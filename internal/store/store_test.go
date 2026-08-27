@@ -377,3 +377,49 @@ func TestStore_QuotaSnapshots(t *testing.T) {
 		t.Errorf("ListQuotaSnapshots() = %+v, want [%+v]", list, created)
 	}
 }
+
+func TestStore_UpdateAccountCredential(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	created, err := s.CreateAccount(Account{
+		Provider:       "anthropic",
+		Label:          "personal",
+		CredentialType: "oauth",
+		CredentialData: "old-data",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+
+	updated, err := s.UpdateAccountCredential(created.ID, "new-data")
+	if err != nil {
+		t.Fatalf("UpdateAccountCredential() error = %v", err)
+	}
+	if updated.CredentialData != "new-data" {
+		t.Errorf("UpdateAccountCredential() CredentialData = %q, want %q", updated.CredentialData, "new-data")
+	}
+	if !updated.UpdatedAt.After(created.UpdatedAt) {
+		t.Errorf("UpdateAccountCredential() UpdatedAt = %v, want after %v", updated.UpdatedAt, created.UpdatedAt)
+	}
+
+	got, err := s.GetAccount(created.ID)
+	if err != nil {
+		t.Fatalf("GetAccount() error = %v", err)
+	}
+	if got.CredentialData != "new-data" {
+		t.Errorf("persisted CredentialData = %q, want %q", got.CredentialData, "new-data")
+	}
+}
+
+func TestStore_UpdateAccountCredentialMissing(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	_, err := s.UpdateAccountCredential(999, "new-data")
+	if !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("UpdateAccountCredential() error = %v, want sql.ErrNoRows", err)
+	}
+}

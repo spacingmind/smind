@@ -26,6 +26,20 @@ func (s *Store) CreateAccount(a Account) (Account, error) {
 	return a, nil
 }
 
+// UpdateAccountCredential replaces an account's credential_data, stamping a
+// new updated_at, and returns the updated account.
+func (s *Store) UpdateAccountCredential(id int64, credentialData string) (Account, error) {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(
+		`UPDATE accounts SET credential_data = ?, updated_at = ? WHERE id = ?`,
+		credentialData, now, id,
+	)
+	if err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	return s.GetAccount(id)
+}
+
 // GetAccount returns the account with the given id.
 func (s *Store) GetAccount(id int64) (Account, error) {
 	var a Account

@@ -4,6 +4,7 @@ go 1.27
 
 require (
 	github.com/refraction-networking/utls v1.8.2
+	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0
 )
