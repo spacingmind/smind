@@ -24,9 +24,9 @@ var fakeACPAgentPath string
 // TASKRUNNER_FAKE_CLAUDE_CLI=1 is set (only ever true in a subprocess this
 // package's own tests spawn via claudecode.WithCLIPath(os.Executable())),
 // it runs the fake CLI instead of the test suite. This is the same
-// re-exec-self helper-process pattern internal/claudecode's own tests use,
-// adapted because claudecode's scenario-selecting extraEnv option is
-// unexported and only reachable from within package claudecode itself; the
+// re-exec-self helper-process pattern claude-agent-sdk-go's own tests use,
+// adapted because its scenario-selecting extraEnv option is unexported and
+// only reachable from within that package itself; the
 // worktree-relative "scenario" file convention from fakeagent above serves
 // the same purpose here without needing it.
 func TestMain(m *testing.M) {

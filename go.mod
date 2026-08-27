@@ -1,9 +1,10 @@
 module github.com/spacingmind/smind
 
-go 1.27
+go 1.27.0
 
 require (
 	github.com/refraction-networking/utls v1.8.2
+	github.com/spacingmind/claude-agent-sdk-go v0.0.0-20260827121352-f204576f53ad
 	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0
