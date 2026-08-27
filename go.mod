@@ -3,6 +3,7 @@ module github.com/spacingmind/smind
 go 1.27.0
 
 require (
+	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/refraction-networking/utls v1.8.2
 	github.com/spacingmind/claude-agent-sdk-go v0.0.0-20260827121352-f204576f53ad
