@@ -10,27 +10,20 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
-	"github.com/spacingmind/smind/internal/store"
 )
 
 // Server serves the smind API and UI.
 type Server struct {
-	cfg      config.Config
-	store    *store.Store
-	registry *accounts.Registry
-	router   *routing.Router
-	proxy    *proxy
+	cfg   config.Config
+	proxy *proxy
 }
 
-// New builds a Server from config, backed by s/reg/router for the proxy
+// New builds a Server from config, backed by reg/router for the proxy
 // endpoints.
-func New(cfg config.Config, s *store.Store, reg *accounts.Registry, router *routing.Router) *Server {
+func New(cfg config.Config, reg *accounts.Registry, router *routing.Router) *Server {
 	return &Server{
-		cfg:      cfg,
-		store:    s,
-		registry: reg,
-		router:   router,
-		proxy:    newProxy(reg, router),
+		cfg:   cfg,
+		proxy: newProxy(reg, router),
 	}
 }
 

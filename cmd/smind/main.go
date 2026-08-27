@@ -46,7 +46,7 @@ func main() {
 	poller := quota.New(db, noopQuotaFetcher{})
 	router := routing.New(db, registry, poller)
 
-	srv := server.New(cfg, db, registry, router)
+	srv := server.New(cfg, registry, router)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
