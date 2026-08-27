@@ -83,6 +83,19 @@ CLI:
 - Modeled after `refs/paseo`'s actual CLI (`public-docs/cli.md`) and its
   documented run/attach/logs/stop semantics, not invented from scratch —
   see Acceptance Criteria above for the specific behaviors carried over.
+- New backend method `run.start`: like `task.prompt`'s first half (calls
+  `Registry.Start`) but returns `{runId}` immediately instead of implicitly
+  attaching. `task.prompt` is unchanged — it still couples the run to its
+  own request/connection context (stop-on-detach), which is the right
+  default for a caller like a future embedded web UI where closing the tab
+  should stop the run. The CLI's `task send` foreground mode needs the
+  opposite (Ctrl+C detaches, doesn't stop), which is only achievable by
+  decoupling "start" from "watch": `run.start` to get the runId back
+  immediately (that request then terminates, so it's never in-flight when
+  Ctrl+C happens), then `run.attach` to stream — `run.attach`'s own
+  cancellation is already detach-only. Driving the foreground stream
+  through `task.prompt` itself cannot support detach, since its own
+  request context going Done is specifically what stops the run.
 - Persistent multi-turn sessions ("send" to an idle finished agent)
   deferred — see Acceptance Criteria. This keeps `internal/taskrunner`'s
   existing one-shot-subprocess-per-call design untouched.
