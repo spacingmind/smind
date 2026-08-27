@@ -45,6 +45,21 @@ func WithClaudeCodePermissionPolicy(p claudecode.PermissionPolicy) Option {
 	return func(r *Runner) { r.claudePermissionPolicy = p }
 }
 
+// WithACPCommand overrides the command spawned for ProviderGLM turns, in
+// place of the default acp.GLMCommand(). This is the only seam RunPrompt's
+// GLM path exposes for pointing it at something other than the real GLM
+// agent: acpBackend/claudeBackend and the newACPClient/newClaudeClient
+// fields that satisfy them from within this package's own tests are
+// unexported, so a caller in another package (e.g. internal/server's tests,
+// which need to drive RunPrompt without a real `npx`/GLM install) has no
+// way to substitute a fake backend directly. Overriding just the command --
+// letting it point at a compiled fake-agent binary that still speaks real
+// ACP over stdio -- covers that need without exporting the backend
+// interfaces themselves.
+func WithACPCommand(command []string) Option {
+	return func(r *Runner) { r.acpCommand = command }
+}
+
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -67,6 +82,10 @@ type Runner struct {
 	acpPermissionPolicy    acp.PermissionPolicy
 	claudePermissionPolicy claudecode.PermissionPolicy
 
+	// acpCommand is the command spawned for ProviderGLM turns. Defaults to
+	// acp.GLMCommand(); overridable via WithACPCommand.
+	acpCommand []string
+
 	// newACPClient and newClaudeClient default to wrapping acp.New and
 	// claudecode.New. Overridable only from within this package's tests,
 	// to point at a fake agent binary / fake CLI instead of a real one --
@@ -79,7 +98,8 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm: wm,
+		wm:         wm,
+		acpCommand: acp.GLMCommand(),
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -134,7 +154,7 @@ func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, events
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
 
-	client, err := r.newACPClient(acp.GLMCommand(), opts...)
+	client, err := r.newACPClient(r.acpCommand, opts...)
 	if err != nil {
 		return fmt.Errorf("taskrunner: spawn glm agent: %w", err)
 	}
