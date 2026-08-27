@@ -100,3 +100,10 @@ export interface FileEntry {
 export interface FileReadResult {
   content: string;
 }
+
+// Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the
+// task's full unified diff text, or an empty string for a task with no
+// changes.
+export interface TaskDiffResult {
+  diff: string;
+}

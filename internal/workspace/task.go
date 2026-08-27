@@ -130,3 +130,22 @@ func (m *Manager) ListTasks(workspaceID int64) ([]store.Task, error) {
 func (m *Manager) GetTask(id int64) (store.Task, error) {
 	return m.store.GetTask(id)
 }
+
+// Diff returns task id's full unified diff: everything changed in its git
+// worktree relative to the commit its branch was created from -- see
+// taskDiff (git.go) for the exact git invocation and why. A task with no
+// changes at all returns an empty string, not an error.
+func (m *Manager) Diff(id int64) (string, error) {
+	t, err := m.store.GetTask(id)
+	if err != nil {
+		return "", fmt.Errorf("task diff: %w", err)
+	}
+	if t.WorktreePath == nil || t.Branch == nil {
+		return "", fmt.Errorf("task diff %d: task has no worktree", id)
+	}
+	diff, err := taskDiff(*t.WorktreePath, *t.Branch)
+	if err != nil {
+		return "", fmt.Errorf("task diff %d: %w", id, err)
+	}
+	return diff, nil
+}
