@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -21,22 +22,54 @@ type OAuthRefresher interface {
 // OAuth2Refresher is a generic OAuthRefresher using the standard OAuth2
 // refresh-token grant, parameterized by token endpoint and client ID.
 type OAuth2Refresher struct {
-	config oauth2.Config
+	config     oauth2.Config
+	httpClient *http.Client
+}
+
+// OAuth2RefresherOption configures an OAuth2Refresher.
+type OAuth2RefresherOption func(*OAuth2Refresher)
+
+// WithOAuth2ClientSecret sets a client secret to send alongside the client
+// ID. Providers that require one (e.g. Google's OAuth2 token endpoint)
+// expect it as a form parameter rather than an Authorization header, so this
+// also pins the auth style to AuthStyleInParams instead of the default
+// auto-detection, which would otherwise cost a wasted probe request against
+// providers that reject header-style auth outright.
+func WithOAuth2ClientSecret(secret string) OAuth2RefresherOption {
+	return func(r *OAuth2Refresher) {
+		r.config.ClientSecret = secret
+		r.config.Endpoint.AuthStyle = oauth2.AuthStyleInParams
+	}
+}
+
+// WithOAuth2HTTPClient overrides the HTTP client used for refresh requests.
+// Intended for tests to redirect requests at a local server.
+func WithOAuth2HTTPClient(client *http.Client) OAuth2RefresherOption {
+	return func(r *OAuth2Refresher) {
+		r.httpClient = client
+	}
 }
 
 // NewOAuth2Refresher returns an OAuth2Refresher that exchanges refresh
 // tokens against tokenURL using clientID.
-func NewOAuth2Refresher(tokenURL, clientID string) *OAuth2Refresher {
-	return &OAuth2Refresher{
+func NewOAuth2Refresher(tokenURL, clientID string, opts ...OAuth2RefresherOption) *OAuth2Refresher {
+	r := &OAuth2Refresher{
 		config: oauth2.Config{
 			ClientID: clientID,
 			Endpoint: oauth2.Endpoint{TokenURL: tokenURL},
 		},
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
 }
 
 // Refresh exchanges cred.RefreshToken for a new access token.
 func (r *OAuth2Refresher) Refresh(ctx context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	if r.httpClient != nil {
+		ctx = context.WithValue(ctx, oauth2.HTTPClient, r.httpClient)
+	}
 	tok, err := r.config.TokenSource(ctx, &oauth2.Token{RefreshToken: cred.RefreshToken}).Token()
 	if err != nil {
 		return OAuthCredential{}, fmt.Errorf("refresh oauth token: %w", err)
