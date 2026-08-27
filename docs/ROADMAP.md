@@ -17,14 +17,12 @@ Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
 
 Goal: proxy Anthropic/OpenAI-compatible requests across multiple accounts.
 
-- [ ] Accounts registry: OAuth/API key credentials (`~/.spacingmind/accounts/`), automatic token refresh
-- [ ] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions`
-- [ ] Session affinity: same conversation → same account (24h TTL)
-- [ ] Failover chain: exhausted account → next in pool
-- [ ] Quota poller: per-account usage, TTL cache
-- [ ] Routing policy v1: `hard` (single account) + `pool` (fill-first)
-- [ ] SQLite: accounts, routing decisions, quota snapshots
-- [ ] TLS fingerprinting (utls) for outbound provider requests
+- [x] SQLite: accounts, routing decisions, quota snapshots (`internal/store`)
+- [x] Accounts registry: typed credential registry + OAuth refresh (`internal/accounts`, on top of `internal/store` — superseded the original `~/.spacingmind/accounts/` file-store idea)
+- [x] TLS fingerprinting (utls) for outbound provider requests (`internal/transport`, HTTP/1.1 only)
+- [x] Quota poller: TTL-cached per-account usage (`internal/quota`) — polling/caching mechanism done; the actual per-provider usage-API calls are a stubbed `Fetcher` interface, not yet implemented
+- [ ] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`, next up
+- [ ] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions` — wires `internal/routing` + `internal/transport` into `internal/server`
 
 Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` works across 2 accounts with real failover.
 
