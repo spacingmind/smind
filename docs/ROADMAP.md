@@ -21,8 +21,10 @@ Goal: proxy Anthropic/OpenAI-compatible requests across multiple accounts.
 - [x] Accounts registry: typed credential registry + OAuth refresh (`internal/accounts`, on top of `internal/store` — superseded the original `~/.spacingmind/accounts/` file-store idea)
 - [x] TLS fingerprinting (utls) for outbound provider requests (`internal/transport`, HTTP/1.1 only)
 - [x] Quota poller: TTL-cached per-account usage (`internal/quota`) — polling/caching mechanism done; the actual per-provider usage-API calls are a stubbed `Fetcher` interface, not yet implemented
-- [ ] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`, next up
-- [ ] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions` — wires `internal/routing` + `internal/transport` into `internal/server`
+- [x] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`
+- [x] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions` — wires `internal/routing` + `internal/accounts` + `internal/transport` into `internal/server`. Also added real OAuth token refresh (`internal/accounts`) for Anthropic, OpenAI, Kimi, xAI, and Antigravity (Google Vertex/Gemini skipped — needs a service-account JWT-bearer flow, not a refresh-token flow, tracked as a separate future task)
+
+Phase 1 is functionally complete but not yet exercised with a real provider account: there's still no way to add an account (no CLI, no admin endpoint — only the Go `accounts.Registry` API). Adding a minimal `smind account add` CLI command is the smallest next step to actually validate the "2 accounts, real failover" DoD end-to-end.
 
 Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` works across 2 accounts with real failover.
 
