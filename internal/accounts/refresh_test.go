@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"sync"
 	"testing"
 	"time"
@@ -247,5 +249,69 @@ func TestOAuth2Refresher_PreservesRefreshTokenWhenOmitted(t *testing.T) {
 	}
 	if got.RefreshToken != "refresh-old" {
 		t.Errorf("RefreshToken = %q, want preserved refresh-old (token endpoint omitted it)", got.RefreshToken)
+	}
+}
+
+func TestOAuth2Refresher_WithClientSecretSendsSecretInParams(t *testing.T) {
+	t.Parallel()
+
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		gotBody = string(body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer srv.Close()
+
+	refresher := NewOAuth2Refresher(srv.URL, "client-id", WithOAuth2ClientSecret("client-secret"))
+	got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if got.AccessToken != "access-new" {
+		t.Errorf("AccessToken = %q, want access-new", got.AccessToken)
+	}
+
+	vals, err := url.ParseQuery(gotBody)
+	if err != nil {
+		t.Fatalf("url.ParseQuery(%q) error = %v", gotBody, err)
+	}
+	if vals.Get("client_secret") != "client-secret" {
+		t.Errorf("request client_secret = %q, want client-secret", vals.Get("client_secret"))
+	}
+	if vals.Get("client_id") != "client-id" {
+		t.Errorf("request client_id = %q, want client-id", vals.Get("client_id"))
+	}
+}
+
+func TestOAuth2Refresher_WithHTTPClientOverride(t *testing.T) {
+	t.Parallel()
+
+	var called bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"access_token":"access-new","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer srv.Close()
+
+	target, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	client := &http.Client{Transport: &rewriteTransport{target: target}}
+
+	// tokenURL points nowhere reachable; only the HTTP client override's
+	// transport (which rewrites every request to srv) makes this resolve.
+	refresher := NewOAuth2Refresher("http://unreachable.invalid/token", "client-id", WithOAuth2HTTPClient(client))
+	if _, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"}); err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if !called {
+		t.Error("Refresh() did not use the overridden HTTP client, want it to hit the local server")
 	}
 }

@@ -366,6 +366,368 @@ func TestOpenAIRefresher_ContextCancelled(t *testing.T) {
 	}
 }
 
+func TestKimiRefresher_Refresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		var gotForm url.Values
+		var gotHeaders http.Header
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotHeaders = r.Header.Clone()
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse request form: %v", err)
+			}
+			gotForm = r.PostForm
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","token_type":"Bearer","expires_in":3600,"scope":"chat"}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewKimiRefresher(WithKimiHTTPClient(testHTTPClient(t, srv)))
+		before := time.Now()
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+
+		if got.AccessToken != "access-new" {
+			t.Errorf("AccessToken = %q, want access-new", got.AccessToken)
+		}
+		if got.RefreshToken != "refresh-new" {
+			t.Errorf("RefreshToken = %q, want refresh-new", got.RefreshToken)
+		}
+		wantExpiry := before.Add(3600 * time.Second)
+		if got.ExpiresAt.Before(wantExpiry.Add(-5*time.Second)) || got.ExpiresAt.After(wantExpiry.Add(5*time.Second)) {
+			t.Errorf("ExpiresAt = %v, want near %v", got.ExpiresAt, wantExpiry)
+		}
+
+		if gotForm.Get("client_id") != kimiClientID {
+			t.Errorf("request client_id = %q, want %q", gotForm.Get("client_id"), kimiClientID)
+		}
+		if gotForm.Get("grant_type") != "refresh_token" {
+			t.Errorf("request grant_type = %q, want refresh_token", gotForm.Get("grant_type"))
+		}
+		if gotForm.Get("refresh_token") != "refresh-old" {
+			t.Errorf("request refresh_token = %q, want refresh-old", gotForm.Get("refresh_token"))
+		}
+		if ct := gotHeaders.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+			t.Errorf("Content-Type header = %q, want application/x-www-form-urlencoded", ct)
+		}
+		if accept := gotHeaders.Get("Accept"); accept != "application/json" {
+			t.Errorf("Accept header = %q, want application/json", accept)
+		}
+	})
+
+	t.Run("missing refresh token in response falls back to original", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","token_type":"Bearer","expires_in":60}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewKimiRefresher(WithKimiHTTPClient(testHTTPClient(t, srv)))
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+		if got.RefreshToken != "refresh-old" {
+			t.Errorf("RefreshToken = %q, want preserved refresh-old", got.RefreshToken)
+		}
+	})
+
+	t.Run("non-200 response returns status and body in error", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"invalid grant"}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewKimiRefresher(WithKimiHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for non-200 response")
+		}
+		if got := err.Error(); !strings.Contains(got, "403") || !strings.Contains(got, "invalid grant") {
+			t.Errorf("Refresh() error = %q, want it to mention status 403 and body", got)
+		}
+	})
+
+	t.Run("malformed JSON response returns error, not panic", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`not json`))
+		}))
+		defer srv.Close()
+
+		refresher := NewKimiRefresher(WithKimiHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for malformed JSON response")
+		}
+	})
+}
+
+func TestXAIRefresher_Refresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success", func(t *testing.T) {
+		t.Parallel()
+
+		var gotForm url.Values
+		var gotHeaders http.Header
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			gotHeaders = r.Header.Clone()
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse request form: %v", err)
+			}
+			gotForm = r.PostForm
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","id_token":"id-new","token_type":"Bearer","expires_in":3600}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewXAIRefresher(WithXAIHTTPClient(testHTTPClient(t, srv)))
+		before := time.Now()
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+
+		if got.AccessToken != "access-new" {
+			t.Errorf("AccessToken = %q, want access-new", got.AccessToken)
+		}
+		if got.RefreshToken != "refresh-new" {
+			t.Errorf("RefreshToken = %q, want refresh-new", got.RefreshToken)
+		}
+		wantExpiry := before.Add(3600 * time.Second)
+		if got.ExpiresAt.Before(wantExpiry.Add(-5*time.Second)) || got.ExpiresAt.After(wantExpiry.Add(5*time.Second)) {
+			t.Errorf("ExpiresAt = %v, want near %v", got.ExpiresAt, wantExpiry)
+		}
+
+		if gotForm.Get("client_id") != xaiClientID {
+			t.Errorf("request client_id = %q, want %q", gotForm.Get("client_id"), xaiClientID)
+		}
+		if gotForm.Get("grant_type") != "refresh_token" {
+			t.Errorf("request grant_type = %q, want refresh_token", gotForm.Get("grant_type"))
+		}
+		if gotForm.Get("refresh_token") != "refresh-old" {
+			t.Errorf("request refresh_token = %q, want refresh-old", gotForm.Get("refresh_token"))
+		}
+		if ct := gotHeaders.Get("Content-Type"); ct != "application/x-www-form-urlencoded" {
+			t.Errorf("Content-Type header = %q, want application/x-www-form-urlencoded", ct)
+		}
+		if accept := gotHeaders.Get("Accept"); accept != "application/json" {
+			t.Errorf("Accept header = %q, want application/json", accept)
+		}
+	})
+
+	t.Run("missing refresh token in response falls back to original", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","token_type":"Bearer","expires_in":60}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewXAIRefresher(WithXAIHTTPClient(testHTTPClient(t, srv)))
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+		if got.RefreshToken != "refresh-old" {
+			t.Errorf("RefreshToken = %q, want preserved refresh-old", got.RefreshToken)
+		}
+	})
+
+	t.Run("non-200 response returns status and body in error", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"message":"invalid grant"}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewXAIRefresher(WithXAIHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for non-200 response")
+		}
+		if got := err.Error(); !strings.Contains(got, "401") || !strings.Contains(got, "invalid grant") {
+			t.Errorf("Refresh() error = %q, want it to mention status 401 and body", got)
+		}
+	})
+
+	t.Run("malformed JSON response returns error, not panic", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`not json`))
+		}))
+		defer srv.Close()
+
+		refresher := NewXAIRefresher(WithXAIHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for malformed JSON response")
+		}
+	})
+}
+
+func TestAntigravityRefresher_Refresh(t *testing.T) {
+	t.Parallel()
+
+	t.Run("success sends client_secret", func(t *testing.T) {
+		t.Parallel()
+
+		var gotForm url.Values
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := r.ParseForm(); err != nil {
+				t.Errorf("parse request form: %v", err)
+			}
+			gotForm = r.PostForm
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","refresh_token":"refresh-new","token_type":"Bearer","expires_in":3600,"scope":"cloud-platform"}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewAntigravityRefresher(WithAntigravityHTTPClient(testHTTPClient(t, srv)))
+		before := time.Now()
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+
+		if got.AccessToken != "access-new" {
+			t.Errorf("AccessToken = %q, want access-new", got.AccessToken)
+		}
+		if got.RefreshToken != "refresh-new" {
+			t.Errorf("RefreshToken = %q, want refresh-new", got.RefreshToken)
+		}
+		wantExpiry := before.Add(3600 * time.Second)
+		if got.ExpiresAt.Before(wantExpiry.Add(-5*time.Second)) || got.ExpiresAt.After(wantExpiry.Add(5*time.Second)) {
+			t.Errorf("ExpiresAt = %v, want near %v", got.ExpiresAt, wantExpiry)
+		}
+
+		if gotForm.Get("client_id") != antigravityClientID {
+			t.Errorf("request client_id = %q, want %q", gotForm.Get("client_id"), antigravityClientID)
+		}
+		if gotForm.Get("client_secret") != antigravityClientSecret {
+			t.Errorf("request client_secret = %q, want %q", gotForm.Get("client_secret"), antigravityClientSecret)
+		}
+		if gotForm.Get("grant_type") != "refresh_token" {
+			t.Errorf("request grant_type = %q, want refresh_token", gotForm.Get("grant_type"))
+		}
+		if gotForm.Get("refresh_token") != "refresh-old" {
+			t.Errorf("request refresh_token = %q, want refresh-old", gotForm.Get("refresh_token"))
+		}
+	})
+
+	t.Run("missing refresh token in response falls back to original", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"access-new","token_type":"Bearer","expires_in":60}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewAntigravityRefresher(WithAntigravityHTTPClient(testHTTPClient(t, srv)))
+		got, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err != nil {
+			t.Fatalf("Refresh() error = %v", err)
+		}
+		if got.RefreshToken != "refresh-old" {
+			t.Errorf("RefreshToken = %q, want preserved refresh-old", got.RefreshToken)
+		}
+	})
+
+	t.Run("non-200 response returns error", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Token has been expired or revoked."}`))
+		}))
+		defer srv.Close()
+
+		refresher := NewAntigravityRefresher(WithAntigravityHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for non-200 response")
+		}
+		if got := err.Error(); !strings.Contains(got, "invalid_grant") {
+			t.Errorf("Refresh() error = %q, want it to mention invalid_grant", got)
+		}
+	})
+
+	t.Run("malformed JSON response returns error, not panic", func(t *testing.T) {
+		t.Parallel()
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`not json`))
+		}))
+		defer srv.Close()
+
+		refresher := NewAntigravityRefresher(WithAntigravityHTTPClient(testHTTPClient(t, srv)))
+		_, err := refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+		if err == nil {
+			t.Fatal("Refresh() error = nil, want error for malformed JSON response")
+		}
+	})
+}
+
+func TestAntigravityRefresher_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	refresher := NewAntigravityRefresher(WithAntigravityHTTPClient(http.DefaultClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := refresher.Refresh(ctx, OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want error for an already-cancelled context")
+	}
+}
+
+func TestKimiRefresher_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	refresher := NewKimiRefresher(WithKimiHTTPClient(http.DefaultClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := refresher.Refresh(ctx, OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want error for an already-cancelled context")
+	}
+}
+
+func TestXAIRefresher_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	refresher := NewXAIRefresher(WithXAIHTTPClient(http.DefaultClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := refresher.Refresh(ctx, OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want error for an already-cancelled context")
+	}
+}
+
 func TestAnthropicRefresher_ConnectionRefused(t *testing.T) {
 	t.Parallel()
 

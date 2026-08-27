@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -23,6 +24,16 @@ const (
 
 	openaiTokenURL = "https://auth.openai.com/oauth/token"
 	openaiClientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+
+	kimiTokenURL = "https://auth.kimi.com/api/oauth/token"
+	kimiClientID = "17e5f671-d194-4dfb-9706-5516cb48c098"
+
+	xaiTokenURL = "https://auth.x.ai/oauth2/token"
+	xaiClientID = "b1a00492-073a-47ea-816f-4c329264a828"
+
+	antigravityTokenURL     = "https://oauth2.googleapis.com/token"
+	antigravityClientID     = "1071006060591-tmhssin2h21lcre235vtolojh4g403ep.apps.googleusercontent.com"
+	antigravityClientSecret = "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"
 )
 
 // AnthropicRefresher refreshes Claude Code OAuth credentials against
@@ -231,4 +242,212 @@ func jwtExpiry(token string) (time.Time, error) {
 	}
 
 	return time.Unix(int64(claims.Exp), 0), nil
+}
+
+// KimiRefresher refreshes Kimi (Moonshot) OAuth credentials against
+// auth.kimi.com's standard OAuth2 refresh-token grant.
+type KimiRefresher struct {
+	httpClient *http.Client
+}
+
+// KimiRefresherOption configures a KimiRefresher.
+type KimiRefresherOption func(*KimiRefresher)
+
+// WithKimiHTTPClient overrides the HTTP client used for refresh requests.
+// Intended for tests to redirect requests at a local server.
+func WithKimiHTTPClient(client *http.Client) KimiRefresherOption {
+	return func(r *KimiRefresher) {
+		r.httpClient = client
+	}
+}
+
+// NewKimiRefresher returns a KimiRefresher. No Cloudflare-style TLS
+// fingerprinting requirement is documented for this endpoint, so this
+// defaults to a plain http.Client rather than the uTLS clients Anthropic and
+// OpenAI require.
+func NewKimiRefresher(opts ...KimiRefresherOption) *KimiRefresher {
+	r := &KimiRefresher{httpClient: &http.Client{}}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+type kimiTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+	Scope        string `json:"scope"`
+}
+
+// Refresh exchanges cred.RefreshToken for a new access token.
+func (r *KimiRefresher) Refresh(ctx context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	form := url.Values{
+		"client_id":     {kimiClientID},
+		"grant_type":    {"refresh_token"},
+		"refresh_token": {cred.RefreshToken},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, kimiTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("create kimi oauth refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("kimi oauth refresh request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("read kimi oauth refresh response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return OAuthCredential{}, fmt.Errorf("kimi oauth refresh failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	var tok kimiTokenResponse
+	if err := json.Unmarshal(body, &tok); err != nil {
+		return OAuthCredential{}, fmt.Errorf("parse kimi oauth refresh response: %w", err)
+	}
+
+	refreshToken := tok.RefreshToken
+	if refreshToken == "" {
+		refreshToken = cred.RefreshToken
+	}
+	return OAuthCredential{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: refreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
+	}, nil
+}
+
+// XAIRefresher refreshes xAI (Grok) OAuth credentials against
+// auth.x.ai's standard OAuth2 refresh-token grant.
+type XAIRefresher struct {
+	httpClient *http.Client
+}
+
+// XAIRefresherOption configures an XAIRefresher.
+type XAIRefresherOption func(*XAIRefresher)
+
+// WithXAIHTTPClient overrides the HTTP client used for refresh requests.
+// Intended for tests to redirect requests at a local server.
+func WithXAIHTTPClient(client *http.Client) XAIRefresherOption {
+	return func(r *XAIRefresher) {
+		r.httpClient = client
+	}
+}
+
+// NewXAIRefresher returns an XAIRefresher. No Cloudflare-style TLS
+// fingerprinting requirement is documented for this endpoint, so this
+// defaults to a plain http.Client rather than the uTLS clients Anthropic and
+// OpenAI require.
+func NewXAIRefresher(opts ...XAIRefresherOption) *XAIRefresher {
+	r := &XAIRefresher{httpClient: &http.Client{}}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+type xaiTokenResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
+	TokenType    string `json:"token_type"`
+	ExpiresIn    int    `json:"expires_in"`
+}
+
+// Refresh exchanges cred.RefreshToken for a new access token.
+func (r *XAIRefresher) Refresh(ctx context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	form := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {xaiClientID},
+		"refresh_token": {cred.RefreshToken},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, xaiTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("create xai oauth refresh request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := r.httpClient.Do(req)
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("xai oauth refresh request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return OAuthCredential{}, fmt.Errorf("read xai oauth refresh response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return OAuthCredential{}, fmt.Errorf("xai oauth refresh failed with status %d: %s", resp.StatusCode, body)
+	}
+
+	var tok xaiTokenResponse
+	if err := json.Unmarshal(body, &tok); err != nil {
+		return OAuthCredential{}, fmt.Errorf("parse xai oauth refresh response: %w", err)
+	}
+
+	refreshToken := tok.RefreshToken
+	if refreshToken == "" {
+		refreshToken = cred.RefreshToken
+	}
+	return OAuthCredential{
+		AccessToken:  tok.AccessToken,
+		RefreshToken: refreshToken,
+		ExpiresAt:    time.Now().Add(time.Duration(tok.ExpiresIn) * time.Second),
+	}, nil
+}
+
+// AntigravityRefresher refreshes Google Antigravity (Cloud Code) OAuth
+// credentials against Google's standard oauth2.googleapis.com token
+// endpoint.
+type AntigravityRefresher struct {
+	httpClient *http.Client
+}
+
+// AntigravityRefresherOption configures an AntigravityRefresher.
+type AntigravityRefresherOption func(*AntigravityRefresher)
+
+// WithAntigravityHTTPClient overrides the HTTP client used for refresh
+// requests. Intended for tests to redirect requests at a local server.
+func WithAntigravityHTTPClient(client *http.Client) AntigravityRefresherOption {
+	return func(r *AntigravityRefresher) {
+		r.httpClient = client
+	}
+}
+
+// NewAntigravityRefresher returns an AntigravityRefresher. Google's token
+// endpoint has no documented TLS fingerprinting requirement, so this
+// defaults to a plain http.Client rather than the uTLS clients Anthropic and
+// OpenAI require.
+func NewAntigravityRefresher(opts ...AntigravityRefresherOption) *AntigravityRefresher {
+	r := &AntigravityRefresher{httpClient: &http.Client{}}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// Refresh exchanges cred.RefreshToken for a new access token. Unlike
+// Anthropic/OpenAI/Kimi/xAI, Google's "installed application" OAuth client
+// requires a client_secret alongside the client_id on every token request,
+// even though it isn't actually secret (it ships embedded in the Antigravity
+// client). This is otherwise a standard OAuth2 refresh-token grant, so it's
+// built directly on OAuth2Refresher instead of hand-rolling raw HTTP.
+func (r *AntigravityRefresher) Refresh(ctx context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	inner := NewOAuth2Refresher(antigravityTokenURL, antigravityClientID,
+		WithOAuth2ClientSecret(antigravityClientSecret),
+		WithOAuth2HTTPClient(r.httpClient),
+	)
+	return inner.Refresh(ctx, cred)
 }
