@@ -49,6 +49,13 @@ Definition of done: a real scopedocs feature built end-to-end from smind UI, rep
 
 Goal: usable from a phone outside the home network.
 
+Transport note: daemon ↔ relay is a real service boundary (the relay is
+separately deployable), so gRPC is the planned protocol there — unlike the
+daemon's own client-facing API (Phase 2), which uses RPC-over-WebSocket
+specifically because its primary client is a browser (gRPC has no native
+browser support without a grpc-web proxy layer). Not implemented yet;
+noted here so Phase 3 design starts from this rather than re-litigating it.
+
 - [ ] Relay server (Go, dumb pipe), self-hostable as `smind relay`
 - [ ] E2EE handshake: X25519 + ChaCha20-Poly1305, QR pairing
 - [ ] Reconnect grace, correct key rotation
