@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
+  PermissionRequestEventParams,
+  PermissionResolvedEventParams,
   Provider,
   RunAttachResult,
   RunChunkEventParams,
@@ -11,6 +13,13 @@ import type {
   RunStatusValue,
   RunSummary,
 } from "@/lib/types";
+
+/** A still-unanswered permission request on a run, as shown by the detail pane. */
+export interface PendingPermission {
+  requestId: string;
+  summary: string;
+  options: { id: string; label: string; kind: string }[];
+}
 
 /** One run in a task's timeline, as rendered by the detail pane. */
 export interface RunEntry {
@@ -23,6 +32,16 @@ export interface RunEntry {
   text: string;
   stopReason?: string;
   err?: string;
+  /**
+   * The run's most recent still-unanswered permission request, or
+   * undefined if none is currently pending. Set when a "permission_request"
+   * event arrives (live, or replayed from run.attach's backfill for a
+   * request nobody has answered yet) and cleared when the matching
+   * "permission_resolved" event arrives -- from *any* connection, not just
+   * one originating from this tab's own respondPermission call, since
+   * another connection could answer first.
+   */
+  pendingPermission?: PendingPermission;
 }
 
 interface TimelineState {
@@ -39,6 +58,15 @@ interface TimelineState {
    * function's caller doesn't need to patch state itself.
    */
   stopRun: (runId: string) => Promise<void>;
+  /**
+   * Answers runId's pending permission request requestId with optionId
+   * (run.respondPermission), from this connection. Never clears
+   * pendingPermission itself: the subsequent "permission_resolved" event --
+   * which arrives here the same way regardless of whether this call or a
+   * different connection answered first -- is what does that, so both
+   * cases are handled by the exact same code path.
+   */
+  respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
 }
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active run.attach be aborted (detached, not stopped) on task switch or unmount. */
@@ -60,6 +88,36 @@ function patch(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string,
 
 function appendChunk(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, text: string): void {
   setRuns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, text: r.text + text } : r)) : prev));
+}
+
+function setPendingPermission(
+  setRuns: Dispatch<SetStateAction<RunEntry[] | null>>,
+  runId: string,
+  params: PermissionRequestEventParams,
+): void {
+  patch(setRuns, runId, {
+    pendingPermission: { requestId: params.requestId, summary: params.summary, options: params.options },
+  });
+}
+
+/**
+ * Clears runId's pendingPermission, but only if it's still the request
+ * being resolved -- guarding against an out-of-order/duplicate
+ * "permission_resolved" event clearing a *later* pending request that
+ * happened to arrive first (defensive; the server only ever resolves one
+ * request at a time per internal/runs.Registry's own invariants, but the
+ * UI shouldn't rely on wire-ordering guarantees it hasn't verified).
+ */
+function clearPendingPermission(
+  setRuns: Dispatch<SetStateAction<RunEntry[] | null>>,
+  runId: string,
+  params: PermissionResolvedEventParams,
+): void {
+  setRuns((prev) =>
+    prev
+      ? prev.map((r) => (r.id === runId && r.pendingPermission?.requestId === params.requestId ? { ...r, pendingPermission: undefined } : r))
+      : prev,
+  );
 }
 
 /**
@@ -86,6 +144,10 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         if (session.cancelled) return;
         if (event === "chunk") {
           appendChunk(setRuns, runId, (params as RunChunkEventParams).text);
+        } else if (event === "permission_request") {
+          setPendingPermission(setRuns, runId, params as PermissionRequestEventParams);
+        } else if (event === "permission_resolved") {
+          clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
         }
       },
       { signal: session.controller.signal },
@@ -226,5 +288,13 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     [client],
   );
 
-  return { runs, error, submitPrompt, stopRun };
+  const respondPermission = useCallback(
+    async (runId: string, requestId: string, optionId: string) => {
+      if (!client) throw new Error("not connected");
+      await client.call("run.respondPermission", { runId, requestId, optionId });
+    },
+    [client],
+  );
+
+  return { runs, error, submitPrompt, stopRun, respondPermission };
 }

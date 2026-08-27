@@ -68,13 +68,45 @@ export interface RunChunkEventParams {
   text: string;
 }
 
+// One choice offered by a pending permission request (internal/wsapi/
+// handlers.go's permissionOptionParams -- the wire shape of
+// taskrunner.PermissionOption). `kind` is one of ACP's
+// PermissionOptionKind values, carried through as-is: "allow_once" |
+// "allow_always" | "reject_once" | "reject_always".
+export interface PermissionOption {
+  id: string;
+  label: string;
+  kind: string;
+}
+
+// Params of a "permission_request" event task.prompt/run.attach emit
+// (internal/wsapi/handlers.go's permissionRequestParams).
+export interface PermissionRequestEventParams {
+  requestId: string;
+  summary: string;
+  options: PermissionOption[];
+}
+
+// Params of a "permission_resolved" event task.prompt/run.attach emit
+// (internal/wsapi/handlers.go's permissionResolvedParams).
+export interface PermissionResolvedEventParams {
+  requestId: string;
+  optionId: string;
+}
+
 // One event in a run.logs response (internal/wsapi/handlers.go's
-// runLogEvent) -- the same fields chunk events/terminal results carry,
-// batched instead of streamed. `type` is "chunk" or "done".
+// runLogEvent) -- the same fields chunk/permission events and terminal
+// results carry, batched instead of streamed. Which of the other fields
+// are populated depends on `type`, mirroring internal/taskrunner.Event's
+// own discriminated-by-Type shape.
 export interface RunLogEvent {
-  type: "chunk" | "done";
+  type: "chunk" | "done" | "permission_request" | "permission_resolved";
   text?: string;
   stopReason?: string;
+  requestId?: string;
+  summary?: string;
+  options?: PermissionOption[];
+  optionId?: string;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).
