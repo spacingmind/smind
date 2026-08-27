@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -394,7 +395,7 @@ func TestServer_RunLogs_Tail(t *testing.T) {
 	if len(tail.Events) != 1 {
 		t.Fatalf("tailed run.logs events = %d, want 1", len(tail.Events))
 	}
-	if tail.Events[0] != full.Events[len(full.Events)-1] {
+	if !reflect.DeepEqual(tail.Events[0], full.Events[len(full.Events)-1]) {
 		t.Fatalf("tailed event = %+v, want the last full event %+v", tail.Events[0], full.Events[len(full.Events)-1])
 	}
 	if tail.Status != string(runs.StatusDone) {
@@ -506,5 +507,203 @@ func TestServer_ConnectionClose_StopsTaskPromptRun(t *testing.T) {
 			t.Fatalf("run's status is still %q 5s after its starting connection closed, want it stopped", logs.Status)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestServer_RunRespondPermission_CrossConnection proves run.respondPermission
+// from a connection that did not start (or attach to) the run answers its
+// pending permission request and the blocked turn continues, reflecting
+// that exact choice -- mirroring run.stop's existing cross-connection test
+// pattern (TestServer_RunStop_CrossConnection above). It also proves the
+// request/resolution round trip is visible on the watching connection as
+// its own named events ("permission_request"/"permission_resolved"),
+// distinct from a plain "chunk".
+func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, "tok")
+
+	starter := dialWS(t, srv, "tok")
+	sendRequest(t, starter, "1", "task.prompt", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+
+	permEnv := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if permEnv.Event != "permission_request" {
+		t.Fatalf("first message = %+v, want a permission_request event", permEnv)
+	}
+	var req permissionRequestParams
+	if err := json.Unmarshal(permEnv.Params, &req); err != nil {
+		t.Fatalf("decode permission_request params: %v", err)
+	}
+	if req.RequestID == "" {
+		t.Fatal("permission_request event's requestId is empty")
+	}
+	if req.Summary != "Run a risky command" {
+		t.Fatalf("permission_request summary = %q, want %q", req.Summary, "Run a risky command")
+	}
+	if len(req.Options) != 2 || req.Options[0].ID != "allow-1" || req.Options[1].ID != "deny-1" {
+		t.Fatalf("permission_request options = %+v, want allow-1 then deny-1", req.Options)
+	}
+
+	sendRequest(t, starter, "list", "run.list", nil)
+	listResp := readEnvelopeFor(t, starter, "list", 5*time.Second)
+	var summaries []runs.RunSummary
+	if err := json.Unmarshal(listResp.Result, &summaries); err != nil {
+		t.Fatalf("decode run.list result: %v", err)
+	}
+	runID := summaries[0].ID
+
+	// A different connection than the one watching the run answers it.
+	responder := dialWS(t, srv, "tok")
+	sendRequest(t, responder, "respond", "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": req.RequestID, "optionId": "allow-1",
+	})
+	respondResp := readEnvelopeFor(t, responder, "respond", 5*time.Second)
+	if respondResp.Error != nil {
+		t.Fatalf("run.respondPermission error = %v", respondResp.Error.Message)
+	}
+
+	resolvedEnv := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if resolvedEnv.Event != "permission_resolved" {
+		t.Fatalf("message after respondPermission = %+v, want a permission_resolved event", resolvedEnv)
+	}
+	var resolved permissionResolvedParams
+	if err := json.Unmarshal(resolvedEnv.Params, &resolved); err != nil {
+		t.Fatalf("decode permission_resolved params: %v", err)
+	}
+	if resolved.RequestID != req.RequestID || resolved.OptionID != "allow-1" {
+		t.Fatalf("permission_resolved = %+v, want requestId=%q optionId=%q", resolved, req.RequestID, "allow-1")
+	}
+
+	finalChunk := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if finalChunk.Event != "chunk" {
+		t.Fatalf("message after permission_resolved = %+v, want the agent's post-decision chunk", finalChunk)
+	}
+	var chunkParams taskChunkParams
+	if err := json.Unmarshal(finalChunk.Params, &chunkParams); err != nil {
+		t.Fatalf("decode chunk params: %v", err)
+	}
+	if chunkParams.Text != "chose:allow-1" {
+		t.Fatalf("final chunk text = %q, want %q (the fake agent's echo of the chosen option)", chunkParams.Text, "chose:allow-1")
+	}
+
+	term := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if term.Error != nil {
+		t.Fatalf("task.prompt terminal error = %v, want success", term.Error.Message)
+	}
+	var result taskPromptResult
+	if err := json.Unmarshal(term.Result, &result); err != nil {
+		t.Fatalf("decode task.prompt result: %v", err)
+	}
+	if result.StopReason != "end_turn" {
+		t.Fatalf("StopReason = %q, want %q", result.StopReason, "end_turn")
+	}
+}
+
+// TestServer_RunLogs_ShowsPermissionRequestAndResolved proves run.logs
+// renders both new event types with their real data (requestId/summary/
+// options, and requestId/optionId respectively) rather than falling
+// through toRunLogEvent's default branch, which would otherwise silently
+// mis-render either one as an empty/wrong "chunk" entry -- a real, specific
+// risk this test exists to rule out, not just exercise the happy path.
+func TestServer_RunLogs_ShowsPermissionRequestAndResolved(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "task.prompt", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	permEnv := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	var req permissionRequestParams
+	if err := json.Unmarshal(permEnv.Params, &req); err != nil {
+		t.Fatalf("decode permission_request params: %v", err)
+	}
+
+	sendRequest(t, ws, "list", "run.list", nil)
+	listResp := readEnvelopeFor(t, ws, "list", 5*time.Second)
+	var summaries []runs.RunSummary
+	if err := json.Unmarshal(listResp.Result, &summaries); err != nil {
+		t.Fatalf("decode run.list result: %v", err)
+	}
+	runID := summaries[0].ID
+
+	// run.logs while the request is still pending (unanswered): must show
+	// the permission_request entry correctly, with no resolution yet.
+	sendRequest(t, ws, "logs1", "run.logs", map[string]any{"runId": runID})
+	logsResp1 := readEnvelopeFor(t, ws, "logs1", 5*time.Second)
+	var logs1 runLogsResult
+	if err := json.Unmarshal(logsResp1.Result, &logs1); err != nil {
+		t.Fatalf("decode run.logs result: %v", err)
+	}
+	var sawPending bool
+	for _, e := range logs1.Events {
+		if e.Type == "permission_resolved" {
+			t.Fatalf("run.logs shows a permission_resolved entry before the request was answered: %+v", logs1.Events)
+		}
+		if e.Type == "permission_request" {
+			sawPending = true
+			if e.RequestID != req.RequestID {
+				t.Fatalf("run.logs permission_request RequestID = %q, want %q", e.RequestID, req.RequestID)
+			}
+			if e.Summary != "Run a risky command" {
+				t.Fatalf("run.logs permission_request Summary = %q, want %q", e.Summary, "Run a risky command")
+			}
+			if len(e.Options) != 2 {
+				t.Fatalf("run.logs permission_request Options = %+v, want 2", e.Options)
+			}
+			if e.Text != "" {
+				t.Fatalf("run.logs permission_request Text = %q, want empty (not mis-rendered as a chunk)", e.Text)
+			}
+		}
+	}
+	if !sawPending {
+		t.Fatalf("run.logs does not show the pending permission_request: %+v", logs1.Events)
+	}
+
+	sendRequest(t, ws, "respond", "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": req.RequestID, "optionId": "deny-1",
+	})
+	if resp := readEnvelopeFor(t, ws, "respond", 5*time.Second); resp.Error != nil {
+		t.Fatalf("run.respondPermission error = %v", resp.Error.Message)
+	}
+
+	// Drain the rest of the streamed task.prompt turn.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		env := readEnvelopeFor(t, ws, "1", time.Until(deadline))
+		if env.Event == "" {
+			break
+		}
+	}
+
+	// run.logs after the run finished: the permission_resolved entry must
+	// carry the exact requestId/optionId, not an empty/wrong chunk.
+	sendRequest(t, ws, "logs2", "run.logs", map[string]any{"runId": runID})
+	logsResp2 := readEnvelopeFor(t, ws, "logs2", 5*time.Second)
+	var logs2 runLogsResult
+	if err := json.Unmarshal(logsResp2.Result, &logs2); err != nil {
+		t.Fatalf("decode run.logs result: %v", err)
+	}
+	var sawResolved bool
+	for _, e := range logs2.Events {
+		if e.Type == "permission_resolved" {
+			sawResolved = true
+			if e.RequestID != req.RequestID || e.OptionID != "deny-1" {
+				t.Fatalf("run.logs permission_resolved = %+v, want RequestID=%q OptionID=%q", e, req.RequestID, "deny-1")
+			}
+			if e.Text != "" {
+				t.Fatalf("run.logs permission_resolved Text = %q, want empty (not mis-rendered as a chunk)", e.Text)
+			}
+		}
+	}
+	if !sawResolved {
+		t.Fatalf("run.logs does not show the permission_resolved entry after answering: %+v", logs2.Events)
 	}
 }

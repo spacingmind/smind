@@ -15,32 +15,33 @@ import (
 // bound to wm, runner, reg, and treg.
 func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
-		"workspace.create": handleWorkspaceCreate(wm),
-		"workspace.list":   handleWorkspaceList(wm),
-		"workspace.get":    handleWorkspaceGet(wm),
-		"space.create":     handleSpaceCreate(wm),
-		"space.list":       handleSpaceList(wm),
-		"space.get":        handleSpaceGet(wm),
-		"task.create":      handleTaskCreate(wm),
-		"task.list":        handleTaskList(wm),
-		"task.get":         handleTaskGet(wm),
-		"task.archive":     handleTaskArchive(wm),
-		"task.diff":        handleTaskDiff(wm),
-		"task.prompt":      handleTaskPrompt(wm, runner, reg),
-		"run.start":        handleRunStart(wm, runner, reg),
-		"run.list":         handleRunList(reg),
-		"run.attach":       handleRunAttach(reg),
-		"run.logs":         handleRunLogs(reg),
-		"run.stop":         handleRunStop(reg),
-		"terminal.create":  handleTerminalCreate(wm, treg),
-		"terminal.attach":  handleTerminalAttach(treg),
-		"terminal.write":   handleTerminalWrite(treg),
-		"terminal.resize":  handleTerminalResize(treg),
-		"terminal.close":   handleTerminalClose(treg),
-		"terminal.list":    handleTerminalList(treg),
-		"file.list":        handleFileList(wm),
-		"file.read":        handleFileRead(wm),
-		"file.write":       handleFileWrite(wm),
+		"workspace.create":      handleWorkspaceCreate(wm),
+		"workspace.list":        handleWorkspaceList(wm),
+		"workspace.get":         handleWorkspaceGet(wm),
+		"space.create":          handleSpaceCreate(wm),
+		"space.list":            handleSpaceList(wm),
+		"space.get":             handleSpaceGet(wm),
+		"task.create":           handleTaskCreate(wm),
+		"task.list":             handleTaskList(wm),
+		"task.get":              handleTaskGet(wm),
+		"task.archive":          handleTaskArchive(wm),
+		"task.diff":             handleTaskDiff(wm),
+		"task.prompt":           handleTaskPrompt(wm, runner, reg),
+		"run.start":             handleRunStart(wm, runner, reg),
+		"run.list":              handleRunList(reg),
+		"run.attach":            handleRunAttach(reg),
+		"run.logs":              handleRunLogs(reg),
+		"run.stop":              handleRunStop(reg),
+		"run.respondPermission": handleRunRespondPermission(reg),
+		"terminal.create":       handleTerminalCreate(wm, treg),
+		"terminal.attach":       handleTerminalAttach(treg),
+		"terminal.write":        handleTerminalWrite(treg),
+		"terminal.resize":       handleTerminalResize(treg),
+		"terminal.close":        handleTerminalClose(treg),
+		"terminal.list":         handleTerminalList(treg),
+		"file.list":             handleFileList(wm),
+		"file.read":             handleFileRead(wm),
+		"file.write":            handleFileWrite(wm),
 	}
 }
 
@@ -206,6 +207,38 @@ type taskChunkParams struct {
 	Text string `json:"text"`
 }
 
+// permissionOptionParams is one choice offered by a "permission_request"
+// event or a run.logs "permission_request" entry -- the wire shape of
+// taskrunner.PermissionOption.
+type permissionOptionParams struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
+}
+
+func toPermissionOptionParams(opts []taskrunner.PermissionOption) []permissionOptionParams {
+	out := make([]permissionOptionParams, len(opts))
+	for i, o := range opts {
+		out[i] = permissionOptionParams{ID: o.ID, Label: o.Label, Kind: o.Kind}
+	}
+	return out
+}
+
+// permissionRequestParams is the params payload of a "permission_request"
+// event task.prompt/run.attach emit for taskrunner.EventTypePermissionRequest.
+type permissionRequestParams struct {
+	RequestID string                   `json:"requestId"`
+	Summary   string                   `json:"summary"`
+	Options   []permissionOptionParams `json:"options"`
+}
+
+// permissionResolvedParams is the params payload of a "permission_resolved"
+// event task.prompt/run.attach emit for taskrunner.EventTypePermissionResolved.
+type permissionResolvedParams struct {
+	RequestID string `json:"requestId"`
+	OptionID  string `json:"optionId"`
+}
+
 // handleTaskPrompt starts a Run and then behaves like an implicit
 // run.attach on it, for backward compatibility with task.prompt's existing
 // (PR #18) behavior: a single connection driving a run start-to-finish
@@ -327,8 +360,20 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 			if !ok {
 				return terminalResult(reg, runID)
 			}
-			if e.Type == taskrunner.EventTypeText {
+			switch e.Type {
+			case taskrunner.EventTypeText:
 				rc.Emit("chunk", taskChunkParams{Text: e.Text})
+			case taskrunner.EventTypePermissionRequest:
+				rc.Emit("permission_request", permissionRequestParams{
+					RequestID: e.PermissionRequestID,
+					Summary:   e.PermissionSummary,
+					Options:   toPermissionOptionParams(e.PermissionOptions),
+				})
+			case taskrunner.EventTypePermissionResolved:
+				rc.Emit("permission_resolved", permissionResolvedParams{
+					RequestID: e.PermissionRequestID,
+					OptionID:  e.PermissionOptionID,
+				})
 			}
 		case <-cancelCh:
 			if !stopOnDetach {
@@ -358,18 +403,46 @@ func terminalResult(reg *runs.Registry, runID string) (any, error) {
 }
 
 // runLogEvent is the wire shape of one event in a run.logs response --
-// the same fields task.prompt/run.attach's "chunk" events and terminal
-// results carry, just batched instead of streamed.
+// the same fields task.prompt/run.attach's streamed events and terminal
+// results carry, just batched instead of streamed. Type is "chunk", "done",
+// "permission_request", or "permission_resolved"; which of the other fields
+// are populated depends on it, mirroring taskrunner.Event's own
+// discriminated-by-Type shape.
 type runLogEvent struct {
-	Type       string `json:"type"`
-	Text       string `json:"text,omitempty"`
-	StopReason string `json:"stopReason,omitempty"`
+	Type       string                   `json:"type"`
+	Text       string                   `json:"text,omitempty"`
+	StopReason string                   `json:"stopReason,omitempty"`
+	RequestID  string                   `json:"requestId,omitempty"`
+	Summary    string                   `json:"summary,omitempty"`
+	Options    []permissionOptionParams `json:"options,omitempty"`
+	OptionID   string                   `json:"optionId,omitempty"`
 }
 
+// toRunLogEvent translates one taskrunner.Event into its run.logs wire
+// shape. Every taskrunner.EventType has its own explicit case here
+// (including the two permission event types) rather than falling through a
+// default -- a default branch would otherwise silently mis-render a
+// permission event as an empty/wrong "chunk" entry instead of dropping or
+// erroring, which is worse and easy to miss if untested.
 func toRunLogEvent(e taskrunner.Event) runLogEvent {
 	switch e.Type {
+	case taskrunner.EventTypeText:
+		return runLogEvent{Type: "chunk", Text: e.Text}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
+	case taskrunner.EventTypePermissionRequest:
+		return runLogEvent{
+			Type:      "permission_request",
+			RequestID: e.PermissionRequestID,
+			Summary:   e.PermissionSummary,
+			Options:   toPermissionOptionParams(e.PermissionOptions),
+		}
+	case taskrunner.EventTypePermissionResolved:
+		return runLogEvent{
+			Type:      "permission_resolved",
+			RequestID: e.PermissionRequestID,
+			OptionID:  e.PermissionOptionID,
+		}
 	default:
 		return runLogEvent{Type: "chunk", Text: e.Text}
 	}
@@ -434,6 +507,28 @@ func handleRunStop(reg *runs.Registry) handlerFunc {
 		}
 		if err := reg.Stop(p.RunID); err != nil {
 			return nil, fmt.Errorf("run.stop: %w", err)
+		}
+		return struct{}{}, nil
+	}
+}
+
+// handleRunRespondPermission answers a pending permission request by ID,
+// from any connection regardless of which one (if any) is watching the run
+// -- mirroring run.stop's cross-connection reasoning. The blocked provider
+// callback (see internal/runs.Registry's runPermissionDecider) unblocks
+// with this answer and the turn continues.
+func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID     string `json:"runId"`
+			RequestID string `json:"requestId"`
+			OptionID  string `json:"optionId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.respondPermission: invalid params: %w", err)
+		}
+		if err := reg.RespondPermission(p.RunID, p.RequestID, p.OptionID); err != nil {
+			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
 		return struct{}{}, nil
 	}

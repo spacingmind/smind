@@ -291,4 +291,139 @@ describe("TaskDetailPane", () => {
     expect(screen.getByText(/stop failed: boom/i)).toBeInTheDocument();
     expect(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
   });
+
+  it("renders a pending permission request with a button per option when a permission_request event arrives", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    expect(screen.queryByTestId("pending-permission")).not.toBeInTheDocument();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [
+        { id: "allow-1", label: "Allow", kind: "allow_once" },
+        { id: "deny-1", label: "Deny", kind: "reject_once" },
+      ],
+    });
+    await flush();
+
+    const pending = screen.getByTestId("pending-permission");
+    expect(within(pending).getByText("Run a risky command")).toBeInTheDocument();
+    expect(within(pending).getByRole("button", { name: "Allow" })).toBeInTheDocument();
+    expect(within(pending).getByRole("button", { name: "Deny" })).toBeInTheDocument();
+  });
+
+  it("clicking a permission option calls run.respondPermission with the run/request/option ids", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [
+        { id: "allow-1", label: "Allow", kind: "allow_once" },
+        { id: "deny-1", label: "Deny", kind: "reject_once" },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(within(screen.getByTestId("pending-permission")).getByRole("button", { name: "Allow" }));
+    await flush();
+
+    const respondCall = client.nth("run.respondPermission", 0);
+    expect(respondCall.params).toEqual({ runId: "run-1", requestId: "req-1", optionId: "allow-1" });
+
+    // The prompt stays up (buttons disabled) until a permission_resolved
+    // event actually clears it -- see the next two tests.
+    expect(screen.getByTestId("pending-permission")).toBeInTheDocument();
+    expect(within(screen.getByTestId("pending-permission")).getByRole("button", { name: "Allow" })).toBeDisabled();
+  });
+
+  it("clears the pending permission prompt once a matching permission_resolved event arrives from this tab's own click", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [{ id: "allow-1", label: "Allow", kind: "allow_once" }],
+    });
+    await flush();
+
+    fireEvent.click(within(screen.getByTestId("pending-permission")).getByRole("button", { name: "Allow" }));
+    await flush();
+
+    client.nth("run.respondPermission", 0).resolve(undefined);
+    await flush();
+    // Resolving the RPC call alone must not clear the prompt -- only the
+    // server's own "permission_resolved" event does, since another
+    // connection's answer arrives the same way and must behave identically.
+    expect(screen.getByTestId("pending-permission")).toBeInTheDocument();
+
+    client.emit("run.attach", 0, "permission_resolved", { requestId: "req-1", optionId: "allow-1" });
+    await flush();
+
+    expect(screen.queryByTestId("pending-permission")).not.toBeInTheDocument();
+  });
+
+  it("clears the pending permission prompt on a permission_resolved event that did not originate from this tab's own click", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [{ id: "allow-1", label: "Allow", kind: "allow_once" }],
+    });
+    await flush();
+    expect(screen.getByTestId("pending-permission")).toBeInTheDocument();
+
+    // No respondPermission call was ever made from this tab -- some other
+    // connection answered it, and the resolution still arrives as a normal
+    // event on this run's own subscription.
+    expect(client.calls.some((c) => c.method === "run.respondPermission")).toBe(false);
+
+    client.emit("run.attach", 0, "permission_resolved", { requestId: "req-1", optionId: "allow-1" });
+    await flush();
+
+    expect(screen.queryByTestId("pending-permission")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [{ id: "allow-1", label: "Allow", kind: "allow_once" }],
+    });
+    await flush();
+
+    fireEvent.click(within(screen.getByTestId("pending-permission")).getByRole("button", { name: "Allow" }));
+    await flush();
+
+    client.nth("run.respondPermission", 0).reject(new Error("boom"));
+    await flush();
+
+    const pending = screen.getByTestId("pending-permission");
+    expect(within(pending).getByText(/boom/i)).toBeInTheDocument();
+    expect(within(pending).getByRole("button", { name: "Allow" })).not.toBeDisabled();
+  });
 });

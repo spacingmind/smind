@@ -56,7 +56,15 @@ type run struct {
 	provider  taskrunner.Provider
 	prompt    string
 	startedAt time.Time
-	cancel    context.CancelFunc
+
+	// ctx is this run's own background context (the one Start derived via
+	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
+	// it. runPermissionDecider selects on it directly (not just on
+	// whatever ctx the provider itself passes to Decide) because ACP's own
+	// session/request_permission dispatch runs with context.Background(),
+	// not anything derived from this run's ctx -- see runPermissionDecider.
+	ctx    context.Context
+	cancel context.CancelFunc
 
 	mu            sync.Mutex
 	status        Status
@@ -68,6 +76,11 @@ type run struct {
 	history     []Event
 	subscribers map[int]*subQueue
 	nextSubID   int
+
+	// pendingPermissions holds one buffered(1) channel per permission
+	// request currently awaiting an answer, keyed by request id -- see
+	// runPermissionDecider and RespondPermission.
+	pendingPermissions map[string]chan string
 }
 
 func (r *run) statusLocked() RunStatus {
@@ -108,14 +121,16 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 
 	runCtx, cancel := context.WithCancel(ctx)
 	r := &run{
-		id:          id,
-		taskID:      taskID,
-		provider:    provider,
-		prompt:      prompt,
-		startedAt:   time.Now(),
-		cancel:      cancel,
-		status:      StatusRunning,
-		subscribers: make(map[int]*subQueue),
+		id:                 id,
+		taskID:             taskID,
+		provider:           provider,
+		prompt:             prompt,
+		startedAt:          time.Now(),
+		ctx:                runCtx,
+		cancel:             cancel,
+		status:             StatusRunning,
+		subscribers:        make(map[int]*subQueue),
+		pendingPermissions: make(map[string]chan string),
 	}
 
 	reg.mu.Lock()
@@ -137,9 +152,125 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		}
 	}()
 
-	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, events)
+	decider := runPermissionDecider{reg: reg, r: r}
+	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, events)
 	<-forwardDone
 	reg.finish(r, err)
+}
+
+// runPermissionDecider implements taskrunner.PermissionDecider for one run,
+// bridging the provider's own blocking Decide call to Registry.RespondPermission
+// via a pending-response channel recorded on the run itself.
+//
+// This deliberately never touches the events chan<- taskrunner.Event that
+// drive's forwarder goroutine owns: Decide runs on whatever goroutine the
+// provider dispatches the permission callback on (a distinct goroutine from
+// RunPrompt's own forwarding, and, for ACP, one that doesn't even share
+// RunPrompt's ctx -- see acp/rpc.go's handleInboundRequest, dispatched with
+// context.Background()). A second concurrent writer on that events channel
+// would be exactly the close-vs-send race class this project has already
+// hit; going through reg.record instead sidesteps it entirely, since record
+// was already designed (by Stop/History/List) to be called safely from any
+// goroutine.
+type runPermissionDecider struct {
+	reg *Registry
+	r   *run
+}
+
+func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
+	requestID, err := newRunID()
+	if err != nil {
+		return "", fmt.Errorf("runs: permission request id: %w", err)
+	}
+
+	ch := make(chan string, 1)
+	d.r.mu.Lock()
+	d.r.pendingPermissions[requestID] = ch
+	d.r.mu.Unlock()
+
+	d.reg.record(d.r, taskrunner.Event{
+		Type:                taskrunner.EventTypePermissionRequest,
+		PermissionRequestID: requestID,
+		PermissionSummary:   summary,
+		PermissionOptions:   options,
+	})
+
+	select {
+	case optionID := <-ch:
+		// Recorded here, on the same goroutine right after Decide wakes up
+		// -- not by RespondPermission directly -- so there's exactly one
+		// code path appending both the request and its resolution to
+		// history, in the correct order relative to Decide actually
+		// returning (see RespondPermission's own doc comment).
+		d.reg.record(d.r, taskrunner.Event{
+			Type:                taskrunner.EventTypePermissionResolved,
+			PermissionRequestID: requestID,
+			PermissionOptionID:  optionID,
+		})
+		return optionID, nil
+
+	case <-ctx.Done():
+		d.abandon(requestID)
+		return "", ctx.Err()
+
+	case <-d.r.ctx.Done():
+		// The run itself was stopped. ctx above is the provider's own
+		// per-request context, which for ACP is context.Background() and
+		// so would never fire here on its own -- d.r.ctx (the run's own
+		// cancellable context, cancelled by Registry.Stop) is what
+		// guarantees this Decide call unblocks instead of hanging forever
+		// once a pending permission request's run is stopped.
+		d.abandon(requestID)
+		return "", d.r.ctx.Err()
+	}
+}
+
+// abandon removes requestID's pending channel so a RespondPermission call
+// that arrives after Decide already gave up (via ctx cancellation) gets a
+// clear "unknown/already resolved" error instead of silently succeeding
+// into a channel nobody will ever read from again.
+func (d runPermissionDecider) abandon(requestID string) {
+	d.r.mu.Lock()
+	delete(d.r.pendingPermissions, requestID)
+	d.r.mu.Unlock()
+}
+
+// RespondPermission answers runID's pending permission request requestID
+// with optionID, from any caller regardless of which connection (if any) is
+// watching the run -- mirroring Stop's cross-connection reasoning. The
+// blocked Decide call (see runPermissionDecider) wakes up and itself
+// records the EventTypePermissionResolved event once it does.
+//
+// Looking up the channel and sending into it happen under the same r.mu
+// critical section as deleting the map entry on success, which is what
+// makes double-answering (or answering after Decide already gave up)
+// reliably detectable as an error rather than racy: the buffered(1) channel
+// starts empty, so the first successful send both delivers the answer and
+// atomically removes requestID from the map before releasing the lock: any
+// second call -- whether truly concurrent (blocked on the same mutex) or
+// merely later -- finds no entry and returns a clear error, never a silent
+// no-op, a panic, or (worse) a second value nobody will ever receive.
+func (reg *Registry) RespondPermission(runID, requestID, optionID string) error {
+	r, err := reg.get(runID)
+	if err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	ch, ok := r.pendingPermissions[requestID]
+	if !ok {
+		r.mu.Unlock()
+		return fmt.Errorf("runs: permission request %q: %w", requestID, ErrNotFound)
+	}
+	select {
+	case ch <- optionID:
+		delete(r.pendingPermissions, requestID)
+		r.mu.Unlock()
+		return nil
+	default:
+		r.mu.Unlock()
+		return fmt.Errorf("runs: permission request %q already resolved", requestID)
+	}
 }
 
 // record appends e to r's history and broadcasts it to every subscriber
