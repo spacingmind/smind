@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -17,6 +18,7 @@ type fakeFetcher struct {
 	mu    sync.Mutex
 	usage map[int64]quota.Usage
 	calls map[int64]int
+	errs  map[int64]error
 }
 
 func newFakeFetcher() *fakeFetcher {
@@ -27,6 +29,9 @@ func (f *fakeFetcher) Fetch(ctx context.Context, account store.Account) (quota.U
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls[account.ID]++
+	if err := f.errs[account.ID]; err != nil {
+		return quota.Usage{}, err
+	}
 	return f.usage[account.ID], nil
 }
 
@@ -40,6 +45,15 @@ func (f *fakeFetcher) setExhausted(accountID int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.usage[accountID] = quota.Usage{TokensUsed: 100, TokensLimit: 100}
+}
+
+func (f *fakeFetcher) setError(accountID int64, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errs == nil {
+		f.errs = map[int64]error{}
+	}
+	f.errs[accountID] = err
 }
 
 func newTestRouter(t *testing.T, opts ...Option) (*Router, *store.Store, *accounts.Registry, *fakeFetcher) {
@@ -333,5 +347,86 @@ func TestRouter_Route_ConcurrentDifferentSessions(t *testing.T) {
 
 	for err := range errs {
 		t.Errorf("concurrent Route() error = %v", err)
+	}
+}
+
+func TestRouter_Route_UnknownQuotaFailsOpen(t *testing.T) {
+	t.Parallel()
+
+	r, _, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	a := newAccount(t, reg, "a")
+	// Deliberately not calling fetcher.setAvailable/setExhausted: the fake
+	// returns a zero-value quota.Usage (TokensLimit == 0), simulating an
+	// account with no known quota data yet.
+	_ = fetcher
+
+	got, err := r.Route(context.Background(), "sess", PolicyHard, []int64{a})
+	if err != nil {
+		t.Fatalf("Route() error = %v, want fail-open success for unknown quota", err)
+	}
+	if got.ID != a {
+		t.Errorf("Route() account = %d, want %d", got.ID, a)
+	}
+}
+
+func TestRouter_Route_QuotaFetchErrorPropagates(t *testing.T) {
+	t.Parallel()
+
+	r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	a := newAccount(t, reg, "a")
+	wantErr := errors.New("provider usage API unreachable")
+	fetcher.setError(a, wantErr)
+
+	_, err := r.Route(context.Background(), "sess", PolicyHard, []int64{a})
+	if err == nil {
+		t.Fatal("Route() error = nil, want propagated fetch error")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Errorf("Route() error = %v, want wrapping %v", err, wantErr)
+	}
+
+	decisions, err := s.ListRoutingDecisions()
+	if err != nil {
+		t.Fatalf("ListRoutingDecisions() error = %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Errorf("routing decisions = %d, want 0 (no decision on quota-check failure)", len(decisions))
+	}
+}
+
+func TestRouter_Route_ConcurrentSameSession(t *testing.T) {
+	t.Parallel()
+
+	r, _, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	a := newAccount(t, reg, "a")
+	fetcher.setAvailable(a)
+
+	const workers = 8
+	var wg sync.WaitGroup
+	results := make(chan accounts.Account, workers)
+	errs := make(chan error, workers)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := r.Route(context.Background(), "shared-session", PolicyHard, []int64{a})
+			if err != nil {
+				errs <- err
+				return
+			}
+			results <- got
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	close(results)
+
+	for err := range errs {
+		t.Errorf("concurrent Route() error = %v", err)
+	}
+	for got := range results {
+		if got.ID != a {
+			t.Errorf("Route() account = %d, want %d (only candidate)", got.ID, a)
+		}
 	}
 }
