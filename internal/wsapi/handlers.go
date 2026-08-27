@@ -24,6 +24,7 @@ func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		"task.list":        handleTaskList(wm),
 		"task.get":         handleTaskGet(wm),
 		"task.archive":     handleTaskArchive(wm),
+		"task.diff":        handleTaskDiff(wm),
 		"task.prompt":      handleTaskPrompt(wm, runner, reg),
 		"run.start":        handleRunStart(wm, runner, reg),
 		"run.list":         handleRunList(reg),
@@ -151,6 +152,34 @@ func handleTaskArchive(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
 		}
 		return wm.ArchiveTask(p.ID)
+	}
+}
+
+// taskDiffResult is the result of task.diff: id's full unified diff text
+// (see workspace.Manager.Diff), or an empty string for a task with no
+// changes.
+type taskDiffResult struct {
+	Diff string `json:"diff"`
+}
+
+// handleTaskDiff returns the task's full unified diff -- everything
+// changed in its git worktree relative to the commit its branch was
+// created from, both committed-but-not-on-base commits and any current
+// uncommitted changes. See workspace.Manager.Diff / git.go's taskDiff for
+// the exact git invocation.
+func handleTaskDiff(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.diff: invalid params: %w", err)
+		}
+		diff, err := wm.Diff(p.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("task.diff: %w", err)
+		}
+		return taskDiffResult{Diff: diff}, nil
 	}
 }
 
