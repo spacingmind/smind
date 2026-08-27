@@ -65,6 +65,19 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
+// UpdateTaskStatus sets a task's status and returns the updated task.
+func (s *Store) UpdateTaskStatus(id int64, status string) (Task, error) {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(
+		`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
+		status, now, id,
+	)
+	if err != nil {
+		return Task{}, fmt.Errorf("update task %d status: %w", id, err)
+	}
+	return s.GetTask(id)
+}
+
 // ArchiveTask sets a task's status to "archived" and stamps archived_at, then
 // returns the updated task. Calling it again on an already-archived task is a
 // no-op: the WHERE clause matches no rows, so archived_at is left as the
