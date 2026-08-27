@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -149,6 +150,28 @@ func waitForStatus(t *testing.T, reg *Registry, runID string, want Status, timeo
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for run %q to reach status %q, still %q", runID, want, status.Status)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// waitForPermissionRequest polls runID's history for its first
+// taskrunner.EventTypePermissionRequest event, returning it once found.
+func waitForPermissionRequest(t *testing.T, reg *Registry, runID string, timeout time.Duration) taskrunner.Event {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		hist, _, err := reg.History(runID)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", runID, err)
+		}
+		for _, e := range hist {
+			if e.Type == taskrunner.EventTypePermissionRequest {
+				return e
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for run %q to record a permission request, history so far: %+v", runID, hist)
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -519,5 +542,236 @@ func TestRegistry_List_ReflectsCurrentStatus(t *testing.T) {
 	}
 	if got := byID[runStopped].Status; got != StatusStopped {
 		t.Fatalf("List()[stopped].Status = %q, want %q", got, StatusStopped)
+	}
+}
+
+// TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionUnblocks
+// proves the full pending-permission bridge end to end: the fake agent's
+// "permission" scenario issues a real session/request_permission call,
+// which appears as a taskrunner.EventTypePermissionRequest in the run's
+// history (the same path run.attach/run.logs read from) with the options it
+// offered; the run stays running (not just "hasn't gotten around to
+// finishing yet" -- confirmed by a real wait below) until
+// RespondPermission answers it; and once answered, the blocked Decide call
+// unblocks with that exact choice, which the fake agent echoes back in its
+// final chunk, and a matching EventTypePermissionResolved is recorded
+// after the request in history.
+func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionUnblocks(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	reg := New()
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+	if req.PermissionRequestID == "" {
+		t.Fatal("PermissionRequestID is empty")
+	}
+	if req.PermissionSummary != "Run a risky command" {
+		t.Fatalf("PermissionSummary = %q, want %q", req.PermissionSummary, "Run a risky command")
+	}
+	wantOpts := []taskrunner.PermissionOption{
+		{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
+		{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
+	}
+	if len(req.PermissionOptions) != 2 || req.PermissionOptions[0] != wantOpts[0] || req.PermissionOptions[1] != wantOpts[1] {
+		t.Fatalf("PermissionOptions = %+v, want %+v", req.PermissionOptions, wantOpts)
+	}
+
+	// Confirm the run is genuinely still blocked on the request, not just
+	// not-yet-finished: give it a real moment and check it hasn't gone
+	// terminal on its own.
+	time.Sleep(100 * time.Millisecond)
+	_, status, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if status.Status != StatusRunning {
+		t.Fatalf("Status = %q before answering the permission request, want still %q", status.Status, StatusRunning)
+	}
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+
+	status = waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	if status.StopReason != "end_turn" {
+		t.Fatalf("StopReason = %q, want %q", status.StopReason, "end_turn")
+	}
+
+	hist, _, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	var sawResolvedAfterRequest, sawFinalChunk bool
+	requestIdx, resolvedIdx := -1, -1
+	for i, e := range hist {
+		switch {
+		case e.Type == taskrunner.EventTypePermissionRequest:
+			requestIdx = i
+		case e.Type == taskrunner.EventTypePermissionResolved:
+			resolvedIdx = i
+			if e.PermissionRequestID != req.PermissionRequestID {
+				t.Fatalf("resolved event's PermissionRequestID = %q, want %q", e.PermissionRequestID, req.PermissionRequestID)
+			}
+			if e.PermissionOptionID != "allow-1" {
+				t.Fatalf("resolved event's PermissionOptionID = %q, want %q", e.PermissionOptionID, "allow-1")
+			}
+			sawResolvedAfterRequest = requestIdx >= 0 && resolvedIdx > requestIdx
+		case e.Type == taskrunner.EventTypeText && e.Text == "chose:allow-1":
+			sawFinalChunk = true
+		}
+	}
+	if !sawResolvedAfterRequest {
+		t.Fatalf("EventTypePermissionResolved did not appear after EventTypePermissionRequest in history: %+v", hist)
+	}
+	if !sawFinalChunk {
+		t.Fatalf("history does not include the agent's post-decision chunk reflecting the chosen option: %+v", hist)
+	}
+}
+
+// TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError proves
+// answering the same request id twice is a clear, distinct error on the
+// second call -- not a panic, not a silent no-op, and not delivered to a
+// decider that already moved on.
+func TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	reg := New()
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("first RespondPermission() error = %v, want nil", err)
+	}
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "deny-1"); err == nil {
+		t.Fatal("second RespondPermission() for the same request id: error = nil, want a clear error")
+	}
+
+	// The run must still have honored only the first answer.
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	hist, _, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	for _, e := range hist {
+		if e.Type == taskrunner.EventTypeText && e.Text == "chose:deny-1" {
+			t.Fatalf("run reflects the second (rejected) answer, want only the first: %+v", hist)
+		}
+	}
+}
+
+// TestRegistry_RespondPermission_UnknownRequestID_IsAClearError proves
+// answering a request id the Registry never issued (for this run, or at
+// all) is a clear error, not a panic or silent no-op.
+func TestRegistry_RespondPermission_UnknownRequestID_IsAClearError(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	reg := New()
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	if err := reg.RespondPermission(runID, "no-such-request", "allow-1"); err == nil {
+		t.Fatal("RespondPermission() with an unknown request id: error = nil, want a clear error")
+	}
+
+	// Clean up: the run is still blocked on the real pending request.
+	if err := reg.Stop(runID); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+// TestRegistry_RespondPermission_UnknownRun_ReturnsErrNotFound proves
+// RespondPermission on a run ID the Registry has never heard of behaves
+// like Stop/History/Subscribe on an unknown ID: ErrNotFound, not a panic.
+func TestRegistry_RespondPermission_UnknownRun_ReturnsErrNotFound(t *testing.T) {
+	t.Parallel()
+	reg := New()
+	if err := reg.RespondPermission("no-such-run", "req-1", "allow-1"); err != ErrNotFound {
+		t.Fatalf("RespondPermission() error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRegistry_Stop_WhilePermissionPending_Unblocks proves stopping a run
+// while a permission request is still pending actually unblocks the
+// provider's blocked Decide call (rather than hanging forever) and leaves
+// no goroutine behind -- ACP's own session/request_permission dispatch
+// runs with context.Background(), not anything derived from the run's own
+// ctx, so this only passes if runPermissionDecider's extra select on the
+// run's own ctx (see registry.go) is actually wired up.
+func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	runner := newTestRunner(wm)
+	reg := New()
+
+	// Let the runtime settle from whatever earlier parallel subtests /
+	// prior GC activity are still winding down, then take a goroutine-count
+	// baseline immediately before starting the run under test.
+	runtime.GC()
+	time.Sleep(20 * time.Millisecond)
+	baseline := runtime.NumGoroutine()
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+	if req.PermissionRequestID == "" {
+		t.Fatal("PermissionRequestID is empty")
+	}
+
+	start := time.Now()
+	if err := reg.Stop(runID); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	status := waitForStatus(t, reg, runID, StatusStopped, 5*time.Second)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("Stop() took %s to unblock the pending permission request, want promptly", elapsed)
+	}
+	if status.FinishedAt == nil {
+		t.Fatal("FinishedAt is nil, want set once stopped")
+	}
+
+	// Answering the now-abandoned request must be a clear error, not a
+	// silent success into a channel nobody will ever read again.
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err == nil {
+		t.Fatal("RespondPermission() on a request abandoned by Stop: error = nil, want a clear error")
+	}
+
+	// Goroutine-leak check: poll for the count to settle back down near
+	// baseline instead of asserting immediately, since the decider
+	// goroutine (and the subprocess's own Close/Wait) unblock asynchronously
+	// relative to Stop() returning.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		runtime.GC()
+		time.Sleep(20 * time.Millisecond)
+		current := runtime.NumGoroutine()
+		if current <= baseline+2 { // small slack for unrelated background goroutines
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("goroutine count did not settle back to baseline after Stop(): baseline=%d current=%d", baseline, current)
+		}
 	}
 }
