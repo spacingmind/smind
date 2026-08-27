@@ -17,7 +17,7 @@ const PROVIDERS: Provider[] = ["claude-native", "glm"];
  * local (provider/prompt/submitting) state.
  */
 export function TaskDetailPane({ client, task }: { client: WsClientLike | null; task: Task }) {
-  const { runs, error, submitPrompt } = useRunTimeline(client, task.ID);
+  const { runs, error, submitPrompt, stopRun } = useRunTimeline(client, task.ID);
 
   return (
     <div className="flex h-full flex-col">
@@ -38,7 +38,7 @@ export function TaskDetailPane({ client, task }: { client: WsClientLike | null; 
         {runs !== null && runs.length > 0 && (
           <ul className="space-y-4">
             {runs.map((run) => (
-              <RunEntryView key={run.id} run={run} />
+              <RunEntryView key={run.id} run={run} onStop={stopRun} />
             ))}
           </ul>
         )}
@@ -49,20 +49,53 @@ export function TaskDetailPane({ client, task }: { client: WsClientLike | null; 
   );
 }
 
-function RunEntryView({ run }: { run: RunEntry }) {
+function RunEntryView({ run, onStop }: { run: RunEntry; onStop: (runId: string) => Promise<void> }) {
+  const [stopping, setStopping] = useState(false);
+  const [stopError, setStopError] = useState<string | null>(null);
+
+  async function handleStop() {
+    setStopping(true);
+    setStopError(null);
+    try {
+      await onStop(run.id);
+    } catch (err) {
+      setStopError(err instanceof Error ? err.message : String(err));
+      setStopping(false);
+    }
+    // On success, leave `stopping` true: the run's own run.attach
+    // subscription observes the stop as its terminal response and patches
+    // `run.status` away from "running" shortly, which unmounts this button
+    // (see the status !== "running" guard below) -- no need to reset here.
+  }
+
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border p-3">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{run.provider}</span>
-        <span className="uppercase" data-testid="run-status">
-          {run.status}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="uppercase" data-testid="run-status">
+            {run.status}
+          </span>
+          {run.status === "running" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-5 px-2 text-xs"
+              disabled={stopping}
+              onClick={handleStop}
+            >
+              Stop
+            </Button>
+          )}
+        </div>
       </div>
       <p className="mt-1 text-sm font-medium">{run.prompt}</p>
       <pre className="mt-2 whitespace-pre-wrap text-sm" data-testid="run-text">
         {run.text}
       </pre>
       {run.err && <p className="mt-1 text-xs text-destructive">{run.err}</p>}
+      {stopError && <p className="mt-1 text-xs text-destructive">stop failed: {stopError}</p>}
     </li>
   );
 }

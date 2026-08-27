@@ -243,4 +243,52 @@ describe("TaskDetailPane", () => {
     expect(screen.getByText("FRESH")).toBeInTheDocument();
     expect(screen.getAllByTestId("run-entry")).toHaveLength(1);
   });
+
+  it("shows a Stop button only for a running run, and clicking it calls run.stop (not an abort)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    const entry = screen.getByTestId("run-entry");
+    const stopButton = within(entry).getByRole("button", { name: "Stop" });
+
+    fireEvent.click(stopButton);
+    await flush();
+
+    const stopCall = client.nth("run.stop", 0);
+    expect(stopCall.params).toEqual({ runId: "run-1" });
+    // Stopping must go through run.stop, never by aborting the active
+    // run.attach subscription (that would only detach, not stop).
+    expect(client.nth("run.attach", 0).options?.signal?.aborted).toBeFalsy();
+
+    stopCall.resolve(undefined);
+    await flush();
+
+    // The run's own run.attach subscription observes the stop as its
+    // terminal response, same as any other subscriber -- simulate the
+    // server ending the stream that way, and confirm the Stop button
+    // disappears once the run is no longer "running".
+    client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "" });
+    await flush();
+    expect(within(screen.getByTestId("run-entry")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+  });
+
+  it("surfaces a run.stop failure without crashing, keeping the Stop button usable", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    fireEvent.click(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" }));
+    await flush();
+
+    client.nth("run.stop", 0).reject(new Error("boom"));
+    await flush();
+
+    expect(screen.getByText(/stop failed: boom/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
+  });
 });
