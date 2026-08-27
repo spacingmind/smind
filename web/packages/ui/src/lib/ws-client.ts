@@ -107,11 +107,30 @@ export interface CallOptions {
 }
 
 /**
+ * The public call/callStream surface of WsClient, factored out as an
+ * interface so components that only need to issue RPCs (as opposed to
+ * managing the connection itself) can depend on this instead of the
+ * concrete class -- which in turn lets tests pass a plain-object fake
+ * implementing just these two methods, the same way ws-client.test.ts's
+ * FakeSocket fakes the layer *below* WsClient. A real WsClient instance
+ * satisfies this structurally, no adapter needed.
+ */
+export interface WsClientLike {
+  call<TResult = unknown>(method: string, params?: unknown, options?: CallOptions): Promise<TResult>;
+  callStream<TResult = unknown>(
+    method: string,
+    params?: unknown,
+    onEvent?: EventFunc,
+    options?: CallOptions,
+  ): Promise<TResult>;
+}
+
+/**
  * One WebSocket connection to a smind daemon's /ws endpoint, supporting
  * any number of concurrent in-flight requests (each identified by its own
  * request id), matching internal/wsclient.Client's contract.
  */
-export class WsClient {
+export class WsClient implements WsClientLike {
   private readonly socket: SocketLike;
   private readonly inflight = new Map<string, InflightRequest>();
   private nextId = 0;
