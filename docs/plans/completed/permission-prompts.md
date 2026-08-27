@@ -217,17 +217,177 @@ here).
 
 ## Progress
 
-- [ ] `internal/taskrunner`: `PermissionOption`/`PermissionDecider`, new
+- [x] `internal/taskrunner`: `PermissionOption`/`PermissionDecider`, new
   `EventType`s, per-call decider wiring, both provider adapters
-- [ ] `internal/runs`: per-run pending-permission bridge,
+- [x] `internal/runs`: per-run pending-permission bridge,
   `RespondPermission`, decider construction in `Start`/`drive`
-- [ ] `internal/wsapi`: `run.respondPermission` +
+- [x] `internal/wsapi`: `run.respondPermission` +
   `attachAndStream`/`toRunLogEvent` new-event-type handling
-- [ ] Frontend: pending-permission UI in the task detail timeline
-- [ ] Verification (typecheck/tests/build/-race + real-daemon E2E,
+- [x] Frontend: pending-permission UI in the task detail timeline
+- [x] Verification (typecheck/tests/build/-race + real-daemon E2E,
   ACP end-to-end at minimum; Claude Code E2E or a documented reason why
   not)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+Real source confirmed before implementing (all matched the plan's claims
+except the exact Claude Code `PermissionPolicy` signature, corrected
+below):
+
+- `acp.PermissionPolicy.Decide(ctx, RequestPermissionParams) (optionID
+  string, err error)` -- `internal/acp/permission.go`. Confirmed
+  `acp/rpc.go`'s `handleInboundRequest` dispatches every inbound request
+  (including `session/request_permission`) via `go
+  c.handleInboundRequest(msg)` with `context.Background()`, exactly as the
+  plan said -- this is why the run's own `ctx` (not the provider's) has to
+  be the thing that unblocks a stopped run's pending request.
+- `claudecode.PermissionPolicy.Decide(ctx, CanUseToolRequest) (allow bool,
+  updatedInput map[string]any, denyMessage string, err error)` --
+  `claude-agent-sdk-go@v0.0.0-20260827121352-f204576f53ad/permission.go`.
+  The plan's doc additionally listed `updatedPermissions
+  []map[string]any, interrupt bool` return values that do not exist in the
+  real interface; the adapter (`claudeDeciderAdapter` in
+  `internal/taskrunner/permission.go`) was written against the real
+  4-value signature. Also confirmed `handleControlRequest` in
+  `claude-agent-sdk-go/client.go` calls `Decide` synchronously on `Prompt`'s
+  own read-loop goroutine with `Prompt`'s own `ctx` (not
+  `context.Background()`) -- so for this provider the run's own ctx and the
+  decider's `ctx` parameter are actually the same object; the extra
+  `d.r.ctx.Done()` select case is still added uniformly in
+  `runPermissionDecider.Decide` for both providers, since it's free for
+  Claude Code and required for ACP.
+
+Acceptance criteria, each confirmed by a specific test/command:
+
+- **Human-in-the-loop blocking, auto-policies unaffected when unused**:
+  `internal/taskrunner/runner_test.go`'s pre-existing
+  `TestRunner_RunPrompt_GLM`/`TestRunner_RunPrompt_ClaudeNative` (decider
+  `nil`) still pass unchanged, proving today's `AutoApprovePolicy`/
+  `AutoDenyPolicy` fallback behavior is byte-for-byte preserved.
+  `TestRunner_RunPrompt_PermissionRequest_GLM` and
+  `_ClaudeNative`/`_ClaudeNative_Deny` prove the decider path drives a real
+  blocking decision instead.
+- **Pending request visible via `run.attach`/`run.logs`**:
+  `internal/wsapi/run_test.go`'s
+  `TestServer_RunRespondPermission_CrossConnection` (live `run.attach`
+  stream sees a `permission_request` event with `requestId`/`summary`/
+  `options`) and `TestServer_RunLogs_ShowsPermissionRequestAndResolved`
+  (`run.logs` renders the same data, both while pending and after
+  resolution, with explicit non-default cases in `toRunLogEvent` --
+  confirmed by asserting `Text` stays empty rather than being
+  mis-rendered).
+- **`run.respondPermission` from any connection unblocks `Decide`**:
+  `TestServer_RunRespondPermission_CrossConnection` (wsapi-level, two
+  separate `dialWS` connections, mirroring
+  `TestServer_RunStop_CrossConnection`) and
+  `TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionUnblocks`
+  (registry-level: run confirmed still `StatusRunning` after a real 100ms
+  wait, so "blocked" isn't just "hasn't finished yet").
+- **Unified provider-agnostic shape**: `internal/taskrunner/permission.go`'s
+  `PermissionOption`/`PermissionDecider`; `internal/runs` and
+  `internal/wsapi` only ever construct/consume `taskrunner.PermissionOption`
+  and the two new `taskrunner.EventType`s, never provider-specific types --
+  confirmed by grep (`acp.PermissionOption`/`claudecode.CanUseToolRequest`
+  appear only inside `internal/taskrunner/permission.go`).
+- **Stop unblocks a pending request instead of hanging**:
+  `TestRegistry_Stop_WhilePermissionPending_Unblocks` -- stops a run with a
+  real pending ACP permission request (whose own dispatch context is
+  `context.Background()`, confirmed above, so only the run's own ctx can be
+  what unblocks it), asserts `Stop()` takes effect within the test timeout,
+  then polls `runtime.NumGoroutine()` back down to baseline to confirm no
+  goroutine leak, not just that the call returned.
+- **Double-answer and unknown-id are clear errors, not panics/no-ops**:
+  `TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError`,
+  `TestRegistry_RespondPermission_UnknownRequestID_IsAClearError`,
+  `TestRegistry_RespondPermission_UnknownRun_ReturnsErrNotFound` (Go level)
+  and the same two error cases exercised again against the real running
+  daemon in the manual E2E script (see below).
+- **Frontend pending-permission UI, cross-connection resolution**:
+  `web/packages/ui/src/components/task-detail.test.tsx`'s five new tests
+  (renders prompt + per-option buttons on `permission_request`; clicking
+  calls `run.respondPermission` with the right ids; clears on a
+  `permission_resolved` event that *did* originate from this tab's click;
+  clears on one that *did not* -- no `run.respondPermission` call was ever
+  made from that tab; surfaces a `run.respondPermission` failure without
+  crashing, keeping the buttons usable).
+
+Test scenarios from the spec:
+
+- Real ACP end-to-end (fake agent issues a real
+  `session/request_permission`, blocks, `run.respondPermission` unblocks
+  it, the agent's own scripted reply reflects the chosen option): extended
+  `internal/taskrunner/fakeagent/main.go` with a `"permission"` scenario
+  (new `call()` RPC helper mirroring `internal/acp/fakeagent`'s), covered
+  end-to-end at three layers --
+  `TestRunner_RunPrompt_PermissionRequest_GLM` (taskrunner),
+  `TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionUnblocks`
+  (runs), `TestServer_RunRespondPermission_CrossConnection` (wsapi) -- plus
+  the manual real-daemon E2E script (below).
+- Claude Code native: **full E2E achieved**, not just adapter unit tests --
+  extended `internal/taskrunner/taskrunner_test.go`'s fake CLI
+  (`runFakeClaudeCLI`) with a `"permission"` scenario that issues a real
+  `can_use_tool` control request (mirrors
+  `claude-agent-sdk-go/fakecli_test.go`'s own
+  `"streaming_and_permission"` scenario), exercised by
+  `TestRunner_RunPrompt_PermissionRequest_ClaudeNative`/`_Deny`. This
+  proves the real wire-level control-request/response round trip, both
+  directions (allow and deny). Additionally, `internal/taskrunner/permission_test.go`
+  unit-tests `claudeDeciderAdapter`/`acpDeciderAdapter`'s conversion logic
+  in isolation with real input/output shapes (`TestClaudeDeciderAdapter_Allow`/
+  `_Deny`/`_PropagatesError`, `TestACPDeciderAdapter_TranslatesOptionsAndChoice`/
+  `_PropagatesError`, `TestSummarizeACPToolCall`) as extra coverage below the
+  E2E layer. **Gap**: this Claude Code E2E coverage exists only at the Go
+  test level (fake CLI re-exec'd as a helper process within `go test`) --
+  `cmd/smind/serve.go` has an `SMIND_ACP_COMMAND` env hook that lets a
+  real running daemon's GLM/ACP path point at a fake agent binary, but no
+  equivalent hook exists for the Claude Code native path, so the *manual*
+  real-daemon-binary E2E script below only exercises the ACP path, not
+  Claude Code native. Adding such a hook was judged out of scope for this
+  pass (it would be a `cmd/smind` change unrelated to the permission-prompts
+  feature itself); flagging plainly rather than leaving it ambiguous.
+- Stop while a permission request is pending, no goroutine leak:
+  `TestRegistry_Stop_WhilePermissionPending_Unblocks` (see above).
+- `run.respondPermission` from a different connection than the one
+  watching: `TestServer_RunRespondPermission_CrossConnection` (see above),
+  plus the manual E2E script's `responder` connection distinct from
+  `starter`.
+- Answering the same request id twice / unknown id: see above (both Go
+  tests and manual E2E script).
+- `run.logs` on a run with a permission request, correctly rendered (not
+  silently mis-rendered by `toRunLogEvent`'s `default:` case):
+  `TestServer_RunLogs_ShowsPermissionRequestAndResolved` -- explicit,
+  separate `case` arms added to both `attachAndStream` and `toRunLogEvent`
+  for `EventTypePermissionRequest`/`EventTypePermissionResolved`.
+- Concurrency, `-race` repeated: `go test ./internal/taskrunner/... ./internal/runs/... ./internal/wsapi/... -race -count=5`
+  clean (also `go test ./... -race -count=1` clean for the full repo).
+- Frontend component tests: see above (5 new tests in `task-detail.test.tsx`).
+- `go build ./...` / `gofmt -l .` / `go vet ./...` clean. `go test -race
+  ./...` clean. `bunx tsc -b` clean (run from `web/packages/ui`). `bun run
+  --filter '@smind/ui' test`: 43 passed (38 pre-existing + 5 new). `task
+  build` succeeded; `internal/server/dist/.gitkeep` was deleted by the
+  build as usual and restored with `touch` + `git add`.
+
+Manual E2E against the real built binary (`bin/smind` +
+`internal/taskrunner/fakeagent`, `SMIND_ACP_COMMAND` pointed at the fake
+agent, driven by a from-scratch Node 26 script using only built-in
+`fetch`/`WebSocket` to reproduce the exact `/ws?token=...` wire sequence a
+browser tab would use): started a real workspace/task against a real git
+repo, wrote the fake agent's `"permission"` scenario file into the task's
+real worktree, ran `task.prompt`, observed a `permission_request` event
+arrive on the live stream, confirmed the turn was still blocked after
+a real 500ms wait, called `run.respondPermission` from a **second**
+WebSocket connection, observed the resulting `permission_resolved` event
+and the agent's post-decision chunk (`"chose:allow-1"`) on the *original*
+connection, confirmed the turn completed with `stopReason: "end_turn"`,
+confirmed a double-answer and an unknown-request-id answer both errored
+against the live server, and confirmed `run.logs` rendered both new event
+types. Full log: all checks printed `PASS`, ending in `ALL CHECKS PASSED`,
+exit code 0. This script lives outside the repo (`/tmp/smind-e2e/e2e.mjs`)
+since it's a one-off verification aid, not project source.
+
+Not independently verified: frontend visual rendering in a real browser --
+no browser is available in this sandbox, consistent with every prior web
+UI task in this repo's history. Coverage instead comes from the jsdom +
+Testing Library component tests above, which exercise the real React
+component tree and the real event-folding hook logic, just not real
+browser layout/paint.
