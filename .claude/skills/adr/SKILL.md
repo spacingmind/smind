@@ -36,3 +36,9 @@ Accepted
 3. Keep it short — an ADR records the decision and its reasoning, not a full
    design doc. If the decision affects `docs/ARCHITECTURE.md` or
    `docs/ROADMAP.md`, update those too and note the ADR link there.
+4. If this decision came out of a `docs/plans/active/<slug>.md` spec (see
+   the `plan` skill), link the ADR from that plan's Decisions section, and
+   vice versa — an ADR records *what* was decided and why it's the right
+   call in general; the plan records *how* that decision applies to the
+   specific work it's part of. Keep them cross-referenced rather than
+   duplicating one into the other.

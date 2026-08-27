@@ -24,9 +24,12 @@ Don't guess at behavior you haven't read.
 **(b) Bounded changes.** Make the smallest coherent change that satisfies the
 request. Run `task test` and `task lint` before considering the change done.
 
-**(c) Multi-session work.** Create `docs/plans/active/<slug>.md` with
-sections for decisions, progress, and validation. Keep it updated as the work
-proceeds. When the work is finished, move the file to `docs/plans/completed/`.
+**(c) Multi-session work — spec-driven.** Before implementation starts,
+create `docs/plans/active/<slug>.md` with concrete acceptance criteria and
+named test scenarios (the spec), plus sections for decisions, progress, and
+validation (how the spec got satisfied). See the `plan` skill. Keep it
+updated as work proceeds. When finished — every acceptance criterion
+confirmed in Validation — move the file to `docs/plans/completed/`.
 
 **(d) Material ambiguity.** If a choice materially affects architecture (data
 model, routing behavior, public API shape, etc.) and isn't already decided in
