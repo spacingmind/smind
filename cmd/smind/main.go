@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
@@ -46,7 +47,13 @@ func main() {
 	poller := quota.New(db, noopQuotaFetcher{})
 	router := routing.New(db, registry, poller)
 
-	srv := server.New(cfg, registry, router)
+	token, err := auth.LoadOrCreateToken(config.Dir())
+	if err != nil {
+		log.Fatalf("auth: %v", err)
+	}
+	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
+
+	srv := server.New(cfg, registry, router, token)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
