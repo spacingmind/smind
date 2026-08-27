@@ -11,9 +11,24 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/quota"
+	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/server"
+	"github.com/spacingmind/smind/internal/store"
 )
+
+// noopQuotaFetcher always reports zero usage. Real per-provider usage
+// polling (Anthropic/OpenAI/etc. quota APIs) isn't implemented yet, so this
+// is a known gap, not a mistake: routing.Router treats an account with no
+// known limit as available, so this keeps routing failing open (never
+// blocking on quota) until real quota fetching lands.
+type noopQuotaFetcher struct{}
+
+func (noopQuotaFetcher) Fetch(ctx context.Context, account store.Account) (quota.Usage, error) {
+	return quota.Usage{}, nil
+}
 
 func main() {
 	cfg, err := config.Load()
@@ -21,7 +36,17 @@ func main() {
 		log.Printf("config: %v (continuing with defaults)", err)
 	}
 
-	srv := server.New(cfg)
+	db, err := store.Open(store.DefaultPath())
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+	defer db.Close()
+
+	registry := accounts.New(db)
+	poller := quota.New(db, noopQuotaFetcher{})
+	router := routing.New(db, registry, poller)
+
+	srv := server.New(cfg, db, registry, router)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),

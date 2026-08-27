@@ -7,23 +7,39 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/routing"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // Server serves the smind API and UI.
 type Server struct {
-	cfg config.Config
+	cfg      config.Config
+	store    *store.Store
+	registry *accounts.Registry
+	router   *routing.Router
+	proxy    *proxy
 }
 
-// New builds a Server from config.
-func New(cfg config.Config) *Server {
-	return &Server{cfg: cfg}
+// New builds a Server from config, backed by s/reg/router for the proxy
+// endpoints.
+func New(cfg config.Config, s *store.Store, reg *accounts.Registry, router *routing.Router) *Server {
+	return &Server{
+		cfg:      cfg,
+		store:    s,
+		registry: reg,
+		router:   router,
+		proxy:    newProxy(reg, router),
+	}
 }
 
 // Handler returns the root http handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
+	mux.HandleFunc("POST /v1/messages", s.proxy.handleAnthropic)
+	mux.HandleFunc("POST /v1/chat/completions", s.proxy.handleOpenAI)
 	mux.Handle("/", webUI())
 	return mux
 }
