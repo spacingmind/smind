@@ -18,11 +18,10 @@ import (
 
 // Server serves the smind API and UI.
 type Server struct {
-	cfg    config.Config
-	proxy  *proxy
-	wm     *workspace.Manager
-	runner *taskrunner.Runner
-	token  string
+	cfg   config.Config
+	proxy *proxy
+	ws    http.Handler
+	token string
 }
 
 // New builds a Server from config, backed by reg/router for the proxy
@@ -30,11 +29,10 @@ type Server struct {
 // the proxy endpoints and the /ws upgrade; see Handler.
 func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, token string) *Server {
 	return &Server{
-		cfg:    cfg,
-		proxy:  newProxy(reg, router),
-		wm:     wm,
-		runner: runner,
-		token:  token,
+		cfg:   cfg,
+		proxy: newProxy(reg, router),
+		ws:    wsapi.Handler(wm, runner, token),
+		token: token,
 	}
 }
 
@@ -54,7 +52,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.Handle("POST /v1/messages", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropic)))
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
-	mux.Handle("GET /ws", wsapi.Handler(s.wm, s.runner, s.token))
+	mux.Handle("GET /ws", s.ws)
 	mux.Handle("/", webUI())
 	return mux
 }
