@@ -131,13 +131,185 @@
 
 ## Progress
 
-- [ ] `internal/terminal`: PTY-backed session registry, backfill+live,
+- [x] `internal/terminal`: PTY-backed session registry, backfill+live,
   bounded scrollback, verified process cleanup
-- [ ] `internal/wsapi`: `terminal.create`/`attach`/`write`/`resize`/
+- [x] `internal/wsapi`: `terminal.create`/`attach`/`write`/`resize`/
   `close`/`list` + tests
-- [ ] `TerminalPane` component (xterm.js) + tests
-- [ ] Verification (typecheck/tests/build + real-daemon E2E script)
+- [x] `TerminalPane` component (xterm.js) + tests
+- [x] Verification (typecheck/tests/build + real-daemon E2E script)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+**`internal/terminal`** (`internal/terminal/registry.go`, `terminal.go`,
+`subqueue.go`, `kill_linux.go`/`kill_other.go`) models
+`internal/runs.Registry` closely: `Registry.Subscribe` holds the same
+session mutex across the backfill push and live-subscriber registration
+as `runs.Registry.Subscribe`, for the same gapless/duplicate-free
+guarantee, adapted from discrete `taskrunner.Event`s to a raw PTY byte
+stream (backfill is the session's accumulated scrollback buffer pushed as
+one `Event`, not N discrete events). `subQueue` is `runs.subQueue` copied
+verbatim (adapted to `terminal.Event`) rather than imported across
+packages, since it's an unexported type tied to its own package's `Event`.
+
+Genuine differences from Runs, and why:
+- **Bounded scrollback** (`scrollbackCap` = 256KiB, `scrollbackHardCap` =
+  2x, amortized-compaction trim) since a terminal session, unlike a Run,
+  has no natural end to bound its history by.
+- **Bidirectional I/O**: `Write`/`Resize` have no Run analog (a Run is
+  server->client only).
+- **`Close` actually kills something**: unlike a Run's `Stop` (cancels a
+  context, the subprocess's own goroutine tears itself down),
+  `Registry.Close` calls `killTree` (a real OS-level process kill) and
+  blocks on the session's `closedCh` until the background read loop has
+  actually observed the process exiting and reaped it (`cmd.Wait()`) --
+  so a caller can rely on "the process is gone" by the time `Close`
+  returns, not just "we asked it to die".
+- **`killTree`'s /proc-walk (`kill_linux.go`)**: a plain
+  `kill(-pid, SIGKILL)` on the shell's own process group is not enough --
+  an interactive shell with job control (which bash/zsh auto-enable for a
+  PTY session) puts each foreground/background command into its *own*
+  process group, so a background job (e.g. `sleep 300 &`) would survive a
+  group-only kill as an orphan. `killTree` walks `/proc` to find every
+  real descendant process and kills each directly, regardless of process
+  group. `TestRegistry_Close_KillsBackgroundJobsToo`
+  (`registry_linux_test.go`) proves this concretely: starts a background
+  job, confirms its real pid is alive, closes the session, confirms both
+  the shell's pid and the background job's pid are gone. A non-Linux
+  fallback (`kill_other.go`) does a best-effort group-kill only, documented
+  as weaker.
+
+**Verification commands run (all clean):**
+- `go build ./...`, `go vet ./...`, `gofmt -l $(git ls-files '*.go')` --
+  clean.
+- `go test -race -count=1 ./...` -- all packages pass, including
+  `internal/terminal` (real spawned-shell tests: write/read round trip,
+  second-connection backfill, real `stty size` resize verification,
+  `Close` process-actually-gone check via signal-0, background-job-kill
+  check via `/proc`, a `-race` concurrent-subscribers stress test adapted
+  from `internal/runs/subscribe_race_test.go`'s exact shape) and
+  `internal/wsapi` (wire-level `terminal.*` round trip tests, including a
+  cross-connection backfill test and a detach-does-not-close test).
+  `internal/terminal`'s and `internal/wsapi`'s tests force `$SHELL=/bin/bash`
+  for determinism (a developer's own interactive shell's dotfiles/theme
+  otherwise make output assertions flaky/slow under concurrent spawns --
+  discovered via real flakiness while writing these tests, see below).
+  Re-ran `go test -race -count=3..15` on the terminal-specific tests
+  repeatedly with no failures after fixing two test-harness bugs (not
+  implementation bugs): (1) a `task.cancel`-race test needs to read at
+  least one event first to synchronize with the server actually having
+  dispatched the request, same reason `run_test.go`'s analogous tests do;
+  (2) `terminal.close`'s own response and a still-open `terminal.attach`'s
+  terminal response it ends both become ready around the same time, so
+  their wire arrival order isn't guaranteed -- fixed by reading for both
+  ids without assuming order, instead of assuming `close`'s response
+  arrives first.
+- Web: `bunx tsc -b` clean. `bun run test` (`vitest run`) -- 26/26 tests
+  pass across all 4 web test files, including 10 new `TerminalPane` tests.
+- `task build` succeeded; `internal/server/dist/.gitkeep` was deleted by
+  the build (the known Vite `--emptyOutDir` issue from every prior web UI
+  task) and restored via `git checkout`.
+
+**Manual/E2E verification against the real built binary** (`bin/smind`,
+temp `SMIND_HOME`, real git repo workspace + task created via the CLI,
+a from-scratch Node 26 script using only built-in `fetch`/`WebSocket`,
+no test framework): confirmed all of the following against the actual
+running daemon:
+- `terminal.create` returns a `terminalId` immediately.
+- `terminal.write` of `echo hello-e2e-marker\n` produces the real command
+  output, observed via `terminal.attach`'s backfill+live "data" stream,
+  base64-decoded.
+- `terminal.resize` reaches the real PTY: confirmed via the shell's own
+  `stty size` output changing to match, not a shell-side cached
+  `$COLUMNS`/`$LINES`.
+- A second, independent WebSocket connection attaching to the same
+  `terminalId` sees the earlier output via backfill, then continues
+  receiving new output live.
+- `terminal.list` reflects the session's status (`running`, then
+  `closed`).
+- `terminal.close` actually terminates the shell process: captured the
+  shell's own real OS pid via `echo $$` sent through `terminal.write`,
+  confirmed alive via `kill -0` before close, confirmed **gone** via
+  `kill -0` after `terminal.close` returned.
+- Both attached connections' `terminal.attach` calls ended with a clean
+  terminal result (not a hang, not an error) once the session closed.
+- **Daemon graceful shutdown** (`SIGTERM`) actually kills a still-running
+  terminal session's shell process: created a session, captured its real
+  pid, sent `SIGTERM` to the daemon process, confirmed (via `kill -0`)
+  the shell process was gone after the daemon logged `smind stopped` --
+  proving `internal/server.Server.Close` -> `terminal.Registry.CloseAll`
+  (wired into `cmd/smind/serve.go`'s `cmdServe`, after
+  `httpSrv.Shutdown`) works end-to-end, not just in a unit test.
+
+**What jsdom could and couldn't exercise** (frontend, honesty note per
+every prior web UI task's standard): jsdom's `HTMLCanvasElement.getContext()`
+is unimplemented ("Not implemented: ... without installing the canvas npm
+package"), so a real `@xterm/xterm` `Terminal.open()` under jsdom produces
+DOM structure (`.xterm` class etc.) but not real cell/canvas rendering,
+and there's no way to simulate real keyboard focus/input reliably driving
+xterm's own key-handling. Rather than fight that boundary, `TerminalPane`
+factors the terminal-widget dependency out behind a small `TerminalHandle`
+interface (`open`/`onData`/`onResize`/`write`/`fit`/`dispose`) -- the same
+pattern `WsClientLike`/`FakeWsClient` already established for the
+WebSocket boundary -- so the 10 component tests
+(`terminal-pane.test.tsx`) exercise the component's own real wiring logic
+(calls `terminal.create` then `terminal.attach`; incoming base64 "data"
+events are decoded and passed to the handle's `write`; the handle's
+`onData` callback firing sends `terminal.write`; the handle's `onResize`
+firing sends `terminal.resize`; unmount/task-switch aborts the attach
+signal without calling `terminal.close`, and disposes the handle; the
+explicit "Close terminal" button does call `terminal.close`; a
+`terminal.create` failure surfaces as a visible error) against a
+`FakeTerminalHandle` test double, deterministically and without depending
+on jsdom's incomplete canvas emulation. What this suite does **not**
+verify: real xterm.js rendering/ANSI parsing, real keyboard-driven
+`onData` firing, real focus behavior, or real pixel-level terminal
+appearance -- those are exactly the browser-only gaps every prior web UI
+task in this repo's history has reported, confirmed unavailable in this
+sandbox (no real browser).
+
+**Deviations from the spec, and judgment calls:**
+- `internal/wsapi.Handler`'s signature is unchanged (existing callers,
+  including `wsclient_test.go`, are untouched), but a new
+  `wsapi.New`/`wsapi.API` pair was added so `internal/server.Server` can
+  reach the `*terminal.Registry` directly, purely to support
+  `Server.Close()` -> `terminal.Registry.CloseAll()` on graceful daemon
+  shutdown (a spec requirement: "verify no orphaned process/fd survives
+  daemon shutdown"). This is the one piece of backend wiring the spec
+  didn't explicitly describe the shape of; the plan's `run.start`/
+  `run.attach` split reasoning didn't need an analogous shutdown hook
+  since Run subprocess lifetime was never claimed to survive daemon exit,
+  but a terminal session explicitly is required to not survive it.
+- Wire format for `terminal.attach`'s "data" event payload and
+  `terminal.write`'s input are asymmetric: output (PTY -> client) is
+  base64-encoded (`terminalDataParams`), input (client -> PTY, via
+  `terminal.write`) is a plain JSON string. This wasn't explicitly
+  specified. Reasoning: PTY output is an arbitrary byte stream that isn't
+  guaranteed valid UTF-8 at arbitrary chunk boundaries (a multi-byte
+  character split across two `Read()`s, or genuinely binary output from a
+  program running in the shell) -- `encoding/json` silently mangles
+  invalid UTF-8 in a plain string rather than erroring, corrupting exactly
+  the bytes a terminal emulator needs byte-exact, so output goes over the
+  wire as base64. Input always originates as a JS string from the
+  browser's own keyboard/paste handling, which is always valid UTF-8 on
+  the wire, so there's no equivalent risk there and no need for the
+  extra encoding overhead.
+- `terminal.list` filters server-side by `taskId` (unlike `run.list`,
+  which returns everything and is filtered client-side, per
+  `docs/plans/active/web-ui-task-detail.md`'s Decisions). Judgment call,
+  not specified either way: a terminal session inherently belongs to
+  exactly one task's worktree (there's no cross-task terminal use case
+  the way a UI might want a global run history), so filtering server-side
+  avoids the client fetching every task's sessions just to find its own.
+- Added a "Close terminal" button to `TerminalPane` (the spec says "if you
+  add one" for this) since a real way to kill a hung/no-longer-needed
+  shell seemed necessary for a usable terminal feature, not just nice to
+  have.
+
+**Worth a second look:** `killTree`'s `/proc`-walk (`kill_linux.go`) is
+the most novel piece of concurrency/OS-interaction code in this change and
+the one most worth independent scrutiny -- it's genuinely necessary (see
+above) but is also the one place this diverges furthest from directly
+mirroring `internal/runs`, since Runs never had to solve "kill an entire
+process tree, not just one pid or one process group." The non-Linux
+fallback (`kill_other.go`) is untested (no non-Linux CI/dev environment
+available here) and intentionally documented as weaker.
