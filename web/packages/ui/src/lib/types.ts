@@ -85,3 +85,39 @@ export interface RunLogsResult {
   err?: string;
   events: RunLogEvent[];
 }
+
+// internal/terminal.Status's two values (internal/terminal/terminal.go),
+// carried over the wire as their underlying string.
+export type TerminalStatusValue = "running" | "closed";
+
+// Mirrors internal/terminal.SessionStatus (internal/wsapi's terminal.list
+// result) field-for-field -- like RunSummary, this struct carries no
+// `json:` tags on the Go side, so its wire shape is the exact PascalCase
+// Go field names.
+export interface TerminalSessionStatus {
+  ID: string;
+  TaskID: number;
+  StartedAt: string;
+  Status: TerminalStatusValue;
+  ClosedAt: string | null;
+}
+
+// Result of terminal.create (internal/wsapi/terminal.go's
+// terminalCreateResult).
+export interface TerminalCreateResult {
+  terminalId: string;
+}
+
+// Terminal result of terminal.attach, once the session itself closes
+// (internal/wsapi/terminal.go's terminalAttachResult).
+export interface TerminalAttachResult {
+  terminalId: string;
+}
+
+// Params of every "data" event terminal.attach emits
+// (internal/wsapi/terminal.go's terminalDataParams) -- one chunk of raw
+// PTY output, base64-encoded (see that Go type's doc comment for why:
+// PTY output isn't guaranteed valid UTF-8 at arbitrary chunk boundaries).
+export interface TerminalDataEventParams {
+  data: string;
+}
