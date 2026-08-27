@@ -4,8 +4,10 @@
 // internal/acp/fakeagent (which exists to prove internal/acp's own
 // streaming/fs/permission plumbing in detail), this script only needs to
 // prove that Runner wires a real ACP subprocess up correctly and translates
-// its updates -- so it skips the release-gating, fs, and permission
-// exercises entirely.
+// its updates -- so it skips the release-gating and fs exercises entirely,
+// but does include a permission scenario (see runPromptScript's
+// "permission" case) since proving Runner's PermissionDecider wiring needs
+// a real session/request_permission round trip.
 //
 // The scenario to run is read from a "scenario" file in the session's cwd
 // (the task's worktree) rather than an environment variable, since the
@@ -14,8 +16,10 @@
 // then blocks forever, for proving context cancellation actually stops a
 // running turn; "slow" streams five chunks with a real 300ms delay between
 // each, for proving a caller observes genuinely incremental delivery rather
-// than a reply buffered until the end; anything else (including no file at
-// all) runs the default two-chunk scripted reply.
+// than a reply buffered until the end; "permission" issues a real
+// session/request_permission call and streams back which option was chosen,
+// for proving Runner's PermissionDecider wiring end to end; anything else
+// (including no file at all) runs the default two-chunk scripted reply.
 package main
 
 import (
@@ -25,6 +29,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,9 +41,21 @@ type message struct {
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *rpcError       `json:"error,omitempty"`
 }
 
-var writeMu sync.Mutex
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+var (
+	writeMu sync.Mutex
+	nextID  int64
+
+	pendingMu sync.Mutex
+	pending   = map[int64]chan message{}
+)
 
 func writeMessage(msg message) {
 	data, err := json.Marshal(msg)
@@ -62,6 +79,22 @@ func respond(id json.RawMessage, result any) {
 	writeMessage(message{JSONRPC: "2.0", ID: id, Result: raw})
 }
 
+// call sends a request from the agent to the client (e.g.
+// session/request_permission) and blocks for the matching response.
+func call(method string, params any) message {
+	raw, _ := json.Marshal(params)
+	id := atomic.AddInt64(&nextID, 1)
+	idJSON, _ := json.Marshal(id)
+
+	ch := make(chan message, 1)
+	pendingMu.Lock()
+	pending[id] = ch
+	pendingMu.Unlock()
+
+	writeMessage(message{JSONRPC: "2.0", ID: idJSON, Method: method, Params: raw})
+	return <-ch
+}
+
 func main() {
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
 	var sessionCwd string
@@ -81,21 +114,34 @@ func main() {
 }
 
 func handle(msg message, sessionCwd *string) {
-	switch msg.Method {
-	case "initialize":
+	switch {
+	case msg.Method == "initialize":
 		respond(msg.ID, map[string]any{
 			"protocolVersion":   1,
 			"agentCapabilities": map[string]any{},
 		})
-	case "session/new":
+	case msg.Method == "session/new":
 		var params struct {
 			Cwd string `json:"cwd"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
 		respond(msg.ID, map[string]any{"sessionId": sessionID})
-	case "session/prompt":
+	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
+	case msg.Method == "" && len(msg.ID) > 0:
+		// A response to a call() this agent itself sent (e.g. the
+		// session/request_permission round trip in runPromptScript).
+		var id int64
+		if err := json.Unmarshal(msg.ID, &id); err == nil {
+			pendingMu.Lock()
+			ch, ok := pending[id]
+			delete(pending, id)
+			pendingMu.Unlock()
+			if ok {
+				ch <- msg
+			}
+		}
 	}
 }
 
@@ -118,6 +164,44 @@ func runPromptScript(promptMsg message, cwd string) {
 	if scenario == "hang" {
 		sessionUpdate("before hang")
 		time.Sleep(time.Hour)
+		return
+	}
+
+	if scenario == "permission" {
+		// Deliberately issues the session/request_permission call as the
+		// very first thing, with no preceding session/update: a preceding
+		// text chunk would race the permission request in any test that
+		// observes both through internal/runs.Registry, since ACP
+		// dispatches an inbound request (session/request_permission) on
+		// its own goroutine, decoupled from the notification-forwarding
+		// pipeline a session/update chunk goes through (see acp/rpc.go's
+		// handleLine) -- there's no causal ordering between them on the
+		// wire, only a schedule-dependent one. The resolved event and
+		// this scenario's final chunk, by contrast, *are* causally
+		// ordered (this process cannot call sessionUpdate below until it
+		// has received the permission response, which the client only
+		// sends after recording the resolution), so that ordering is safe
+		// for tests to assert on.
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall":  map[string]any{"toolCallId": "tc-1", "title": "Run a risky command"},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
 	}
 

@@ -10,6 +10,23 @@ const (
 	// EventTypeDone is the terminal event for a turn: exactly one is sent,
 	// last, before the events channel passed to Runner.RunPrompt is closed.
 	EventTypeDone
+
+	// EventTypePermissionRequest records a pending human-in-the-loop
+	// permission request raised mid-turn (see PermissionDecider). Unlike
+	// EventTypeText/EventTypeDone, this is never sent on the events channel
+	// RunPrompt owns -- internal/runs constructs a PermissionDecider whose
+	// Decide method records this event (and EventTypePermissionResolved)
+	// directly via Registry.record, from whichever goroutine the provider
+	// dispatches the permission callback on. See internal/runs/registry.go's
+	// runPermissionDecider for why that's safe and EventTypeText/EventTypeDone's
+	// single-writer events channel is not.
+	EventTypePermissionRequest
+
+	// EventTypePermissionResolved records the resolution of a prior
+	// EventTypePermissionRequest (same PermissionRequestID). Recorded the
+	// same way as EventTypePermissionRequest, immediately after the
+	// decider's blocked Decide call wakes up with an answer.
+	EventTypePermissionResolved
 )
 
 // Event is the provider-agnostic streaming update Runner.RunPrompt emits,
@@ -40,6 +57,26 @@ type Event struct {
 	// acp.SessionUpdate, or a claudecode.Message (claudecode.AssistantMessage
 	// for EventTypeText) / claudecode.ResultMessage (for EventTypeDone).
 	// Nil for ACP's EventTypeDone, since ACP's turn-ending signal is just
-	// the stop reason string already captured in StopReason.
+	// the stop reason string already captured in StopReason. Always nil for
+	// the permission event types, which have no single backend-native value
+	// (their PermissionOptions are already the provider-agnostic shape).
 	Raw any
+
+	// PermissionRequestID identifies one pending permission request,
+	// populated for both EventTypePermissionRequest and
+	// EventTypePermissionResolved so a resolution can be correlated with
+	// the request it answers.
+	PermissionRequestID string
+
+	// PermissionSummary describes what's being requested, populated for
+	// EventTypePermissionRequest.
+	PermissionSummary string
+
+	// PermissionOptions are the choices offered, populated for
+	// EventTypePermissionRequest.
+	PermissionOptions []PermissionOption
+
+	// PermissionOptionID is the option that was chosen, populated for
+	// EventTypePermissionResolved.
+	PermissionOptionID string
 }

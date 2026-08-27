@@ -120,6 +120,59 @@ func runFakeClaudeCLI() {
 		stdin.Scan() // consume the prompt line, then never respond or exit
 		time.Sleep(time.Hour)
 
+	case "permission":
+		// Mirrors claude-agent-sdk-go's own fakecli_test.go
+		// "streaming_and_permission" scenario: issues a real can_use_tool
+		// control request and streams back which behavior the client
+		// decided on, proving Runner's PermissionDecider wiring drives a
+		// real control-request round trip end to end.
+		stdin.Scan() // consume the prompt line
+
+		writeLine(map[string]any{
+			"type":       "control_request",
+			"request_id": "req-1",
+			"request": map[string]any{
+				"subtype":     "can_use_tool",
+				"tool_name":   "Bash",
+				"input":       map[string]any{"command": "echo hi"},
+				"tool_use_id": "tool-1",
+			},
+		})
+
+		stdin.Scan()
+		var resp struct {
+			Response struct {
+				Response struct {
+					Behavior string `json:"behavior"`
+				} `json:"response"`
+			} `json:"response"`
+		}
+		_ = json.Unmarshal(stdin.Bytes(), &resp)
+		behavior := resp.Response.Response.Behavior
+		if behavior == "" {
+			behavior = "unknown"
+		}
+
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "text", "text": "chose:" + behavior},
+				},
+			},
+		})
+
+		writeLine(map[string]any{
+			"type":        "result",
+			"is_error":    false,
+			"num_turns":   1,
+			"session_id":  "sess-1",
+			"stop_reason": "end_turn",
+			"result":      "done",
+		})
+
 	default:
 		fmt.Fprintf(os.Stderr, "fake claude cli: unknown scenario %q\n", scenario)
 		os.Exit(1)

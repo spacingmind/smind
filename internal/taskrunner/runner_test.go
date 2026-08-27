@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,7 +52,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, events)
 	}()
 
 	got := drainEvents(events)
@@ -84,7 +85,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, events)
 	}()
 
 	got := drainEvents(events)
@@ -151,7 +152,7 @@ func TestRunner_RunPrompt_NoWorktree(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, events)
 	}()
 
 	got := drainEvents(events)
@@ -171,7 +172,7 @@ func TestRunner_RunPrompt_UnknownProvider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", nil, events)
 	}()
 
 	got := drainEvents(events)
@@ -200,7 +201,7 @@ func TestRunner_RunPrompt_ContextCancellationStopsSubprocess(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", nil, events)
 	}()
 
 	select {
@@ -253,7 +254,7 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	defer cancel()
 
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", nil, events)
 	}()
 
 	select {
@@ -274,5 +275,173 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	case <-errCh:
 	case <-time.After(5 * time.Second):
 		t.Fatal("RunPrompt() did not return within 5s after the caller stopped reading events -- likely blocked sending the final Done event")
+	}
+}
+
+// stubDecider is a PermissionDecider that records every Decide call it
+// receives and always answers with a fixed optionID, for tests that only
+// need to prove RunPrompt actually wires a per-call decider through to the
+// provider's own permission callback (and translates its choice back
+// correctly) -- not exercise any real blocking/human-in-the-loop behavior,
+// which is internal/runs.Registry's job (see internal/runs/runs_test.go).
+type stubDecider struct {
+	optionID string
+
+	mu      sync.Mutex
+	calls   int
+	summary string
+	options []PermissionOption
+}
+
+func (d *stubDecider) Decide(_ context.Context, summary string, options []PermissionOption) (string, error) {
+	d.mu.Lock()
+	d.calls++
+	d.summary = summary
+	d.options = options
+	d.mu.Unlock()
+	return d.optionID, nil
+}
+
+func (d *stubDecider) callCount() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.calls
+}
+
+// TestRunner_RunPrompt_PermissionRequest_GLM proves RunPrompt wires a
+// per-call PermissionDecider through to a real ACP session/request_permission
+// round trip: the decider sees the fake agent's offered options (translated
+// from acp.RequestPermissionParams into taskrunner.PermissionOption), and
+// the option it picks is translated back into the real optionId the agent
+// receives -- proven observably by the fake agent's own scripted reply
+// (see fakeagent's "permission" scenario), which echoes back whichever
+// optionId it was told was chosen.
+func TestRunner_RunPrompt_PermissionRequest_GLM(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := glmRunner(wm)
+	decider := &stubDecider{optionID: "allow-1"}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if decider.callCount() != 1 {
+		t.Fatalf("decider.calls = %d, want 1", decider.callCount())
+	}
+	if len(decider.options) != 2 {
+		t.Fatalf("decider saw %d options, want 2: %+v", len(decider.options), decider.options)
+	}
+	wantOpts := []PermissionOption{
+		{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
+		{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
+	}
+	for i, want := range wantOpts {
+		if decider.options[i] != want {
+			t.Fatalf("decider.options[%d] = %+v, want %+v", i, decider.options[i], want)
+		}
+	}
+	if decider.summary != "Run a risky command" {
+		t.Fatalf("decider.summary = %q, want %q", decider.summary, "Run a risky command")
+	}
+
+	var texts []string
+	for _, e := range got {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "chose:allow-1" {
+		t.Fatalf("got texts %v, want [%q]", texts, "chose:allow-1")
+	}
+}
+
+// TestRunner_RunPrompt_PermissionRequest_ClaudeNative proves the same
+// end-to-end wiring as the GLM test above, but for Claude Code native's
+// genuinely different can_use_tool control-request shape: the decider is
+// offered the synthesized allow/deny PermissionOption pair (there's no
+// options list on the wire, just a tool name/input -- see
+// claudeDeciderAdapter), and its choice is translated back into the real
+// (allow bool, updatedInput, denyMessage) tuple the CLI's control_response
+// expects, observably reflected in the fake CLI's own scripted reply.
+func TestRunner_RunPrompt_PermissionRequest_ClaudeNative(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := claudeNativeRunner(t, wm)
+	decider := &stubDecider{optionID: claudeOptionAllow}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if decider.callCount() != 1 {
+		t.Fatalf("decider.calls = %d, want 1", decider.callCount())
+	}
+	wantOpts := []PermissionOption{
+		{ID: "allow", Label: "Allow", Kind: "allow_once"},
+		{ID: "deny", Label: "Deny", Kind: "reject_once"},
+	}
+	if len(decider.options) != 2 || decider.options[0] != wantOpts[0] || decider.options[1] != wantOpts[1] {
+		t.Fatalf("decider.options = %+v, want %+v", decider.options, wantOpts)
+	}
+	if decider.summary != "run Bash" {
+		t.Fatalf("decider.summary = %q, want %q", decider.summary, "run Bash")
+	}
+
+	var texts []string
+	for _, e := range got {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "chose:allow" {
+		t.Fatalf("got texts %v, want [%q]", texts, "chose:allow")
+	}
+}
+
+// TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny proves a "deny"
+// decision reaches the CLI as behavior "deny", not just that "allow" round
+// trips -- the two-way translation (bool in, bool out) is exactly the kind
+// of thing that silently inverts if either side of claudeDeciderAdapter's
+// mapping is ever wrong.
+func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := claudeNativeRunner(t, wm)
+	decider := &stubDecider{optionID: claudeOptionDeny}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	var texts []string
+	for _, e := range got {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "chose:deny" {
+		t.Fatalf("got texts %v, want [%q]", texts, "chose:deny")
 	}
 }

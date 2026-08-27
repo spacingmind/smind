@@ -121,12 +121,19 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // whether it returns an error or not, so a caller can unconditionally range
 // over it.
 //
+// decider, if non-nil, overrides the Runner-level acp.PermissionPolicy/
+// claudecode.PermissionPolicy default for this call only -- see
+// PermissionDecider's doc comment for why a human-in-the-loop decider is
+// inherently per-call rather than Runner-wide configuration. nil preserves
+// today's behavior exactly: each provider falls through to its own
+// Runner-level default.
+//
 // The backend client spawned for this call is not reused: RunPrompt owns
 // its subprocess end to end and closes it before returning. ctx cancellation
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -140,17 +147,20 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM:
-		return r.runGLM(ctx, worktreePath, prompt, events)
+		return r.runGLM(ctx, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
 }
 
-func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, events chan<- Event) error {
+func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
 	var opts []acp.Option
-	if r.acpPermissionPolicy != nil {
+	switch {
+	case decider != nil:
+		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider}))
+	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
 
@@ -197,9 +207,12 @@ func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, events
 	return nil
 }
 
-func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
 	var opts []claudecode.Option
-	if r.claudePermissionPolicy != nil {
+	switch {
+	case decider != nil:
+		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}))
+	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
 	}
 
