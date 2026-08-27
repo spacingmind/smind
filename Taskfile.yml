@@ -1,0 +1,47 @@
+version: "3"
+
+tasks:
+  build:
+    desc: Build web UI then the smind binary
+    deps: [build:web]
+    cmds:
+      - go build -o bin/smind ./cmd/smind
+
+  build:web:
+    desc: Build the web UI into internal/server/dist
+    dir: web
+    cmds:
+      - bun install
+      - bun run --filter '@smind/ui' build
+    sources:
+      - "packages/ui/src/**/*"
+      - "packages/ui/*.{json,ts,html}"
+    generates:
+      - "../internal/server/dist/**/*"
+
+  dev:go:
+    desc: Run the Go daemon with auto-reload (requires air)
+    cmds:
+      - go run ./cmd/smind
+
+  dev:web:
+    desc: Vite dev server proxying API to :4648
+    dir: web/packages/ui
+    cmds:
+      - bun run dev
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Vet + gofmt check
+    cmds:
+      - go vet ./...
+      - test -z "$(gofmt -l .)"
+
+  tidy:
+    desc: go mod tidy
+    cmds:
+      - go mod tidy

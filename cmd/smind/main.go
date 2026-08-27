@@ -1,0 +1,48 @@
+// Command smind runs the Spacing Mind daemon.
+package main
+
+import (
+	"context"
+	"errors"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/server"
+)
+
+func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("config: %v (continuing with defaults)", err)
+	}
+
+	srv := server.New(cfg)
+	httpSrv := &http.Server{
+		Addr:              srv.Addr(),
+		Handler:           srv.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	go func() {
+		log.Printf("smind listening on http://%s", httpSrv.Addr)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("listen: %v", err)
+		}
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	<-ctx.Done()
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("shutdown: %v", err)
+	}
+	log.Printf("smind stopped")
+}

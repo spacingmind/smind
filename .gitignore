@@ -1,0 +1,9 @@
+bin/
+refs/
+.task/
+
+web/node_modules/
+web/packages/*/node_modules/
+
+internal/server/dist/*
+!internal/server/dist/.gitkeep
