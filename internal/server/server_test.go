@@ -1,11 +1,15 @@
 package server
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/quota"
@@ -95,5 +99,100 @@ func TestHandlerAuth_WebUIUnauthenticated(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+// TestHandleToken_Unauthenticated checks that GET /api/token itself carries
+// no auth check (see handleToken's doc comment for why) -- it must succeed
+// with no Authorization header, same as the web UI's own HTML/JS.
+func TestHandleToken_Unauthenticated(t *testing.T) {
+	const token = "the-real-token"
+	handler := newTestServer(t, token).Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/token", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /api/token response: %v", err)
+	}
+	if body.Token != token {
+		t.Errorf("token = %q, want %q", body.Token, token)
+	}
+}
+
+// TestHandleToken_RoundTripsIntoWorkingWSConnection proves GET /api/token
+// serves the daemon's *real* current token, not just some string, by doing
+// exactly what the web UI's page JS does: fetch /api/token, then dial /ws
+// with the fetched token and successfully call a real RPC method. It also
+// checks that a token which merely differs from the fetched one -- rather
+// than being a byte-for-byte match -- is rejected by /ws, so this isn't a
+// vacuous "any token works" pass.
+func TestHandleToken_RoundTripsIntoWorkingWSConnection(t *testing.T) {
+	const token = "test-token-for-ws-roundtrip"
+	handler := newTestServer(t, token).Handler()
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+
+	resp, err := http.Get(srv.URL + "/api/token")
+	if err != nil {
+		t.Fatalf("GET /api/token: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode /api/token response: %v", err)
+	}
+	if body.Token == "" {
+		t.Fatalf("fetched token is empty")
+	}
+
+	wsBase := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws"
+
+	// The fetched token must actually open a working connection.
+	ws, _, err := websocket.DefaultDialer.Dial(wsBase+"?token="+url.QueryEscape(body.Token), nil)
+	if err != nil {
+		t.Fatalf("dial /ws with fetched token: %v", err)
+	}
+	defer ws.Close()
+
+	if err := ws.WriteJSON(map[string]any{"id": "1", "method": "workspace.list"}); err != nil {
+		t.Fatalf("write workspace.list request: %v", err)
+	}
+	var env map[string]any
+	if err := ws.ReadJSON(&env); err != nil {
+		t.Fatalf("read workspace.list response: %v", err)
+	}
+	if errVal, ok := env["error"]; ok {
+		t.Fatalf("workspace.list returned error: %v", errVal)
+	}
+	if env["id"] != "1" {
+		t.Errorf("response id = %v, want %q", env["id"], "1")
+	}
+	if _, ok := env["result"]; !ok {
+		t.Errorf("response missing result: %v", env)
+	}
+
+	// A token that isn't the real one must still be rejected.
+	_, resp2, err := websocket.DefaultDialer.Dial(wsBase+"?token=not-"+url.QueryEscape(body.Token), nil)
+	if err == nil {
+		t.Fatalf("dial /ws with wrong token unexpectedly succeeded")
+	}
+	if resp2 == nil || resp2.StatusCode != http.StatusUnauthorized {
+		status := "<nil response>"
+		if resp2 != nil {
+			status = resp2.Status
+		}
+		t.Errorf("dial /ws with wrong token: status = %v, want %d", status, http.StatusUnauthorized)
 	}
 }

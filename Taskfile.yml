@@ -31,9 +31,17 @@ tasks:
       - bun run dev
 
   test:
-    desc: Run Go tests
+    desc: Run Go and web tests
+    deps: [test:web]
     cmds:
       - go test ./...
+
+  test:web:
+    desc: Run the web UI's test suite
+    dir: web
+    cmds:
+      - bun install
+      - bun run --filter '@smind/ui' test
 
   lint:
     desc: Vet + gofmt check
