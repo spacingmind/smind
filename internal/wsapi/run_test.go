@@ -77,6 +77,93 @@ func TestServer_RunAttach_SecondConnectionMidRun(t *testing.T) {
 	}
 }
 
+// TestServer_RunStart_NotStoppedByOwnRequestCompletion proves run.start
+// decouples "start a run" from "watch a run": the request that started the
+// run has already completed (its terminal {runId} response arrived) and
+// its connection is then closed entirely, yet the run keeps going and
+// remains reachable -- via run.attach and run.list -- from a second
+// connection. This is the property task.prompt deliberately does not have
+// (its own request context going Done stops the run; see
+// handleTaskPrompt's doc comment), which is exactly why the CLI's
+// foreground `task send` needs run.start instead.
+func TestServer_RunStart_NotStoppedByOwnRequestCompletion(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, "tok")
+
+	starter := dialWS(t, srv, "tok")
+	sendRequest(t, starter, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	term := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if term.Event != "" {
+		t.Fatalf("run.start emitted an event %+v, want no streaming, just a terminal result", term)
+	}
+	if term.Error != nil {
+		t.Fatalf("run.start error = %v", term.Error.Message)
+	}
+	var result runStartResult
+	if err := json.Unmarshal(term.Result, &result); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+	if result.RunID == "" {
+		t.Fatal("run.start result did not include a runId")
+	}
+
+	// The starting request already completed above; closing its connection
+	// entirely must not stop the run.
+	if err := starter.Close(); err != nil {
+		t.Fatalf("starter.Close() error = %v", err)
+	}
+
+	watcher := dialWS(t, srv, "tok")
+	sendRequest(t, watcher, "list", "run.list", nil)
+	listResp := readEnvelopeFor(t, watcher, "list", 5*time.Second)
+	if listResp.Error != nil {
+		t.Fatalf("run.list error = %v", listResp.Error.Message)
+	}
+	var summaries []runs.RunSummary
+	if err := json.Unmarshal(listResp.Result, &summaries); err != nil {
+		t.Fatalf("decode run.list result: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != result.RunID {
+		t.Fatalf("run.list = %+v, want exactly the run started by run.start (%s)", summaries, result.RunID)
+	}
+	if summaries[0].Status != runs.StatusRunning {
+		t.Fatalf("run.list status = %q, want %q (starter closing must not have stopped it)", summaries[0].Status, runs.StatusRunning)
+	}
+
+	sendRequest(t, watcher, "attach", "run.attach", map[string]any{"runId": result.RunID})
+	chunk := readEnvelopeFor(t, watcher, "attach", 5*time.Second)
+	if chunk.Event != "chunk" {
+		t.Fatalf("run.attach first message = %+v, want a chunk event", chunk)
+	}
+
+	sendRequest(t, watcher, "logs", "run.logs", map[string]any{"runId": result.RunID})
+	logsResp := readEnvelopeFor(t, watcher, "logs", 5*time.Second)
+	if logsResp.Error != nil {
+		t.Fatalf("run.logs error = %v", logsResp.Error.Message)
+	}
+	var logs runLogsResult
+	if err := json.Unmarshal(logsResp.Result, &logs); err != nil {
+		t.Fatalf("decode run.logs result: %v", err)
+	}
+	if logs.Status != string(runs.StatusRunning) {
+		t.Fatalf("run.logs status = %q, want still %q", logs.Status, runs.StatusRunning)
+	}
+
+	// Clean up: stop the run so the fake agent subprocess doesn't outlive
+	// this test. The still-open run.attach observes the stop as its own
+	// terminal (error) response, same as any other subscriber.
+	sendRequest(t, watcher, "stop", "run.stop", map[string]any{"runId": result.RunID})
+	if resp := readEnvelopeFor(t, watcher, "stop", 5*time.Second); resp.Error != nil {
+		t.Fatalf("run.stop error = %v", resp.Error.Message)
+	}
+	readEnvelopeFor(t, watcher, "attach", 5*time.Second)
+}
+
 // TestServer_RunAttach_AlreadyFinished proves attaching to an
 // already-finished run gets an immediate terminal response (full
 // backfill, no live events, no hang) rather than blocking forever.

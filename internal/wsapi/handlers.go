@@ -25,6 +25,7 @@ func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		"task.get":         handleTaskGet(wm),
 		"task.archive":     handleTaskArchive(wm),
 		"task.prompt":      handleTaskPrompt(wm, runner, reg),
+		"run.start":        handleRunStart(wm, runner, reg),
 		"run.list":         handleRunList(reg),
 		"run.attach":       handleRunAttach(reg),
 		"run.logs":         handleRunLogs(reg),
@@ -196,6 +197,44 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 		}
 
 		return attachAndStream(ctx, rc, reg, runID, true)
+	}
+}
+
+// runStartResult is the terminal result of a successful run.start: just the
+// new run's ID, returned as soon as the run is registered -- unlike
+// task.prompt/run.attach, run.start never streams and never blocks waiting
+// for the run to progress or finish.
+type runStartResult struct {
+	RunID string `json:"runId"`
+}
+
+// handleRunStart is task.prompt's first half on its own: it starts a Run
+// (via reg.Start) and returns its ID immediately, without the implicit
+// run.attach that makes task.prompt stream and block until the run
+// finishes. This is what lets a caller decouple "start a run" from
+// "watch a run": the request that starts the run terminates right away, so
+// it is never in flight by the time anything might want to cancel a
+// separate, later run.attach watching the same run -- see run.attach's own
+// doc comment, and the CLI's task-send command, for why that decoupling
+// matters (Ctrl+C during a foreground `task send` must detach the watch,
+// not stop the run, which task.prompt's own request-scoped stop-on-detach
+// behavior cannot support).
+func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID   int64               `json:"taskId"`
+			Provider taskrunner.Provider `json:"provider"`
+			Prompt   string              `json:"prompt"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.start: invalid params: %w", err)
+		}
+
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt)
+		if err != nil {
+			return nil, fmt.Errorf("run.start: %w", err)
+		}
+		return runStartResult{RunID: runID}, nil
 	}
 }
 
