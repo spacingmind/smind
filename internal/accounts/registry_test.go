@@ -139,3 +139,25 @@ func TestRegistry_GetMissing(t *testing.T) {
 		t.Fatal("Get() error = nil, want error for missing account")
 	}
 }
+
+func TestRegistry_GetUnknownCredentialType(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+
+	// Bypass the registry's typed constructors to simulate a corrupted or
+	// pre-migration row with an unrecognized credential_type.
+	raw, err := r.store.CreateAccount(store.Account{
+		Provider:       "anthropic",
+		Label:          "corrupt",
+		CredentialType: "bogus",
+		CredentialData: "{}",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+
+	if _, err := r.Get(raw.ID); err == nil {
+		t.Fatal("Get() error = nil, want error for unknown credential type")
+	}
+}
