@@ -30,6 +30,9 @@ func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		"run.attach":       handleRunAttach(reg),
 		"run.logs":         handleRunLogs(reg),
 		"run.stop":         handleRunStop(reg),
+		"file.list":        handleFileList(wm),
+		"file.read":        handleFileRead(wm),
+		"file.write":       handleFileWrite(wm),
 	}
 }
 
