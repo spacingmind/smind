@@ -1,0 +1,11 @@
+{
+  "name": "smind",
+  "version": "0.0.1",
+  "private": false,
+  "description": "Reserved name for Spacing Mind (smind), a self-hosted coding-agent platform. Not yet published for real use.",
+  "homepage": "https://github.com/spacingmind/smind",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/spacingmind/smind.git"
+  }
+}

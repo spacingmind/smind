@@ -5,7 +5,7 @@ tasks:
     desc: Build web UI then the smind binary
     deps: [build:web]
     cmds:
-      - go build -o bin/smind ./cmd/smind
+      - go build -buildvcs=false -o bin/smind ./cmd/smind
 
   build:web:
     desc: Build the web UI into internal/server/dist
