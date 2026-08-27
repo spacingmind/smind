@@ -102,6 +102,13 @@
   real and stays real, but component-level interaction/render logic (as
   opposed to actual pixels) can and should be verified for real via jsdom
   rather than left to narrative description.
+- The provider select uses a plain native `<select>` (styled to match the
+  existing shadcn input/button primitives) rather than adding shadcn's
+  `Select` component: no `Select` primitive existed in this codebase yet,
+  it's a fixed two-option list, and pulling in a new Radix-based
+  primitive just for that felt like scope creep beyond this task's actual
+  need. Revisit if/when a real dynamic-options select is needed
+  elsewhere.
 - Explicitly out of scope, deferred to later tasks: file explorer,
   CodeMirror 6, diff viewer, xterm terminal, permission prompts UI, and any
   run.stop/cancel control in the UI itself (stopping a run from the web UI
@@ -110,14 +117,125 @@
 
 ## Progress
 
-- [ ] `@testing-library/react` + jsdom added to the Vitest setup
-- [ ] Task selection lifted into `App.tsx`; sidebar rows are clickable
-- [ ] Task detail pane: run timeline (history + live streaming)
-- [ ] Prompt form (`run.start` + `run.attach`)
-- [ ] Component tests for the above
-- [ ] Verification (typecheck/tests/build + real-daemon E2E script)
+- [x] `@testing-library/react` + jsdom added to the Vitest setup
+- [x] Task selection lifted into `App.tsx`; sidebar rows are clickable
+- [x] Task detail pane: run timeline (history + live streaming)
+- [x] Prompt form (`run.start` + `run.attach`)
+- [x] Component tests for the above
+- [x] Verification (typecheck/tests/build + real-daemon E2E script)
 
 ## Validation
 
 (Filled in as each Acceptance Criterion is confirmed — command run, test
 name, or manual check.)
+
+- Vitest + jsdom + `@testing-library/react`: added as devDependencies
+  (`web/packages/ui/package.json`), `vitest.config.ts` switched
+  `environment: "node"` -> `"jsdom"`, include pattern widened to
+  `*.test.{ts,tsx}`, and a `setupFiles` entry
+  (`src/test/setup.ts`) registers `@testing-library/jest-dom/vitest`
+  matchers, `IS_REACT_ACT_ENVIRONMENT` (React 19 requires this explicitly
+  under Vitest), a `window.matchMedia` stub (jsdom doesn't implement it,
+  and the shadcn Sidebar primitives call it unconditionally), and
+  `cleanup()` after every test. `@testing-library/jest-dom` was also
+  added (not in the original plan text, but needed for `toBeInTheDocument`/
+  `toHaveTextContent` — the standard RTL/Vitest pairing).
+- Clicking a task selects it, client-side, no navigation: `App.tsx` lifts
+  `selectedTask` state; `AppSidebar`/`WorkspaceItem`
+  (`web/packages/ui/src/components/app-sidebar.tsx`) take
+  `selectedTaskId`/`onSelectTask` props and wire the task row's
+  `onClick` + `isActive`. Proven by
+  `app-sidebar.test.tsx`'s "clicking a task row invokes onSelectTask with
+  that task", and the placeholder is now conditionally replaced by
+  `TaskDetailPane` in `App.tsx`.
+- Detail pane identity + run timeline (history + live streaming):
+  `web/packages/ui/src/components/task-detail.tsx` +
+  `web/packages/ui/src/hooks/use-run-timeline.ts`. Proven by
+  `task-detail.test.tsx`'s "selecting a task fetches and renders its run
+  history" (run.list -> run.logs for an already-terminal run) and
+  "streams a running run's live chunks into the timeline as they arrive,
+  not buffered until the terminal event" (run.attach backfill+live via a
+  fake client, chunks visible before the terminal response resolves).
+- Cross-connection reattach (a run started elsewhere still streams live
+  here): proven at the component level by the same "streams a running
+  run's live chunks" test (the fake run.list already reports the run as
+  `running` before the pane's own run.attach call exists, exactly the
+  "started by someone else" case) and, end-to-end against the real
+  daemon, by `verify.mjs` (see below): connection A's run.attach receives
+  5 backfilled/live chunks with real ~300ms gaps (1203ms total spread,
+  ruling out buffered delivery) while an independent connection B
+  observes the same run via `run.list`/`run.logs` mid-stream and again
+  after it finishes.
+- Finished runs show full history via `run.logs` (no subscription):
+  covered by the same "selecting a task fetches and renders its run
+  history" test, and by `verify.mjs`'s final `run.logs` call on
+  connection B after the run reaches `done`.
+- Prompt form starts a run via `run.start` + `run.attach`, never
+  `task.prompt`: `task-detail.test.tsx`'s "submits the prompt form via
+  run.start then run.attach, never task.prompt" asserts the exact call
+  order (`run.start` before `run.attach`, as two distinct fake-client
+  calls) and that `task.prompt` is never called. Re-confirmed against the
+  real daemon by `verify.mjs`'s `run.start` timing assertion (resolves in
+  1ms, never blocking on the run itself).
+- Switching away (or unmounting) detaches without stopping the run:
+  `task-detail.test.tsx`'s "aborts (does not stop) an actively streaming
+  run.attach on unmount" (asserts the fake client's `run.attach` call's
+  `AbortSignal` is aborted, and that `run.stop` is never called) and
+  "switching to a different task and back doesn't duplicate entries or
+  leak the live subscription" (same abort assertion on task switch, plus
+  proves the run's full text is intact — no gap/truncation — once
+  reselected). Re-confirmed against the real daemon by `verify-detach.mjs`:
+  a `run.attach` cancelled via `task.cancel` on its own request id (the
+  same mechanism `WsClient`'s `AbortSignal` path uses) settles in 1ms,
+  and a fresh connection immediately afterward sees the run still
+  `running` with its pre-detach backfill (`"before hang"`) intact — then
+  an explicit cross-connection `run.stop` (from a third call, not the one
+  that started or attached to the run) is what actually stops it,
+  confirming detach and stop are genuinely different operations. No
+  orphan `fakeagent` subprocess remained after the daemon's graceful
+  shutdown (`ps aux | grep fakeagent` empty).
+- No stale-update races: `task-detail.test.tsx`'s "a rapid double-switch
+  (A -> B -> A) discards task B's now-stale fetch instead of letting it
+  overwrite the re-selected task A view" — task A's first `run.list` call
+  is left pending, the selection moves to B and back to A (issuing a
+  *second* `run.list` for A), and only then is the stale first call
+  resolved; asserted it never renders, while the second (fresh) call's
+  data does.
+
+Commands run: `go build ./...`, `gofmt -l .`, `go vet ./...`,
+`go test -race ./...` (all packages, unaffected by this task — no Go
+changes), `bunx tsc -b` (clean), `bun run test` / `task test:web` / `task
+test` (17 tests total across `ws-client.test.ts`, `app-sidebar.test.tsx`,
+`task-detail.test.tsx` — all passing), `task lint`, `task build`
+(`internal/server/dist/.gitkeep` regenerated as a real file by the Vite
+build each time, as with every prior task; restored via `git checkout --
+internal/server/dist/.gitkeep` before committing).
+
+Manual/E2E: built `bin/smind` and a `internal/taskrunner/fakeagent`
+binary, ran the real daemon (`SMIND_ACP_COMMAND` pointed at fakeagent, an
+isolated `SMIND_HOME`) against a real git-initialized workspace repo,
+created via the real CLI (`smind workspace create`, `smind task new`).
+Two standalone Node scripts (`/tmp/smind-e2e/verify.mjs` and
+`verify-detach.mjs`, built-in `fetch`/`WebSocket` only, no browser, no
+bundler) drove the exact same `run.start`/`run.attach`/`run.list`/
+`run.logs`/`task.cancel` wire calls the component/hook make, against
+independent WebSocket connections standing in for separate browser tabs.
+Both scripts' every assertion passed (see their own inline checks); full
+transcripts are not committed (temp scripts, outside the repo) but the
+call sequences and shapes they exercise are exactly
+`web/packages/ui/src/hooks/use-run-timeline.ts`'s.
+
+What was **not** verified, honestly: no real browser is available in
+this sandbox (`npx playwright install chromium` fails for lack of root,
+confirmed by the prior task and not re-attempted here) — so actual pixel
+rendering, CSS layout, focus/keyboard behavior, and real click-vs-anchor
+interaction on `SidebarMenuSubButton` (which renders as an `<a>` with no
+`href`) were not checked visually. jsdom + `@testing-library/react`
+verify real React render/effect/cleanup/state semantics (the component
+tree actually re-renders as events arrive, effects actually clean up in
+the right order, DOM nodes with the right `textContent` actually appear)
+but not what it looks like or whether a real mouse click on the actual
+rendered pixels works. The prompt form's native `<select>` (no shadcn
+Select primitive existed in this codebase; adding one felt like scope
+creep for a fixed two-option list, see Decisions) was only exercised via
+its DOM value, not visually.
