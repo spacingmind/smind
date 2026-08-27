@@ -125,7 +125,7 @@ type Client struct {
 
 	mu         sync.Mutex
 	sessionCwd map[string]string
-	updateSubs map[string]chan<- SessionUpdate
+	updateSubs map[string]*updateSub
 
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
@@ -155,7 +155,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		policy:     AutoApprovePolicy{},
 		logWriter:  io.Discard,
 		sessionCwd: make(map[string]string),
-		updateSubs: make(map[string]chan<- SessionUpdate),
+		updateSubs: make(map[string]*updateSub),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -220,19 +220,42 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 	return res.SessionID, nil
 }
 
+// updateSub tracks one session's subscriber channel plus a WaitGroup of
+// handleSessionUpdate sends currently in flight against it. Prompt's cleanup
+// waits on that WaitGroup after removing the subscription (guaranteeing no
+// handleSessionUpdate call can newly start one) and before closing the
+// channel -- see Prompt for why this matters.
+type updateSub struct {
+	ch chan<- SessionUpdate
+	wg sync.WaitGroup
+}
+
 // Prompt sends text as a single user message to sessionID and blocks until
 // the agent finishes the turn. While the request is in flight, every
 // session/update the agent sends for this session is forwarded onto
 // updates as it arrives, in order; updates is closed when Prompt returns,
 // whether it returns an error or not.
+//
+// If ctx is cancelled, call returns as soon as it observes ctx.Done(), which
+// can happen before the read loop goroutine has finished delivering a
+// session/update that was already in flight for this session -- e.g. one
+// the agent sent just before Prompt gave up waiting. Without waiting for
+// that delivery to finish first, closing updates here could race with
+// handleSessionUpdate's send on the same channel and panic ("send on closed
+// channel"). sub.wg (incremented under the same lock as the subscriber
+// lookup, so it can't race with the delete below) makes that impossible:
+// once delete has run, no new send can start, and wg.Wait() blocks until
+// every send that did start has finished.
 func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates chan<- SessionUpdate) (string, error) {
+	sub := &updateSub{ch: updates}
 	c.mu.Lock()
-	c.updateSubs[sessionID] = updates
+	c.updateSubs[sessionID] = sub
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
 		delete(c.updateSubs, sessionID)
 		c.mu.Unlock()
+		sub.wg.Wait()
 		close(updates)
 	}()
 
@@ -264,11 +287,16 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 	update.Raw = params.Update
 
 	c.mu.Lock()
-	ch := c.updateSubs[params.SessionID]
-	c.mu.Unlock()
-	if ch != nil {
-		ch <- update
+	sub, ok := c.updateSubs[params.SessionID]
+	if ok {
+		sub.wg.Add(1)
 	}
+	c.mu.Unlock()
+	if !ok {
+		return
+	}
+	defer sub.wg.Done()
+	sub.ch <- update
 }
 
 func (c *Client) sessionRoot(sessionID string) (string, bool) {

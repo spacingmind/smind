@@ -176,6 +176,58 @@ func TestClient_Close(t *testing.T) {
 	}
 }
 
+// TestClient_PromptCancelledWhileUpdateInFlight is a regression test for a
+// close/send race: cancelling Prompt's context makes call return as soon as
+// ctx.Done() fires, independent of whatever the read loop goroutine happens
+// to be doing at that exact moment. If Prompt's deferred cleanup closed
+// updates without first confirming no handleSessionUpdate call was mid-send
+// on it, this could panic ("send on closed channel"). Repeated iterations
+// (see the -count driven by the caller/CI) are what actually catch the
+// race; a single run passing doesn't prove much on its own, but the fix
+// makes it safe regardless of the exact interleaving.
+func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sessionID, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	updates := make(chan SessionUpdate)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.Prompt(ctx, sessionID, "hi", updates)
+		done <- err
+	}()
+
+	// Read the first chunk (proves the turn is genuinely underway), then
+	// cancel immediately without releasing the fake agent's gate -- the
+	// read loop may or may not still be mid-delivery of that same update
+	// when cancellation is observed, which is exactly the window this test
+	// exercises.
+	readUpdate(t, updates)
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Prompt() did not return within 5s after cancellation")
+	}
+
+	// Drain to confirm updates was actually closed (not leaked open).
+	select {
+	case _, ok := <-updates:
+		if ok {
+			t.Fatal("received an unexpected update after Prompt() returned")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("updates channel was not closed after Prompt() returned")
+	}
+}
+
 func TestGLMCommand(t *testing.T) {
 	got := GLMCommand()
 	want := []string{"npx", "-y", "glm-acp-agent@1.3.0"}
