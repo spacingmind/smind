@@ -94,9 +94,9 @@ CLI:
 
 ## Progress
 
-- [ ] `internal/runs`: registry, broadcast-with-backfill, cross-connection
+- [x] `internal/runs`: registry, broadcast-with-backfill, cross-connection
   stop
-- [ ] `internal/wsapi`: `run.list`/`run.attach`/`run.logs`/`run.stop`,
+- [x] `internal/wsapi`: `run.list`/`run.attach`/`run.logs`/`run.stop`,
   `task.prompt` starts a tracked Run instead of driving it inline
 - [ ] `cmd/smind` CLI subcommands
 - [ ] End-to-end manual verification against the real built binary
@@ -104,4 +104,58 @@ CLI:
 ## Validation
 
 (Filled in as each Acceptance Criterion is confirmed — command run, test
-name, or manual check.)
+name, or manual check. CLI-facing criteria are left blank; that's the next
+task.)
+
+Backend (`internal/runs` + `internal/wsapi`):
+
+- A `task.prompt` invocation is tracked server-side as a Run with a stable
+  ID, independent of the WebSocket connection that started it —
+  `TestRegistry_Start_RunsToCompletion`, `TestServer_ConnectionClose_StopsTaskPromptRun`
+  (a run started by `task.prompt` is still reachable/stoppable after its
+  starting connection closes).
+- `run.list` — `TestServer_RunAttach_SecondConnectionMidRun`,
+  `TestRegistry_List_ReflectsCurrentStatus`.
+- `run.attach` to a still-running run: backfill then live, no dupes/gaps —
+  `TestRegistry_Subscribe_MidRunAttach_BackfillThenLive`,
+  `TestRegistry_Subscribe_ConcurrentBackfillLiveRace` (stress test under
+  `-race`, many subscribers joining at staggered times against one
+  producer), `TestServer_RunAttach_SecondConnectionMidRun` (wire-level).
+- `run.attach` to an already-finished run: immediate backfill + terminal
+  response, no hang — `TestRegistry_Subscribe_AlreadyFinished`,
+  `TestServer_RunAttach_AlreadyFinished`.
+- `run.logs` (full history, and with a tail count) without blocking or
+  live-following — `TestRegistry_History_OnRunningRun_ReturnsWithoutBlocking`,
+  `TestServer_RunLogs_Tail`.
+- `run.stop` by ID, regardless of which connection started the run —
+  `TestRegistry_Stop_FromAnyCaller_CancelsTheRun`,
+  `TestServer_RunStop_CrossConnection` (subprocess actually killed,
+  confirmed via the fake agent's 1h "hang" scenario ending promptly).
+- Detaching does not stop the run; a later `run.logs`/`run.attach` still
+  works — `TestRegistry_Unsubscribe_DoesNotStopTheRun`,
+  `TestServer_RunAttach_DetachDoesNotStopRun`.
+- Existing `task.prompt` single-connection start-to-finish behavior (PR
+  #18) keeps working unmodified — full existing `internal/wsapi` suite
+  (`TestServer_WorkspaceSpaceTaskCRUDRoundTrip`,
+  `TestServer_ConcurrentInFlightRequests`,
+  `TestServer_TaskPromptStreamsIncrementally`,
+  `TestServer_TaskCancel_StopsRunningTurn`) passes unmodified.
+- `task.cancel`/`run.stop` coexist without conflict: `task.cancel` on
+  `task.prompt`'s own request id still stops the run (back-compat);
+  `task.cancel` on an unrelated `run.attach` request id only detaches that
+  attach, leaving the run running — `TestServer_TaskCancel_OnlyAffectsItsOwnRequest`.
+- Two runs on different tasks don't cross-contaminate —
+  `TestRegistry_TwoRuns_DoNotCrossContaminate`.
+- The daemon process itself exiting does not leave orphaned subprocesses:
+  verified at the level within this task's control (a `task.prompt`-started
+  run's subprocess is killed when its starting WebSocket connection
+  closes, which is what actually happens on a client-initiated disconnect
+  or an abrupt server-side connection teardown) —
+  `TestServer_ConnectionClose_StopsTaskPromptRun`. Graceful
+  `http.Server.Shutdown` behavior for still-open, non-cooperating
+  WebSocket connections is unchanged by this work and was not
+  re-verified — that's `internal/server`/`cmd/smind` wiring, out of this
+  task's scope.
+
+Commands run: `go test -race -count=5 ./internal/runs/... ./internal/wsapi/...`,
+`task test`, `task lint`, `task build` — all pass.
