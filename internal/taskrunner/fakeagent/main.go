@@ -12,8 +12,10 @@
 // worktree path is the one piece of per-test state naturally available to
 // both the test and the spawned agent. Scenario "hang" streams one chunk
 // then blocks forever, for proving context cancellation actually stops a
-// running turn; anything else (including no file at all) runs the default
-// two-chunk scripted reply.
+// running turn; "slow" streams five chunks with a real 300ms delay between
+// each, for proving a caller observes genuinely incremental delivery rather
+// than a reply buffered until the end; anything else (including no file at
+// all) runs the default two-chunk scripted reply.
 package main
 
 import (
@@ -116,6 +118,21 @@ func runPromptScript(promptMsg message, cwd string) {
 	if scenario == "hang" {
 		sessionUpdate("before hang")
 		time.Sleep(time.Hour)
+		return
+	}
+
+	if scenario == "slow" {
+		// Streams several chunks with a real delay between each, so a
+		// caller (e.g. a manual CLI smoke test) can observe genuinely
+		// incremental delivery -- not just receipt of the whole reply
+		// after the fact -- by timing when each one arrives.
+		for i, chunk := range []string{"one ", "two ", "three ", "four ", "five"} {
+			if i > 0 {
+				time.Sleep(300 * time.Millisecond)
+			}
+			sessionUpdate(chunk)
+		}
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
 	}
 
