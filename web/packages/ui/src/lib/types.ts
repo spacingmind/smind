@@ -86,6 +86,21 @@ export interface RunLogsResult {
   events: RunLogEvent[];
 }
 
+// One entry returned by file.list (internal/files.Entry) -- a file or
+// subdirectory of the listed directory. Like RunLogEvent, this Go struct
+// carries `json:` tags, so its wire shape is lowercase, not the PascalCase
+// Go field names.
+export interface FileEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+}
+
+// Result of file.read (internal/wsapi/files.go's fileReadResult).
+export interface FileReadResult {
+  content: string;
+}
+
 // Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the
 // task's full unified diff text, or an empty string for a task with no
 // changes.
