@@ -32,15 +32,14 @@ Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` w
 
 Goal: replace Paseo as daily driver.
 
-- [ ] Workspace CRUD: `smind workspace create <path> --account X / --pool Y`
-- [ ] Space CRUD (optional layer) + per-space env
-- [ ] Task lifecycle: create (auto worktree) → run → archive (clean worktree)
-- [ ] Agent spawning via ACP: Claude Code, Codex, GLM
+- [x] Data model: Workspace/Space/Task + workspace_accounts (`internal/store`)
+- [x] Workspace CRUD + Task lifecycle with real git worktrees (`internal/workspace`) — `create`/`run`/`archive`, not yet wired to CLI/HTTP
+- [x] Auth: simple bearer token (`internal/auth`), gating the Phase 1 proxy endpoints
+- [x] Agent spawning: ACP client (`internal/acp`, proven against real GLM) + Claude Code native headless client (`internal/claudecode`, protocol verified against `refs/claude-agent-sdk-python`). Codex uses its own "app-server" JSON-RPC protocol (distinct from both), not yet implemented — tracked as a follow-up. Google Vertex/Gemini also deferred (needs a service-account JWT-bearer credential type, not a refresh-token flow). Neither `internal/acp` nor `internal/claudecode` is wired to task lifecycle/HTTP yet — that's the next integration task.
 - [ ] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent
       timeline (streaming chat); file explorer with git status; CodeMirror 6
       editor + preview; custom per-hunk diff viewer; xterm terminal (PTY in
       task cwd); permission prompts UI
-- [ ] Auth: simple token
 - [ ] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop`
 
 Definition of done: a real scopedocs feature built end-to-end from smind UI, replacing Paseo.
