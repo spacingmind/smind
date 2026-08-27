@@ -11,6 +11,8 @@ import (
 	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
 func newTestServer(t *testing.T, token string) *Server {
@@ -28,7 +30,9 @@ func newTestServer(t *testing.T, token string) *Server {
 	reg := accounts.New(s)
 	poller := quota.New(s, newFakeQuotaFetcher())
 	router := routing.New(s, reg, poller)
-	return New(config.Default(), reg, router, token)
+	wm := workspace.New(s)
+	runner := taskrunner.New(wm)
+	return New(config.Default(), reg, router, wm, runner, token)
 }
 
 func TestHandlerAuth(t *testing.T) {
