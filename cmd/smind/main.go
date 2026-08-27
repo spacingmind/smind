@@ -18,6 +18,8 @@ import (
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/server"
 	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
 // noopQuotaFetcher always reports zero usage. Real per-provider usage
@@ -46,6 +48,8 @@ func main() {
 	registry := accounts.New(db)
 	poller := quota.New(db, noopQuotaFetcher{})
 	router := routing.New(db, registry, poller)
+	wm := workspace.New(db)
+	runner := taskrunner.New(wm)
 
 	token, err := auth.LoadOrCreateToken(config.Dir())
 	if err != nil {
@@ -53,7 +57,7 @@ func main() {
 	}
 	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
 
-	srv := server.New(cfg, registry, router, token)
+	srv := server.New(cfg, registry, router, wm, runner, token)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),

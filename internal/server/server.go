@@ -11,22 +11,30 @@ import (
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
+	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
+	"github.com/spacingmind/smind/internal/wsapi"
 )
 
 // Server serves the smind API and UI.
 type Server struct {
-	cfg   config.Config
-	proxy *proxy
-	token string
+	cfg    config.Config
+	proxy  *proxy
+	wm     *workspace.Manager
+	runner *taskrunner.Runner
+	token  string
 }
 
 // New builds a Server from config, backed by reg/router for the proxy
-// endpoints. token gates the proxy endpoints; see Handler.
-func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, token string) *Server {
+// endpoints and wm/runner for the /ws workspace/space/task API. token gates
+// the proxy endpoints and the /ws upgrade; see Handler.
+func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, token string) *Server {
 	return &Server{
-		cfg:   cfg,
-		proxy: newProxy(reg, router),
-		token: token,
+		cfg:    cfg,
+		proxy:  newProxy(reg, router),
+		wm:     wm,
+		runner: runner,
+		token:  token,
 	}
 }
 
@@ -37,12 +45,16 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, toke
 // anywhere in it, so gating it behind the same bearer check would make it
 // impossible to use without already having the token through some other
 // channel. The proxy endpoints carry real provider credentials downstream,
-// so those require the token.
+// so those require the token. /ws requires the token too, but checks it as
+// a query parameter rather than through auth.RequireToken's Authorization
+// header check -- a browser WebSocket client can't set request headers on
+// the upgrade -- so it isn't wrapped in that middleware; see wsapi.Handler.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.Handle("POST /v1/messages", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropic)))
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
+	mux.Handle("GET /ws", wsapi.Handler(s.wm, s.runner, s.token))
 	mux.Handle("/", webUI())
 	return mux
 }
