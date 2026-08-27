@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
+	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
-	"github.com/spacingmind/smind/internal/claudecode"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
