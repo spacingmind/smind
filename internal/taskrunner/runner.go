@@ -170,7 +170,10 @@ func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, events
 		return fmt.Errorf("taskrunner: glm prompt: %w", err)
 	}
 
-	events <- Event{Type: EventTypeDone, StopReason: stopReason}
+	select {
+	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
+	case <-ctx.Done():
+	}
 	return nil
 }
 
@@ -219,6 +222,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
 
-	events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}
+	select {
+	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
+	case <-ctx.Done():
+	}
 	return nil
 }
