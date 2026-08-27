@@ -85,3 +85,18 @@ export interface RunLogsResult {
   err?: string;
   events: RunLogEvent[];
 }
+
+// One entry returned by file.list (internal/files.Entry) -- a file or
+// subdirectory of the listed directory. Like RunLogEvent, this Go struct
+// carries `json:` tags, so its wire shape is lowercase, not the PascalCase
+// Go field names.
+export interface FileEntry {
+  name: string;
+  isDir: boolean;
+  size: number;
+}
+
+// Result of file.read (internal/wsapi/files.go's fileReadResult).
+export interface FileReadResult {
+  content: string;
+}
