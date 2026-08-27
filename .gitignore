@@ -4,6 +4,7 @@ refs/
 
 web/node_modules/
 web/packages/*/node_modules/
+web/packages/*/*.tsbuildinfo
 
 internal/server/dist/*
 !internal/server/dist/.gitkeep
