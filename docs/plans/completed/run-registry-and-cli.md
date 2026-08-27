@@ -111,14 +111,14 @@ CLI:
   stop
 - [x] `internal/wsapi`: `run.list`/`run.attach`/`run.logs`/`run.stop`,
   `task.prompt` starts a tracked Run instead of driving it inline
-- [ ] `cmd/smind` CLI subcommands
-- [ ] End-to-end manual verification against the real built binary
+- [x] `cmd/smind` CLI subcommands (plus the new `run.start` backend method
+  they need -- see Decisions)
+- [x] End-to-end manual verification against the real built binary
 
 ## Validation
 
 (Filled in as each Acceptance Criterion is confirmed — command run, test
-name, or manual check. CLI-facing criteria are left blank; that's the next
-task.)
+name, or manual check.)
 
 Backend (`internal/runs` + `internal/wsapi`):
 
@@ -170,5 +170,106 @@ Backend (`internal/runs` + `internal/wsapi`):
   re-verified — that's `internal/server`/`cmd/smind` wiring, out of this
   task's scope.
 
-Commands run: `go test -race -count=5 ./internal/runs/... ./internal/wsapi/...`,
-`task test`, `task lint`, `task build` — all pass.
+`run.start` (new backend method the CLI's `task send` needs -- see
+Decisions): returns `{runId}` immediately without implicit attach, and a
+run it starts is not stopped when its own starting request/connection later
+completes/closes --
+`TestServer_RunStart_NotStoppedByOwnRequestCompletion` (starts a run via
+`run.start`, closes the starting connection entirely, then proves from a
+second connection that `run.list`/`run.attach`/`run.logs` all still see it
+`running`), plus `wsclient`'s
+`TestClient_CallStream_CtxCancel_DetachesPromptlyWithoutStoppingRun` and
+`TestClient_CallStream_DeliversEventsBeforeTerminal` (same property
+exercised through the real client).
+
+CLI (`cmd/smind` + `internal/wsclient`):
+
+- `task send` foreground streams incrementally in real time, not buffered
+  until the end — `internal/wsclient`'s
+  `TestClient_CallStream_SlowScenario_ObservesRealGapsBetweenEvents` (gates
+  on >=900ms first-to-last-chunk elapsed for 5 chunks separated by real
+  300ms server-side delays; buffered delivery would print instantly at the
+  very end and fail this gate) and
+  `TestClient_CallStream_DeliversEventsBeforeTerminal` (a chunk is observed
+  before an hour-long hang would otherwise let the terminal response
+  arrive). Manually re-confirmed against the real built binary: `smind task
+  send <taskId> glm "..."` against a task whose worktree has a `scenario`
+  file containing `slow` (fake agent via `SMIND_ACP_COMMAND`) printed "one
+  two three four five" over ~1.2s wall time (4 real ~300ms gaps between the
+  5 chunks), then `run <id> finished: end_turn`.
+- `task send` foreground, Ctrl+C mid-stream detaches (does not stop the
+  run) — `internal/wsclient`'s
+  `TestClient_CallStream_CtxCancel_DetachesPromptlyWithoutStoppingRun`.
+  Manually re-confirmed: started `task send <taskId> glm "..."` against a
+  `hang`-scenario task in the background, waited for its first streamed
+  chunk ("before hang"), sent SIGINT directly to the CLI process. It
+  printed `detached -- run <id> is still running; see \`smind task logs
+  <id>\`` and exited in ~3ms (measured via a poll loop around the `kill
+  -INT`/process-exit). A **fresh** `smind task logs <id>` invocation
+  afterward showed `run <id>: running` with the fake agent subprocess still
+  present in `ps`. `smind task attach <id>` against the same still-running
+  run re-attached (immediately printed the backfilled "before hang" chunk),
+  and Ctrl+C on that attach also detached cleanly (~4ms) without stopping
+  the run.
+- `task attach <runId>` on an already-finished run prints history and
+  exits cleanly rather than hanging — manually confirmed: attached to a
+  finished `slow`-scenario run, got "one two three four five" +
+  `run <id> finished: end_turn` and exit code 0 in ~104ms (well under a
+  5s timeout wrapper), for both `task attach` and `task logs -f`.
+- `task logs <runId>` (no flags), `--tail N`, and `-f` all behave
+  correctly on both a still-running and an already-finished run — manually
+  confirmed: plain `task logs` on a running `hang`-scenario run returned
+  the backfill-so-far without blocking; `--tail N` truncated to the last N
+  events (verified both with the flag before and after the positional
+  `<runId>`, and with `--tail=N`); `-f` on a running run streamed live and
+  then terminated on its own (exit code 0, printing the `stopped` status)
+  the moment a **separate** `task stop <runId>` invocation stopped the run,
+  confirming a `-f` follower is not itself what keeps a run alive and does
+  not hang past the run's actual end; on the already-finished run, plain
+  `task logs`, `--tail N`, and `-f` all returned immediately with full
+  history (no live-follow needed since there was nothing left to follow).
+- `task stop <runId>` from a fresh CLI invocation (not the one that
+  started the run) actually stops it — `internal/wsapi`'s
+  `TestServer_RunStop_CrossConnection`. Manually re-confirmed twice: once
+  against a run left running server-side after its starting CLI process
+  was killed abruptly (SIGKILL via a shell timeout, not a graceful
+  Ctrl+C) -- `task stop <id>` from a brand-new invocation stopped it and
+  the fake agent subprocess disappeared from `ps`; and once against a run
+  a `task logs -f` was actively following, where the stop both ended the
+  run and caused the follower to exit on its own.
+- Auth: the CLI's `dialDaemon` (`cmd/smind/client.go`) calls
+  `config.Load()`/`auth.LoadOrCreateToken(config.Dir())` -- the exact same
+  functions `cmdServe` calls -- rather than inventing a separate credential
+  path; confirmed by reading the code and by every manual command above
+  succeeding against a daemon and CLI sharing one `SMIND_HOME`.
+- `--host`/remote daemon support: not implemented, by design (confirmed
+  absent from `cmd/smind/client.go` and every subcommand's flag handling).
+- `workspace create`/`workspace ls`, `task new`/`task ls`: manually
+  exercised end-to-end against the real binary (`smind workspace create
+  <repoPath> <name> <policy>`, `smind workspace ls`, `smind task new
+  <workspaceId> <title>`, `smind task ls <workspaceId>`) -- each produced
+  its documented tab-separated output and reflected the daemon's actual
+  store state on the following `ls`.
+- Bug found and fixed during this task's manual verification: `task logs
+  <runId> --tail N` / `-f` (flags *after* the positional `<runId>`, exactly
+  the order the command's own usage string documents) failed with a usage
+  error, because the interrupted agent's original implementation used
+  `flag.FlagSet`, and Go's stdlib `flag` package stops parsing at the first
+  non-flag argument -- it does not support flags after a positional
+  argument. Rewritten as manual, order-independent argument parsing in
+  `cmdTaskLogs` (`cmd/smind/task.go`); re-verified `--tail`/`-f` in every
+  argument order (`<runId> --tail N`, `--tail N <runId>`, `<runId>
+  --tail=N`) plus the previously-untested already-finished-run and
+  currently-running-run cases for both flags.
+- Orphan-subprocess check across the whole manual session: `ps aux | grep
+  fakeagent` showed zero leftover fake-agent subprocesses after every run
+  was either explicitly stopped or allowed to finish, and zero after the
+  daemon's own graceful `SIGTERM` shutdown.
+
+Commands run: `go build ./...`, `gofmt -l .`, `go vet ./...`,
+`go test -race -count=5 ./internal/wsapi/... ./internal/wsclient/...`,
+`task test`, `task lint`, `task build` — all pass. Manual e2e: real
+`bin/smind serve` (with `SMIND_ACP_COMMAND` pointed at a built
+`internal/taskrunner/fakeagent` binary) against an isolated `SMIND_HOME`
+and a real git-initialized workspace repo, driven entirely through the
+built `bin/smind` CLI subcommands described above.
