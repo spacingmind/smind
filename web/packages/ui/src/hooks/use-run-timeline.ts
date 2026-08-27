@@ -31,6 +31,14 @@ interface TimelineState {
   error: string | null;
   /** Starts a new run (run.start) and immediately begins streaming it (run.attach) into the timeline. */
   submitPrompt: (provider: Provider, prompt: string) => Promise<void>;
+  /**
+   * Actually stops runId server-side (run.stop) -- unlike task switch/
+   * unmount, which only ever detach. The run's own active run.attach
+   * subscription (if any) observes the stop as its terminal response, same
+   * as any other subscriber, and updates its status the normal way; this
+   * function's caller doesn't need to patch state itself.
+   */
+  stopRun: (runId: string) => Promise<void>;
 }
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active run.attach be aborted (detached, not stopped) on task switch or unmount. */
@@ -210,5 +218,13 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     [client, taskId],
   );
 
-  return { runs, error, submitPrompt };
+  const stopRun = useCallback(
+    async (runId: string) => {
+      if (!client) throw new Error("not connected");
+      await client.call("run.stop", { runId });
+    },
+    [client],
+  );
+
+  return { runs, error, submitPrompt, stopRun };
 }
