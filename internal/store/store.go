@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 
@@ -35,7 +36,7 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create db dir: %w", err)
 		}
 	}
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", sqliteDSN(path))
 	if err != nil {
 		return nil, fmt.Errorf("open db: %w", err)
 	}
@@ -49,4 +50,12 @@ func Open(path string) (*Store, error) {
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.db.Close()
+}
+
+func sqliteDSN(path string) string {
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)"
 }

@@ -1,7 +1,10 @@
 package store
 
 import (
+	"database/sql"
+	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -93,6 +96,183 @@ func TestStore_Accounts(t *testing.T) {
 			}
 			assertAccountsEqual(t, list[0], created)
 		})
+	}
+}
+
+func TestStore_GetMissing(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	tests := []struct {
+		name string
+		get  func() error
+	}{
+		{
+			name: "account",
+			get: func() error {
+				_, err := s.GetAccount(1)
+				return err
+			},
+		},
+		{
+			name: "routing decision",
+			get: func() error {
+				_, err := s.GetRoutingDecision(1)
+				return err
+			},
+		},
+		{
+			name: "quota snapshot",
+			get: func() error {
+				_, err := s.GetQuotaSnapshot(1)
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.get()
+			if !errors.Is(err, sql.ErrNoRows) {
+				t.Fatalf("missing %s error = %v, want sql.ErrNoRows", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestStore_ListEmpty(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts() error = %v", err)
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("ListAccounts() = %+v, want empty", accounts)
+	}
+
+	decisions, err := s.ListRoutingDecisions()
+	if err != nil {
+		t.Fatalf("ListRoutingDecisions() error = %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Fatalf("ListRoutingDecisions() = %+v, want empty", decisions)
+	}
+
+	snapshots, err := s.ListQuotaSnapshots()
+	if err != nil {
+		t.Fatalf("ListQuotaSnapshots() error = %v", err)
+	}
+	if len(snapshots) != 0 {
+		t.Fatalf("ListQuotaSnapshots() = %+v, want empty", snapshots)
+	}
+}
+
+func TestStore_RejectsMissingAccountReferences(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	now := time.Now().UTC().Truncate(time.Second)
+
+	_, err := s.CreateRoutingDecision(RoutingDecision{
+		SessionKey: "conversation-1",
+		AccountID:  999,
+		Policy:     "hard",
+		DecidedAt:  now,
+		ExpiresAt:  now.Add(time.Hour),
+	})
+	if err == nil {
+		t.Fatal("CreateRoutingDecision() error = nil, want foreign key error")
+	}
+
+	_, err = s.CreateQuotaSnapshot(QuotaSnapshot{
+		AccountID: 999,
+		UsageData: `{"tokens_used":1000}`,
+		PolledAt:  now,
+		ExpiresAt: now.Add(time.Minute),
+	})
+	if err == nil {
+		t.Fatal("CreateQuotaSnapshot() error = nil, want foreign key error")
+	}
+}
+
+func TestStore_ReopenExistingDatabase(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "smind.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	created, err := s.CreateAccount(Account{
+		Provider:       "anthropic",
+		Label:          "personal",
+		CredentialType: "oauth",
+		CredentialData: "refresh-token-abc",
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	reopened, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := reopened.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	got, err := reopened.GetAccount(created.ID)
+	if err != nil {
+		t.Fatalf("GetAccount() after reopen error = %v", err)
+	}
+	assertAccountsEqual(t, got, created)
+}
+
+func TestStore_ConcurrentAccountCreates(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	const workers = 20
+
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+	for i := range workers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := s.CreateAccount(Account{
+				Provider:       "anthropic",
+				Label:          "personal-" + string(rune('a'+i)),
+				CredentialType: "oauth",
+				CredentialData: "refresh-token",
+			})
+			errs <- err
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("CreateAccount() concurrent error = %v", err)
+		}
+	}
+
+	accounts, err := s.ListAccounts()
+	if err != nil {
+		t.Fatalf("ListAccounts() error = %v", err)
+	}
+	if len(accounts) != workers {
+		t.Fatalf("ListAccounts() len = %d, want %d", len(accounts), workers)
 	}
 }
 
