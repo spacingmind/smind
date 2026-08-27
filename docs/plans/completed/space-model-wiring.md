@@ -78,11 +78,118 @@
 
 ## Progress
 
-- [ ] `smind space create`/`smind space ls` CLI subcommands
-- [ ] `smind task new --space` flag
-- [ ] Sidebar: Workspace → Space → Task tree, ungrouped-tasks bucket
-- [ ] Verification (typecheck/tests/build + real-daemon E2E)
+- [x] `smind space create`/`smind space ls` CLI subcommands
+- [x] `smind task new --space` flag
+- [x] Sidebar: Workspace → Space → Task tree, ungrouped-tasks bucket
+- [x] Verification (typecheck/tests/build + real-daemon E2E)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+- **Backend needs no changes**: confirmed by reading `internal/wsapi/handlers.go`
+  (`handleSpaceCreate`/`handleSpaceList`/`handleSpaceGet`/`handleTaskCreate`
+  all already exist, `task.create` already accepts a nullable `spaceId`)
+  and `internal/workspace/space.go` (`CreateSpace`/`GetSpace`/`ListSpaces`
+  already implemented and covered by `internal/workspace/space_test.go`).
+  `git status`/`git diff` after implementation show zero files touched
+  under `internal/`.
+
+- **CLI `smind space create <workspaceId> <title>` / `smind space ls
+  <workspaceId>`**: added in `cmd/smind/space.go`, wired into
+  `cmd/smind/main.go`'s dispatch and usage text. Round-tripped against the
+  real built binary:
+  ```
+  $ smind workspace create /tmp/smind-e2e-repo "E2E Workspace" solo
+  1  E2E Workspace  /tmp/smind-e2e-repo  solo
+  $ smind space create 1 "My Feature Space"
+  1  My Feature Space  1
+  $ smind space ls 1
+  ID  TITLE             WORKSPACEID
+  1   My Feature Space  1
+  ```
+
+- **`smind task new --space <spaceId>`**: added to `cmd/smind/task.go`'s
+  `cmdTaskNew` as a trailing optional flag (parsed by hand, not
+  `flag.FlagSet`, since the title itself is a variadic positional argument
+  -- the flag is stripped off the tail of the arg list before the
+  remaining args are joined into the title). Verified against the real
+  binary, including the regression check (no `--space` still creates an
+  unscoped task):
+  ```
+  $ smind task new 1 "Task scoped to space" --space 1
+  1  Task scoped to space  created
+  $ smind task new 1 "Unscoped task"
+  2  Unscoped task  created
+  ```
+  Confirmed at the data layer (not just exit code 0) via
+  `sqlite3 $SMIND_HOME/smind.db "SELECT id, workspace_id, space_id, title FROM tasks;"`:
+  ```
+  1|1|1|Task scoped to space
+  2|1||Unscoped task
+  ```
+  task 1's `space_id` is the created space's id; task 2's is NULL.
+
+- **Web UI sidebar Workspace → Space → Task tree, with an "Ungrouped"
+  bucket for `SpaceID: null` tasks**: implemented in
+  `web/packages/ui/src/components/app-sidebar.tsx` (`useWorkspaceTree` now
+  fetches `space.list` alongside `task.list` per workspace and groups
+  client-side by `Task.SpaceID`; `WorkspaceItem` renders flat when
+  `spaces.length === 0` and otherwise renders each `SpaceItem` plus an
+  "Ungrouped" bucket when there are any ungrouped tasks). `Space` type
+  added to `web/packages/ui/src/lib/types.ts`, verified field-for-field
+  against `internal/store.Space`.
+
+  Component tests in `web/packages/ui/src/components/app-sidebar.test.tsx`
+  (`bun run test`, 4/4 passing in that file, 46/46 across the whole
+  suite):
+  - `"a workspace with zero spaces renders its tasks flat, same as before
+    space grouping existed"` -- regression check: no `space.list` results
+    means no "Ungrouped"/space-heading UI at all, task renders directly
+    under the workspace exactly as before this task.
+  - `"a workspace with two spaces plus an ungrouped task renders all three
+    groupings, nothing dropped"` -- both spaces, each space's own task,
+    and the ungrouped task under an explicit "Ungrouped" bucket are all
+    present.
+  - `"selecting a task inside a space invokes onSelectTask with the same
+    Task shape as an ungrouped one"` -- clicking a task nested inside a
+    space calls `onSelectTask` with the exact same `Task` object shape the
+    original (still-passing) `"clicking a task row invokes onSelectTask
+    with that task"` test exercises for an ungrouped task.
+
+- **Web UI stays read-only / CLI-only creation**: confirmed via
+  `grep -rn "\.create(" web/packages/ui/src/` returning zero matches
+  before this task started -- no existing UI creates a workspace or task
+  either, so Space creation staying CLI-only is consistent, not a new
+  paradigm.
+
+- **`go build ./...` / `gofmt -l .` / `go vet ./...` / `go test -race
+  ./...`**: all clean, full repo, after the change (last run: all 17
+  testable packages `ok`, `cmd/smind` correctly `[no test files]` as
+  before -- this repo has no CLI unit tests, matching the existing
+  `cmd/smind/workspace.go`/`task.go` convention of manual E2E-only
+  verification for the CLI layer).
+
+- **`bunx tsc -b`**: clean (run from `web/packages/ui`, where the actual
+  `tsconfig.json` lives). `bun run test` (`task test:web`): 46/46 passing.
+
+- **`task build`**: succeeded; `internal/server/dist/.gitkeep` was deleted
+  by the Vite build as expected and restored with `touch` + `git add`,
+  matching the documented recurring issue.
+
+- **Manual E2E against the real built binary**: built `bin/smind`, started
+  it against a temp `SMIND_HOME`, used `smind workspace create`, `smind
+  space create`, `smind task new --space`, and `smind task new` (no
+  space) to create the full hierarchy, confirmed via `smind space ls`/
+  `smind task ls` plus a direct sqlite read (above). Then ran a
+  from-scratch Node 26 script (built-in `WebSocket`, no browser) against
+  the same running daemon, reproducing `workspace.list` then
+  `space.list`+`task.list` per workspace exactly as `useWorkspaceTree`
+  does, including the client-side grouping logic -- output confirmed the
+  wire shapes match `web/packages/ui/src/lib/types.ts` field-for-field and
+  the resulting tree groups correctly:
+  ```
+  Workspace: E2E Workspace
+    Space: My Feature Space
+      Task: Task scoped to space [created]
+    Ungrouped:
+      Task: Unscoped task [created]
+  ```
