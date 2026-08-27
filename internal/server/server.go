@@ -12,28 +12,43 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
 
 // Server serves the smind API and UI.
 type Server struct {
-	cfg   config.Config
-	proxy *proxy
-	ws    http.Handler
-	token string
+	cfg       config.Config
+	proxy     *proxy
+	ws        http.Handler
+	terminals *terminal.Registry
+	token     string
 }
 
 // New builds a Server from config, backed by reg/router for the proxy
-// endpoints and wm/runner for the /ws workspace/space/task API. token gates
-// the proxy endpoints and the /ws upgrade; see Handler.
+// endpoints and wm/runner for the /ws workspace/space/task/terminal API.
+// token gates the proxy endpoints and the /ws upgrade; see Handler.
 func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, token string) *Server {
+	api := wsapi.New(wm, runner, token)
 	return &Server{
-		cfg:   cfg,
-		proxy: newProxy(reg, router),
-		ws:    wsapi.Handler(wm, runner, token),
-		token: token,
+		cfg:       cfg,
+		proxy:     newProxy(reg, router),
+		ws:        api.Handler,
+		terminals: api.Terminals,
+		token:     token,
 	}
+}
+
+// Close releases daemon-owned resources that live outside the
+// http.Server itself: currently just killing every still-running
+// terminal session's shell process and PTY (see
+// internal/terminal.Registry.CloseAll), so a graceful daemon shutdown
+// (cmdServe, in cmd/smind/serve.go) doesn't leave any orphaned behind.
+// Safe to call once, after http.Server.Shutdown has stopped accepting new
+// /ws connections.
+func (s *Server) Close() {
+	s.terminals.CloseAll()
 }
 
 // Handler returns the root http handler.

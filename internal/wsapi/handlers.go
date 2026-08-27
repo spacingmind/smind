@@ -7,12 +7,13 @@ import (
 
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, and reg.
-func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) map[string]handlerFunc {
+// bound to wm, runner, reg, and treg.
+func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"workspace.create": handleWorkspaceCreate(wm),
 		"workspace.list":   handleWorkspaceList(wm),
@@ -31,6 +32,12 @@ func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		"run.attach":       handleRunAttach(reg),
 		"run.logs":         handleRunLogs(reg),
 		"run.stop":         handleRunStop(reg),
+		"terminal.create":  handleTerminalCreate(wm, treg),
+		"terminal.attach":  handleTerminalAttach(treg),
+		"terminal.write":   handleTerminalWrite(treg),
+		"terminal.resize":  handleTerminalResize(treg),
+		"terminal.close":   handleTerminalClose(treg),
+		"terminal.list":    handleTerminalList(treg),
 		"file.list":        handleFileList(wm),
 		"file.read":        handleFileRead(wm),
 		"file.write":       handleFileWrite(wm),

@@ -49,6 +49,18 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(smindHome)
 	os.Setenv("SMIND_HOME", smindHome)
 
+	// terminal.* tests spawn a real shell via internal/terminal's
+	// resolveShell, which honors $SHELL -- force it to a plain /bin/bash
+	// (when available) rather than the dev machine's own interactive
+	// shell (zsh with dotfiles/oh-my-zsh/etc., in this sandbox), so
+	// terminal output assertions aren't at the mercy of one developer's
+	// shell config/startup chatter/slower startup under parallel load.
+	// Same rationale as internal/terminal's own tests (see that package's
+	// forceTestShell).
+	if _, err := os.Stat("/bin/bash"); err == nil {
+		os.Setenv("SHELL", "/bin/bash")
+	}
+
 	os.Exit(m.Run())
 }
 
