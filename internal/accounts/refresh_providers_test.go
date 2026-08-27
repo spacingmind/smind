@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/transport"
 )
 
 // rewriteTransport redirects every request to target's host, regardless of
@@ -311,4 +314,77 @@ func TestJWTExpiry(t *testing.T) {
 			t.Fatal("jwtExpiry() error = nil, want error for unparseable base64 payload")
 		}
 	})
+}
+
+func TestNewAnthropicRefresher_DefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	r := NewAnthropicRefresher()
+	if r.httpClient == nil {
+		t.Fatal("httpClient = nil, want a default uTLS-fingerprinted client")
+	}
+	if _, ok := r.httpClient.Transport.(*transport.RoundTripper); !ok {
+		t.Errorf("httpClient.Transport = %T, want *transport.RoundTripper", r.httpClient.Transport)
+	}
+}
+
+func TestNewOpenAIRefresher_DefaultTransport(t *testing.T) {
+	t.Parallel()
+
+	r := NewOpenAIRefresher()
+	if r.httpClient == nil {
+		t.Fatal("httpClient = nil, want a default uTLS-fingerprinted client")
+	}
+	if _, ok := r.httpClient.Transport.(*transport.RoundTripper); !ok {
+		t.Errorf("httpClient.Transport = %T, want *transport.RoundTripper", r.httpClient.Transport)
+	}
+}
+
+func TestAnthropicRefresher_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	refresher := NewAnthropicRefresher(WithAnthropicHTTPClient(http.DefaultClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := refresher.Refresh(ctx, OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want error for an already-cancelled context")
+	}
+}
+
+func TestOpenAIRefresher_ContextCancelled(t *testing.T) {
+	t.Parallel()
+
+	refresher := NewOpenAIRefresher(WithOpenAIHTTPClient(http.DefaultClient))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := refresher.Refresh(ctx, OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want error for an already-cancelled context")
+	}
+}
+
+func TestAnthropicRefresher_ConnectionRefused(t *testing.T) {
+	t.Parallel()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("net.Listen() error = %v", err)
+	}
+	addr := l.Addr().String()
+	if err := l.Close(); err != nil {
+		t.Fatalf("Listener.Close() error = %v", err)
+	}
+	target, err := url.Parse("http://" + addr)
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+
+	refresher := NewAnthropicRefresher(WithAnthropicHTTPClient(&http.Client{Transport: &rewriteTransport{target: target}}))
+	_, err = refresher.Refresh(context.Background(), OAuthCredential{RefreshToken: "refresh-old"})
+	if err == nil {
+		t.Fatal("Refresh() error = nil, want connection-refused error")
+	}
 }
