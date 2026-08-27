@@ -39,7 +39,7 @@ tasks:
     desc: Vet + gofmt check
     cmds:
       - go vet ./...
-      - test -z "$(gofmt -l .)"
+      - test -z "$(gofmt -l $(git ls-files '*.go'))"
 
   tidy:
     desc: go mod tidy

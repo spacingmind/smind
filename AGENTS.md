@@ -36,7 +36,20 @@ architecture unilaterally.
 ## refs/ map
 
 `refs/` holds read-only clones of other projects, used as pattern references
-— not dependencies, not code to copy wholesale.
+— not dependencies, not code to copy wholesale. Gitignored; not part of this
+repo's history.
 
-> Note: these clones are not present in this checkout yet. Once added, treat
-> them as read-only reference material only.
+- `refs/paseo` — UI and daemon patterns (workspace/agent orchestration UI
+  smind is meant to eventually replace for daily use).
+- `refs/cliproxyapi` — Go routing/proxy patterns for multi-account LLM
+  request routing (most relevant to the Phase 1 routing engine).
+- `refs/agent-client-protocol` — Agent Client Protocol (ACP) spec/impl, for
+  Phase 2 agent spawning (Claude Code, Codex, GLM) via a standard protocol.
+- `refs/codex` — OpenAI Codex CLI, approval/sandbox patterns.
+- `refs/claude-code` — Claude Code CLI, for SDK/protocol edge cases.
+
+Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
+(`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading
+refs/. Reach for refs/ when stuck on a specific hard pattern (routing,
+worktree lifecycle, ACP wiring), or when a dependency's own docs are the
+better source of truth.
