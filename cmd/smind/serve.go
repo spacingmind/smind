@@ -102,6 +102,7 @@ func cmdServe(args []string) int {
 	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+	srv.Close() // kill every still-running terminal session's shell/PTY
 	log.Printf("smind stopped")
 	return 0
 }
