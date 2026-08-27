@@ -33,6 +33,8 @@ func run(args []string) int {
 		return cmdServe(args[1:])
 	case "workspace":
 		return cmdWorkspace(args[1:])
+	case "space":
+		return cmdSpace(args[1:])
 	case "task":
 		return cmdTask(args[1:])
 	case "-h", "--help", "help":
@@ -54,7 +56,10 @@ Usage:
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces
 
-  smind task new <workspaceId> <title>                    create a task
+  smind space create <workspaceId> <title>                create a space within a workspace
+  smind space ls <workspaceId>                             list a workspace's spaces
+
+  smind task new <workspaceId> <title> [--space <id>]     create a task, optionally scoped to a space
   smind task ls <workspaceId>                              list a workspace's tasks
   smind task send <taskId> <provider> <prompt>            start a run, stream it (Ctrl+C to detach)
   smind task attach <runId>                                stream a run (Ctrl+C to detach)

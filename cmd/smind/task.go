@@ -81,9 +81,18 @@ func cmdTask(args []string) int {
 	}
 }
 
+// cmdTaskNewUsage is printed on any argument error in cmdTaskNew.
+const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>]"
+
+// cmdTaskNew accepts an optional trailing "--space <spaceId>" pair after
+// the title -- unlike cmdTaskLogs's flags, which can appear anywhere
+// relative to its positional runId, --space only needs to work in this one
+// documented position (title text comes last otherwise, so a trailing
+// "--space <id>" can be unambiguously stripped off before the remaining
+// args are joined into the title).
 func cmdTaskNew(args []string) int {
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: smind task new <workspaceId> <title>")
+		fmt.Fprintln(os.Stderr, cmdTaskNewUsage)
 		return 2
 	}
 	workspaceID, err := parseInt64(args[0])
@@ -91,7 +100,23 @@ func cmdTaskNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "task new: invalid workspaceId %q: %v\n", args[0], err)
 		return 2
 	}
-	title := strings.Join(args[1:], " ")
+
+	rest := args[1:]
+	var spaceID *int64
+	if len(rest) >= 2 && rest[len(rest)-2] == "--space" {
+		id, err := parseInt64(rest[len(rest)-1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task new: invalid --space value %q: %v\n", rest[len(rest)-1], err)
+			return 2
+		}
+		spaceID = &id
+		rest = rest[:len(rest)-2]
+	}
+	if len(rest) == 0 {
+		fmt.Fprintln(os.Stderr, cmdTaskNewUsage)
+		return 2
+	}
+	title := strings.Join(rest, " ")
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -100,10 +125,13 @@ func cmdTaskNew(args []string) int {
 	}
 	defer client.Close()
 
+	params := map[string]any{"workspaceId": workspaceID, "title": title}
+	if spaceID != nil {
+		params["spaceId"] = *spaceID
+	}
+
 	var task store.Task
-	err = client.Call(context.Background(), "task.create", map[string]any{
-		"workspaceId": workspaceID, "title": title,
-	}, &task)
+	err = client.Call(context.Background(), "task.create", params, &task)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task new: %v\n", err)
 		return 1

@@ -25,6 +25,19 @@ export interface Task {
   ArchivedAt: string | null;
 }
 
+// Mirrors internal/store.Space field-for-field -- same no-json-tags,
+// PascalCase-on-the-wire convention as Workspace/Task above. An optional
+// grouping layer within a workspace; Task.SpaceID (nullable) points at
+// one of these.
+export interface Space {
+  ID: number;
+  WorkspaceID: number;
+  Title: string;
+  EnvData: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
 // The only two internal/taskrunner.Provider values that exist today (see
 // internal/taskrunner/provider.go) -- not dynamically discovered, see
 // docs/plans/active/web-ui-task-detail.md's Decisions.
