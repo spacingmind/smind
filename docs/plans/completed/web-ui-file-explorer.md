@@ -90,11 +90,140 @@
 
 ## Progress
 
-- [ ] `internal/files` (or equivalent): list/read/write, real sandboxing
-- [ ] `internal/wsapi`: `file.list`/`file.read`/`file.write` + tests
-- [ ] `FileExplorerPane` component (tree + CodeMirror 6 editor) + tests
-- [ ] Verification (typecheck/tests/build + real-daemon E2E script)
+- [x] `internal/files` (or equivalent): list/read/write, real sandboxing
+- [x] `internal/wsapi`: `file.list`/`file.read`/`file.write` + tests
+- [x] `FileExplorerPane` component (tree + CodeMirror 6 editor) + tests
+- [x] Verification (typecheck/tests/build + real-daemon E2E script)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+(Filled in as each Acceptance Criterion is confirmed — command run, test
+name, or manual check.)
+
+- New daemon methods backed by a new package: `internal/files/files.go`
+  implements `List`/`Read`/`Write` against a `root` (the task's
+  `WorktreePath`) plus a client-supplied `path`; `internal/wsapi/files.go`
+  wires `file.list`/`file.read`/`file.write` into `methodHandlers`
+  (`internal/wsapi/handlers.go`), looking up each task's `WorktreePath` via
+  `workspace.Manager.GetTask` the same way every other task-scoped method
+  already does, and erroring clearly if a task has no worktree (nil
+  `WorktreePath`, or has been archived and the worktree directory is
+  gone — proven by `TestServer_File_ArchivedTask_Errors`).
+- `file.read` rejects non-UTF-8 content instead of mangling it: proven by
+  `internal/files/files_test.go`'s `TestRead_NonUTF8_Rejected`.
+- `file.write` creates a new file and overwrites an existing one: proven by
+  `TestWrite_CreatesNewFile` / `TestWrite_OverwritesExistingFile`, and
+  end-to-end over the wire by `TestServer_FileList_Read_Write_RoundTrip`
+  (list root -> read README.md -> write a change -> read again and confirm
+  it landed -> write a brand-new file -> list again and see both).
+- **Path sandboxing** (the highest-risk part): every path is resolved via
+  `internal/files.resolveInRoot`, which (1) joins/cleans the client path
+  against the worktree root (rejecting `..` traversal outright via
+  `filepath.Join`+`Clean`'s normal semantics), (2) resolves symlinks along
+  the *entire* resulting path via `filepath.EvalSymlinks` — tolerating a
+  not-yet-existing leaf (`file.write`'s create case) by walking up to the
+  nearest existing ancestor, resolving *that*, and rejoining the missing
+  leaf verbatim (`resolveExistingPrefix`) — and only *then* (3) checks
+  containment of the fully-resolved, symlink-free path against the
+  fully-resolved root via a separator-aware prefix check
+  (`withinRoot`, `candidate == root || strings.HasPrefix(candidate,
+  root+separator)`) that treats a sibling directory sharing root's string
+  prefix (e.g. `/foo/bar-evil` vs `/foo/bar`) as outside. Symlinks are
+  resolved *before* containment is checked, not after, so a symlink
+  planted inside the worktree can't smuggle access to anywhere else on
+  disk. Adversarial Go tests, all passing, at both layers:
+  - `internal/files/files_test.go`: `TestSandbox_DotDotTraversal_Rejected`,
+    `TestSandbox_DeepDotDotTraversal_Rejected`,
+    `TestSandbox_AbsolutePathOutsideRoot_Rejected` (+
+    `..._AbsolutePathInsideRoot_Allowed` as the positive control),
+    `TestSandbox_SymlinkToOutsideFile_Rejected`,
+    `TestSandbox_SymlinkToOutsideDirectory_Rejected` (covers both an
+    existing target via `List` and the missing-leaf `Write` case through a
+    symlinked ancestor directory),
+    `TestSandbox_SiblingDirectorySharingPrefix_NotTreatedAsContained`,
+    `TestSandbox_RootItself_Allowed`.
+  - `internal/wsapi/files_test.go`:
+    `TestServer_File_PathTraversal_Rejected` proves the wire-level
+    handlers reject `..` traversal, an absolute path outside the root, and
+    that a rejected `file.write` never actually creates anything outside
+    the sandbox (`os.Stat` on the target path confirms it wasn't created).
+  - Re-confirmed against the real running daemon (see Manual/E2E below),
+    including a real symlink planted inside a real task worktree pointing
+    at a real file outside it.
+- `FileExplorerPane` (`web/packages/ui/src/components/file-explorer-pane.tsx`
+  + `code-mirror-editor.tsx` + `web/packages/ui/src/hooks/use-file-explorer.ts`):
+  a lazily-expanding directory tree (`file.list` per directory, only on
+  first expand) and a CodeMirror 6 editor (`@codemirror/*`/`codemirror`
+  added as dependencies) for the selected file, with a visible Save button
+  (disabled until the buffer is dirty) plus a Ctrl/Cmd-S keybinding, both
+  calling `file.write`. Takes `{ client, task }` exactly like
+  `TaskDetailPane`. **Not** wired into `App.tsx`/`task-detail.tsx`, per the
+  Acceptance Criteria (parallel diff-viewer/terminal work against the same
+  shell files) — proven working standalone by
+  `file-explorer-pane.test.tsx` rendering it directly against a
+  `FakeWsClient`, no app shell involved.
+- Frontend test scenarios, all passing
+  (`web/packages/ui/src/components/file-explorer-pane.test.tsx`, 7 tests):
+  tree renders `file.list`'s result; lazy expansion only fetches
+  `file.list` once per directory (collapse/re-expand doesn't re-fetch);
+  selecting a file fetches and displays its content via `file.read`;
+  editing (dispatched through the real mounted `EditorView`'s own
+  `dispatch` API via a test-only `editorViewRegistry` — see that file's
+  doc comment for why: jsdom's contentEditable/input-event simulation
+  isn't reliable enough to trust for driving CodeMirror's own DOM-mutation
+  pipeline, so the test drives the same public API a real keystroke
+  ultimately reaches, exercising this component's own onChange wiring
+  rather than CodeMirror's internal event capture) and saving calls
+  `file.write` with the edited content; a `file.write` failure surfaces
+  `save failed: <message>` without losing the edit (buffer and Save-enabled
+  state both preserved); switching the selected file loads the new file's
+  content, replacing the old; Ctrl-S (a real `keydown` dispatched at the
+  `EditorView`'s `contentDOM`, confirmed via a smoke test to actually reach
+  CodeMirror's keymap dispatch in jsdom) triggers `file.write` the same as
+  clicking Save.
+
+Commands run: `go build ./...` (clean), `gofmt -l .` (no output),
+`go vet ./...` (clean), `go test -race ./...` (all packages pass,
+including the new `internal/files` and `internal/wsapi` file-handling
+tests). `bunx tsc -b` (clean). `bun run test` / `task test:web` (23 tests
+across all 4 web test files, all passing, up from 16 before this task).
+`task build` succeeded; `internal/server/dist/.gitkeep` was deleted by the
+Vite build as expected (same as every prior web UI task) and restored
+(`touch` + `git add`) before committing.
+
+Manual/E2E against the real built binary: built `bin/smind` and
+`internal/taskrunner/fakeagent`, ran the real daemon against an isolated
+`SMIND_HOME` and a real git-initialized workspace repo, created a real
+workspace + task via the real CLI (`smind workspace create`,
+`smind task new`). A from-scratch Node script (built-in `fetch`/
+`WebSocket` only, Node 26, no browser) opened a real WebSocket connection
+and drove the exact `file.list`/`file.read`/`file.write` wire sequence
+`FileExplorerPane` makes: listed the real worktree root (saw `.git` and
+`README.md`), read `README.md`'s real content, wrote a change, read again
+and confirmed the new content landed, wrote a brand-new file and confirmed
+it appeared in a fresh `file.list`, then ran three adversarial checks
+against the live daemon (not just unit tests): a deep `../` traversal
+toward `/etc/passwd`, an absolute `/etc/passwd` path, and a real symlink
+planted inside the real task worktree directory (found via
+`$SMIND_HOME/worktrees/1/<slug>`) pointing at a real file in a separate
+temp directory outside the worktree — all three were rejected by the
+running daemon with the expected "path ... escapes the worktree root"
+error, and the symlink case specifically proves the sandbox check happens
+against a real filesystem symlink, not just the unit tests' simulated one.
+Every assertion in that script passed; the daemon, temp `SMIND_HOME`, temp
+repo, and temp outside-symlink-target directory were all torn down
+afterward (nothing left running or on disk).
+
+What was **not** verified, honestly, consistent with every prior web UI
+task in this repo: no real browser is available in this sandbox, so actual
+pixel rendering, CSS layout/scrolling of the tree and editor panes, real
+mouse click/drag behavior, and CodeMirror's own real-browser keyboard/IME
+input handling were not visually checked. jsdom + `@testing-library/react`
+verify real React render/effect/cleanup/state semantics and (per the
+smoke tests run during development) that a real `EditorView` mounts and
+its `Mod-s` keymap dispatch actually fires in jsdom — but not what the
+editor looks like, how it scrolls with a long file, or whether real typing
+via a physical keyboard in a real browser produces the same `onChange`
+calls (CodeMirror's own DOM-mutation-observing input pipeline is
+CodeMirror's to test, not this codebase's — see
+`code-mirror-editor.tsx`'s `editorViewRegistry` doc comment).
