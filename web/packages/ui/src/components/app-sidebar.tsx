@@ -66,7 +66,17 @@ function useWorkspaceTree(client: WsClient | null) {
   return { workspaces, error };
 }
 
-export function AppSidebar({ client }: { client: WsClient | null }) {
+export function AppSidebar({
+  client,
+  selectedTaskId = null,
+  onSelectTask,
+}: {
+  client: WsClient | null;
+  /** The currently-selected task's id, if any, so its row can render as active. */
+  selectedTaskId?: number | null;
+  /** Invoked with the full Task when a task row is clicked. */
+  onSelectTask?: (task: Task) => void;
+}) {
   const { workspaces, error } = useWorkspaceTree(client);
 
   return (
@@ -88,7 +98,7 @@ export function AppSidebar({ client }: { client: WsClient | null }) {
                 )}
                 {!error && workspaces?.length === 0 && <StatusRow text="No workspaces yet." />}
                 {workspaces?.map((ws) => (
-                  <WorkspaceItem key={ws.ID} workspace={ws} />
+                  <WorkspaceItem key={ws.ID} workspace={ws} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
                 ))}
               </SidebarMenu>
             </ScrollArea>
@@ -110,7 +120,15 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
   );
 }
 
-function WorkspaceItem({ workspace }: { workspace: WorkspaceWithTasks }) {
+function WorkspaceItem({
+  workspace,
+  selectedTaskId,
+  onSelectTask,
+}: {
+  workspace: WorkspaceWithTasks;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+}) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -129,7 +147,7 @@ function WorkspaceItem({ workspace }: { workspace: WorkspaceWithTasks }) {
           ) : (
             workspace.tasks.map((task) => (
               <SidebarMenuSubItem key={task.ID}>
-                <SidebarMenuSubButton>
+                <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
                   <span className="truncate">{task.Title}</span>
                   <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">{task.Status}</span>
                 </SidebarMenuSubButton>
