@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm and runner.
-func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner) map[string]handlerFunc {
+// bound to wm, runner, and reg.
+func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"workspace.create": handleWorkspaceCreate(wm),
 		"workspace.list":   handleWorkspaceList(wm),
@@ -23,7 +24,11 @@ func methodHandlers(wm *workspace.Manager, runner *taskrunner.Runner) map[string
 		"task.list":        handleTaskList(wm),
 		"task.get":         handleTaskGet(wm),
 		"task.archive":     handleTaskArchive(wm),
-		"task.prompt":      handleTaskPrompt(runner),
+		"task.prompt":      handleTaskPrompt(wm, runner, reg),
+		"run.list":         handleRunList(reg),
+		"run.attach":       handleRunAttach(reg),
+		"run.logs":         handleRunLogs(reg),
+		"run.stop":         handleRunStop(reg),
 	}
 }
 
@@ -148,18 +153,33 @@ func handleTaskArchive(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-// taskPromptResult is the terminal result of a successful task.prompt.
+// taskPromptResult is the terminal result of a successful task.prompt (or
+// run.attach/run.start reaching StatusDone).
 type taskPromptResult struct {
+	RunID      string `json:"runId"`
 	StopReason string `json:"stopReason"`
 }
 
 // taskChunkParams is the params payload of every "chunk" event task.prompt
-// emits.
+// and run.attach emit.
 type taskChunkParams struct {
 	Text string `json:"text"`
 }
 
-func handleTaskPrompt(runner *taskrunner.Runner) handlerFunc {
+// handleTaskPrompt starts a Run and then behaves like an implicit
+// run.attach on it, for backward compatibility with task.prompt's existing
+// (PR #18) behavior: a single connection driving a run start-to-finish
+// looks the same as before -- same "chunk" events, same terminal result --
+// even though the run itself now lives in reg, independent of this
+// connection.
+//
+// The one place task.prompt's behavior deliberately still differs from
+// run.attach's: this request's own context going Done (via task.cancel on
+// this request's id, or the connection closing) stops the run it started,
+// matching task.prompt's pre-Registry behavior where the run's context
+// *was* this request's context. run.attach's context going Done, by
+// contrast, only detaches -- see handleRunAttach.
+func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			TaskID   int64               `json:"taskId"`
@@ -170,26 +190,173 @@ func handleTaskPrompt(runner *taskrunner.Runner) handlerFunc {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
 		}
 
-		events := make(chan taskrunner.Event)
-		var stopReason string
-		forwardDone := make(chan struct{})
-		go func() {
-			defer close(forwardDone)
-			for e := range events {
-				switch e.Type {
-				case taskrunner.EventTypeText:
-					rc.Emit("chunk", taskChunkParams{Text: e.Text})
-				case taskrunner.EventTypeDone:
-					stopReason = e.StopReason
-				}
-			}
-		}()
-
-		err := runner.RunPrompt(ctx, p.TaskID, p.Provider, p.Prompt, events)
-		<-forwardDone
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
-		return taskPromptResult{StopReason: stopReason}, nil
+
+		return attachAndStream(ctx, rc, reg, runID, true)
+	}
+}
+
+func handleRunList(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
+		return reg.List(), nil
+	}
+}
+
+// handleRunAttach streams runID's backfilled-then-live events exactly like
+// task.prompt does, terminating once the run reaches a terminal state
+// (immediately, if it already has). Unlike task.prompt, this request's own
+// context going Done (connection closing, or a task.cancel naming this
+// request's id) only detaches -- the run keeps going -- matching the
+// "detaching does not stop the run" requirement.
+func handleRunAttach(reg *runs.Registry) handlerFunc {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID string `json:"runId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.attach: invalid params: %w", err)
+		}
+		return attachAndStream(ctx, rc, reg, p.RunID, false)
+	}
+}
+
+// attachAndStream subscribes to runID and forwards its events as "chunk"
+// events on rc until the run goes terminal, at which point it returns the
+// same shape task.prompt always has: a taskPromptResult on success, or an
+// error if the run ended in StatusError or StatusStopped.
+//
+// If stopOnDetach is true and ctx goes Done before the run finishes, the
+// run is stopped (via reg.Stop) rather than merely detached from -- see
+// handleTaskPrompt's doc comment for why task.prompt needs that and
+// run.attach doesn't. Either way, once ctx is Done this stops re-selecting
+// on it (cancelCh is set to nil, which blocks forever) so a repeated
+// cancel can't call Stop twice or otherwise re-enter that branch; the loop
+// then just drains events to their natural close.
+func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry, runID string, stopOnDetach bool) (any, error) {
+	events, unsubscribe, err := reg.Subscribe(runID)
+	if err != nil {
+		return nil, fmt.Errorf("run %s: %w", runID, err)
+	}
+	defer unsubscribe()
+
+	cancelCh := ctx.Done()
+	for {
+		select {
+		case e, ok := <-events:
+			if !ok {
+				return terminalResult(reg, runID)
+			}
+			if e.Type == taskrunner.EventTypeText {
+				rc.Emit("chunk", taskChunkParams{Text: e.Text})
+			}
+		case <-cancelCh:
+			if !stopOnDetach {
+				return nil, ctx.Err()
+			}
+			_ = reg.Stop(runID)
+			cancelCh = nil
+		}
+	}
+}
+
+func terminalResult(reg *runs.Registry, runID string) (any, error) {
+	_, status, err := reg.History(runID)
+	if err != nil {
+		return nil, fmt.Errorf("run %s: %w", runID, err)
+	}
+	switch status.Status {
+	case runs.StatusDone:
+		return taskPromptResult{RunID: runID, StopReason: status.StopReason}, nil
+	case runs.StatusStopped:
+		return nil, fmt.Errorf("run %s: stopped", runID)
+	case runs.StatusError:
+		return nil, fmt.Errorf("run %s: %s", runID, status.Err)
+	default:
+		return nil, fmt.Errorf("run %s: not terminal", runID)
+	}
+}
+
+// runLogEvent is the wire shape of one event in a run.logs response --
+// the same fields task.prompt/run.attach's "chunk" events and terminal
+// results carry, just batched instead of streamed.
+type runLogEvent struct {
+	Type       string `json:"type"`
+	Text       string `json:"text,omitempty"`
+	StopReason string `json:"stopReason,omitempty"`
+}
+
+func toRunLogEvent(e taskrunner.Event) runLogEvent {
+	switch e.Type {
+	case taskrunner.EventTypeDone:
+		return runLogEvent{Type: "done", StopReason: e.StopReason}
+	default:
+		return runLogEvent{Type: "chunk", Text: e.Text}
+	}
+}
+
+// runLogsResult is the terminal result of run.logs.
+type runLogsResult struct {
+	RunID      string        `json:"runId"`
+	Status     string        `json:"status"`
+	StopReason string        `json:"stopReason,omitempty"`
+	Err        string        `json:"err,omitempty"`
+	Events     []runLogEvent `json:"events"`
+}
+
+// handleRunLogs returns runID's full (or, with Tail set, last Tail)
+// recorded events plus its current status as a single response -- it never
+// streams and never blocks waiting for the run to progress, unlike
+// run.attach.
+func handleRunLogs(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID string `json:"runId"`
+			Tail  int    `json:"tail"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.logs: invalid params: %w", err)
+		}
+
+		history, status, err := reg.History(p.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("run.logs: %w", err)
+		}
+		if p.Tail > 0 && len(history) > p.Tail {
+			history = history[len(history)-p.Tail:]
+		}
+
+		events := make([]runLogEvent, len(history))
+		for i, e := range history {
+			events[i] = toRunLogEvent(e)
+		}
+		return runLogsResult{
+			RunID:      status.ID,
+			Status:     string(status.Status),
+			StopReason: status.StopReason,
+			Err:        status.Err,
+			Events:     events,
+		}, nil
+	}
+}
+
+// handleRunStop stops a run by ID regardless of which connection started
+// it -- unlike task.cancel, which only knows about still-in-flight
+// requests on its own connection. It's not an error to stop an
+// already-finished run (see Registry.Stop).
+func handleRunStop(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID string `json:"runId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.stop: invalid params: %w", err)
+		}
+		if err := reg.Stop(p.RunID); err != nil {
+			return nil, fmt.Errorf("run.stop: %w", err)
+		}
+		return struct{}{}, nil
 	}
 }

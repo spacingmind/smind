@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -24,8 +25,15 @@ var upgrader = websocket.Upgrader{
 // Each accepted connection gets its own conn (see conn.go) serving requests
 // until the client disconnects; conn.serve blocks for the connection's
 // whole lifetime, so this handler doesn't return until then.
+//
+// All connections Handler accepts share one *runs.Registry, since a Run
+// started on one connection (via task.prompt or a future run.start) must
+// be reachable from any other connection's run.list/run.attach/run.logs/
+// run.stop -- that's the whole point of tracking it server-side instead of
+// inline in the request that started it.
 func Handler(wm *workspace.Manager, runner *taskrunner.Runner, token string) http.Handler {
-	hs := methodHandlers(wm, runner)
+	reg := runs.New()
+	hs := methodHandlers(wm, runner, reg)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
