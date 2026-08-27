@@ -8,7 +8,12 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "node",
-    include: ["src/**/*.test.ts"],
+    // jsdom (not "node") so component tests can render real DOM trees via
+    // @testing-library/react -- ws-client.test.ts doesn't need a DOM, but
+    // running it under jsdom too is harmless, and Vitest only supports one
+    // environment per config short of per-file overrides.
+    environment: "jsdom",
+    include: ["src/**/*.test.{ts,tsx}"],
+    setupFiles: ["./src/test/setup.ts"],
   },
 });
