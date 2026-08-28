@@ -11,6 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
+	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -22,6 +23,7 @@ type Server struct {
 	cfg       config.Config
 	proxy     *proxy
 	ws        http.Handler
+	runs      *runs.Registry
 	terminals *terminal.Registry
 	token     string
 }
@@ -35,19 +37,21 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		cfg:       cfg,
 		proxy:     newProxy(reg, router),
 		ws:        api.Handler,
+		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
 	}
 }
 
 // Close releases daemon-owned resources that live outside the
-// http.Server itself: currently just killing every still-running
-// terminal session's shell process and PTY (see
+// http.Server itself: killing every still-running agent Run (see
+// internal/runs.Registry.CloseAll) and terminal session's shell/PTY (see
 // internal/terminal.Registry.CloseAll), so a graceful daemon shutdown
-// (cmdServe, in cmd/smind/serve.go) doesn't leave any orphaned behind.
-// Safe to call once, after http.Server.Shutdown has stopped accepting new
-// /ws connections.
+// (cmdServe, in cmd/smind/serve.go) doesn't leave either kind of
+// subprocess orphaned behind. Safe to call once, after
+// http.Server.Shutdown has stopped accepting new /ws connections.
 func (s *Server) Close() {
+	s.runs.CloseAll()
 	s.terminals.CloseAll()
 }
 
