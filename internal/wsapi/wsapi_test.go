@@ -140,7 +140,7 @@ func newTestTask(t *testing.T, wm *workspace.Manager, scenario string) store.Tas
 }
 
 func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
-	return taskrunner.New(wm, taskrunner.WithACPCommand([]string{fakeACPAgentPath}))
+	return taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 }
 
 func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
