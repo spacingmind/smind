@@ -74,70 +74,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		c.eventsBus = bus
 		c.serve(r.Context())
 	})
-	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
-}
-
-// busWorkspaceNotifier adapts the shared event bus to workspace.Notifier,
-// translating each Manager lifecycle notification into its ADR-0005/0009
-// wire payload.
-type busWorkspaceNotifier struct {
-	bus *eventBus
-}
-
-func (b busWorkspaceNotifier) NotifyTaskStatus(taskID int64, status string) {
-	b.bus.Publish(Event{Topic: TopicTaskStatus, Payload: taskStatusPayload{TaskID: taskID, Status: status}})
-}
-
-func (b busWorkspaceNotifier) NotifyWorkspaceCreated(w store.Workspace) {
-	b.bus.Publish(Event{Topic: TopicWorkspaceCreated, Payload: workspaceCreatedPayload{Workspace: w}})
-}
-
-func (b busWorkspaceNotifier) NotifyWorkspaceDeleted(id int64) {
-	b.bus.Publish(Event{Topic: TopicWorkspaceDeleted, Payload: workspaceDeletedPayload{ID: id}})
-}
-
-func (b busWorkspaceNotifier) NotifySpaceCreated(sp store.Space) {
-	b.bus.Publish(Event{Topic: TopicSpaceCreated, Payload: spaceCreatedPayload{Space: sp}})
-}
-
-func (b busWorkspaceNotifier) NotifySpaceDeleted(id, workspaceID int64) {
-	b.bus.Publish(Event{Topic: TopicSpaceDeleted, Payload: spaceDeletedPayload{ID: id, WorkspaceID: workspaceID}})
-}
-
-func (b busWorkspaceNotifier) NotifyTaskCreated(t store.Task) {
-	b.bus.Publish(Event{Topic: TopicTaskCreated, Payload: taskCreatedPayload{Task: t}})
-}
-
-func (b busWorkspaceNotifier) NotifyTaskUpdated(t store.Task) {
-	b.bus.Publish(Event{Topic: TopicTaskUpdated, Payload: taskUpdatedPayload{Task: t}})
-}
-
-func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
-	b.bus.Publish(Event{Topic: TopicTaskArchived, Payload: taskArchivedPayload{Task: t}})
-}
-
-func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
-	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
-}
-
-// busRunNotifier adapts the shared event bus to runs.Notifier, translating
-// each Registry lifecycle notification into its ADR-0005 wire payload.
-type busRunNotifier struct {
-	bus *eventBus
-}
-
-func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
-	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
-		RunID: s.ID, TaskID: s.TaskID, Status: string(s.Status),
-		StopReason: s.StopReason, Err: s.Err,
-	}})
-}
-
-func (b busRunNotifier) NotifyPermissionPending(runID string, taskID int64, requestID, summary string, options []taskrunner.PermissionOption) {
-	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
-		RunID: runID, TaskID: taskID, RequestID: requestID, Summary: summary,
-		Options: toPermissionOptionParams(options),
-	}})
+	return &API{Handler: handler, Runs: reg, Terminals: treg}
 }
 
 // Handler returns the http.Handler for the /ws endpoint alone -- a thin
