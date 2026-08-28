@@ -90,10 +90,10 @@ func readTerminalResponses(t *testing.T, ws *websocket.Conn, ids []string, timeo
 
 func TestServer_TerminalCreateAttachWrite_RealShell(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "create", "terminal.create", map[string]any{"taskId": task.ID})
@@ -156,10 +156,10 @@ func TestServer_TerminalCreateAttachWrite_RealShell(t *testing.T) {
 // TestServer_RunAttach_SecondConnectionMidRun.
 func TestServer_TerminalAttach_SecondConnectionSeesBackfill(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	creator := dialWS(t, srv, "tok")
 	sendRequest(t, creator, "create", "terminal.create", map[string]any{"taskId": task.ID})
@@ -199,10 +199,10 @@ func TestServer_TerminalAttach_SecondConnectionSeesBackfill(t *testing.T) {
 // no-op/fixed-default implementation.
 func TestServer_TerminalResize_ReachesPTY(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "create", "terminal.create", map[string]any{"taskId": task.ID})
@@ -238,10 +238,10 @@ func TestServer_TerminalResize_ReachesPTY(t *testing.T) {
 // that. Mirrors run_test.go's TestServer_RunAttach_DetachDoesNotStopRun.
 func TestServer_TerminalAttach_DetachDoesNotCloseSession(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "create", "terminal.create", map[string]any{"taskId": task.ID})
@@ -305,10 +305,10 @@ func TestServer_TerminalAttach_DetachDoesNotCloseSession(t *testing.T) {
 // spawned pid; this test proves the wire-level contract on top of it.
 func TestServer_TerminalClose_ActuallyClosesSession(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "create", "terminal.create", map[string]any{"taskId": task.ID})
@@ -356,9 +356,9 @@ func TestServer_TerminalClose_ActuallyClosesSession(t *testing.T) {
 // workspace manager doesn't know about.
 func TestServer_TerminalCreate_UnknownTask(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "create", "terminal.create", map[string]any{"taskId": 99999})
@@ -373,11 +373,11 @@ func TestServer_TerminalCreate_UnknownTask(t *testing.T) {
 // Registry knows about.
 func TestServer_TerminalList_FiltersByTask(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	taskA := newTestTask(t, wm, "")
 	taskB := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "createA", "terminal.create", map[string]any{"taskId": taskA.ID})

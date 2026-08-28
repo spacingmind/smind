@@ -40,7 +40,7 @@ func registerTestRun(reg *Registry, id string) *run {
 // to also catch any actual data race in record/Subscribe/finish.
 func TestRegistry_Subscribe_ConcurrentBackfillLiveRace(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg := newTestRegistry(t, newTestStore(t))
 	r := registerTestRun(reg, "run-1")
 
 	const total = 300
