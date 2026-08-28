@@ -69,7 +69,7 @@ func cmdServe(args []string) int {
 		// real GLM credentials or network access. Unset (the normal case),
 		// this changes nothing: taskrunner.New's own default
 		// (acp.GLMCommand()) applies exactly as before.
-		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(strings.Fields(cmd)))
+		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, strings.Fields(cmd)))
 	}
 	runner := taskrunner.New(wm, runnerOpts...)
 

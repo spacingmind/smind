@@ -22,6 +22,12 @@ func drainEvents(events <-chan Event) []Event {
 	return got
 }
 
+// glmRunner's newACPClient override ignores the command it's given and
+// always spawns fakeACPAgentPath, so it works identically for driving
+// ProviderKimi turns in tests too -- runACP is provider-agnostic past the
+// r.acpCommands lookup (see TestRunner_RunPrompt_Kimi), so this one helper
+// covers every ACP-speaking provider rather than needing a kimi-specific
+// twin.
 func glmRunner(wm *workspace.Manager) *Runner {
 	r := New(wm)
 	r.newACPClient = func(_ []string, opts ...acp.Option) (acpBackend, error) {
@@ -74,6 +80,62 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	}
 	if got[2].Type != EventTypeDone || got[2].StopReason != "end_turn" {
 		t.Fatalf("event[2] = %+v, want EventTypeDone/end_turn", got[2])
+	}
+}
+
+// TestRunner_RunPrompt_Kimi proves ProviderKimi is driven through the same
+// ACP flow as ProviderGLM (runACP), not a separate/duplicated code path --
+// it exercises the real r.acpCommands[ProviderKimi] lookup inside RunPrompt,
+// then (via glmRunner's newACPClient override) drives the same real fake
+// ACP agent GLM's own test drives.
+func TestRunner_RunPrompt_Kimi(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "")
+	r := glmRunner(wm)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("got %d events, want 3: %+v", len(got), got)
+	}
+	if got[2].Type != EventTypeDone || got[2].StopReason != "end_turn" {
+		t.Fatalf("event[2] = %+v, want EventTypeDone/end_turn", got[2])
+	}
+}
+
+// TestRunner_WithACPCommand_IsPerProviderIndependent proves overriding one
+// ACP provider's command (via the real WithACPCommand option, not the
+// test-only newACPClient seam) leaves every other ACP provider's default
+// untouched -- a real behavior requirement once acpCommands became a map
+// keyed by provider instead of one shared field.
+func TestRunner_WithACPCommand_IsPerProviderIndependent(t *testing.T) {
+	t.Parallel()
+	custom := []string{"custom-glm-binary"}
+	r := New(nil, WithACPCommand(ProviderGLM, custom))
+
+	got := r.acpCommands[ProviderGLM]
+	if len(got) != 1 || got[0] != custom[0] {
+		t.Fatalf("acpCommands[ProviderGLM] = %v, want %v", got, custom)
+	}
+
+	wantKimi := acp.KimiCommand()
+	gotKimi := r.acpCommands[ProviderKimi]
+	if len(gotKimi) != len(wantKimi) {
+		t.Fatalf("acpCommands[ProviderKimi] = %v, want unchanged default %v", gotKimi, wantKimi)
+	}
+	for i := range wantKimi {
+		if gotKimi[i] != wantKimi[i] {
+			t.Fatalf("acpCommands[ProviderKimi] = %v, want unchanged default %v", gotKimi, wantKimi)
+		}
 	}
 }
 
