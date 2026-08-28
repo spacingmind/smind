@@ -487,7 +487,6 @@ func (reg *Registry) finish(r *run, err error) {
 		subs = append(subs, q)
 	}
 	r.subscribers = make(map[int]*subQueue)
-	status, finishedAt, stopReason, errMsg := string(r.status), r.finishedAt, r.stopReason, r.errMsg
 	r.mu.Unlock()
 
 	reg.notifyRunStatus(r)
@@ -499,12 +498,6 @@ func (reg *Registry) finish(r *run, err error) {
 	for _, q := range subs {
 		q.closeQueue()
 	}
-
-	// Best-effort, same reasoning as record's persistence call: finish has
-	// no caller able to act on a persistence error, and the in-memory
-	// status transition above (what every other Registry method actually
-	// relies on) already happened regardless.
-	_, _ = reg.st.UpdateRunStatus(r.id, status, finishedAt, stopReason, errMsg)
 
 	reg.retain(r.id)
 
