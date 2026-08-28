@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -41,11 +42,112 @@ type Registry struct {
 	// finishedOrder records finished run IDs in finish order, so eviction
 	// (see finishedRetentionCap) always drops the oldest first.
 	finishedOrder []string
+
+	// st persists every Run's row and event history so both survive a
+	// daemon restart -- see New's doc comment for reconciliation/rehydration
+	// and Start/record/finish for the write path.
+	st *store.Store
 }
 
-// New returns an empty Registry.
-func New() *Registry {
-	return &Registry{runs: make(map[string]*run)}
+// New returns a Registry backed by st for persistence, after two
+// synchronous startup steps so the returned Registry is immediately
+// consistent with what's on disk:
+//
+//  1. Reconciliation: any persisted run row still status "running" is
+//     transitioned to StatusInterrupted. Surviving to a fresh process start
+//     with that status means the subprocess that was driving it is
+//     definitely gone (nothing ties a run.start-originated subprocess's
+//     lifetime to the daemon's -- see CloseAll's doc comment), so "running"
+//     would be a lie and there is no way to resume it.
+//  2. Rehydration: the most recent finishedRetentionCap persisted runs
+//     (each with its full event history) are loaded into the in-memory map
+//     as already-terminal runs, so run.list/run.attach/run.logs keep
+//     serving recent history exactly as before the restart -- attaching to
+//     a rehydrated run immediately delivers its backfilled history then
+//     closes, same as attaching to any other already-finished run.
+func New(st *store.Store) (*Registry, error) {
+	reg := &Registry{runs: make(map[string]*run), st: st}
+
+	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
+		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
+	}
+
+	rows, err := st.ListRecentRuns(finishedRetentionCap)
+	if err != nil {
+		return nil, fmt.Errorf("runs: rehydrate: %w", err)
+	}
+	for _, row := range rows {
+		r, err := rehydrateRun(st, row)
+		if err != nil {
+			return nil, fmt.Errorf("runs: rehydrate run %q: %w", row.ID, err)
+		}
+		reg.runs[r.id] = r
+		reg.finishedOrder = append(reg.finishedOrder, r.id)
+	}
+	// ListRecentRuns orders most-recent-first; finishedOrder must be
+	// oldest-first (retain/CloseAll assume eviction drops index 0 first).
+	for i, j := 0, len(reg.finishedOrder)-1; i < j; i, j = i+1, j-1 {
+		reg.finishedOrder[i], reg.finishedOrder[j] = reg.finishedOrder[j], reg.finishedOrder[i]
+	}
+
+	return reg, nil
+}
+
+// closedChan returns an already-closed channel, used for rehydrated runs:
+// they have no live driving goroutine to close closedCh for them, but the
+// field must still be non-nil and already-signaled so a caller that happens
+// to wait on it (CloseAll skips them via status != StatusRunning, but the
+// invariant should hold regardless) never blocks.
+func closedChan() chan struct{} {
+	ch := make(chan struct{})
+	close(ch)
+	return ch
+}
+
+// rehydrateRun rebuilds an in-memory run from a persisted store.Run row and
+// its store.RunEvent history, for New's rehydration step. The result is
+// always terminal (StatusRunning never survives reconciliation, which runs
+// before this), so it carries no live ctx/cancel and an already-closed
+// closedCh.
+func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
+	storedEvents, err := st.ListRunEvents(row.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list events: %w", err)
+	}
+	history := make([]Event, 0, len(storedEvents))
+	for _, se := range storedEvents {
+		e, err := decodeEvent(se.EventData)
+		if err != nil {
+			return nil, fmt.Errorf("decode event seq %d: %w", se.Seq, err)
+		}
+		history = append(history, e)
+	}
+	var nextSeq int64
+	if n := len(storedEvents); n > 0 {
+		nextSeq = storedEvents[n-1].Seq + 1
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // rehydrated runs are always already-terminal; ctx is inert.
+
+	return &run{
+		id:                 row.ID,
+		taskID:             row.TaskID,
+		provider:           taskrunner.Provider(row.Provider),
+		prompt:             row.Prompt,
+		startedAt:          row.StartedAt,
+		ctx:                ctx,
+		cancel:             cancel,
+		closedCh:           closedChan(),
+		status:             Status(row.Status),
+		finishedAt:         row.FinishedAt,
+		stopReason:         row.StopReason,
+		errMsg:             row.ErrMsg,
+		history:            history,
+		nextEventSeq:       nextSeq,
+		subscribers:        make(map[int]*subQueue),
+		pendingPermissions: make(map[string]chan string),
+	}, nil
 }
 
 // run is a Registry's internal bookkeeping for one Run: identity fields
@@ -83,6 +185,16 @@ type run struct {
 	history     []Event
 	subscribers map[int]*subQueue
 	nextSubID   int
+
+	// nextEventSeq is the seq to assign the next persisted run_events row
+	// (see Registry.record) -- strictly increasing per run, starting at 0,
+	// carried forward from a rehydrated run's last persisted seq so a run
+	// that somehow kept going past a restart (it can't today; reconciliation
+	// always marks a still-"running" row interrupted first) wouldn't reuse
+	// seq values. Guarded by mu for consistency with every other run field,
+	// even though record's own single-writer-per-run guarantee (see its doc
+	// comment) would make that unnecessary on its own.
+	nextEventSeq int64
 
 	// pendingPermissions holds one buffered(1) channel per permission
 	// request currently awaiting an answer, keyed by request id -- see
@@ -139,6 +251,18 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
 		pendingPermissions: make(map[string]chan string),
+	}
+
+	// Persisted before this run is registered/driven, so Start fails fast
+	// (and never starts an agent subprocess for a run whose row didn't make
+	// it to disk) rather than only surfacing a persistence problem later,
+	// silently, from inside the drive goroutine.
+	if _, err := reg.st.CreateRun(store.Run{
+		ID: id, TaskID: taskID, Provider: string(provider), Prompt: prompt,
+		Status: string(StatusRunning), StartedAt: r.startedAt,
+	}); err != nil {
+		cancel()
+		return "", fmt.Errorf("runs: start: persist run: %w", err)
 	}
 
 	reg.mu.Lock()
@@ -293,11 +417,24 @@ func (reg *Registry) record(r *run, e Event) {
 	if e.Type == taskrunner.EventTypeDone {
 		r.stopReason = e.StopReason
 	}
+	seq := r.nextEventSeq
+	r.nextEventSeq++
 	subs := make([]*subQueue, 0, len(r.subscribers))
 	for _, q := range r.subscribers {
 		subs = append(subs, q)
 	}
 	r.mu.Unlock()
+
+	// Best-effort: a transient persistence failure here doesn't corrupt or
+	// stop the run itself (the in-memory history/subscriber delivery above
+	// already happened), and record has no caller able to act on an error --
+	// it runs on drive's internal forwarding goroutine, not on behalf of any
+	// request. A run whose events failed to persist just won't survive a
+	// restart with full history; it still finishes and streams normally in
+	// the current process.
+	if data, err := encodeEvent(e); err == nil {
+		_, _ = reg.st.AppendRunEvent(r.id, seq, data)
+	}
 
 	for _, q := range subs {
 		q.push(e)
@@ -322,6 +459,7 @@ func (reg *Registry) finish(r *run, err error) {
 		subs = append(subs, q)
 	}
 	r.subscribers = make(map[int]*subQueue)
+	status, finishedAt, stopReason, errMsg := string(r.status), r.finishedAt, r.stopReason, r.errMsg
 	r.mu.Unlock()
 
 	// Close every subscriber still attached: their relay goroutines drain
@@ -331,6 +469,12 @@ func (reg *Registry) finish(r *run, err error) {
 	for _, q := range subs {
 		q.closeQueue()
 	}
+
+	// Best-effort, same reasoning as record's persistence call: finish has
+	// no caller able to act on a persistence error, and the in-memory
+	// status transition above (what every other Registry method actually
+	// relies on) already happened regardless.
+	_, _ = reg.st.UpdateRunStatus(r.id, status, finishedAt, stopReason, errMsg)
 
 	reg.retain(r.id)
 

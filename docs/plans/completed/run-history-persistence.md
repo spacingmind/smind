@@ -127,16 +127,49 @@
 
 ## Progress
 
-- [ ] Schema: `runs` + `run_events` tables
-- [ ] `internal/store`: CRUD methods + tests
-- [ ] `internal/runs`: `Registry` takes `*store.Store`; persists on
+- [x] Schema: `runs` + `run_events` tables
+- [x] `internal/store`: CRUD methods + tests
+- [x] `internal/runs`: `Registry` takes `*store.Store`; persists on
       Start/record/finish; rehydrates + reconciles in `New`
-- [ ] `internal/runs`: tests (persistence, restart simulation, interrupted
+- [x] `internal/runs`: tests (persistence, restart simulation, interrupted
       reconciliation, race)
-- [ ] Thread `*store.Store` through `wsapi.New` / `server.New` /
-      `cmd/smind/serve.go`
-- [ ] Verification (unit/race tests + live-daemon restart E2E)
+- [x] Thread `*store.Store` through `wsapi.New` / `server.New` /
+      `cmd/smind/serve.go` (and every test call site: `internal/wsapi`,
+      `internal/wsclient`, `internal/server`)
+- [x] Verification (unit/race tests + live-daemon restart E2E)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+- **Schema + `internal/store` CRUD** (`internal/store/runs_test.go`):
+  `TestStore_Runs`, `TestStore_GetRunMissing`, `TestStore_ListRecentRuns`,
+  `TestStore_MarkRunningRunsInterrupted`, `TestStore_RunEvents`,
+  `TestStore_RunsSurviveReopen` (Close + reopen the same db file, confirm
+  run + events readable) -- all pass.
+- **Write path (Start/record/finish persist)**
+  (`internal/runs/runs_test.go`): `TestRegistry_Start_PersistsRunRowImmediately`
+  (row queryable via the store before the turn does anything),
+  `TestRegistry_Record_PersistsEventsInOrder` (persisted `run_events` match
+  in-memory `History` exactly, same order), `TestRegistry_Finish_PersistsTerminalStatus`
+  (`done` and `stopped` subtests) -- all pass.
+- **Rehydrate-on-restart** (`TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries`):
+  drives a run to completion on one `Registry`, discards it, builds a new
+  `Registry` against the same store, confirms `List`/`History`/`Subscribe`
+  all behave identically to the original -- pass.
+- **Interrupted reconciliation** (`TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted`):
+  a run left "running" in the store (no Stop/CloseAll, simulating a crash)
+  comes back `StatusInterrupted` from a new `Registry` -- pass.
+- **Full suite**: `go test -race -count=3 ./...` clean across every
+  package. `gofmt -l`, `go vet ./...`, `task build` clean; `git status`
+  after `task build` showed exactly the expected changed/new files.
+- **Live-daemon E2E, graceful restart**: real `bin/smind serve`, a real
+  `run.start` turn driven to completion over a real WebSocket connection,
+  graceful SIGTERM shutdown, fresh daemon restart, `run.logs` for that ID
+  still returns the full 3-event history (`Hello, ` / `world!` / done,
+  `end_turn`) -- confirmed via a Node driver script.
+- **Live-daemon E2E, crash + reconciliation**: same shape, but a `"hang"`
+  scenario run left genuinely in-flight, daemon killed with SIGKILL (no
+  graceful `CloseAll`). Confirmed via direct sqlite query that the row was
+  left `status = "running"` immediately after the kill; after restarting
+  the daemon, both a direct sqlite query and `run.logs` over the wire
+  report `status = "interrupted"`, with the one event recorded before the
+  hang still present.

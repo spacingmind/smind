@@ -64,7 +64,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
+// newTestWorkspaceManager also returns the underlying store: newTestWSServer
+// needs it to back the /ws API's runs.Registry persistence with the same
+// database wm's tasks live in (runs.task_id references tasks(id), enforced
+// via the foreign_keys pragma -- see store.sqliteDSN).
+func newTestWorkspaceManager(t *testing.T) (*workspace.Manager, *store.Store) {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -75,7 +79,7 @@ func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
 			t.Errorf("store.Close() error = %v", err)
 		}
 	})
-	return workspace.New(s)
+	return workspace.New(s), s
 }
 
 // newTestRepo creates a real git repository in a temp dir with one commit,
@@ -139,9 +143,13 @@ func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
 	return taskrunner.New(wm, taskrunner.WithACPCommand([]string{fakeACPAgentPath}))
 }
 
-func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, token string) *httptest.Server {
+func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(Handler(wm, runner, token))
+	handler, err := Handler(wm, runner, db, token)
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	return srv
 }
@@ -236,9 +244,9 @@ func expectNoMoreMessages(t *testing.T, ws *websocket.Conn, id string, timeout t
 
 func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	repo := newTestRepo(t)
@@ -362,7 +370,8 @@ func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 
 func TestServer_AuthRejection(t *testing.T) {
 	t.Parallel()
-	srv := newTestWSServer(t, nil, nil, "correct-token")
+	_, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, nil, nil, db, "correct-token")
 
 	tests := []struct {
 		name  string
@@ -394,10 +403,10 @@ func TestServer_AuthRejection(t *testing.T) {
 
 func TestServer_ConcurrentInFlightRequests(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "prompt", "task.prompt", map[string]any{
@@ -442,10 +451,10 @@ func TestServer_ConcurrentInFlightRequests(t *testing.T) {
 // response the agent will never send in time.
 func TestServer_TaskPromptStreamsIncrementally(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{
@@ -477,10 +486,10 @@ func TestServer_TaskPromptStreamsIncrementally(t *testing.T) {
 // for the cancelled request's id, no duplicate or late second one.
 func TestServer_TaskCancel_StopsRunningTurn(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{

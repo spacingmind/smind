@@ -15,10 +15,10 @@ import (
 // run.attach rather than task.prompt.
 func TestServer_RunAttach_SecondConnectionMidRun(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "task.prompt", map[string]any{
@@ -89,10 +89,10 @@ func TestServer_RunAttach_SecondConnectionMidRun(t *testing.T) {
 // foreground `task send` needs run.start instead.
 func TestServer_RunStart_NotStoppedByOwnRequestCompletion(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "run.start", map[string]any{
@@ -170,10 +170,10 @@ func TestServer_RunStart_NotStoppedByOwnRequestCompletion(t *testing.T) {
 // backfill, no live events, no hang) rather than blocking forever.
 func TestServer_RunAttach_AlreadyFinished(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "task.prompt", map[string]any{
@@ -230,10 +230,10 @@ func TestServer_RunAttach_AlreadyFinished(t *testing.T) {
 // mechanism.
 func TestServer_RunStop_CrossConnection(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "task.prompt", map[string]any{
@@ -294,10 +294,10 @@ func TestServer_RunStop_CrossConnection(t *testing.T) {
 // the run running -- only run.stop does that.
 func TestServer_RunAttach_DetachDoesNotStopRun(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "task.prompt", map[string]any{
@@ -352,10 +352,10 @@ func TestServer_RunAttach_DetachDoesNotStopRun(t *testing.T) {
 // last N events instead of the full history.
 func TestServer_RunLogs_Tail(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{
@@ -409,10 +409,10 @@ func TestServer_RunLogs_Tail(t *testing.T) {
 // connection, not to a run.
 func TestServer_TaskCancel_OnlyAffectsItsOwnRequest(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{
@@ -465,10 +465,10 @@ func TestServer_TaskCancel_OnlyAffectsItsOwnRequest(t *testing.T) {
 // task.cancel does.
 func TestServer_ConnectionClose_StopsTaskPromptRun(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{
@@ -520,10 +520,10 @@ func TestServer_ConnectionClose_StopsTaskPromptRun(t *testing.T) {
 // distinct from a plain "chunk".
 func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 
 	starter := dialWS(t, srv, "tok")
 	sendRequest(t, starter, "1", "task.prompt", map[string]any{
@@ -611,10 +611,10 @@ func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
 // risk this test exists to rule out, not just exercise the happy path.
 func TestServer_RunLogs_ShowsPermissionRequestAndResolved(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{

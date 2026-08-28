@@ -14,12 +14,12 @@ import (
 // gets back an empty diff, not an error.
 func TestServer_TaskDiff_RoundTrip(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
 
 	t.Run("changed worktree", func(t *testing.T) {
 		task := newTestTask(t, wm, "diff me")
-		srv := newTestWSServer(t, wm, runner, "tok")
+		srv := newTestWSServer(t, wm, runner, db, "tok")
 		ws := dialWS(t, srv, "tok")
 
 		sendRequest(t, ws, "1", "task.diff", map[string]any{"taskId": task.ID})
@@ -43,7 +43,7 @@ func TestServer_TaskDiff_RoundTrip(t *testing.T) {
 
 	t.Run("unchanged worktree", func(t *testing.T) {
 		task := newTestTask(t, wm, "")
-		srv := newTestWSServer(t, wm, runner, "tok")
+		srv := newTestWSServer(t, wm, runner, db, "tok")
 		ws := dialWS(t, srv, "tok")
 
 		sendRequest(t, ws, "1", "task.diff", map[string]any{"taskId": task.ID})

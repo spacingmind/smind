@@ -79,7 +79,10 @@ func cmdServe(args []string) int {
 	}
 	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
 
-	srv := server.New(cfg, registry, router, wm, runner, token)
+	srv, err := server.New(cfg, registry, router, wm, runner, db, token)
+	if err != nil {
+		log.Fatalf("server: %v", err)
+	}
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
