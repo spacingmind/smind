@@ -16,9 +16,14 @@ import (
 )
 
 // fakeACPAgentPath is the compiled internal/taskrunner/fakeagent binary,
-// built once for every test that exercises the GLM path against a real ACP
-// subprocess -- mirroring internal/acp's own TestMain pattern.
+// built once for every test that exercises the GLM/Kimi path against a real
+// ACP subprocess -- mirroring internal/acp's own TestMain pattern.
 var fakeACPAgentPath string
+
+// fakeCodexAgentPath is the compiled internal/codex/fakeagent binary, built
+// once for every test that exercises the Codex-native path against a real
+// app-server subprocess.
+var fakeCodexAgentPath string
 
 // TestMain doubles as the entrypoint for the fake Claude Code CLI: when
 // TASKRUNNER_FAKE_CLAUDE_CLI=1 is set (only ever true in a subprocess this
@@ -49,6 +54,16 @@ func TestMain(m *testing.M) {
 	}
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
+	}
+
+	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	buildCodex := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent")
+	buildCodex.Dir, err = os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	if out, err := buildCodex.CombinedOutput(); err != nil {
+		panic(fmt.Sprintf("build codex fakeagent: %v: %s", err, out))
 	}
 
 	smindHome, err := os.MkdirTemp("", "smind-taskrunner-home-")
