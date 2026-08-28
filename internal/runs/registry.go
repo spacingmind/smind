@@ -442,24 +442,46 @@ func (reg *Registry) record(r *run, e Event) {
 }
 
 func (reg *Registry) finish(r *run, err error) {
-	r.mu.Lock()
 	now := time.Now()
-	r.finishedAt = &now
+
+	r.mu.Lock()
+	stopRequested := r.stopRequested
+	stopReason := r.stopReason
+	r.mu.Unlock()
+
+	var status Status
+	var errMsg string
 	switch {
-	case r.stopRequested:
-		r.status = StatusStopped
+	case stopRequested:
+		status = StatusStopped
 	case err != nil:
-		r.status = StatusError
-		r.errMsg = err.Error()
+		status = StatusError
+		errMsg = err.Error()
 	default:
-		r.status = StatusDone
+		status = StatusDone
 	}
+
+	// Persist before the in-memory status transition below becomes
+	// visible, not after: otherwise a caller that observes the terminal
+	// status in memory (History/List, CloseAll's own callers, a test
+	// polling waitForStatus) has no guarantee the persisted row already
+	// matches -- a real, CI-reproducible race (30/30 passing locally,
+	// failing under CI's slower scheduling), not hypothetical. Best-effort
+	// past this point: finish has no caller able to act on a persistence
+	// error, and the in-memory transition below (what every other Registry
+	// method actually relies on) happens regardless of whether this
+	// succeeds.
+	_, _ = reg.st.UpdateRunStatus(r.id, string(status), &now, stopReason, errMsg)
+
+	r.mu.Lock()
+	r.finishedAt = &now
+	r.status = status
+	r.errMsg = errMsg
 	subs := make([]*subQueue, 0, len(r.subscribers))
 	for _, q := range r.subscribers {
 		subs = append(subs, q)
 	}
 	r.subscribers = make(map[int]*subQueue)
-	status, finishedAt, stopReason, errMsg := string(r.status), r.finishedAt, r.stopReason, r.errMsg
 	r.mu.Unlock()
 
 	// Close every subscriber still attached: their relay goroutines drain
@@ -469,12 +491,6 @@ func (reg *Registry) finish(r *run, err error) {
 	for _, q := range subs {
 		q.closeQueue()
 	}
-
-	// Best-effort, same reasoning as record's persistence call: finish has
-	// no caller able to act on a persistence error, and the in-memory
-	// status transition above (what every other Registry method actually
-	// relies on) already happened regardless.
-	_, _ = reg.st.UpdateRunStatus(r.id, status, finishedAt, stopReason, errMsg)
 
 	reg.retain(r.id)
 
