@@ -21,4 +21,10 @@ const (
 	// over the Agent Client Protocol (internal/acp) -- Kimi's CLI speaks
 	// ACP natively, the same as GLM's, just a different spawned command.
 	ProviderKimi Provider = "kimi"
+
+	// ProviderCodexNative drives a task via OpenAI's Codex CLI, spoken over
+	// its own native "app-server" JSON-RPC-over-stdio protocol
+	// (internal/codex) -- not ACP, unlike GLM/Kimi; see internal/codex's
+	// package doc comment for why.
+	ProviderCodexNative Provider = "codex-native"
 )

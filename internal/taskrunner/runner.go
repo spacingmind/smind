@@ -6,6 +6,7 @@ import (
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -25,6 +26,17 @@ type acpBackend interface {
 // test-substitution reason as acpBackend.
 type claudeBackend interface {
 	Prompt(ctx context.Context, text string, updates chan<- claudecode.Message) (claudecode.ResultMessage, error)
+	Close() error
+}
+
+// codexBackend is the subset of *codex.Client's methods RunPrompt needs to
+// drive a Codex-native turn. Same shape as acpBackend (Codex's client also
+// needs an explicit Initialize/NewSession handshake, unlike claudeBackend),
+// same test-substitution reason.
+type codexBackend interface {
+	Initialize(ctx context.Context) error
+	NewSession(ctx context.Context, cwd string) (string, error)
+	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
 	Close() error
 }
 
@@ -63,6 +75,21 @@ func WithACPCommand(provider Provider, command []string) Option {
 	return func(r *Runner) { r.acpCommands[provider] = command }
 }
 
+// WithCodexPermissionPolicy sets the codex.PermissionPolicy passed to every
+// Codex-native client this Runner constructs. Left unset, codex.New's own
+// default (AutoApprovePolicy) applies.
+func WithCodexPermissionPolicy(p codex.PermissionPolicy) Option {
+	return func(r *Runner) { r.codexPermissionPolicy = p }
+}
+
+// WithCodexCommand overrides the command spawned for ProviderCodexNative
+// turns, in place of the default codex.DefaultCommand(). Same reasoning and
+// use (pointing at a compiled fake-agent binary in tests) as
+// WithACPCommand.
+func WithCodexCommand(command []string) Option {
+	return func(r *Runner) { r.codexCommand = command }
+}
+
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -84,6 +111,7 @@ type Runner struct {
 
 	acpPermissionPolicy    acp.PermissionPolicy
 	claudePermissionPolicy claudecode.PermissionPolicy
+	codexPermissionPolicy  codex.PermissionPolicy
 
 	// acpCommands maps each ACP-speaking provider to the command spawned for
 	// its turns. Seeded in New with every known ACP provider's real default
@@ -93,13 +121,22 @@ type Runner struct {
 	// than spawning an empty command.
 	acpCommands map[Provider][]string
 
-	// newACPClient and newClaudeClient default to wrapping acp.New and
-	// claudecode.New. Overridable only from within this package's tests,
-	// to point at a fake agent binary / fake CLI instead of a real one --
-	// neither client package exposes a constructor seam of its own, and a
-	// broader public abstraction isn't warranted for a need this narrow.
+	// codexCommand is the command spawned for ProviderCodexNative turns.
+	// Defaults to codex.DefaultCommand(); overridable via WithCodexCommand.
+	// Not part of acpCommands: Codex isn't an ACP-speaking provider (see
+	// internal/codex's package doc comment), so it doesn't belong in that
+	// map.
+	codexCommand []string
+
+	// newACPClient, newClaudeClient, and newCodexClient default to wrapping
+	// acp.New, claudecode.New, and codex.New. Overridable only from within
+	// this package's tests, to point at a fake agent binary / fake CLI
+	// instead of a real one -- none of the three client packages expose a
+	// constructor seam of their own, and a broader public abstraction isn't
+	// warranted for a need this narrow.
 	newACPClient    func(command []string, opts ...acp.Option) (acpBackend, error)
 	newClaudeClient func(worktreePath string, opts ...claudecode.Option) (claudeBackend, error)
+	newCodexClient  func(command []string, opts ...codex.Option) (codexBackend, error)
 }
 
 // New returns a Runner backed by wm.
@@ -110,11 +147,15 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
 		},
+		codexCommand: codex.DefaultCommand(),
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
 		newClaudeClient: func(worktreePath string, opts ...claudecode.Option) (claudeBackend, error) {
 			return claudecode.New(worktreePath, opts...)
+		},
+		newCodexClient: func(command []string, opts ...codex.Option) (codexBackend, error) {
+			return codex.New(command, opts...)
 		},
 	}
 	for _, opt := range opts {
@@ -160,6 +201,8 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
+	case ProviderCodexNative:
+		return r.runCodexNative(ctx, worktreePath, prompt, decider, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -277,6 +320,58 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
+	case <-ctx.Done():
+	}
+	return nil
+}
+
+// runCodexNative drives one turn against a Codex-native agent (internal/codex).
+// Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
+// runClaudeNative), since codex.Client needs the same two-step setup ACP
+// clients do.
+func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+	var opts []codex.Option
+	switch {
+	case decider != nil:
+		opts = append(opts, codex.WithPermissionPolicy(codexDeciderAdapter{decider}))
+	case r.codexPermissionPolicy != nil:
+		opts = append(opts, codex.WithPermissionPolicy(r.codexPermissionPolicy))
+	}
+
+	client, err := r.newCodexClient(r.codexCommand, opts...)
+	if err != nil {
+		return fmt.Errorf("taskrunner: spawn codex agent: %w", err)
+	}
+	defer client.Close()
+
+	if err := client.Initialize(ctx); err != nil {
+		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
+	}
+	threadID, err := client.NewSession(ctx, worktreePath)
+	if err != nil {
+		return fmt.Errorf("taskrunner: codex new thread: %w", err)
+	}
+
+	updates := make(chan codex.Update)
+	forwardDone := make(chan struct{})
+	go func() {
+		defer close(forwardDone)
+		for u := range updates {
+			select {
+			case events <- Event{Type: EventTypeText, Text: u.Text, Raw: u}:
+			case <-ctx.Done():
+			}
+		}
+	}()
+
+	stopReason, err := client.Prompt(ctx, threadID, prompt, updates)
+	<-forwardDone
+	if err != nil {
+		return fmt.Errorf("taskrunner: codex prompt: %w", err)
+	}
+
+	select {
+	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
 	case <-ctx.Done():
 	}
 	return nil

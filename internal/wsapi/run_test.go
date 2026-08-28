@@ -755,3 +755,48 @@ func TestServer_RunStart_KimiProvider(t *testing.T) {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
 }
+
+// TestServer_RunStart_CodexNativeProvider proves the wire path recognizes
+// provider "codex-native" end to end, mirroring
+// TestServer_RunStart_KimiProvider but through Runner's non-ACP
+// runCodexNative path.
+func TestServer_RunStart_CodexNativeProvider(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := taskrunner.New(wm, taskrunner.WithCodexCommand([]string{fakeCodexAgentPath}))
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "codex-native", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+
+	sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	deadline := time.Now().Add(5 * time.Second)
+	var logs runLogsResult
+	for {
+		env := readEnvelopeFor(t, ws, "2", time.Until(deadline))
+		if err := json.Unmarshal(env.Result, &logs); err != nil {
+			t.Fatalf("decode run.logs result: %v", err)
+		}
+		if logs.Status == string(runs.StatusDone) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for codex-native run to finish, last status %q", logs.Status)
+		}
+		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	}
+	if len(logs.Events) != 3 {
+		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
+	}
+}

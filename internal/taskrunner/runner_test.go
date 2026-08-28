@@ -10,6 +10,7 @@ import (
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -32,6 +33,14 @@ func glmRunner(wm *workspace.Manager) *Runner {
 	r := New(wm)
 	r.newACPClient = func(_ []string, opts ...acp.Option) (acpBackend, error) {
 		return acp.New([]string{fakeACPAgentPath}, opts...)
+	}
+	return r
+}
+
+func codexRunner(wm *workspace.Manager) *Runner {
+	r := New(wm)
+	r.newCodexClient = func(_ []string, opts ...codex.Option) (codexBackend, error) {
+		return codex.New([]string{fakeCodexAgentPath}, opts...)
 	}
 	return r
 }
@@ -136,6 +145,40 @@ func TestRunner_WithACPCommand_IsPerProviderIndependent(t *testing.T) {
 		if gotKimi[i] != wantKimi[i] {
 			t.Fatalf("acpCommands[ProviderKimi] = %v, want unchanged default %v", gotKimi, wantKimi)
 		}
+	}
+}
+
+// TestRunner_RunPrompt_CodexNative proves RunPrompt drives ProviderCodexNative
+// through runCodexNative against a real internal/codex client wired to a
+// fake app-server subprocess, mirroring TestRunner_RunPrompt_GLM's shape
+// but for Codex's async turn/completed completion signal.
+func TestRunner_RunPrompt_CodexNative(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "")
+	r := codexRunner(wm)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("got %d events, want 3: %+v", len(got), got)
+	}
+	if got[0].Type != EventTypeText || got[0].Text != "Hello, " {
+		t.Fatalf("event[0] = %+v, want text %q", got[0], "Hello, ")
+	}
+	if got[1].Type != EventTypeText || got[1].Text != "world!" {
+		t.Fatalf("event[1] = %+v, want text %q", got[1], "world!")
+	}
+	if got[2].Type != EventTypeDone || got[2].StopReason != "completed" {
+		t.Fatalf("event[2] = %+v, want EventTypeDone/completed", got[2])
 	}
 }
 

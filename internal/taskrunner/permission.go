@@ -7,6 +7,7 @@ import (
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 )
 
 // PermissionOption is one choice offered to a PermissionDecider, unifying
@@ -128,4 +129,46 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		return true, req.Input, "", nil, false, nil
 	}
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
+}
+
+// Synthesized PermissionOption IDs for Codex-native turns, whose wire
+// protocol (like Claude Code's) has no options list -- just a request to
+// accept or decline (see codex.PermissionPolicy's doc comment).
+const (
+	codexOptionAccept  = "accept"
+	codexOptionDecline = "decline"
+)
+
+// codexDeciderAdapter adapts a PermissionDecider to codex.PermissionPolicy.
+// Codex's two approval-request kinds (command execution, file change) each
+// have no options list, only a request to accept or decline, so this
+// synthesizes the same two-option shape claudeDeciderAdapter does for
+// Claude Code's can_use_tool request.
+type codexDeciderAdapter struct {
+	decider PermissionDecider
+}
+
+func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
+	summary := fmt.Sprintf("run %s", req.Command)
+	return a.decide(ctx, summary)
+}
+
+func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.FileChangeApprovalRequest) (bool, error) {
+	summary := "change files"
+	if req.Reason != "" {
+		summary = req.Reason
+	}
+	return a.decide(ctx, summary)
+}
+
+func (a codexDeciderAdapter) decide(ctx context.Context, summary string) (bool, error) {
+	opts := []PermissionOption{
+		{ID: codexOptionAccept, Label: "Accept", Kind: "allow_once"},
+		{ID: codexOptionDecline, Label: "Decline", Kind: "reject_once"},
+	}
+	optionID, err := a.decider.Decide(ctx, summary, opts)
+	if err != nil {
+		return false, err
+	}
+	return optionID == codexOptionAccept, nil
 }
