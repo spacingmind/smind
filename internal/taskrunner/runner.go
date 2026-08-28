@@ -75,6 +75,21 @@ func WithACPCommand(provider Provider, command []string) Option {
 	return func(r *Runner) { r.acpCommands[provider] = command }
 }
 
+// WithCodexPermissionPolicy sets the codex.PermissionPolicy passed to every
+// Codex-native client this Runner constructs. Left unset, codex.New's own
+// default (AutoApprovePolicy) applies.
+func WithCodexPermissionPolicy(p codex.PermissionPolicy) Option {
+	return func(r *Runner) { r.codexPermissionPolicy = p }
+}
+
+// WithCodexCommand overrides the command spawned for ProviderCodexNative
+// turns, in place of the default codex.DefaultCommand(). Same reasoning and
+// use (pointing at a compiled fake-agent binary in tests) as
+// WithACPCommand.
+func WithCodexCommand(command []string) Option {
+	return func(r *Runner) { r.codexCommand = command }
+}
+
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -132,6 +147,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
 		},
+		codexCommand: codex.DefaultCommand(),
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -359,21 +375,4 @@ func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string
 	case <-ctx.Done():
 	}
 	return nil
-}
-
-// CommitTask commits whatever is currently staged in taskID's worktree
-// under an agent-authored message -- the same commit primitive the UI's
-// task.commit uses, plus the ADR 0006 Smind-Agent/Smind-Task trailers so
-// review tooling can filter agent commits. provider names the committing
-// agent and lands in the Smind-Agent trailer.
-//
-// Deliberately a taskrunner-level helper, not an agent-visible tool: no
-// agent asks for it today, so exposing it over the agent protocol would be
-// speculative surface (see docs/plans/active/commit-flow.md's Decisions).
-func (r *Runner) CommitTask(taskID int64, provider Provider, message string) (workspace.CommitResult, error) {
-	result, err := r.wm.CommitTask(taskID, message, "agent", string(provider))
-	if err != nil {
-		return workspace.CommitResult{}, fmt.Errorf("taskrunner: commit task %d: %w", taskID, err)
-	}
-	return result, nil
 }
