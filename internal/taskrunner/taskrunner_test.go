@@ -91,6 +91,31 @@ func runFakeClaudeCLI() {
 		fmt.Fprintf(os.Stdout, "%s\n", data)
 	}
 
+	// The client always sends an initialize control_request in New(),
+	// before any prompt -- mirrors claude-agent-sdk-go's own
+	// fakecli_test.go ackInitialize helper. Every scenario below assumes
+	// the control channel is already established by the time it starts
+	// reading the actual prompt line.
+	if !stdin.Scan() {
+		os.Exit(1)
+	}
+	var initEnv struct {
+		Type      string `json:"type"`
+		RequestID string `json:"request_id"`
+	}
+	if err := json.Unmarshal(stdin.Bytes(), &initEnv); err != nil || initEnv.Type != "control_request" {
+		fmt.Fprintf(os.Stderr, "fake claude cli: expected initialize control_request, got %q\n", stdin.Text())
+		os.Exit(1)
+	}
+	writeLine(map[string]any{
+		"type": "control_response",
+		"response": map[string]any{
+			"subtype":    "success",
+			"request_id": initEnv.RequestID,
+			"response":   map[string]any{"success": true},
+		},
+	})
+
 	switch scenario {
 	case "reply":
 		stdin.Scan() // consume the prompt line

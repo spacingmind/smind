@@ -111,7 +111,7 @@ func TestClaudeDeciderAdapter_Allow(t *testing.T) {
 		ToolUseID: "tool-1",
 	}
 
-	allow, updatedInput, denyMessage, err := adapter.Decide(context.Background(), req)
+	allow, updatedInput, denyMessage, updatedPermissions, interrupt, err := adapter.Decide(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
@@ -123,6 +123,9 @@ func TestClaudeDeciderAdapter_Allow(t *testing.T) {
 	}
 	if denyMessage != "" {
 		t.Fatalf("denyMessage = %q, want empty on allow", denyMessage)
+	}
+	if updatedPermissions != nil || interrupt {
+		t.Fatalf("updatedPermissions/interrupt = %+v/%v, want nil/false -- this pass never sets them", updatedPermissions, interrupt)
 	}
 
 	want := []PermissionOption{
@@ -147,7 +150,7 @@ func TestClaudeDeciderAdapter_Deny(t *testing.T) {
 
 	req := claudecode.CanUseToolRequest{ToolName: "Bash", Input: map[string]any{"command": "rm -rf /"}}
 
-	allow, updatedInput, denyMessage, err := adapter.Decide(context.Background(), req)
+	allow, updatedInput, denyMessage, updatedPermissions, interrupt, err := adapter.Decide(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Decide() error = %v", err)
 	}
@@ -160,6 +163,9 @@ func TestClaudeDeciderAdapter_Deny(t *testing.T) {
 	if denyMessage != claudeFixedDenyMessage {
 		t.Fatalf("denyMessage = %q, want %q", denyMessage, claudeFixedDenyMessage)
 	}
+	if updatedPermissions != nil || interrupt {
+		t.Fatalf("updatedPermissions/interrupt = %+v/%v, want nil/false -- this pass never sets them", updatedPermissions, interrupt)
+	}
 }
 
 func TestClaudeDeciderAdapter_PropagatesError(t *testing.T) {
@@ -168,11 +174,12 @@ func TestClaudeDeciderAdapter_PropagatesError(t *testing.T) {
 	d := &recordingDecider{err: wantErr}
 	adapter := claudeDeciderAdapter{decider: d}
 
-	allow, updatedInput, denyMessage, err := adapter.Decide(context.Background(), claudecode.CanUseToolRequest{})
+	allow, updatedInput, denyMessage, updatedPermissions, interrupt, err := adapter.Decide(context.Background(), claudecode.CanUseToolRequest{})
 	if err != wantErr {
 		t.Fatalf("Decide() error = %v, want %v", err, wantErr)
 	}
-	if allow || updatedInput != nil || denyMessage != "" {
-		t.Fatalf("on error want zero values, got allow=%v updatedInput=%+v denyMessage=%q", allow, updatedInput, denyMessage)
+	if allow || updatedInput != nil || denyMessage != "" || updatedPermissions != nil || interrupt {
+		t.Fatalf("on error want zero values, got allow=%v updatedInput=%+v denyMessage=%q updatedPermissions=%+v interrupt=%v",
+			allow, updatedInput, denyMessage, updatedPermissions, interrupt)
 	}
 }
