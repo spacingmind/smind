@@ -594,6 +594,20 @@ func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 // run has already reached a terminal state -- Stop expresses intent
 // ("this run should not still be going"), which is already satisfied once
 // it's no longer running.
+//
+// Stop also synchronously clears every pending permission request on r,
+// rather than leaving that to runPermissionDecider.Decide's own goroutine
+// noticing r.ctx's cancellation on its own schedule. Decide's own select
+// also watches r.ctx.Done() and calls abandon on wakeup, but that goroutine
+// and drive's goroutine (which runs RunPrompt to completion and then calls
+// finish once ctx cancellation unwinds it) are two independent watchers of
+// the same cancellation signal with no ordering between them -- finish
+// could set StatusStopped before Decide's goroutine gets scheduled to call
+// abandon. Doing it here, under the same lock, means a request is
+// guaranteed gone by the time Stop returns, regardless of that race:
+// RespondPermission called right after Stop always sees it already
+// abandoned. Decide's later abandon call becomes a harmless no-op delete of
+// an already-missing key.
 func (reg *Registry) Stop(runID string) error {
 	r, err := reg.get(runID)
 	if err != nil {
@@ -606,6 +620,9 @@ func (reg *Registry) Stop(runID string) error {
 	}
 	r.stopRequested = true
 	cancel := r.cancel
+	for id := range r.pendingPermissions {
+		delete(r.pendingPermissions, id)
+	}
 	r.mu.Unlock()
 	cancel()
 	return nil
