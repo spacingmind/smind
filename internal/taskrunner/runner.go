@@ -76,21 +76,6 @@ func WithACPCommand(provider Provider, command []string) Option {
 	return func(r *Runner) { r.acpCommands[provider] = command }
 }
 
-// WithCodexPermissionPolicy sets the codex.PermissionPolicy passed to every
-// Codex-native client this Runner constructs. Left unset, codex.New's own
-// default (AutoApprovePolicy) applies.
-func WithCodexPermissionPolicy(p codex.PermissionPolicy) Option {
-	return func(r *Runner) { r.codexPermissionPolicy = p }
-}
-
-// WithCodexCommand overrides the command spawned for ProviderCodexNative
-// turns, in place of the default codex.DefaultCommand(). Same reasoning and
-// use (pointing at a compiled fake-agent binary in tests) as
-// WithACPCommand.
-func WithCodexCommand(command []string) Option {
-	return func(r *Runner) { r.codexCommand = command }
-}
-
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -148,7 +133,6 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
 		},
-		codexCommand: codex.DefaultCommand(),
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -207,7 +191,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, provider, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderCodexNative:
@@ -222,7 +206,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
