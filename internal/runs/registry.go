@@ -47,54 +47,6 @@ type Registry struct {
 	// daemon restart -- see New's doc comment for reconciliation/rehydration
 	// and Start/record/finish for the write path.
 	st *store.Store
-
-	// notifier, if set via SetNotifier, receives run.status lifecycle
-	// notifications (Start, finish) and permission.pending notifications
-	// (runPermissionDecider), so the wsapi server can push them as
-	// subscription events from the points the state actually changes.
-	notifier Notifier
-}
-
-// Notifier receives run lifecycle and permission notifications, for
-// pushing wsapi subscription events from the points the state actually
-// changes.
-type Notifier interface {
-	NotifyRunStatus(s RunStatus)
-	NotifyPermissionPending(runID string, taskID int64, requestID, summary string, options []taskrunner.PermissionOption)
-}
-
-// SetNotifier registers n; nil-safe (notifications with no notifier are
-// no-ops).
-func (reg *Registry) SetNotifier(n Notifier) {
-	reg.mu.Lock()
-	reg.notifier = n
-	reg.mu.Unlock()
-}
-
-func (reg *Registry) getNotifier() Notifier {
-	reg.mu.Lock()
-	n := reg.notifier
-	reg.mu.Unlock()
-	return n
-}
-
-// notifyRunStatus fires the notifier (if any) with r's current status.
-// Neither reg.mu nor r.mu is held across the callback itself: each is
-// dropped before calling into the notifier, which reaches other
-// packages' locks (wsapi's bus/subscriber) -- holding either here could
-// deadlock against a path acquiring them in the opposite order (e.g.
-// Start's registration taking reg.mu while this snapshot takes r.mu).
-func (reg *Registry) notifyRunStatus(r *run) {
-	reg.mu.Lock()
-	n := reg.notifier
-	reg.mu.Unlock()
-	if n == nil {
-		return
-	}
-	r.mu.Lock()
-	st := r.statusLocked()
-	r.mu.Unlock()
-	n.NotifyRunStatus(st)
 }
 
 // New returns a Registry backed by st for persistence, after two
@@ -535,6 +487,7 @@ func (reg *Registry) finish(r *run, err error) {
 		subs = append(subs, q)
 	}
 	r.subscribers = make(map[int]*subQueue)
+	status, finishedAt, stopReason, errMsg := string(r.status), r.finishedAt, r.stopReason, r.errMsg
 	r.mu.Unlock()
 
 	reg.notifyRunStatus(r)
@@ -546,6 +499,12 @@ func (reg *Registry) finish(r *run, err error) {
 	for _, q := range subs {
 		q.closeQueue()
 	}
+
+	// Best-effort, same reasoning as record's persistence call: finish has
+	// no caller able to act on a persistence error, and the in-memory
+	// status transition above (what every other Registry method actually
+	// relies on) already happened regardless.
+	_, _ = reg.st.UpdateRunStatus(r.id, status, finishedAt, stopReason, errMsg)
 
 	reg.retain(r.id)
 
