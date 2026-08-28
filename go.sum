@@ -22,8 +22,8 @@ github.com/refraction-networking/utls v1.8.2 h1:j4Q1gJj0xngdeH+Ox/qND11aEfhpgoEv
 github.com/refraction-networking/utls v1.8.2/go.mod h1:jkSOEkLqn+S/jtpEHPOsVv/4V4EVnelwbMQl4vCWXAM=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
-github.com/spacingmind/claude-agent-sdk-go v0.0.0-20260827121352-f204576f53ad h1:OH+pvPGj1US1tgEFMJAROBleqEnv6gtYdMg1L73GpjA=
-github.com/spacingmind/claude-agent-sdk-go v0.0.0-20260827121352-f204576f53ad/go.mod h1:oTWrb+TrlUivBXIRAiF2QOSZpVhh2iHckzPFiorTcQs=
+github.com/spacingmind/claude-agent-sdk-go v0.3.2 h1:t3asjuAhV9A3zuvg1Z7QP9pBHBizI60O20EGGLA1txE=
+github.com/spacingmind/claude-agent-sdk-go v0.3.2/go.mod h1:oTWrb+TrlUivBXIRAiF2QOSZpVhh2iHckzPFiorTcQs=
 golang.org/x/crypto v0.36.0 h1:AnAEvhDddvBdpY+uR+MyHmuZzzNqXSe/GvuDeob5L34=
 golang.org/x/crypto v0.36.0/go.mod h1:Y4J0ReaxCR1IMaabaSMugxJES1EpwhBHhv2bDHklZvc=
 golang.org/x/mod v0.37.0 h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=

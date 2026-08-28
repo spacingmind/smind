@@ -6,7 +6,7 @@ require (
 	github.com/creack/pty v1.1.24
 	github.com/gorilla/websocket v1.5.3
 	github.com/refraction-networking/utls v1.8.2
-	github.com/spacingmind/claude-agent-sdk-go v0.0.0-20260827121352-f204576f53ad
+	github.com/spacingmind/claude-agent-sdk-go v0.3.2
 	golang.org/x/oauth2 v0.36.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.57.0

@@ -103,13 +103,17 @@ const claudeFixedDenyMessage = "denied by human reviewer"
 // Claude Code's can_use_tool request has no options list, only a tool
 // name/input to allow or deny, so this synthesizes the two-option shape
 // PermissionDecider expects and translates the chosen option back into the
-// real (allow, updatedInput, denyMessage, err) tuple Claude Code's protocol
-// expects.
+// real (allow, updatedInput, denyMessage, updatedPermissions, interrupt, err)
+// tuple Claude Code's protocol expects. updatedPermissions/interrupt are
+// always the zero value (nil / false): letting a human edit permission
+// rules or interrupt the turn from this UI is out of scope for this pass
+// (see docs/plans/completed/permission-prompts.md's Decisions) -- a plain
+// allow/deny is all PermissionDecider's two-option shape can express.
 type claudeDeciderAdapter struct {
 	decider PermissionDecider
 }
 
-func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, error) {
+func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
 	opts := []PermissionOption{
 		{ID: claudeOptionAllow, Label: "Allow", Kind: "allow_once"},
 		{ID: claudeOptionDeny, Label: "Deny", Kind: "reject_once"},
@@ -118,10 +122,10 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 
 	optionID, err := a.decider.Decide(ctx, summary, opts)
 	if err != nil {
-		return false, nil, "", err
+		return false, nil, "", nil, false, err
 	}
 	if optionID == claudeOptionAllow {
-		return true, req.Input, "", nil
+		return true, req.Input, "", nil, false, nil
 	}
-	return false, nil, claudeFixedDenyMessage, nil
+	return false, nil, claudeFixedDenyMessage, nil, false, nil
 }
