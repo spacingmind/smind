@@ -775,3 +775,83 @@ func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
 		}
 	}
 }
+
+// TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem proves CloseAll
+// (used at daemon shutdown -- see internal/server.Server.Close) actually
+// terminates every still-running run.start-originated Run, not just asks
+// them to stop: it must return only once each one's subprocess has really
+// exited (StatusStopped, not still StatusRunning) -- the same "gone, not
+// just asked to go" guarantee internal/terminal.Registry.CloseAll already
+// gives its own callers, proven here for internal/runs the same way.
+func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	reg := New()
+
+	const n = 3
+	runIDs := make([]string, n)
+	for i := 0; i < n; i++ {
+		task := newTestTask(t, wm, "hang")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		runIDs[i] = runID
+	}
+
+	for _, id := range runIDs {
+		waitForHistoryLen(t, reg, id, 1, 5*time.Second) // confirm each turn is genuinely under way, not just registered
+	}
+
+	start := time.Now()
+	reg.CloseAll()
+	elapsed := time.Since(start)
+	if elapsed > 5*time.Second {
+		t.Fatalf("CloseAll() took %s to stop %d runs, want promptly", elapsed, n)
+	}
+
+	for _, id := range runIDs {
+		_, status, err := reg.History(id)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", id, err)
+		}
+		if status.Status != StatusStopped {
+			t.Fatalf("run %q status after CloseAll() = %q, want %q (CloseAll must wait for the subprocess to actually exit, not just signal it)", id, status.Status, StatusStopped)
+		}
+		if status.FinishedAt == nil {
+			t.Fatalf("run %q FinishedAt is nil after CloseAll(), want set", id)
+		}
+	}
+}
+
+// TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately proves CloseAll is
+// a cheap no-op when there's nothing to stop -- it must not block on
+// already-finished or never-started runs.
+func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
+	t.Parallel()
+	wm := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	reg := New()
+
+	task := newTestTask(t, wm, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+
+	start := time.Now()
+	reg.CloseAll()
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("CloseAll() with no running runs took %s, want near-instant", elapsed)
+	}
+
+	_, status, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if status.Status != StatusDone {
+		t.Fatalf("already-finished run's status changed by CloseAll(): %q, want still %q", status.Status, StatusDone)
+	}
+}
