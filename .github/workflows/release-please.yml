@@ -1,0 +1,34 @@
+# Runs on every push to `master` -- which, under this repo's branching
+# model, only happens when a `develop` -> `master` release PR is merged
+# (feature work lands on `develop` via PR first; `master` is release-only,
+# see CONTRIBUTING.md).
+#
+# release-please inspects Conventional Commits (feat:/fix:/BREAKING CHANGE)
+# accumulated since the last release, and either:
+#   - opens/updates a "chore(master): release X.Y.Z" PR containing the
+#     version bump + CHANGELOG.md, if there's nothing to release yet, or
+#   - once that release PR is itself merged, creates the vX.Y.Z git tag
+#     and a GitHub Release.
+#
+# This intentionally stops at "tag + GitHub Release + changelog" -- it does
+# not attach cross-platform binaries (that's a separate, not-yet-built
+# distribution task; see docs/decisions/ for the eventual GitHub Releases +
+# install-script plan modeled on refs/cliproxyapi's release workflow).
+name: release-please
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

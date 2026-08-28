@@ -18,3 +18,17 @@ task lint        # go vet + gofmt check
 ```
 
 See [docs/](docs/) for architecture and design decisions.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branching model, Conventional
+Commits convention, and spec-driven development practice this repo follows.
+
+## License
+
+[AGPL-3.0](LICENSE) — see
+[docs/decisions/0003-agpl-license-no-repo-split.md](docs/decisions/0003-agpl-license-no-repo-split.md)
+for the rationale (permissive licenses are reserved for
+protocol/infrastructure pieces meant for broad reuse, e.g.
+[claude-agent-sdk-go](https://github.com/spacingmind/claude-agent-sdk-go)
+(MIT); this repo — the daemon, CLI, and web UI — is AGPL-3.0).
