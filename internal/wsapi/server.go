@@ -34,28 +34,20 @@ type API struct {
 	Terminals *terminal.Registry
 }
 
-// New builds the full /ws API: one shared *runs.Registry and one shared
-// *terminal.Registry, both backed by db (see runs.New's and terminal.New's
-// doc comments on the reconciliation/rehydration each performs
-// synchronously here, so New itself can fail if that startup work does),
-// for every connection the returned Handler accepts (see Handler's doc
-// comment for why a Run or terminal session's lifetime must be independent
-// of any one connection), plus the http.Handler itself.
-func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
+// New builds the full /ws API: one shared *runs.Registry (backed by db --
+// see runs.New's doc comment on the reconciliation/rehydration it performs
+// synchronously here, so New itself can fail if that startup work does) and
+// one shared *terminal.Registry for every connection the returned Handler
+// accepts (see Handler's doc comment for why a Run or terminal session's
+// lifetime must be independent of any one connection), plus the
+// http.Handler itself.
+func New(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
 	reg, err := runs.New(db)
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
-	treg, err := terminal.New(db)
-	if err != nil {
-		return nil, fmt.Errorf("wsapi: new: %w", err)
-	}
-	bus := newEventBus()
-	wm.SetNotifier(busWorkspaceNotifier{bus: bus})
-	reg.SetNotifier(busRunNotifier{bus: bus})
-
-	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, coord)
+	treg := terminal.New()
+	hs := methodHandlers(wm, runner, reg, treg)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
@@ -74,7 +66,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		c.eventsBus = bus
 		c.serve(r.Context())
 	})
-	return &API{Handler: handler, Runs: reg, Terminals: treg}
+	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
 }
 
 // Handler returns the http.Handler for the /ws endpoint alone -- a thin
@@ -93,8 +85,8 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 // inline in the request that started it. The same reasoning applies to the
 // shared *terminal.Registry for terminal.create/attach/write/resize/close/
 // list.
-func Handler(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (http.Handler, error) {
-	api, err := New(wm, acctReg, runner, db, token)
+func Handler(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (http.Handler, error) {
+	api, err := New(wm, runner, db, token)
 	if err != nil {
 		return nil, err
 	}

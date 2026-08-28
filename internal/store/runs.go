@@ -11,24 +11,15 @@ import (
 // already has its own precise start time for the in-memory run this row
 // mirrors, and the two must agree.
 func (s *Store) CreateRun(r Run) (Run, error) {
-	approvalPolicy := r.ApprovalPolicy
-	if approvalPolicy == "" {
-		// Matches taskrunner.ApprovalPolicyManual's zero-value default:
-		// a caller that doesn't set this (or an older caller from before
-		// this column existed) gets today's always-ask-a-human behavior,
-		// not an empty/invalid policy string persisted to disk.
-		approvalPolicy = "manual"
-	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.TaskID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, approvalPolicy,
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg,
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
 	}
-	r.ApprovalPolicy = approvalPolicy
 	return r, nil
 }
 
@@ -67,7 +58,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
+		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -81,7 +72,7 @@ func (s *Store) GetRun(id string) (Run, error) {
 // used to rehydrate internal/runs.Registry's in-memory map at startup.
 func (s *Store) ListRecentRuns(limit int) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
+		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg
 		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -143,7 +134,7 @@ func scanRun(row rowScanner) (Run, error) {
 	var r Run
 	var finishedAt sql.NullTime
 	if err := row.Scan(&r.ID, &r.TaskID, &r.Provider, &r.Prompt, &r.Status,
-		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.ApprovalPolicy); err != nil {
+		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg); err != nil {
 		return Run{}, err
 	}
 	r.FinishedAt = nullToTimePtr(finishedAt)
