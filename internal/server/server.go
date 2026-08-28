@@ -3,6 +3,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -29,10 +31,14 @@ type Server struct {
 }
 
 // New builds a Server from config, backed by reg/router for the proxy
-// endpoints and wm/runner for the /ws workspace/space/task/terminal API.
-// token gates the proxy endpoints and the /ws upgrade; see Handler.
-func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, token string) *Server {
-	api := wsapi.New(wm, runner, token)
+// endpoints and wm/runner/db for the /ws workspace/space/task/run/terminal
+// API (db backs runs.Registry's persistence -- see wsapi.New). token gates
+// the proxy endpoints and the /ws upgrade; see Handler.
+func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*Server, error) {
+	api, err := wsapi.New(wm, runner, db, token)
+	if err != nil {
+		return nil, fmt.Errorf("server: new: %w", err)
+	}
 	return &Server{
 		cfg:       cfg,
 		proxy:     newProxy(reg, router),
@@ -40,7 +46,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
-	}
+	}, nil
 }
 
 // Close releases daemon-owned resources that live outside the

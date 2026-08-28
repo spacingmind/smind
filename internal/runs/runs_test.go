@@ -47,7 +47,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
+func newTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -58,7 +58,26 @@ func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
 			t.Errorf("store.Close() error = %v", err)
 		}
 	})
-	return workspace.New(s)
+	return s
+}
+
+// newTestWorkspaceManager also returns the underlying store, since a
+// Registry started against a task from wm must persist against that same
+// store -- runs.task_id references tasks(id), enforced via foreign_keys
+// pragma (see store.sqliteDSN).
+func newTestWorkspaceManager(t *testing.T) (*workspace.Manager, *store.Store) {
+	t.Helper()
+	s := newTestStore(t)
+	return workspace.New(s), s
+}
+
+func newTestRegistry(t *testing.T, st *store.Store) *Registry {
+	t.Helper()
+	reg, err := New(st)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return reg
 }
 
 func newTestRepo(t *testing.T) string {
@@ -197,10 +216,10 @@ func waitForHistoryLen(t *testing.T, reg *Registry, runID string, n int, timeout
 
 func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -232,9 +251,9 @@ func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 
 func TestRegistry_Start_UnknownTask_FailsSynchronously(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	_, err := reg.Start(context.Background(), wm, runner, 999999, taskrunner.ProviderGLM, "hi")
 	if err == nil {
@@ -252,10 +271,10 @@ func TestRegistry_Start_UnknownTask_FailsSynchronously(t *testing.T) {
 // for that.
 func TestRegistry_History_OnRunningRun_ReturnsWithoutBlocking(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -283,10 +302,10 @@ func TestRegistry_History_OnRunningRun_ReturnsWithoutBlocking(t *testing.T) {
 // the run goes terminal.
 func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -329,10 +348,10 @@ func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 // events that will never come.
 func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -358,10 +377,10 @@ func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 // itself -- Stop just takes a run ID.
 func TestRegistry_Stop_FromAnyCaller_CancelsTheRun(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -384,10 +403,10 @@ func TestRegistry_Stop_FromAnyCaller_CancelsTheRun(t *testing.T) {
 
 func TestRegistry_Stop_AlreadyFinished_IsNotAnError(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -409,7 +428,7 @@ func TestRegistry_Stop_AlreadyFinished_IsNotAnError(t *testing.T) {
 
 func TestRegistry_Stop_UnknownRun_ReturnsErrNotFound(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg := newTestRegistry(t, newTestStore(t))
 	if err := reg.Stop("no-such-run"); err != ErrNotFound {
 		t.Fatalf("Stop() error = %v, want ErrNotFound", err)
 	}
@@ -420,10 +439,10 @@ func TestRegistry_Stop_UnknownRun_ReturnsErrNotFound(t *testing.T) {
 // later History/Subscribe on it still works normally.
 func TestRegistry_Unsubscribe_DoesNotStopTheRun(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -472,11 +491,11 @@ func TestRegistry_Unsubscribe_DoesNotStopTheRun(t *testing.T) {
 // running Runs keep fully independent history/subscriber state.
 func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	taskA := newTestTask(t, wm, "")
 	taskB := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runA, err := reg.Start(context.Background(), wm, runner, taskA.ID, taskrunner.ProviderGLM, "hi a")
 	if err != nil {
@@ -511,11 +530,11 @@ func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 
 func TestRegistry_List_ReflectsCurrentStatus(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	taskDone := newTestTask(t, wm, "")
 	taskHang := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runDone, err := reg.Start(context.Background(), wm, runner, taskDone.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -558,10 +577,10 @@ func TestRegistry_List_ReflectsCurrentStatus(t *testing.T) {
 // after the request in history.
 func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionUnblocks(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -641,10 +660,10 @@ func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionU
 // decider that already moved on.
 func TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -677,10 +696,10 @@ func TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError(t *test
 // all) is a clear error, not a panic or silent no-op.
 func TestRegistry_RespondPermission_UnknownRequestID_IsAClearError(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
 	if err != nil {
@@ -703,7 +722,7 @@ func TestRegistry_RespondPermission_UnknownRequestID_IsAClearError(t *testing.T)
 // like Stop/History/Subscribe on an unknown ID: ErrNotFound, not a panic.
 func TestRegistry_RespondPermission_UnknownRun_ReturnsErrNotFound(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg := newTestRegistry(t, newTestStore(t))
 	if err := reg.RespondPermission("no-such-run", "req-1", "allow-1"); err != ErrNotFound {
 		t.Fatalf("RespondPermission() error = %v, want ErrNotFound", err)
 	}
@@ -718,10 +737,10 @@ func TestRegistry_RespondPermission_UnknownRun_ReturnsErrNotFound(t *testing.T) 
 // run's own ctx (see registry.go) is actually wired up.
 func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	// Let the runtime settle from whatever earlier parallel subtests /
 	// prior GC activity are still winding down, then take a goroutine-count
@@ -785,9 +804,9 @@ func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
 // gives its own callers, proven here for internal/runs the same way.
 func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	const n = 3
 	runIDs := make([]string, n)
@@ -830,9 +849,9 @@ func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
 // already-finished or never-started runs.
 func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, st := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	reg := New()
+	reg := newTestRegistry(t, st)
 
 	task := newTestTask(t, wm, "")
 	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
@@ -853,5 +872,263 @@ func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
 	}
 	if status.Status != StatusDone {
 		t.Fatalf("already-finished run's status changed by CloseAll(): %q, want still %q", status.Status, StatusDone)
+	}
+}
+
+// TestRegistry_Start_PersistsRunRowImmediately proves a run's row is
+// queryable directly via the store as soon as Start returns -- before the
+// turn does anything -- so a run recorded as started is durable even if the
+// daemon dies immediately after.
+func TestRegistry_Start_PersistsRunRowImmediately(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	reg := newTestRegistry(t, st)
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = reg.Stop(runID) })
+
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("store.GetRun(%q) error = %v", runID, err)
+	}
+	if row.TaskID != task.ID || row.Provider != string(taskrunner.ProviderGLM) || row.Prompt != "hi" {
+		t.Fatalf("persisted run row = %+v", row)
+	}
+	if row.Status != string(StatusRunning) {
+		t.Fatalf("persisted run row Status = %q, want %q", row.Status, StatusRunning)
+	}
+}
+
+// TestRegistry_Record_PersistsEventsInOrder proves every event a run emits
+// is persisted, in the same order Registry.History reports them, readable
+// directly via the store (not just through the Registry's in-memory view).
+func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	reg := newTestRegistry(t, st)
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+
+	memHist, _, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if len(memHist) == 0 {
+		t.Fatal("History() returned no events, nothing to compare persistence against")
+	}
+
+	persisted, err := st.ListRunEvents(runID)
+	if err != nil {
+		t.Fatalf("store.ListRunEvents() error = %v", err)
+	}
+	if len(persisted) != len(memHist) {
+		t.Fatalf("persisted event count = %d, want %d (matching in-memory History)", len(persisted), len(memHist))
+	}
+	for i, pe := range persisted {
+		if pe.Seq != int64(i) {
+			t.Fatalf("persisted event %d Seq = %d, want %d", i, pe.Seq, i)
+		}
+		decoded, err := decodeEvent(pe.EventData)
+		if err != nil {
+			t.Fatalf("decodeEvent(%d) error = %v", i, err)
+		}
+		if decoded.Type != memHist[i].Type || decoded.Text != memHist[i].Text || decoded.StopReason != memHist[i].StopReason {
+			t.Fatalf("persisted event %d = %+v, want it to match in-memory event %+v", i, decoded, memHist[i])
+		}
+	}
+}
+
+// TestRegistry_Finish_PersistsTerminalStatus proves both a normal
+// completion and a deliberate Stop persist their terminal status/
+// finished_at/stop_reason, not just the in-memory RunStatus.
+func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
+	t.Parallel()
+
+	t.Run("done", func(t *testing.T) {
+		t.Parallel()
+		wm, st := newTestWorkspaceManager(t)
+		task := newTestTask(t, wm, "")
+		runner := newTestRunner(wm)
+		reg := newTestRegistry(t, st)
+
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+
+		row, err := st.GetRun(runID)
+		if err != nil {
+			t.Fatalf("store.GetRun() error = %v", err)
+		}
+		if row.Status != string(StatusDone) {
+			t.Fatalf("persisted Status = %q, want %q", row.Status, StatusDone)
+		}
+		if row.FinishedAt == nil {
+			t.Fatal("persisted FinishedAt is nil, want set")
+		}
+		if row.StopReason == "" {
+			t.Fatal("persisted StopReason is empty, want set")
+		}
+	})
+
+	t.Run("stopped", func(t *testing.T) {
+		t.Parallel()
+		wm, st := newTestWorkspaceManager(t)
+		task := newTestTask(t, wm, "hang")
+		runner := newTestRunner(wm)
+		reg := newTestRegistry(t, st)
+
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+		waitForHistoryLen(t, reg, runID, 1, 5*time.Second)
+		if err := reg.Stop(runID); err != nil {
+			t.Fatalf("Stop() error = %v", err)
+		}
+		waitForStatus(t, reg, runID, StatusStopped, 5*time.Second)
+
+		row, err := st.GetRun(runID)
+		if err != nil {
+			t.Fatalf("store.GetRun() error = %v", err)
+		}
+		if row.Status != string(StatusStopped) {
+			t.Fatalf("persisted Status = %q, want %q", row.Status, StatusStopped)
+		}
+		if row.FinishedAt == nil {
+			t.Fatal("persisted FinishedAt is nil, want set")
+		}
+	})
+}
+
+// TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries proves the
+// whole point of this persistence layer: a run driven to completion by one
+// Registry is fully visible (List + History, identical content) from a
+// brand-new Registry built later against the same store -- simulating a
+// daemon restart, since a fresh process only ever constructs a fresh
+// Registry.
+func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg1, runID, StatusDone, 5*time.Second)
+	wantHist, wantStatus, err := reg1.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg1 error = %v", err)
+	}
+
+	// reg1 is simply discarded here (no Close/CloseAll) -- nothing about
+	// Registry itself is persistent; only what went through st is.
+	reg2 := newTestRegistry(t, st)
+
+	gotHist, gotStatus, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 (rehydrated) error = %v", err)
+	}
+	if gotStatus.Status != wantStatus.Status || gotStatus.TaskID != wantStatus.TaskID || gotStatus.Provider != wantStatus.Provider {
+		t.Fatalf("rehydrated RunStatus = %+v, want %+v", gotStatus, wantStatus)
+	}
+	if len(gotHist) != len(wantHist) {
+		t.Fatalf("rehydrated History len = %d, want %d", len(gotHist), len(wantHist))
+	}
+	for i := range wantHist {
+		if gotHist[i].Type != wantHist[i].Type || gotHist[i].Text != wantHist[i].Text || gotHist[i].StopReason != wantHist[i].StopReason {
+			t.Fatalf("rehydrated History[%d] = %+v, want %+v", i, gotHist[i], wantHist[i])
+		}
+	}
+
+	summaries := reg2.List()
+	found := false
+	for _, s := range summaries {
+		if s.ID == runID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("List() on rehydrated Registry = %+v, want it to include run %q", summaries, runID)
+	}
+
+	// A rehydrated run behaves like any other finished run: Subscribe
+	// immediately backfills and closes.
+	events, unsubscribe, err := reg2.Subscribe(runID)
+	if err != nil {
+		t.Fatalf("Subscribe() on rehydrated run error = %v", err)
+	}
+	defer unsubscribe()
+	n := 0
+	for range events {
+		n++
+	}
+	if n != len(wantHist) {
+		t.Fatalf("Subscribe() on rehydrated run delivered %d events, want %d", n, len(wantHist))
+	}
+}
+
+// TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted
+// proves a run left at status "running" in the store (simulating a daemon
+// crash -- no CloseAll, no graceful Stop) comes back as StatusInterrupted,
+// not StatusRunning, the next time a Registry is built against that store.
+func TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForHistoryLen(t, reg1, runID, 1, 5*time.Second)
+
+	// Simulate a crash: reg1 (and its live subprocess) is abandoned without
+	// Stop/CloseAll ever running, so the persisted row is left "running".
+	// Kill the actual fakeagent subprocess directly so it doesn't linger
+	// past the test.
+	t.Cleanup(func() { _ = reg1.Stop(runID) })
+
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("store.GetRun() before reconciliation error = %v", err)
+	}
+	if row.Status != string(StatusRunning) {
+		t.Fatalf("precondition: persisted Status = %q, want %q", row.Status, StatusRunning)
+	}
+
+	reg2 := newTestRegistry(t, st)
+
+	_, status, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 error = %v", err)
+	}
+	if status.Status != StatusInterrupted {
+		t.Fatalf("rehydrated Status = %q, want %q", status.Status, StatusInterrupted)
+	}
+
+	reconciled, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("store.GetRun() after reconciliation error = %v", err)
+	}
+	if reconciled.Status != string(StatusInterrupted) {
+		t.Fatalf("persisted Status after reconciliation = %q, want %q", reconciled.Status, StatusInterrupted)
 	}
 }
