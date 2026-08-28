@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.3.0](https://github.com/spacingmind/smind/compare/v0.2.0...v0.3.0) (2026-08-28)
+
+
+### Features
+
+* add Codex (OpenAI) as a native third-party provider ([#40](https://github.com/spacingmind/smind/issues/40)) ([9fcb01b](https://github.com/spacingmind/smind/commit/9fcb01b9bb9ec7ec9f890da02cbd451899869c59))
+* add Kimi as a second ACP-speaking provider ([#39](https://github.com/spacingmind/smind/issues/39)) ([cc47ee7](https://github.com/spacingmind/smind/commit/cc47ee70feb77c14f46c543f9a4b0824c278fdf6))
+* persist run/conversation history so it survives a daemon restart ([#38](https://github.com/spacingmind/smind/issues/38)) ([84f3ee5](https://github.com/spacingmind/smind/commit/84f3ee56f956412e7be1dc058a7d54645211912f))
+
+
+### Bug Fixes
+
+* close a race between Stop's cancellation and abandoning a pending permission request ([#41](https://github.com/spacingmind/smind/issues/41)) ([87f5acf](https://github.com/spacingmind/smind/commit/87f5acf3092ebe45932844801c64edbcd9053a93))
+* kill in-flight run.start subprocesses on daemon shutdown ([#37](https://github.com/spacingmind/smind/issues/37)) ([f575359](https://github.com/spacingmind/smind/commit/f575359d26e6ddfb2af10c67d2209b975e4e7ed3))
+* persist a run's terminal status before it becomes visible in memory ([#42](https://github.com/spacingmind/smind/issues/42)) ([5adb204](https://github.com/spacingmind/smind/commit/5adb204caf59191e3557d6f1b76fdb7b0af169c3))
+
 ## [0.2.0](https://github.com/spacingmind/smind/compare/v0.1.0...v0.2.0) (2026-08-28)
 
 
