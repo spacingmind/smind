@@ -76,6 +76,21 @@ func WithACPCommand(provider Provider, command []string) Option {
 	return func(r *Runner) { r.acpCommands[provider] = command }
 }
 
+// WithCodexPermissionPolicy sets the codex.PermissionPolicy passed to every
+// Codex-native client this Runner constructs. Left unset, codex.New's own
+// default (AutoApprovePolicy) applies.
+func WithCodexPermissionPolicy(p codex.PermissionPolicy) Option {
+	return func(r *Runner) { r.codexPermissionPolicy = p }
+}
+
+// WithCodexCommand overrides the command spawned for ProviderCodexNative
+// turns, in place of the default codex.DefaultCommand(). Same reasoning and
+// use (pointing at a compiled fake-agent binary in tests) as
+// WithACPCommand.
+func WithCodexCommand(command []string) Option {
+	return func(r *Runner) { r.codexCommand = command }
+}
+
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -133,6 +148,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
 		},
+		codexCommand: codex.DefaultCommand(),
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -193,7 +209,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, worktreePath, prompt, decider, events)
 	default:
@@ -395,93 +411,6 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	return nil
 }
 
-// claudeEvents translates one claudecode.Message into zero or more
-// taskrunner.Events. Both AssistantMessage and UserMessage are walked the
-// same way -- the CLI decodes both with the same block decoder, and a
-// tool_result block can arrive on either one (see claudecode's
-// ToolResultBlock doc comment) -- differing only in that a UserMessage's
-// text blocks are dropped rather than becoming EventTypeText: a user turn
-// is either an echo of the human's own prompt (which the UI already has,
-// see EventTypeUserMessage's doc comment) or the envelope carrying tool
-// results back to the model, never new assistant prose. SystemMessage,
-// ResultMessage (handled separately by runClaudeNative itself), and every
-// other message type yield nothing.
-func claudeEvents(msg claudecode.Message) []Event {
-	var (
-		blocks    []claudecode.ContentBlock
-		assistant bool
-	)
-	switch m := msg.(type) {
-	case claudecode.AssistantMessage:
-		blocks, assistant = m.Content, true
-	case claudecode.UserMessage:
-		blocks = m.Content
-	default:
-		return nil
-	}
-
-	var out []Event
-	for _, block := range blocks {
-		switch b := block.(type) {
-		case claudecode.TextBlock:
-			if !assistant {
-				continue
-			}
-			out = append(out, Event{Type: EventTypeText, Text: b.Text, Raw: msg})
-		case claudecode.ThinkingBlock:
-			out = append(out, Event{Type: EventTypeThinking, Text: b.Thinking, Raw: msg})
-		case claudecode.ToolUseBlock:
-			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
-		case claudecode.ServerToolUseBlock:
-			// A server-side tool (WebSearch/WebFetch) is still a tool call
-			// as far as a timeline card is concerned -- same id/name/input
-			// shape, just executed by the CLI rather than locally.
-			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
-		case claudecode.ToolResultBlock:
-			status := ToolStatusSuccess
-			if b.IsError {
-				status = ToolStatusFailure
-			}
-			out = append(out, Event{
-				Type:       EventTypeToolCall,
-				Raw:        msg,
-				ToolCallID: b.ToolUseID,
-				ToolStatus: status,
-				ToolResult: b.Content,
-			})
-		case claudecode.ServerToolResultBlock:
-			// No IsError equivalent on the wire for these -- an errored
-			// server tool reports the failure inside Content instead.
-			out = append(out, Event{
-				Type:       EventTypeToolCall,
-				Raw:        msg,
-				ToolCallID: b.ToolUseID,
-				ToolStatus: ToolStatusSuccess,
-				ToolResult: b.Content,
-			})
-		}
-	}
-	return out
-}
-
-// claudeToolUseEvent builds the "call started" event shared by
-// ToolUseBlock and ServerToolUseBlock.
-func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[string]any) Event {
-	// json.Marshal on a map[string]any built by decoding the CLI's own
-	// NDJSON never fails, so the error is ignored -- same reasoning as
-	// every other json.Marshal call in this package that round-trips
-	// already-decoded provider data.
-	raw, _ := json.Marshal(input)
-	return Event{
-		Type:       EventTypeToolCall,
-		Raw:        msg,
-		ToolCallID: id,
-		ToolName:   name,
-		ToolStatus: ToolStatusRunning,
-		ToolInput:  raw,
-	}
-}
-
 // runCodexNative drives one turn against a Codex-native agent (internal/codex).
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
@@ -532,21 +461,4 @@ func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string
 	case <-ctx.Done():
 	}
 	return nil
-}
-
-// CommitTask commits whatever is currently staged in taskID's worktree
-// under an agent-authored message -- the same commit primitive the UI's
-// task.commit uses, plus the ADR 0006 Smind-Agent/Smind-Task trailers so
-// review tooling can filter agent commits. provider names the committing
-// agent and lands in the Smind-Agent trailer.
-//
-// Deliberately a taskrunner-level helper, not an agent-visible tool: no
-// agent asks for it today, so exposing it over the agent protocol would be
-// speculative surface (see docs/plans/active/commit-flow.md's Decisions).
-func (r *Runner) CommitTask(taskID int64, provider Provider, message string) (workspace.CommitResult, error) {
-	result, err := r.wm.CommitTask(taskID, message, "agent", string(provider))
-	if err != nil {
-		return workspace.CommitResult{}, fmt.Errorf("taskrunner: commit task %d: %w", taskID, err)
-	}
-	return result, nil
 }
