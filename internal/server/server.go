@@ -13,6 +13,7 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -34,7 +35,7 @@ type Server struct {
 // API (db backs runs.Registry's persistence -- see wsapi.New). token gates
 // the proxy endpoints and the /ws upgrade; see Handler.
 func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*Server, error) {
-	api, err := wsapi.New(wm, reg, runner, db, token)
+	api, err := wsapi.New(wm, runner, db, token)
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
