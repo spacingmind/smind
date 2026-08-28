@@ -134,7 +134,7 @@ func newTestTask(t *testing.T, wm *workspace.Manager, scenario string) store.Tas
 }
 
 func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
-	return taskrunner.New(wm, taskrunner.WithACPCommand([]string{fakeACPAgentPath}))
+	return taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 }
 
 // drainToClose reads events off ch until it closes, with a timeout, and

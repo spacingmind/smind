@@ -1,5 +1,5 @@
 // Package taskrunner ties a store.Task to a real running agent, spawning
-// either internal/acp (GLM, or any other ACP-speaking agent) or
+// either internal/acp (GLM, Kimi, or any other ACP-speaking agent) or
 // github.com/spacingmind/claude-agent-sdk-go (Claude Code's native headless
 // protocol) and exposing one unified streaming interface to callers
 // regardless of which backend a given task's agent actually speaks.
@@ -16,4 +16,9 @@ const (
 	// ProviderGLM drives a task via the GLM ACP agent, spoken over the
 	// Agent Client Protocol (internal/acp).
 	ProviderGLM Provider = "glm"
+
+	// ProviderKimi drives a task via Moonshot AI's Kimi CLI, also spoken
+	// over the Agent Client Protocol (internal/acp) -- Kimi's CLI speaks
+	// ACP natively, the same as GLM's, just a different spawned command.
+	ProviderKimi Provider = "kimi"
 )

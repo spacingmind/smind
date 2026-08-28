@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // TestServer_RunAttach_SecondConnectionMidRun proves a second connection
@@ -705,5 +706,52 @@ func TestServer_RunLogs_ShowsPermissionRequestAndResolved(t *testing.T) {
 	}
 	if !sawResolved {
 		t.Fatalf("run.logs does not show the permission_resolved entry after answering: %+v", logs2.Events)
+	}
+}
+
+// TestServer_RunStart_KimiProvider proves the wire path recognizes
+// provider "kimi" end to end: wsapi decodes p.Provider as a bare
+// taskrunner.Provider string with no allowlist of its own (see
+// handleRunStart), so this exercises the real dependency -- that
+// taskrunner.ProviderKimi is wired all the way through runs.Registry.Start
+// -> taskrunner.Runner.RunPrompt -- not just taskrunner in isolation.
+func TestServer_RunStart_KimiProvider(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderKimi, []string{fakeACPAgentPath}))
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "kimi", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+
+	sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	deadline := time.Now().Add(5 * time.Second)
+	var logs runLogsResult
+	for {
+		env := readEnvelopeFor(t, ws, "2", time.Until(deadline))
+		if err := json.Unmarshal(env.Result, &logs); err != nil {
+			t.Fatalf("decode run.logs result: %v", err)
+		}
+		if logs.Status == string(runs.StatusDone) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for kimi run to finish, last status %q", logs.Status)
+		}
+		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	}
+	if len(logs.Events) != 3 {
+		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
 }

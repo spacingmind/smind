@@ -45,19 +45,22 @@ func WithClaudeCodePermissionPolicy(p claudecode.PermissionPolicy) Option {
 	return func(r *Runner) { r.claudePermissionPolicy = p }
 }
 
-// WithACPCommand overrides the command spawned for ProviderGLM turns, in
-// place of the default acp.GLMCommand(). This is the only seam RunPrompt's
-// GLM path exposes for pointing it at something other than the real GLM
-// agent: acpBackend/claudeBackend and the newACPClient/newClaudeClient
-// fields that satisfy them from within this package's own tests are
-// unexported, so a caller in another package (e.g. internal/server's tests,
-// which need to drive RunPrompt without a real `npx`/GLM install) has no
-// way to substitute a fake backend directly. Overriding just the command --
-// letting it point at a compiled fake-agent binary that still speaks real
-// ACP over stdio -- covers that need without exporting the backend
-// interfaces themselves.
-func WithACPCommand(command []string) Option {
-	return func(r *Runner) { r.acpCommand = command }
+// WithACPCommand overrides the command spawned for provider's turns, in
+// place of its default (acp.GLMCommand() for ProviderGLM,
+// acp.KimiCommand() for ProviderKimi). This is the only seam RunPrompt's
+// ACP path exposes for pointing a given ACP-speaking provider at something
+// other than its real agent: acpBackend/claudeBackend and the
+// newACPClient/newClaudeClient fields that satisfy them from within this
+// package's own tests are unexported, so a caller in another package (e.g.
+// internal/server's tests, which need to drive RunPrompt without a real
+// `npx`/GLM or `pip`/Kimi install) has no way to substitute a fake backend
+// directly. Overriding just the command -- letting it point at a compiled
+// fake-agent binary that still speaks real ACP over stdio -- covers that
+// need without exporting the backend interfaces themselves. Each provider's
+// override is independent: overriding ProviderGLM's command has no effect
+// on ProviderKimi's, and vice versa.
+func WithACPCommand(provider Provider, command []string) Option {
+	return func(r *Runner) { r.acpCommands[provider] = command }
 }
 
 // Runner drives task turns against a real agent backend (ACP or Claude Code
@@ -82,9 +85,13 @@ type Runner struct {
 	acpPermissionPolicy    acp.PermissionPolicy
 	claudePermissionPolicy claudecode.PermissionPolicy
 
-	// acpCommand is the command spawned for ProviderGLM turns. Defaults to
-	// acp.GLMCommand(); overridable via WithACPCommand.
-	acpCommand []string
+	// acpCommands maps each ACP-speaking provider to the command spawned for
+	// its turns. Seeded in New with every known ACP provider's real default
+	// (acp.GLMCommand(), acp.KimiCommand()); overridable per-provider via
+	// WithACPCommand. A provider with no entry (shouldn't happen for any
+	// Provider constant this package defines) fails fast in runACP rather
+	// than spawning an empty command.
+	acpCommands map[Provider][]string
 
 	// newACPClient and newClaudeClient default to wrapping acp.New and
 	// claudecode.New. Overridable only from within this package's tests,
@@ -98,8 +105,11 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm:         wm,
-		acpCommand: acp.GLMCommand(),
+		wm: wm,
+		acpCommands: map[Provider][]string{
+			ProviderGLM:  acp.GLMCommand(),
+			ProviderKimi: acp.KimiCommand(),
+		},
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -146,8 +156,8 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	worktreePath := *task.WorktreePath
 
 	switch provider {
-	case ProviderGLM:
-		return r.runGLM(ctx, worktreePath, prompt, decider, events)
+	case ProviderGLM, ProviderKimi:
+		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
 	default:
@@ -155,7 +165,17 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	}
 }
 
-func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+// runACP drives one turn for any ACP-speaking provider (ProviderGLM,
+// ProviderKimi, ...): they differ only in which command r.acpCommands maps
+// them to -- everything else about the ACP session/prompt/streaming flow is
+// identical, since it's the same wire protocol regardless of which agent is
+// on the other end of it.
+func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+	command, ok := r.acpCommands[provider]
+	if !ok {
+		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
+	}
+
 	var opts []acp.Option
 	switch {
 	case decider != nil:
@@ -164,18 +184,18 @@ func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, decide
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
 
-	client, err := r.newACPClient(r.acpCommand, opts...)
+	client, err := r.newACPClient(command, opts...)
 	if err != nil {
-		return fmt.Errorf("taskrunner: spawn glm agent: %w", err)
+		return fmt.Errorf("taskrunner: spawn %s agent: %w", provider, err)
 	}
 	defer client.Close()
 
 	if err := client.Initialize(ctx); err != nil {
-		return fmt.Errorf("taskrunner: initialize glm agent: %w", err)
+		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
 	sessionID, err := client.NewSession(ctx, worktreePath)
 	if err != nil {
-		return fmt.Errorf("taskrunner: glm new session: %w", err)
+		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
 
 	updates := make(chan acp.SessionUpdate)
@@ -197,7 +217,7 @@ func (r *Runner) runGLM(ctx context.Context, worktreePath, prompt string, decide
 	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates)
 	<-forwardDone
 	if err != nil {
-		return fmt.Errorf("taskrunner: glm prompt: %w", err)
+		return fmt.Errorf("taskrunner: %s prompt: %w", provider, err)
 	}
 
 	select {
