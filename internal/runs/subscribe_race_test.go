@@ -20,6 +20,7 @@ func registerTestRun(reg *Registry, id string) *run {
 		status:      StatusRunning,
 		startedAt:   time.Now(),
 		cancel:      func() {},
+		closedCh:    make(chan struct{}),
 		subscribers: make(map[int]*subQueue),
 	}
 	reg.mu.Lock()

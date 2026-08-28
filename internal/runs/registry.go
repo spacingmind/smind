@@ -66,6 +66,13 @@ type run struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	// closedCh closes once finish has run for this run (its subprocess has
+	// exited and every subscriber has been notified) -- see CloseAll, which
+	// blocks on it so a caller can rely on "the process is actually gone"
+	// rather than just "we asked it to stop", the same guarantee
+	// internal/terminal.Registry.Close already gives its own callers.
+	closedCh chan struct{}
+
 	mu            sync.Mutex
 	status        Status
 	finishedAt    *time.Time
@@ -128,6 +135,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
+		closedCh:           make(chan struct{}),
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
 		pendingPermissions: make(map[string]chan string),
@@ -325,6 +333,12 @@ func (reg *Registry) finish(r *run, err error) {
 	}
 
 	reg.retain(r.id)
+
+	// Signal last, same reasoning as internal/terminal.Registry's own
+	// finish: CloseAll blocks on this to know the run's subprocess is
+	// actually gone and every subscriber has been notified, not just that
+	// a stop signal was sent.
+	close(r.closedCh)
 }
 
 func (reg *Registry) retain(id string) {
@@ -451,6 +465,43 @@ func (reg *Registry) Stop(runID string) error {
 	r.mu.Unlock()
 	cancel()
 	return nil
+}
+
+// CloseAll stops every still-running Run the Registry knows about -- used
+// at daemon shutdown so no agent subprocess outlives the daemon process
+// itself. Without this, a Run started via run.start (the path both the CLI
+// and the web UI's prompt form use) has no connection tying its lifetime
+// to anything, and Go's os/exec sets no death-signal/process-group
+// propagation for the subprocess it spawns -- so the daemon process exiting
+// would not, on its own, terminate an in-flight agent subprocess. Each Run
+// is stopped concurrently (in its own goroutine) rather than serially, so
+// one slow-to-exit Run doesn't hold up shutdown behind the others;
+// CloseAll returns once every one of them has actually finished stopping
+// (blocking on each run's closedCh, mirroring
+// internal/terminal.Registry.CloseAll's exact same reasoning and shape).
+func (reg *Registry) CloseAll() {
+	reg.mu.Lock()
+	running := make([]*run, 0, len(reg.runs))
+	for _, r := range reg.runs {
+		r.mu.Lock()
+		isRunning := r.status == StatusRunning
+		r.mu.Unlock()
+		if isRunning {
+			running = append(running, r)
+		}
+	}
+	reg.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, r := range running {
+		wg.Add(1)
+		go func(r *run) {
+			defer wg.Done()
+			_ = reg.Stop(r.id)
+			<-r.closedCh
+		}(r)
+	}
+	wg.Wait()
 }
 
 // List returns a summary of every Run the Registry currently knows about

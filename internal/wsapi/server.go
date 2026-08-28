@@ -19,14 +19,15 @@ var upgrader = websocket.Upgrader{
 // API bundles the /ws http.Handler with the registries New constructs
 // internally, for the one caller (cmdServe, via internal/server.Server)
 // that needs to reach a registry directly rather than only through the
-// wire protocol -- specifically, terminal.Registry.CloseAll on graceful
-// daemon shutdown, so no PTY-backed shell process outlives the daemon
-// itself (internal/terminal.Registry.Close's doc comment covers what
-// "outlives" is verified to mean). Every other caller (existing tests,
-// wsclient) only needs the http.Handler and should keep using Handler
-// below.
+// wire protocol -- specifically, Runs.CloseAll and Terminals.CloseAll on
+// graceful daemon shutdown, so no agent subprocess or PTY-backed shell
+// outlives the daemon itself (each Registry's own CloseAll doc comment
+// covers what "outlives" is verified to mean). Every other caller
+// (existing tests, wsclient) only needs the http.Handler and should keep
+// using Handler below.
 type API struct {
 	Handler   http.Handler
+	Runs      *runs.Registry
 	Terminals *terminal.Registry
 }
 
@@ -54,7 +55,7 @@ func New(wm *workspace.Manager, runner *taskrunner.Runner, token string) *API {
 
 		newConn(ws, hs).serve(r.Context())
 	})
-	return &API{Handler: handler, Terminals: treg}
+	return &API{Handler: handler, Runs: reg, Terminals: treg}
 }
 
 // Handler returns the http.Handler for the /ws endpoint alone -- a thin
