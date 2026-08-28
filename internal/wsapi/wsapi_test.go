@@ -25,6 +25,10 @@ import (
 // subprocess without depending on npx/network access.
 var fakeACPAgentPath string
 
+// fakeCodexAgentPath is the compiled internal/codex/fakeagent binary, for
+// tests driving Runner's Codex-native path.
+var fakeCodexAgentPath string
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "smind-wsapi-test-")
 	if err != nil {
@@ -40,6 +44,16 @@ func TestMain(m *testing.M) {
 	}
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
+	}
+
+	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	buildCodex := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent")
+	buildCodex.Dir, err = os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	if out, err := buildCodex.CombinedOutput(); err != nil {
+		panic(fmt.Sprintf("build codex fakeagent: %v: %s", err, out))
 	}
 
 	smindHome, err := os.MkdirTemp("", "smind-wsapi-home-")
