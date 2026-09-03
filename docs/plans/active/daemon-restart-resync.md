@@ -274,149 +274,203 @@ recording *why*, not just *what*.)
   `client` reference identity, deliberately reusing that existing pattern
   rather than introducing a new event-bus/invalidation mechanism.
 
-### Daemon-side implementation decisions
-
-- **Checkpoint cadence: a fixed 2-second ticker per session** (`internal/
-  terminal.checkpointCadence`), started alongside the existing read loop in
-  `Registry.Create`, not hooked into the existing byte-count-driven
-  `scrollbackCap`/`scrollbackHardCap` compaction pass. A byte-count trigger
-  bounds loss in *bytes since the last compaction*, which for a mostly-idle
-  interactive session (a human typing, not a log firehose) could mean
-  "since whenever the buffer last happened to cross 256KiB" — effectively
-  unbounded in wall-clock terms for typical usage. A fixed wall-clock
-  ticker gives a bound that's meaningful for the actual failure mode this
-  guards against (a SIGKILL mid-session): at most ~2s of output/typing
-  lost, regardless of throughput. 2s specifically: frequent enough that
-  the loss is "a couple of lines", while three orders of magnitude cheaper
-  than a persist-per-chunk on a session that can emit hundreds of chunks/
-  second. The checkpoint write is skip-if-unchanged (tracked via a
-  per-session `historyVersion` counter bumped on every append, compared
-  without diffing the buffer itself), so an idle session between ticks
-  costs nothing beyond one version comparison.
-- **Rehydration retention cap: reuses the existing `closedRetentionCap`
-  (200)** rather than introducing a second constant, the same way
-  `internal/runs` reuses a single cap for both "how many finished runs may
-  I hold in memory" and "how many may I load back in after a restart" —
-  they're the same in-memory cost, just incurred at a different time, so
-  one number serving both is deliberate, not an oversight.
-- **New `StatusInterrupted`**, distinct from `StatusClosed`: a "running"
-  row surviving to a fresh process start means the PTY subprocess (a real
-  child of the old daemon process) is definitely gone, but nothing
-  observed *how* it ended — reporting it as `"closed"` would claim more
-  than is actually known, the same reasoning `internal/runs.StatusInterrupted`
-  already established for runs.
-- **`Write`/`Resize` against a non-running session** (closed or
-  interrupted, current-process or rehydrated) return
-  `"session no longer running"` rather than a silent no-op — `Resize`
-  previously had no such guard at all (a rehydrated session has no live
-  `ptmx` to `Setsize` against, which would otherwise nil-panic); `Write`
-  already had the guard, just a less specific message, now made consistent
-  with `Resize`'s.
-- **`Registry.finish` persists final status/`closed_at`/scrollback
-  synchronously before the in-memory status transition**, mirroring
-  `runs.Registry.finish` exactly (including its CI-reproducible race
-  rationale): this is what gives `Close`'s "final scrollback persisted
-  before returning" contract for free, since `Close` already blocks on
-  `closedCh`, which only closes after `finish` has run. `finish` runs for
-  *both* an explicit `terminal.close` and the shell exiting on its own
-  (e.g. the user typing `exit`) — both are the same "graceful" path from
-  persistence's point of view; only a crash (no `finish` call at all)
-  leaves a "running" row behind for reconciliation to find.
-- **`terminal_sessions.task_id` keeps the `REFERENCES tasks(id)` foreign
-  key** (matching the Acceptance Criteria's explicit ask), which meant
-  `internal/terminal`'s existing tests — which predate this table and
-  hardcode `taskID` literal `1` throughout — needed a real `tasks` row to
-  satisfy it. Rather than editing every hardcoded call site, `newTestRegistry`
-  now creates exactly one workspace+task (directly via `store.Store`, not
-  `workspace.Manager`, since these tests already pass their own worktree
-  path straight to `Create` and have no need for a real git worktree) —
-  the first task in a fresh store is always id 1
-  (`INTEGER PRIMARY KEY AUTOINCREMENT`), so every existing hardcoded `1`
-  stays valid unchanged.
+- **Reconnect lives in a new wrapper (`web/packages/ui/src/lib/reconnect.ts`'s
+  `watchForReconnect`), not inside `WsClient` itself.** `WsClient` gained
+  exactly one small addition: a public `onClose(callback)` hook (fires once,
+  synchronously if already closed) so an external watcher can learn "this
+  connection just died" without knowing *why* — that's the only seam the
+  wrapper needs. The reason it can't live inside `WsClient`: the resync
+  mechanism this whole plan is built on requires App.tsx to receive a
+  *genuinely new* `WsClient` instance on every reconnect (so hooks keyed on
+  the `client` reference re-run) — if `WsClient` quietly re-plumbed itself to
+  a new socket in place, the reference would never change and nothing would
+  resync. `watchForReconnect` also deliberately does **not** perform the
+  initial connect — App.tsx keeps doing that itself, exactly as before, so
+  an initial-connect failure's behavior (show `connectError`, don't retry)
+  is completely unchanged; the wrapper only takes over once a first client
+  already exists, and re-arms itself on every successful reconnect so the
+  loop runs indefinitely.
+- **Backoff policy**: exponential with full jitter — `initialDelayMs: 500`,
+  `factor: 2`, `maxDelayMs: 10_000`, delay drawn uniformly from
+  `[0, min(maxDelayMs, initialDelayMs * factor^attempt)]`. Reasoning: a
+  daemon restart during a graceful deploy/update is expected to take low
+  single-digit seconds, so the first one or two retries should land almost
+  immediately; the 10s cap keeps a genuinely longer outage from hammering
+  the daemon once it comes back. Full jitter (not fixed exponential) avoids
+  every open tab/window retrying in lockstep. There is no retry-count limit
+  — per the Acceptance Criteria, reconnect retries indefinitely until
+  success or the app itself tears down (`ReconnectHandle.close()`).
+- **Token refetch**: `watchForReconnect`'s `connect` option defaults to
+  `daemon.ts`'s `connectDaemon`, which does a fresh, uncached `fetch("/api/token")`
+  every call by construction — so "refetch the token on every reconnect
+  attempt" falls out of always calling the same full connect flow again,
+  with no special-casing needed.
+- **Real connection status** (`"connecting" | "connected" | "reconnecting" | "disconnected"`,
+  `web/packages/ui/src/lib/reconnect.ts`'s `ConnectionStatus`) is threaded
+  from `App.tsx` down to `TaskDetailPane` and `TerminalPane` as an optional
+  `connectionStatus` prop (default `"connected"`, so every pre-existing
+  caller/test keeps behaving exactly as before). When it's `"reconnecting"`,
+  each pane shows a small additive banner ("Connection lost — reconnecting
+  to daemon…") without discarding any already-rendered state (runs, chunks,
+  terminal output) — this is what satisfies "must visibly reflect the
+  break" without needing to distinguish transport-level failures from
+  ordinary RPC errors inside each pane's own call sites (which isn't
+  reliably possible today: `WsClient.failAll` reports a dead connection to
+  in-flight callers as a plain `RpcError`, indistinguishable by type from a
+  genuine server-side error — see that method's implementation).
+- **`TaskDetailPane`/`use-run-timeline.ts` needed no logic changes** for
+  re-attach-on-reconnect: its effect already keys on `[client, taskId]`,
+  calls `run.list` fresh every time that effect runs, and only ever starts
+  a *new* run from an explicit user action (`submitPrompt`) — never
+  automatically inside the effect. So a reconnect's client-reference change
+  naturally re-fetches `run.list` and re-attaches (via `streamRun`) to any
+  run still `"running"`, with no risk of spawning a duplicate, for free.
+  This is the concrete case the Acceptance Criteria's "if a component needs
+  bespoke refetch code, fix its effect keying instead" guidance was written
+  for — and it already fit the pattern.
+- **`TerminalPane` needed a real code change**, because unlike
+  `use-run-timeline.ts` it always called `terminal.create` unconditionally
+  inside the same effect that also attaches — a client-reference change
+  alone would have called `terminal.create` again, spawning a duplicate
+  shell next to the one still running server-side. Fixed by calling
+  `terminal.list({ taskId })` first: if a still-`"running"` session for the
+  task already exists, attach to it; only call `terminal.create` when none
+  does. A `lastTerminalIdRef` (persisted across a client-only effect re-run,
+  reset only when `task.ID` itself actually changes) additionally lets the
+  effect recognize "this is the same session I was already attached to" on
+  reconnect and check *its* specific post-reconnect status — if the daemon
+  now reports it `"interrupted"` (the daemon-side persistence work's
+  addition — see that section above), it renders the distinct "session
+  ended: daemon restarted" state instead of either attaching (which would
+  just backfill scrollback then immediately end, looking like a bare error)
+  or silently starting a replacement shell.
+- `TerminalStatusValue` (`web/packages/ui/src/lib/types.ts`) gained the
+  `"interrupted"` value ahead of the daemon-side work landing — purely
+  additive to the wire contract (no method shape changed), needed so the
+  client's own tests can exercise the daemon's future behavior; the current
+  `develop` backend never actually returns it yet.
+- `FileExplorerPane`/`DiffViewerPane` needed no changes: neither has a
+  create-on-mount step like `TerminalPane`'s old `terminal.create`, and
+  both already key their fetch effects on `[client, task.ID]`.
 
 ## Progress
 
-- [x] Schema: `terminal_sessions` table
-- [x] `internal/store`: CRUD methods + tests
-- [x] `internal/terminal`: checkpointed persistence on the write path;
+- [ ] Schema: `terminal_sessions` table
+- [ ] `internal/store`: CRUD methods + tests
+- [ ] `internal/terminal`: checkpointed persistence on the write path;
       `New(st *store.Store)` reconciliation + rehydration; write/resize
       error on rehydrated sessions
-- [x] `internal/terminal`: tests (checkpoint, graceful close, restart
+- [ ] `internal/terminal`: tests (checkpoint, graceful close, restart
       simulation, interrupted reconciliation, race)
-- [x] `internal/wsapi`: rehydrated-session test coverage
-- [ ] `web/packages/ui`: `WsClient` reconnect (backoff, token refetch,
+- [ ] `internal/wsapi`: rehydrated-session test coverage
+- [x] `web/packages/ui`: `WsClient` reconnect (backoff, token refetch,
       explicit-close vs. unexpected-close distinction) + tests
-- [ ] `web/packages/ui`: `App.tsx` real connection-status state + swaps in
+- [x] `web/packages/ui`: `App.tsx` real connection-status state + swaps in
       a new `WsClient` instance on reconnect + tests
-- [ ] `web/packages/ui`: `TaskDetailPane`/`TerminalPane` re-attach-on-
+- [x] `web/packages/ui`: `TaskDetailPane`/`TerminalPane` re-attach-on-
       reconnect + `TerminalPane` "interrupted" rendering + tests
-- [x] Verification, daemon-side (unit/race tests + live-daemon restart
-      E2E, graceful and crash) — client-side E2E (browser-less WS driver
-      reconnect) not yet done, see Progress above
+- [ ] Verification (unit/race tests + live-daemon restart E2E, graceful
+      and crash) — client-side no-real-browser WS driver scenario done
+      (see Validation below); daemon-side crash/restart E2E and the Go
+      test suite are the other agent's half of this plan.
 
 ## Validation
 
-(Client-side items below intentionally left unfilled — a separate parallel
-track owns `web/packages/ui`.)
+(Filled in as each Acceptance Criterion is confirmed. This section covers
+only the client-side half of the plan — `web/packages/ui`'s reconnect/resync
+work. The daemon-side terminal-persistence half's Validation is the other
+agent's to fill in.)
 
-- **Schema + `internal/store` CRUD** (`internal/store/terminal_sessions_test.go`):
-  `TestStore_TerminalSessions`, `TestStore_GetTerminalSessionMissing`,
-  `TestStore_ListRecentTerminalSessions`,
-  `TestStore_MarkRunningTerminalSessionsInterrupted`,
-  `TestStore_TerminalSessionsSurviveReopen` (Close + reopen the same db
-  file, confirm the session + its checkpointed scrollback are readable) --
-  all pass.
-- **Write path** (`internal/terminal/persistence_test.go`):
-  `TestRegistry_Checkpoint_PersistsScrollback` (real PTY output through a
-  session; waits for a real `checkpointCadence` tick to land, confirms the
-  persisted scrollback matches the in-memory buffer exactly),
-  `TestRegistry_GracefulClose_PersistsFinalState` (`terminal.close` on a
-  real session leaves `status = "closed"`, `closed_at` set, final
-  scrollback matching what was written) -- both pass.
-- **Rehydrate-on-restart** (`TestRegistry_RestartSimulation_ScrollbackSurvivesAcrossRegistries`):
-  drives a session to a graceful close on one `Registry` against a real
-  temp-file store, discards it, builds a new `Registry` against the same
-  store, confirms `List`/`Subscribe` return the identical scrollback as
-  backfill with no live tail, and that `Write`/`Resize` against it both
-  return the documented "session no longer running" error -- pass.
-- **Interrupted reconciliation, concrete crash-loss bound**
-  (`TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint`):
-  a session left "running" in the store (`Registry` discarded without
-  `Close`/`CloseAll`, simulating a crash) comes back `StatusInterrupted`
-  from a new `Registry`, with scrollback containing output written before
-  the last observed checkpoint tick but *not* output written after it and
-  before the simulated crash -- proving the "loses only since the last
-  checkpoint" bound concretely rather than just in prose -- pass.
-- **Full suite**: `go build ./...`, `go vet ./...`, `gofmt -l` clean;
-  `go test -race -count=3 ./...` clean across every package (including
-  `internal/terminal`'s existing `subscribe_race_test.go`/
-  `registry_linux_test.go` coverage, unaffected by the new checkpoint
-  goroutine).
-- **`internal/wsapi`**: existing `terminal_test.go` suite passes unchanged
-  (now threading a real store through, as it already did for `runs`); new
-  `TestServer_TerminalAttach_RehydratedSessionAfterRestart` builds a second
-  server (and so a second `terminal.Registry`, via its own `New(db)` call)
-  against the same `db` a first server used, after closing a session on
-  the first -- confirms `terminal.list`/`terminal.attach` on the second
-  server work identically for the rehydrated session, and
-  `terminal.write`/`terminal.resize` against it both error -- pass.
-- **Live-daemon E2E, graceful restart**: real `smind serve` (built binary),
-  a real terminal session with real shell output over a real WebSocket
-  connection, graceful `SIGTERM` shutdown, fresh daemon restart. Confirmed
-  via direct sqlite query that the row flipped `running` -> `closed`
-  immediately on shutdown (not just eventually); after restart,
-  `terminal.list` reports `status = "closed"` and `terminal.attach`
-  delivers the full pre-shutdown scrollback (including a written marker)
-  as backfill, then a clean terminal result with no live tail.
-- **Live-daemon E2E, crash + reconciliation**: same shape, but the daemon
-  `SIGKILL`ed with no graceful shutdown, timed against a real checkpoint
-  tick observed by polling the sqlite file directly (rather than a fixed
-  sleep, which risks landing close to the next tick's boundary): wrote a
-  first marker, waited for it to actually appear in the persisted
-  scrollback (proving a real checkpoint landed), wrote a second marker,
-  then killed immediately. Confirmed via direct sqlite query, immediately
-  after the kill, that the row was left `status = "running"` with the
-  first marker persisted but not the second; after restarting the daemon,
-  `terminal.list` reports `status = "interrupted"` and `terminal.attach`'s
-  backfill contains the first marker but not the second -- the concrete
-  gap this design accepts, observed directly rather than assumed.
+**Unit tests** (`web/packages/ui`):
+- `lib/ws-client.test.ts` (unchanged, still 8/8 passing) plus the new
+  `onClose` hook's behavior exercised indirectly through `reconnect.test.ts`.
+- `lib/reconnect.test.ts` (new, 6 tests): unexpected close triggers a
+  reconnect attempt; explicit `close()` never does; a failed attempt
+  retries again with backoff (verified via vitest's built-in fake timers —
+  no new dependency needed, per the plan's own suggestion to check first);
+  a successful reconnect resolves to a client usable for a real `call()`
+  against its new fake socket; the reconnect loop re-arms itself on the new
+  client so a second unexpected close also reconnects; the default
+  `connect` (real `connectDaemon`) is invoked fresh on every attempt,
+  proving the token is refetched each time rather than reused.
+- `App.test.tsx` (new, 4 tests, driving the real `WsClient` class against
+  fake sockets rather than `FakeWsClient`, since this needed genuine
+  new-instance-per-reconnect semantics): an initial connect failure still
+  shows the pre-existing `Disconnected: <message>` state and never retries
+  (regression check); an unexpected disconnect moves the header off
+  "Connected to daemon" to "Reconnecting to daemon…", and a successful
+  reconnect brings "Connected to daemon" back; after reconnect, a *fresh*
+  `workspace.list` fires against the new socket (the only way that could
+  happen is if `AppSidebar` actually received a new `client` reference,
+  since `useWorkspaceTree`'s effect is keyed on it — this is the concrete,
+  checkable proxy for "AppSidebar received a different client prop
+  reference" the plan's test scenario asks for, verified behaviorally
+  rather than by reaching into React internals); a task selected before
+  disconnect is still selected and rendered after reconnect, with its pane
+  re-fetching fresh (`run.list`) against the new client rather than being
+  unmounted or losing the selection.
+- `components/task-detail.test.tsx` (2 new tests added to the existing 13):
+  a "Connection lost — reconnecting…" banner appears/disappears with
+  `connectionStatus`, additively (an already-rendered run's streamed text
+  stays on screen, nothing is discarded); given a new post-reconnect
+  client, `useRunTimeline` (no code changes needed — see Decisions) issues
+  a fresh `run.list` and re-attaches to the same still-`"running"` run id,
+  never a fresh `run.start`.
+- `components/terminal-pane.test.tsx` (rewritten for the new
+  list-before-create flow, 14 tests total, 3 new): given a new
+  post-reconnect client, re-issues `terminal.list` and re-attaches to the
+  same still-`"running"` session id instead of a fresh `terminal.create`;
+  a session that comes back `status: "interrupted"` post-reconnect renders
+  the distinct "session ended: daemon restarted" state (verified: no
+  `terminal.attach`/`terminal.create` call happens, and the generic
+  `terminal-error` testid is absent); the same additive connection-lost
+  banner as `TaskDetailPane`, without disposing the terminal widget.
+- Total: `bun run test` (`vitest run`) — **8 test files, 62/62 passing**.
+- `bunx tsc -b` — clean.
+- `bun run build` (`tsc -b && vite build`) — succeeded; `internal/server/dist/.gitkeep`
+  was deleted by the build (the same known Vite `--emptyOutDir` behavior
+  every prior web UI task has hit) and restored via `git checkout`.
+
+**Manual/E2E verification, client-side half** (real built `bin/smind`,
+temp `SMIND_HOME` + a real git repo workspace created via the CLI, a
+from-scratch Bun script using only built-in `fetch`/`WebSocket` — this
+repo's established no-real-browser E2E pattern, kept as a throwaway script
+per prior plans' precedent, not committed): a hand-rolled client mirroring
+`WsClient` plus a `watchForReconnect`-equivalent (unexpected-close
+detection, backoff redial, fresh `/api/token` fetch per attempt) connected
+to the real daemon and confirmed an initial `workspace.list` succeeded;
+the daemon process was then sent `SIGTERM` while a supervisor shell loop
+watched for its exit and restarted the same binary against the same
+`SMIND_HOME` (same token file, so the daemon-restart-preserves-the-token
+assumption in the Acceptance Criteria held); the driver observed the
+socket's unexpected close, redialed (the first attempt landed before the
+new process had bound its port yet and failed as expected, the next
+attempt succeeded), and a fresh `workspace.list`/`task.list` against the
+new connection succeeded — all without the driver script redialing
+manually, confirming the same reconnect contract `reconnect.ts` implements
+holds against a real daemon, not just fake sockets.
+
+**What jsdom could and couldn't exercise** (honesty note, per this
+project's standing practice — see `docs/plans/completed/web-ui-terminal.md`'s
+Validation section): all of this task's reconnect logic itself
+(`reconnect.ts`, `App.tsx`'s status wiring, the `TaskDetailPane`/
+`TerminalPane` list-then-attach/banner logic) is plain JS/React state
+machinery with no real-browser-only dependency, so jsdom exercises it
+faithfully — nothing here needed the manual E2E step to prove correctness
+of the reconnect *logic* itself; the E2E step exists to prove the logic
+holds against a *real* daemon's actual socket-close timing and token
+persistence, which no amount of faking sockets can substitute for. The one
+genuine jsdom gap touched by this task is pre-existing and unrelated to
+reconnect: jsdom's `HTMLCanvasElement.getContext()` is unimplemented (the
+familiar "Not implemented: ... without installing the canvas npm package"
+console noise in every `terminal-pane.test.tsx` run), so `TerminalPane`'s
+tests exercise its own wiring logic via the `TerminalHandle` fake, never a
+real `@xterm/xterm` `Terminal` instance — unchanged by this task, since
+`terminal-pane.test.tsx`'s reconnect-specific new tests use the same fake.
+Separately, jsdom also doesn't implement `ResizeObserver`, which
+`react-resizable-panels`' `<Group>` (used by `App.tsx`'s layout) now
+needed for the first time once a full `App.tsx` render tree was under
+test (no prior test file rendered `<App>` at all) — a plain no-op stub was
+added to `test/setup.ts`, the same way this file already stubs
+`matchMedia` for the sidebar; no test here exercises real panel-resize
+behavior, so the stub being a no-op is sufficient.
