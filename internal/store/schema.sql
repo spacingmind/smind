@@ -83,6 +83,17 @@ CREATE TABLE IF NOT EXISTS run_events (
     UNIQUE (run_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS terminal_sessions (
+    id TEXT PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    status TEXT NOT NULL,
+    started_at TIMESTAMP NOT NULL,
+    closed_at TIMESTAMP,
+    scrollback TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_routing_decisions_session_key ON routing_decisions(session_key);
 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_account_id ON quota_snapshots(account_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_accounts_account_id ON workspace_accounts(account_id);
@@ -92,3 +103,4 @@ CREATE INDEX IF NOT EXISTS idx_tasks_space_id ON tasks(space_id);
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
+CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task_id ON terminal_sessions(task_id);
