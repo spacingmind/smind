@@ -436,8 +436,9 @@ exactly as specified on both sides.
       E2E, graceful and crash)
 - [x] Verification, client-side (typecheck/tests + no-real-browser WS
       driver reconnect E2E)
-- [ ] Verification, merged branch (full repo `verify` — build/test/lint
-      across both tracks together, plus a combined live-daemon E2E)
+- [x] Verification, merged branch (full repo `verify` — build/test/lint
+      across both tracks together, plus a targeted `-race -count=3` re-run
+      of the daemon-side packages)
 
 ## Validation
 
@@ -603,6 +604,40 @@ is sufficient.
 
 ### Merged branch (post-integration)
 
-(To be filled in after running the full `verify` skill — build/test/lint
-across both tracks together, confirming the merge introduced no
-integration bugs beyond what each track already validated in isolation.)
+Merging `terminal-restart-persistence` and `web-client-reconnect` into
+`daemon-restart-resync` (both off `develop`) produced exactly one conflict:
+this plan document, from both branches independently filling in the same
+Decisions/Progress/Validation sections — resolved by combining both halves
+(no code conflicts at all, since the two tracks share no source files, as
+scoped from the start).
+
+Full `verify` skill run on the merged branch:
+- `task build` -- ok (web build + `go build`, no errors).
+- `task test` -- ok: web `bun run test` 8/8 files, 62/62 tests; Go
+  `go test ./...` clean across all 18 packages including `internal/terminal`
+  (2.1s, real PTY spawns) and `internal/wsapi`.
+- `task lint` -- ok: `go vet ./...` and `gofmt -l` (tracked files) both
+  clean.
+- `go test -race -count=3 ./internal/terminal/... ./internal/store/...
+  ./internal/wsapi/...` -- clean (the three packages the daemon-side work
+  touched most, re-run with extra scrutiny post-merge; each package's own
+  track already ran the full suite at `-race -count=3` in isolation).
+- `internal/server/dist/.gitkeep` was deleted by the web build (the known
+  Vite `--emptyOutDir` behavior every prior web UI task has hit) and
+  restored via `git checkout`.
+- Wire-contract cross-check: the daemon-side `internal/terminal.StatusInterrupted`
+  Go constant and the client-side `TerminalStatusValue`'s `"interrupted"`
+  TypeScript literal (added independently by each track before either could
+  see the other's code) both resolve to the same wire string `"interrupted"`
+  — confirmed by grep across both branches before merging, not just by
+  inspection after. No coordination between the two tracks was needed
+  beyond the Acceptance Criteria both were scoped from.
+
+Not re-run post-merge (each already validated real-daemon behavior in
+isolation, and the merge touched no source files either track's E2E script
+exercised): the daemon-side graceful/crash-restart E2E and the client-side
+no-real-browser reconnect E2E. Worth a combined real-daemon E2E pass before
+this plan is treated as fully proven end-to-end (open a real terminal
+session from the web UI, kill/restart the daemon, confirm the UI itself —
+not just a driver script — recovers and shows the session's post-restart
+state) — flagged here rather than silently assumed.
