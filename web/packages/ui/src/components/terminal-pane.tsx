@@ -322,6 +322,16 @@ export function TerminalPane({
     setClosing(true);
     try {
       await client.call("terminal.close", { terminalId: id });
+      // Reset every trace of this session, including lastTerminalIdRef --
+      // otherwise a *later* reconnect's list-then-attach effect above
+      // would still find previousId pointing at this now-closed session,
+      // see it as no longer running, and get permanently stuck showing
+      // "session closed" instead of ever calling terminal.create again.
+      // Clearing it here makes the next effect run treat this exactly
+      // like a fresh attach, same as if the task had just been selected.
+      terminalIdRef.current = null;
+      lastTerminalIdRef.current = null;
+      setTerminalId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
