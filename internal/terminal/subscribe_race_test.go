@@ -46,7 +46,10 @@ func registerTestSession(reg *Registry, id string) *session {
 // record/Subscribe/finish.
 func TestRegistry_Subscribe_ConcurrentBackfillLiveRace(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg, err := New(newTestStore(t))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	s := registerTestSession(reg, "sess-1")
 
 	const total = 300
