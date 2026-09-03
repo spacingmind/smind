@@ -35,9 +35,7 @@ import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/u
 import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
-import { formatRoute, parseRoute, type Route } from "@/lib/route";
-import type { ThemePreference } from "@/lib/theme";
-import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
+import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -70,20 +68,6 @@ export function App({
   /** Overridable for tests -- see TerminalPane's createTerminal for the same pattern. Defaults to the real fetch-token-then-dial flow, used both for the initial connect and (via watchForReconnect) every subsequent reconnect attempt. */
   connect?: () => Promise<WsClient>;
 } = {}) {
-  // KeyboardProvider wraps the shell rather than being mounted alongside
-  // it in main.tsx: `useActionHandler` is how every surface inside claims
-  // an action, so the provider has to be an *ancestor* of all of them --
-  // including AppShell itself, which claims the shell-level actions.
-  return (
-    <KeyboardProvider>
-      <PaletteProvider>
-        <AppShell connect={connect} />
-      </PaletteProvider>
-    </KeyboardProvider>
-  );
-}
-
-function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
@@ -168,62 +152,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       reconnectHandle?.close();
     };
   }, [connect]);
-
-  const selectTask = useCallback(
-    (task: Task) => {
-      setSelectedTask(task);
-      ensureTask(task.ID);
-    },
-    [ensureTask],
-  );
-
-  function openFileTab(path: string) {
-    if (!selectedTask) return;
-    // Implicit open (file-tree click): prefer the side pane if the task
-    // already has one, but never yank a tab already placed -- openTab's
-    // own "prefer" placement is exactly this rule.
-    openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer");
-  }
-
-  /**
-   * The explorer's "Reveal in diff" row action (Item 17). The *payload*
-   * travels through lib/diff-reveal.ts's latch, which the diff pane reads
-   * on mount -- the shell's only job is to bring that tab forward.
-   */
-  function revealInDiff() {
-    if (!selectedTask) return;
-    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
-  }
-
-  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
-  function openTerminalTab() {
-    if (!selectedTask) return;
-    const state = tabsByTask.get(selectedTask.ID);
-    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, [
-      ...(state?.primary.tabs ?? []),
-      ...(state?.side?.tabs ?? []),
-    ]));
-  }
-
-  const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
-
-  // --- Routing (Item 3) ------------------------------------------------
-  //
-  // Hash routing: the URL is a *mirror* of selection state, not its
-  // source. Selecting a task or switching tabs writes the hash; a
-  // hashchange (back/forward, a hand-typed URL, or our own write) feeds
-  // back through `pendingRoute`, which the restore effect below resolves
-  // against whatever the tree currently knows. Both directions go through
-  // the same path, so there's exactly one place that turns a route into a
-  // selection.
-
-  useEffect(() => {
-    function onHashChange() {
-      setPendingRoute(parseRoute(window.location.hash));
-    }
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
-  }, []);
 
   useEffect(() => {
     if (!pendingRoute) return;
@@ -329,179 +257,47 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
   useQuickOpenShortcut(() => setQuickOpenOpen(true), selectedTask !== null);
   return (
-    // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
-    // definite height), which used to be fine when its child just flowed
-    // in document order -- ResizablePanelGroup's inner Panels need a
-    // *definite* ancestor height to resolve their percentage-based
-    // stretch, so an explicit h-svh here (additive with min-h-svh, not
-    // conflicting -- different CSS properties) is what actually gives the
-    // resize handle its full-height drag area instead of collapsing to
-    // the height of the header row.
-    <SidebarProvider
-      className="h-svh"
-      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
-    >
-      {/*
-       * `sidebar.toggle` is claimed by a child of SidebarProvider rather
-       * than by AppShell, because `useSidebar()` throws outside it. A
-       * zero-render component is the cheapest way to be inside a provider
-       * its own parent mounts.
-       */}
-      <SidebarToggleAction />
-      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
-      <CommandPalette />
-      <ShellCommands
-        client={client}
-        tasks={allTasks}
-        workspaces={allWorkspaces}
-        selectedTask={selectedTask}
-        tabs={taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : null}
-        onSelectTask={selectTask}
-        onOpenTab={openTab}
-        onActivateTab={activate}
-      />
-      <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
-        {/*
-         * The sidebar-vs-content split itself -- the whole point of Item 6.
-         * defaultSize/minSize/maxSize take plain numbers as pixels
-         * directly (react-resizable-panels only treats unitless *strings*
-         * as percentages), so SIDEBAR_MIN_WIDTH/SIDEBAR_MAX_WIDTH (12rem/
-         * 32rem) apply as-is -- dragging past either bound still can't
-         * collapse the sidebar to 0 or push it off-screen.
-         */}
-        <ResizablePanel
-          defaultSize={sidebarWidth}
-          minSize={SIDEBAR_MIN_WIDTH}
-          maxSize={SIDEBAR_MAX_WIDTH}
-          onResize={(size) => setSidebarWidth(size.inPixels)}
-          className="min-w-0"
-        >
-          <AppSidebar
-            client={client}
-            selectedTaskId={selectedTask?.ID ?? null}
-            onSelectTask={selectTask}
-            attention={attention}
-            runStatus={runStatus}
-            events={events}
-            onTasksChange={setAllTasks}
-            onWorkspacesChange={(workspaces) => {
-              setAllWorkspaces(workspaces);
-              setTreeLoaded(true);
-            }}
-          />
-        </ResizablePanel>
-        {/*
-         * react-resizable-panels' Separator always sets its own
-         * `data-testid` (and `id`) to its resolved `id` prop, clobbering
-         * any `data-testid` passed directly -- so the only way to control
-         * the rendered data-testid here is via `id`, not `data-testid`.
-         */}
-        <ResizableHandle withHandle id="sidebar-resize-handle" />
-        <ResizablePanel minSize={30} className="min-w-0">
-          {/*
-           * Panel's own box gets its height from the group's flex-stretch,
-           * not from content -- SidebarInset's <main> needs an explicit
-           * h-full to actually fill it (it's a plain block child of Panel
-           * now, not a flex sibling of the sidebar the way it was before
-           * Item 6's restructuring), which is what every pane under it
-           * (TaskDetailPane's own "flex h-full flex-col" root, etc.) relies
-           * on to size its scrollable region correctly.
-           */}
-          <SidebarInset className="h-full">
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-              <SidebarTrigger />
-              <Separator orientation="vertical" className="h-4" />
-              <span className="text-sm text-muted-foreground" data-testid="app-connection-status">
-                {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
-              </span>
-            </header>
-            {/*
-             * flex-1 (grow from a 0 basis) + min-h-0 is what the old inner
-             * ResizablePanelGroup gave this area for free -- it filled all
-             * height left over after the header's own (shrink-0) box,
-             * rather than a percentage height fighting the header for
-             * space. Restated explicitly here now that that group's gone
-             * (it wrapped a single always-100% panel, which was never
-             * actually resizable -- see Item 6).
-             */}
-            <div className="flex-1 min-h-0">
-              {selectedTask && taskState ? (
-                // The side dock (Item 6): one optional split, primary +
-                // side, each its own Radix Tabs root. Moving a tab between
-                // them (PaneTabStrip's move button) is a plain data move
-                // in useTaskTabs -- the pane component underneath *does*
-                // fully unmount from one root and mount in the other,
-                // which is fine because every such component already
-                // tolerates ADR 0004's "switching tabs unmounts inactive
-                // content" and reattaches to its server-side session
-                // rather than recreating it (see use-task-tabs.ts's doc
-                // comment).
-                <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-                  <ResizablePanel minSize={30} className="min-w-0">
-                    <PaneTabStrip
-                      paneId="primary"
-                      tabs={taskState.primary.tabs}
-                      activeKey={taskState.primary.activeKey}
-                      task={selectedTask}
-                      client={client}
-                      connectionStatus={connectionStatus}
-                      events={events}
-                      onOpenFile={openFileTab}
-                      onActivate={(key) => activate(selectedTask.ID, key)}
-                      onClose={(key) => closeTab(selectedTask.ID, key)}
-                      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
-                      onRevealInDiff={revealInDiff}
-                      onNewTerminal={openTerminalTab}
-                    />
-                  </ResizablePanel>
-                  {taskState.side && (
-                    <>
-                      <ResizableHandle withHandle id="side-pane-resize-handle" />
-                      <ResizablePanel
-                        defaultSize={sidePaneWidth}
-                        minSize={SIDE_PANE_MIN_WIDTH}
-                        maxSize={SIDE_PANE_MAX_WIDTH}
-                        onResize={(size) => setSidePaneWidth(size.inPixels)}
-                        className="min-w-0 border-l"
-                      >
-                        <PaneTabStrip
-                          paneId="side"
-                          tabs={taskState.side.tabs}
-                          activeKey={taskState.side.activeKey}
-                          task={selectedTask}
-                          client={client}
-                          connectionStatus={connectionStatus}
-                          events={events}
-                          onOpenFile={openFileTab}
-                          onActivate={(key) => activate(selectedTask.ID, key)}
-                          onClose={(key) => closeTab(selectedTask.ID, key)}
-                          onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
-                          onRevealInDiff={revealInDiff}
-                          onNewTerminal={openTerminalTab}
-                        />
-                      </ResizablePanel>
-                    </>
-                  )}
-                </ResizablePanelGroup>              ) : (
-                <div
-                  data-testid="app-empty-state"
-                  className="flex h-full items-center justify-center text-sm text-muted-foreground"
-                >
-                  Select a task to get started.
-                </div>
-              )}
-            </div>
-          </SidebarInset>
-        </ResizablePanel>
-      </ResizablePanelGroup>
-      <QuickOpen
-        client={client}
-        task={selectedTask}
-        open={quickOpenOpen}
-        onOpenChange={setQuickOpenOpen}
-        onOpenFile={openFileTab}
-        events={events}
-      />
+    <SidebarProvider>
+      <AppSidebar client={client} selectedTaskId={selectedTask?.ID ?? null} onSelectTask={setSelectedTask} />
+      <SidebarInset>
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+          <SidebarTrigger />
+          <Separator orientation="vertical" className="h-4" />
+          <span className="text-sm text-muted-foreground">
+            {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+          </span>
+        </header>
+        <ResizablePanelGroup orientation="horizontal" className="flex-1">
+          <ResizablePanel defaultSize={100} minSize={20}>
+            {selectedTask ? (
+              <Tabs defaultValue="chat" className="h-full gap-0">
+                <TabsList className="mx-3 mt-2 w-fit">
+                  <TabsTrigger value="chat">Chat</TabsTrigger>
+                  <TabsTrigger value="files">Files</TabsTrigger>
+                  <TabsTrigger value="diff">Diff</TabsTrigger>
+                  <TabsTrigger value="terminal">Terminal</TabsTrigger>
+                </TabsList>
+                <TabsContent value="chat" className="min-h-0">
+                  <TaskDetailPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
+                </TabsContent>
+                <TabsContent value="files" className="min-h-0">
+                  <FileExplorerPane client={client} task={selectedTask} />
+                </TabsContent>
+                <TabsContent value="diff" className="min-h-0">
+                  <DiffViewerPane client={client} task={selectedTask} />
+                </TabsContent>
+                <TabsContent value="terminal" className="min-h-0">
+                  <TerminalPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                Select a task to get started.
+              </div>
+            )}
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      </SidebarInset>
     </SidebarProvider>
   );
 }
