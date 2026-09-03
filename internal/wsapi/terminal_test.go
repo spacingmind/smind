@@ -368,6 +368,90 @@ func TestServer_TerminalCreate_UnknownTask(t *testing.T) {
 	}
 }
 
+// TestServer_TerminalAttach_RehydratedSessionAfterRestart proves
+// terminal.list/terminal.attach work identically for a session rehydrated
+// from a fresh terminal.Registry (simulating a daemon restart -- see
+// internal/terminal.New's reconciliation/rehydration) as for one closed in
+// the current process, and that terminal.write/terminal.resize against it
+// return the documented "no longer running" error rather than a hang or
+// silent success.
+func TestServer_TerminalAttach_RehydratedSessionAfterRestart(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+
+	srv1 := newTestWSServer(t, wm, runner, db, "tok")
+	ws1 := dialWS(t, srv1, "tok")
+
+	sendRequest(t, ws1, "create", "terminal.create", map[string]any{"taskId": task.ID})
+	createResp := readEnvelopeFor(t, ws1, "create", 5*time.Second)
+	if createResp.Error != nil {
+		t.Fatalf("terminal.create error = %v", createResp.Error.Message)
+	}
+	var created terminalCreateResult
+	if err := json.Unmarshal(createResp.Result, &created); err != nil {
+		t.Fatalf("decode terminal.create result: %v", err)
+	}
+
+	sendRequest(t, ws1, "attach", "terminal.attach", map[string]any{"terminalId": created.TerminalID})
+	sendRequest(t, ws1, "write", "terminal.write", map[string]any{
+		"terminalId": created.TerminalID, "data": "echo before-restart-marker\n",
+	})
+	readEnvelopeFor(t, ws1, "write", 5*time.Second)
+	collectDataUntil(t, ws1, "attach", "before-restart-marker", 5*time.Second)
+
+	sendRequest(t, ws1, "close", "terminal.close", map[string]any{"terminalId": created.TerminalID})
+	readTerminalResponses(t, ws1, []string{"close", "attach"}, 5*time.Second)
+
+	// Simulate a daemon restart: a brand-new server (and so a brand-new
+	// terminal.Registry, via its own New(db) call) built against the same
+	// db srv1 used -- not srv1 reused. See internal/wsapi.New's doc comment
+	// for why this reconciles/rehydrates from db exactly once, synchronously,
+	// at construction.
+	srv2 := newTestWSServer(t, wm, runner, db, "tok")
+	ws2 := dialWS(t, srv2, "tok")
+
+	sendRequest(t, ws2, "list", "terminal.list", map[string]any{"taskId": task.ID})
+	listResp := readEnvelopeFor(t, ws2, "list", 5*time.Second)
+	if listResp.Error != nil {
+		t.Fatalf("terminal.list error = %v", listResp.Error.Message)
+	}
+	var sessions []terminal.SessionStatus
+	if err := json.Unmarshal(listResp.Result, &sessions); err != nil {
+		t.Fatalf("decode terminal.list result: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].ID != created.TerminalID || sessions[0].Status != terminal.StatusClosed {
+		t.Fatalf("terminal.list after restart = %+v, want exactly one closed session %s", sessions, created.TerminalID)
+	}
+
+	sendRequest(t, ws2, "attach2", "terminal.attach", map[string]any{"terminalId": created.TerminalID})
+	backfill := collectDataUntil(t, ws2, "attach2", "before-restart-marker", 5*time.Second)
+	if !strings.Contains(backfill, "before-restart-marker") {
+		t.Fatalf("rehydrated terminal.attach backfill = %q, want it to contain the pre-restart output", backfill)
+	}
+	attachTerm := readEnvelopeFor(t, ws2, "attach2", 5*time.Second)
+	if attachTerm.Error != nil {
+		t.Fatalf("rehydrated terminal.attach: error = %v, want a clean terminal result (no live tail)", attachTerm.Error.Message)
+	}
+
+	sendRequest(t, ws2, "write", "terminal.write", map[string]any{
+		"terminalId": created.TerminalID, "data": "echo x\n",
+	})
+	writeResp := readEnvelopeFor(t, ws2, "write", 5*time.Second)
+	if writeResp.Error == nil {
+		t.Fatal("terminal.write against a rehydrated session: error = nil, want an error")
+	}
+
+	sendRequest(t, ws2, "resize", "terminal.resize", map[string]any{
+		"terminalId": created.TerminalID, "cols": 80, "rows": 24,
+	})
+	resizeResp := readEnvelopeFor(t, ws2, "resize", 5*time.Second)
+	if resizeResp.Error == nil {
+		t.Fatal("terminal.resize against a rehydrated session: error = nil, want an error")
+	}
+}
+
 // TestServer_TerminalList_FiltersByTask proves terminal.list only returns
 // sessions belonging to the requested task, not every session the
 // Registry knows about.

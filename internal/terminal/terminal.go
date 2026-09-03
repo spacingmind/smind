@@ -32,6 +32,11 @@
 //     genuinely terminate the shell process (and, as best as a Unix
 //     process model allows, everything it spawned -- see killTree) and
 //     close the PTY fd, not just stop watching it.
+//   - Persistence is bounded-cadence, not write-through: internal/runs
+//     persists each discrete taskrunner.Event as it's recorded, but raw PTY
+//     output is a high-frequency byte firehose, not discrete low-frequency
+//     events -- see registry.go's checkpointCadence doc comment for the
+//     concrete bound this trades away.
 package terminal
 
 import (
@@ -67,6 +72,17 @@ const (
 	// because the user typed `exit`, the process was killed some other
 	// way, or Close was called.
 	StatusClosed Status = "closed"
+
+	// StatusInterrupted is a session whose persisted row was still
+	// "running" when a new Registry started up (see New's doc comment) --
+	// its PTY subprocess was a real child of the old daemon process and
+	// cannot have survived a restart, so its fate genuinely isn't "closed"
+	// (nothing observed it exit) but reporting it as "running" would be a
+	// lie. Distinct from StatusClosed the same way internal/runs'
+	// StatusInterrupted is distinct from StatusDone/StatusStopped: this
+	// status is never set by anything other than New's reconciliation
+	// step.
+	StatusInterrupted Status = "interrupted"
 )
 
 // SessionStatus is a point-in-time snapshot of a terminal session's

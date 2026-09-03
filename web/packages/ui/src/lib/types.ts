@@ -131,9 +131,13 @@ export interface RunLogsResult {
   events: RunLogEvent[];
 }
 
-// internal/terminal.Status's two values (internal/terminal/terminal.go),
-// carried over the wire as their underlying string.
-export type TerminalStatusValue = "running" | "closed";
+// internal/terminal.Status's values (internal/terminal/terminal.go), carried
+// over the wire as their underlying string. "interrupted" is the daemon-side
+// terminal-persistence work's addition (docs/plans/active/daemon-restart-resync.md)
+// for a session whose PTY subprocess couldn't have survived a daemon
+// restart -- a real, expected, honest outcome distinct from "closed" (which
+// only ever means an explicit terminal.close).
+export type TerminalStatusValue = "running" | "closed" | "interrupted";
 
 // Mirrors internal/terminal.SessionStatus (internal/wsapi's terminal.list
 // result) field-for-field -- like RunSummary, this struct carries no
