@@ -3,6 +3,7 @@ import { useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
+import type { ConnectionStatus } from "@/lib/reconnect";
 import type { WsClientLike } from "@/lib/ws-client";
 import type { Provider, Task } from "@/lib/types";
 
@@ -16,7 +17,16 @@ const PROVIDERS: Provider[] = ["claude-native", "glm"];
  * from useRunTimeline; this component is presentation plus the form's own
  * local (provider/prompt/submitting) state.
  */
-export function TaskDetailPane({ client, task }: { client: WsClientLike | null; task: Task }) {
+export function TaskDetailPane({
+  client,
+  task,
+  connectionStatus = "connected",
+}: {
+  client: WsClientLike | null;
+  task: Task;
+  /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
+  connectionStatus?: ConnectionStatus;
+}) {
   const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
 
   return (
@@ -28,6 +38,12 @@ export function TaskDetailPane({ client, task }: { client: WsClientLike | null; 
           {task.Branch && <span className="truncate">{task.Branch}</span>}
         </div>
       </div>
+
+      {connectionStatus === "reconnecting" && (
+        <p data-testid="connection-banner" className="border-b bg-amber-500/10 px-4 py-1 text-xs text-amber-600">
+          Connection lost -- reconnecting to daemon…
+        </p>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 py-3">
         {error && <p className="text-sm text-destructive">{error}</p>}

@@ -426,4 +426,60 @@ describe("TaskDetailPane", () => {
     expect(within(pending).getByText(/boom/i)).toBeInTheDocument();
     expect(within(pending).getByRole("button", { name: "Allow" })).not.toBeDisabled();
   });
+
+  it("shows a connection-lost banner while connectionStatus is 'reconnecting', without discarding the currently-shown runs", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+    client.emit("run.attach", 0, "chunk", { text: "hello" });
+    await flush();
+
+    expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
+
+    rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="reconnecting" />);
+    await flush();
+
+    expect(screen.getByTestId("connection-banner")).toBeInTheDocument();
+    // The banner is additive -- the run entry already on screen (with its
+    // already-streamed text) is not thrown away while waiting to resync.
+    expect(screen.getByTestId("run-text")).toHaveTextContent("hello");
+
+    rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
+    await flush();
+    expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
+  });
+
+  it("given a new post-reconnect client, re-issues run.list and re-attaches to the same still-running run instead of a fresh run.start", async () => {
+    const client1 = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client1} task={TASK_A} />);
+
+    client1.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+    expect(client1.nth("run.attach", 0).params).toEqual({ runId: "run-1" });
+    client1.emit("run.attach", 0, "chunk", { text: "partial output" });
+    await flush();
+    expect(screen.getByTestId("run-text")).toHaveTextContent("partial output");
+
+    // App.tsx swaps in a genuinely new WsClient instance after a
+    // successful reconnect -- the task selection itself is untouched.
+    const client2 = new FakeWsClient();
+    rerender(<TaskDetailPane client={client2} task={TASK_A} />);
+    await flush();
+
+    expect(client2.nth("run.list", 0).params).toBeUndefined();
+    client2.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    // Re-attaches to the same still-running run id -- never a fresh
+    // run.start, which would spawn a duplicate run server-side.
+    expect(client2.calls.some((c) => c.method === "run.start")).toBe(false);
+    const reattach = client2.nth("run.attach", 0);
+    expect(reattach.params).toEqual({ runId: "run-1" });
+
+    client2.emit("run.attach", 0, "chunk", { text: "more output" });
+    await flush();
+    expect(screen.getByTestId("run-text")).toHaveTextContent("more output");
+  });
 });

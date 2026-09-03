@@ -178,6 +178,24 @@ export class WsClient implements WsClientLike {
   }
 
   /**
+   * Registers callback to run once the connection closes for any reason --
+   * an explicit close() call or the socket's own unrequested close/error
+   * (see failAll) -- so a caller can tell the two apart itself (e.g. by
+   * setting a flag right before calling close()) without WsClient needing
+   * to know why it closed. Fires immediately, synchronously, if the
+   * connection is already closed by the time this is called. This is the
+   * seam the reconnect wrapper (lib/reconnect.ts) is built on -- see its
+   * doc comment for why reconnect logic lives outside WsClient itself.
+   */
+  onClose(callback: () => void): void {
+    if (this.closed) {
+      callback();
+      return;
+    }
+    this.closeWaiters.push(callback);
+  }
+
+  /**
    * Issues method with params and resolves with its terminal result once
    * it arrives. Only use this for methods that don't stream events --
    * use callStream for those.

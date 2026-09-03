@@ -28,6 +28,13 @@ UI; the same code will back the Phase 4 Tauri desktop wrapper) automatically
 reconnects and resyncs its view of server state after losing the
 connection, without a manual reload.
 
+**Implemented in two parallel tracks** (separate worktrees/branches, merged
+back together): daemon-side terminal persistence (`internal/store`,
+`internal/terminal`, `internal/wsapi`) and client-side reconnect/resync
+(`web/packages/ui`). The two tracks share no files and needed zero
+coordination beyond the wire contract already specified below, which held
+exactly as specified on both sides.
+
 ## Acceptance Criteria
 
 ### Daemon-side: terminal session persistence (mirrors `internal/runs`)
@@ -257,19 +264,12 @@ connection, without a manual reload.
 
 ## Decisions
 
-(To be filled in as implementation makes concrete choices — checkpoint
-cadence/trigger, backoff policy numbers, exact rehydration retention cap,
-whether reconnect lives inside `WsClient` itself or a wrapper — each with
-its reasoning, following this repo's existing plan-doc convention of
-recording *why*, not just *what*.)
-
 - Go `internal/wsclient.Client` reconnect is explicitly out of scope (see
   Acceptance Criteria) — no long-lived CLI use case exists today.
 - Terminal output is not write-through persisted per-chunk (unlike
   `run_events`) — bounded-cadence checkpointing instead, trading "a crash
   loses only the tail since last checkpoint" for avoiding a disk write per
-  PTY chunk. Exact cadence is an implementation-time choice to document
-  here.
+  PTY chunk.
 - Reconnect resync relies on existing hooks' `useEffect` being keyed on
   `client` reference identity, deliberately reusing that existing pattern
   rather than introducing a new event-bus/invalidation mechanism.
@@ -334,6 +334,88 @@ recording *why*, not just *what*.)
   (`INTEGER PRIMARY KEY AUTOINCREMENT`), so every existing hardcoded `1`
   stays valid unchanged.
 
+### Client-side implementation decisions
+
+- **Reconnect lives in a new wrapper (`web/packages/ui/src/lib/reconnect.ts`'s
+  `watchForReconnect`), not inside `WsClient` itself.** `WsClient` gained
+  exactly one small addition: a public `onClose(callback)` hook (fires once,
+  synchronously if already closed) so an external watcher can learn "this
+  connection just died" without knowing *why* — that's the only seam the
+  wrapper needs. The reason it can't live inside `WsClient`: the resync
+  mechanism this whole plan is built on requires App.tsx to receive a
+  *genuinely new* `WsClient` instance on every reconnect (so hooks keyed on
+  the `client` reference re-run) — if `WsClient` quietly re-plumbed itself to
+  a new socket in place, the reference would never change and nothing would
+  resync. `watchForReconnect` also deliberately does **not** perform the
+  initial connect — App.tsx keeps doing that itself, exactly as before, so
+  an initial-connect failure's behavior (show `connectError`, don't retry)
+  is completely unchanged; the wrapper only takes over once a first client
+  already exists, and re-arms itself on every successful reconnect so the
+  loop runs indefinitely.
+- **Backoff policy**: exponential with full jitter — `initialDelayMs: 500`,
+  `factor: 2`, `maxDelayMs: 10_000`, delay drawn uniformly from
+  `[0, min(maxDelayMs, initialDelayMs * factor^attempt)]`. Reasoning: a
+  daemon restart during a graceful deploy/update is expected to take low
+  single-digit seconds, so the first one or two retries should land almost
+  immediately; the 10s cap keeps a genuinely longer outage from hammering
+  the daemon once it comes back. Full jitter (not fixed exponential) avoids
+  every open tab/window retrying in lockstep. There is no retry-count limit
+  — per the Acceptance Criteria, reconnect retries indefinitely until
+  success or the app itself tears down (`ReconnectHandle.close()`).
+- **Token refetch**: `watchForReconnect`'s `connect` option defaults to
+  `daemon.ts`'s `connectDaemon`, which does a fresh, uncached `fetch("/api/token")`
+  every call by construction — so "refetch the token on every reconnect
+  attempt" falls out of always calling the same full connect flow again,
+  with no special-casing needed.
+- **Real connection status** (`"connecting" | "connected" | "reconnecting" | "disconnected"`,
+  `web/packages/ui/src/lib/reconnect.ts`'s `ConnectionStatus`) is threaded
+  from `App.tsx` down to `TaskDetailPane` and `TerminalPane` as an optional
+  `connectionStatus` prop (default `"connected"`, so every pre-existing
+  caller/test keeps behaving exactly as before). When it's `"reconnecting"`,
+  each pane shows a small additive banner ("Connection lost — reconnecting
+  to daemon…") without discarding any already-rendered state (runs, chunks,
+  terminal output) — this is what satisfies "must visibly reflect the
+  break" without needing to distinguish transport-level failures from
+  ordinary RPC errors inside each pane's own call sites (which isn't
+  reliably possible today: `WsClient.failAll` reports a dead connection to
+  in-flight callers as a plain `RpcError`, indistinguishable by type from a
+  genuine server-side error — see that method's implementation).
+- **`TaskDetailPane`/`use-run-timeline.ts` needed no logic changes** for
+  re-attach-on-reconnect: its effect already keys on `[client, taskId]`,
+  calls `run.list` fresh every time that effect runs, and only ever starts
+  a *new* run from an explicit user action (`submitPrompt`) — never
+  automatically inside the effect. So a reconnect's client-reference change
+  naturally re-fetches `run.list` and re-attaches (via `streamRun`) to any
+  run still `"running"`, with no risk of spawning a duplicate, for free.
+  This is the concrete case the Acceptance Criteria's "if a component needs
+  bespoke refetch code, fix its effect keying instead" guidance was written
+  for — and it already fit the pattern.
+- **`TerminalPane` needed a real code change**, because unlike
+  `use-run-timeline.ts` it always called `terminal.create` unconditionally
+  inside the same effect that also attaches — a client-reference change
+  alone would have called `terminal.create` again, spawning a duplicate
+  shell next to the one still running server-side. Fixed by calling
+  `terminal.list({ taskId })` first: if a still-`"running"` session for the
+  task already exists, attach to it; only call `terminal.create` when none
+  does. A `lastTerminalIdRef` (persisted across a client-only effect re-run,
+  reset only when `task.ID` itself actually changes) additionally lets the
+  effect recognize "this is the same session I was already attached to" on
+  reconnect and check *its* specific post-reconnect status — if the daemon
+  now reports it `"interrupted"` (the daemon-side persistence work's
+  addition — see that section above), it renders the distinct "session
+  ended: daemon restarted" state instead of either attaching (which would
+  just backfill scrollback then immediately end, looking like a bare error)
+  or silently starting a replacement shell.
+- `TerminalStatusValue` (`web/packages/ui/src/lib/types.ts`) gained the
+  `"interrupted"` value ahead of the daemon-side work landing — purely
+  additive to the wire contract (no method shape changed). Verified after
+  merging both tracks: the daemon-side `internal/terminal.StatusInterrupted`
+  constant is literally `"interrupted"` too, so the two independently-built
+  halves agree on the wire value with zero coordination needed.
+- `FileExplorerPane`/`DiffViewerPane` needed no changes: neither has a
+  create-on-mount step like `TerminalPane`'s old `terminal.create`, and
+  both already key their fetch effects on `[client, task.ID]`.
+
 ## Progress
 
 - [x] Schema: `terminal_sessions` table
@@ -344,20 +426,31 @@ recording *why*, not just *what*.)
 - [x] `internal/terminal`: tests (checkpoint, graceful close, restart
       simulation, interrupted reconciliation, race)
 - [x] `internal/wsapi`: rehydrated-session test coverage
-- [ ] `web/packages/ui`: `WsClient` reconnect (backoff, token refetch,
+- [x] `web/packages/ui`: `WsClient` reconnect (backoff, token refetch,
       explicit-close vs. unexpected-close distinction) + tests
-- [ ] `web/packages/ui`: `App.tsx` real connection-status state + swaps in
+- [x] `web/packages/ui`: `App.tsx` real connection-status state + swaps in
       a new `WsClient` instance on reconnect + tests
-- [ ] `web/packages/ui`: `TaskDetailPane`/`TerminalPane` re-attach-on-
+- [x] `web/packages/ui`: `TaskDetailPane`/`TerminalPane` re-attach-on-
       reconnect + `TerminalPane` "interrupted" rendering + tests
 - [x] Verification, daemon-side (unit/race tests + live-daemon restart
-      E2E, graceful and crash) — client-side E2E (browser-less WS driver
-      reconnect) not yet done, see Progress above
+      E2E, graceful and crash)
+- [x] Verification, client-side (typecheck/tests + no-real-browser WS
+      driver reconnect E2E)
+- [ ] Verification, merged branch (full repo `verify` — build/test/lint
+      across both tracks together, plus a combined live-daemon E2E)
 
 ## Validation
 
-(Client-side items below intentionally left unfilled — a separate parallel
-track owns `web/packages/ui`.)
+Both tracks were implemented in parallel worktrees (branches
+`terminal-restart-persistence` and `web-client-reconnect`, off `develop`)
+and merged into `daemon-restart-resync`. Each track's own validation below
+is as reported by its implementing agent; the merge itself only touched
+this plan document (a content conflict from both branches editing the same
+sections independently — resolved by combining, no code conflicts at all,
+consistent with the two tracks sharing no source files). Combined
+post-merge verification is recorded in the last subsection.
+
+### Daemon-side (`internal/store`, `internal/terminal`, `internal/wsapi`)
 
 - **Schema + `internal/store` CRUD** (`internal/store/terminal_sessions_test.go`):
   `TestStore_TerminalSessions`, `TestStore_GetTerminalSessionMissing`,
@@ -420,3 +513,96 @@ track owns `web/packages/ui`.)
   `terminal.list` reports `status = "interrupted"` and `terminal.attach`'s
   backfill contains the first marker but not the second -- the concrete
   gap this design accepts, observed directly rather than assumed.
+
+### Client-side (`web/packages/ui`)
+
+**Unit tests**:
+- `lib/ws-client.test.ts` (unchanged, still 8/8 passing) plus the new
+  `onClose` hook's behavior exercised indirectly through `reconnect.test.ts`.
+- `lib/reconnect.test.ts` (new, 6 tests): unexpected close triggers a
+  reconnect attempt; explicit `close()` never does; a failed attempt
+  retries again with backoff (verified via vitest's built-in fake timers --
+  no new dependency needed); a successful reconnect resolves to a client
+  usable for a real `call()` against its new fake socket; the reconnect
+  loop re-arms itself on the new client so a second unexpected close also
+  reconnects; the default `connect` (real `connectDaemon`) is invoked
+  fresh on every attempt, proving the token is refetched each time rather
+  than reused.
+- `App.test.tsx` (new, 4 tests, driving the real `WsClient` class against
+  fake sockets rather than `FakeWsClient`, since this needed genuine
+  new-instance-per-reconnect semantics): an initial connect failure still
+  shows the pre-existing `Disconnected: <message>` state and never retries
+  (regression check); an unexpected disconnect moves the header off
+  "Connected to daemon" to "Reconnecting to daemon…", and a successful
+  reconnect brings "Connected to daemon" back; after reconnect, a *fresh*
+  `workspace.list` fires against the new socket (the only way that could
+  happen is if `AppSidebar` actually received a new `client` reference,
+  since `useWorkspaceTree`'s effect is keyed on it -- verified behaviorally
+  rather than by reaching into React internals); a task selected before
+  disconnect is still selected and rendered after reconnect, with its pane
+  re-fetching fresh (`run.list`) against the new client rather than being
+  unmounted or losing the selection.
+- `components/task-detail.test.tsx` (2 new tests added to the existing 13):
+  a "Connection lost — reconnecting…" banner appears/disappears with
+  `connectionStatus`, additively (an already-rendered run's streamed text
+  stays on screen, nothing is discarded); given a new post-reconnect
+  client, `useRunTimeline` (no code changes needed) issues a fresh
+  `run.list` and re-attaches to the same still-`"running"` run id, never a
+  fresh `run.start`.
+- `components/terminal-pane.test.tsx` (rewritten for the new
+  list-before-create flow, 14 tests total, 3 new): given a new
+  post-reconnect client, re-issues `terminal.list` and re-attaches to the
+  same still-`"running"` session id instead of a fresh `terminal.create`;
+  a session that comes back `status: "interrupted"` post-reconnect renders
+  the distinct "session ended: daemon restarted" state (verified: no
+  `terminal.attach`/`terminal.create` call happens, and the generic
+  `terminal-error` testid is absent); the same additive connection-lost
+  banner as `TaskDetailPane`, without disposing the terminal widget.
+- Total: `bun run test` (`vitest run`) -- **8 test files, 62/62 passing**.
+- `bunx tsc -b` -- clean.
+- `bun run build` (`tsc -b && vite build`) -- succeeded;
+  `internal/server/dist/.gitkeep` was deleted by the build (the same known
+  Vite `--emptyOutDir` behavior every prior web UI task has hit) and
+  restored via `git checkout`.
+
+**Manual/E2E, client-side half** (real built `bin/smind`, temp `SMIND_HOME`
++ a real git repo workspace created via the CLI, a from-scratch Bun script
+using only built-in `fetch`/`WebSocket`, kept as a throwaway script per
+prior plans' precedent, not committed): a hand-rolled client mirroring
+`WsClient` plus a `watchForReconnect`-equivalent (unexpected-close
+detection, backoff redial, fresh `/api/token` fetch per attempt) connected
+to the real daemon and confirmed an initial `workspace.list` succeeded; the
+daemon process was then sent `SIGTERM` while a supervisor shell loop
+watched for its exit and restarted the same binary against the same
+`SMIND_HOME` (same token file, so the daemon-restart-preserves-the-token
+assumption in the Acceptance Criteria held); the driver observed the
+socket's unexpected close, redialed (the first attempt landed before the
+new process had bound its port yet and failed as expected, the next
+attempt succeeded), and a fresh `workspace.list`/`task.list` against the
+new connection succeeded -- all without the driver script redialing
+manually.
+
+**What jsdom could and couldn't exercise**: all of this task's reconnect
+logic itself (`reconnect.ts`, `App.tsx`'s status wiring, the
+`TaskDetailPane`/`TerminalPane` list-then-attach/banner logic) is plain
+JS/React state machinery with no real-browser-only dependency, so jsdom
+exercises it faithfully -- nothing here needed the manual E2E step to
+prove correctness of the reconnect *logic* itself; the E2E step exists to
+prove the logic holds against a *real* daemon's actual socket-close timing
+and token persistence. The one genuine jsdom gap touched by this task is
+pre-existing and unrelated to reconnect: jsdom's
+`HTMLCanvasElement.getContext()` is unimplemented, so `TerminalPane`'s
+tests exercise its own wiring logic via the `TerminalHandle` fake, never a
+real `@xterm/xterm` `Terminal` instance. Separately, jsdom also doesn't
+implement `ResizeObserver`, which `react-resizable-panels`' `<Group>`
+(used by `App.tsx`'s layout) needed for the first time once a full
+`App.tsx` render tree was under test -- a plain no-op stub was added to
+`test/setup.ts`, the same way this file already stubs `matchMedia`; no
+test here exercises real panel-resize behavior, so the stub being a no-op
+is sufficient.
+
+### Merged branch (post-integration)
+
+(To be filled in after running the full `verify` skill — build/test/lint
+across both tracks together, confirming the merge introduced no
+integration bugs beyond what each track already validated in isolation.)

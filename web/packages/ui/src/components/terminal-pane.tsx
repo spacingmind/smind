@@ -4,8 +4,15 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
 import { Button } from "@/components/ui/button";
+import type { ConnectionStatus } from "@/lib/reconnect";
 import type { WsClientLike } from "@/lib/ws-client";
-import type { Task, TerminalAttachResult, TerminalCreateResult, TerminalDataEventParams } from "@/lib/types";
+import type {
+  Task,
+  TerminalAttachResult,
+  TerminalCreateResult,
+  TerminalDataEventParams,
+  TerminalSessionStatus,
+} from "@/lib/types";
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active terminal.attach be aborted (detached, not closed) on task switch or unmount -- same pattern as use-run-timeline.ts's Session. */
 interface Session {
@@ -64,27 +71,34 @@ function base64ToBytes(b64: string): Uint8Array {
  * explorer and a diff viewer are being built in parallel against those
  * same shell files).
  *
- * Lifecycle, mirroring use-run-timeline.ts's run.start/run.attach split:
- * mounting (or the task changing) calls terminal.create once, then
- * immediately begins streaming it via terminal.attach (backfill, then
- * live "data" events written straight into the terminal handle).
- * Unmounting/switching tasks aborts the attach's AbortSignal, which only
- * detaches -- the shell keeps running server-side -- never calling
- * terminal.close itself; only the explicit "Close terminal" button does
- * that, mirroring TaskDetailPane's Stop button going through run.stop
- * rather than an abort.
+ * Lifecycle, mirroring use-run-timeline.ts's run.list-first pattern:
+ * mounting (or the task changing, or App.tsx swapping in a new
+ * post-reconnect client) calls terminal.list first to discover whether a
+ * still-running session for this task already exists -- reusing it via
+ * terminal.attach if so, or terminal.create-then-attach if not -- so a
+ * reconnect's client-reference change resyncs onto the same session
+ * instead of spawning a duplicate shell. Attach streams backfill then live
+ * "data" events written straight into the terminal handle. Unmounting/
+ * switching tasks aborts the attach's AbortSignal, which only detaches --
+ * the shell keeps running server-side -- never calling terminal.close
+ * itself; only the explicit "Close terminal" button does that, mirroring
+ * TaskDetailPane's Stop button going through run.stop rather than an
+ * abort.
  *
- * Only one session is driven at a time (the backend's terminal.list/
- * multi-session support exists but this component doesn't call it this
- * pass -- see the plan's Decisions, "explicitly out of scope").
+ * Only one session is driven at a time -- if terminal.list turns up more
+ * than one running session for the task (e.g. one created from another
+ * tab), the first one found is what this component attaches to.
  */
 export function TerminalPane({
   client,
   task,
+  connectionStatus = "connected",
   createTerminal = createRealTerminal,
 }: {
   client: WsClientLike | null;
   task: Task;
+  /** Real-time connection status from App.tsx -- see TaskDetailPane's identical prop for why. Defaults to "connected" so every existing caller/test keeps behaving exactly as before. */
+  connectionStatus?: ConnectionStatus;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: () => TerminalHandle;
 }) {
@@ -92,9 +106,16 @@ export function TerminalPane({
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // Tracks task.ID across renders so the create/attach effect below can
+  // tell "the client reference changed because we reconnected" (task.ID
+  // unchanged -- reuse lastTerminalIdRef to re-discover the same session)
+  // apart from "the user switched tasks" (task.ID changed -- start fresh).
+  const prevTaskIdRef = useRef<number | null>(null);
+  const lastTerminalIdRef = useRef<string | null>(null);
 
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
   const [closing, setClosing] = useState(false);
 
   // Create the terminal handle once per mount, and dispose it on unmount.
@@ -145,11 +166,25 @@ export function TerminalPane({
     return () => observer.disconnect();
   }, []);
 
-  // terminal.create then terminal.attach: backfill + live "data" events
-  // written straight into the terminal handle. See the component doc
-  // comment for the detach-on-unmount contract.
+  // terminal.list then either terminal.attach (a still-running session for
+  // this task already exists -- e.g. this effect re-running because
+  // App.tsx swapped in a new post-reconnect client, task.ID unchanged) or
+  // terminal.create then terminal.attach (no session yet -- first mount
+  // for this task). See the component doc comment for the
+  // detach-on-unmount contract.
+  //
+  // This list-before-create step is what makes reconnect resync safe:
+  // without it, a client-reference change alone would re-run this effect
+  // and call terminal.create again, spawning a duplicate shell next to the
+  // one still running server-side (see
+  // docs/plans/active/daemon-restart-resync.md's Acceptance Criteria).
   useEffect(() => {
+    const taskChanged = prevTaskIdRef.current !== task.ID;
+    prevTaskIdRef.current = task.ID;
+    if (taskChanged) lastTerminalIdRef.current = null;
+
     setError(null);
+    setEndedStatus(null);
     setTerminalId(null);
     terminalIdRef.current = null;
 
@@ -160,33 +195,68 @@ export function TerminalPane({
 
     const session: Session = { cancelled: false, controller: new AbortController() };
     sessionRef.current = session;
+    const previousId = lastTerminalIdRef.current;
+
+    function attach(id: string): void {
+      lastTerminalIdRef.current = id;
+      terminalIdRef.current = id;
+      setTerminalId(id);
+
+      client!
+        .callStream<TerminalAttachResult>(
+          "terminal.attach",
+          { terminalId: id },
+          (event, params) => {
+            if (session.cancelled) return;
+            if (event === "data") {
+              const { data } = params as TerminalDataEventParams;
+              termRef.current?.write(base64ToBytes(data));
+            }
+          },
+          { signal: session.controller.signal },
+        )
+        .catch(() => {
+          // Either our own detach (unmount/task switch, the expected
+          // path) or the session closing server-side -- neither needs
+          // its own error surface here; a still-mounted pane for the
+          // same task whose session just closed simply stops receiving
+          // output, which is visible in the terminal itself.
+        });
+    }
 
     client
-      .call<TerminalCreateResult>("terminal.create", { taskId: task.ID })
-      .then(({ terminalId: id }) => {
+      .call<TerminalSessionStatus[]>("terminal.list", { taskId: task.ID })
+      .then((sessions) => {
         if (session.cancelled) return;
-        terminalIdRef.current = id;
-        setTerminalId(id);
+
+        // Reconnecting to a session we were already attached to: if the
+        // daemon now reports it as no longer running, that's a real,
+        // honest outcome (the daemon restarted mid-session) -- render it
+        // distinctly instead of silently attaching (which would just
+        // backfill scrollback then immediately end, looking like a bare
+        // error) or silently starting a fresh replacement shell.
+        if (previousId) {
+          const prev = sessions.find((s) => s.ID === previousId);
+          if (prev && prev.Status !== "running") {
+            setEndedStatus(prev.Status === "interrupted" ? "interrupted" : "closed");
+            return;
+          }
+        }
+
+        const existing = sessions.find((s) => s.Status === "running");
+        if (existing) {
+          attach(existing.ID);
+          return;
+        }
 
         client
-          .callStream<TerminalAttachResult>(
-            "terminal.attach",
-            { terminalId: id },
-            (event, params) => {
-              if (session.cancelled) return;
-              if (event === "data") {
-                const { data } = params as TerminalDataEventParams;
-                termRef.current?.write(base64ToBytes(data));
-              }
-            },
-            { signal: session.controller.signal },
-          )
-          .catch(() => {
-            // Either our own detach (unmount/task switch, the expected
-            // path) or the session closing server-side -- neither needs
-            // its own error surface here; a still-mounted pane for the
-            // same task whose session just closed simply stops receiving
-            // output, which is visible in the terminal itself.
+          .call<TerminalCreateResult>("terminal.create", { taskId: task.ID })
+          .then(({ terminalId: id }) => {
+            if (session.cancelled) return;
+            attach(id);
+          })
+          .catch((err: unknown) => {
+            if (!session.cancelled) setError(err instanceof Error ? err.message : String(err));
           });
       })
       .catch((err: unknown) => {
@@ -249,7 +319,9 @@ export function TerminalPane({
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
-        <span data-testid="terminal-status">{terminalId ? `terminal ${terminalId}` : "starting terminal…"}</span>
+        <span data-testid="terminal-status">
+          {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
+        </span>
         <Button
           type="button"
           variant="outline"
@@ -261,6 +333,16 @@ export function TerminalPane({
           Close terminal
         </Button>
       </div>
+      {connectionStatus === "reconnecting" && (
+        <p data-testid="connection-banner" className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-600">
+          Connection lost -- reconnecting to daemon…
+        </p>
+      )}
+      {endedStatus === "interrupted" && (
+        <p className="px-3 py-1 text-xs text-muted-foreground" data-testid="terminal-ended">
+          session ended: daemon restarted
+        </p>
+      )}
       {error && (
         <p className="px-3 py-1 text-xs text-destructive" data-testid="terminal-error">
           {error}
