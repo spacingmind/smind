@@ -379,5 +379,36 @@ describe("TerminalPane", () => {
       // mounted -- only a banner is added, nothing is torn down.
       expect(fake.disposed).toBe(false);
     });
+
+    it("reconnect with two running sessions for the task lands on previousId's exact session, not just whichever is first in the list", async () => {
+      const client1 = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const { rerender } = render(<TerminalPane client={client1} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client1.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      expect(client1.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-1" });
+
+      const client2 = new FakeWsClient();
+      rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+
+      // Another tab's session for the same task happens to be running too,
+      // and is listed *before* this pane's own session -- picking "the
+      // first running entry" would silently swap this pane onto it.
+      client2.nth("terminal.list", 0).resolve([
+        sessionStatus({ ID: "term-other-tab", Status: "running" }),
+        sessionStatus({ ID: "term-1", Status: "running" }),
+      ]);
+      await flush();
+
+      expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
+      const reattach = client2.nth("terminal.attach", 0);
+      expect(reattach.params).toEqual({ terminalId: "term-1" });
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+    });
+
   });
 });
