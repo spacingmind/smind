@@ -6,19 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { PaneHeader } from "@/components/ui/pane-header";
-import { useTheme } from "@/hooks/use-theme";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import { loadTerminalScrollback } from "@/lib/terminal-prefs";
-import {
-  bindTerminal,
-  boundTerminalId,
-  clearTerminalActivity,
-  markTerminalActivity,
-  terminalIdsBoundElsewhere,
-  unbindTerminal,
-} from "@/lib/terminal-sessions";
-import { resolveTerminalTheme } from "@/lib/terminal-theme";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   Task,
@@ -113,39 +101,20 @@ function base64ToBytes(b64: string): Uint8Array {
  * TaskDetailPane's Stop button going through run.stop rather than an
  * abort.
  *
- * One pane drives exactly one session, and which one is recorded in
- * lib/terminal-sessions.ts against this pane's *tab key* -- so Item 20's
- * several-terminals-per-task works: a second terminal tab will not adopt
- * the session a first tab is already driving, and a pane re-mounting
- * (tab switch, reconnect) lands back on its own session rather than on
- * "whichever is first in the list".
- *
- * Output arriving while this pane's tab is not the active one marks the
- * tab (Item 20's activity indicator); activating it clears the mark. That
- * requires the pane to stay mounted while its tab is in the background --
- * see App.tsx's forceMount on terminal tabs, and the plan's Item 20
- * decisions for why that is the right reading of the detach-not-close
- * contract.
+ * Only one session is driven at a time -- if terminal.list turns up more
+ * than one running session for the task (e.g. one created from another
+ * tab), the first one found is what this component attaches to.
  */
 export function TerminalPane({
   client,
   task,
-  tabKey,
-  active = true,
   connectionStatus = "connected",
-  onNewTerminal,
   createTerminal = createRealTerminal,
 }: {
   client: WsClientLike | null;
   task: Task;
-  /** This pane's tab key -- what its session binding and activity flag are recorded against. Defaults to the base terminal tab's key, so an existing single-terminal caller behaves exactly as before. */
-  tabKey?: string;
-  /** Whether this pane's tab is the one in front. Output arriving while false marks the tab; flipping to true clears the mark. Defaults true for a caller that has no tab strip. */
-  active?: boolean;
   /** Real-time connection status from App.tsx -- see TaskDetailPane's identical prop for why. Defaults to "connected" so every existing caller/test keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
-  /** Opens another terminal tab for this task (Item 20). Absent means the caller has no tab strip to open one in, and the control isn't rendered at all -- never as a dead button. */
-  onNewTerminal?: () => void;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: (options: { scrollback: number }) => TerminalHandle;
 }) {
@@ -155,6 +124,13 @@ export function TerminalPane({
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // Tracks task.ID across renders so the create/attach effect below can
+  // tell "the client reference changed because we reconnected" (task.ID
+  // unchanged -- reuse lastTerminalIdRef to re-discover the same session)
+  // apart from "the user switched tasks" (task.ID changed -- start fresh).
+  const prevTaskIdRef = useRef<number | null>(null);
+  const lastTerminalIdRef = useRef<string | null>(null);
+
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
@@ -269,6 +245,10 @@ export function TerminalPane({
   // one still running server-side (see
   // docs/plans/active/daemon-restart-resync.md's Acceptance Criteria).
   useEffect(() => {
+    const taskChanged = prevTaskIdRef.current !== task.ID;
+    prevTaskIdRef.current = task.ID;
+    if (taskChanged) lastTerminalIdRef.current = null;
+
     setError(null);
     setEndedStatus(null);
     setTerminalId(null);
@@ -281,13 +261,10 @@ export function TerminalPane({
 
     const session: Session = { cancelled: false, controller: new AbortController() };
     sessionRef.current = session;
-    // The session this *tab* already owns, if any. Switching tasks changes
-    // `key`, so a different task's binding is never consulted; a reconnect
-    // or a re-mount keeps the same key and therefore the same session.
-    const previousId = boundTerminalId(key);
+    const previousId = lastTerminalIdRef.current;
 
     function attach(id: string): void {
-      bindTerminal(key, id);
+      lastTerminalIdRef.current = id;
       terminalIdRef.current = id;
       setTerminalId(id);
 
@@ -300,8 +277,6 @@ export function TerminalPane({
             if (event === "data") {
               const { data } = params as TerminalDataEventParams;
               termRef.current?.write(base64ToBytes(data));
-              // Output you weren't looking at marks the tab (Item 20).
-              if (!activeRef.current) markTerminalActivity(key);
             }
           },
           { signal: session.controller.signal },
@@ -317,41 +292,24 @@ export function TerminalPane({
 
     client
       .call<TerminalSessionStatus[]>("terminal.list", { taskId: task.ID })
-      .then((rawSessions) => {
-        const sessions = rawSessions ?? [];
+      .then((sessions) => {
         if (session.cancelled) return;
 
-        // Reconnecting to a session we were already attached to:
-        // previousId names that *exact* session, and it must be resolved
-        // by that id specifically -- never by "the first running session
-        // in the list", which could silently swap this pane onto a
-        // *different* session server-side if more than one happens to be
-        // running for the task (e.g. one started from another tab). If
-        // the daemon now reports our own session as no longer running,
-        // that's a real, honest outcome (the daemon restarted
-        // mid-session, or it was closed) -- render it distinctly instead
-        // of silently attaching (which would just backfill scrollback
-        // then immediately end, looking like a bare error) or silently
-        // starting a fresh replacement shell. This is a reconnect, not a
-        // fresh attach, so there is deliberately no fallback to "any
-        // running session"/"create new" below when previousId is set.
+        // Reconnecting to a session we were already attached to: if the
+        // daemon now reports it as no longer running, that's a real,
+        // honest outcome (the daemon restarted mid-session) -- render it
+        // distinctly instead of silently attaching (which would just
+        // backfill scrollback then immediately end, looking like a bare
+        // error) or silently starting a fresh replacement shell.
         if (previousId) {
           const prev = sessions.find((s) => s.ID === previousId);
-          if (prev && prev.Status === "running") {
-            attach(prev.ID);
-          } else {
-            setEndedStatus(prev?.Status === "interrupted" ? "interrupted" : "closed");
+          if (prev && prev.Status !== "running") {
+            setEndedStatus(prev.Status === "interrupted" ? "interrupted" : "closed");
+            return;
           }
-          return;
         }
 
-        // No previousId: a genuinely fresh attach for this tab (first
-        // mount for this task, not a reconnect) -- fine to reuse an
-        // already-running session, *except* one another terminal tab is
-        // already driving, which would render the same shell twice
-        // (Item 20).
-        const taken = terminalIdsBoundElsewhere(key);
-        const existing = sessions.find((s) => s.Status === "running" && !taken.has(s.ID));
+        const existing = sessions.find((s) => s.Status === "running");
         if (existing) {
           attach(existing.ID);
           return;
@@ -482,72 +440,25 @@ export function TerminalPane({
 
   return (
     <div className="flex h-full flex-col">
-      <PaneHeader
-        title={
-          <span data-testid="terminal-status" className="font-normal text-foreground-muted">
-            {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
-          </span>
-        }
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              disabled={!terminalId || (selectionReportable && !hasSelection)}
-              onClick={() => void handleCopy()}
-              data-testid="terminal-copy"
-            >
-              <Copy className="size-3" />
-              Copy
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              disabled={!terminalId}
-              onClick={() => void handlePaste()}
-              data-testid="terminal-paste"
-            >
-              <ClipboardPaste className="size-3" />
-              Paste
-            </Button>
-            {onNewTerminal && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 px-2 text-xs"
-                onClick={onNewTerminal}
-                data-testid="terminal-new"
-              >
-                <Plus className="size-3" />
-                New
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-6 px-2 text-xs"
-              disabled={!terminalId || closing}
-              onClick={handleClose}
-              data-testid="terminal-close"
-            >
-              Close terminal
-            </Button>
-          </>
-        }
-      />
+      <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
+        <span data-testid="terminal-status">
+          {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
+        </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="h-6 px-2 text-xs"
+          disabled={!terminalId || closing}
+          onClick={handleClose}
+        >
+          Close terminal
+        </Button>
+      </div>
       {connectionStatus === "reconnecting" && (
-        <Alert
-          testId="connection-banner"
-          variant="warning"
-          className="rounded-none border-x-0 border-t-0"
-          description="Connection lost -- reconnecting to daemon…"
-        />
+        <p data-testid="connection-banner" className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-600">
+          Connection lost -- reconnecting to daemon…
+        </p>
       )}
       {endedStatus === "interrupted" && (
         <p className="px-3 py-1 text-xs text-muted-foreground" data-testid="terminal-ended">

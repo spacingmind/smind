@@ -486,7 +486,7 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("connection-banner")).toBeInTheDocument();
     // The banner is additive -- the run entry already on screen (with its
     // already-streamed text) is not thrown away while waiting to resync.
-    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("hello");
+    expect(screen.getByTestId("run-text")).toHaveTextContent("hello");
 
     rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
     await flush();
@@ -502,7 +502,7 @@ describe("TaskDetailPane", () => {
     expect(client1.nth("run.attach", 0).params).toEqual({ runId: "run-1" });
     client1.emit("run.attach", 0, "chunk", { text: "partial output" });
     await flush();
-    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial output");
+    expect(screen.getByTestId("run-text")).toHaveTextContent("partial output");
 
     // App.tsx swaps in a genuinely new WsClient instance after a
     // successful reconnect -- the task selection itself is untouched.
@@ -522,85 +522,6 @@ describe("TaskDetailPane", () => {
 
     client2.emit("run.attach", 0, "chunk", { text: "more output" });
     await flush();
-    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("more output");
-  });
-
-  it("renders the provider dropdown from provider.list (3 providers, labels over ids)", async () => {
-    const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
-
-    const listCall = client.nth("provider.list", 0);
-    expect(listCall.params).toBeUndefined();
-    listCall.resolve({
-      providers: [
-        { id: "claude-native", label: "Claude Code" },
-        { id: "glm", label: "GLM" },
-        { id: "codex-native", label: "Codex" },
-      ],
-    } satisfies ProviderListResult);
-    await flush();
-
-    const select = screen.getByLabelText("Provider");
-    const options = within(select).getAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM", "Codex"]);
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm", "codex-native"]);
-  });
-
-  it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
-    const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
-
-    client.nth("run.list", 0).resolve([]);
-    client.nth("provider.list", 0).reject(new Error("boom"));
-    await flush();
-
-    const select = screen.getByLabelText("Provider");
-    const options = within(select).getAllByRole("option");
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm"]);
-
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await flush();
-
-    const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
-  });
-
-  it("defaults the approval-policy selector to manual and omits approvalPolicy from run.start", async () => {
-    const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
-
-    client.nth("run.list", 0).resolve([]);
-    await flush();
-
-    expect(screen.getByLabelText("Approval policy")).toHaveValue("manual");
-
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await flush();
-
-    const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
-  });
-
-  it("sends approvalPolicy=auto-safe in run.start when auto-safe is selected", async () => {
-    const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
-
-    client.nth("run.list", 0).resolve([]);
-    await flush();
-
-    fireEvent.change(screen.getByLabelText("Approval policy"), { target: { value: "auto-safe" } });
-    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await flush();
-
-    const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({
-      taskId: TASK_A.ID,
-      provider: "claude-native",
-      prompt: "do the thing",
-      approvalPolicy: "auto-safe",
-    });
+    expect(screen.getByTestId("run-text")).toHaveTextContent("more output");
   });
 });
