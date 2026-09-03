@@ -341,7 +341,18 @@ export class WsClient implements WsClientLike {
 
     const waiters = this.closeWaiters;
     this.closeWaiters = [];
-    for (const resolve of waiters) resolve();
+    for (const resolve of waiters) {
+      // onClose's doc comment promises every registered callback fires
+      // exactly once -- one callback throwing must not stop the rest of
+      // this loop from running (a caller-side bug in one callback isn't
+      // this class's problem to propagate into breaking every other
+      // caller's callback too).
+      try {
+        resolve();
+      } catch (err) {
+        console.error("wsclient: onClose callback threw", err);
+      }
+    }
   }
 
   private send(env: WireEnvelope): void {

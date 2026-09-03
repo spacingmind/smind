@@ -229,20 +229,33 @@ export function TerminalPane({
       .then((sessions) => {
         if (session.cancelled) return;
 
-        // Reconnecting to a session we were already attached to: if the
-        // daemon now reports it as no longer running, that's a real,
-        // honest outcome (the daemon restarted mid-session) -- render it
-        // distinctly instead of silently attaching (which would just
-        // backfill scrollback then immediately end, looking like a bare
-        // error) or silently starting a fresh replacement shell.
+        // Reconnecting to a session we were already attached to:
+        // previousId names that *exact* session, and it must be resolved
+        // by that id specifically -- never by "the first running session
+        // in the list", which could silently swap this pane onto a
+        // *different* session server-side if more than one happens to be
+        // running for the task (e.g. one started from another tab). If
+        // the daemon now reports our own session as no longer running,
+        // that's a real, honest outcome (the daemon restarted
+        // mid-session, or it was closed) -- render it distinctly instead
+        // of silently attaching (which would just backfill scrollback
+        // then immediately end, looking like a bare error) or silently
+        // starting a fresh replacement shell. This is a reconnect, not a
+        // fresh attach, so there is deliberately no fallback to "any
+        // running session"/"create new" below when previousId is set.
         if (previousId) {
           const prev = sessions.find((s) => s.ID === previousId);
-          if (prev && prev.Status !== "running") {
-            setEndedStatus(prev.Status === "interrupted" ? "interrupted" : "closed");
-            return;
+          if (prev && prev.Status === "running") {
+            attach(prev.ID);
+          } else {
+            setEndedStatus(prev?.Status === "interrupted" ? "interrupted" : "closed");
           }
+          return;
         }
 
+        // No previousId: a genuinely fresh attach for this component
+        // instance (first mount for this task, not a reconnect) -- fine
+        // to reuse any already-running session found, or create one.
         const existing = sessions.find((s) => s.Status === "running");
         if (existing) {
           attach(existing.ID);
@@ -309,6 +322,16 @@ export function TerminalPane({
     setClosing(true);
     try {
       await client.call("terminal.close", { terminalId: id });
+      // Reset every trace of this session, including lastTerminalIdRef --
+      // otherwise a *later* reconnect's list-then-attach effect above
+      // would still find previousId pointing at this now-closed session,
+      // see it as no longer running, and get permanently stuck showing
+      // "session closed" instead of ever calling terminal.create again.
+      // Clearing it here makes the next effect run treat this exactly
+      // like a fresh attach, same as if the task had just been selected.
+      terminalIdRef.current = null;
+      lastTerminalIdRef.current = null;
+      setTerminalId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

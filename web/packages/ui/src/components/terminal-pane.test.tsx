@@ -379,5 +379,81 @@ describe("TerminalPane", () => {
       // mounted -- only a banner is added, nothing is torn down.
       expect(fake.disposed).toBe(false);
     });
+
+    it("reconnect with two running sessions for the task lands on previousId's exact session, not just whichever is first in the list", async () => {
+      const client1 = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const { rerender } = render(<TerminalPane client={client1} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client1.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      expect(client1.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-1" });
+
+      const client2 = new FakeWsClient();
+      rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+
+      // Another tab's session for the same task happens to be running too,
+      // and is listed *before* this pane's own session -- picking "the
+      // first running entry" would silently swap this pane onto it.
+      client2.nth("terminal.list", 0).resolve([
+        sessionStatus({ ID: "term-other-tab", Status: "running" }),
+        sessionStatus({ ID: "term-1", Status: "running" }),
+      ]);
+      await flush();
+
+      expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
+      const reattach = client2.nth("terminal.attach", 0);
+      expect(reattach.params).toEqual({ terminalId: "term-1" });
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+    });
+
+    it("explicitly closing the terminal, then a later reconnect, creates a fresh terminal instead of getting stuck showing 'session closed'", async () => {
+      const client1 = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const stableFactory = () => fake;
+      const { rerender } = render(<TerminalPane client={client1} task={TASK_A} createTerminal={stableFactory} />);
+      await flush();
+      client1.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+
+      fireEvent.click(screen.getByRole("button", { name: "Close terminal" }));
+      await flush();
+      client1.nth("terminal.close", 0).resolve(undefined);
+      await flush();
+
+      // The closed session's id must not linger in state -- otherwise a
+      // later reconnect's list-then-attach effect would still treat this
+      // exact (now-closed) id as "the session to resume".
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("starting terminal");
+      expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
+
+      const client2 = new FakeWsClient();
+      rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={stableFactory} />);
+      await flush();
+
+      const listCall = client2.nth("terminal.list", 0);
+      expect(listCall.params).toEqual({ taskId: TASK_A.ID });
+      // The daemon still remembers the now-closed session.
+      listCall.resolve([sessionStatus({ ID: "term-1", Status: "closed" })]);
+      await flush();
+
+      // Must call terminal.create for a fresh session, not get stuck on
+      // the old (already-closed-by-us) id showing "session closed"
+      // forever.
+      const createCall = client2.nth("terminal.create", 0);
+      expect(createCall.params).toEqual({ taskId: TASK_A.ID });
+      expect(screen.queryByTestId("terminal-ended")).not.toBeInTheDocument();
+
+      createCall.resolve({ terminalId: "term-2" });
+      await flush();
+      expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-2" });
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-2");
+    });
   });
 });
