@@ -33,19 +33,22 @@ type API struct {
 	Terminals *terminal.Registry
 }
 
-// New builds the full /ws API: one shared *runs.Registry (backed by db --
-// see runs.New's doc comment on the reconciliation/rehydration it performs
-// synchronously here, so New itself can fail if that startup work does) and
-// one shared *terminal.Registry for every connection the returned Handler
-// accepts (see Handler's doc comment for why a Run or terminal session's
-// lifetime must be independent of any one connection), plus the
-// http.Handler itself.
+// New builds the full /ws API: one shared *runs.Registry and one shared
+// *terminal.Registry, both backed by db (see runs.New's and terminal.New's
+// doc comments on the reconciliation/rehydration each performs
+// synchronously here, so New itself can fail if that startup work does),
+// for every connection the returned Handler accepts (see Handler's doc
+// comment for why a Run or terminal session's lifetime must be independent
+// of any one connection), plus the http.Handler itself.
 func New(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
 	reg, err := runs.New(db)
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
-	treg := terminal.New()
+	treg, err := terminal.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("wsapi: new: %w", err)
+	}
 	hs := methodHandlers(wm, runner, reg, treg)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
