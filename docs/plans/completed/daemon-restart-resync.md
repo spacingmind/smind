@@ -689,6 +689,23 @@ session from the web UI, kill/restart the daemon, confirm the UI itself —
 not just a driver script — recovers and shows the session's post-restart
 state) — flagged here rather than silently assumed.
 
+**Second merge, after code review found 4 real bugs** (2 daemon-side, 2
+frontend, plus 1 lower-severity frontend finding — see each track's own
+"Post-review fixes" subsection above for detail): both fix branches merged
+back into `daemon-restart-resync` cleanly (again, only the plan document
+itself conflicted, never source files). Full `verify` skill re-run on the
+twice-merged branch:
+- `task build` / `task test` / `task lint` — all clean (web 8/8 files,
+  67/67 tests; Go all 18 packages clean).
+- `go test -race -count=5 ./internal/terminal/... ./internal/store/...
+  ./internal/wsapi/...` — clean (14.3s for `internal/terminal`, which now
+  includes the new `TestRegistry_Finish_SupersedesInFlightStaleCheckpoint`
+  rendezvous test and the Linux zombie-leak regression test; `-count=5`
+  chosen deliberately higher than the first merge's `-count=3` specifically
+  to pressure-test the checkpoint/finish race fix).
+- `internal/server/dist/.gitkeep` deleted by the build (same known Vite
+  behavior) and restored via `git checkout`.
+
 ### Post-review fixes: checkpoint/finish write race + zombie process leak
 
 A code review of PR #48 (this plan's daemon-side work merged together with
