@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { TerminalPane, type TerminalHandle } from "@/components/terminal-pane";
-import type { Task } from "@/lib/types";
+import type { Task, TerminalSessionStatus } from "@/lib/types";
 
 const TASK_A: Task = {
   ID: 1,
@@ -21,6 +21,17 @@ const TASK_A: Task = {
 
 const TASK_B: Task = { ...TASK_A, ID: 2, Title: "Task B", Branch: "task-b" };
 
+function sessionStatus(overrides: Partial<TerminalSessionStatus> = {}): TerminalSessionStatus {
+  return {
+    ID: "term-1",
+    TaskID: TASK_A.ID,
+    StartedAt: "2024-01-01T00:00:00Z",
+    Status: "running",
+    ClosedAt: null,
+    ...overrides,
+  };
+}
+
 /**
  * A fake implementing TerminalHandle's surface, recording every call and
  * exposing emitData/emitResize to drive the callbacks TerminalPane
@@ -28,7 +39,7 @@ const TASK_B: Task = { ...TASK_A, ID: 2, Title: "Task B", Branch: "task-b" };
  * counterpart to FakeWsClient, for exactly the reason TerminalHandle's own
  * doc comment gives: a real xterm.js instance needs browser canvas/layout
  * APIs jsdom doesn't implement, so these tests exercise TerminalPane's own
- * wiring logic (terminal.create/attach/write/resize, detach-on-unmount)
+ * wiring logic (terminal.list/create/attach/write/resize, detach-on-unmount)
  * against this fake instead.
  */
 class FakeTerminalHandle implements TerminalHandle {
@@ -88,7 +99,7 @@ function base64Of(text: string): string {
 }
 
 describe("TerminalPane", () => {
-  it("mounting opens the terminal handle and calls terminal.create then terminal.attach", async () => {
+  it("mounting opens the terminal handle and calls terminal.list, then terminal.create then terminal.attach when no session exists yet", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
@@ -96,10 +107,17 @@ describe("TerminalPane", () => {
 
     expect(fake.opened).toBe(screen.getByTestId("terminal-container"));
 
+    const listCall = client.nth("terminal.list", 0);
+    expect(listCall.params).toEqual({ taskId: TASK_A.ID });
+
+    // terminal.create must not be issued before terminal.list resolves.
+    expect(client.calls.some((c) => c.method === "terminal.create")).toBe(false);
+
+    listCall.resolve([]);
+    await flush();
+
     const createCall = client.nth("terminal.create", 0);
     expect(createCall.params).toEqual({ taskId: TASK_A.ID });
-
-    // terminal.attach must not be issued before terminal.create resolves.
     expect(client.calls.some((c) => c.method === "terminal.attach")).toBe(false);
 
     createCall.resolve({ terminalId: "term-1" });
@@ -114,6 +132,8 @@ describe("TerminalPane", () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
@@ -133,6 +153,8 @@ describe("TerminalPane", () => {
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
     await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
 
@@ -148,6 +170,8 @@ describe("TerminalPane", () => {
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
     await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
 
@@ -162,6 +186,8 @@ describe("TerminalPane", () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     const { unmount } = render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
@@ -180,6 +206,8 @@ describe("TerminalPane", () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
     await flush();
@@ -205,10 +233,24 @@ describe("TerminalPane", () => {
     expect(screen.getByRole("button", { name: "Close terminal" })).toBeDisabled();
   });
 
+  it("surfaces a terminal.list failure as an error message", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+
+    client.nth("terminal.list", 0).reject(new Error("daemon unreachable"));
+    await flush();
+
+    expect(screen.getByTestId("terminal-error")).toHaveTextContent("daemon unreachable");
+  });
+
   it("surfaces a terminal.create failure as an error message", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
     await flush();
 
     client.nth("terminal.create", 0).reject(new Error("no worktree"));
@@ -217,11 +259,13 @@ describe("TerminalPane", () => {
     expect(screen.getByTestId("terminal-error")).toHaveTextContent("no worktree");
   });
 
-  it("switching tasks detaches the previous task's attach and starts a fresh terminal.create/attach for the new task", async () => {
+  it("switching tasks detaches the previous task's attach and starts a fresh terminal.list/create/attach for the new task", async () => {
     const client = new FakeWsClient();
     const fake = new FakeTerminalHandle();
     const stableFactory = () => fake;
     const { rerender } = render(<TerminalPane client={client} task={TASK_A} createTerminal={stableFactory} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
     await flush();
     client.nth("terminal.create", 0).resolve({ terminalId: "term-a" });
     await flush();
@@ -234,6 +278,11 @@ describe("TerminalPane", () => {
     expect(attachA.options?.signal?.aborted).toBe(true);
     expect(client.calls.some((c) => c.method === "terminal.close")).toBe(false);
 
+    const listB = client.nth("terminal.list", 1);
+    expect(listB.params).toEqual({ taskId: TASK_B.ID });
+    listB.resolve([]);
+    await flush();
+
     const createB = client.nth("terminal.create", 1);
     expect(createB.params).toEqual({ taskId: TASK_B.ID });
     createB.resolve({ terminalId: "term-b" });
@@ -243,12 +292,92 @@ describe("TerminalPane", () => {
     expect(attachB.params).toEqual({ terminalId: "term-b" });
   });
 
-  it("renders with no client without crashing, and never calls terminal.create", async () => {
+  it("renders with no client without crashing, and never calls terminal.list/terminal.create", async () => {
     const fake = new FakeTerminalHandle();
     render(<TerminalPane client={null} task={TASK_A} createTerminal={() => fake} />);
     await flush();
 
     expect(screen.getByTestId("terminal-status")).toHaveTextContent("starting terminal");
     expect(fake.opened).not.toBeNull();
+  });
+
+  describe("reconnect resync", () => {
+    it("given a new post-reconnect client, re-issues terminal.list and re-attaches to the same still-running id instead of a fresh terminal.create", async () => {
+      const client1 = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const { rerender } = render(<TerminalPane client={client1} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client1.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+      expect(client1.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-1" });
+
+      // App.tsx swaps in a genuinely new WsClient instance after a
+      // successful reconnect -- task.ID is unchanged, only the client
+      // reference changed.
+      const client2 = new FakeWsClient();
+      rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+
+      const listCall = client2.nth("terminal.list", 0);
+      expect(listCall.params).toEqual({ taskId: TASK_A.ID });
+      listCall.resolve([sessionStatus({ ID: "term-1", Status: "running" })]);
+      await flush();
+
+      // Re-attaches to the same id -- never a fresh terminal.create.
+      expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
+      const reattach = client2.nth("terminal.attach", 0);
+      expect(reattach.params).toEqual({ terminalId: "term-1" });
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-1");
+    });
+
+    it("given a session that comes back status: interrupted post-reconnect, renders the distinct 'session ended: daemon restarted' state, not a generic error", async () => {
+      const client1 = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const { rerender } = render(<TerminalPane client={client1} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client1.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client1.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+
+      const client2 = new FakeWsClient();
+      rerender(<TerminalPane client={client2} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+
+      client2.nth("terminal.list", 0).resolve([sessionStatus({ ID: "term-1", Status: "interrupted" })]);
+      await flush();
+
+      expect(client2.calls.some((c) => c.method === "terminal.attach")).toBe(false);
+      expect(client2.calls.some((c) => c.method === "terminal.create")).toBe(false);
+      expect(screen.getByTestId("terminal-ended")).toHaveTextContent("session ended: daemon restarted");
+      expect(screen.queryByTestId("terminal-error")).not.toBeInTheDocument();
+      expect(screen.getByTestId("terminal-status")).toHaveTextContent("interrupted");
+    });
+
+    it("shows a connection-lost banner while connectionStatus is 'reconnecting', without discarding the existing terminal output", async () => {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      const stableFactory = () => fake;
+      const { rerender } = render(
+        <TerminalPane client={client} task={TASK_A} connectionStatus="connected" createTerminal={stableFactory} />,
+      );
+      await flush();
+      client.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+
+      expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
+
+      rerender(<TerminalPane client={client} task={TASK_A} connectionStatus="reconnecting" createTerminal={stableFactory} />);
+      await flush();
+
+      expect(screen.getByTestId("connection-banner")).toBeInTheDocument();
+      // The terminal widget itself (and its already-rendered output) stays
+      // mounted -- only a banner is added, nothing is torn down.
+      expect(fake.disposed).toBe(false);
+    });
   });
 });
