@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 const FALLBACK_PROVIDERS: ProviderInfo[] = [
