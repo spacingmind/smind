@@ -102,18 +102,6 @@ export function App({
     };
   }, [connect]);
 
-  function selectTask(task: Task) {
-    setSelectedTask(task);
-    ensureTask(task.ID);
-  }
-
-  function openFileTab(path: string) {
-    if (!selectedTask) return;
-    openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
-  }
-
-  const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
-
   return (
     <SidebarProvider>
       <AppSidebar
@@ -161,11 +149,18 @@ export function App({
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                {taskState.tabs.map((entry) => (
-                  <TabsContent key={entry.key} value={entry.key} className="min-h-0">
-                    <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
-                  </TabsContent>
-                ))}
+                <TabsContent value="chat" className="min-h-0">
+                  <TaskDetailPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
+                </TabsContent>
+                <TabsContent value="files" className="min-h-0">
+                  <FileExplorerPane client={client} task={selectedTask} />
+                </TabsContent>
+                <TabsContent value="diff" className="min-h-0">
+                  <DiffViewerPane client={client} task={selectedTask} />
+                </TabsContent>
+                <TabsContent value="terminal" className="min-h-0">
+                  <TerminalPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
+                </TabsContent>
               </Tabs>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
