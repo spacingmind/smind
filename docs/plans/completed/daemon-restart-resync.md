@@ -496,9 +496,86 @@ assumption in the Acceptance Criteria held); the driver observed the
 socket's unexpected close, redialed (the first attempt landed before the
 new process had bound its port yet and failed as expected, the next
 attempt succeeded), and a fresh `workspace.list`/`task.list` against the
-new connection succeeded — all without the driver script redialing
-manually, confirming the same reconnect contract `reconnect.ts` implements
-holds against a real daemon, not just fake sockets.
+new connection succeeded -- all without the driver script redialing
+manually.
+
+**What jsdom could and couldn't exercise**: all of this task's reconnect
+logic itself (`reconnect.ts`, `App.tsx`'s status wiring, the
+`TaskDetailPane`/`TerminalPane` list-then-attach/banner logic) is plain
+JS/React state machinery with no real-browser-only dependency, so jsdom
+exercises it faithfully -- nothing here needed the manual E2E step to
+prove correctness of the reconnect *logic* itself; the E2E step exists to
+prove the logic holds against a *real* daemon's actual socket-close timing
+and token persistence. The one genuine jsdom gap touched by this task is
+pre-existing and unrelated to reconnect: jsdom's
+`HTMLCanvasElement.getContext()` is unimplemented, so `TerminalPane`'s
+tests exercise its own wiring logic via the `TerminalHandle` fake, never a
+real `@xterm/xterm` `Terminal` instance. Separately, jsdom also doesn't
+implement `ResizeObserver`, which `react-resizable-panels`' `<Group>`
+(used by `App.tsx`'s layout) needed for the first time once a full
+`App.tsx` render tree was under test -- a plain no-op stub was added to
+`test/setup.ts`, the same way this file already stubs `matchMedia`; no
+test here exercises real panel-resize behavior, so the stub being a no-op
+is sufficient.
+
+### Merged branch (post-integration)
+
+Merging `terminal-restart-persistence` and `web-client-reconnect` into
+`daemon-restart-resync` (both off `develop`) produced exactly one conflict:
+this plan document, from both branches independently filling in the same
+Decisions/Progress/Validation sections — resolved by combining both halves
+(no code conflicts at all, since the two tracks share no source files, as
+scoped from the start).
+
+Full `verify` skill run on the merged branch:
+- `task build` -- ok (web build + `go build`, no errors).
+- `task test` -- ok: web `bun run test` 8/8 files, 62/62 tests; Go
+  `go test ./...` clean across all 18 packages including `internal/terminal`
+  (2.1s, real PTY spawns) and `internal/wsapi`.
+- `task lint` -- ok: `go vet ./...` and `gofmt -l` (tracked files) both
+  clean.
+- `go test -race -count=3 ./internal/terminal/... ./internal/store/...
+  ./internal/wsapi/...` -- clean (the three packages the daemon-side work
+  touched most, re-run with extra scrutiny post-merge; each package's own
+  track already ran the full suite at `-race -count=3` in isolation).
+- `internal/server/dist/.gitkeep` was deleted by the web build (the known
+  Vite `--emptyOutDir` behavior every prior web UI task has hit) and
+  restored via `git checkout`.
+- Wire-contract cross-check: the daemon-side `internal/terminal.StatusInterrupted`
+  Go constant and the client-side `TerminalStatusValue`'s `"interrupted"`
+  TypeScript literal (added independently by each track before either could
+  see the other's code) both resolve to the same wire string `"interrupted"`
+  — confirmed by grep across both branches before merging, not just by
+  inspection after. No coordination between the two tracks was needed
+  beyond the Acceptance Criteria both were scoped from.
+
+Not re-run post-merge (each already validated real-daemon behavior in
+isolation, and the merge touched no source files either track's E2E script
+exercised): the daemon-side graceful/crash-restart E2E and the client-side
+no-real-browser reconnect E2E. Worth a combined real-daemon E2E pass before
+this plan is treated as fully proven end-to-end (open a real terminal
+session from the web UI, kill/restart the daemon, confirm the UI itself —
+not just a driver script — recovers and shows the session's post-restart
+state) — flagged here rather than silently assumed.
+
+**Second merge, after code review found 4 real bugs** (2 daemon-side, 2
+frontend, plus 1 lower-severity frontend finding — see each track's own
+"Post-review fixes" subsection above for detail): both fix branches merged
+back into `daemon-restart-resync` cleanly (again, only the plan document
+itself conflicted, never source files). Full `verify` skill re-run on the
+twice-merged branch:
+- `task build` / `task test` / `task lint` — all clean (web 8/8 files,
+  67/67 tests; Go all 18 packages clean).
+- `go test -race -count=5 ./internal/terminal/... ./internal/store/...
+  ./internal/wsapi/...` — clean (14.3s for `internal/terminal`, which now
+  includes the new `TestRegistry_Finish_SupersedesInFlightStaleCheckpoint`
+  rendezvous test and the Linux zombie-leak regression test; `-count=5`
+  chosen deliberately higher than the first merge's `-count=3` specifically
+  to pressure-test the checkpoint/finish race fix).
+- `internal/server/dist/.gitkeep` deleted by the build (same known Vite
+  behavior) and restored via `git checkout`.
+
+### Post-review fixes: checkpoint/finish write race + zombie process leak
 
 A code review of PR #48 (this plan's daemon-side work merged together with
 the parallel client-reconnect track) found two real bugs, both fixed on
