@@ -641,3 +641,76 @@ this plan is treated as fully proven end-to-end (open a real terminal
 session from the web UI, kill/restart the daemon, confirm the UI itself —
 not just a driver script — recovers and shows the session's post-restart
 state) — flagged here rather than silently assumed.
+
+### Post-review fixes: checkpoint/finish write race + zombie process leak
+
+A code review of PR #48 (this plan's daemon-side work merged together with
+the parallel client-reconnect track) found two real bugs, both fixed on
+this branch:
+
+- **Checkpoint/finish write race**: `checkpointLoop` snapshotted history
+  under `s.mu` but issued its store write outside any lock shared with
+  `finish`'s own write, so a stale checkpoint write (snapshotted before a
+  session's final output) could land *after* `finish`'s authoritative
+  write, silently leaving a gracefully-closed session's persisted
+  scrollback stale -- violating the "final scrollback persisted before
+  Close returns" contract. Fixed by adding `session.checkpointStop`/
+  `checkpointDone`: `finish` closes `checkpointStop` and blocks on
+  `checkpointDone` (closed by `checkpointLoop` only once it has actually
+  returned, not merely been told to) *before* performing its own write --
+  so any checkpoint write already in flight is guaranteed to have already
+  landed by the time `finish`'s write happens, making `finish`'s write
+  unambiguously the last one. This also closes the related concern that
+  `CloseAll` only waited on each session's `closedCh`, not on
+  `checkpointLoop`'s own goroutine exiting (a latent race against
+  `db.Close()` at daemon shutdown) -- `closedCh` now only closes once
+  `checkpointLoop` has fully stopped too.
+  - Proven by `TestRegistry_Finish_SupersedesInFlightStaleCheckpoint`,
+    which deterministically forces the race via a per-session
+    `checkpointWriteHook` test seam (called by `checkpointLoop` right
+    before its store write) rather than hoping goroutine scheduling
+    reproduces it. An earlier version of this test tried forcing the same
+    interleaving via a real sqlite write-lock held by a second connection,
+    but sqlite's own lock arbitration consistently favored whichever
+    writer had been queued first (always the checkpoint, given how that
+    version had to sequence things), so it passed regardless of whether
+    the fix was present -- worth recording since it's a non-obvious dead
+    end. The hook lives on the session struct, not a package-level var,
+    specifically because a package-level version raced under `-race
+    -count=5`: `TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint`
+    deliberately leaves a session's `checkpointLoop` ticking in the
+    background (simulating a crash, no clean `Close`), and that leaked
+    goroutine reading a shared global hook meant for a different test's
+    session caused exactly the cross-test race + double-close panic the
+    session-scoped version avoids.
+  - Verified against a temporarily-reverted fix (skip the
+    `checkpointDone` wait): the test fails, reproducing the exact stale-
+    scrollback symptom, then passes again once restored.
+- **Zombie process leak on `Create` failure**: both of `Create`'s error
+  paths after `pty.Start` (a `newSessionID` failure, and the more
+  realistic `CreateTerminalSession` persistence failure this plan added)
+  killed the spawned shell without ever calling `cmd.Wait()`, leaking a
+  zombie under the daemon. Fixed with a shared `killAndReap(ptmx, cmd)`
+  helper (kill + close + `Wait`, mirroring `readLoop`'s own reap comment)
+  used by both branches.
+  - Proven by `TestKillAndReap_NoZombieLeft` (direct: spawns a real
+    process, calls `killAndReap`, asserts `cmd.ProcessState` is set and
+    the pid is gone) and, Linux-only,
+    `TestRegistry_Create_CreateTerminalSessionFailure_NoZombieLeft`
+    (forces the realistic `CreateTerminalSession` failure via an unknown
+    `taskId` and confirms via `/proc`-walking `buildChildrenMap` --
+    already used by `killTree` -- that no new child process of the test
+    binary survives). Both verified against a temporarily-reverted fix
+    (drop the `cmd.Wait()` call): they fail, reproducing the zombie, then
+    pass again once restored.
+- **Full verification after both fixes**: `go build ./...`, `go vet ./...`,
+  `gofmt -l` clean. `go test -race -count=5 ./internal/terminal/...
+  ./internal/store/... ./internal/wsapi/...` clean (run three times to
+  build confidence, since one earlier attempt hit the default 10-minute
+  `go test` timeout with a large goroutine dump showing several sessions
+  genuinely still mid-read -- not mid-`finish`, ruling out a deadlock in
+  the new rendezvous logic -- consistent with transient contention from
+  other concurrent processes on this shared machine rather than a
+  reproducible bug; two immediate reruns at the same `-count=5` and a
+  third combined run all completed cleanly in 14-15s). `go test -race
+  -count=3 ./...` clean across every package.

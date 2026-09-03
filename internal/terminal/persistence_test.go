@@ -1,10 +1,13 @@
 package terminal
 
 import (
+	"os/exec"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/creack/pty"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -325,4 +328,180 @@ func TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint(t *test
 	if err := reg2.Resize(id, 80, 24); err == nil {
 		t.Fatal("reg2.Resize() against an interrupted session: error = nil, want an error")
 	}
+}
+
+// TestRegistry_Finish_SupersedesInFlightStaleCheckpoint reproduces, for
+// real, the race a review of this package's checkpoint/finish interaction
+// found: checkpointLoop snapshots history under s.mu but issues its store
+// write outside any lock shared with finish's own write, so a checkpoint
+// write that took a stale snapshot (before the session's final output)
+// could -- absent the checkpointStop/checkpointDone rendezvous finish now
+// performs before its own write -- land in the store *after* finish's
+// write, silently leaving a gracefully-closed session's persisted
+// scrollback stale.
+//
+// This deliberately does not rely on hoping goroutine scheduling
+// reproduces that interleaving (an earlier version of this test tried
+// forcing it via a real sqlite write-lock held by a second connection, but
+// sqlite's own lock arbitration turned out to consistently favor whichever
+// writer had been queued first -- which was always the checkpoint, given
+// how that version had to sequence things -- making it pass regardless of
+// whether the fix was present). Instead it sets a hook directly on the
+// session -- session.checkpointWriteHook, a test-only seam checkpointLoop
+// calls right after taking its snapshot and right before issuing the store
+// write -- to deterministically pause the real checkpoint goroutine there,
+// genuinely "a checkpoint write is about to happen", for exactly as long
+// as the test wants, independent of any store-level locking semantics.
+// While it's paused, the test produces the session's real final output and
+// closes it concurrently, then only afterward releases the paused
+// checkpoint, letting its (now stale) write finally land -- proving
+// finish's own write is still the one that wins.
+//
+// The hook lives on the session struct rather than as a package-level var
+// specifically so it can't be read by an unrelated session's
+// checkpointLoop -- including one a *different*, concurrently-running
+// t.Parallel() test deliberately left ticking in the background (e.g.
+// TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint,
+// which simulates a crash by abandoning a session without a clean Close).
+// A package-level var was tried first and produced exactly that
+// cross-test race under -race -count=5.
+func TestRegistry_Finish_SupersedesInFlightStaleCheckpoint(t *testing.T) {
+	t.Parallel()
+	forceTestShell(t)
+	st := newTestStore(t)
+	newTestTaskID(t, st)
+
+	reg, err := New(st)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	id, err := reg.Create(1, t.TempDir())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	events, unsubscribe, err := reg.Subscribe(id)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := reg.Write(id, []byte("echo before-tick\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	collectUntil(t, events, "before-tick", 5*time.Second)
+
+	// Pause the real checkpointLoop goroutine right before its store write
+	// -- its snapshot (already taken by this point, under s.mu, inside the
+	// same call) contains only "before-tick", since "final-output" below
+	// hasn't been written yet.
+	reg.mu.Lock()
+	s := reg.sessions[id]
+	reg.mu.Unlock()
+
+	releaseCheckpoint := make(chan struct{})
+	checkpointAboutToWrite := make(chan struct{})
+	s.mu.Lock()
+	s.checkpointWriteHook = func() {
+		close(checkpointAboutToWrite)
+		<-releaseCheckpoint
+	}
+	s.mu.Unlock()
+
+	select {
+	case <-checkpointAboutToWrite:
+	case <-time.After(checkpointCadence + 5*time.Second):
+		t.Fatal("checkpointLoop never reached checkpointWriteHook")
+	}
+
+	// The paused checkpoint's snapshot was taken before this -- append the
+	// session's real final output now, in memory only.
+	if err := reg.Write(id, []byte("echo final-output\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	collectUntil(t, events, "final-output", 5*time.Second)
+
+	// Close concurrently: readLoop -> finish, which (per the fix) closes
+	// checkpointStop and then blocks on checkpointDone -- and checkpointLoop
+	// cannot observe checkpointStop and return while it's still paused
+	// inside the hook below, so Close cannot return either, yet.
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- reg.Close(id) }()
+
+	// Not required for correctness (releasing the checkpoint below is what
+	// actually unblocks everything) -- just gives Close's finish a moment
+	// to reach its own checkpointStop/checkpointDone rendezvous first, so
+	// the intended interleaving is the one actually exercised.
+	time.Sleep(200 * time.Millisecond)
+
+	// Release the paused checkpoint: its (now stale) write finally lands,
+	// persisting only "before-tick". If finish's own write were not
+	// strictly ordered after this (the bug), the persisted row would be
+	// left with this stale scrollback despite status = closed.
+	close(releaseCheckpoint)
+
+	select {
+	case err := <-closeDone:
+		if err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close() did not return after releasing the paused checkpoint")
+	}
+
+	// The just-released checkpoint write runs on checkpointLoop's own
+	// goroutine, asynchronously from Close's return -- under the bug (no
+	// wait in finish), Close/finish's write already landed *before* this
+	// point, and the stale checkpoint write that clobbers it happens
+	// strictly *after*, so reading the row immediately after Close returns
+	// would race that write and could observe the (incorrectly) correct
+	// state merely by checking too early. Give it a moment to land before
+	// asserting, so the check reflects the true final state either way.
+	time.Sleep(300 * time.Millisecond)
+
+	row, err := st.GetTerminalSession(id)
+	if err != nil {
+		t.Fatalf("GetTerminalSession() error = %v", err)
+	}
+	if row.Status != string(StatusClosed) {
+		t.Fatalf("Status = %q, want %q", row.Status, StatusClosed)
+	}
+	if !strings.Contains(row.Scrollback, "final-output") {
+		t.Fatalf("Scrollback = %q, missing final output -- a stale in-flight checkpoint write clobbered finish's authoritative final write", row.Scrollback)
+	}
+	if !strings.Contains(row.Scrollback, "before-tick") {
+		t.Fatalf("Scrollback = %q, missing earlier output too", row.Scrollback)
+	}
+}
+
+// TestKillAndReap_NoZombieLeft is a direct, deterministic test of the
+// killAndReap helper introduced to fix a zombie-process leak: Create's
+// error paths (a newSessionID failure, a CreateTerminalSession failure)
+// both run after a real shell has already been spawned via pty.Start, and
+// used to kill it without ever calling Wait -- leaving a zombie process
+// under the daemon, since nothing else ever reaps it. This spawns a real
+// long-running process the same way Create does (pty.Start), calls
+// killAndReap directly, and confirms both that Wait was actually called
+// (cmd.ProcessState is only ever set once Wait has completed) and that the
+// process is genuinely gone, not just a lingering zombie.
+func TestKillAndReap_NoZombieLeft(t *testing.T) {
+	t.Parallel()
+	forceTestShell(t)
+
+	cmd := exec.Command(resolveShell(), "-c", "sleep 300")
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		t.Fatalf("pty.Start() error = %v", err)
+	}
+	pid := cmd.Process.Pid
+	if !processAlive(pid) {
+		t.Fatalf("pid %d not alive right after Start", pid)
+	}
+
+	killAndReap(ptmx, cmd)
+
+	if cmd.ProcessState == nil {
+		t.Fatal("cmd.ProcessState = nil, want set -- killAndReap did not call Wait")
+	}
+	waitGone(t, pid, 2*time.Second)
 }

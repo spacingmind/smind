@@ -16,12 +16,21 @@ import (
 // Registry.Subscribe's doc comment in registry.go for the invariant under
 // test here.
 func registerTestSession(reg *Registry, id string) *session {
+	// checkpointStop/checkpointDone must be non-nil (even though this
+	// helper never spawns a real checkpointLoop) because finish -- which
+	// this file drives directly -- closes/waits on them unconditionally;
+	// with no goroutine to close checkpointDone, close it here up front so
+	// finish's own wait on it is an immediate no-op.
+	checkpointDone := make(chan struct{})
+	close(checkpointDone)
 	s := &session{
-		id:          id,
-		startedAt:   time.Now(),
-		status:      StatusRunning,
-		closedCh:    make(chan struct{}),
-		subscribers: make(map[int]*subQueue),
+		id:             id,
+		startedAt:      time.Now(),
+		status:         StatusRunning,
+		closedCh:       make(chan struct{}),
+		checkpointStop: make(chan struct{}),
+		checkpointDone: checkpointDone,
+		subscribers:    make(map[int]*subQueue),
 	}
 	reg.mu.Lock()
 	reg.sessions[id] = s

@@ -144,8 +144,9 @@ func closedChan() chan struct{} {
 // rehydrateSession rebuilds an in-memory session from a persisted
 // store.TerminalSession row, for New's rehydration step. The result is
 // always terminal (StatusRunning never survives reconciliation, which runs
-// before this), so it carries no live cmd/ptmx and an already-closed
-// closedCh.
+// before this), so it carries no live cmd/ptmx, an already-closed closedCh,
+// and nil checkpointStop/checkpointDone (there is no live checkpointLoop to
+// coordinate with, and nothing ever calls finish on a rehydrated session).
 func rehydrateSession(row store.TerminalSession) *session {
 	return &session{
 		id:          row.ID,
@@ -176,6 +177,27 @@ type session struct {
 	// just "we asked it to die".
 	closedCh chan struct{}
 
+	// checkpointStop tells checkpointLoop to stop ticking -- closed by
+	// finish, before finish performs its own final persistence write (see
+	// checkpointDone below for why finish waits before doing so). nil for
+	// a rehydrated session, which never has a live checkpointLoop.
+	checkpointStop chan struct{}
+
+	// checkpointDone closes once checkpointLoop has actually returned
+	// (not merely been told to stop) -- finish closes checkpointStop and
+	// then blocks on this before performing its own write, which is what
+	// guarantees finish's write is always the last one for this session's
+	// row: a checkpoint write already in flight when checkpointStop is
+	// closed gets to finish landing in the store, but checkpointLoop
+	// cannot start (or be partway through) another one after that, since
+	// it will have already observed checkpointStop and returned by the
+	// time this channel closes. Without this, checkpointLoop's write
+	// (issued outside any lock shared with finish's own write) can land
+	// after finish's, silently leaving a closed session's persisted
+	// scrollback stale/truncated -- exactly the race this exists to close.
+	// nil for a rehydrated session, same as checkpointStop.
+	checkpointDone chan struct{}
+
 	mu          sync.Mutex
 	status      Status
 	closedAt    *time.Time
@@ -188,6 +210,20 @@ type session struct {
 	// checkpoint without diffing the buffer itself -- an idle session (no
 	// new output between ticks) costs nothing beyond the version compare.
 	historyVersion uint64
+
+	// checkpointWriteHook, when non-nil, is called by checkpointLoop after
+	// it has taken a checkpoint snapshot and before it issues the
+	// corresponding store write -- nil (a no-op) for every real session.
+	// This exists purely so persistence_test.go can deterministically
+	// force a checkpoint write to be genuinely in flight at a chosen
+	// moment (by blocking here until the test releases it), to prove
+	// finish's own write always supersedes it, rather than relying on
+	// goroutine-scheduling luck to reproduce that interleaving. Scoped to
+	// one session (not a package-level var) so it can never be read by an
+	// unrelated session's checkpointLoop -- including one a *different*
+	// test deliberately left running in the background (e.g. a simulated-
+	// crash test that abandons a session without a clean Close).
+	checkpointWriteHook func()
 }
 
 func (s *session) statusLocked() SessionStatus {
@@ -245,8 +281,7 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 
 	id, err := newSessionID()
 	if err != nil {
-		_ = ptmx.Close()
-		_ = cmd.Process.Kill()
+		killAndReap(ptmx, cmd)
 		return "", fmt.Errorf("terminal: create: %w", err)
 	}
 
@@ -254,20 +289,21 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 	if _, err := reg.st.CreateTerminalSession(store.TerminalSession{
 		ID: id, TaskID: taskID, Status: string(StatusRunning), StartedAt: startedAt,
 	}); err != nil {
-		_ = ptmx.Close()
-		_ = cmd.Process.Kill()
+		killAndReap(ptmx, cmd)
 		return "", fmt.Errorf("terminal: create: persist session: %w", err)
 	}
 
 	s := &session{
-		id:          id,
-		taskID:      taskID,
-		startedAt:   startedAt,
-		cmd:         cmd,
-		ptmx:        ptmx,
-		closedCh:    make(chan struct{}),
-		status:      StatusRunning,
-		subscribers: make(map[int]*subQueue),
+		id:             id,
+		taskID:         taskID,
+		startedAt:      startedAt,
+		cmd:            cmd,
+		ptmx:           ptmx,
+		closedCh:       make(chan struct{}),
+		checkpointStop: make(chan struct{}),
+		checkpointDone: make(chan struct{}),
+		status:         StatusRunning,
+		subscribers:    make(map[int]*subQueue),
 	}
 
 	reg.mu.Lock()
@@ -278,6 +314,21 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 	go reg.checkpointLoop(s)
 
 	return id, nil
+}
+
+// killAndReap kills cmd's already-spawned process and waits for it to
+// actually exit, discarding both the kill error (the process may have
+// already exited on its own) and the wait error (its exit status is
+// irrelevant here -- the caller is abandoning this session entirely,
+// before it was ever registered). Used by Create's error paths, both of
+// which run after pty.Start has already spawned a real shell: killing it
+// without also reaping it (a plain Kill with no following Wait) leaves a
+// zombie process under the daemon, since nothing else ever calls Wait on
+// it -- mirrors readLoop's own reap comment for the normal-exit path.
+func killAndReap(ptmx *os.File, cmd *exec.Cmd) {
+	_ = ptmx.Close()
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
 }
 
 // readLoop is the one goroutine that ever reads s.ptmx: it pushes every
@@ -316,10 +367,16 @@ func (reg *Registry) readLoop(s *session) {
 // cadence, write-only-if-changed (tracked via historyVersion, so an idle
 // session between ticks costs nothing but a version compare) -- see
 // checkpointCadence's doc comment for the crash-loss bound this gives. It
-// exits once s closes: finish already persists the final scrollback
-// synchronously at that point (atomically with the status transition), so
-// there's nothing left for a further checkpoint tick to do.
+// exits as soon as it observes s.checkpointStop closed, always closing
+// checkpointDone right before returning (deferred, so this holds even if
+// a future change adds another return path) -- finish blocks on
+// checkpointDone specifically so no checkpoint write started before this
+// loop notices checkpointStop can land after finish's own write; see
+// checkpointDone's doc comment on session for the exact race this
+// prevents.
 func (reg *Registry) checkpointLoop(s *session) {
+	defer close(s.checkpointDone)
+
 	ticker := time.NewTicker(checkpointCadence)
 	defer ticker.Stop()
 
@@ -333,10 +390,14 @@ func (reg *Registry) checkpointLoop(s *session) {
 			if version != lastCheckpointed {
 				snapshot = append([]byte(nil), s.history...)
 			}
+			hook := s.checkpointWriteHook
 			s.mu.Unlock()
 
 			if snapshot == nil {
 				continue
+			}
+			if hook != nil {
+				hook()
 			}
 			// Best-effort, same reasoning as internal/runs.Registry.record:
 			// a transient persistence failure here doesn't affect the live
@@ -345,7 +406,7 @@ func (reg *Registry) checkpointLoop(s *session) {
 			if _, err := reg.st.UpdateTerminalSessionScrollback(s.id, string(snapshot)); err == nil {
 				lastCheckpointed = version
 			}
-		case <-s.closedCh:
+		case <-s.checkpointStop:
 			return
 		}
 	}
@@ -370,6 +431,20 @@ func (reg *Registry) record(s *session, data []byte) {
 }
 
 func (reg *Registry) finish(s *session) {
+	// Stop checkpointLoop and wait for it to have actually returned -- not
+	// just been signaled to -- before this function's own write below.
+	// Closing checkpointStop alone would only ask it to stop on its *next*
+	// loop iteration; if a checkpoint write was already in flight (started
+	// before checkpointStop closed), it can still land at any point after
+	// this line. Blocking on checkpointDone means that write, if any, is
+	// guaranteed to have already completed (checkpointLoop only closes
+	// checkpointDone, via its deferred close, once its current select case
+	// -- including any in-progress store call -- has returned) by the time
+	// this function's own write below runs, so that write is unambiguously
+	// the last one for this session's row.
+	close(s.checkpointStop)
+	<-s.checkpointDone
+
 	now := time.Now()
 
 	s.mu.Lock()
@@ -560,9 +635,14 @@ func (reg *Registry) Resize(id string, cols, rows uint16) error {
 // allows, everything it spawned (see killTree) -- and closes the PTY
 // master fd, then blocks until the session's own background read loop has
 // observed the resulting EOF/error and finished tearing down (status
-// flipped to closed, every subscriber unblocked) before returning. A
-// caller can rely on the process actually being gone by the time Close
-// returns, not just that a kill signal was sent.
+// flipped to closed, every subscriber unblocked, checkpointLoop's
+// goroutine fully exited -- see finish's doc comment) before returning. A
+// caller can rely on the process actually being gone, its final scrollback
+// durably persisted, and its checkpoint goroutine no longer touching the
+// store at all, by the time Close returns -- not just that a kill signal
+// was sent. This last point is also what makes it safe for CloseAll's own
+// caller (daemon shutdown) to close the underlying store right after
+// CloseAll returns: no session's checkpointLoop can still be mid-write.
 //
 // It's not an error to close an already-closed session (mirrors
 // runs.Registry.Stop's already-terminal-is-a-no-op contract) -- Close
