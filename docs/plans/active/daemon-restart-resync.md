@@ -425,11 +425,58 @@ agent's to fill in.)
   `terminal.attach`/`terminal.create` call happens, and the generic
   `terminal-error` testid is absent); the same additive connection-lost
   banner as `TaskDetailPane`, without disposing the terminal widget.
-- Total: `bun run test` (`vitest run`) — **8 test files, 62/62 passing**.
+- Total: `bun run test` (`vitest run`) — **8 test files, 62/62 passing**
+  (post-review-fix count below: 67/67).
 - `bunx tsc -b` — clean.
 - `bun run build` (`tsc -b && vite build`) — succeeded; `internal/server/dist/.gitkeep`
   was deleted by the build (the same known Vite `--emptyOutDir` behavior
   every prior web UI task has hit) and restored via `git checkout`.
+
+**Post-review fixes** (PR #48 code review found two real bugs in
+`TerminalPane`'s reconnect logic, confirmed by multiple independent
+review passes, plus one lower-severity `ws-client.ts` finding):
+- **Wrong-session reattach**: the list-then-attach effect's `previousId`
+  branch only acted on the lookup when the found entry's
+  `Status !== "running"`; when it *was* still running, execution fell
+  through to `sessions.find(s => s.Status === "running")`, which returns
+  whichever running session is first in the array -- not necessarily
+  `previousId`'s own. With two running sessions for the same task (e.g.
+  one from another tab), a reconnect could silently swap the pane onto the
+  *other* session. Fixed by resolving `previousId` to its exact entry and
+  never falling back to "any running session" once `previousId` is set --
+  that fallback now only runs when there's no `previousId` to match
+  against at all (a genuinely fresh attach, not a reconnect). Covered by a
+  new test: `terminal.list` returns the *other* tab's running session
+  first and this pane's own session second; asserts the reattach targets
+  the own id specifically, not index 0.
+- **`handleClose` left `lastTerminalIdRef` stale**: closing the terminal
+  never reset `terminalIdRef`/`terminalId`/`lastTerminalIdRef`, so a later
+  reconnect's effect would still find `previousId` pointing at the
+  now-closed session, see it as no longer running, and get permanently
+  stuck rendering "session closed" -- `terminal.create` would never be
+  called again for that task/component lifetime (only navigating away and
+  back, which resets `lastTerminalIdRef` via the task-changed branch,
+  could escape it). This was a genuine regression introduced by this PR:
+  before `lastTerminalIdRef` existed, a client swap always just created a
+  fresh terminal unconditionally. Fixed by resetting all three refs/state
+  on a successful `terminal.close`, so the next effect run (reconnect or
+  otherwise) treats it exactly like a fresh attach. Covered by a new test:
+  explicit close, then a reconnect, asserts `terminal.create` fires (not a
+  stuck `terminal-ended` state).
+- **Lower severity**: `WsClient.failAll`'s `onClose` callback-dispatch loop
+  had no per-callback isolation -- one throwing callback would stop every
+  callback registered after it in `closeWaiters` from ever firing, breaking
+  `onClose`'s documented "fires exactly once, guaranteed" contract. Fixed
+  with a per-callback `try/catch` (`console.error` and continue -- no
+  existing "isolate one callback from its siblings" convention was found
+  elsewhere in this codebase to match, so this is a new, minimal one).
+  Covered by a new test: a throwing callback registered between two
+  non-throwing ones doesn't prevent either from firing.
+- All three fixes are in `web/packages/ui/src/components/terminal-pane.tsx`
+  and `web/packages/ui/src/lib/ws-client.ts`. Re-ran the full suite after:
+  `bunx tsc -b` clean, `bun run test` — **8 test files, 67/67 passing**
+  (5 new tests: 2 in `terminal-pane.test.tsx`, 3 in `ws-client.test.ts`'s
+  new `onClose` describe block).
 
 **Manual/E2E verification, client-side half** (real built `bin/smind`,
 temp `SMIND_HOME` + a real git repo workspace created via the CLI, a
