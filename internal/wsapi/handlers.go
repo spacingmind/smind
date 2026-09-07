@@ -16,10 +16,10 @@ import (
 
 // methodHandlers returns the full set of RPC methods this package serves,
 // bound to wm, runner, reg, and treg.
-func methodHandlers(wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
-		"account.add":           handleAccountAdd(accounts),
-		"account.list":          handleAccountList(accounts),
+		"account.add":           handleAccountAdd(acctReg),
+		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
 		"workspace.get":         handleWorkspaceGet(wm),

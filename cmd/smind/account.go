@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
-	"time"
 )
 
 // accountResult is the credential-free account metadata returned by the
@@ -94,16 +93,8 @@ func cmdAccountList(args []string) int {
 	fmt.Fprintln(tw, "ID\tPROVIDER\tLABEL\tCREDENTIALTYPE\tCREATED\tUPDATED")
 	for _, account := range accounts {
 		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", account.ID, account.Provider, account.Label,
-			account.CredentialType, formatAccountTime(account.CreatedAt), formatAccountTime(account.UpdatedAt))
+			account.CredentialType, account.CreatedAt, account.UpdatedAt)
 	}
 	tw.Flush()
 	return 0
-}
-
-func formatAccountTime(value string) string {
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return value
-	}
-	return parsed.Format(time.RFC3339)
 }
