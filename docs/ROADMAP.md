@@ -8,7 +8,7 @@ Goal: repo lives, binary runs.
 - [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.spacingmind/config.yaml`
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
-- [x] CI: GitHub Actions — go test + bun build + lint
+- [ ] CI: GitHub Actions — go test + bun build + lint
 - [ ] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
@@ -24,7 +24,7 @@ Goal: proxy Anthropic/OpenAI-compatible requests across multiple accounts.
 - [x] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`
 - [x] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions` — wires `internal/routing` + `internal/accounts` + `internal/transport` into `internal/server`. Also added real OAuth token refresh (`internal/accounts`) for Anthropic, OpenAI, Kimi, xAI, and Antigravity (Google Vertex/Gemini skipped — needs a service-account JWT-bearer flow, not a refresh-token flow, tracked as a separate future task)
 
-Phase 1 is functionally complete but not yet exercised with a real provider account: `smind account add`/`smind account ls` (paste a credential blob) and, as of `docs/plans/active/oauth-account-login.md`, `smind account login <provider> <label>` plus the accounts dialog's "Connect" button (real browser-based OAuth for `anthropic`/`openai`, the two providers `proxy.go` actually routes) now manage local accounts through the daemon, but real two-account failover still needs real provider credentials to validate end-to-end -- untested against a live Anthropic/OpenAI account in this environment (no vendor accounts, no browser available here; see that plan's Validation section).
+Phase 1 is functionally complete but not yet exercised with a real provider account: `smind account add` and `smind account ls` now manage local accounts through the daemon, but real two-account failover still needs provider credentials to validate end-to-end.
 
 Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` works across 2 accounts with real failover.
 
