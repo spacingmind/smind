@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -40,7 +41,7 @@ type API struct {
 // for every connection the returned Handler accepts (see Handler's doc
 // comment for why a Run or terminal session's lifetime must be independent
 // of any one connection), plus the http.Handler itself.
-func New(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
+func New(wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
 	reg, err := runs.New(db)
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
@@ -49,7 +50,7 @@ func New(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, toke
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
-	hs := methodHandlers(wm, runner, reg, treg)
+	hs := methodHandlers(wm, accounts, runner, reg, treg)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
@@ -84,8 +85,8 @@ func New(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, toke
 // inline in the request that started it. The same reasoning applies to the
 // shared *terminal.Registry for terminal.create/attach/write/resize/close/
 // list.
-func Handler(wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (http.Handler, error) {
-	api, err := New(wm, runner, db, token)
+func Handler(wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (http.Handler, error) {
+	api, err := New(wm, accounts, runner, db, token)
 	if err != nil {
 		return nil, err
 	}

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -159,13 +160,37 @@ func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
 
 func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
 	t.Helper()
-	handler, err := Handler(wm, runner, db, token)
+	handler, err := Handler(wm, newTestAccountsRegistry(t), runner, db, token)
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
+	return srv
+}
+
+func newTestWSServerWithAccounts(t *testing.T, wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
+	t.Helper()
+	handler, err := Handler(wm, accounts, runner, db, token)
 	if err != nil {
 		t.Fatalf("Handler() error = %v", err)
 	}
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func newTestAccountsRegistry(t *testing.T) *accounts.Registry {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("store.Close() error = %v", err)
+		}
+	})
+	return accounts.New(s)
 }
 
 func dialWS(t *testing.T, srv *httptest.Server, token string) *websocket.Conn {
@@ -253,6 +278,61 @@ func expectNoMoreMessages(t *testing.T, ws *websocket.Conn, id string, timeout t
 	_ = json.Unmarshal(data, &env)
 	if env.ID == id {
 		t.Fatalf("received an unexpected extra message for id %q: %s", id, data)
+	}
+}
+
+func TestServer_AccountAddListRoundTrip(t *testing.T) {
+	t.Parallel()
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	wm := workspace.New(s)
+	registry := accounts.New(s)
+	srv := newTestWSServerWithAccounts(t, wm, registry, nil, s, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "account.add", map[string]any{
+		"provider": "anthropic", "label": "personal",
+		"credential": `{"access_token":"access-test","refresh_token":"refresh-test","expires_at":"2030-01-02T03:04:05Z"}`,
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.add error = %v", resp.Error.Message)
+	}
+	if bytes.Contains(resp.Result, []byte("refresh-test")) || bytes.Contains(resp.Result, []byte("access-test")) {
+		t.Fatalf("account.add returned credential material: %s", resp.Result)
+	}
+	var created accountResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("decode account.add result: %v", err)
+	}
+	if created.CredentialType != accounts.CredentialTypeOAuth {
+		t.Fatalf("credential type = %q, want %q", created.CredentialType, accounts.CredentialTypeOAuth)
+	}
+	stored, err := registry.Get(created.ID)
+	if err != nil {
+		t.Fatalf("registry.Get() error = %v", err)
+	}
+	if stored.OAuth == nil || stored.OAuth.RefreshToken != "refresh-test" {
+		t.Fatalf("stored OAuth = %+v, want refresh credential", stored.OAuth)
+	}
+
+	sendRequest(t, ws, "2", "account.list", nil)
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.list error = %v", resp.Error.Message)
+	}
+	if bytes.Contains(resp.Result, []byte("refresh-test")) {
+		t.Fatalf("account.list returned credential material: %s", resp.Result)
+	}
+	var listed []accountResult
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatalf("decode account.list result: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("account.list = %+v, want account %d", listed, created.ID)
 	}
 }
 

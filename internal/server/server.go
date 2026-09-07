@@ -35,7 +35,7 @@ type Server struct {
 // API (db backs runs.Registry's persistence -- see wsapi.New). token gates
 // the proxy endpoints and the /ws upgrade; see Handler.
 func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*Server, error) {
-	api, err := wsapi.New(wm, runner, db, token)
+	api, err := wsapi.New(wm, reg, runner, db, token)
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
@@ -101,20 +101,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleToken serves the daemon's real current auth token as JSON, so the
-// web UI's own page JS can open /ws?token=... on load without the user
-// pasting anything in manually.
-//
-// This carries no auth check of its own, deliberately: the token already
-// has to be readable by page JS one way or another, since a browser
-// WebSocket client can't set an Authorization header on the /ws upgrade
-// (see wsapi.Handler's doc comment) -- /ws itself already checks the token
-// as a plain, unauthenticated-to-reach query parameter for exactly that
-// reason. Serving it via a same-origin GET doesn't introduce a new trust
-// boundary beyond what already exists: anyone who can reach this HTTP
-// server at all can already hit /ws (or any other token-gated endpoint) by
-// reading the token some other way. This is scoped to smind's current
-// single-user-localhost posture; revisit if remote access is ever added.
 func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": s.token,
