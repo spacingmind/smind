@@ -4,13 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
-	"github.com/spacingmind/smind/internal/acp"
-	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -18,13 +15,10 @@ import (
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, reg, treg, and coord.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
+// bound to wm, runner, reg, and treg.
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
-		"account.oauthStart":    handleAccountOAuthStart(coord),
-		"provider.list":         handleProviderList(),
-		"provider.test":         handleProviderTest(acctReg),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
@@ -157,6 +151,84 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
+		}
+		return accountResultFrom(account), nil
+	}
+}
+
+func handleAccountList(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.list: accounts registry is unavailable")
+		}
+		stored, err := registry.List()
+		if err != nil {
+			return nil, fmt.Errorf("account.list: %w", err)
+		}
+		result := make([]accountResult, len(stored))
+		for i, account := range stored {
+			result[i] = accountResultFrom(account)
+		}
+		return result, nil
+	}
+}
+
+// accountResult is the deliberately credential-free account shape exposed by
+// the WebSocket API. Account metadata is useful to clients; credential
+// material must stay in the registry/store and never be returned over RPC.
+type accountResult struct {
+	ID             int64  `json:"id"`
+	Provider       string `json:"provider"`
+	Label          string `json:"label"`
+	CredentialType string `json:"credentialType"`
+	CreatedAt      string `json:"createdAt"`
+	UpdatedAt      string `json:"updatedAt"`
+}
+
+func accountResultFrom(a accounts.Account) accountResult {
+	return accountResult{
+		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType,
+		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
+	}
+}
+
+func handleAccountAdd(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.add: accounts registry is unavailable")
+		}
+		var p struct {
+			Provider   string `json:"provider"`
+			Label      string `json:"label"`
+			Credential string `json:"credential"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.add: invalid params: %w", err)
+		}
+		if p.Provider == "" || p.Label == "" || p.Credential == "" {
+			return nil, fmt.Errorf("account.add: provider, label, and credential are required")
+		}
+
+		var oauth accounts.OAuthCredential
+		if err := json.Unmarshal([]byte(p.Credential), &oauth); err == nil && oauth.RefreshToken != "" {
+			created, err := registry.AddOAuth(p.Provider, p.Label, oauth)
+			if err != nil {
+				return nil, fmt.Errorf("account.add: %w", err)
+			}
+			account, err := registry.Get(created.ID)
+			if err != nil {
+				return nil, fmt.Errorf("account.add: %w", err)
+			}
+			return accountResultFrom(account), nil
+		}
+
+		created, err := registry.AddAPIKey(p.Provider, p.Label, strings.TrimSpace(p.Credential))
+		if err != nil {
+			return nil, fmt.Errorf("account.add: %w", err)
+		}
+		account, err := registry.Get(created.ID)
+		if err != nil {
+			return nil, fmt.Errorf("account.add: %w", err)
 		}
 		return accountResultFrom(account), nil
 	}
