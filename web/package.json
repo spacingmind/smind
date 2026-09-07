@@ -1,5 +1,8 @@
 {
   "name": "smind-web",
   "private": true,
-  "workspaces": ["packages/*"]
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "bun run --filter '@smind/ui' test"
+  }
 }

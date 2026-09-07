@@ -53,8 +53,10 @@ smind task send <taskId> glm "fix the failing test"   # or open the web UI and u
 
 ```sh
 task build      # build the web UI, then the smind binary (bin/smind)
+task dev        # run the Go daemon and Vite UI with hot reload
 task dev:web    # run the Vite dev server, proxying /healthz to :4648
-task dev:go     # run the Go daemon
+task dev        # daemon + web UI with hot reload (one Ctrl+C)
+task dev:go     # run the Go daemon with hot reload
 task test       # go test ./... (plus the web UI's test suite)
 task lint       # go vet + gofmt check
 ```
