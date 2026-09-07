@@ -20,15 +20,46 @@ tasks:
       - "../internal/server/dist/**/*"
 
   dev:go:
-    desc: Run the Go daemon with auto-reload (requires air)
+    desc: Run the Go daemon with auto-reload
     cmds:
-      - go run ./cmd/smind
+      - go run github.com/air-verse/air@v1.67.4 -c .air.toml
 
   dev:web:
     desc: Vite dev server proxying API to :4648
     dir: web/packages/ui
     cmds:
       - bun run dev
+
+  dev:
+    desc: Run the Go daemon and Vite dev server with hot reload
+    cmds:
+      - |
+        bash -c '
+          set -eu
+          go_pid=
+          web_pid=
+
+          cleanup() {
+            trap - EXIT INT TERM
+            for pid in "$go_pid" "$web_pid"; do
+              if [ -n "$pid" ]; then
+                kill -TERM -- "-$pid" 2>/dev/null || true
+              fi
+            done
+            for pid in "$go_pid" "$web_pid"; do
+              if [ -n "$pid" ]; then
+                wait "$pid" 2>/dev/null || true
+              fi
+            done
+          }
+
+          trap cleanup EXIT INT TERM
+          setsid task dev:go &
+          go_pid=$!
+          setsid task dev:web &
+          web_pid=$!
+          wait "$go_pid"
+        '
 
   test:
     desc: Run Go and web tests
