@@ -107,6 +107,19 @@ wire shape lands.
   subsequent read, so "expect nothing" assertions are only ever the
   last read on a connection).
 
+- Test-side sync fix (CI PR #54 flake, TestServer_TerminalAttach_
+  DetachDoesNotCloseSession): the detach test synchronized on the echo
+  of "sync-marker", but the echo's trailing output can still be in
+  flight when task.cancel is sent, so a late "data" *event* for the
+  attach id can legally arrive after the cancel and before the terminal
+  response -- and its envelope has Error == nil, tripping the test's
+  single-read assertion. The event pump goroutine this change adds per
+  connection shifted scheduling enough to make the pre-existing
+  interleaving observable. Protocol behavior is correct (events and
+  responses interleave on one id by design); the fix reads the attach
+  id's terminal response via the file's existing readTerminalResponses
+  helper, which skips streaming events -- no server-side change.
+
 ## Progress
 
 - [x] ADR 0005 (protocol shape) — before implementation
