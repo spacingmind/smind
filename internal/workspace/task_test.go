@@ -3,6 +3,8 @@ package workspace
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -132,6 +134,123 @@ func TestManager_ArchiveTask(t *testing.T) {
 		}
 	})
 
+	t.Run("checkpoints uncommitted and untracked work onto the task branch", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		task, err := m.CreateTask(w.ID, nil, "Dirty work")
+		if err != nil {
+			t.Fatalf("CreateTask() error = %v", err)
+		}
+		wt, branch := *task.WorktreePath, *task.Branch
+		tipBefore := gitRevParse(t, repo, branch)
+
+		// An uncommitted modification to a tracked file...
+		readme := filepath.Join(wt, "README.md")
+		if err := os.WriteFile(readme, []byte("hello\nuncommitted line\n"), 0o644); err != nil {
+			t.Fatalf("write README (uncommitted): %v", err)
+		}
+		// ...and a brand new untracked file.
+		notes := filepath.Join(wt, "notes.txt")
+		if err := os.WriteFile(notes, []byte("untracked content\n"), 0o644); err != nil {
+			t.Fatalf("write notes.txt: %v", err)
+		}
+
+		archived, err := m.ArchiveTask(task.ID)
+		if err != nil {
+			t.Fatalf("ArchiveTask() error = %v", err)
+		}
+		if archived.Status != "archived" {
+			t.Fatalf("ArchiveTask() status = %q, want \"archived\"", archived.Status)
+		}
+		if _, err := os.Stat(wt); !os.IsNotExist(err) {
+			t.Fatalf("worktree dir %q still exists after archive: err = %v", wt, err)
+		}
+
+		// The branch must outlive the worktree and carry both changes: its
+		// tip moved, is the machine-generated checkpoint commit, and its
+		// tree contains the uncommitted modification and the untracked
+		// file.
+		if tipAfter := gitRevParse(t, repo, branch); tipAfter == tipBefore {
+			t.Fatalf("branch %q did not move after archiving a dirty worktree (tip %q)", branch, tipAfter)
+		}
+		subject := strings.TrimSpace(runGitOutputT(t, repo, "log", "-1", "--format=%s", branch))
+		if subject != checkpointCommitMessage {
+			t.Fatalf("branch tip subject = %q, want %q", subject, checkpointCommitMessage)
+		}
+		if got := runGitOutputT(t, repo, "show", branch+":README.md"); !strings.Contains(got, "uncommitted line") {
+			t.Fatalf("checkpoint commit's README.md = %q, want it to contain the uncommitted change", got)
+		}
+		if got, want := runGitOutputT(t, repo, "show", branch+":notes.txt"), "untracked content\n"; got != want {
+			t.Fatalf("checkpoint commit's notes.txt = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("clean worktree archives without a checkpoint commit", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		task, err := m.CreateTask(w.ID, nil, "Clean work")
+		if err != nil {
+			t.Fatalf("CreateTask() error = %v", err)
+		}
+		branch := *task.Branch
+		tipBefore := gitRevParse(t, repo, branch)
+
+		if _, err := m.ArchiveTask(task.ID); err != nil {
+			t.Fatalf("ArchiveTask() error = %v", err)
+		}
+		if tipAfter := gitRevParse(t, repo, branch); tipAfter != tipBefore {
+			t.Fatalf("branch %q moved after archiving a clean worktree: %q -> %q", branch, tipBefore, tipAfter)
+		}
+	})
+
+	t.Run("worktree with only committed changes archives without a checkpoint commit", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		task, err := m.CreateTask(w.ID, nil, "Committed work")
+		if err != nil {
+			t.Fatalf("CreateTask() error = %v", err)
+		}
+		wt, branch := *task.WorktreePath, *task.Branch
+
+		// Real committed work, but nothing uncommitted: the archive must
+		// not add an empty checkpoint commit on top of it.
+		readme := filepath.Join(wt, "README.md")
+		if err := os.WriteFile(readme, []byte("hello\ncommitted work\n"), 0o644); err != nil {
+			t.Fatalf("write README: %v", err)
+		}
+		runGitT(t, wt, "add", "README.md")
+		runGitT(t, wt, "commit", "-m", "real committed work")
+		tipBefore := gitRevParse(t, repo, branch)
+
+		if _, err := m.ArchiveTask(task.ID); err != nil {
+			t.Fatalf("ArchiveTask() error = %v", err)
+		}
+		if tipAfter := gitRevParse(t, repo, branch); tipAfter != tipBefore {
+			t.Fatalf("branch %q moved after archiving a fully committed worktree: %q -> %q", branch, tipBefore, tipAfter)
+		}
+		if got := runGitOutputT(t, repo, "show", branch+":README.md"); !strings.Contains(got, "committed work") {
+			t.Fatalf("branch's README.md = %q, want the pre-archive commit's content", got)
+		}
+	})
+
 	t.Run("task with no worktree_path archives cleanly", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t)
@@ -185,4 +304,11 @@ func TestManager_ArchiveTask(t *testing.T) {
 			t.Fatalf("ArchiveTask() status = %q, want \"archived\"", archived.Status)
 		}
 	})
+}
+
+// gitRevParse resolves a single rev to its full commit hash, failing the
+// test if the rev does not resolve.
+func gitRevParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	return strings.TrimSpace(runGitOutputT(t, dir, "rev-parse", rev))
 }

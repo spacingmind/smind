@@ -1,7 +1,6 @@
 import { act } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { vi } from "vitest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FakeWsClient } from "@/test/fake-ws-client";

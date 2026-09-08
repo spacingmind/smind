@@ -90,10 +90,18 @@ func (m *Manager) RunTask(id int64) (store.Task, error) {
 	return t, nil
 }
 
-// ArchiveTask removes the task's git worktree (if any) and marks it
-// archived. It uses `git worktree remove --force` since a task worktree is
-// disposable and archiving is meant to discard it regardless of any
-// uncommitted changes.
+// ArchiveTask checkpoints the task's git worktree (if any) onto its branch,
+// removes the worktree, and marks the task archived.
+//
+// The checkpoint (gitWorktreeCheckpoint) commits everything currently
+// uncommitted in the worktree -- including untracked files -- under a
+// machine-generated checkpoint message, so the branch alone retains all
+// work even after the worktree directory is gone; nothing reviewable is
+// destroyed by the subsequent `git worktree remove --force`. A checkpoint
+// failure aborts the archive before any removal happens: losing the
+// worktree with the checkpoint still unwritten is exactly the data-loss
+// bug this ordering guards against, so an error is preferable to a
+// half-archive that can't be recovered from.
 //
 // If the worktree directory no longer exists on disk (e.g. it was already
 // removed some other way), that's not treated as a failure: the directory
@@ -105,6 +113,10 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 	}
 
 	if t.WorktreePath != nil && dirExists(*t.WorktreePath) {
+		if err := gitWorktreeCheckpoint(*t.WorktreePath); err != nil {
+			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
+		}
+
 		ws, err := m.store.GetWorkspace(t.WorkspaceID)
 		if err != nil {
 			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)

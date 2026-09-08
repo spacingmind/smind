@@ -82,6 +82,16 @@ Frontend-only; no daemon changes.
   implicitly suppressed the same way: its terminal runs are snapshotted
   as seen at selection. Map is prop-drilled App→AppSidebar→TaskRows; no
   new push/subscribe plumbing, per the plan's constraint.
+- **Preview integration (merge with develop's PR #51)**: the editor
+  preview feature (Edit/Preview toggle, file-preview.tsx's
+  markdown/svg/sandboxed-html renderers) moved into `FileEditorPane`
+  because the explorer pane became tree-only in this same change — the
+  editor view PR #51 attached to no longer exists. Ported behavior
+  unchanged: toggle only when `previewKind(path)` is non-null, preview
+  renders the live buffer (unsaved edits visible, no auto-save),
+  CodeMirror stays mounted and hidden (cursor/undo survive), HTML via
+  `sandbox=""` iframe + srcDoc. Its preview tests moved alongside into
+  `file-editor-pane.test.tsx`.
 - **Test moves/updates**: editor-behavior tests moved from
   `file-explorer-pane.test.tsx` to `file-editor-pane.test.tsx`
   (deliberate — the editor is now a separate component; tree tests stay
@@ -121,6 +131,7 @@ Frontend-only; no daemon changes.
   App.test.tsx updates above (run.list answering, row-click
   disambiguation, focus-before-click) — all four pre-existing App tests
   still pass verbatim in intent.
-- `bunx tsc -b` clean; `bun run test`: 9 files, 73/73 passed;
+- `bunx tsc -b` clean; `bun run test`: 9 files, 80/80 passed (73 + 7 preview tests ported from
+  develop's file-explorer-pane.test.tsx);
   `task build` succeeded (dist/.gitkeep restored after Vite's
   --emptyOutDir wiped it).
