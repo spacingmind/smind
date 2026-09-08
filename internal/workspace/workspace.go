@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -14,6 +15,38 @@ import (
 // Manager provides Workspace and Task operations backed by a store.Store.
 type Manager struct {
 	store *store.Store
+
+	// taskNotifier, if set via SetTaskNotifier, is invoked after every
+	// successful task status transition (created/running/archived) so a
+	// caller (the wsapi server) can push task.status events from the point
+	// the state actually changed, rather than polling.
+	taskMu       sync.Mutex
+	taskNotifier func(taskID int64, status string)
+}
+
+// SetTaskNotifier registers f as the callback fired on task lifecycle
+// transitions. Nil-safe: transitions with no notifier registered are
+// no-ops, and a nil *Manager (wsapi tests construct the server without a
+// workspace manager) accepts the call rather than panicking.
+func (m *Manager) SetTaskNotifier(f func(taskID int64, status string)) {
+	if m == nil {
+		return
+	}
+	m.taskMu.Lock()
+	m.taskNotifier = f
+	m.taskMu.Unlock()
+}
+
+func (m *Manager) notifyTask(t store.Task) {
+	if m == nil {
+		return
+	}
+	m.taskMu.Lock()
+	f := m.taskNotifier
+	m.taskMu.Unlock()
+	if f != nil {
+		f(t.ID, t.Status)
+	}
 }
 
 // New returns a Manager backed by s.
