@@ -8,7 +8,7 @@ Goal: repo lives, binary runs.
 - [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.spacingmind/config.yaml`
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
-- [ ] CI: GitHub Actions — go test + bun build + lint
+- [x] CI: GitHub Actions — go test + bun build + lint
 - [ ] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
