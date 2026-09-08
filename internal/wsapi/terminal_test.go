@@ -266,8 +266,15 @@ func TestServer_TerminalAttach_DetachDoesNotCloseSession(t *testing.T) {
 	collectDataUntil(t, ws, "attach", "sync-marker", 5*time.Second)
 
 	sendCancel(t, ws, "attach")
-	term := readEnvelopeFor(t, ws, "attach", 5*time.Second)
-	if term.Error == nil {
+	// The marker match above can leave the echo's trailing output still
+	// in flight, so a late "data" event for the attach id may arrive after
+	// the cancel and before the terminal response (event/response
+	// interleaving on one id is legal; the extra per-connection event
+	// pump goroutine added with ADR-0005 subscriptions made the race
+	// observable). readTerminalResponses skips streaming events and waits
+	// for the actual terminal response.
+	resps := readTerminalResponses(t, ws, []string{"attach"}, 5*time.Second)
+	if term := resps["attach"]; term.Error == nil {
 		t.Fatal("terminal.attach after task.cancel: error = nil, want an error (the attach request itself was cancelled)")
 	}
 

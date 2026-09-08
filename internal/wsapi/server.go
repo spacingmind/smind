@@ -50,6 +50,12 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
+	bus := newEventBus()
+	wm.SetTaskNotifier(func(taskID int64, status string) {
+		bus.Publish(Event{Topic: TopicTaskStatus, Payload: taskStatusPayload{TaskID: taskID, Status: status}})
+	})
+	reg.SetNotifier(busRunNotifier{bus: bus})
+
 	hs := methodHandlers(wm, acctReg, runner, reg, treg)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
@@ -64,9 +70,32 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		}
 		defer ws.Close()
 
-		newConn(ws, hs).serve(r.Context())
+		c := newConn(ws, hs)
+		c.eventsSub = newSubscriber()
+		c.eventsBus = bus
+		c.serve(r.Context())
 	})
 	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
+}
+
+// busRunNotifier adapts the shared event bus to runs.Notifier, translating
+// each Registry lifecycle notification into its ADR-0005 wire payload.
+type busRunNotifier struct {
+	bus *eventBus
+}
+
+func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
+	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
+		RunID: s.ID, TaskID: s.TaskID, Status: string(s.Status),
+		StopReason: s.StopReason, Err: s.Err,
+	}})
+}
+
+func (b busRunNotifier) NotifyPermissionPending(runID string, taskID int64, requestID, summary string, options []taskrunner.PermissionOption) {
+	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
+		RunID: runID, TaskID: taskID, RequestID: requestID, Summary: summary,
+		Options: toPermissionOptionParams(options),
+	}})
 }
 
 // Handler returns the http.Handler for the /ws endpoint alone -- a thin

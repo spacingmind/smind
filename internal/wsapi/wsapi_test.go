@@ -250,7 +250,11 @@ func readEnvelopeFor(t *testing.T, ws *websocket.Conn, id string, timeout time.D
 		}
 		var env envelope
 		if err := json.Unmarshal(data, &env); err != nil {
-			t.Fatalf("unmarshal envelope: %v: %s", err, data)
+			// Not an RPC message -- e.g. an ADR-0005 event notification
+			// ({"event": {...}}, whose "event" is an object this envelope
+			// type can't decode). Skip it; this helper only wants messages
+			// addressed to id.
+			continue
 		}
 		if env.ID == id {
 			return env
