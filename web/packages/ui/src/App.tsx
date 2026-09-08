@@ -11,7 +11,6 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
-import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
 import { connectDaemon } from "@/lib/daemon";
@@ -55,8 +54,7 @@ export function App({
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
-  const events = useDaemonEvents(client);
-  const attention = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  const attention = useTaskAttention(client, selectedTask?.ID ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -102,6 +100,18 @@ export function App({
     };
   }, [connect]);
 
+  function selectTask(task: Task) {
+    setSelectedTask(task);
+    ensureTask(task.ID);
+  }
+
+  function openFileTab(path: string) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
+  }
+
+  const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+
   return (
     <SidebarProvider>
       <AppSidebar
@@ -109,7 +119,6 @@ export function App({
         selectedTaskId={selectedTask?.ID ?? null}
         onSelectTask={selectTask}
         attention={attention}
-        events={events}
       />
       <SidebarInset>
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
@@ -149,18 +158,11 @@ export function App({
                     </TabsTrigger>
                   ))}
                 </TabsList>
-                <TabsContent value="chat" className="min-h-0">
-                  <TaskDetailPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
-                </TabsContent>
-                <TabsContent value="files" className="min-h-0">
-                  <FileExplorerPane client={client} task={selectedTask} />
-                </TabsContent>
-                <TabsContent value="diff" className="min-h-0">
-                  <DiffViewerPane client={client} task={selectedTask} />
-                </TabsContent>
-                <TabsContent value="terminal" className="min-h-0">
-                  <TerminalPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
-                </TabsContent>
+                {taskState.tabs.map((entry) => (
+                  <TabsContent key={entry.key} value={entry.key} className="min-h-0">
+                    <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} />
+                  </TabsContent>
+                ))}
               </Tabs>
             ) : (
               <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
@@ -181,20 +183,18 @@ function TabContent({
   task,
   connectionStatus,
   onOpenFile,
-  events,
 }: {
   entry: TabEntry;
   client: WsClient | null;
   task: Task;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
-  events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
     task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
     files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
-    diff: <DiffViewerPane client={client} task={task} events={events} />,
+    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} />,
+    diff: <DiffViewerPane client={client} task={task} />,
     terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
   };
   return renderers[entry.kind];

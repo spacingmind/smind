@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
-import type { Task, Workspace } from "@/lib/types";
+import type { RunSummary, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -27,6 +27,20 @@ const TASK: Task = {
   CreatedAt: "2024-01-01T00:00:00Z",
   UpdatedAt: "2024-01-01T00:00:00Z",
   ArchivedAt: null,
+};
+
+const TASK_A: Task = {
+  ...TASK,
+  ID: 1,
+  Title: "Task A",
+  Branch: "task-a",
+};
+
+const TASK_B: Task = {
+  ...TASK,
+  ID: 2,
+  Title: "Task B",
+  Branch: "task-b",
 };
 
 /** Flushes pending microtasks, wrapped in `act` so React commits any resulting state updates before the caller asserts -- same helper other component test files use. */
@@ -64,13 +78,51 @@ function respond(socket: FakeSocket, method: string, result: unknown, index = 0)
   socket.emit({ id: env.id, result });
 }
 
-/** Drives AppSidebar's workspace.list -> {space.list, task.list} sequence for a single workspace with one task, so a task row exists to click. */
-async function resolveSidebar(socket: FakeSocket): Promise<void> {
+/** Resolves every request sent so far for method (later duplicate responses to an already-answered id are ignored by WsClient, so this is safe even as requests accumulate across task switches). */
+function respondAll(socket: FakeSocket, method: string, result: unknown): void {
+  for (const env of socket.sent.filter((e) => e.method === method)) {
+    if (env.id) socket.emit({ id: env.id, result });
+  }
+}
+
+/** Drives AppSidebar's workspace.list -> {space.list, task.list} sequence for a single workspace, plus useTaskAttention's initial run.list (empty). */
+async function resolveSidebar(socket: FakeSocket, tasks: Task[] = [TASK]): Promise<void> {
   await flush();
   respond(socket, "workspace.list", [WORKSPACE]);
   await flush();
   respond(socket, "space.list", []);
-  respond(socket, "task.list", [TASK]);
+  respond(socket, "task.list", tasks);
+  // useTaskAttention fires run.list on connect; an empty run list keeps
+  // these tests free of badge noise. TaskDetailPane's own run.list (on
+  // selection) gets answered separately via respondAll.
+  respond(socket, "run.list", []);
+  await flush();
+}
+
+/** Clicks task's sidebar row specifically -- its title also appears as TaskDetailPane's h2 heading once selected, so a plain getByText matches both. */
+function clickTaskRow(task: Task): void {
+  fireEvent.click(screen.getAllByText(task.Title)[0]!);
+}
+
+/** Selects task's row, opens its Files tab, expands nothing, and clicks the README.md row -- the file-open flow the tab registry tests build on. */
+async function openFileInTask(socket: FakeSocket, task: Task, content: string): Promise<void> {
+  clickTaskRow(task);
+  await flush();
+  respondAll(socket, "run.list", []);
+  await flush();
+
+  // Radix's tab trigger needs DOM focus before its click activates a tab
+  // (it activates on pointer-down-with-focus semantics); jsdom's
+  // fireEvent.click doesn't focus first like a real browser click does.
+  const filesTab = screen.getByRole("tab", { name: "Files" });
+  filesTab.focus();
+  fireEvent.click(filesTab);
+  await flush();
+  respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
+  await flush();
+  fireEvent.click(screen.getByTestId("file-row"));
+  await flush();
+  respondAll(socket, "file.read", { content });
   await flush();
 }
 
@@ -150,7 +202,7 @@ describe("App", () => {
 
     // TaskDetailPane mounts for the selected task and issues its own
     // run.list against the pre-disconnect client.
-    respond(socket1, "run.list", []);
+    respond(socket1, "run.list", [], 1);
     await flush();
     expect(screen.getByRole("heading", { name: "Fix the bug" })).toBeInTheDocument();
 
@@ -163,5 +215,131 @@ describe("App", () => {
     // re-fetched fresh against the new client rather than being unmounted.
     expect(screen.getByRole("heading", { name: "Fix the bug" })).toBeInTheDocument();
     expect(socket2.sent.some((e) => e.method === "run.list")).toBe(true);
+  });
+
+  it("the same file path opened in task A and task B yields two distinct tabs, both preserved across task switches", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await openFileInTask(socket, TASK_A, "# A");
+    expect(screen.getByTestId("file-editor-path")).toHaveTextContent("README.md");
+    expect(screen.getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
+
+    // Switch to task B: fresh default tab set, no leaked file tab...
+    clickTaskRow(TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+
+    // ...and the same path opens as B's own independent tab.
+    await openFileInTask(socket, TASK_B, "# B");
+    expect(screen.getByTestId("file-editor-path")).toHaveTextContent("README.md");
+
+    // Switch back to A: its README.md tab survived, with A's content once
+    // its FileEditorPane remounts (per-task scoping, ADR 0004).
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const readmeTab = screen.getByRole("tab", { name: /README\.md/ });
+    readmeTab.focus();
+    fireEvent.click(readmeTab);
+    await flush();
+    respondAll(socket, "file.read", { content: "# A" });
+    await flush();
+    expect(screen.getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
+  });
+
+  it("closing a file tab removes only that tab, leaving the base tabs intact", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    await openFileInTask(socket, TASK_A, "# A");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close README.md" }));
+    await flush();
+
+    expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Chat" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+  });
+
+  it("a task with an errored run shows an attention dot, and selecting the task clears it", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    respond(socket, "workspace.list", [WORKSPACE]);
+    await flush();
+    respond(socket, "space.list", []);
+    respond(socket, "task.list", [TASK_A, TASK_B]);
+    await flush();
+
+    const erroredRun: RunSummary = {
+      ID: "run-1",
+      TaskID: TASK_B.ID,
+      Provider: "glm",
+      Prompt: "do it",
+      Status: "error",
+      StartedAt: "2024-01-01T00:00:00Z",
+      FinishedAt: "2024-01-01T00:01:00Z",
+      StopReason: "",
+      Err: "boom",
+    };
+    // run.list #0 is useTaskAttention's (fired on connect, before any selection).
+    respond(socket, "run.list", [erroredRun]);
+    await flush();
+
+    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+
+    // Selecting the task snapshots its terminal runs as seen -> dot clears.
+    clickTaskRow(TASK_B);
+    await flush();
+    // run.list #1 is TaskDetailPane's own fetch for the selected task.
+    respond(socket, "run.list", [], 1);
+    await flush();
+
+    expect(screen.queryByTestId("task-attention")).not.toBeInTheDocument();
+  });
+
+  it("a running run with an unresolved permission request shows an attention dot", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    respond(socket, "workspace.list", [WORKSPACE]);
+    await flush();
+    respond(socket, "space.list", []);
+    respond(socket, "task.list", [TASK_A, TASK_B]);
+    respond(socket, "run.list", [
+      {
+        ID: "run-2",
+        TaskID: TASK_A.ID,
+        Provider: "glm",
+        Prompt: "do it",
+        Status: "running",
+        StartedAt: "2024-01-01T00:00:00Z",
+        FinishedAt: null,
+        StopReason: "",
+        Err: "",
+      } satisfies RunSummary,
+    ]);
+    await flush();
+    respond(socket, "run.logs", {
+      runId: "run-2",
+      status: "running",
+      events: [{ type: "permission_request", requestId: "req-1", summary: "run a command" }],
+    });
+    await flush();
+
+    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
   });
 });
