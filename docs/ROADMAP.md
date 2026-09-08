@@ -8,7 +8,7 @@ Goal: repo lives, binary runs.
 - [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.spacingmind/config.yaml`
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
-- [ ] CI: GitHub Actions — go test + bun build + lint
+- [x] CI: GitHub Actions — go test + bun build + lint
 - [ ] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
@@ -39,8 +39,12 @@ Goal: replace Paseo as daily driver.
 - [x] Extract Claude Code client into its own Go module/repo: [spacingmind/claude-agent-sdk-go](https://github.com/spacingmind/claude-agent-sdk-go) (public, MIT) — no official Go SDK for Claude Code exists yet. `internal/taskrunner` now depends on it externally.
 - [x] WebSocket RPC API (`internal/wsapi`, `GET /ws`) exposing workspace/space/task CRUD and streaming `task.prompt` — the transport the web UI (and later the terminal feature) will drive. REST+SSE was tried first and discarded in favor of RPC-over-WebSocket (bidirectional need); gRPC ruled out for this layer (no browser support) but planned for daemon↔relay in Phase 3.
 - [x] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent timeline (streaming chat); file explorer with git status; CodeMirror 6 editor; custom per-hunk diff viewer; xterm terminal (PTY in task cwd); permission prompts UI
-- [x] Web UI: preview pane (markdown, svg, sandboxed html alongside the CodeMirror editor) — built in #51, e2e-verified in the crud-ui Playwright pass
+- [ ] Web UI: preview pane (rendered output alongside the CodeMirror editor) — the one piece of the original Web UI item not yet built
 - [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
+
+Remaining for Phase 2: editor preview pane; Codex spawning (app-server
+JSON-RPC follow-up); the real scopedocs dogfood that is the definition of
+done.
 
 Remaining for Phase 2: the dogfood that is the definition of done.
 
