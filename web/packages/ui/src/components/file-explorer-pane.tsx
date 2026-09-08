@@ -1,8 +1,9 @@
-import type { ReactNode } from "react";
-import { AlertCircle, ChevronRight, File, Folder, FolderOpen, Loader2 } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { AlertCircle, ChevronRight, Eye, File, Folder, FolderOpen, Loader2, PenLine } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
+import { FilePreview, previewKind } from "@/components/file-preview";
 import { useFileExplorer, type DirNode } from "@/hooks/use-file-explorer";
 import type { WsClientLike } from "@/lib/ws-client";
 import type { Task } from "@/lib/types";
@@ -213,6 +214,14 @@ function FileEditorView({
   onChange: (content: string) => void;
   onSave: () => Promise<void>;
 }) {
+  // null for non-previewable files -- the Edit/Preview control doesn't
+  // render at all in that case, never as a disabled dead button.
+  const kind = previewKind(path);
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  // mode can outlive kind (preview a .md, then select a .ts): a stale
+  // "preview" must not blank the editor for a file with no preview.
+  const previewing = kind !== null && mode === "preview";
+
   function handleSave() {
     onSave().catch(() => {
       // saveError is already surfaced via the hook's state; nothing more to do here.
@@ -226,21 +235,63 @@ function FileEditorView({
           {path}
           {dirty && <span aria-label="unsaved changes"> *</span>}
         </span>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !dirty}
-          className="h-7 shrink-0 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {kind && (
+            <div className="flex h-7 items-center rounded-lg border border-input p-0.5" data-testid="preview-toggle">
+              <button
+                type="button"
+                onClick={() => setMode("edit")}
+                disabled={mode === "edit"}
+                aria-pressed={mode === "edit"}
+                className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+              >
+                <PenLine className="size-3" />
+                Edit
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("preview")}
+                disabled={mode === "preview"}
+                aria-pressed={mode === "preview"}
+                className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+              >
+                <Eye className="size-3" />
+                Preview
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || !dirty}
+            className="h-7 shrink-0 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
       </div>
       {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
       {saveError && <p className="px-3 py-2 text-sm text-destructive">save failed: {saveError}</p>}
       {loading ? (
         <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
       ) : (
-        !error && <CodeMirrorEditor value={content} onChange={onChange} onSave={handleSave} testId="file-editor" />
+        !error && (
+          <>
+            {/*
+              The editor stays mounted in preview mode, hidden via CSS:
+              unmounting would destroy the EditorView and its cursor/
+              selection/undo history (and file-explorer-pane.test.tsx relies
+              on editorViewRegistry lookups staying valid across the
+              toggle). The preview only ever renders the buffer react has,
+              which onChange keeps equal to the editor's live document --
+              unsaved edits included. Preview does not auto-save.
+            */}
+            <div className={previewing ? "hidden" : "flex h-full min-h-0 flex-col"}>
+              <CodeMirrorEditor value={content} onChange={onChange} onSave={handleSave} testId="file-editor" />
+            </div>
+            {previewing && kind && <FilePreview kind={kind} content={content} path={path} />}
+          </>
+        )
       )}
     </div>
   );
