@@ -63,6 +63,14 @@ type conn struct {
 
 	mu       sync.Mutex
 	inflight map[string]*inflightRequest
+
+	// eventsSub/eventsBus, when non-nil, arm this connection's ADR-0005
+	// event subscription: serve registers the subscriber on the shared
+	// bus, layers the per-connection events.subscribe/events.unsubscribe
+	// handlers over the shared handler map, and runs pumpEvents until the
+	// connection closes.
+	eventsSub *subscriber
+	eventsBus *eventBus
 }
 
 func newConn(ws *websocket.Conn, handlers map[string]handlerFunc) *conn {
@@ -81,6 +89,23 @@ func newConn(ws *websocket.Conn, handlers map[string]handlerFunc) *conn {
 func (c *conn) serve(ctx context.Context) {
 	connCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if c.eventsSub != nil {
+		hs := make(map[string]handlerFunc, len(c.handlers)+2)
+		for k, v := range c.handlers {
+			hs[k] = v
+		}
+		hs["events.subscribe"] = handleEventsSubscribe(c.eventsSub)
+		hs["events.unsubscribe"] = handleEventsUnsubscribe(c.eventsSub)
+		c.handlers = hs
+
+		c.eventsBus.register(c.eventsSub)
+		defer func() {
+			c.eventsBus.unregister(c.eventsSub)
+			c.eventsSub.close()
+		}()
+		go c.pumpEvents(connCtx, c.eventsSub)
+	}
 
 	for {
 		_, data, err := c.ws.ReadMessage()

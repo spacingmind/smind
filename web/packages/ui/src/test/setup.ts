@@ -39,6 +39,21 @@ if (!window.matchMedia) {
     }) as MediaQueryList;
 }
 
+// jsdom doesn't implement ResizeObserver either; react-resizable-panels'
+// <Group> (used by components/ui/resizable.tsx, which App.tsx renders
+// unconditionally as its main layout) constructs one unconditionally on
+// mount. TerminalPane's own ResizeObserver usage already guards against it
+// being undefined (see that component's doc comment on what jsdom can't
+// exercise), but this one isn't this project's code to guard -- a no-op
+// stub is enough, since no test here exercises real panel-resize behavior.
+if (!window.ResizeObserver) {
+  window.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  } as unknown as typeof ResizeObserver;
+}
+
 afterEach(() => {
   cleanup();
 });

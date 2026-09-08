@@ -33,6 +33,8 @@ func run(args []string) int {
 		return cmdServe(args[1:])
 	case "workspace":
 		return cmdWorkspace(args[1:])
+	case "account":
+		return cmdAccount(args[1:])
 	case "space":
 		return cmdSpace(args[1:])
 	case "task":
@@ -55,6 +57,9 @@ Usage:
 
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces
+
+  smind account add <provider> <label> < credential       register an account (credential from stdin)
+  smind account ls                                        list accounts
 
   smind space create <workspaceId> <title>                create a space within a workspace
   smind space ls <workspaceId>                             list a workspace's spaces

@@ -2,12 +2,15 @@ package terminal
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // forceTestShell sets $SHELL to /bin/bash for the whole test process
@@ -31,12 +34,57 @@ func forceTestShell(t *testing.T) {
 	})
 }
 
-// newTestRegistry returns a Registry whose sessions run /bin/bash; see
-// forceTestShell.
+// newTestStore returns a real temp-file store (not :memory: -- see
+// internal/runs' identical helper, since a restart simulation needs to
+// close and reopen the same underlying file).
+func newTestStore(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("store.Close() error = %v", err)
+		}
+	})
+	return s
+}
+
+// newTestTaskID creates a workspace + task directly against st (bypassing
+// internal/workspace.Manager -- these tests pass their own worktree path
+// straight to Create, so they have no need for a real git worktree, just a
+// real tasks(id) row to satisfy terminal_sessions.task_id's foreign key)
+// and returns its id. Every pre-existing test in this file hardcodes taskID
+// 1 when calling Create -- the first task created against a fresh store is
+// always id 1 (INTEGER PRIMARY KEY AUTOINCREMENT), so this keeps every one
+// of those call sites valid without editing them individually.
+func newTestTaskID(t *testing.T, st *store.Store) int64 {
+	t.Helper()
+	ws, err := st.CreateWorkspace(store.Workspace{Path: "/repo", Title: "repo", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+	task, err := st.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "task", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	return task.ID
+}
+
+// newTestRegistry returns a Registry whose sessions run /bin/bash (see
+// forceTestShell), backed by a fresh temp-file store with task id 1 already
+// created (see newTestTaskID).
 func newTestRegistry(t *testing.T) *Registry {
 	t.Helper()
 	forceTestShell(t)
-	return New()
+	st := newTestStore(t)
+	newTestTaskID(t, st)
+	reg, err := New(st)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return reg
 }
 
 // collectUntil reads from events until acc (accumulated as a string)
@@ -295,7 +343,10 @@ func TestRegistry_Close_IsIdempotent(t *testing.T) {
 // ID the Registry has never seen, rather than panicking or hanging.
 func TestRegistry_UnknownID(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg, err := New(newTestStore(t))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
 	if _, _, err := reg.Subscribe("nope"); err != ErrNotFound {
 		t.Errorf("Subscribe() error = %v, want ErrNotFound", err)
@@ -316,7 +367,10 @@ func TestRegistry_UnknownID(t *testing.T) {
 // default directory.
 func TestRegistry_Create_NoWorktree(t *testing.T) {
 	t.Parallel()
-	reg := New()
+	reg, err := New(newTestStore(t))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	if _, err := reg.Create(1, ""); err == nil {
 		t.Fatal("Create() error = nil, want an error for an empty worktree path")
 	}

@@ -104,3 +104,23 @@ type RunEvent struct {
 	EventData string
 	CreatedAt time.Time
 }
+
+// TerminalSession is a persisted record of one internal/terminal.Registry
+// session: a task's PTY-backed shell, with a lifetime independent of the
+// process that spawned it (see internal/terminal.Registry.CloseAll's doc
+// comment). Scrollback is the session's scrollback buffer as of its last
+// checkpoint (or its final state, once Status is "closed"/"interrupted") --
+// unlike RunEvent.EventData, this is the raw buffer, not JSON, since a
+// terminal session's history is a single opaque byte stream rather than a
+// sequence of discrete structured events. ClosedAt is nil while the session
+// is (as far as this row's writer knew) still running.
+type TerminalSession struct {
+	ID         string
+	TaskID     int64
+	Status     string
+	StartedAt  time.Time
+	ClosedAt   *time.Time
+	Scrollback string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}

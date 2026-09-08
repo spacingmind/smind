@@ -2,56 +2,43 @@ import type { ReactNode } from "react";
 import { AlertCircle, ChevronRight, File, Folder, FolderOpen, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { useFileExplorer, type DirNode } from "@/hooks/use-file-explorer";
 import type { WsClientLike } from "@/lib/ws-client";
 import type { Task } from "@/lib/types";
 
 /**
- * A self-contained file explorer + editor pane: a collapsible directory
- * tree on the left (file.list, lazily expanding subdirectories) and a
- * CodeMirror 6 editor on the right for whichever file is selected
- * (file.read on select, file.write via the Save button or Ctrl/Cmd-S).
- *
- * Deliberately not wired into App.tsx/TaskDetailPane -- see
- * docs/plans/active/web-ui-file-explorer.md's Acceptance Criteria. This
- * takes the same `{ client, task }` shape TaskDetailPane does so that
- * follow-up integration is a drop-in once it happens.
+ * The tree half of the file explorer: a lazily expanding directory tree
+ * (file.list) over the task's worktree. Clicking a file now delegates to
+ * onOpenFile instead of selecting an inline editor -- the editor half
+ * moved to FileEditorPane, mounted per open file tab (see
+ * docs/plans/active/tab-registry-side-dock.md). The explorer hook still
+ * keeps selectedPath for row highlighting only.
  */
-export function FileExplorerPane({ client, task }: { client: WsClientLike | null; task: Task }) {
+export function FileExplorerPane({
+  client,
+  task,
+  onOpenFile,
+}: {
+  client: WsClientLike | null;
+  task: Task;
+  /** Called with the clicked file's worktree-relative path; App.tsx opens/activates its file tab. */
+  onOpenFile?: (path: string) => void;
+}) {
   const explorer = useFileExplorer(client, task);
 
   return (
-    <div className="flex h-full min-h-0" data-testid="file-explorer-pane">
-      <div className="w-64 shrink-0 overflow-y-auto border-r">
-        <DirChildren
-          path=""
-          depth={0}
-          dirs={explorer.dirs}
-          selectedPath={explorer.selectedPath}
-          onToggleDir={explorer.toggleDir}
-          onSelectFile={explorer.selectFile}
-        />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col">
-        {explorer.selectedPath === null ? (
-          <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
-            Select a file to view it.
-          </div>
-        ) : (
-          <FileEditorView
-            path={explorer.selectedPath}
-            content={explorer.content}
-            dirty={explorer.dirty}
-            loading={explorer.contentLoading}
-            error={explorer.contentError}
-            saving={explorer.saving}
-            saveError={explorer.saveError}
-            onChange={explorer.setContent}
-            onSave={explorer.save}
-          />
-        )}
-      </div>
+    <div className="h-full min-h-0 overflow-y-auto" data-testid="file-explorer-pane">
+      <DirChildren
+        path=""
+        depth={0}
+        dirs={explorer.dirs}
+        selectedPath={explorer.selectedPath}
+        onToggleDir={explorer.toggleDir}
+        onSelectFile={(path) => {
+          explorer.selectFile(path);
+          onOpenFile?.(path);
+        }}
+      />
     </div>
   );
 }
@@ -188,60 +175,6 @@ function TreeRow({
     >
       {icon}
       <span className="truncate">{label}</span>
-    </div>
-  );
-}
-
-function FileEditorView({
-  path,
-  content,
-  dirty,
-  loading,
-  error,
-  saving,
-  saveError,
-  onChange,
-  onSave,
-}: {
-  path: string;
-  content: string;
-  dirty: boolean;
-  loading: boolean;
-  error: string | null;
-  saving: boolean;
-  saveError: string | null;
-  onChange: (content: string) => void;
-  onSave: () => Promise<void>;
-}) {
-  function handleSave() {
-    onSave().catch(() => {
-      // saveError is already surfaced via the hook's state; nothing more to do here.
-    });
-  }
-
-  return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <span className="truncate text-sm font-medium" data-testid="file-editor-path">
-          {path}
-          {dirty && <span aria-label="unsaved changes"> *</span>}
-        </span>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={saving || !dirty}
-          className="h-7 shrink-0 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-      {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
-      {saveError && <p className="px-3 py-2 text-sm text-destructive">save failed: {saveError}</p>}
-      {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
-      ) : (
-        !error && <CodeMirrorEditor value={content} onChange={onChange} onSave={handleSave} testId="file-editor" />
-      )}
     </div>
   );
 }
