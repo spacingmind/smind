@@ -2,10 +2,13 @@ package wsapi
 
 import (
 	"crypto/subtle"
+	"fmt"
 	"net/http"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -19,26 +22,35 @@ var upgrader = websocket.Upgrader{
 // API bundles the /ws http.Handler with the registries New constructs
 // internally, for the one caller (cmdServe, via internal/server.Server)
 // that needs to reach a registry directly rather than only through the
-// wire protocol -- specifically, terminal.Registry.CloseAll on graceful
-// daemon shutdown, so no PTY-backed shell process outlives the daemon
-// itself (internal/terminal.Registry.Close's doc comment covers what
-// "outlives" is verified to mean). Every other caller (existing tests,
-// wsclient) only needs the http.Handler and should keep using Handler
-// below.
+// wire protocol -- specifically, Runs.CloseAll and Terminals.CloseAll on
+// graceful daemon shutdown, so no agent subprocess or PTY-backed shell
+// outlives the daemon itself (each Registry's own CloseAll doc comment
+// covers what "outlives" is verified to mean). Every other caller
+// (existing tests, wsclient) only needs the http.Handler and should keep
+// using Handler below.
 type API struct {
 	Handler   http.Handler
+	Runs      *runs.Registry
 	Terminals *terminal.Registry
 }
 
 // New builds the full /ws API: one shared *runs.Registry and one shared
-// *terminal.Registry for every connection the returned Handler accepts
-// (see Handler's doc comment for why a Run or terminal session's
-// lifetime must be independent of any one connection), plus the
-// http.Handler itself.
-func New(wm *workspace.Manager, runner *taskrunner.Runner, token string) *API {
-	reg := runs.New()
-	treg := terminal.New()
-	hs := methodHandlers(wm, runner, reg, treg)
+// *terminal.Registry, both backed by db (see runs.New's and terminal.New's
+// doc comments on the reconciliation/rehydration each performs
+// synchronously here, so New itself can fail if that startup work does),
+// for every connection the returned Handler accepts (see Handler's doc
+// comment for why a Run or terminal session's lifetime must be independent
+// of any one connection), plus the http.Handler itself.
+func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
+	reg, err := runs.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("wsapi: new: %w", err)
+	}
+	treg, err := terminal.New(db)
+	if err != nil {
+		return nil, fmt.Errorf("wsapi: new: %w", err)
+	}
+	hs := methodHandlers(wm, acctReg, runner, reg, treg)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
@@ -54,7 +66,7 @@ func New(wm *workspace.Manager, runner *taskrunner.Runner, token string) *API {
 
 		newConn(ws, hs).serve(r.Context())
 	})
-	return &API{Handler: handler, Terminals: treg}
+	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
 }
 
 // Handler returns the http.Handler for the /ws endpoint alone -- a thin
@@ -73,6 +85,10 @@ func New(wm *workspace.Manager, runner *taskrunner.Runner, token string) *API {
 // inline in the request that started it. The same reasoning applies to the
 // shared *terminal.Registry for terminal.create/attach/write/resize/close/
 // list.
-func Handler(wm *workspace.Manager, runner *taskrunner.Runner, token string) http.Handler {
-	return New(wm, runner, token).Handler
+func Handler(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) (http.Handler, error) {
+	api, err := New(wm, acctReg, runner, db, token)
+	if err != nil {
+		return nil, err
+	}
+	return api.Handler, nil
 }

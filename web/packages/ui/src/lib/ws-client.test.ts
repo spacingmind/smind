@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { CallAbortedError, RpcError, WsClient, type WireEnvelope } from "@/lib/ws-client";
 
 /**
@@ -186,5 +186,60 @@ describe("WsClient", () => {
     socket.emitClose();
 
     await expect(client.call("workspace.list")).rejects.toThrow(/closed/);
+  });
+
+  describe("onClose", () => {
+    it("fires every registered callback once when the connection closes", () => {
+      const socket = new FakeSocket();
+      const client = new WsClient(socket);
+
+      const a = vi.fn();
+      const b = vi.fn();
+      client.onClose(a);
+      client.onClose(b);
+
+      socket.emitClose();
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(1);
+
+      // Only fires once, even if the socket somehow reports closing again.
+      socket.emitClose();
+      expect(a).toHaveBeenCalledTimes(1);
+      expect(b).toHaveBeenCalledTimes(1);
+    });
+
+    it("fires immediately, synchronously, if the connection is already closed", () => {
+      const socket = new FakeSocket();
+      const client = new WsClient(socket);
+      socket.emitClose();
+
+      const callback = vi.fn();
+      client.onClose(callback);
+
+      expect(callback).toHaveBeenCalledTimes(1);
+    });
+
+    it("still fires every other callback even if one of them throws", () => {
+      const socket = new FakeSocket();
+      const client = new WsClient(socket);
+
+      const before = vi.fn();
+      const throwing = vi.fn(() => {
+        throw new Error("boom");
+      });
+      const after = vi.fn();
+      client.onClose(before);
+      client.onClose(throwing);
+      client.onClose(after);
+
+      const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+      expect(() => socket.emitClose()).not.toThrow();
+      consoleError.mockRestore();
+
+      expect(before).toHaveBeenCalledTimes(1);
+      expect(throwing).toHaveBeenCalledTimes(1);
+      // Registered *after* the throwing callback -- must still fire.
+      expect(after).toHaveBeenCalledTimes(1);
+    });
   });
 });

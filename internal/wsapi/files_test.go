@@ -16,10 +16,10 @@ import (
 // write a change, then read again to confirm it landed.
 func TestServer_FileList_Read_Write_RoundTrip(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	// newTestTask's worktree starts with README.md (see newTestRepo) plus
@@ -111,10 +111,10 @@ func findEntry(entries []files.Entry, name string) (files.Entry, bool) {
 // into a subdirectory of the worktree, not just the root.
 func TestServer_FileList_Subdirectory(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	if err := os.Mkdir(filepath.Join(*task.WorktreePath, "sub"), 0o755); err != nil {
@@ -143,10 +143,10 @@ func TestServer_FileList_Subdirectory(t *testing.T) {
 // own unit tests -- for all three methods.
 func TestServer_File_PathTraversal_Rejected(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "list", "file.list", map[string]any{"taskId": task.ID, "path": "../../../../../../etc"})
@@ -181,10 +181,10 @@ func TestServer_File_PathTraversal_Rejected(t *testing.T) {
 // directory files.List would resolve against is simply gone.
 func TestServer_File_ArchivedTask_Errors(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	if _, err := wm.ArchiveTask(task.ID); err != nil {

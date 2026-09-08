@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -24,6 +25,10 @@ import (
 // task.prompt tests can drive Runner's GLM path against a real ACP
 // subprocess without depending on npx/network access.
 var fakeACPAgentPath string
+
+// fakeCodexAgentPath is the compiled internal/codex/fakeagent binary, for
+// tests driving Runner's Codex-native path.
+var fakeCodexAgentPath string
 
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "smind-wsapi-test-")
@@ -40,6 +45,16 @@ func TestMain(m *testing.M) {
 	}
 	if out, err := build.CombinedOutput(); err != nil {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
+	}
+
+	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	buildCodex := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent")
+	buildCodex.Dir, err = os.Getwd()
+	if err != nil {
+		panic(err)
+	}
+	if out, err := buildCodex.CombinedOutput(); err != nil {
+		panic(fmt.Sprintf("build codex fakeagent: %v: %s", err, out))
 	}
 
 	smindHome, err := os.MkdirTemp("", "smind-wsapi-home-")
@@ -64,7 +79,11 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
+// newTestWorkspaceManager also returns the underlying store: newTestWSServer
+// needs it to back the /ws API's runs.Registry persistence with the same
+// database wm's tasks live in (runs.task_id references tasks(id), enforced
+// via the foreign_keys pragma -- see store.sqliteDSN).
+func newTestWorkspaceManager(t *testing.T) (*workspace.Manager, *store.Store) {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -75,7 +94,7 @@ func newTestWorkspaceManager(t *testing.T) *workspace.Manager {
 			t.Errorf("store.Close() error = %v", err)
 		}
 	})
-	return workspace.New(s)
+	return workspace.New(s), s
 }
 
 // newTestRepo creates a real git repository in a temp dir with one commit,
@@ -136,14 +155,42 @@ func newTestTask(t *testing.T, wm *workspace.Manager, scenario string) store.Tas
 }
 
 func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
-	return taskrunner.New(wm, taskrunner.WithACPCommand([]string{fakeACPAgentPath}))
+	return taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 }
 
-func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, token string) *httptest.Server {
+func newTestWSServer(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
 	t.Helper()
-	srv := httptest.NewServer(Handler(wm, runner, token))
+	handler, err := Handler(wm, newTestAccountsRegistry(t), runner, db, token)
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
+	return srv
+}
+
+func newTestWSServerWithAccounts(t *testing.T, wm *workspace.Manager, accounts *accounts.Registry, runner *taskrunner.Runner, db *store.Store, token string) *httptest.Server {
+	t.Helper()
+	handler, err := Handler(wm, accounts, runner, db, token)
+	if err != nil {
+		t.Fatalf("Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+func newTestAccountsRegistry(t *testing.T) *accounts.Registry {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "accounts.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("store.Close() error = %v", err)
+		}
+	})
+	return accounts.New(s)
 }
 
 func dialWS(t *testing.T, srv *httptest.Server, token string) *websocket.Conn {
@@ -234,11 +281,66 @@ func expectNoMoreMessages(t *testing.T, ws *websocket.Conn, id string, timeout t
 	}
 }
 
+func TestServer_AccountAddListRoundTrip(t *testing.T) {
+	t.Parallel()
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	wm := workspace.New(s)
+	registry := accounts.New(s)
+	srv := newTestWSServerWithAccounts(t, wm, registry, nil, s, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "account.add", map[string]any{
+		"provider": "anthropic", "label": "personal",
+		"credential": `{"access_token":"access-test","refresh_token":"refresh-test","expires_at":"2030-01-02T03:04:05Z"}`,
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.add error = %v", resp.Error.Message)
+	}
+	if bytes.Contains(resp.Result, []byte("refresh-test")) || bytes.Contains(resp.Result, []byte("access-test")) {
+		t.Fatalf("account.add returned credential material: %s", resp.Result)
+	}
+	var created accountResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("decode account.add result: %v", err)
+	}
+	if created.CredentialType != accounts.CredentialTypeOAuth {
+		t.Fatalf("credential type = %q, want %q", created.CredentialType, accounts.CredentialTypeOAuth)
+	}
+	stored, err := registry.Get(created.ID)
+	if err != nil {
+		t.Fatalf("registry.Get() error = %v", err)
+	}
+	if stored.OAuth == nil || stored.OAuth.RefreshToken != "refresh-test" {
+		t.Fatalf("stored OAuth = %+v, want refresh credential", stored.OAuth)
+	}
+
+	sendRequest(t, ws, "2", "account.list", nil)
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.list error = %v", resp.Error.Message)
+	}
+	if bytes.Contains(resp.Result, []byte("refresh-test")) {
+		t.Fatalf("account.list returned credential material: %s", resp.Result)
+	}
+	var listed []accountResult
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatalf("decode account.list result: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("account.list = %+v, want account %d", listed, created.ID)
+	}
+}
+
 func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	repo := newTestRepo(t)
@@ -362,7 +464,8 @@ func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 
 func TestServer_AuthRejection(t *testing.T) {
 	t.Parallel()
-	srv := newTestWSServer(t, nil, nil, "correct-token")
+	_, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, nil, nil, db, "correct-token")
 
 	tests := []struct {
 		name  string
@@ -394,10 +497,10 @@ func TestServer_AuthRejection(t *testing.T) {
 
 func TestServer_ConcurrentInFlightRequests(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "prompt", "task.prompt", map[string]any{
@@ -442,10 +545,10 @@ func TestServer_ConcurrentInFlightRequests(t *testing.T) {
 // response the agent will never send in time.
 func TestServer_TaskPromptStreamsIncrementally(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{
@@ -477,10 +580,10 @@ func TestServer_TaskPromptStreamsIncrementally(t *testing.T) {
 // for the cancelled request's id, no duplicate or late second one.
 func TestServer_TaskCancel_StopsRunningTurn(t *testing.T) {
 	t.Parallel()
-	wm := newTestWorkspaceManager(t)
+	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "hang")
 	runner := newTestRunner(wm)
-	srv := newTestWSServer(t, wm, runner, "tok")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
 	ws := dialWS(t, srv, "tok")
 
 	sendRequest(t, ws, "1", "task.prompt", map[string]any{

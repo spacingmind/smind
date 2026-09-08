@@ -69,7 +69,7 @@ func cmdServe(args []string) int {
 		// real GLM credentials or network access. Unset (the normal case),
 		// this changes nothing: taskrunner.New's own default
 		// (acp.GLMCommand()) applies exactly as before.
-		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(strings.Fields(cmd)))
+		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, strings.Fields(cmd)))
 	}
 	runner := taskrunner.New(wm, runnerOpts...)
 
@@ -79,7 +79,10 @@ func cmdServe(args []string) int {
 	}
 	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
 
-	srv := server.New(cfg, registry, router, wm, runner, token)
+	srv, err := server.New(cfg, registry, router, wm, runner, db, token)
+	if err != nil {
+		log.Fatalf("server: %v", err)
+	}
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),

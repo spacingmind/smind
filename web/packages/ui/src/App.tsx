@@ -10,8 +10,16 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { connectDaemon } from "@/lib/daemon";
+import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
+
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  connecting: "Connecting…",
+  connected: "Connected to daemon",
+  reconnecting: "Reconnecting to daemon…",
+  disconnected: "Disconnected",
+};
 
 /**
  * The app shell: a collapsible sidebar with live workspace/task data next
@@ -29,33 +37,60 @@ import type { WsClient } from "@/lib/ws-client";
  * session -- exactly the same "switching away only detaches" contract
  * every one of these panes already implements on task switch/unmount.
  */
-export function App() {
+export function App({
+  connect = connectDaemon,
+}: {
+  /** Overridable for tests -- see TerminalPane's createTerminal for the same pattern. Defaults to the real fetch-token-then-dial flow, used both for the initial connect and (via watchForReconnect) every subsequent reconnect attempt. */
+  connect?: () => Promise<WsClient>;
+} = {}) {
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    let connected: WsClient | null = null;
+    let reconnectHandle: ReconnectHandle | null = null;
 
-    connectDaemon()
+    connect()
       .then((c) => {
         if (cancelled) {
           c.close();
           return;
         }
-        connected = c;
+        setConnectionStatus("connected");
         setClient(c);
+        // Arms the reconnect loop only after a first successful connect --
+        // an initial-connect failure keeps the pre-existing connectError
+        // behavior below, unchanged, rather than retrying silently.
+        reconnectHandle = watchForReconnect(c, {
+          connect,
+          onStatusChange: setConnectionStatus,
+          onClient: (newClient) => {
+            if (cancelled) {
+              newClient.close();
+              return;
+            }
+            // A genuinely new WsClient instance, not the same one mutated
+            // in place -- this is what makes every hook keyed on the
+            // `client` reference (useWorkspaceTree, useRunTimeline, ...)
+            // re-run and resync itself for free. See the plan's Decisions.
+            setClient(newClient);
+          },
+        });
       })
       .catch((err: unknown) => {
-        if (!cancelled) setConnectError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) {
+          setConnectionStatus("disconnected");
+          setConnectError(err instanceof Error ? err.message : String(err));
+        }
       });
 
     return () => {
       cancelled = true;
-      connected?.close();
+      reconnectHandle?.close();
     };
-  }, []);
+  }, [connect]);
 
   return (
     <SidebarProvider>
@@ -65,7 +100,7 @@ export function App() {
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
           <span className="text-sm text-muted-foreground">
-            {connectError ? `Disconnected: ${connectError}` : client ? "Connected to daemon" : "Connecting…"}
+            {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
           </span>
         </header>
         <ResizablePanelGroup orientation="horizontal" className="flex-1">
@@ -79,7 +114,7 @@ export function App() {
                   <TabsTrigger value="terminal">Terminal</TabsTrigger>
                 </TabsList>
                 <TabsContent value="chat" className="min-h-0">
-                  <TaskDetailPane client={client} task={selectedTask} />
+                  <TaskDetailPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
                 </TabsContent>
                 <TabsContent value="files" className="min-h-0">
                   <FileExplorerPane client={client} task={selectedTask} />
@@ -88,7 +123,7 @@ export function App() {
                   <DiffViewerPane client={client} task={selectedTask} />
                 </TabsContent>
                 <TabsContent value="terminal" className="min-h-0">
-                  <TerminalPane client={client} task={selectedTask} />
+                  <TerminalPane client={client} task={selectedTask} connectionStatus={connectionStatus} />
                 </TabsContent>
               </Tabs>
             ) : (

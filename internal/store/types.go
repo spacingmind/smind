@@ -72,3 +72,55 @@ type Task struct {
 	UpdatedAt    time.Time
 	ArchivedAt   *time.Time
 }
+
+// Run is a persisted record of one internal/runs.Registry Run: a
+// task.prompt/run.start turn, with a lifetime independent of the process
+// that drove it (see internal/runs.Registry.CloseAll's doc comment). StopReason
+// and ErrMsg mirror runs.RunStatus's fields of the same name. FinishedAt is
+// nil while the run is (as far as this row's writer knew) still going.
+type Run struct {
+	ID         string
+	TaskID     int64
+	Provider   string
+	Prompt     string
+	Status     string
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	StopReason string
+	ErrMsg     string
+}
+
+// RunEvent is one persisted internal/runs.Event, in the order it was
+// recorded for its run (Seq is strictly increasing per RunID, starting at
+// 0). EventData is the JSON encoding of the event (see
+// internal/runs.EncodeEvent) -- following this codebase's existing
+// convention of storing structured payloads as JSON-in-TEXT rather than a
+// normalized column per Event field (accounts.credential_data,
+// quota_snapshots.usage_data, spaces.env_data).
+type RunEvent struct {
+	ID        int64
+	RunID     string
+	Seq       int64
+	EventData string
+	CreatedAt time.Time
+}
+
+// TerminalSession is a persisted record of one internal/terminal.Registry
+// session: a task's PTY-backed shell, with a lifetime independent of the
+// process that spawned it (see internal/terminal.Registry.CloseAll's doc
+// comment). Scrollback is the session's scrollback buffer as of its last
+// checkpoint (or its final state, once Status is "closed"/"interrupted") --
+// unlike RunEvent.EventData, this is the raw buffer, not JSON, since a
+// terminal session's history is a single opaque byte stream rather than a
+// sequence of discrete structured events. ClosedAt is nil while the session
+// is (as far as this row's writer knew) still running.
+type TerminalSession struct {
+	ID         string
+	TaskID     int64
+	Status     string
+	StartedAt  time.Time
+	ClosedAt   *time.Time
+	Scrollback string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}

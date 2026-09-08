@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -91,9 +92,13 @@ func newTestDaemon(t *testing.T, scenario string) *testDaemon {
 		}
 	}
 
-	runner := taskrunner.New(wm, taskrunner.WithACPCommand([]string{fakeACPAgentPath}))
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 	token := "tok"
-	srv := httptest.NewServer(wsapi.Handler(wm, runner, token))
+	handler, err := wsapi.Handler(wm, accounts.New(s), runner, s, token)
+	if err != nil {
+		t.Fatalf("wsapi.Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 
 	return &testDaemon{srv: srv, token: token, task: task}

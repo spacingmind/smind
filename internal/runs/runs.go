@@ -41,6 +41,16 @@ const (
 	// distinguished from StatusError so callers can tell a deliberate stop
 	// from an actual backend failure.
 	StatusStopped Status = "stopped"
+
+	// StatusInterrupted is a Run whose persisted row was still "running"
+	// when the daemon started up -- meaning the process driving it is
+	// definitely gone (nothing ties a run.start-originated subprocess's
+	// lifetime to the daemon's; see Registry.CloseAll's doc comment), but
+	// unlike StatusStopped (a deliberate, successful cancellation) or
+	// StatusError (a reported backend failure), its actual fate is unknown.
+	// Only ever assigned by Registry's startup reconciliation, never by a
+	// live run.
+	StatusInterrupted Status = "interrupted"
 )
 
 // RunStatus is a point-in-time snapshot of a Run's identity and lifecycle

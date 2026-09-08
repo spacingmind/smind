@@ -36,7 +36,11 @@ func newTestServer(t *testing.T, token string) *Server {
 	router := routing.New(s, reg, poller)
 	wm := workspace.New(s)
 	runner := taskrunner.New(wm)
-	return New(config.Default(), reg, router, wm, runner, token)
+	srv, err := New(config.Default(), reg, router, wm, runner, s, token)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	return srv
 }
 
 func TestHandlerAuth(t *testing.T) {
