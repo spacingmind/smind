@@ -15,9 +15,46 @@ func gitWorktreeAdd(repoPath, worktreePath, branch string) error {
 	return runGit(repoPath, "worktree", "add", worktreePath, "-b", branch)
 }
 
+// checkpointCommitMessage marks the machine-generated commits ArchiveTask
+// creates to preserve unreviewed work before a task's worktree is removed.
+const checkpointCommitMessage = "smind: checkpoint before archive"
+
+// gitWorktreeCheckpoint commits everything currently sitting uncommitted in
+// worktreePath -- staged, unstaged, and untracked alike -- onto the branch
+// the worktree has checked out, so the branch alone retains the full
+// working-tree state and the worktree directory can then be removed without
+// losing anything reviewable.
+//
+// Cleanliness is decided by `git status --porcelain`: an empty output is
+// exactly the condition under which a following `git commit` would have
+// nothing to record, so a worktree whose changes are all already committed
+// (or that never had any) returns without creating an empty checkpoint
+// commit. The status check is deliberately the same shape of check as
+// taskDiff's full snapshot diff, but scoped to "is there anything to
+// commit" rather than "what changed since base" -- only the former decides
+// whether a commit is possible at all.
+func gitWorktreeCheckpoint(worktreePath string) error {
+	out, err := runGitOutput(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return fmt.Errorf("read worktree status: %w", err)
+	}
+	if strings.TrimSpace(out) == "" {
+		return nil
+	}
+	if err := runGit(worktreePath, "add", "-A"); err != nil {
+		return fmt.Errorf("stage worktree changes: %w", err)
+	}
+	if err := runGit(worktreePath, "commit", "-m", checkpointCommitMessage); err != nil {
+		return fmt.Errorf("commit checkpoint: %w", err)
+	}
+	return nil
+}
+
 // gitWorktreeRemove runs `git worktree remove <worktreePath> --force` inside
-// repoPath. --force is used because archiving a task worktree is meant to
-// discard it regardless of uncommitted changes.
+// repoPath. Callers must have checkpointed any reviewable work first --
+// ArchiveTask does so via gitWorktreeCheckpoint -- after which --force only
+// guards against refuse-to-remove edge cases (e.g. untracked-but-ignored
+// leftovers, submodules) rather than silently discarding unreviewed changes.
 func gitWorktreeRemove(repoPath, worktreePath string) error {
 	return runGit(repoPath, "worktree", "remove", worktreePath, "--force")
 }

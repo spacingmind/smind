@@ -41,6 +41,20 @@ func runGitT(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// runGitOutputT behaves like runGitT but returns the command's stdout.
+func runGitOutputT(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, stderr.String())
+	}
+	return stdout.String()
+}
+
 func newTestManager(t *testing.T) *Manager {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
