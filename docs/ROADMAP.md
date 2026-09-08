@@ -8,7 +8,7 @@ Goal: repo lives, binary runs.
 - [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.spacingmind/config.yaml`
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
-- [ ] CI: GitHub Actions — go test + bun build + lint
+- [x] CI: GitHub Actions — go test + bun build + lint
 - [ ] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
@@ -35,14 +35,16 @@ Goal: replace Paseo as daily driver.
 - [x] Data model: Workspace/Space/Task + workspace_accounts (`internal/store`)
 - [x] Workspace CRUD + Task lifecycle with real git worktrees (`internal/workspace`) — `create`/`run`/`archive`, not yet wired to CLI/HTTP
 - [x] Auth: simple bearer token (`internal/auth`), gating the Phase 1 proxy endpoints
-- [x] Agent spawning: ACP client (`internal/acp`, proven against real GLM) + Claude Code native headless client (`internal/claudecode`, protocol verified against `refs/claude-agent-sdk-python`) + `internal/taskrunner` unifying both behind one `RunPrompt(taskID, provider, prompt, events)` call. Codex uses its own "app-server" JSON-RPC protocol (distinct from both), not yet implemented — tracked as a follow-up. Google Vertex/Gemini also deferred (needs a service-account JWT-bearer credential type, not a refresh-token flow). `internal/taskrunner` isn't wired to HTTP/CLI yet — that's the next integration task. Two real concurrency bugs (a close/send race in `acp.Client.Prompt`, an unguarded final-event send in `taskrunner.RunPrompt`) were found and fixed during review, each with a `-race`-verified regression test.
+- [x] Agent spawning: ACP client (`internal/acp`, proven against real GLM) + Claude Code native headless client (`internal/claudecode`, protocol verified against `refs/claude-agent-sdk-python`) + `internal/taskrunner` unifying both behind one `RunPrompt(taskID, provider, prompt, events)` call. Codex uses its own "app-server" JSON-RPC protocol (distinct from both), not yet implemented — tracked as a follow-up. Google Vertex/Gemini also deferred (needs a service-account JWT-bearer credential type, not a refresh-token flow). Two real concurrency bugs (a close/send race in `acp.Client.Prompt`, an unguarded final-event send in `taskrunner.RunPrompt`) were found and fixed during review, each with a `-race`-verified regression test.
 - [x] Extract Claude Code client into its own Go module/repo: [spacingmind/claude-agent-sdk-go](https://github.com/spacingmind/claude-agent-sdk-go) (public, MIT) — no official Go SDK for Claude Code exists yet. `internal/taskrunner` now depends on it externally.
 - [x] WebSocket RPC API (`internal/wsapi`, `GET /ws`) exposing workspace/space/task CRUD and streaming `task.prompt` — the transport the web UI (and later the terminal feature) will drive. REST+SSE was tried first and discarded in favor of RPC-over-WebSocket (bidirectional need); gRPC ruled out for this layer (no browser support) but planned for daemon↔relay in Phase 3.
-- [ ] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent
-      timeline (streaming chat); file explorer with git status; CodeMirror 6
-      editor + preview; custom per-hunk diff viewer; xterm terminal (PTY in
-      task cwd); permission prompts UI
-- [ ] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop`
+- [x] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent timeline (streaming chat); file explorer with git status; CodeMirror 6 editor; custom per-hunk diff viewer; xterm terminal (PTY in task cwd); permission prompts UI
+- [ ] Web UI: preview pane (rendered output alongside the CodeMirror editor) — the one piece of the original Web UI item not yet built
+- [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
+
+Remaining for Phase 2: editor preview pane; Codex spawning (app-server
+JSON-RPC follow-up); the real scopedocs dogfood that is the definition of
+done.
 
 Definition of done: a real scopedocs feature built end-to-end from smind UI, replacing Paseo.
 
@@ -51,8 +53,8 @@ Definition of done: a real scopedocs feature built end-to-end from smind UI, rep
 Goal: usable from a phone outside the home network.
 
 Transport note: daemon ↔ relay is a real service boundary (the relay is
-separately deployable), so gRPC is the planned protocol there — unlike the
-daemon's own client-facing API (Phase 2), which uses RPC-over-WebSocket
+separately deployable), so gRPC is the planned protocol there — unlike
+the daemon's own client-facing API (Phase 2), which uses RPC-over-WebSocket
 specifically because its primary client is a browser (gRPC has no native
 browser support without a grpc-web proxy layer). Not implemented yet;
 noted here so Phase 3 design starts from this rather than re-litigating it.
