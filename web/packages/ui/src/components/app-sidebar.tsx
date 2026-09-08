@@ -4,6 +4,7 @@ import { AlertCircle, ChevronRight, FolderGit2, Layers, Loader2 } from "lucide-r
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type { Space, Task, Workspace } from "@/lib/types";
+import type { TaskAttention } from "@/hooks/use-task-attention";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
@@ -101,12 +102,15 @@ export function AppSidebar({
   client,
   selectedTaskId = null,
   onSelectTask,
+  attention,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
   selectedTaskId?: number | null;
   /** Invoked with the full Task when a task row is clicked. */
   onSelectTask?: (task: Task) => void;
+  /** Per-task attention badges (App.tsx's useTaskAttention) -- renders a dot on each row that has any reason. */
+  attention?: TaskAttention;
 }) {
   const { workspaces, error } = useWorkspaceTree(client);
 
@@ -129,7 +133,13 @@ export function AppSidebar({
                 )}
                 {!error && workspaces?.length === 0 && <StatusRow text="No workspaces yet." />}
                 {workspaces?.map((ws) => (
-                  <WorkspaceItem key={ws.ID} workspace={ws} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
+                  <WorkspaceItem
+                    key={ws.ID}
+                    workspace={ws}
+                    selectedTaskId={selectedTaskId}
+                    onSelectTask={onSelectTask}
+                    attention={attention}
+                  />
                 ))}
               </SidebarMenu>
             </ScrollArea>
@@ -155,10 +165,12 @@ function WorkspaceItem({
   workspace,
   selectedTaskId,
   onSelectTask,
+  attention,
 }: {
   workspace: WorkspaceWithTree;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
+  attention?: TaskAttention;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -178,11 +190,17 @@ function WorkspaceItem({
       {open && (
         <SidebarMenuSub>
           {flat ? (
-            <TaskRows tasks={workspace.ungroupedTasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} emptyText="No tasks" />
+            <TaskRows
+              tasks={workspace.ungroupedTasks}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={onSelectTask}
+              emptyText="No tasks"
+              attention={attention}
+            />
           ) : (
             <>
               {workspace.spaces.map((space) => (
-                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />
+                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
@@ -190,6 +208,7 @@ function WorkspaceItem({
                   tasks={workspace.ungroupedTasks}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
+                  attention={attention}
                 />
               )}
             </>
@@ -204,12 +223,22 @@ function SpaceItem({
   space,
   selectedTaskId,
   onSelectTask,
+  attention,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
+  attention?: TaskAttention;
 }) {
-  return <SpaceLikeItem title={space.Title} tasks={space.tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} />;
+  return (
+    <SpaceLikeItem
+      title={space.Title}
+      tasks={space.tasks}
+      selectedTaskId={selectedTaskId}
+      onSelectTask={onSelectTask}
+      attention={attention}
+    />
+  );
 }
 
 /**
@@ -225,11 +254,13 @@ function SpaceLikeItem({
   tasks,
   selectedTaskId,
   onSelectTask,
+  attention,
 }: {
   title: string;
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
+  attention?: TaskAttention;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -242,7 +273,13 @@ function SpaceLikeItem({
       </SidebarMenuSubButton>
       {open && (
         <SidebarMenuSub>
-          <TaskRows tasks={tasks} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} emptyText="No tasks" />
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No tasks"
+            attention={attention}
+          />
         </SidebarMenuSub>
       )}
     </SidebarMenuSubItem>
@@ -254,11 +291,13 @@ function TaskRows({
   selectedTaskId,
   onSelectTask,
   emptyText,
+  attention,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
+  attention?: TaskAttention;
 }) {
   if (tasks.length === 0) {
     return (
@@ -270,14 +309,27 @@ function TaskRows({
 
   return (
     <>
-      {tasks.map((task) => (
-        <SidebarMenuSubItem key={task.ID}>
-          <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
-            <span className="truncate">{task.Title}</span>
-            <span className="ml-auto shrink-0 text-[10px] uppercase text-muted-foreground">{task.Status}</span>
-          </SidebarMenuSubButton>
-        </SidebarMenuSubItem>
-      ))}
+      {tasks.map((task) => {
+        const reasons = attention?.get(task.ID);
+        const hasAttention = reasons !== undefined && reasons.size > 0;
+        return (
+          <SidebarMenuSubItem key={task.ID}>
+            <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
+              <span className="truncate">{task.Title}</span>
+              {hasAttention && (
+                <span
+                  data-testid="task-attention"
+                  aria-label="task needs attention"
+                  className="ml-auto size-2 shrink-0 rounded-full bg-primary"
+                />
+              )}
+              <span className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}>
+                {task.Status}
+              </span>
+            </SidebarMenuSubButton>
+          </SidebarMenuSubItem>
+        );
+      })}
     </>
   );
 }
