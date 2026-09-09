@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/spacingmind/smind/compare/v0.3.0...v0.4.0) (2026-09-09)
+
+
+### Features
+
+* editor preview pane, tab registry with per-task tabs, wsapi event subscription, archive checkpoint ([#56](https://github.com/spacingmind/smind/issues/56)) ([f621492](https://github.com/spacingmind/smind/commit/f621492159de7956b247bb2b815e599180541707))
+
 ## [0.3.0](https://github.com/spacingmind/smind/compare/v0.2.0...v0.3.0) (2026-08-28)
 
 
