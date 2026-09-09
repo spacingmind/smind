@@ -54,7 +54,7 @@ func gitWorktreeCheckpoint(worktreePath string) error {
 // repoPath. Callers must have checkpointed any reviewable work first --
 // ArchiveTask does so via gitWorktreeCheckpoint -- after which --force only
 // guards against refuse-to-remove edge cases (e.g. untracked-but-ignored
-// leftovers, submodules) rather than silently discarding unreviewed changes.
+// leftovers, submodules) rather than silently discarding reviewable changes.
 func gitWorktreeRemove(repoPath, worktreePath string) error {
 	return runGit(repoPath, "worktree", "remove", worktreePath, "--force")
 }
