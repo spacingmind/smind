@@ -206,6 +206,36 @@ export interface TaskDiffResult {
   diff: string;
 }
 
+// One entry in a task.files response (internal/workspace.TaskFile): a path
+// in the task's base→worktree diff, its change kind, and whether it's
+// currently staged in the worktree's real index.
+export interface TaskFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | string;
+  staged: boolean;
+}
+
+// Result of task.files (internal/wsapi/handlers.go's taskFilesResult).
+export interface TaskFilesResult {
+  files: TaskFile[];
+}
+
+// Result of task.fileDiff (internal/wsapi/handlers.go's
+// taskFileDiffResult): one file's slice of the task's unified diff, or ""
+// for a path with no changes.
+export interface TaskFileDiffResult {
+  diff: string;
+}
+
+// Result of task.commit (internal/wsapi/handlers.go's taskCommitResult):
+// the new commit's full sha, its subject line, and the staged file count
+// it recorded.
+export interface TaskCommitResult {
+  commit: string;
+  subject: string;
+  files: number;
+}
+
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
 // docs/decisions/0005-wsapi-event-subscription.md. Carried in the
 // notification envelope's payload field (lowercase json tags, unlike the
