@@ -19,6 +19,7 @@ import (
 func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
+		"provider.list":         handleProviderList(),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
@@ -614,5 +615,19 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
 		return struct{}{}, nil
+	}
+}
+
+// providerListResult is the result of provider.list: every provider the
+// daemon supports, sourced from taskrunner.SupportedProviders (the single
+// source of truth RunPrompt's dispatch stays in sync with).
+type providerListResult struct {
+	Providers []taskrunner.ProviderInfo `json:"providers"`
+}
+
+// handleProviderList returns the daemon's supported providers. No params.
+func handleProviderList() handlerFunc {
+	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
+		return providerListResult{Providers: taskrunner.SupportedProviders()}, nil
 	}
 }

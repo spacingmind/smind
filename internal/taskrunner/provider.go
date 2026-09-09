@@ -28,3 +28,25 @@ const (
 	// package doc comment for why.
 	ProviderCodexNative Provider = "codex-native"
 )
+
+// ProviderInfo describes one supported Provider for clients (the wsapi
+// provider.list method's wire shape): the Provider id itself, plus an
+// optional human-facing label.
+type ProviderInfo struct {
+	ID    Provider `json:"id"`
+	Label string   `json:"label,omitempty"`
+}
+
+// SupportedProviders is the single source of truth for which providers the
+// daemon supports -- every provider RunPrompt can dispatch to, in dropdown
+// display order, with their human labels. provider.list serves this; the
+// web UI renders its dropdown from it. A provider added here (and to
+// RunPrompt's switch) shows up in the UI without client changes.
+func SupportedProviders() []ProviderInfo {
+	return []ProviderInfo{
+		{ID: ProviderClaudeNative, Label: "Claude Code"},
+		{ID: ProviderGLM, Label: "GLM"},
+		{ID: ProviderKimi, Label: "Kimi"},
+		{ID: ProviderCodexNative, Label: "Codex"},
+	}
+}
