@@ -198,7 +198,7 @@ function TabContent({
   const renderers: Record<TabKind, React.ReactNode> = {
     task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
     files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} />,
+    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
     terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
   };

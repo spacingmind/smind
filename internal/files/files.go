@@ -1,13 +1,3 @@
-// Package files provides sandboxed file operations (list/read/write) scoped
-// to a single directory root -- in practice, a task's real git worktree
-// (store.Task.WorktreePath), as used by internal/wsapi's file.list/
-// file.read/file.write handlers.
-//
-// Every exported function takes root plus a client-supplied path and
-// resolves that path *inside* root before touching the filesystem. This is
-// the package's whole reason to exist: path is untrusted client input, and
-// nothing here may read, write, or even list anything outside root --
-// see resolveInRoot for how that's enforced.
 package files
 
 import (
@@ -18,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -27,6 +18,50 @@ type Entry struct {
 	Name  string `json:"name"`
 	IsDir bool   `json:"isDir"`
 	Size  int64  `json:"size"`
+}
+
+// ConflictError is Write's rejected-if-changed outcome: the caller passed
+// an expectedMtime and the file's current state on disk doesn't match it --
+// either its mtime moved (someone rewrote it) or the file is gone entirely
+// (Deleted). No write happened; the caller (the editor UI) is expected to
+// surface the choice of reload-vs-overwrite to the human rather than
+// silently clobbering either version.
+type ConflictError struct {
+	Path    string
+	Deleted bool
+}
+
+func (e *ConflictError) Error() string {
+	if e.Deleted {
+		return fmt.Sprintf("write %q: conflict: file was deleted on disk", e.Path)
+	}
+	return fmt.Sprintf("write %q: conflict: file changed on disk since it was read", e.Path)
+}
+
+// RPCCode gives internal/wsapi the machine-readable error code to put on
+// the wire so the editor can distinguish the two conflict states without
+// string-matching.
+func (e *ConflictError) RPCCode() string {
+	if e.Deleted {
+		return "conflict_deleted"
+	}
+	return "conflict"
+}
+
+// MissingError is Read's typed not-found outcome, so clients probing
+// whether a file still exists get a machine-readable code ("not_found")
+// instead of parsing an OS error string.
+type MissingError struct {
+	Path string
+}
+
+func (e *MissingError) Error() string {
+	return fmt.Sprintf("read %q: file does not exist", e.Path)
+}
+
+// RPCCode is ConflictError.RPCCode's counterpart for the read path.
+func (e *MissingError) RPCCode() string {
+	return "not_found"
 }
 
 // List returns the entries of path (relative to root; "" means root
@@ -65,53 +100,84 @@ func List(root, path string) ([]Entry, error) {
 	return entries, nil
 }
 
-// Read returns path's content as a UTF-8 string. path must resolve inside
-// root -- see resolveInRoot. A file that isn't valid UTF-8 (binary) returns
-// a clear error rather than silently mangling its bytes; there is no binary
-// file support here.
-func Read(root, path string) (string, error) {
+// Read returns path's content as a UTF-8 string plus the file's mtime, for
+// callers that will later write conditionally (Write's expectedMtime -- see
+// the file-conflict-detection plan). A file that isn't valid UTF-8 (binary)
+// returns a clear error rather than silently mangling its bytes; a missing
+// file returns *MissingError. path must resolve inside root -- see
+// resolveInRoot.
+func Read(root, path string) (string, time.Time, error) {
 	target, err := resolveInRoot(root, path)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
 
 	info, err := os.Stat(target)
 	if err != nil {
-		return "", fmt.Errorf("read %q: %w", path, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", time.Time{}, &MissingError{Path: path}
+		}
+		return "", time.Time{}, fmt.Errorf("read %q: %w", path, err)
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("read %q: is a directory", path)
+		return "", time.Time{}, fmt.Errorf("read %q: is a directory", path)
 	}
 
 	data, err := os.ReadFile(target)
 	if err != nil {
-		return "", fmt.Errorf("read %q: %w", path, err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", time.Time{}, &MissingError{Path: path}
+		}
+		return "", time.Time{}, fmt.Errorf("read %q: %w", path, err)
 	}
 	if !utf8.Valid(data) {
-		return "", fmt.Errorf("read %q: not valid UTF-8 (binary files are not supported)", path)
+		return "", time.Time{}, fmt.Errorf("read %q: not valid UTF-8 (binary files are not supported)", path)
 	}
-	return string(data), nil
+	return string(data), info.ModTime(), nil
 }
 
 // Write writes content to path, creating the file if it doesn't already
-// exist (but not any missing parent directories). path must resolve inside
-// root -- see resolveInRoot.
-func Write(root, path, content string) error {
+// exist (but not any missing parent directories), and returns the written
+// file's mtime so conditional writers can chain it into their next
+// expectedMtime. path must resolve inside root -- see resolveInRoot.
+//
+// When expectedMtime is non-nil it is a conditional write: if the file's
+// current mtime differs from it, or the file no longer exists (a client
+// only ever holds an mtime from a successful Read, so it existed), Write
+// does nothing and returns *ConflictError. A nil expectedMtime is today's
+// unconditional last-write-wins.
+func Write(root, path, content string, expectedMtime *time.Time) (time.Time, error) {
 	target, err := resolveInRoot(root, path)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 
-	if info, err := os.Stat(target); err == nil && info.IsDir() {
-		return fmt.Errorf("write %q: is a directory", path)
-	} else if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("write %q: %w", path, err)
+	var currentMtime time.Time
+	if info, err := os.Stat(target); err == nil {
+		if info.IsDir() {
+			return time.Time{}, fmt.Errorf("write %q: is a directory", path)
+		}
+		currentMtime = info.ModTime()
+	} else if errors.Is(err, fs.ErrNotExist) {
+		if expectedMtime != nil {
+			return time.Time{}, &ConflictError{Path: path, Deleted: true}
+		}
+	} else {
+		return time.Time{}, fmt.Errorf("write %q: %w", path, err)
+	}
+
+	if expectedMtime != nil && !currentMtime.Equal(*expectedMtime) {
+		return time.Time{}, &ConflictError{Path: path}
 	}
 
 	if err := os.WriteFile(target, []byte(content), 0o644); err != nil {
-		return fmt.Errorf("write %q: %w", path, err)
+		return time.Time{}, fmt.Errorf("write %q: %w", path, err)
 	}
-	return nil
+	info, err := os.Stat(target)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("write %q: %w", path, err)
+	}
+	return info.ModTime(), nil
 }
 
 // resolveInRoot resolves reqPath against root (a task's real worktree path)

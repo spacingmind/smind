@@ -192,7 +192,7 @@ func (c *conn) sendError(id string, err error) {
 	if !c.terminate(id) {
 		return
 	}
-	c.writeEnvelope(envelope{ID: id, Error: &rpcError{Message: err.Error()}})
+	c.writeEnvelope(envelope{ID: id, Error: codedError(err)})
 }
 
 func (c *conn) writeEnvelope(env envelope) {
