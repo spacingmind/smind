@@ -124,113 +124,6 @@ describe("DiffViewerPane", () => {
   });
 });
 
-describe("DiffViewerPane staging", () => {
-  it("stage checkbox calls task.stage and updates the file's staged state", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    const box = screen.getByTestId("stage-file.txt");
-    expect(box).not.toBeChecked();
-    // Commit stays disabled: nothing staged yet.
-    expect(screen.getByTestId("commit-button")).toBeDisabled();
-
-    fireEvent.click(box);
-    const call = client.nth("task.stage", 0);
-    expect(call.params).toEqual({ taskId: TASK.ID, path: "file.txt", staged: true });
-    call.resolve({});
-    await flush();
-
-    expect(screen.getByTestId("stage-file.txt")).toBeChecked();
-    expect(screen.getByTestId("commit-button")).toHaveTextContent(/1 staged/);
-  });
-
-  it("unchecking a staged file sends staged: false", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    client.nth("task.files", 0).resolve({
-      files: [{ path: "file.txt", status: "modified", staged: true }],
-    } satisfies TaskFilesResult);
-    await flush();
-
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    expect(client.nth("task.stage", 0).params).toEqual({
-      taskId: TASK.ID,
-      path: "file.txt",
-      staged: false,
-    });
-  });
-
-  it("a stage failure renders inline", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    client.nth("task.stage", 0).reject(new Error("stage blew up"));
-    await flush();
-
-    expect(screen.getByTestId("diff-error")).toHaveTextContent("stage blew up");
-    expect(screen.getByTestId("stage-file.txt")).not.toBeChecked();
-  });
-});
-
-describe("DiffViewerPane commit bar", () => {
-  it("Commit stays disabled until at least one file is staged and the message is non-empty", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    const button = screen.getByTestId("commit-button");
-    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "a message" } });
-    expect(button).toBeDisabled();
-
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    client.nth("task.stage", 0).resolve({});
-    await flush();
-    expect(button).toBeEnabled();
-  });
-
-  it("a successful commit shows sha+subject and refreshes the files list", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    client.nth("task.stage", 0).resolve({});
-    await flush();
-    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "my commit" } });
-    fireEvent.click(screen.getByTestId("commit-button"));
-
-    const call = client.nth("task.commit", 0);
-    expect(call.params).toEqual({ taskId: TASK.ID, message: "my commit", author: "human" });
-    call.resolve({ commit: "abcdef1234567890", subject: "my commit", files: 1 });
-    await flush();
-
-    expect(screen.getByTestId("commit-success")).toHaveTextContent("my commit");
-    expect(screen.getByTestId("commit-success")).toHaveTextContent("abcdef12");
-    // Post-commit refresh of the files list.
-    expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(2);
-  });
-
-  it("a commit failure renders inline and does not refresh", async () => {
-    const client = new FakeWsClient();
-    render(<DiffViewerPane client={client} task={TASK} />);
-    await resolveFilesAndDiffs(client);
-
-    fireEvent.click(screen.getByTestId("stage-file.txt"));
-    client.nth("task.stage", 0).resolve({});
-    await flush();
-    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "my commit" } });
-    fireEvent.click(screen.getByTestId("commit-button"));
-    client.nth("task.commit", 0).reject(new Error("nothing staged to commit"));
-    await flush();
-
-    expect(screen.getByTestId("commit-error")).toHaveTextContent("nothing staged to commit");
-    expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(1);
-  });
-});
-
 /** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them. */
 function makeEventsStub() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();
@@ -253,35 +146,40 @@ function makeEventsStub() {
 }
 
 describe("DiffViewerPane live refresh", () => {
-  it("refetches task.files on a terminal run.status for the viewed task", async () => {
+  it("refetches task.diff on a terminal run.status for the viewed task", async () => {
     const client = new FakeWsClient();
     const stub = makeEventsStub();
     render(<DiffViewerPane client={client} task={TASK} events={stub.events} />);
-    client.nth("task.files", 0).resolve({ files: [] } satisfies TaskFilesResult);
+
+    client.nth("task.diff", 0).resolve({ diff: "" } satisfies TaskDiffResult);
     await flush();
     expect(screen.getByTestId("diff-empty")).toBeInTheDocument();
 
     // Non-terminal status: no refetch.
     act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "running" }));
     await flush();
-    expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(1);
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
 
     // Terminal status for the same task: refetch.
     act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "done" }));
     await flush();
-    expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(2);
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(2);
+    client.nth("task.diff", 1).resolve({ diff: SAMPLE_DIFF } satisfies TaskDiffResult);
+    await flush();
+    expect(screen.getByTestId("diff-container").textContent).toContain("line2 added");
   });
 
   it("ignores terminal run.status events for a different task", async () => {
     const client = new FakeWsClient();
     const stub = makeEventsStub();
     render(<DiffViewerPane client={client} task={TASK} events={stub.events} />);
-    client.nth("task.files", 0).resolve({ files: [] } satisfies TaskFilesResult);
+
+    client.nth("task.diff", 0).resolve({ diff: "" } satisfies TaskDiffResult);
     await flush();
 
     act(() => stub.fire("run.status", { runId: "r9", taskId: TASK.ID + 1, status: "done" }));
     await flush();
 
-    expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(1);
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
   });
 });
