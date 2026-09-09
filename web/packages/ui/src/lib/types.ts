@@ -194,9 +194,18 @@ export interface FileEntry {
   size: number;
 }
 
-// Result of file.read (internal/wsapi/files.go's fileReadResult).
+// Result of file.read (internal/wsapi/files.go's fileReadResult): content
+// plus the read-time mtime, echoed back as file.write's expectedMtime for
+// conditional saves (see the file-conflict-detection plan).
 export interface FileReadResult {
   content: string;
+  mtime: string;
+}
+
+// Result of file.write (internal/wsapi/files.go's fileWriteResult): the
+// written file's mtime, chained into the next conditional save.
+export interface FileWriteResult {
+  mtime: string;
 }
 
 // Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the

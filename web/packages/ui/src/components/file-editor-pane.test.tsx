@@ -3,6 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { editorViewRegistry } from "@/components/code-mirror-editor";
+import { RpcError } from "@/lib/ws-client";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Task } from "@/lib/types";
@@ -259,5 +260,222 @@ describe("FileEditorPane preview mode", () => {
     // Same EditorView instance (cursor/undo history survive) with the edit still in the buffer.
     expect(editorViewRegistry.get(editorEl)).toBe(viewBefore);
     expect(viewBefore?.state.doc.toString()).toBe("# Edited before preview");
+  });
+});
+
+// Conflict-detection tests (docs/plans/active/file-conflict-detection.md):
+// conditional save rejected with a coded error -> banner; Reload re-reads;
+// Overwrite force-writes without expectedMtime; the deleted-on-disk state;
+// and the terminal run.status probe showing the banner before any save.
+
+/** Minimal DaemonEvents stub, same as diff-viewer-pane.test.tsx's. */
+function makeEventsStub() {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    events: {
+      subscribe(topic: string, listener: (payload: unknown) => void): () => void {
+        let set = listeners.get(topic);
+        if (!set) {
+          set = new Set<(payload: unknown) => void>();
+          listeners.set(topic, set);
+        }
+        set.add(listener);
+        return () => set!.delete(listener);
+      },
+    },
+    fire(topic: string, payload: unknown): void {
+      for (const l of listeners.get(topic) ?? []) l(payload);
+    },
+  };
+}
+
+/** Opens PATH at MTIME with the given content and makes the buffer dirty by typing NEWCONTENT. */
+async function openDirty(content: string, mtime: string, newContent: string): Promise<FakeWsClient> {
+  const client = new FakeWsClient();
+  render(<FileEditorPane client={client} task={TASK} path={PATH} />);
+  client.nth("file.read", 0).resolve({ content, mtime });
+  await flush();
+  typeInEditor(newContent);
+  await flush();
+  return client;
+}
+
+describe("FileEditorPane conflict detection", () => {
+  it("a save with a matching mtime sends expectedMtime (conditional write)", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "edited");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+
+    expect(client.nth("file.write", 0).params).toEqual({
+      taskId: TASK.ID,
+      path: PATH,
+      content: "edited",
+      expectedMtime: "2024-01-01T00:00:00Z",
+    });
+
+    client.nth("file.write", 0).resolve({ mtime: "2024-01-02T00:00:00Z" });
+    await flush();
+    // The next save chains the returned mtime.
+    typeInEditor("edited more");
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+    expect(client.nth("file.write", 1).params).toEqual({
+      taskId: TASK.ID,
+      path: PATH,
+      content: "edited more",
+      expectedMtime: "2024-01-02T00:00:00Z",
+    });
+  });
+
+  it("a conflicting save renders the changed-on-disk banner and keeps the buffer", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "human edit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+
+    client.nth("file.write", 0).reject(new RpcError("file changed on disk", "conflict"));
+    await flush();
+
+    const banner = screen.getByTestId("file-conflict-banner");
+    expect(banner).toHaveAttribute("data-conflict", "changed");
+    expect(screen.getByTestId("conflict-reload")).toBeInTheDocument();
+    expect(screen.getByTestId("conflict-overwrite")).toBeInTheDocument();
+
+    // No data loss: the buffer and the dirty marker survive.
+    const view = editorViewRegistry.get(screen.getByTestId("file-editor"));
+    expect(view?.state.doc.toString()).toBe("human edit");
+    expect(screen.getByTestId("file-editor-path")).toHaveTextContent("*");
+  });
+
+  it("Reload re-reads the file, replacing the buffer and clearing the banner", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "human edit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+    client.nth("file.write", 0).reject(new RpcError("file changed on disk", "conflict"));
+    await flush();
+
+    fireEvent.click(screen.getByTestId("conflict-reload"));
+    await flush();
+
+    expect(client.nth("file.read", 1).params).toEqual({ taskId: TASK.ID, path: PATH });
+    client.nth("file.read", 1).resolve({ content: "agent version\n", mtime: "2024-01-03T00:00:00Z" });
+    await flush();
+
+    expect(screen.queryByTestId("file-conflict-banner")).not.toBeInTheDocument();
+    const view = editorViewRegistry.get(screen.getByTestId("file-editor"));
+    expect(view?.state.doc.toString()).toBe("agent version\n");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    // The next save is conditional against the reloaded mtime.
+    typeInEditor("post-reload edit");
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+    expect(client.nth("file.write", 1).params).toEqual({
+      taskId: TASK.ID,
+      path: PATH,
+      content: "post-reload edit",
+      expectedMtime: "2024-01-03T00:00:00Z",
+    });
+  });
+
+  it("Overwrite force-writes without expectedMtime and clears the banner", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "human edit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+    client.nth("file.write", 0).reject(new RpcError("file changed on disk", "conflict"));
+    await flush();
+
+    fireEvent.click(screen.getByTestId("conflict-overwrite"));
+    await flush();
+
+    expect(client.nth("file.write", 1).params).toEqual({ taskId: TASK.ID, path: PATH, content: "human edit" });
+    client.nth("file.write", 1).resolve({ mtime: "2024-01-04T00:00:00Z" });
+    await flush();
+
+    expect(screen.queryByTestId("file-conflict-banner")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("the deleted-on-disk conflict renders its own banner state", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "human edit");
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await flush();
+    client.nth("file.write", 0).reject(new RpcError("file deleted on disk", "conflict_deleted"));
+    await flush();
+
+    expect(screen.getByTestId("file-conflict-banner")).toHaveAttribute("data-conflict", "deleted");
+
+    // Overwrite on deleted recreates the file (unconditional write).
+    fireEvent.click(screen.getByTestId("conflict-overwrite"));
+    await flush();
+    expect(client.nth("file.write", 1).params).toEqual({ taskId: TASK.ID, path: PATH, content: "human edit" });
+    client.nth("file.write", 1).resolve({ mtime: "2024-01-05T00:00:00Z" });
+    await flush();
+    expect(screen.queryByTestId("file-conflict-banner")).not.toBeInTheDocument();
+  });
+
+  it("a terminal run.status for this task probes a dirty buffer and shows the banner pre-save", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(<FileEditorPane client={client} task={TASK} path={PATH} events={stub.events} />);
+    client.nth("file.read", 0).resolve({ content: "original", mtime: "2024-01-01T00:00:00Z" });
+    await flush();
+
+    typeInEditor("human edit");
+    await flush();
+
+    // Non-terminal status: no probe.
+    act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "running" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "file.read")).toHaveLength(1);
+
+    // Terminal status for the same task: probe.
+    act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "done" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "file.read")).toHaveLength(2);
+
+    // Drift (different mtime): banner before any save was attempted.
+    client.nth("file.read", 1).resolve({ content: "agent version\n", mtime: "2024-01-06T00:00:00Z" });
+    await flush();
+    expect(screen.getByTestId("file-conflict-banner")).toHaveAttribute("data-conflict", "changed");
+    expect(client.calls.filter((c) => c.method === "file.write")).toHaveLength(0);
+
+    // The buffer is untouched by the probe -- nothing auto-reloaded.
+    const view = editorViewRegistry.get(screen.getByTestId("file-editor"));
+    expect(view?.state.doc.toString()).toBe("human edit");
+  });
+
+  it("a run.status probe for a clean buffer does not re-read", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(<FileEditorPane client={client} task={TASK} path={PATH} events={stub.events} />);
+    client.nth("file.read", 0).resolve({ content: "original", mtime: "2024-01-01T00:00:00Z" });
+    await flush();
+
+    act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "done" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "file.read")).toHaveLength(1);
+  });
+
+  it("ignores terminal run.status events for a different task", async () => {
+    const client = await openDirty("original", "2024-01-01T00:00:00Z", "human edit");
+
+    const stub = makeEventsStub();
+    // Re-render with events attached; openDirty's mount had none.
+    const { unmount } = render(<FileEditorPane client={client} task={TASK} path={PATH} events={stub.events} />);
+    // The remount triggers its own file.read (index 1 in this render's client).
+    client.nth("file.read", 1).resolve({ content: "original", mtime: "2024-01-01T00:00:00Z" });
+    await flush();
+
+    act(() => stub.fire("run.status", { runId: "r9", taskId: TASK.ID + 1, status: "done" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "file.read")).toHaveLength(2);
+    unmount();
   });
 });
