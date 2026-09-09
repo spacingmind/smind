@@ -57,7 +57,7 @@ func gitWorktreeCheckpoint(worktreePath string) error {
 // repoPath. Callers must have checkpointed any reviewable work first --
 // ArchiveTask does so via gitWorktreeCheckpoint -- after which --force only
 // guards against refuse-to-remove edge cases (e.g. untracked-but-ignored
-// leftovers, submodules) rather than silently discarding unreviewed changes.
+// leftovers, submodules) rather than silently discarding reviewable changes.
 func gitWorktreeRemove(repoPath, worktreePath string) error {
 	return runGit(repoPath, "worktree", "remove", worktreePath, "--force")
 }
@@ -251,7 +251,7 @@ func taskChangedFiles(worktreePath, branch string) ([]TaskFile, error) {
 		return nil, err
 	}
 
-	files := make([]TaskFile, 0)
+	var files []TaskFile
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line == "" {
 			continue
@@ -372,48 +372,4 @@ func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
 		Subject: subject,
 		Files:   fileCount,
 	}, nil
-}
-
-// shortstatRe parses `git diff --shortstat`'s single summary line. Each
-// clause is optional and git omits the ones that are zero -- a pure
-// addition prints "1 file changed, 12 insertions(+)" with no deletions
-// clause at all -- so this matches each independently rather than
-// expecting all three.
-var shortstatRe = regexp.MustCompile(`(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?`)
-
-// taskDiffStat returns the file/insertion/deletion counts of exactly the
-// diff taskDiff renders: the same base→snapshot-index computation, asked
-// for --shortstat instead of hunks. Going through the snapshot index is
-// what makes the counts include untracked files -- the ones an agent just
-// created, which are usually the most interesting part of a task's diff
-// and which a plain `git diff --shortstat` would miss entirely.
-//
-// A task with no changes yields three zeros and no error; git prints
-// nothing at all in that case, which the regexp simply doesn't match.
-func taskDiffStat(worktreePath, branch string) (files, insertions, deletions int, err error) {
-	base, err := taskDiffBase(worktreePath, branch)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("resolve base commit: %w", err)
-	}
-	env, cleanup, err := snapshotIndex(worktreePath)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("snapshot worktree index: %w", err)
-	}
-	defer cleanup()
-
-	out, err := runGitOutputEnv(worktreePath, env, "diff", "--shortstat", "--cached", base)
-	if err != nil {
-		return 0, 0, 0, fmt.Errorf("diff shortstat against base %s: %w", base, err)
-	}
-
-	m := shortstatRe.FindStringSubmatch(out)
-	if m == nil {
-		return 0, 0, 0, nil
-	}
-	// Every capture is \d+ or empty, so Atoi's error can only mean the
-	// clause was absent -- which is exactly the zero we want.
-	files, _ = strconv.Atoi(m[1])
-	insertions, _ = strconv.Atoi(m[2])
-	deletions, _ = strconv.Atoi(m[3])
-	return files, insertions, deletions, nil
 }
