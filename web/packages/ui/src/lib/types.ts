@@ -38,10 +38,23 @@ export interface Space {
   UpdatedAt: string;
 }
 
-// The only two internal/taskrunner.Provider values that exist today (see
-// internal/taskrunner/provider.go) -- not dynamically discovered, see
-// docs/plans/active/web-ui-task-detail.md's Decisions.
-export type Provider = "claude-native" | "glm";
+// internal/taskrunner.Provider values, carried over the wire as their
+// underlying strings. The authoritative list is served dynamically by the
+// daemon's provider.list method (see ProviderListResult); this union just
+// covers the values that can appear, including the hardcoded fallback's two.
+export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
+
+// One entry in a provider.list response (internal/taskrunner.ProviderInfo):
+// the provider id itself plus an optional human-facing label.
+export interface ProviderInfo {
+  id: Provider;
+  label?: string;
+}
+
+// Result of provider.list (internal/wsapi/handlers.go's providerListResult).
+export interface ProviderListResult {
+  providers: ProviderInfo[];
+}
 
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried
 // over the wire as their underlying string, same as any other Go string

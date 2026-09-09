@@ -42,14 +42,46 @@ the daemon, not be hardcoded in the client.
 
 ## Decisions
 
-(To be filled: label mapping location, fallback semantics, caching.)
+- **Label mapping location**: `internal/taskrunner/provider.go` gained
+  `SupportedProviders() []ProviderInfo` — the single source of truth
+  listing every provider RunPrompt can dispatch to, in dropdown display
+  order, with human labels ("Claude Code", "GLM", "Kimi", "Codex").
+  `provider.list` (wsapi) serves it verbatim; the client maps
+  `label ?? id` in the `<option>` and holds no id→label table. Note:
+  the backend actually supports **four** providers (kimi was merged
+  alongside codex), so provider.list returns all four — the wire/UI
+  tests assert the full set.
+- **Fallback semantics**: `PromptForm` keeps a `FALLBACK_PROVIDERS`
+  const (the old two-provider list, ids only). It is set as initial
+  state, `provider.list` replaces it on success (only if the response
+  has ≥1 provider); on error the fallback stays and the error is logged
+  via `console.error` — non-fatal, form fully usable.
+- **Caching / fetch cadence**: fetched once per `WsClientLike` instance
+  (an effect keyed on `client`), reset to fallback when the client
+  changes — so a reconnect re-fetches, matching how run.list re-fetches
+  per new client. No caching across connections.
+- One combined commit instead of two (spec doc rides along).
 
 ## Progress
 
-- [ ] `provider.list` backend + wire test
-- [ ] UI dropdown from `provider.list` + fallback + tests
-- [ ] Verification (both sides)
+- [x] `provider.list` backend + wire test
+- [x] UI dropdown from `provider.list` + fallback + tests
+- [x] Verification (both sides)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+- `provider.list` returns `{providers: [{id, label}]}` sourced from
+  `taskrunner.SupportedProviders()` — confirmed by
+  `TestServer_ProviderList_RoundTrip` (real WS connection, decodes into
+  the typed `providerListResult`, fails loudly on unknown ids/labels).
+- Web: `task-detail.test.tsx` — "renders the provider dropdown from
+  provider.list (3 providers, labels over ids)" asserts option
+  labels/values; "falls back to the hardcoded two-provider list when
+  provider.list rejects, and the form still submits" asserts the
+  fallback options and a successful run.start after rejection.
+- Go chain green: `go build ./...`, `gofmt -l .` (empty), `go vet ./...`,
+  `go test -race ./...`, `task test`, `task lint` — all pass.
+- Web: `bunx tsc -b` clean, `bun run test` (in `web/packages/ui`) —
+  82 tests pass (including the two new ones); `task build` succeeds;
+  `internal/server/dist/.gitkeep` restored after the vite build wiped
+  it.
