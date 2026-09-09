@@ -192,3 +192,33 @@ export interface FileReadResult {
 export interface TaskDiffResult {
   diff: string;
 }
+
+// Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
+// docs/decisions/0005-wsapi-event-subscription.md. Carried in the
+// notification envelope's payload field (lowercase json tags, unlike the
+// PascalCase no-tag structs above).
+
+// Payload of task.status: {taskId, status}.
+export interface TaskStatusEventPayload {
+  taskId: number;
+  status: string;
+}
+
+// Payload of run.status: {runId, taskId, status, stopReason?, err?}.
+export interface RunStatusEventPayload {
+  runId: string;
+  taskId: number;
+  status: RunStatusValue;
+  stopReason?: string;
+  err?: string;
+}
+
+// Payload of permission.pending: {runId, taskId, requestId, summary,
+// options} -- same option shape as PermissionOption.
+export interface PermissionPendingEventPayload {
+  runId: string;
+  taskId: number;
+  requestId: string;
+  summary: string;
+  options: PermissionOption[];
+}

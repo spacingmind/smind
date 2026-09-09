@@ -9,12 +9,15 @@
 // closing the connection), translated idiomatically to TS/browser
 // WebSocket.
 //
-// One JSON object is sent per WebSocket text message, in one of four
+// One JSON object is sent per WebSocket text message, in one of five
 // shapes:
 //   - client -> server request:  {id, method, params}
 //   - server -> client response: {id, result} or {id, error: {message}}
 //   - server -> client event:    {id, event, params}
 //   - client -> server cancel:   {method: "task.cancel", params: {id}}
+//   - server -> client notification: {event: {topic, seq, payload}} -- an
+//     ADR 0005 subscription push with no id and an object-valued event
+//     field (versus a streaming event's string); see onNotification.
 
 /** Wire envelope -- mirrors internal/wsapi's envelope exactly. */
 export interface WireEnvelope {
@@ -24,6 +27,20 @@ export interface WireEnvelope {
   result?: unknown;
   error?: { message: string };
   event?: string;
+}
+
+/**
+ * One server-pushed notification per ADR 0005 (internal/wsapi/events.go's
+ * eventNotification): a topic subscribed to via events.subscribe, a
+ * per-connection monotonic seq starting at 1 (sequenced across all of the
+ * connection's topics, so a client can detect gaps), and a topic-specific
+ * payload. Travels in an envelope's event field with no id -- it is not a
+ * response to any request.
+ */
+export interface DaemonNotification {
+  topic: string;
+  seq: number;
+  payload: unknown;
 }
 
 /**
@@ -133,6 +150,7 @@ export interface WsClientLike {
 export class WsClient implements WsClientLike {
   private readonly socket: SocketLike;
   private readonly inflight = new Map<string, InflightRequest>();
+  private readonly notificationListeners = new Set<(n: DaemonNotification) => void>();
   private nextId = 0;
   private closed = false;
   private closeError: Error | null = null;
@@ -193,6 +211,24 @@ export class WsClient implements WsClientLike {
       return;
     }
     this.closeWaiters.push(callback);
+  }
+
+  /**
+   * Registers fn to be invoked for every ADR-0005 notification this
+   * connection delivers, regardless of topic -- filtering by topic is the
+   * listener's job, since the app holds one events.subscribe covering all
+   * topics per connection (see hooks/use-daemon-events.ts, which owns that
+   * subscription). Returns an unregister function so a consumer can detach
+   * on unmount without disturbing other listeners or the connection.
+   * Notifications are connection-scoped and live-only: a reconnect means a
+   * brand-new WsClient that consumers must re-register against (the app's
+   * client-reference swap already re-runs their effects).
+   */
+  onNotification(fn: (n: DaemonNotification) => void): () => void {
+    this.notificationListeners.add(fn);
+    return () => {
+      this.notificationListeners.delete(fn);
+    };
   }
 
   /**
@@ -306,6 +342,16 @@ export class WsClient implements WsClientLike {
     } catch {
       return;
     }
+
+    // ADR-0005 notifications ({event: {topic, seq, payload}}, no id) are
+    // connection-scoped pushes, not responses to anything -- they never
+    // enter the inflight machinery below.
+    const notification = parseNotification(env);
+    if (notification) {
+      this.notify(notification);
+      return;
+    }
+
     if (!env.id) return;
 
     const req = this.inflight.get(env.id);
@@ -318,6 +364,22 @@ export class WsClient implements WsClientLike {
 
     this.inflight.delete(env.id);
     req.resolveTerm(env);
+  }
+
+  /**
+   * Fans one notification out to every registered listener. A listener
+   * throwing must not break delivery to the others -- same isolation
+   * failAll gives its closeWaiters (a consumer-side bug is not this
+   * class's problem to propagate into breaking every other consumer).
+   */
+  private notify(n: DaemonNotification): void {
+    for (const fn of this.notificationListeners) {
+      try {
+        fn(n);
+      } catch (err) {
+        console.error("wsclient: onNotification listener threw", err);
+      }
+    }
   }
 
   /**
@@ -358,6 +420,22 @@ export class WsClient implements WsClientLike {
   private send(env: WireEnvelope): void {
     this.socket.send(JSON.stringify(env));
   }
+}
+
+/**
+ * Recognizes an ADR-0005 notification envelope -- no id, and an
+ * object-valued event field carrying a string topic (a streaming request
+ * event has an id and a *string* event field, so the two can never be
+ * confused). Anything malformed (missing topic, non-numeric seq, or an
+ * event that isn't an object) is not a notification and returns null,
+ * falling through to the existing id-routed handling which ignores it --
+ * a bad push must never throw off the RPC engine.
+ */
+function parseNotification(env: WireEnvelope): DaemonNotification | null {
+  if (env.id || typeof env.event !== "object" || env.event === null) return null;
+  const e = env.event as { topic?: unknown; seq?: unknown; payload?: unknown };
+  if (typeof e.topic !== "string") return null;
+  return { topic: e.topic, seq: Number(e.seq) || 0, payload: e.payload };
 }
 
 function waitForAbort(signal: AbortSignal): Promise<void> {

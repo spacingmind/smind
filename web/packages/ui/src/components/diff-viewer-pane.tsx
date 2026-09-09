@@ -4,8 +4,9 @@ import "diff2html/bundles/css/diff2html.min.css";
 import "highlight.js/styles/github.css";
 
 import { Button } from "@/components/ui/button";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import type { Task, TaskDiffResult } from "@/lib/types";
+import type { RunStatusEventPayload, Task, TaskDiffResult } from "@/lib/types";
 
 /**
  * A self-contained diff-viewing pane for a task: fetches task.diff and
@@ -23,7 +24,16 @@ import type { Task, TaskDiffResult } from "@/lib/types";
  * mountable and independently testable (see diff-viewer-pane.test.tsx)
  * ahead of that follow-up integration step.
  */
-export function DiffViewerPane({ client, task }: { client: WsClientLike | null; task: Task }) {
+export function DiffViewerPane({
+  client,
+  task,
+  events,
+}: {
+  client: WsClientLike | null;
+  task: Task;
+  /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task refetches the diff. */
+  events?: DaemonEvents | null;
+}) {
   const [diff, setDiff] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -55,6 +65,21 @@ export function DiffViewerPane({ client, task }: { client: WsClientLike | null; 
     setError(null);
     fetchDiff();
   }, [fetchDiff]);
+
+  // Live refresh: a terminal run.status (done/error/stopped) for the
+  // viewed task means the agent just stopped changing files -- refetch.
+  // (No per-write diff events exist; terminal run status is the right
+  // trigger.) Registered on `events`, keyed on fetchDiff's own deps
+  // (client, task.ID), so a task switch re-registers cleanly.
+  useEffect(() => {
+    if (!events) return;
+    return events.subscribe("run.status", (payload) => {
+      const p = payload as Partial<RunStatusEventPayload>;
+      if (p.taskId !== task.ID) return;
+      if (p.status !== "done" && p.status !== "error" && p.status !== "stopped") return;
+      fetchDiff();
+    });
+  }, [events, fetchDiff, task.ID]);
 
   // Renders `diff` into containerRef via diff2html's DOM-based UI (rather
   // than dangerouslySetInnerHTML) so its own highlightCode() pass can run
