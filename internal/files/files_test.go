@@ -73,7 +73,7 @@ func TestList_PathIsAFile(t *testing.T) {
 func TestRead_ExistingFile(t *testing.T) {
 	root := newTestRoot(t)
 
-	content, err := Read(root, "sub/nested.txt")
+	content, _, err := Read(root, "sub/nested.txt")
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRead_ExistingFile(t *testing.T) {
 func TestRead_Directory(t *testing.T) {
 	root := newTestRoot(t)
 
-	if _, err := Read(root, "sub"); err == nil {
+	if _, _, err := Read(root, "sub"); err == nil {
 		t.Fatal("Read(sub) error = nil, want an error (is a directory)")
 	}
 }
@@ -97,7 +97,7 @@ func TestRead_NonUTF8_Rejected(t *testing.T) {
 		t.Fatalf("write bin.dat: %v", err)
 	}
 
-	if _, err := Read(root, "bin.dat"); err == nil {
+	if _, _, err := Read(root, "bin.dat"); err == nil {
 		t.Fatal("Read(bin.dat) error = nil, want an error (not valid UTF-8)")
 	}
 }
@@ -105,10 +105,10 @@ func TestRead_NonUTF8_Rejected(t *testing.T) {
 func TestWrite_CreatesNewFile(t *testing.T) {
 	root := newTestRoot(t)
 
-	if err := Write(root, "new.txt", "fresh content"); err != nil {
+	if _, err := Write(root, "new.txt", "fresh content", nil); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	content, err := Read(root, "new.txt")
+	content, _, err := Read(root, "new.txt")
 	if err != nil {
 		t.Fatalf("Read() after Write() error = %v", err)
 	}
@@ -120,10 +120,10 @@ func TestWrite_CreatesNewFile(t *testing.T) {
 func TestWrite_OverwritesExistingFile(t *testing.T) {
 	root := newTestRoot(t)
 
-	if err := Write(root, "hello.txt", "overwritten"); err != nil {
+	if _, err := Write(root, "hello.txt", "overwritten", nil); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	content, err := Read(root, "hello.txt")
+	content, _, err := Read(root, "hello.txt")
 	if err != nil {
 		t.Fatalf("Read() after Write() error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestWrite_OverwritesExistingFile(t *testing.T) {
 func TestWrite_TargetIsDirectory(t *testing.T) {
 	root := newTestRoot(t)
 
-	if err := Write(root, "sub", "oops"); err == nil {
+	if _, err := Write(root, "sub", "oops", nil); err == nil {
 		t.Fatal("Write(sub) error = nil, want an error (is a directory)")
 	}
 }
@@ -143,7 +143,7 @@ func TestWrite_TargetIsDirectory(t *testing.T) {
 func TestWrite_NestedInMissingParentDir_Errors(t *testing.T) {
 	root := newTestRoot(t)
 
-	if err := Write(root, "nosuchdir/file.txt", "x"); err == nil {
+	if _, err := Write(root, "nosuchdir/file.txt", "x", nil); err == nil {
 		t.Fatal("Write(nosuchdir/file.txt) error = nil, want an error (parent directory doesn't exist)")
 	}
 }
@@ -162,13 +162,13 @@ func TestSandbox_DotDotTraversal_Rejected(t *testing.T) {
 	t.Cleanup(func() { os.Remove(outsideFile) })
 
 	traversal := "../" + filepath.Base(outsideFile)
-	if _, err := Read(root, traversal); err == nil {
+	if _, _, err := Read(root, traversal); err == nil {
 		t.Fatalf("Read(%q) error = nil, want a rejection (escapes worktree root)", traversal)
 	}
 	if _, err := List(root, "../"); err == nil {
 		t.Fatal(`List("../") error = nil, want a rejection (escapes worktree root)`)
 	}
-	if err := Write(root, traversal, "pwned"); err == nil {
+	if _, err := Write(root, traversal, "pwned", nil); err == nil {
 		t.Fatalf("Write(%q) error = nil, want a rejection (escapes worktree root)", traversal)
 	}
 	// Confirm the traversal write didn't actually land.
@@ -184,7 +184,7 @@ func TestSandbox_DotDotTraversal_Rejected(t *testing.T) {
 func TestSandbox_DeepDotDotTraversal_Rejected(t *testing.T) {
 	root := newTestRoot(t)
 
-	if _, err := Read(root, "../../../../../../../../etc/passwd"); err == nil {
+	if _, _, err := Read(root, "../../../../../../../../etc/passwd"); err == nil {
 		t.Fatal("Read(deep ../ traversal to /etc/passwd) error = nil, want a rejection")
 	}
 }
@@ -192,13 +192,13 @@ func TestSandbox_DeepDotDotTraversal_Rejected(t *testing.T) {
 func TestSandbox_AbsolutePathOutsideRoot_Rejected(t *testing.T) {
 	root := newTestRoot(t)
 
-	if _, err := Read(root, "/etc/passwd"); err == nil {
+	if _, _, err := Read(root, "/etc/passwd"); err == nil {
 		t.Fatal("Read(/etc/passwd) error = nil, want a rejection (absolute path escapes root)")
 	}
 	if _, err := List(root, "/etc"); err == nil {
 		t.Fatal("List(/etc) error = nil, want a rejection (absolute path escapes root)")
 	}
-	if err := Write(root, "/tmp/smind-sandbox-escape-test.txt", "pwned"); err == nil {
+	if _, err := Write(root, "/tmp/smind-sandbox-escape-test.txt", "pwned", nil); err == nil {
 		t.Fatal("Write(/tmp/...) error = nil, want a rejection (absolute path escapes root)")
 	}
 }
@@ -207,7 +207,7 @@ func TestSandbox_AbsolutePathInsideRoot_Allowed(t *testing.T) {
 	root := newTestRoot(t)
 
 	abs := filepath.Join(root, "hello.txt")
-	content, err := Read(root, abs)
+	content, _, err := Read(root, abs)
 	if err != nil {
 		t.Fatalf("Read(absolute path inside root) error = %v, want success", err)
 	}
@@ -234,7 +234,7 @@ func TestSandbox_SymlinkToOutsideFile_Rejected(t *testing.T) {
 		t.Fatalf("symlink: %v", err)
 	}
 
-	if content, err := Read(root, "evil-link"); err == nil {
+	if content, _, err := Read(root, "evil-link"); err == nil {
 		t.Fatalf("Read(evil-link) = %q, err = nil, want a rejection (symlink escapes root)", content)
 	}
 }
@@ -264,7 +264,7 @@ func TestSandbox_SymlinkToOutsideDirectory_Rejected(t *testing.T) {
 	// exercises resolveExistingPrefix's missing-leaf path, proving the
 	// symlinked *ancestor* is still caught even though the full candidate
 	// path itself doesn't exist for EvalSymlinks to reject outright.
-	if err := Write(root, "evil-dir/newfile.txt", "pwned"); err == nil {
+	if _, err := Write(root, "evil-dir/newfile.txt", "pwned", nil); err == nil {
 		t.Fatal("Write(evil-dir/newfile.txt) error = nil, want a rejection (symlinked ancestor escapes root)")
 	}
 	if _, err := os.Stat(filepath.Join(outsideDir, "newfile.txt")); err == nil {
@@ -292,7 +292,7 @@ func TestSandbox_SiblingDirectorySharingPrefix_NotTreatedAsContained(t *testing.
 
 	// Absolute path straight at the sibling: must be rejected, not allowed
 	// just because its string form starts with root's string form.
-	if _, err := Read(root, filepath.Join(sibling, "secret.txt")); err == nil {
+	if _, _, err := Read(root, filepath.Join(sibling, "secret.txt")); err == nil {
 		t.Fatal("Read(sibling absolute path) error = nil, want a rejection")
 	}
 }
