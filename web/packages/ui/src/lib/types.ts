@@ -44,61 +44,16 @@ export interface Space {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
-// internal/taskrunner.ApprovalPolicy's two values, carried over the wire as
-// their underlying string -- run.start/task.prompt's optional
-// `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
-// default when omitted (today's always-ask-a-human behavior); "auto-safe"
-// lets a small, conservative allowlist of read-only verification commands
-// (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
-export type ApprovalPolicy = "manual" | "auto-safe";
-
-// internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
-// spawned as an external CLI subprocess managing its own authentication out
-// of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no
-// credential for it, so accounts-dialog renders it as "managed externally"
-// instead of offering a credential form or flagging a missing key. Absent
-// means "handled through the separate account-credential system instead"
-// (today: everything else provider.list returns).
-export type ProviderKind = "cli";
-
-// internal/taskrunner.ProviderCredentialKind's two values, present only on
-// providers with a credential row in accounts-dialog (i.e. kind is unset).
-// "oauth" gets a Connect button (account.oauthStart) with manual-paste as a
-// fallback; "api-key" gets only the manual-paste form (account.add).
-export type ProviderCredentialKind = "oauth" | "api-key";
-
 // One entry in a provider.list response (internal/taskrunner.ProviderInfo):
-// the provider id itself plus an optional human-facing label, Kind, and (for
-// providers with a credential row) CredentialKind/accountProvider.
-//
-// accountProvider is the id accounts-dialog must actually send to
-// account.add/account.oauthStart -- it's internal/accounts' own provider
-// vocabulary (anthropic/openai/kimi/xai/antigravity), which predates and
-// differs from this Provider union (claude-native/glm/kimi/codex-native).
-// The two aren't fully unified: xai and antigravity are accounts-only
-// providers with no taskrunner counterpart, so provider.list can't (and
-// doesn't try to) describe them -- see accounts-dialog.tsx's doc comment and
-// docs/plans/active/task-permission-ux.md's Item 7d note for that gap.
+// the provider id itself plus an optional human-facing label.
 export interface ProviderInfo {
   id: Provider;
   label?: string;
-  kind?: ProviderKind;
-  credentialKind?: ProviderCredentialKind;
-  accountProvider?: string;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
 export interface ProviderListResult {
   providers: ProviderInfo[];
-}
-
-// Result of provider.test (internal/wsapi/handlers.go's providerTestResult):
-// a lightweight "can this provider actually start?" diagnostic -- ok plus a
-// short human-readable detail either way (which account/credential it used,
-// or why it isn't ready). Never mutates anything (no refresh, no run).
-export interface ProviderTestResult {
-  ok: boolean;
-  detail: string;
 }
 
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried

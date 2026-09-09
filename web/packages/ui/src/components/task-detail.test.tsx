@@ -524,4 +524,45 @@ describe("TaskDetailPane", () => {
     await flush();
     expect(screen.getByTestId("run-text")).toHaveTextContent("more output");
   });
+
+  it("renders the provider dropdown from provider.list (3 providers, labels over ids)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    const listCall = client.nth("provider.list", 0);
+    expect(listCall.params).toBeUndefined();
+    listCall.resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM" },
+        { id: "codex-native", label: "Codex" },
+      ],
+    } satisfies ProviderListResult);
+    await flush();
+
+    const select = screen.getByLabelText("Provider");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM", "Codex"]);
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm", "codex-native"]);
+  });
+
+  it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([]);
+    client.nth("provider.list", 0).reject(new Error("boom"));
+    await flush();
+
+    const select = screen.getByLabelText("Provider");
+    const options = within(select).getAllByRole("option");
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm"]);
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    const startCall = client.nth("run.start", 0);
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
+  });
 });
