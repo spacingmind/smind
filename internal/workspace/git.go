@@ -54,7 +54,7 @@ func gitWorktreeCheckpoint(worktreePath string) error {
 // repoPath. Callers must have checkpointed any reviewable work first --
 // ArchiveTask does so via gitWorktreeCheckpoint -- after which --force only
 // guards against refuse-to-remove edge cases (e.g. untracked-but-ignored
-// leftovers, submodules) rather than silently discarding unreviewed changes.
+// leftovers, submodules) rather than silently discarding reviewable changes.
 func gitWorktreeRemove(repoPath, worktreePath string) error {
 	return runGit(repoPath, "worktree", "remove", worktreePath, "--force")
 }
@@ -100,6 +100,51 @@ func dirExists(path string) bool {
 	return err == nil && info.IsDir()
 }
 
+// snapshotIndex copies the worktree's real index into a throwaway temp
+// file, runs `git add -A` against that copy (via GIT_INDEX_FILE), and
+// returns the env to give any further git invocation that should see the
+// fully-snapshotted working-tree state. The caller must invoke the returned
+// cleanup once done -- the temp index is this function's only side effect,
+// and the worktree's real index (and its actual staged/unstaged state) is
+// never touched. See taskDiff's doc comment for why a copy of the real
+// index (rather than a fresh empty one) is the required starting point.
+func snapshotIndex(worktreePath string) (env []string, cleanup func(), err error) {
+	realIndexPath, err := runGitOutput(worktreePath, "rev-parse", "--git-path", "index")
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolve index path: %w", err)
+	}
+	realIndexPath = strings.TrimSpace(realIndexPath)
+	if !filepath.IsAbs(realIndexPath) {
+		realIndexPath = filepath.Join(worktreePath, realIndexPath)
+	}
+	realIndex, err := os.ReadFile(realIndexPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read worktree index %q: %w", realIndexPath, err)
+	}
+
+	tmp, err := os.CreateTemp("", "smind-task-diff-index-")
+	if err != nil {
+		return nil, nil, fmt.Errorf("create throwaway index: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(realIndex); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return nil, nil, fmt.Errorf("write throwaway index: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return nil, nil, fmt.Errorf("write throwaway index: %w", err)
+	}
+
+	snapEnv := append(os.Environ(), "GIT_INDEX_FILE="+tmpPath)
+	if _, err := runGitOutputEnv(worktreePath, snapEnv, "add", "-A"); err != nil {
+		os.Remove(tmpPath)
+		return nil, nil, fmt.Errorf("snapshot worktree into throwaway index: %w", err)
+	}
+	return snapEnv, func() { os.Remove(tmpPath) }, nil
+}
+
 // taskDiff returns the unified diff of everything changed in worktreePath
 // (checked out on branch) relative to the commit branch was created from:
 // any real commits made on branch since it forked off its base, plus
@@ -137,38 +182,12 @@ func taskDiff(worktreePath, branch string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve base commit: %w", err)
 	}
-
-	realIndexPath, err := runGitOutput(worktreePath, "rev-parse", "--git-path", "index")
+	env, cleanup, err := snapshotIndex(worktreePath)
 	if err != nil {
-		return "", fmt.Errorf("resolve index path: %w", err)
+		return "", fmt.Errorf("snapshot worktree index: %w", err)
 	}
-	realIndexPath = strings.TrimSpace(realIndexPath)
-	if !filepath.IsAbs(realIndexPath) {
-		realIndexPath = filepath.Join(worktreePath, realIndexPath)
-	}
-	realIndex, err := os.ReadFile(realIndexPath)
-	if err != nil {
-		return "", fmt.Errorf("read worktree index %q: %w", realIndexPath, err)
-	}
+	defer cleanup()
 
-	tmp, err := os.CreateTemp("", "smind-task-diff-index-")
-	if err != nil {
-		return "", fmt.Errorf("create throwaway index: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(realIndex); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("write throwaway index: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("write throwaway index: %w", err)
-	}
-
-	env := append(os.Environ(), "GIT_INDEX_FILE="+tmpPath)
-	if _, err := runGitOutputEnv(worktreePath, env, "add", "-A"); err != nil {
-		return "", fmt.Errorf("snapshot worktree into throwaway index: %w", err)
-	}
 	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base)
 	if err != nil {
 		return "", fmt.Errorf("diff against base %s: %w", base, err)
@@ -198,4 +217,156 @@ func taskDiffBase(worktreePath, branch string) (string, error) {
 		return "", fmt.Errorf("branch %q has no reflog entries; cannot determine its base commit", branch)
 	}
 	return last, nil
+}
+
+// taskChangedFiles returns one entry per path in the same base→worktree
+// snapshot diff taskDiff computes (`git diff --name-status` against the
+// snapshot index -- identical computation, names-and-status instead of
+// hunks), cross-referenced with `git status --porcelain` on the *real*
+// index so each entry reports whether the file currently has anything
+// staged. Status maps git's letter codes onto "added" (A), "modified"
+// (M), "deleted" (D); any other code (e.g. R for renames) is carried
+// through lowercased rather than collapsed, so callers never see a lie.
+func taskChangedFiles(worktreePath, branch string) ([]TaskFile, error) {
+	base, err := taskDiffBase(worktreePath, branch)
+	if err != nil {
+		return nil, fmt.Errorf("resolve base commit: %w", err)
+	}
+	env, cleanup, err := snapshotIndex(worktreePath)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot worktree index: %w", err)
+	}
+	defer cleanup()
+
+	out, err := runGitOutputEnv(worktreePath, env, "diff", "--name-status", "--cached", base)
+	if err != nil {
+		return nil, fmt.Errorf("diff names against base %s: %w", base, err)
+	}
+
+	staged, err := stagedPaths(worktreePath)
+	if err != nil {
+		return nil, err
+	}
+
+	var files []TaskFile
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if line == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) < 2 {
+			return nil, fmt.Errorf("parse name-status line %q", line)
+		}
+		code, path := fields[0], fields[len(fields)-1]
+		var status string
+		switch code[0] {
+		case 'A':
+			status = "added"
+		case 'M':
+			status = "modified"
+		case 'D':
+			status = "deleted"
+		default:
+			status = strings.ToLower(code)
+		}
+		files = append(files, TaskFile{Path: path, Status: status, Staged: staged[path]})
+	}
+	return files, nil
+}
+
+// taskFileDiff returns the unified diff for exactly one path of the same
+// base→worktree snapshot diff taskDiff computes: the identical invocation
+// with a pathspec appended, so a per-file view is always a consistent
+// slice of the whole-task diff. A path with no changes yields "".
+func taskFileDiff(worktreePath, branch, path string) (string, error) {
+	base, err := taskDiffBase(worktreePath, branch)
+	if err != nil {
+		return "", fmt.Errorf("resolve base commit: %w", err)
+	}
+	env, cleanup, err := snapshotIndex(worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("snapshot worktree index: %w", err)
+	}
+	defer cleanup()
+
+	diff, err := runGitOutputEnv(worktreePath, env, "diff", "--no-color", "--cached", base, "--", path)
+	if err != nil {
+		return "", fmt.Errorf("diff %q against base %s: %w", path, base, err)
+	}
+	return diff, nil
+}
+
+// taskStageFile stages (staged=true) or unstages (staged=false) a single
+// path in the worktree's real index. The `--` separator keeps paths that
+// look like options (or contain odd characters) from being interpreted as
+// anything but a pathspec.
+func taskStageFile(worktreePath, path string, staged bool) error {
+	var err error
+	if staged {
+		err = runGit(worktreePath, "add", "--", path)
+	} else {
+		_, err = runGitOutput(worktreePath, "restore", "--staged", "--", path)
+	}
+	return err
+}
+
+// stagedPaths returns the set of paths git status --porcelain reports as
+// having a staged change: entries whose index column (the first of the two
+// XY status characters) is anything other than ' ' (unmodified) or '?'
+// (untracked -- an untracked file is by definition not staged, even though
+// porcelain prints "??").
+func stagedPaths(worktreePath string) (map[string]bool, error) {
+	out, err := runGitOutput(worktreePath, "status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("read worktree status: %w", err)
+	}
+	staged := make(map[string]bool)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		x := line[0]
+		path := strings.TrimPrefix(line[3:], "\"")
+		path = strings.TrimSuffix(path, "\"")
+		if x != ' ' && x != '?' {
+			staged[path] = true
+		}
+	}
+	return staged, nil
+}
+
+// gitTaskCommit commits whatever is currently staged in the worktree's
+// real index (plain `git commit -m` -- no -a, no implicit add) and returns
+// the new commit's full SHA, subject (first line of message), and file
+// count. An index with nothing staged returns ErrNothingStaged rather
+// than letting git's "nothing to commit" stderr leak: that case is an
+// expected, caller-presentable condition, not a plumbing failure.
+func gitTaskCommit(worktreePath, message string) (CommitResult, error) {
+	names, err := runGitOutput(worktreePath, "diff", "--cached", "--name-only")
+	if err != nil {
+		return CommitResult{}, fmt.Errorf("read staged files: %w", err)
+	}
+	var fileCount int
+	for _, line := range strings.Split(strings.TrimSpace(names), "\n") {
+		if line != "" {
+			fileCount++
+		}
+	}
+	if fileCount == 0 {
+		return CommitResult{}, ErrNothingStaged
+	}
+
+	if err := runGit(worktreePath, "commit", "-m", message); err != nil {
+		return CommitResult{}, fmt.Errorf("commit: %w", err)
+	}
+	sha, err := runGitOutput(worktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return CommitResult{}, fmt.Errorf("resolve new commit: %w", err)
+	}
+	subject := strings.SplitN(message, "\n", 2)[0]
+	return CommitResult{
+		Commit:  strings.TrimSpace(sha),
+		Subject: subject,
+		Files:   fileCount,
+	}, nil
 }
