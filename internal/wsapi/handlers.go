@@ -19,6 +19,7 @@ import (
 func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
+		"provider.list":         handleProviderList(),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
