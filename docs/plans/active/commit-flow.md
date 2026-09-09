@@ -80,19 +80,78 @@ Backend + UI; the biggest missing piece of editor mode.
 
 ## Decisions
 
-(To be filled by the implementer: status mapping for task.files,
- staged-state exposure, error envelopes, summary shape, porcelain
- cross-referencing, commit identity/env consistency.)
+- **Status mapping (task.files).** `git diff --name-status` against the
+  same snapshot index taskDiff builds; codes mapped A→"added",
+  M→"modified", D→"deleted". Any other code (e.g. R) is carried through
+  lowercased rather than collapsed — callers never see a lie.
+- **Staged-state exposure.** `task.files` includes `staged` per file,
+  cross-referenced with `git status --porcelain` on the *real* index:
+  an entry counts as staged when its index (X) column is neither ' '
+  (unmodified) nor '?' (untracked). "?? " lines therefore report
+  `staged: false`, which is correct.
+- **taskFileDiff is taskDiff + pathspec.** Same base resolution + same
+  snapshot-index env + `-- <path>` appended — a per-file view is always
+  a consistent slice of the whole-task diff, no second diff mode.
+- **Error envelope (empty stage).** `workspace.ErrNothingStaged`
+  sentinel ("nothing staged to commit"); the wsapi layer wraps it in
+  the standard error envelope (method-prefixed message), no git stderr.
+  The check is `git diff --cached --name-only` being empty before
+  invoking commit — a staged-but-identical-to-HEAD file also lands
+  here, matching git's own "nothing to commit" judgment.
+- **Summary shape.** `{commit: full SHA, subject: first message line
+  (pre-trailers), files: staged file count}`.
+- **Agent trailers.** Appended as a blank-line-separated footer:
+  `<message>\n\nSmind-Agent: <provider>\nSmind-Task: <taskID>` (taskID
+  is the numeric DB id; no "task-" prefix). Agent author with empty
+  `agent` is refused before any git runs.
+- **Commit identity/env.** Plain inherited-env `git commit -m` in the
+  worktree dir, same runGit helpers as gitWorktreeCheckpoint — no
+  committer overrides; human vs. agent is distinguished solely by the
+  trailers (ADR 0006 rationale: the marker travels with the commit).
+- **Taskrunner helper scope.** `(*Runner).CommitTask(taskID, provider,
+  message)` calls `wm.CommitTask(..., "agent", provider)`. Not wired as
+  an agent-visible tool — no agent asks for it today.
+- **UI author surface.** The commit bar always sends
+  `author: "human"`; no agent-author control exists in the UI this pass.
 
 ## Progress
 
-- [ ] task.files / task.fileDiff / task.stage / task.commit backend
-- [ ] Wire tests
-- [ ] Taskrunner CommitTask helper (agent trailers)
-- [ ] Per-file diff viewer + stage checkboxes + commit bar
-- [ ] UI tests
-- [ ] Verification (both chains)
+- [x] task.files / task.fileDiff / task.stage / task.commit backend
+- [x] Wire tests
+- [x] Taskrunner CommitTask helper (agent trailers)
+- [x] Per-file diff viewer + stage checkboxes + commit bar
+- [x] UI tests
+- [x] Verification (both chains)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed.)
+- **task.files** — `internal/wsapi` TestServer_CommitFlow: two changed
+  files listed with correct statuses (modified/added) and
+  `staged:false` initially; workspace TestManager_TaskFiles adds the
+  empty case and staged-state observability. ✔
+- **task.fileDiff** — wire: notes.txt slice contains the added content,
+  unchanged path returns empty; workspace TestManager_TaskFileDiff
+  checks slice-consistency (README diff has no notes hunks). ✔
+- **task.stage** — wire: stage→files shows staged; unstage round-trips;
+  workspace TestManager_TaskStage asserts the real `git status
+  --porcelain` flips M·/·M too. ✔
+- **task.commit** — wire: nothing-staged error is the clean message
+  ("nothing staged"), human commit of the staged-only set → branch tip
+  (rev-parse HEAD == returned sha; diff-tree records only README.md);
+  agent trailers byte-exact (TestServer_TaskCommit_AgentTrailers +
+  workspace byte-exact test incl. refusal cases: empty agent name,
+  invalid author). ✔
+- **Taskrunner helper** — `CommitTask` calls the same primitive with
+  agent trailers; compiles and is covered via the workspace-level
+  trailer tests (no separate subprocess run needed — it's a two-line
+  delegation). ✔
+- **UI** — diff-viewer-pane tests (10 suites green): per-file grouping
+  renders per-entry task.fileDiff via diff2html; collapse/expand; stage
+  checkbox → task.stage + state update; commit disabled until staged +
+  non-empty message; success shows subject+sha (abcdef12) and re-issues
+  task.files; stage/commit failures render inline; terminal
+  run.status-triggered refresh still works (and ignores other tasks). ✔
+- **Verify chains** — `go build ./... && gofmt -l . && go vet ./... &&
+  go test -race ./... && task test && task lint` green; `bunx tsc -b`,
+  `bun run test` (103 tests), `task build` green (dist/.gitkeep
+  restored after the emptyOutDir wipe). ✔
