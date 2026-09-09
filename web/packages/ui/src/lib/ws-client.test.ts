@@ -243,3 +243,70 @@ describe("WsClient", () => {
     });
   });
 });
+
+describe("notifications", () => {
+  it("fires the listener for a {event:{topic,seq,payload}} notification while a call stays pending, and never routes it into the inflight machinery", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+
+    const promise = client.call("workspace.list");
+    const seen: Array<{ topic: string; seq: number; payload: unknown }> = [];
+    client.onNotification((n) => seen.push(n));
+
+    // Notification shape per ADR 0005: object-valued event field, no id.
+    socket.emit({ event: { topic: "run.status", seq: 1, payload: { runId: "r1", taskId: 1, status: "done" } } } as unknown as WireEnvelope);
+
+    expect(seen).toEqual([{ topic: "run.status", seq: 1, payload: { runId: "r1", taskId: 1, status: "done" } }]);
+
+    // The pending call was untouched: no synthetic resolution, no error.
+    socket.emit({ id: socket.sent[0]!.id!, result: [] });
+    await expect(promise).resolves.toEqual([]);
+  });
+
+  it("still routes a request-stream event (id + string event field) to callStream's onEvent", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+
+    const note = vi.fn();
+    client.onNotification(note);
+
+    const events: Array<[string, unknown]> = [];
+    const promise = client.callStream("task.prompt", { taskId: 1 }, (event, params) => events.push([event, params]));
+    const id = socket.sent[0]!.id!;
+
+    socket.emit({ id, event: "chunk", params: { text: "hi" } });
+    expect(events).toEqual([["chunk", { text: "hi" }]]);
+    expect(note).not.toHaveBeenCalled();
+
+    socket.emit({ id, result: { runId: "run-1" } });
+    await expect(promise).resolves.toEqual({ runId: "run-1" });
+  });
+
+  it("ignores a malformed notification (non-string topic) without throwing", () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+
+    const note = vi.fn();
+    client.onNotification(note);
+
+    expect(() =>
+      socket.emit({ event: { seq: 1 } } as unknown as WireEnvelope),
+    ).not.toThrow();
+    expect(note).not.toHaveBeenCalled();
+  });
+
+  it("stops delivering after the unregister function is called", () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+
+    const note = vi.fn();
+    const off = client.onNotification(note);
+
+    socket.emit({ event: { topic: "task.status", seq: 1, payload: {} } } as unknown as WireEnvelope);
+    expect(note).toHaveBeenCalledTimes(1);
+
+    off();
+    socket.emit({ event: { topic: "task.status", seq: 2, payload: {} } } as unknown as WireEnvelope);
+    expect(note).toHaveBeenCalledTimes(1);
+  });
+});
