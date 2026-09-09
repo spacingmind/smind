@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/spacingmind/smind/compare/v0.4.0...v0.5.0) (2026-09-09)
+
+
+### Features
+
+* live UI on events, provider dropdown, per-file commit flow, conflict detection ([#65](https://github.com/spacingmind/smind/issues/65)) ([1154fcd](https://github.com/spacingmind/smind/commit/1154fcd656110f076b9625e493c8afb214b88569))
+
 ## [0.4.0](https://github.com/spacingmind/smind/compare/v0.3.0...v0.4.0) (2026-09-09)
 
 
