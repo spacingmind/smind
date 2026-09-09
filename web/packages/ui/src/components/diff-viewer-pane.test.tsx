@@ -107,3 +107,63 @@ describe("DiffViewerPane", () => {
     expect(screen.getByRole("button", { name: "Refresh" })).toBeDisabled();
   });
 });
+
+/** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them. */
+function makeEventsStub() {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    events: {
+      subscribe(topic: string, listener: (payload: unknown) => void): () => void {
+        let set = listeners.get(topic);
+        if (!set) {
+          set = new Set();
+          listeners.set(topic, set);
+        }
+        set.add(listener);
+        return () => set!.delete(listener);
+      },
+    },
+    fire(topic: string, payload: unknown): void {
+      for (const l of listeners.get(topic) ?? []) l(payload);
+    },
+  };
+}
+
+describe("DiffViewerPane live refresh", () => {
+  it("refetches task.diff on a terminal run.status for the viewed task", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(<DiffViewerPane client={client} task={TASK} events={stub.events} />);
+
+    client.nth("task.diff", 0).resolve({ diff: "" } satisfies TaskDiffResult);
+    await flush();
+    expect(screen.getByTestId("diff-empty")).toBeInTheDocument();
+
+    // Non-terminal status: no refetch.
+    act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "running" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
+
+    // Terminal status for the same task: refetch.
+    act(() => stub.fire("run.status", { runId: "r1", taskId: TASK.ID, status: "done" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(2);
+    client.nth("task.diff", 1).resolve({ diff: SAMPLE_DIFF } satisfies TaskDiffResult);
+    await flush();
+    expect(screen.getByTestId("diff-container").textContent).toContain("line2 added");
+  });
+
+  it("ignores terminal run.status events for a different task", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(<DiffViewerPane client={client} task={TASK} events={stub.events} />);
+
+    client.nth("task.diff", 0).resolve({ diff: "" } satisfies TaskDiffResult);
+    await flush();
+
+    act(() => stub.fire("run.status", { runId: "r9", taskId: TASK.ID + 1, status: "done" }));
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "task.diff")).toHaveLength(1);
+  });
+});
