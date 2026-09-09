@@ -342,80 +342,6 @@ export interface TaskDiffResult {
   diff: string;
 }
 
-// Result of task.searchIndex (internal/wsapi/handlers.go's
-// taskSearchIndexResult): every worktree-relative path eligible for
-// quick-open (Item 18) -- git's own notion of the worktree's contents,
-// fuzzy-matched client-side (lib/fuzzy-match.ts) rather than server-side,
-// so ranking/highlighting stay in the UI's own testable code.
-export interface TaskSearchIndexResult {
-  paths: string[];
-}
-
-// One entry in a task.files response (internal/workspace.TaskFile): a path
-// in the task's base→worktree diff, its change kind, and whether it's
-// currently staged in the worktree's real index.
-export interface TaskFile {
-  path: string;
-  status: "added" | "modified" | "deleted" | string;
-  staged: boolean;
-}
-
-// Result of task.files (internal/wsapi/handlers.go's taskFilesResult).
-export interface TaskFilesResult {
-  files: TaskFile[];
-}
-
-// One entry in a task.stats response (internal/workspace.TaskStat): a
-// task's branch and the size of the same base->worktree diff task.diff
-// renders. Tasks with no worktree, and tasks whose stat could not be
-// computed, are absent from the list -- zero changed files is a real and
-// different statement from "not known", so the sidebar must be able to
-// tell them apart.
-export interface TaskStat {
-  taskId: number;
-  branch: string;
-  filesChanged: number;
-  insertions: number;
-  deletions: number;
-}
-
-// Result of task.stats (internal/wsapi/handlers.go's taskStatsResult).
-export interface TaskStatsResult {
-  stats: TaskStat[];
-}
-
-// Result of task.fileDiff (internal/wsapi/handlers.go's
-// taskFileDiffResult): one file's slice of the task's unified diff, or ""
-// for a path with no changes.
-export interface TaskFileDiffResult {
-  diff: string;
-}
-
-// Result of workspace.delete/space.delete (internal/wsapi/handlers.go's
-// deleteSummaryResult): how many tasks/spaces were actually removed, so the
-// UI can show an accurate confirmation without a second round trip.
-export interface DeleteSummaryResult {
-  tasksRemoved: number;
-  spacesRemoved: number;
-}
-
-// Result of task.commit (internal/wsapi/handlers.go's taskCommitResult):
-// the new commit's full sha, its subject line, and the staged file count
-// it recorded.
-export interface TaskCommitResult {
-  commit: string;
-  subject: string;
-  files: number;
-}
-
-// Result of task.createPr (internal/wsapi/handlers.go's
-// taskCreatePRResult): the URL of the pull request opened for the task's
-// branch (directly, or from a clean smind/pr-<id> branch if the task
-// branch's base had diverged -- see internal/workspace.Manager.CreatePR).
-export interface TaskCreatePrResult {
-  url: string;
-}
-
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
 // docs/decisions/0005-wsapi-event-subscription.md. Carried in the
 // notification envelope's payload field (lowercase json tags, unlike the
@@ -444,34 +370,4 @@ export interface PermissionPendingEventPayload {
   requestId: string;
   summary: string;
   options: PermissionOption[];
-}
-
-// One entry in an account.list response (internal/wsapi/handlers.go's
-// accountResult): lowercase json tags, unlike the PascalCase no-tag store
-// structs above. Credential material itself is never returned over RPC.
-export interface Account {
-  id: number;
-  provider: string;
-  label: string;
-  credentialType: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-// One entry in an fs.listDir response (internal/wsapi/hostfs.go's
-// fsListDirEntry, mirroring internal/hostfs.Entry): a subdirectory of the
-// listed directory, and whether it's itself a git repository.
-export interface FsListDirEntry {
-  name: string;
-  path: string;
-  isGitRepo: boolean;
-}
-
-// Result of fs.listDir (internal/wsapi/hostfs.go's fsListDirResult): the
-// resolved directory that was listed, its parent (empty string at the
-// filesystem root), and its subdirectories.
-export interface FsListDirResult {
-  path: string;
-  parent: string;
-  entries: FsListDirEntry[];
 }

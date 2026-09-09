@@ -22,7 +22,7 @@ function notify(socket: FakeSocket, topic: string, payload: unknown): void {
 }
 
 describe("useDaemonEvents", () => {
-  it("issues one events.subscribe with every topic per connection, regardless of consumer count", async () => {
+  it("issues one events.subscribe with the three topics per connection, regardless of consumer count", async () => {
     const socket = new FakeSocket();
     const client = new WsClient(socket);
     const { result, rerender } = renderHook(() => useDaemonEvents(client));
@@ -30,24 +30,7 @@ describe("useDaemonEvents", () => {
 
     const subs = socket.sent.filter((e) => e.method === "events.subscribe");
     expect(subs).toHaveLength(1);
-    // ADR 0005's three plus ADR 0009's eight lifecycle topics. Notably
-    // absent: "event.dropped", which the daemon synthesises rather than
-    // publishes and whose name knownTopics rejects.
-    expect(subs[0]!.params).toEqual({
-      topics: [
-        "task.status",
-        "run.status",
-        "permission.pending",
-        "workspace.created",
-        "workspace.deleted",
-        "space.created",
-        "space.deleted",
-        "task.created",
-        "task.updated",
-        "task.archived",
-        "task.deleted",
-      ],
-    });
+    expect(subs[0]!.params).toEqual({ topics: ["task.status", "run.status", "permission.pending"] });
 
     // Two consumers on the same surface, still one daemon subscription.
     act(() => {

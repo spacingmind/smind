@@ -4,41 +4,9 @@ import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
 import { ReviewComments, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { EmptyState } from "@/components/ui/empty-state";
-import { InlineSpinner } from "@/components/ui/inline-spinner";
-import { PaneHeader } from "@/components/ui/pane-header";
-import { useTaskDiff } from "@/hooks/use-task-diff";
-import { formatDiffStat } from "@/lib/diff-stat";
-import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
-import { filePathForElement, type DiffLineRef } from "@/lib/diff-lines";
-import {
-  addReviewDraft,
-  buildReviewPrompt,
-  clearReviewDrafts,
-  useReviewDrafts,
-  type ReviewDraft,
-} from "@/lib/review-drafts";
-import { loadDiffPrefs, saveDiffPrefs } from "@/lib/diff-prefs";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import type {
-  Provider,
-  ProviderListResult,
-  RunStartResult,
-  RunStatusEventPayload,
-  Task,
-  TaskCommitResult,
-  TaskCreatePrResult,
-  TaskFile,
-  TaskFileDiffResult,
-  TaskFilesResult,
-} from "@/lib/types";
-
-/** One file row's view state: fetched diff text, viewed flag (local only this pass), open/collapsed. */
-interface FileState {
-  diff: string | null;
-  viewed: boolean;
-}
+import type { RunStatusEventPayload, Task, TaskDiffResult } from "@/lib/types";
 
 /**
  * A per-file review-and-commit surface for a task (ADR 0006): the task's
@@ -64,12 +32,10 @@ export function DiffViewerPane({
 }: {
   client: WsClientLike | null;
   task: Task;
-  /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task refetches the files list. */
+  /** The app's single-subscription event stream; optional so existing tests/mounts render unchanged. A terminal run.status for this task refetches the diff. */
   events?: DaemonEvents | null;
 }) {
-  const [files, setFiles] = useState<TaskFile[] | null>(null);
-  const [fileStates, setFileStates] = useState<Record<string, FileState>>({});
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [diff, setDiff] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   // Per-file task.stage in-flight tracking -- the checkbox for a given
@@ -142,6 +108,22 @@ export function DiffViewerPane({
 
   // Live refresh: a terminal run.status (done/error/stopped) for the
   // viewed task means the agent just stopped changing files -- refetch.
+  // (No per-write diff events exist; terminal run status is the right
+  // trigger.) Registered on `events`, keyed on fetchDiff's own deps
+  // (client, task.ID), so a task switch re-registers cleanly.
+  useEffect(() => {
+    if (!events) return;
+    return events.subscribe("run.status", (payload) => {
+      const p = payload as Partial<RunStatusEventPayload>;
+      if (p.taskId !== task.ID) return;
+      if (p.status !== "done" && p.status !== "error" && p.status !== "stopped") return;
+      fetchDiff();
+    });
+  }, [events, fetchDiff, task.ID]);
+
+  // Renders `diff` into containerRef via diff2html's DOM-based UI (rather
+  // than dangerouslySetInnerHTML) so its own highlightCode() pass can run
+  // against real DOM nodes afterward.
   useEffect(() => {
     if (!events) return;
     return events.subscribe("run.status", (payload) => {

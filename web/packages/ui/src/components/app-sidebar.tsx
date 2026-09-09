@@ -1,28 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-
-import { useCommands } from "@/palette/palette-provider";
-import type { Command } from "@/palette/commands";
+import { useEffect, useState, type ReactNode } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import {
-  AlertCircle,
-  Archive,
-  ChevronRight,
-  FolderGit2,
-  GitBranch,
-  Layers,
-  Loader2,
-  MoreHorizontal,
-  Plus,
-  Search,
-  Settings,
-  SlidersHorizontal,
-  Trash2,
-} from "lucide-react";
+import { AlertCircle, ChevronRight, FolderGit2, Layers, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, Workspace } from "@/lib/types";
+import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import type { TaskAttention } from "@/hooks/use-task-attention";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -211,20 +194,45 @@ function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null
   return overrides;
 }
 
-/** Which create/archive dialog a sidebar row has opened, if any. */
-type CrudTarget =
-  | { kind: "workspace" }
-  | { kind: "space"; workspace: WorkspaceWithTree }
-  | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
-  | { kind: "archive"; task: Task }
-  | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
-  | { kind: "deleteSpace"; space: SpaceWithTasks };
+/**
+ * Live task.Status patching over the fetched tree: task.status
+ * notifications (ADR 0005) update an override map in-memory; the tree
+ * itself is only refetched on client change (reconnect), exactly as
+ * before. Overrides are cleared whenever the client changes so a
+ * reconnect never shows stale statuses alongside the fresh fetch.
+ */
+function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null): Map<number, string> {
+  const [overrides, setOverrides] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    setOverrides(new Map());
+  }, [client]);
+
+  useEffect(() => {
+    if (!events) return;
+    return events.subscribe("task.status", (payload) => {
+      const p = payload as Partial<TaskStatusEventPayload>;
+      const taskId = p.taskId;
+      const status = p.status;
+      if (typeof taskId !== "number" || typeof status !== "string") return;
+      setOverrides((prev) => {
+        if (prev.get(taskId) === status) return prev;
+        const next = new Map(prev);
+        next.set(taskId, status);
+        return next;
+      });
+    });
+  }, [events]);
+
+  return overrides;
+}
 
 export function AppSidebar({
   client,
   selectedTaskId = null,
   onSelectTask,
   attention,
+  events,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -233,119 +241,11 @@ export function AppSidebar({
   onSelectTask?: (task: Task) => void;
   /** Per-task attention badges (App.tsx's useTaskAttention) -- renders a dot on each row that has any reason. */
   attention?: TaskAttention;
+  /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
+  events?: DaemonEvents | null;
 }) {
-  const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
+  const { workspaces, error } = useWorkspaceTree(client);
   const statusOverrides = useStatusOverrides(client, events ?? null);
-  const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
-  const stats = useTaskStats(client, events ?? null, workspaceIds);
-  const rowSignal = useMemo<RowSignal>(
-    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS, stats }),
-    [attention, statusOverrides, runStatus, stats],
-  );
-
-  // Out-of-tab attention notifications (Item 4): every task across the
-  // whole tree, flattened just far enough to label a Notification by
-  // title -- this list changing (workspace/space/task fetch completing)
-  // never itself fires anything; only a *new* attention reason while the
-  // tab is hidden does, in the hook itself.
-  const allTasks = useMemo(
-    () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
-    [workspaces],
-  );
-  const { permission: notificationPermission } = useNotificationPermission();
-  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
-
-  useEffect(() => {
-    onTasksChange?.(allTasks);
-  }, [allTasks, onTasksChange]);
-
-  useEffect(() => {
-    if (workspaces) onWorkspacesChange?.(workspaces);
-  }, [workspaces, onWorkspacesChange]);
-
-  const [crud, setCrud] = useState<CrudTarget | null>(null);
-  const [accountsOpen, setAccountsOpen] = useState(false);
-  const { open: settingsOpen, openSettings, setOpen: setSettingsOpen } = useSettingsOpen();
-
-  // Command-palette contributions for the dialogs this component owns.
-  // Registered here rather than in App.tsx on purpose: the surface that
-  // owns a dialog is the one that can open it, and `useCommands` is the
-  // API that lets it contribute without either file importing the other
-  // (docs/design.md §8).
-  const paletteCommands = useMemo<Command[]>(() => {
-    const commands: Command[] = [
-      {
-        id: "new-workspace",
-        group: "Actions",
-        title: "New workspace",
-        keywords: ["create", "add", "project", "repo"],
-        run: () => setCrud({ kind: "workspace" }),
-      },
-      {
-        id: "accounts",
-        group: "Actions",
-        title: "Open accounts",
-        keywords: ["providers", "credentials", "login", "oauth"],
-        run: () => setAccountsOpen(true),
-      },
-    ];
-    // "New task" needs a workspace to create the task in. With exactly one
-    // workspace the choice is unambiguous; with several, picking one for
-    // the user would be a guess, so the entry is per workspace instead.
-    for (const ws of workspaces ?? []) {
-      commands.push({
-        id: `new-task-${ws.ID}`,
-        group: "Actions",
-        title:
-          (workspaces ?? []).length === 1
-            ? "New task"
-            : `New task in ${ws.Title || ws.Path}`,
-        keywords: ["create", "add", ws.Title, ws.Path],
-        run: () => setCrud({ kind: "task", workspace: ws, spaceId: null }),
-      });
-    }
-    return commands;
-  }, [workspaces]);
-  useCommands("sidebar:actions", 5, paletteCommands);
-  // The just-created workspace is expanded on landing; existing ones start
-  // collapsed until first refresh happens (empty state -> created).
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const didInitialLoad = useRef(false);
-  useEffect(() => {
-    if (workspaces === null) return;
-    if (!didInitialLoad.current) {
-      didInitialLoad.current = true;
-      setExpanded(new Set(workspaces.map((ws) => ws.ID)));
-    }
-  }, [workspaces]);
-
-  // Collapsed search (audit-deepseek-harness.md §3): a header action that
-  // expands into a field. An outside click collapses it only while the
-  // query is empty -- a typed query survives clicking away, because
-  // dismissing someone's search by accident is worse than leaving a field
-  // open. The tree's `expanded` set is never touched while searching, so
-  // clearing the query restores exactly the expansion state it had.
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const searchRef = useRef<HTMLDivElement | null>(null);
-  const searching = query.trim() !== "";
-
-  useEffect(() => {
-    if (!searchOpen) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (searchRef.current?.contains(e.target as Node)) return;
-      setQuery((current) => {
-        if (current.trim() === "") setSearchOpen(false);
-        return current;
-      });
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [searchOpen]);
-
-  const results = useMemo(() => searchTasks(workspaces ?? [], query), [workspaces, query]);
-
-  const empty = !error && workspaces !== null && workspaces.length === 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -439,6 +339,7 @@ export function AppSidebar({
                     selectedTaskId={selectedTaskId}
                     onSelectTask={onSelectTask}
                     attention={attention}
+                    statusOverrides={statusOverrides}
                   />
                 ))}
               </SidebarMenu>
@@ -622,6 +523,7 @@ function WorkspaceItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   workspace: WorkspaceWithTree;
   expanded: boolean;
@@ -634,6 +536,7 @@ function WorkspaceItem({
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   // A workspace with no spaces (today's common/default case, and every
   // workspace that existed before Space wiring) renders exactly as it did
@@ -677,11 +580,12 @@ function WorkspaceItem({
               onSelectTask={onSelectTask}
               emptyText="No tasks"
               attention={attention}
+              statusOverrides={statusOverrides}
             />
           ) : (
             <>
               {workspace.spaces.map((space) => (
-                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} />
+                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} statusOverrides={statusOverrides} />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
@@ -690,6 +594,7 @@ function WorkspaceItem({
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   attention={attention}
+                  statusOverrides={statusOverrides}
                 />
               )}
             </>
@@ -705,11 +610,13 @@ function SpaceItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   return (
     <SpaceLikeItem
@@ -718,6 +625,7 @@ function SpaceItem({
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
       attention={attention}
+      statusOverrides={statusOverrides}
     />
   );
 }
@@ -736,12 +644,14 @@ function SpaceLikeItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   title: string;
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   const [open, setOpen] = useState(true);
   const { attention, runStatus } = useRowSignal();
@@ -768,6 +678,7 @@ function SpaceLikeItem({
             onSelectTask={onSelectTask}
             emptyText="No tasks"
             attention={attention}
+            statusOverrides={statusOverrides}
           />
         </SidebarMenuSub>
       )}
@@ -841,12 +752,14 @@ function TaskRows({
   onSelectTask,
   emptyText,
   attention,
+  statusOverrides,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   const { attention, statusOverrides, runStatus, stats } = useRowSignal();
 
@@ -875,7 +788,7 @@ function TaskRows({
                 />
               )}
               <span className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}>
-                {task.Status}
+                {statusOverrides.get(task.ID) ?? task.Status}
               </span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
