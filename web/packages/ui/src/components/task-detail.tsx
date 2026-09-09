@@ -1,13 +1,16 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import type { Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
-import type { Provider, Task } from "@/lib/types";
 
-const PROVIDERS: Provider[] = ["claude-native", "glm"];
+const FALLBACK_PROVIDERS: ProviderInfo[] = [
+  { id: "claude-native" },
+  { id: "glm" },
+];
 
 /**
  * The main-content pane for a selected task: identity header, a chat-log
@@ -60,7 +63,7 @@ export function TaskDetailPane({
         )}
       </div>
 
-      <PromptForm onSubmit={submitPrompt} disabled={!client} />
+      <PromptForm client={client} onSubmit={submitPrompt} disabled={!client} />
     </div>
   );
 }
@@ -190,13 +193,34 @@ function PendingPermissionView({
 }
 
 function PromptForm({
+  client,
   onSubmit,
   disabled,
 }: {
+  client: WsClientLike | null;
   onSubmit: (provider: Provider, prompt: string) => Promise<void>;
   disabled: boolean;
 }) {
+  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
   const [provider, setProvider] = useState<Provider>("claude-native");
+
+  // Fetch the provider list once per client connection, like the other
+  // one-shot fetches; on failure keep the fallback list (console.error,
+  // non-fatal) so the form still works.
+  useEffect(() => {
+    setProviders(FALLBACK_PROVIDERS);
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then((result) => {
+        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
+      })
+      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -229,9 +253,9 @@ function PromptForm({
         disabled={inactive}
         className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
       >
-        {PROVIDERS.map((p) => (
-          <option key={p} value={p}>
-            {p}
+        {providers.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label ?? p.id}
           </option>
         ))}
       </select>

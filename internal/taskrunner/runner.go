@@ -376,3 +376,20 @@ func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string
 	}
 	return nil
 }
+
+// CommitTask commits whatever is currently staged in taskID's worktree
+// under an agent-authored message -- the same commit primitive the UI's
+// task.commit uses, plus the ADR 0006 Smind-Agent/Smind-Task trailers so
+// review tooling can filter agent commits. provider names the committing
+// agent and lands in the Smind-Agent trailer.
+//
+// Deliberately a taskrunner-level helper, not an agent-visible tool: no
+// agent asks for it today, so exposing it over the agent protocol would be
+// speculative surface (see docs/plans/active/commit-flow.md's Decisions).
+func (r *Runner) CommitTask(taskID int64, provider Provider, message string) (workspace.CommitResult, error) {
+	result, err := r.wm.CommitTask(taskID, message, "agent", string(provider))
+	if err != nil {
+		return workspace.CommitResult{}, fmt.Errorf("taskrunner: commit task %d: %w", taskID, err)
+	}
+	return result, nil
+}

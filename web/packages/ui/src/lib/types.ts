@@ -38,10 +38,23 @@ export interface Space {
   UpdatedAt: string;
 }
 
-// The only two internal/taskrunner.Provider values that exist today (see
-// internal/taskrunner/provider.go) -- not dynamically discovered, see
-// docs/plans/active/web-ui-task-detail.md's Decisions.
-export type Provider = "claude-native" | "glm";
+// internal/taskrunner.Provider values, carried over the wire as their
+// underlying strings. The authoritative list is served dynamically by the
+// daemon's provider.list method (see ProviderListResult); this union just
+// covers the values that can appear, including the hardcoded fallback's two.
+export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
+
+// One entry in a provider.list response (internal/taskrunner.ProviderInfo):
+// the provider id itself plus an optional human-facing label.
+export interface ProviderInfo {
+  id: Provider;
+  label?: string;
+}
+
+// Result of provider.list (internal/wsapi/handlers.go's providerListResult).
+export interface ProviderListResult {
+  providers: ProviderInfo[];
+}
 
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried
 // over the wire as their underlying string, same as any other Go string
@@ -181,9 +194,18 @@ export interface FileEntry {
   size: number;
 }
 
-// Result of file.read (internal/wsapi/files.go's fileReadResult).
+// Result of file.read (internal/wsapi/files.go's fileReadResult): content
+// plus the read-time mtime, echoed back as file.write's expectedMtime for
+// conditional saves (see the file-conflict-detection plan).
 export interface FileReadResult {
   content: string;
+  mtime: string;
+}
+
+// Result of file.write (internal/wsapi/files.go's fileWriteResult): the
+// written file's mtime, chained into the next conditional save.
+export interface FileWriteResult {
+  mtime: string;
 }
 
 // Result of task.diff (internal/wsapi/handlers.go's taskDiffResult): the
@@ -191,4 +213,64 @@ export interface FileReadResult {
 // changes.
 export interface TaskDiffResult {
   diff: string;
+}
+
+// One entry in a task.files response (internal/workspace.TaskFile): a path
+// in the task's base→worktree diff, its change kind, and whether it's
+// currently staged in the worktree's real index.
+export interface TaskFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | string;
+  staged: boolean;
+}
+
+// Result of task.files (internal/wsapi/handlers.go's taskFilesResult).
+export interface TaskFilesResult {
+  files: TaskFile[];
+}
+
+// Result of task.fileDiff (internal/wsapi/handlers.go's
+// taskFileDiffResult): one file's slice of the task's unified diff, or ""
+// for a path with no changes.
+export interface TaskFileDiffResult {
+  diff: string;
+}
+
+// Result of task.commit (internal/wsapi/handlers.go's taskCommitResult):
+// the new commit's full sha, its subject line, and the staged file count
+// it recorded.
+export interface TaskCommitResult {
+  commit: string;
+  subject: string;
+  files: number;
+}
+
+// Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
+// docs/decisions/0005-wsapi-event-subscription.md. Carried in the
+// notification envelope's payload field (lowercase json tags, unlike the
+// PascalCase no-tag structs above).
+
+// Payload of task.status: {taskId, status}.
+export interface TaskStatusEventPayload {
+  taskId: number;
+  status: string;
+}
+
+// Payload of run.status: {runId, taskId, status, stopReason?, err?}.
+export interface RunStatusEventPayload {
+  runId: string;
+  taskId: number;
+  status: RunStatusValue;
+  stopReason?: string;
+  err?: string;
+}
+
+// Payload of permission.pending: {runId, taskId, requestId, summary,
+// options} -- same option shape as PermissionOption.
+export interface PermissionPendingEventPayload {
+  runId: string;
+  taskId: number;
+  requestId: string;
+  summary: string;
+  options: PermissionOption[];
 }

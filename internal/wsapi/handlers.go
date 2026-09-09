@@ -19,6 +19,7 @@ import (
 func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
+		"provider.list":         handleProviderList(),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
@@ -31,6 +32,10 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.get":              handleTaskGet(wm),
 		"task.archive":          handleTaskArchive(wm),
 		"task.diff":             handleTaskDiff(wm),
+		"task.files":            handleTaskFiles(wm),
+		"task.fileDiff":         handleTaskFileDiff(wm),
+		"task.stage":            handleTaskStage(wm),
+		"task.commit":           handleTaskCommit(wm),
 		"task.prompt":           handleTaskPrompt(wm, runner, reg),
 		"run.start":             handleRunStart(wm, runner, reg),
 		"run.list":              handleRunList(reg),
@@ -274,6 +279,117 @@ func handleTaskDiff(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.diff: %w", err)
 		}
 		return taskDiffResult{Diff: diff}, nil
+	}
+}
+
+// taskFilesResult is the result of task.files: the task's changed files,
+// one entry per path in the same base→worktree diff task.diff computes,
+// each with its change kind and current staged state (see
+// workspace.TaskFile).
+type taskFilesResult struct {
+	Files []workspace.TaskFile `json:"files"`
+}
+
+// handleTaskFiles returns the task's changed files -- the per-file input
+// for the review-and-commit UI. A task with no changes returns an empty
+// list, not an error.
+func handleTaskFiles(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.files: invalid params: %w", err)
+		}
+		files, err := wm.TaskFiles(p.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("task.files: %w", err)
+		}
+		return taskFilesResult{Files: files}, nil
+	}
+}
+
+// taskFileDiffResult is the result of task.fileDiff: the unified diff for
+// exactly one file of the task's base→worktree diff, or an empty string
+// for a path with no changes.
+type taskFileDiffResult struct {
+	Diff string `json:"diff"`
+}
+
+// handleTaskFileDiff returns one file's slice of the task's diff -- the
+// same snapshot-index computation task.diff runs, restricted to path.
+func handleTaskFileDiff(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64  `json:"taskId"`
+			Path   string `json:"path"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.fileDiff: invalid params: %w", err)
+		}
+		if p.Path == "" {
+			return nil, fmt.Errorf("task.fileDiff: path is required")
+		}
+		diff, err := wm.TaskFileDiff(p.TaskID, p.Path)
+		if err != nil {
+			return nil, fmt.Errorf("task.fileDiff: %w", err)
+		}
+		return taskFileDiffResult{Diff: diff}, nil
+	}
+}
+
+// handleTaskStage stages or unstages a single file in the task worktree's
+// real index -- unlike task.diff's throwaway snapshot index, a real
+// mutation, which is the point (see ADR 0006 decision 1).
+func handleTaskStage(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64  `json:"taskId"`
+			Path   string `json:"path"`
+			Staged bool   `json:"staged"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.stage: invalid params: %w", err)
+		}
+		if p.Path == "" {
+			return nil, fmt.Errorf("task.stage: path is required")
+		}
+		if err := wm.TaskStage(p.TaskID, p.Path, p.Staged); err != nil {
+			return nil, fmt.Errorf("task.stage: %w", err)
+		}
+		return struct{}{}, nil
+	}
+}
+
+// taskCommitResult is the result of task.commit: the new commit's full
+// SHA, its subject line, and how many staged files it recorded.
+type taskCommitResult struct {
+	Commit  string `json:"commit"`
+	Subject string `json:"subject"`
+	Files   int    `json:"files"`
+}
+
+// handleTaskCommit commits exactly what is currently staged in the task
+// worktree. author is "human" or "agent"; agent commits gain
+// Smind-Agent/Smind-Task trailers (ADR 0006 decision 3) and require a
+// non-empty agent (provider) name. Nothing staged surfaces as the clean
+// "nothing staged to commit" error rather than a git stderr leak.
+func handleTaskCommit(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID  int64  `json:"taskId"`
+			Message string `json:"message"`
+			Author  string `json:"author"`
+			Agent   string `json:"agent"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.commit: invalid params: %w", err)
+		}
+		result, err := wm.CommitTask(p.TaskID, p.Message, p.Author, p.Agent)
+		if err != nil {
+			return nil, fmt.Errorf("task.commit: %w", err)
+		}
+		return taskCommitResult(result), nil
 	}
 }
 
@@ -614,5 +730,19 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
 		return struct{}{}, nil
+	}
+}
+
+// providerListResult is the result of provider.list: every provider the
+// daemon supports, sourced from taskrunner.SupportedProviders (the single
+// source of truth RunPrompt's dispatch stays in sync with).
+type providerListResult struct {
+	Providers []taskrunner.ProviderInfo `json:"providers"`
+}
+
+// handleProviderList returns the daemon's supported providers. No params.
+func handleProviderList() handlerFunc {
+	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
+		return providerListResult{Providers: taskrunner.SupportedProviders()}, nil
 	}
 }

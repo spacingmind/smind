@@ -19,7 +19,10 @@
 // still-in-flight request named in its params.
 package wsapi
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"errors"
+)
 
 // envelope is the wire shape of every message this package sends or
 // receives; requests, responses, events, and cancellations all fit this one
@@ -33,9 +36,33 @@ type envelope struct {
 	Event  string          `json:"event,omitempty"`
 }
 
-// rpcError is the wire shape of a terminal error response.
+// rpcError is the wire shape of a terminal error response: message always,
+// plus a machine-readable code when the underlying error provides one
+// (rpcCoder -- e.g. files.ConflictError's "conflict"/"conflict_deleted"),
+// so clients can branch on error kind without string-matching.
 type rpcError struct {
 	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
+}
+
+// rpcCoder is implemented by typed errors that carry a machine-readable
+// code for the wire.
+type rpcCoder interface {
+	RPCCode() string
+}
+
+// codedError builds a terminal error response for err, attaching err's
+// RPCCode when it (or anything it wraps) implements rpcCoder.
+func codedError(err error) *rpcError {
+	r := &rpcError{Message: err.Error()}
+	for err != nil {
+		if c, ok := err.(rpcCoder); ok {
+			r.Code = c.RPCCode()
+			break
+		}
+		err = errors.Unwrap(err)
+	}
+	return r
 }
 
 // cancelParams is the params shape of a task.cancel message.
