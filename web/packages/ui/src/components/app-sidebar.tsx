@@ -1,9 +1,11 @@
 import { useEffect, useState, type ReactNode } from "react";
+
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { AlertCircle, ChevronRight, FolderGit2, Layers, Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, Workspace } from "@/lib/types";
+import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import type { TaskAttention } from "@/hooks/use-task-attention";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -98,11 +100,45 @@ function useWorkspaceTree(client: WsClient | null) {
   return { workspaces, error };
 }
 
+/**
+ * Live task.Status patching over the fetched tree: task.status
+ * notifications (ADR 0005) update an override map in-memory; the tree
+ * itself is only refetched on client change (reconnect), exactly as
+ * before. Overrides are cleared whenever the client changes so a
+ * reconnect never shows stale statuses alongside the fresh fetch.
+ */
+function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null): Map<number, string> {
+  const [overrides, setOverrides] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    setOverrides(new Map());
+  }, [client]);
+
+  useEffect(() => {
+    if (!events) return;
+    return events.subscribe("task.status", (payload) => {
+      const p = payload as Partial<TaskStatusEventPayload>;
+      const taskId = p.taskId;
+      const status = p.status;
+      if (typeof taskId !== "number" || typeof status !== "string") return;
+      setOverrides((prev) => {
+        if (prev.get(taskId) === status) return prev;
+        const next = new Map(prev);
+        next.set(taskId, status);
+        return next;
+      });
+    });
+  }, [events]);
+
+  return overrides;
+}
+
 export function AppSidebar({
   client,
   selectedTaskId = null,
   onSelectTask,
   attention,
+  events,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -111,8 +147,11 @@ export function AppSidebar({
   onSelectTask?: (task: Task) => void;
   /** Per-task attention badges (App.tsx's useTaskAttention) -- renders a dot on each row that has any reason. */
   attention?: TaskAttention;
+  /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
+  events?: DaemonEvents | null;
 }) {
   const { workspaces, error } = useWorkspaceTree(client);
+  const statusOverrides = useStatusOverrides(client, events ?? null);
 
   return (
     <Sidebar collapsible="icon">
@@ -139,6 +178,7 @@ export function AppSidebar({
                     selectedTaskId={selectedTaskId}
                     onSelectTask={onSelectTask}
                     attention={attention}
+                    statusOverrides={statusOverrides}
                   />
                 ))}
               </SidebarMenu>
@@ -166,11 +206,13 @@ function WorkspaceItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   workspace: WorkspaceWithTree;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -196,11 +238,12 @@ function WorkspaceItem({
               onSelectTask={onSelectTask}
               emptyText="No tasks"
               attention={attention}
+              statusOverrides={statusOverrides}
             />
           ) : (
             <>
               {workspace.spaces.map((space) => (
-                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} />
+                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} statusOverrides={statusOverrides} />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
@@ -209,6 +252,7 @@ function WorkspaceItem({
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   attention={attention}
+                  statusOverrides={statusOverrides}
                 />
               )}
             </>
@@ -224,11 +268,13 @@ function SpaceItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   return (
     <SpaceLikeItem
@@ -237,6 +283,7 @@ function SpaceItem({
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
       attention={attention}
+      statusOverrides={statusOverrides}
     />
   );
 }
@@ -255,12 +302,14 @@ function SpaceLikeItem({
   selectedTaskId,
   onSelectTask,
   attention,
+  statusOverrides,
 }: {
   title: string;
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -279,6 +328,7 @@ function SpaceLikeItem({
             onSelectTask={onSelectTask}
             emptyText="No tasks"
             attention={attention}
+            statusOverrides={statusOverrides}
           />
         </SidebarMenuSub>
       )}
@@ -292,12 +342,14 @@ function TaskRows({
   onSelectTask,
   emptyText,
   attention,
+  statusOverrides,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
   attention?: TaskAttention;
+  statusOverrides: Map<number, string>;
 }) {
   if (tasks.length === 0) {
     return (
@@ -324,7 +376,7 @@ function TaskRows({
                 />
               )}
               <span className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}>
-                {task.Status}
+                {statusOverrides.get(task.ID) ?? task.Status}
               </span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
