@@ -343,3 +343,62 @@ describe("App", () => {
     expect(screen.getByTestId("task-attention")).toBeInTheDocument();
   });
 });
+
+/** Feeds one ADR-0005 notification down the socket (App holds a real WsClient per connection). */
+function pushNotification(socket: FakeSocket, topic: string, payload: unknown): void {
+  act(() => {
+    socket.emit({ event: { topic, seq: 1, payload } } as never);
+  });
+}
+
+describe("App live events", () => {
+  it("a terminal run.status notification badges the task without any refetch", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    const sentBefore = socket.sent.length;
+
+    // Live terminal run for unseen task B -> immediate badge, no RPC.
+    pushNotification(socket, "run.status", { runId: "run-live", taskId: TASK_B.ID, status: "done" });
+    await flush();
+
+    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+    expect(socket.sent.length).toBe(sentBefore);
+  });
+
+  it("a permission.pending notification badges the task live", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    pushNotification(socket, "permission.pending", {
+      runId: "run-p",
+      taskId: TASK_A.ID,
+      requestId: "req-9",
+      summary: "run a command",
+      options: [],
+    });
+    await flush();
+
+    expect(screen.getByTestId("task-attention")).toBeInTheDocument();
+  });
+
+  it("a task.status notification updates the sidebar row's status text live", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    // TASK_A.Status is "active" from the fetch; the event says "done".
+    expect(screen.getByText("active")).toBeInTheDocument();
+
+    pushNotification(socket, "task.status", { taskId: TASK_A.ID, status: "done" });
+    await flush();
+
+    expect(screen.queryByText("active")).not.toBeInTheDocument();
+    expect(screen.getByText("done")).toBeInTheDocument();
+  });
+});

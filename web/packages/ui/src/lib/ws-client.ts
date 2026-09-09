@@ -218,6 +218,24 @@ export class WsClient implements WsClientLike {
   }
 
   /**
+   * Registers fn to be invoked for every ADR-0005 notification this
+   * connection delivers, regardless of topic -- filtering by topic is the
+   * listener's job, since the app holds one events.subscribe covering all
+   * topics per connection (see hooks/use-daemon-events.ts, which owns that
+   * subscription). Returns an unregister function so a consumer can detach
+   * on unmount without disturbing other listeners or the connection.
+   * Notifications are connection-scoped and live-only: a reconnect means a
+   * brand-new WsClient that consumers must re-register against (the app's
+   * client-reference swap already re-runs their effects).
+   */
+  onNotification(fn: (n: DaemonNotification) => void): () => void {
+    this.notificationListeners.add(fn);
+    return () => {
+      this.notificationListeners.delete(fn);
+    };
+  }
+
+  /**
    * Issues method with params and resolves with its terminal result once
    * it arrives. Only use this for methods that don't stream events --
    * use callStream for those.

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type { RunLogEvent, RunLogsResult, RunSummary } from "@/lib/types";
 
@@ -8,6 +9,9 @@ export type AttentionReason = "error" | "finished" | "permission";
 
 /** Task ids that currently warrant an attention dot, with the reasons why. */
 export type TaskAttention = Map<number, Set<AttentionReason>>;
+
+/** The run fields the badge logic needs -- what run.status payloads and RunSummary share. */
+type RunLike = Pick<RunSummary, "ID" | "TaskID" | "Status">;
 
 /**
  * True if events contain a permission_request whose requestId has no
@@ -26,24 +30,31 @@ function hasUnresolvedPermission(events: RunLogEvent[]): boolean {
 }
 
 /**
- * Derives the sidebar's per-task attention badges from data the app
- * already pulls on (re)connect -- deliberately NOT new push/subscribe
- * plumbing (that's the separate wsapi-event-subscription task; the plan
- * accepts refresh/reconnect-driven updates for this pass).
+ * Derives the sidebar's per-task attention badges from two paths:
  *
- - On every client (re)connect: run.list for all runs, then run.logs for
- * each still-running run to detect an unresolved permission request.
- * - On selectedTaskId change: snapshot that task's terminal run ids as
+ * - Live (when `events` is non-null): run.status and permission.pending
+ *   notifications update badges immediately, no refetch -- a run
+ *   finishing while another task is selected badges its task on arrival.
+ * - Resync (every client change): run.list for all runs, then run.logs
+ *   for each still-running run to detect an unresolved permission
+ *   request. Delivery is live-only (ADR 0005), so this pass is what
+ *   re-derives truth after a reconnect.
+ *
+ * On selectedTaskId change: snapshot that task's terminal run ids as
  * "seen", which is what clears its error/finished badges -- the dot means
  * "something ended or needs you that you haven't looked at yet".
  */
-export function useTaskAttention(client: WsClientLike | null, selectedTaskId: number | null): TaskAttention {
+export function useTaskAttention(
+  client: WsClientLike | null,
+  selectedTaskId: number | null,
+  events: DaemonEvents | null,
+): TaskAttention {
   const [attention, setAttention] = useState<TaskAttention>(new Map());
 
   // Latest-known run summaries and permission-pending task ids, kept in
   // refs so the selection-change effect can re-derive badges without
   // refetching.
-  const runsRef = useRef<RunSummary[] | null>(null);
+  const runsRef = useRef<RunLike[] | null>(null);
   const pendingPermissionTasksRef = useRef<Set<number>>(new Set());
   /** Per task, the terminal run ids already observed at selection time. */
   const seenRef = useRef<Map<number, Set<string>>>(new Map());
@@ -118,6 +129,53 @@ export function useTaskAttention(client: WsClientLike | null, selectedTaskId: nu
       cancelled = true;
     };
   }, [client, recompute]);
+
+  // Live path: badge (or clear) as run.status / permission.pending
+  // notifications arrive -- no refetch, the notification IS the state
+  // transition. Patch the ref-held run list in place; recompute turns
+  // it into badges. A terminal run arriving while its task is selected
+  // is marked seen directly (the user is watching it), so it never
+  // badges; a terminal run for any other task stays unseen and badges.
+  useEffect(() => {
+    if (!events) return;
+
+    const offRunStatus = events.subscribe("run.status", (payload) => {
+      const p = payload as { runId?: string; taskId?: number; status?: string };
+      if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
+
+      const runs = runsRef.current ?? (runsRef.current = []);
+      const idx = runs.findIndex((r) => r.ID === p.runId);
+      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, Status: p.status as RunLike["Status"] };
+      else runs.push({ ID: p.runId, TaskID: p.taskId, Status: p.status as RunLike["Status"] });
+
+      if (p.status === "running") {
+        // A (re)started run un-terminalizes: clear its seen marker and
+        // any stale permission badge for the task.
+        seenRef.current.get(p.taskId)?.delete(p.runId);
+        pendingPermissionTasksRef.current.delete(p.taskId);
+      } else if (selectedTaskId === p.taskId) {
+        let seen = seenRef.current.get(p.taskId);
+        if (!seen) {
+          seen = new Set();
+          seenRef.current.set(p.taskId, seen);
+        }
+        seen.add(p.runId);
+      }
+      recompute();
+    });
+
+    const offPermission = events.subscribe("permission.pending", (payload) => {
+      const p = payload as { taskId?: number };
+      if (typeof p.taskId !== "number") return;
+      pendingPermissionTasksRef.current.add(p.taskId);
+      recompute();
+    });
+
+    return () => {
+      offRunStatus();
+      offPermission();
+    };
+  }, [events, selectedTaskId, recompute]);
 
   useEffect(() => {
     if (selectedTaskId === null) return;
