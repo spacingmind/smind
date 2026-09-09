@@ -36,10 +36,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.diff":             handleTaskDiff(wm),
 		"task.files":            handleTaskFiles(wm),
 		"task.fileDiff":         handleTaskFileDiff(wm),
-		"task.searchIndex":      handleTaskSearchIndex(wm),
 		"task.stage":            handleTaskStage(wm),
 		"task.commit":           handleTaskCommit(wm),
-		"task.createPr":         handleTaskCreatePR(wm),
 		"task.prompt":           handleTaskPrompt(wm, runner, reg),
 		"run.start":             handleRunStart(wm, runner, reg),
 		"run.list":              handleRunList(reg),
@@ -478,35 +476,6 @@ func handleTaskFiles(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-// taskStatsResult is the result of task.stats: one entry per task in the
-// workspace that has a worktree to diff (see workspace.TaskStat). Tasks
-// with no worktree, and tasks whose stat could not be computed, are absent
-// from the list rather than present with zeroes -- zero changed files is a
-// real and different statement from "not known".
-type taskStatsResult struct {
-	Stats []workspace.TaskStat `json:"stats"`
-}
-
-// handleTaskStats returns every task's branch and diff size for one
-// workspace in a single call -- the sidebar's per-row git signal, which
-// would otherwise be one task.files round trip (and one worktree scan) per
-// row. The counts are of exactly the diff task.diff renders.
-func handleTaskStats(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		var p struct {
-			WorkspaceID int64 `json:"workspaceId"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("task.stats: invalid params: %w", err)
-		}
-		stats, err := wm.TaskStats(p.WorkspaceID)
-		if err != nil {
-			return nil, fmt.Errorf("task.stats: %w", err)
-		}
-		return taskStatsResult{Stats: stats}, nil
-	}
-}
-
 // taskFileDiffResult is the result of task.fileDiff: the unified diff for
 // exactly one file of the task's base→worktree diff, or an empty string
 // for a path with no changes.
@@ -533,33 +502,6 @@ func handleTaskFileDiff(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.fileDiff: %w", err)
 		}
 		return taskFileDiffResult{Diff: diff}, nil
-	}
-}
-
-// taskSearchIndexResult is the result of task.searchIndex: every path in
-// the task's worktree eligible for the web UI's quick-open (Item 18),
-// git's own notion of the worktree's contents (tracked plus
-// untracked-but-not-ignored) rather than a client-side directory walk.
-type taskSearchIndexResult struct {
-	Paths []string `json:"paths"`
-}
-
-// handleTaskSearchIndex returns the whole-worktree path list quick-open
-// fuzzy-matches against client-side; see workspace.Manager.TaskSearchIndex
-// for why this is one RPC rather than a client-side file.list walk.
-func handleTaskSearchIndex(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		var p struct {
-			TaskID int64 `json:"taskId"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("task.searchIndex: invalid params: %w", err)
-		}
-		paths, err := wm.TaskSearchIndex(p.TaskID)
-		if err != nil {
-			return nil, fmt.Errorf("task.searchIndex: %w", err)
-		}
-		return taskSearchIndexResult{Paths: paths}, nil
 	}
 }
 
@@ -615,36 +557,6 @@ func handleTaskCommit(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.commit: %w", err)
 		}
 		return taskCommitResult(result), nil
-	}
-}
-
-// taskCreatePRResult is the result of task.createPr: the URL of the pull
-// request gh created.
-type taskCreatePRResult struct {
-	URL string `json:"url"`
-}
-
-// handleTaskCreatePR opens a pull request for a task's branch against
-// baseBranch (or workspace.defaultBaseBranch if empty) -- see
-// workspace.Manager.CreatePR for the push-directly-vs-cherry-pick-onto-a-
-// clean-branch decision (task-permission-ux.md Item 5). Every failure mode
-// (no worktree, fetch/push/gh failure, a diverged base with no commits to
-// PR) comes back as a wrapped, descriptive error -- never swallowed -- so
-// the web UI has something concrete to show inline.
-func handleTaskCreatePR(wm *workspace.Manager) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		var p struct {
-			TaskID     int64  `json:"taskId"`
-			BaseBranch string `json:"baseBranch"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("task.createPr: invalid params: %w", err)
-		}
-		result, err := wm.CreatePR(p.TaskID, p.BaseBranch)
-		if err != nil {
-			return nil, fmt.Errorf("task.createPr: %w", err)
-		}
-		return taskCreatePRResult{URL: result.URL}, nil
 	}
 }
 
