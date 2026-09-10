@@ -286,3 +286,21 @@ export interface Account {
   createdAt: string;
   updatedAt: string;
 }
+
+// One entry in an fs.listDir response (internal/wsapi/hostfs.go's
+// fsListDirEntry, mirroring internal/hostfs.Entry): a subdirectory of the
+// listed directory, and whether it's itself a git repository.
+export interface FsListDirEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+}
+
+// Result of fs.listDir (internal/wsapi/hostfs.go's fsListDirResult): the
+// resolved directory that was listed, its parent (empty string at the
+// filesystem root), and its subdirectories.
+export interface FsListDirResult {
+  path: string;
+  parent: string;
+  entries: FsListDirEntry[];
+}

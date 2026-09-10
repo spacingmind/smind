@@ -53,6 +53,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"file.list":             handleFileList(wm),
 		"file.read":             handleFileRead(wm),
 		"file.write":            handleFileWrite(wm),
+		"fs.listDir":            handleFsListDir(),
 	}
 }
 

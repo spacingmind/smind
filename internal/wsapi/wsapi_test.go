@@ -466,6 +466,54 @@ func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 	}
 }
 
+// TestServer_FsListDir_HappyPath proves fs.listDir round-trips over a real
+// WebSocket connection: it lists a directory's real subdirectories,
+// flagging the one that's a git repo.
+func TestServer_FsListDir_HappyPath(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	repo := newTestRepo(t)
+	if err := os.Mkdir(filepath.Join(repo, "plain"), 0o755); err != nil {
+		t.Fatalf("mkdir plain: %v", err)
+	}
+
+	sendRequest(t, ws, "1", "fs.listDir", map[string]any{"path": repo})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("fs.listDir error = %v", resp.Error.Message)
+	}
+	var result fsListDirResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		t.Fatalf("decode fs.listDir result: %v", err)
+	}
+	if len(result.Entries) != 1 || result.Entries[0].Name != "plain" {
+		t.Fatalf("fs.listDir entries = %+v, want [plain]", result.Entries)
+	}
+	if result.Entries[0].IsGitRepo {
+		t.Errorf("plain.IsGitRepo = true, want false")
+	}
+}
+
+// TestServer_FsListDir_NonexistentPath proves an unlistable path surfaces
+// as an RPC error over the wire, not a panic or an empty success.
+func TestServer_FsListDir_NonexistentPath(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "fs.listDir", map[string]any{
+		"path": filepath.Join(t.TempDir(), "does-not-exist"),
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("fs.listDir(nonexistent) error = nil, want an error")
+	}
+}
+
 func TestServer_AuthRejection(t *testing.T) {
 	t.Parallel()
 	_, db := newTestWorkspaceManager(t)
