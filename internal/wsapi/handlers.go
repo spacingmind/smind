@@ -25,9 +25,11 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
 		"workspace.get":         handleWorkspaceGet(wm),
+		"workspace.delete":      handleWorkspaceDelete(wm),
 		"space.create":          handleSpaceCreate(wm),
 		"space.list":            handleSpaceList(wm),
 		"space.get":             handleSpaceGet(wm),
+		"space.delete":          handleSpaceDelete(wm),
 		"task.create":           handleTaskCreate(wm),
 		"task.list":             handleTaskList(wm),
 		"task.get":              handleTaskGet(wm),
@@ -203,6 +205,37 @@ func handleWorkspaceGet(wm *workspace.Manager) handlerFunc {
 	}
 }
 
+// deleteSummaryResult is the shared result shape of workspace.delete and
+// space.delete: how many tasks/spaces were actually removed, mirroring
+// workspace.DeleteSummary field-for-field, so the client can show an
+// accurate "removed N tasks, M spaces" confirmation without a second round
+// trip.
+type deleteSummaryResult struct {
+	TasksRemoved  int `json:"tasksRemoved"`
+	SpacesRemoved int `json:"spacesRemoved"`
+}
+
+// handleWorkspaceDelete permanently removes a workspace and everything
+// under it (every space and its tasks, every ungrouped task) from smind's
+// own tracking -- see workspace.Manager.DeleteWorkspace for the
+// checkpoint-then-remove-worktree-then-DB-delete ordering that makes this
+// safe. It never touches the workspace's real directory on disk.
+func handleWorkspaceDelete(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("workspace.delete: invalid params: %w", err)
+		}
+		summary, err := wm.DeleteWorkspace(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("workspace.delete: %w", err)
+		}
+		return deleteSummaryResult(summary), nil
+	}
+}
+
 func handleSpaceCreate(wm *workspace.Manager) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
@@ -238,6 +271,25 @@ func handleSpaceGet(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("space.get: invalid params: %w", err)
 		}
 		return wm.GetSpace(p.ID)
+	}
+}
+
+// handleSpaceDelete permanently removes a space and every task within it
+// from smind's own tracking -- see workspace.Manager.DeleteSpace. It never
+// touches anything on disk outside smind's own worktree directories.
+func handleSpaceDelete(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("space.delete: invalid params: %w", err)
+		}
+		summary, err := wm.DeleteSpace(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("space.delete: %w", err)
+		}
+		return deleteSummaryResult(summary), nil
 	}
 }
 
