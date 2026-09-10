@@ -466,6 +466,144 @@ func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 	}
 }
 
+// TestServer_WorkspaceDelete_HappyPath proves workspace.delete round-trips
+// over a real WebSocket connection: it reports the actual counts removed,
+// and a following workspace.list/task.list no longer show the removed rows.
+func TestServer_WorkspaceDelete_HappyPath(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	repo := newTestRepo(t)
+
+	createdWorkspace, err := wm.CreateWorkspace(repo, "W1", "hard", nil)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+	createdSpace, err := wm.CreateSpace(createdWorkspace.ID, "S1", "{}")
+	if err != nil {
+		t.Fatalf("CreateSpace() error = %v", err)
+	}
+	spaceID := createdSpace.ID
+	if _, err := wm.CreateTask(createdWorkspace.ID, &spaceID, "in space"); err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	if _, err := wm.CreateTask(createdWorkspace.ID, nil, "ungrouped"); err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+
+	sendRequest(t, ws, "1", "workspace.delete", map[string]any{"id": createdWorkspace.ID})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("workspace.delete error = %v", resp.Error.Message)
+	}
+	var summary deleteSummaryResult
+	if err := json.Unmarshal(resp.Result, &summary); err != nil {
+		t.Fatalf("decode workspace.delete result: %v", err)
+	}
+	if summary.TasksRemoved != 2 || summary.SpacesRemoved != 1 {
+		t.Fatalf("workspace.delete summary = %+v, want {TasksRemoved: 2, SpacesRemoved: 1}", summary)
+	}
+
+	sendRequest(t, ws, "2", "workspace.list", nil)
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("workspace.list error = %v", resp.Error.Message)
+	}
+	var workspaces []store.Workspace
+	if err := json.Unmarshal(resp.Result, &workspaces); err != nil {
+		t.Fatalf("decode workspace.list result: %v", err)
+	}
+	if len(workspaces) != 0 {
+		t.Fatalf("workspace.list after delete = %+v, want empty", workspaces)
+	}
+}
+
+// TestServer_WorkspaceDelete_Nonexistent proves deleting a workspace that
+// doesn't exist surfaces as a clear RPC error, not a silent success.
+func TestServer_WorkspaceDelete_Nonexistent(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "workspace.delete", map[string]any{"id": 999})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("workspace.delete(nonexistent) error = nil, want an error")
+	}
+}
+
+// TestServer_SpaceDelete_HappyPath proves space.delete round-trips over a
+// real WebSocket connection: it reports the actual task count removed, and
+// a following task.list no longer shows the removed tasks, while the
+// workspace itself and any other space/task survive.
+func TestServer_SpaceDelete_HappyPath(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	repo := newTestRepo(t)
+
+	createdWorkspace, err := wm.CreateWorkspace(repo, "W1", "hard", nil)
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+	createdSpace, err := wm.CreateSpace(createdWorkspace.ID, "S1", "{}")
+	if err != nil {
+		t.Fatalf("CreateSpace() error = %v", err)
+	}
+	spaceID := createdSpace.ID
+	if _, err := wm.CreateTask(createdWorkspace.ID, &spaceID, "in space"); err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	survivor, err := wm.CreateTask(createdWorkspace.ID, nil, "ungrouped")
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+
+	sendRequest(t, ws, "1", "space.delete", map[string]any{"id": createdSpace.ID})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("space.delete error = %v", resp.Error.Message)
+	}
+	var summary deleteSummaryResult
+	if err := json.Unmarshal(resp.Result, &summary); err != nil {
+		t.Fatalf("decode space.delete result: %v", err)
+	}
+	if summary.TasksRemoved != 1 || summary.SpacesRemoved != 1 {
+		t.Fatalf("space.delete summary = %+v, want {TasksRemoved: 1, SpacesRemoved: 1}", summary)
+	}
+
+	sendRequest(t, ws, "2", "task.list", map[string]any{"workspaceId": createdWorkspace.ID})
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("task.list error = %v", resp.Error.Message)
+	}
+	var tasks []store.Task
+	if err := json.Unmarshal(resp.Result, &tasks); err != nil {
+		t.Fatalf("decode task.list result: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != survivor.ID {
+		t.Fatalf("task.list after delete = %+v, want only the ungrouped survivor %d", tasks, survivor.ID)
+	}
+}
+
+// TestServer_SpaceDelete_Nonexistent proves deleting a space that doesn't
+// exist surfaces as a clear RPC error, not a silent success.
+func TestServer_SpaceDelete_Nonexistent(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "space.delete", map[string]any{"id": 999})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("space.delete(nonexistent) error = nil, want an error")
+	}
+}
+
 // TestServer_FsListDir_HappyPath proves fs.listDir round-trips over a real
 // WebSocket connection: it lists a directory's real subdirectories,
 // flagging the one that's a git repo.

@@ -236,6 +236,14 @@ export interface TaskFileDiffResult {
   diff: string;
 }
 
+// Result of workspace.delete/space.delete (internal/wsapi/handlers.go's
+// deleteSummaryResult): how many tasks/spaces were actually removed, so the
+// UI can show an accurate confirmation without a second round trip.
+export interface DeleteSummaryResult {
+  tasksRemoved: number;
+  spacesRemoved: number;
+}
+
 // Result of task.commit (internal/wsapi/handlers.go's taskCommitResult):
 // the new commit's full sha, its subject line, and the staged file count
 // it recorded.

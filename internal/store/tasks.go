@@ -65,6 +65,53 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
+// ListTasksBySpace returns all tasks in spaceID, ordered by id.
+func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
+	rows, err := s.db.Query(
+		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		 FROM tasks WHERE space_id = ? ORDER BY id`,
+		spaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks for space %d: %w", spaceID, err)
+	}
+	defer rows.Close()
+
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
+// ListUngroupedTasksByWorkspace returns all tasks directly in workspaceID
+// (i.e. with no space), ordered by id.
+func (s *Store) ListUngroupedTasksByWorkspace(workspaceID int64) ([]Task, error) {
+	rows, err := s.db.Query(
+		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		 FROM tasks WHERE workspace_id = ? AND space_id IS NULL ORDER BY id`,
+		workspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list ungrouped tasks for workspace %d: %w", workspaceID, err)
+	}
+	defer rows.Close()
+
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
 // UpdateTaskStatus sets a task's status and returns the updated task.
 func (s *Store) UpdateTaskStatus(id int64, status string) (Task, error) {
 	now := time.Now().UTC()
@@ -93,6 +140,36 @@ func (s *Store) ArchiveTask(id int64) (Task, error) {
 		return Task{}, fmt.Errorf("archive task %d: %w", id, err)
 	}
 	return s.GetTask(id)
+}
+
+// DeleteTask permanently removes task id and everything scoped to it from
+// smind's own tracking: run_events (via each of its runs), runs,
+// terminal_sessions, and finally the tasks row itself, in that FK-safe
+// child-before-parent order (matching the schema's foreign keys, enforced
+// by _pragma=foreign_keys(1) -- see store.sqliteDSN). It never touches
+// anything on disk; git worktree cleanup is workspace.Manager's job (see
+// workspace.Manager.DeleteTask), which calls this only after that succeeds.
+// Deleting a nonexistent task is a clear not-found error (via GetTask),
+// never a silent no-op.
+func (s *Store) DeleteTask(id int64) error {
+	if _, err := s.GetTask(id); err != nil {
+		return fmt.Errorf("delete task %d: %w", id, err)
+	}
+	if _, err := s.db.Exec(
+		`DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`, id,
+	); err != nil {
+		return fmt.Errorf("delete task %d: delete run events: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM runs WHERE task_id = ?`, id); err != nil {
+		return fmt.Errorf("delete task %d: delete runs: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM terminal_sessions WHERE task_id = ?`, id); err != nil {
+		return fmt.Errorf("delete task %d: delete terminal sessions: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete task %d: %w", id, err)
+	}
+	return nil
 }
 
 type rowScanner interface {
