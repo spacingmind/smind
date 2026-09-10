@@ -9,6 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FolderPickerDialog } from "@/components/folder-picker-dialog";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -104,62 +105,77 @@ export function CreateWorkspaceDialog({
   const [path, setPath] = useState("");
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      {open && (
-        <CrudForm
-          title="New workspace"
-          description="Point smind at an existing local git repository."
-          submitLabel="Create workspace"
-          onOpenChange={onOpenChange}
-          onSubmit={async () => {
-            if (!path.trim()) {
-              setError("Path is required.");
-              return false;
-            }
-            try {
-              const ws = await client!.call<Workspace>("workspace.create", {
-                path: path.trim(),
-                ...(title.trim() ? { title: title.trim() } : {}),
-              });
-              onCreated(ws);
-              setPath("");
-              setTitle("");
-              return true;
-            } catch (err) {
-              setError(err instanceof Error ? err.message : String(err));
-              return false;
-            }
-          }}
-        >
-          <div className="grid gap-2">
-            <label htmlFor="workspace-path" className="text-sm font-medium">
-              Path
-            </label>
-            <Input
-              id="workspace-path"
-              placeholder="/path/to/repo"
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              autoFocus
-            />
-          </div>
-          <div className="grid gap-2">
-            <label htmlFor="workspace-title" className="text-sm font-medium">
-              Title <span className="font-normal text-muted-foreground">(optional)</span>
-            </label>
-            <Input
-              id="workspace-title"
-              placeholder="Defaults to the repository directory name"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
-          <FormError message={error} />
-        </CrudForm>
-      )}
-    </Dialog>
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        {open && (
+          <CrudForm
+            title="New workspace"
+            description="Point smind at an existing local git repository."
+            submitLabel="Create workspace"
+            onOpenChange={onOpenChange}
+            onSubmit={async () => {
+              if (!path.trim()) {
+                setError("Path is required.");
+                return false;
+              }
+              try {
+                const ws = await client!.call<Workspace>("workspace.create", {
+                  path: path.trim(),
+                  ...(title.trim() ? { title: title.trim() } : {}),
+                });
+                onCreated(ws);
+                setPath("");
+                setTitle("");
+                return true;
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+                return false;
+              }
+            }}
+          >
+            <div className="grid gap-2">
+              <label htmlFor="workspace-path" className="text-sm font-medium">
+                Path
+              </label>
+              <div className="flex gap-2">
+                <Input
+                  id="workspace-path"
+                  placeholder="/path/to/repo"
+                  value={path}
+                  onChange={(e) => setPath(e.target.value)}
+                  autoFocus
+                  className="flex-1"
+                />
+                <Button type="button" variant="outline" onClick={() => setPickerOpen(true)}>
+                  Browse…
+                </Button>
+              </div>
+            </div>
+            <div className="grid gap-2">
+              <label htmlFor="workspace-title" className="text-sm font-medium">
+                Title <span className="font-normal text-muted-foreground">(optional)</span>
+              </label>
+              <Input
+                id="workspace-title"
+                placeholder="Defaults to the repository directory name"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+            </div>
+            <FormError message={error} />
+          </CrudForm>
+        )}
+      </Dialog>
+      <FolderPickerDialog
+        client={client}
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onSelect={(selected) => setPath(selected)}
+      />
+    </>
   );
 }
 
