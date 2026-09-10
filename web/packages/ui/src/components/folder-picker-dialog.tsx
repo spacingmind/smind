@@ -133,7 +133,7 @@ export function FolderPickerDialog({
                     ) : (
                       <Folder className="size-3.5 shrink-0" />
                     )}
-                    <span className="truncate">{entry.name}</span>
+                    <span className="min-w-0 truncate">{entry.name}</span>
                     {entry.isGitRepo && (
                       <span
                         data-testid="git-repo-indicator"
