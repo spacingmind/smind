@@ -56,12 +56,14 @@ function useWorkspaceTree(client: WsClient | null) {
     setError(null);
 
     (async () => {
-      const list = await client.call<Workspace[]>("workspace.list");
+      // ?? [] tolerates a daemon that answers null for an empty list
+      // (defense in depth; the wire contract is backend-owned).
+      const list = (await client.call<Workspace[]>("workspace.list")) ?? [];
       const withTree = await Promise.all(
         list.map(async (ws) => {
           const [spaces, tasks] = await Promise.all([
-            client.call<Space[]>("space.list", { workspaceId: ws.ID }),
-            client.call<Task[]>("task.list", { workspaceId: ws.ID }),
+            client.call<Space[]>("space.list", { workspaceId: ws.ID }).then((r) => r ?? []),
+            client.call<Task[]>("task.list", { workspaceId: ws.ID }).then((r) => r ?? []),
           ]);
 
           const tasksBySpaceId = new Map<number, Task[]>();
