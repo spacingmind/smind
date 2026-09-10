@@ -217,7 +217,7 @@ export function FileEditorPane({
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <span className="truncate text-sm font-medium" data-testid="file-editor-path">
+        <span className="min-w-0 truncate text-sm font-medium" data-testid="file-editor-path">
           {path}
           {dirty && <span aria-label="unsaved changes"> *</span>}
         </span>
