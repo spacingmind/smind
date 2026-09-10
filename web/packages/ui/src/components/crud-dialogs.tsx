@@ -326,6 +326,146 @@ export function CreateTaskDialog({
   );
 }
 
+/** Shared confirm copy for DeleteWorkspaceDialog/DeleteSpaceDialog: states plainly that this only affects smind's own tracking, never the real directory on disk. */
+function DeleteConsequences({ tasksRemoved, spacesRemoved }: { tasksRemoved: number; spacesRemoved: number }) {
+  const spaceClause = spacesRemoved > 0 ? `${spacesRemoved} space${spacesRemoved === 1 ? "" : "s"} and ` : "";
+  return (
+    <p className="mt-2">
+      This removes {spaceClause}
+      {tasksRemoved} task{tasksRemoved === 1 ? "" : "s"} from smind only -- files on disk are untouched.
+      Uncommitted work in any task worktree is checkpointed to its branch first. This cannot be undone in
+      smind.
+    </p>
+  );
+}
+
+export function DeleteWorkspaceDialog({
+  client,
+  workspace,
+  tasksRemoved,
+  spacesRemoved,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  client: WsClient | null;
+  workspace: Workspace | null;
+  /** Total tasks about to be removed (every space's tasks plus ungrouped tasks) -- computed client-side from the already-loaded workspace tree, not a new round trip. */
+  tasksRemoved: number;
+  /** Spaces about to be removed, from the same already-loaded tree. */
+  spacesRemoved: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete workspace?</DialogTitle>
+          <DialogDescription asChild>
+            <div>
+              <span className="font-medium text-foreground">{workspace?.Title || workspace?.Path}</span>
+              <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={spacesRemoved} />
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <FormError message={error} />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={pending}
+            onClick={async () => {
+              if (!workspace) return;
+              setPending(true);
+              setError(null);
+              try {
+                await client!.call("workspace.delete", { id: workspace.ID });
+                onDeleted();
+                onOpenChange(false);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            {pending ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function DeleteSpaceDialog({
+  client,
+  space,
+  tasksRemoved,
+  open,
+  onOpenChange,
+  onDeleted,
+}: {
+  client: WsClient | null;
+  space: Space | null;
+  /** Tasks about to be removed with this space -- computed client-side from the already-loaded workspace tree. */
+  tasksRemoved: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onDeleted: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete space?</DialogTitle>
+          <DialogDescription asChild>
+            <div>
+              <span className="font-medium text-foreground">{space?.Title}</span>
+              <DeleteConsequences tasksRemoved={tasksRemoved} spacesRemoved={0} />
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <FormError message={error} />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={pending}
+            onClick={async () => {
+              if (!space) return;
+              setPending(true);
+              setError(null);
+              try {
+                await client!.call("space.delete", { id: space.ID });
+                onDeleted();
+                onOpenChange(false);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            {pending ? "Deleting…" : "Delete"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function ArchiveTaskDialog({
   client,
   task,

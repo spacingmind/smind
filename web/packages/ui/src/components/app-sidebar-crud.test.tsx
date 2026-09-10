@@ -267,4 +267,97 @@ describe("AppSidebar CRUD", () => {
 
     await waitFor(() => expect(screen.queryByText("Fix the bug")).not.toBeInTheDocument());
   });
+
+  it("workspace row menu offers Delete workspace; confirming shows counts, calls workspace.delete, and refreshes", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    // The workspace's own row menu is the first "Row actions" trigger;
+    // Space A's is the second.
+    const menu = (await screen.findAllByRole("button", { name: "Row actions" }))[0];
+    fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(await screen.findByText("Delete workspace"));
+
+    // 1 space (Space A) and 1 task (TASK, ungrouped since its SpaceID is null).
+    expect(await screen.findByText(/1 space and 1 task/i)).toBeInTheDocument();
+    expect(screen.getByText(/files on disk are untouched/i)).toBeInTheDocument();
+    expect(screen.getByText(/checkpointed to its branch/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    const del = await waitFor(() => client.nth("workspace.delete"));
+    expect(del.params).toEqual({ id: 1 });
+
+    await act(async () => {
+      del.resolve({ tasksRemoved: 1, spacesRemoved: 1 });
+    });
+    await resolveRefresh(client, WORKSPACE, [], []);
+
+    expect(client.calls.filter((c) => c.method === "workspace.delete")).toHaveLength(1);
+  });
+
+  it("Delete workspace confirm: cancel calls no RPC", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE);
+
+    const menu = await screen.findByRole("button", { name: "Row actions" });
+    fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(await screen.findByText("Delete workspace"));
+
+    expect(await screen.findByText("Delete workspace?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await flush();
+
+    expect(screen.queryByText("Delete workspace?")).not.toBeInTheDocument();
+    expect(client.calls.filter((c) => c.method === "workspace.delete")).toHaveLength(0);
+  });
+
+  it("space row menu offers Delete space; confirming shows the task count, calls space.delete, and refreshes", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    // Space A's own row menu (distinct from the workspace's) is the second
+    // "Row actions" trigger, since Space A renders alongside the workspace.
+    const rowMenus = await screen.findAllByRole("button", { name: "Row actions" });
+    fireEvent.pointerDown(rowMenus[rowMenus.length - 1], { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(await screen.findByText("Delete space"));
+
+    expect(await screen.findByText("Delete space?")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    const del = await waitFor(() => client.nth("space.delete"));
+    expect(del.params).toEqual({ id: 10 });
+
+    await act(async () => {
+      del.resolve({ tasksRemoved: 0, spacesRemoved: 1 });
+    });
+    await resolveRefresh(client, WORKSPACE, [], []);
+
+    expect(client.calls.filter((c) => c.method === "space.delete")).toHaveLength(1);
+  });
+
+  it("Delete space confirm: cancel calls no RPC", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    const rowMenus = await screen.findAllByRole("button", { name: "Row actions" });
+    fireEvent.pointerDown(rowMenus[rowMenus.length - 1], { button: 0, ctrlKey: false });
+    await flush();
+    fireEvent.click(await screen.findByText("Delete space"));
+
+    expect(await screen.findByText("Delete space?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await flush();
+
+    expect(screen.queryByText("Delete space?")).not.toBeInTheDocument();
+    expect(client.calls.filter((c) => c.method === "space.delete")).toHaveLength(0);
+  });
 });

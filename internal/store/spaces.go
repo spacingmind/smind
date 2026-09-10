@@ -39,6 +39,31 @@ func (s *Store) GetSpace(id int64) (Space, error) {
 	return sp, nil
 }
 
+// DeleteSpace permanently removes space id and every task within it (via
+// DeleteTask, which cascades to each task's runs/run_events/
+// terminal_sessions) from smind's own tracking, then the spaces row itself.
+// A task in a different space or workspace is untouched. Deleting a
+// nonexistent space is a clear not-found error (via GetSpace), never a
+// silent no-op.
+func (s *Store) DeleteSpace(id int64) error {
+	if _, err := s.GetSpace(id); err != nil {
+		return fmt.Errorf("delete space %d: %w", id, err)
+	}
+	tasks, err := s.ListTasksBySpace(id)
+	if err != nil {
+		return fmt.Errorf("delete space %d: %w", id, err)
+	}
+	for _, t := range tasks {
+		if err := s.DeleteTask(t.ID); err != nil {
+			return fmt.Errorf("delete space %d: %w", id, err)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM spaces WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete space %d: %w", id, err)
+	}
+	return nil
+}
+
 // ListSpacesByWorkspace returns all spaces for workspaceID, ordered by id.
 func (s *Store) ListSpacesByWorkspace(workspaceID int64) ([]Space, error) {
 	rows, err := s.db.Query(
