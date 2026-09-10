@@ -61,6 +61,45 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	return workspaces, rows.Err()
 }
 
+// DeleteWorkspace permanently removes workspace id and everything under it
+// from smind's own tracking: workspace_accounts rows, every space in the
+// workspace (via DeleteSpace, cascading to their tasks), every
+// workspace-level task with no space (via DeleteTask), and finally the
+// workspaces row -- in that FK-safe child-before-parent order. A second,
+// unrelated workspace's rows are completely untouched. Deleting a
+// nonexistent workspace is a clear not-found error (via GetWorkspace),
+// never a silent no-op.
+func (s *Store) DeleteWorkspace(id int64) error {
+	if _, err := s.GetWorkspace(id); err != nil {
+		return fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM workspace_accounts WHERE workspace_id = ?`, id); err != nil {
+		return fmt.Errorf("delete workspace %d: delete workspace accounts: %w", id, err)
+	}
+	spaces, err := s.ListSpacesByWorkspace(id)
+	if err != nil {
+		return fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	for _, sp := range spaces {
+		if err := s.DeleteSpace(sp.ID); err != nil {
+			return fmt.Errorf("delete workspace %d: %w", id, err)
+		}
+	}
+	ungrouped, err := s.ListUngroupedTasksByWorkspace(id)
+	if err != nil {
+		return fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	for _, t := range ungrouped {
+		if err := s.DeleteTask(t.ID); err != nil {
+			return fmt.Errorf("delete workspace %d: %w", id, err)
+		}
+	}
+	if _, err := s.db.Exec(`DELETE FROM workspaces WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	return nil
+}
+
 // AddWorkspaceAccount adds accountID to workspaceID's candidate account pool.
 func (s *Store) AddWorkspaceAccount(workspaceID, accountID int64) error {
 	_, err := s.db.Exec(
