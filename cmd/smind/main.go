@@ -60,6 +60,7 @@ Usage:
 
   smind account add <provider> <label> < credential       register an account (credential from stdin)
   smind account ls                                        list accounts
+  smind account login <provider> <label>                  browser OAuth login (anthropic, openai)
 
   smind space create <workspaceId> <title>                create a space within a workspace
   smind space ls <workspaceId>                             list a workspace's spaces
