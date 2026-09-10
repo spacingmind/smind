@@ -114,18 +114,8 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 		return store.Task{}, fmt.Errorf("archive task: %w", err)
 	}
 
-	if t.WorktreePath != nil && dirExists(*t.WorktreePath) {
-		if err := gitWorktreeCheckpoint(*t.WorktreePath); err != nil {
-			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
-		}
-
-		ws, err := m.store.GetWorkspace(t.WorkspaceID)
-		if err != nil {
-			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
-		}
-		if err := gitWorktreeRemove(ws.Path, *t.WorktreePath); err != nil {
-			return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
-		}
+	if err := m.checkpointAndRemoveWorktree(t); err != nil {
+		return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
 	}
 
 	t, err = m.store.ArchiveTask(id)

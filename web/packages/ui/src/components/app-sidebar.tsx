@@ -11,6 +11,7 @@ import {
   MoreHorizontal,
   Plus,
   Settings,
+  Trash2,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -23,6 +24,8 @@ import {
   CreateSpaceDialog,
   CreateTaskDialog,
   CreateWorkspaceDialog,
+  DeleteSpaceDialog,
+  DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
 import { Button } from "@/components/ui/button";
 import {
@@ -172,7 +175,9 @@ type CrudTarget =
   | { kind: "workspace" }
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
-  | { kind: "archive"; task: Task };
+  | { kind: "archive"; task: Task }
+  | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
+  | { kind: "deleteSpace"; space: SpaceWithTasks };
 
 export function AppSidebar({
   client,
@@ -283,6 +288,8 @@ export function AppSidebar({
                     onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
                     onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                     onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
+                    onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
                     selectedTaskId={selectedTaskId}
                     onSelectTask={onSelectTask}
                     attention={attention}
@@ -339,6 +346,30 @@ export function AppSidebar({
               onArchived={refresh}
             />
           )}
+          {crud?.kind === "deleteWorkspace" && (
+            <DeleteWorkspaceDialog
+              client={client}
+              workspace={crud.workspace}
+              spacesRemoved={crud.workspace.spaces.length}
+              tasksRemoved={
+                crud.workspace.spaces.reduce((sum, sp) => sum + sp.tasks.length, 0) +
+                crud.workspace.ungroupedTasks.length
+              }
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onDeleted={refresh}
+            />
+          )}
+          {crud?.kind === "deleteSpace" && (
+            <DeleteSpaceDialog
+              client={client}
+              space={crud.space}
+              tasksRemoved={crud.space.tasks.length}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onDeleted={refresh}
+            />
+          )}
           <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
         </>
       )}
@@ -385,6 +416,8 @@ function WorkspaceItem({
   onAddSpace,
   onAddTask,
   onArchiveTask,
+  onDeleteWorkspace,
+  onDeleteSpace,
   selectedTaskId,
   onSelectTask,
   attention,
@@ -396,6 +429,8 @@ function WorkspaceItem({
   onAddSpace: () => void;
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
+  onDeleteWorkspace: () => void;
+  onDeleteSpace: (space: SpaceWithTasks) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
@@ -419,6 +454,7 @@ function WorkspaceItem({
           items={[
             { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
             { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+            { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
           ]}
         />
       </SidebarMenuAction>
@@ -446,6 +482,7 @@ function WorkspaceItem({
                   statusOverrides={statusOverrides}
                   onAddTask={onAddTask}
                   onArchiveTask={onArchiveTask}
+                  onDeleteSpace={onDeleteSpace}
                 />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
@@ -475,6 +512,7 @@ function SpaceItem({
   statusOverrides,
   onAddTask,
   onArchiveTask,
+  onDeleteSpace,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
@@ -483,6 +521,7 @@ function SpaceItem({
   statusOverrides: Map<number, string>;
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
+  onDeleteSpace: (space: SpaceWithTasks) => void;
 }) {
   return (
     <SpaceLikeItem
@@ -496,7 +535,10 @@ function SpaceItem({
     >
       <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
         <RowMenu
-          items={[{ label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) }]}
+          items={[
+            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
+            { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
+          ]}
         />
       </SidebarMenuSubItem>
     </SpaceLikeItem>
