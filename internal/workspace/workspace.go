@@ -104,7 +104,16 @@ func validateGitRepoPath(path string) error {
 		return fmt.Errorf("workspace path %q is not a directory", path)
 	}
 	if _, err := os.Stat(filepath.Join(path, ".git")); err != nil {
-		return fmt.Errorf("workspace path %q is not a git repository: %w", path, err)
+		// Deliberately doesn't wrap the underlying os.Stat error (%w) --
+		// that's a raw "stat .../.git: no such file or directory" a UI
+		// user has no way to act on. This message is written to be read
+		// as-is: FormError (web/packages/ui/src/components/crud-dialogs.tsx)
+		// passes the daemon's message straight through, verbatim.
+		return fmt.Errorf(
+			"workspace path %q is not a git repository -- smind workspaces must point at an existing repo "+
+				"(tasks are created as git worktrees branched off it); run \"git init\" there first, or pick a different folder",
+			path,
+		)
 	}
 	return nil
 }

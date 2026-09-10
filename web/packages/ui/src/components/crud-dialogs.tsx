@@ -113,7 +113,7 @@ export function CreateWorkspaceDialog({
         {open && (
           <CrudForm
             title="New workspace"
-            description="Point smind at an existing local git repository."
+            description="Must be an existing git repository -- tasks are created as worktrees branched off it."
             submitLabel="Create workspace"
             onOpenChange={onOpenChange}
             onSubmit={async () => {
@@ -200,7 +200,7 @@ export function CreateSpaceDialog({
       {open && (
         <CrudForm
           title="New space"
-          description="A grouping layer for tasks within the workspace."
+          description="Groups tasks inside this workspace -- it isn't its own repo; the workspace already points at that."
           submitLabel="Create space"
           onOpenChange={onOpenChange}
           onSubmit={async () => {
