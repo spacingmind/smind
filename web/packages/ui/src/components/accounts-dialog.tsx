@@ -16,10 +16,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Account, ProviderListResult } from "@/lib/types";
+import type { Account } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
-/** Accounts settings dialog: list (account.list) plus a minimal add form (account.add). No edit/remove this pass. */
+/**
+ * Account-credential provider IDs (internal/accounts/refresh_providers.go),
+ * the vocabulary internal/server/proxy.go actually matches accounts
+ * against -- distinct from taskrunner.SupportedProviders()'s
+ * claude-native/glm/kimi/codex-native task-execution IDs, which
+ * provider.list serves and which this dialog used to (wrongly) source its
+ * manual-add dropdown from. An account added under a task-execution
+ * provider ID silently never matches proxy.go's routing lookup, so this
+ * dialog must never offer those IDs here.
+ */
+const MANUAL_PROVIDERS: { id: string; label: string }[] = [
+  { id: "anthropic", label: "Anthropic (Claude)" },
+  { id: "openai", label: "OpenAI (Codex)" },
+  { id: "kimi", label: "Kimi" },
+  { id: "xai", label: "xAI (Grok)" },
+  { id: "antigravity", label: "Antigravity (Gemini)" },
+];
+
+/** Providers with a real browser-based OAuth login flow wired up (account.oauthStart) -- everyone else stays on the manual-paste form below. */
+const OAUTH_PROVIDERS: { id: string; label: string }[] = [
+  { id: "anthropic", label: "Anthropic (Claude)" },
+  { id: "openai", label: "OpenAI (Codex)" },
+];
+
+/** Accounts settings dialog: list (account.list), a "Connect" OAuth login per known provider (account.oauthStart), and a manual-paste form (account.add) for everything else. No edit/remove this pass. */
 export function AccountsDialog({
   client,
   open,
@@ -30,25 +54,22 @@ export function AccountsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
-  const [providers, setProviders] = useState<ProviderListResult["providers"]>([]);
-  const [provider, setProvider] = useState<string>("");
+  const [provider, setProvider] = useState<string>(MANUAL_PROVIDERS[0].id);
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  const [oauthLabel, setOauthLabel] = useState("");
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
+  const [oauthError, setOauthError] = useState<string | null>(null);
+
   async function refresh() {
     if (!client) return;
     try {
-      const [list, provs] = await Promise.all([
-        client.call<Account[]>("account.list").then((r) => r ?? []),
-        client.call<ProviderListResult>("provider.list"),
-      ]);
+      const list = (await client.call<Account[]>("account.list")) ?? [];
       setAccounts(list);
-      setProviders(provs.providers);
-      // Default the select to the first provider rather than forcing a
-      // pick when there's nothing meaningful to choose between yet.
-      setProvider((prev) => prev || provs.providers[0]?.id || "");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -78,6 +99,30 @@ export function AccountsDialog({
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setPending(false);
+    }
+  }
+
+  async function connect(providerId: string) {
+    if (!oauthLabel.trim()) {
+      setOauthError("Label is required.");
+      return;
+    }
+    setOauthError(null);
+    setAuthorizeUrl(null);
+    setConnecting(providerId);
+    try {
+      await client!.callStream("account.oauthStart", { provider: providerId, label: oauthLabel.trim() }, (event, params) => {
+        if (event !== "authorizeUrl") return;
+        const url = (params as { url?: string } | undefined)?.url;
+        if (url) setAuthorizeUrl(url);
+      });
+      setOauthLabel("");
+      setAuthorizeUrl(null);
+      await refresh();
+    } catch (err) {
+      setOauthError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setConnecting(null);
     }
   }
 
@@ -111,6 +156,49 @@ export function AccountsDialog({
             </ul>
           )}
         </div>
+
+        <div className="grid gap-3 border-t pt-4">
+          <div className="grid gap-1">
+            <label htmlFor="account-oauth-label" className="text-sm font-medium">
+              Label
+            </label>
+            <Input
+              id="account-oauth-label"
+              value={oauthLabel}
+              onChange={(e) => setOauthLabel(e.target.value)}
+              placeholder="e.g. work"
+            />
+          </div>
+          {oauthError && <p className="text-sm text-destructive">{oauthError}</p>}
+          <div className="flex flex-wrap gap-2">
+            {OAUTH_PROVIDERS.map((p) => (
+              <Button
+                key={p.id}
+                variant="outline"
+                disabled={connecting !== null}
+                onClick={() => void connect(p.id)}
+              >
+                {connecting === p.id ? "Connecting…" : `Connect ${p.label}`}
+              </Button>
+            ))}
+          </div>
+          {connecting && (
+            <p className="text-sm text-muted-foreground">
+              {authorizeUrl ? (
+                <>
+                  Waiting for login — if a browser didn't open automatically,{" "}
+                  <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
+                    open the login page
+                  </a>
+                  .
+                </>
+              ) : (
+                "Starting login…"
+              )}
+            </p>
+          )}
+        </div>
+
         <div className="grid gap-3 border-t pt-4">
           <div className="grid gap-2">
             <div className="grid grid-cols-2 gap-2">
@@ -123,9 +211,9 @@ export function AccountsDialog({
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    {providers.map((p) => (
+                    {MANUAL_PROVIDERS.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.label ?? p.id}
+                        {p.label}
                       </SelectItem>
                     ))}
                   </SelectContent>

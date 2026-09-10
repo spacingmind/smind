@@ -15,10 +15,11 @@ import (
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, reg, and treg.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
+// bound to wm, runner, reg, treg, and coord.
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
+		"account.oauthStart":    handleAccountOAuthStart(coord),
 		"provider.list":         handleProviderList(),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
@@ -111,6 +112,41 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 		account, err := registry.Get(created.ID)
 		if err != nil {
 			return nil, fmt.Errorf("account.add: %w", err)
+		}
+		return accountResultFrom(account), nil
+	}
+}
+
+// handleAccountOAuthStart runs a full browser-based OAuth login for
+// provider (accounts.LoginCoordinator.Login), emitting an "authorizeUrl"
+// event as soon as the vendor's authorize URL is ready -- before this
+// request blocks waiting for the callback -- so the caller can open it (CLI)
+// or render it (web UI) without polling. See LoginCoordinator.Login's doc
+// comment for the full flow: unsupported providers, a second concurrent
+// login for the same provider, callback timeout, and state mismatch all
+// surface as errors from coord.Login, wrapped here the same way every other
+// account.* handler wraps its registry errors.
+func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
+	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
+		if coord == nil {
+			return nil, fmt.Errorf("account.oauthStart: login coordinator is unavailable")
+		}
+		var p struct {
+			Provider string `json:"provider"`
+			Label    string `json:"label"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.oauthStart: invalid params: %w", err)
+		}
+		if p.Provider == "" || p.Label == "" {
+			return nil, fmt.Errorf("account.oauthStart: provider and label are required")
+		}
+
+		account, err := coord.Login(ctx, p.Provider, p.Label, func(url string) {
+			rc.Emit("authorizeUrl", map[string]string{"url": url})
+		})
+		if err != nil {
+			return nil, fmt.Errorf("account.oauthStart: %w", err)
 		}
 		return accountResultFrom(account), nil
 	}
