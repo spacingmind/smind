@@ -410,7 +410,7 @@ function WorkspaceItem({
     <SidebarMenuItem>
       <SidebarMenuButton onClick={onToggleExpanded}>
         <FolderGit2 />
-        <span className="truncate">{workspace.Title || workspace.Path}</span>
+        <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
         <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
       </SidebarMenuButton>
       <SidebarMenuAction>
@@ -535,7 +535,7 @@ function SpaceLikeItem({
     <SidebarMenuSubItem>
       <SidebarMenuSubButton onClick={() => setOpen((o) => !o)}>
         <Layers className="size-3.5" />
-        <span className="truncate">{title}</span>
+        <span className="min-w-0 truncate">{title}</span>
         <ChevronRight className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
       </SidebarMenuSubButton>
       {children}
@@ -589,7 +589,7 @@ function TaskRows({
         return (
           <SidebarMenuSubItem key={task.ID}>
             <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
-              <span className="truncate">{task.Title}</span>
+              <span className="min-w-0 truncate">{task.Title}</span>
               {hasAttention && (
                 <span
                   data-testid="task-attention"

@@ -158,7 +158,7 @@ export function AccountsDialog({
             <ul className="grid gap-1 text-sm">
               {accounts.map((a) => (
                 <li key={a.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-accent">
-                  <span className="font-medium">{a.label}</span>
+                  <span className="min-w-0 truncate font-medium">{a.label}</span>
                   <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                     {providerLabel(a.provider)} · {a.credentialType}
                   </span>
