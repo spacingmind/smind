@@ -54,6 +54,15 @@ if (!window.ResizeObserver) {
   } as unknown as typeof ResizeObserver;
 }
 
+// jsdom doesn't implement Element.scrollIntoView; Radix's Select content
+// (components/ui/select.tsx, used by accounts-dialog.tsx's manual-add
+// provider picker) calls it on the matched item whenever the popup opens,
+// unconditionally. A no-op stub is enough -- no test here exercises real
+// scroll positioning.
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => {};
+}
+
 afterEach(() => {
   cleanup();
 });

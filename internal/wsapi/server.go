@@ -56,7 +56,8 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	})
 	reg.SetNotifier(busRunNotifier{bus: bus})
 
-	hs := methodHandlers(wm, acctReg, runner, reg, treg)
+	coord := accounts.NewDefaultLoginCoordinator(acctReg)
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, coord)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
