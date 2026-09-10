@@ -27,6 +27,11 @@ function renderDialog(client: FakeWsClient) {
   render(<AccountsDialog client={client as never} open onOpenChange={() => {}} />);
 }
 
+/** The manual-paste form is collapsed behind a disclosure by default -- open it before interacting with its fields. */
+async function openManualForm(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: /Paste a credential instead/ }));
+}
+
 describe("AccountsDialog", () => {
   it("lists accounts from account.list", async () => {
     const client = new FakeWsClient();
@@ -36,7 +41,7 @@ describe("AccountsDialog", () => {
     await flush();
 
     expect(await screen.findByText("main")).toBeInTheDocument();
-    expect(screen.getByText(/anthropic · oauth/)).toBeInTheDocument();
+    expect(screen.getByText(/Anthropic \(Claude\) · oauth/)).toBeInTheDocument();
   });
 
   it("shows the empty hint when there are no accounts", async () => {
@@ -49,12 +54,30 @@ describe("AccountsDialog", () => {
     expect(await screen.findByText(/No accounts yet/)).toBeInTheDocument();
   });
 
+  it("manual-paste form is collapsed until its disclosure is opened", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve([]);
+    await flush();
+
+    expect(screen.queryByLabelText("Provider")).not.toBeInTheDocument();
+    const toggle = await screen.findByRole("button", { name: /Paste a credential instead/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(toggle);
+
+    expect(await screen.findByLabelText("Provider")).toBeInTheDocument();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("manual-add provider dropdown offers account-credential provider IDs, not task-execution ones", async () => {
     const client = new FakeWsClient();
     renderDialog(client);
 
     client.nth("account.list").resolve([]);
     await flush();
+    await openManualForm();
 
     fireEvent.click(await screen.findByLabelText("Provider"));
     const options = await screen.findAllByRole("option");
@@ -80,6 +103,7 @@ describe("AccountsDialog", () => {
 
     client.nth("account.list").resolve([]);
     await flush();
+    await openManualForm();
 
     fireEvent.click(await screen.findByRole("button", { name: "Add account" }));
     await flush();
@@ -94,6 +118,7 @@ describe("AccountsDialog", () => {
 
     client.nth("account.list", 0).resolve([]);
     await flush();
+    await openManualForm();
 
     fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "main" } });
     fireEvent.change(screen.getByLabelText("Credential"), { target: { value: '{"apiKey":"sk"}' } });
@@ -122,6 +147,7 @@ describe("AccountsDialog", () => {
 
     client.nth("account.list", 0).resolve([]);
     await flush();
+    await openManualForm();
 
     fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "main" } });
     fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "tok" } });

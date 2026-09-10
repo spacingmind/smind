@@ -25,9 +25,10 @@ type callbackResult struct {
 // comment for why that ordering matters. The server is always torn down via
 // close, on every exit path (success, timeout, or the caller giving up).
 type callbackServer struct {
-	httpServer *http.Server
-	listener   net.Listener
-	result     chan callbackResult
+	httpServer    *http.Server
+	listener      net.Listener
+	result        chan callbackResult
+	providerLabel string
 }
 
 // newCallbackServer binds addr synchronously and starts serving path on it
@@ -35,14 +36,16 @@ type callbackServer struct {
 // opposed to merely having been requested) so a caller can be sure the
 // vendor's redirect has somewhere to land before it hands the authorize URL
 // to a browser -- binding after that point would leave a window where the
-// vendor could redirect before anything is listening.
-func newCallbackServer(addr, path string) (*callbackServer, error) {
+// vendor could redirect before anything is listening. providerLabel is
+// purely cosmetic: it's what the browser-facing success page names (see
+// oauth_callback_page.go), not used for any routing/matching decision.
+func newCallbackServer(addr, path, providerLabel string) (*callbackServer, error) {
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("bind oauth callback listener on %s: %w", addr, err)
 	}
 
-	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1)}
+	s := &callbackServer{listener: listener, result: make(chan callbackResult, 1), providerLabel: providerLabel}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, s.handleCallback)
@@ -79,12 +82,17 @@ func (s *callbackServer) handleCallback(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if res.errCode != "" || res.code == "" {
+	if res.errCode != "" {
 		w.WriteHeader(http.StatusBadRequest)
-		fmt.Fprint(w, "<html><body>smind login failed -- you can close this tab and check the terminal/app for details.</body></html>")
+		fmt.Fprint(w, renderCallbackErrorPage(res.errCode))
 		return
 	}
-	fmt.Fprint(w, "<html><body>smind login complete -- you can close this tab.</body></html>")
+	if res.code == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, renderCallbackErrorPage("no authorization code was returned"))
+		return
+	}
+	fmt.Fprint(w, renderCallbackSuccessPage(s.providerLabel))
 }
 
 // waitForCallback blocks until the vendor's redirect lands, ctx is done, or
