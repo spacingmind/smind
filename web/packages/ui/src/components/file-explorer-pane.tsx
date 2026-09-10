@@ -173,8 +173,8 @@ function TreeRow({
       )}
       style={{ paddingLeft: `${depth * 14 + 8}px` }}
     >
-      {icon}
-      <span className="truncate">{label}</span>
+      <span className="shrink-0">{icon}</span>
+      <span className="min-w-0 truncate">{label}</span>
     </div>
   );
 }

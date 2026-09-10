@@ -140,27 +140,29 @@ export function App({
                 onValueChange={(key) => activate(selectedTask.ID, key)}
                 className="h-full gap-0"
               >
-                <TabsList className="mx-3 mt-2 w-fit">
-                  {taskState.tabs.map((entry) => (
-                    <TabsTrigger key={entry.key} value={entry.key} className="gap-1.5">
-                      {entry.title}
-                      {entry.closable && (
-                        <span
-                          role="button"
-                          aria-label={`Close ${entry.title}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            closeTab(selectedTask.ID, entry.key);
-                          }}
-                          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          ×
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
+                <div className="mx-3 mt-2 overflow-x-auto">
+                  <TabsList className="w-fit">
+                    {taskState.tabs.map((entry) => (
+                      <TabsTrigger key={entry.key} value={entry.key} className="max-w-48 gap-1.5">
+                        <span className="min-w-0 truncate">{entry.title}</span>
+                        {entry.closable && (
+                          <span
+                            role="button"
+                            aria-label={`Close ${entry.title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              e.preventDefault();
+                              closeTab(selectedTask.ID, entry.key);
+                            }}
+                            className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          >
+                            ×
+                          </span>
+                        )}
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
                 {taskState.tabs.map((entry) => (
                   <TabsContent key={entry.key} value={entry.key} className="min-h-0">
                     <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
