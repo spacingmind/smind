@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -141,7 +142,20 @@ func TestLoginCoordinator_Login_HappyPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET callback: %v", err)
 	}
+	body, err := io.ReadAll(resp.Body)
 	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("read callback response body: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("callback response status = %d, want 200", resp.StatusCode)
+	}
+	// providerDisplayLabel falls back to the raw provider id ("fake" here,
+	// since it's not a known real provider) -- confirms the label actually
+	// reaches newCallbackServer, not just that some page renders.
+	if !strings.Contains(string(body), "fake") {
+		t.Errorf("callback success page = %q, want it to mention the provider", body)
+	}
 
 	res := <-doneCh
 	if res.err != nil {

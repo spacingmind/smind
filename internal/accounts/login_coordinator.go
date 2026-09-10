@@ -88,7 +88,7 @@ func (c *LoginCoordinator) Login(ctx context.Context, provider, label string, on
 		return Account{}, fmt.Errorf("oauth login: %w", err)
 	}
 
-	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath())
+	server, err := newCallbackServer(login.CallbackAddr(), login.CallbackPath(), providerDisplayLabel(provider))
 	if err != nil {
 		return Account{}, fmt.Errorf("oauth login: %w", err)
 	}
@@ -142,4 +142,23 @@ func (c *LoginCoordinator) release(provider string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.inFlight, provider)
+}
+
+// providerDisplayLabels are the human-facing names the browser-facing
+// callback page (oauth_callback_page.go) shows -- purely cosmetic, distinct
+// from and not a source of truth for the provider id itself.
+var providerDisplayLabels = map[string]string{
+	"anthropic": "Anthropic",
+	"openai":    "OpenAI",
+}
+
+// providerDisplayLabel returns provider's display name, falling back to the
+// raw id for anything not in providerDisplayLabels (defensive only --
+// LoginCoordinator.Login already rejects unknown providers before this is
+// ever called).
+func providerDisplayLabel(provider string) string {
+	if label, ok := providerDisplayLabels[provider]; ok {
+		return label
+	}
+	return provider
 }

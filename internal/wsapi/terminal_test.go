@@ -119,7 +119,13 @@ func TestServer_TerminalCreateAttachWrite_RealShell(t *testing.T) {
 		t.Fatalf("terminal.write error = %v", writeResp.Error.Message)
 	}
 
-	collectDataUntil(t, ws, "attach", "hello-from-wsapi-test", 5*time.Second)
+	// 15s, not this file's usual 5s: this is the one wait in the test that
+	// depends on a real OS shell process actually scheduling and running
+	// (echoing back over the PTY), not just an RPC round trip -- CI runners
+	// occasionally starve that under load (observed as a flake: "i/o
+	// timeout (waiting for id \"attach\")" on an otherwise unrelated PR's
+	// CI run), where a real terminal never gets that slow interactively.
+	collectDataUntil(t, ws, "attach", "hello-from-wsapi-test", 15*time.Second)
 
 	sendRequest(t, ws, "close", "terminal.close", map[string]any{"terminalId": created.TerminalID})
 
