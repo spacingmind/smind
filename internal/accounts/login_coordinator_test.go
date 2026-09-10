@@ -60,6 +60,33 @@ func freeAddr(t *testing.T) string {
 	return addr
 }
 
+// assertPortReleased fails t if addr cannot be rebound within a couple of
+// seconds. A single net.Listen attempt taken immediately after a
+// coordinator releases its callback listener can spuriously collide with
+// an unrelated parallel subtest's own freeAddr() call landing on the exact
+// same ephemeral port in that same instant -- this file runs many
+// t.Parallel() subtests that all briefly bind-then-close 127.0.0.1:0 to
+// reserve an address, and under CI's heavier parallelism that TOCTOU
+// window collides often enough to fail a single-shot check. That's a
+// shared-fixture race between subtests, not a real leak in the listener
+// this assertion is actually trying to verify, so a short bounded retry
+// tells the two apart without weakening the guarantee.
+func assertPortReleased(t *testing.T, addr string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		l, err := net.Listen("tcp", addr)
+		if err == nil {
+			l.Close()
+			return
+		}
+		lastErr = err
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("net.Listen(%q) error = %v, want the callback listener released", addr, lastErr)
+}
+
 // stateFromAuthorizeURL extracts the state fakeLogin.AuthorizeURL embedded,
 // so a test can build a matching callback request.
 func stateFromAuthorizeURL(t *testing.T, raw string) string {
@@ -188,11 +215,7 @@ func TestLoginCoordinator_Login_Timeout(t *testing.T) {
 
 	// The listener must be torn down: rebinding the same address should
 	// now succeed.
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		t.Fatalf("net.Listen(%q) error = %v, want the callback listener released", addr, err)
-	}
-	l.Close()
+	assertPortReleased(t, addr)
 }
 
 func TestLoginCoordinator_Login_ConcurrentSameProvider(t *testing.T) {
@@ -231,11 +254,7 @@ func TestLoginCoordinator_Login_ConcurrentSameProvider(t *testing.T) {
 
 	// Only one listener was ever opened: the address is free again now
 	// that both attempts have finished.
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		t.Fatalf("net.Listen(%q) error = %v, want the callback listener released", addr, err)
-	}
-	l.Close()
+	assertPortReleased(t, addr)
 }
 
 // TestLoginCoordinator_Login_ContextCancelled confirms that cancelling the
@@ -266,11 +285,7 @@ func TestLoginCoordinator_Login_ContextCancelled(t *testing.T) {
 		t.Fatal("Login() error = nil, want a context-cancellation error")
 	}
 
-	l, err := net.Listen("tcp", addr)
-	if err != nil {
-		t.Fatalf("net.Listen(%q) error = %v, want the callback listener released", addr, err)
-	}
-	l.Close()
+	assertPortReleased(t, addr)
 }
 
 func TestLoginCoordinator_Login_ExchangeError(t *testing.T) {
