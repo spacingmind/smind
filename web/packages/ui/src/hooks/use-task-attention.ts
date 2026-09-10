@@ -97,7 +97,8 @@ export function useTaskAttention(
 
     client
       .call<RunSummary[]>("run.list")
-      .then(async (runs) => {
+      .then(async (rawRuns) => {
+        const runs = rawRuns ?? [];
         if (cancelled) return;
         runsRef.current = runs;
 

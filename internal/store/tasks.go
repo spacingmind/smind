@@ -54,7 +54,7 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	}
 	defer rows.Close()
 
-	var tasks []Task
+	tasks := make([]Task, 0)
 	for rows.Next() {
 		t, err := scanTask(rows)
 		if err != nil {

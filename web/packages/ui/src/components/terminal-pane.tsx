@@ -226,7 +226,8 @@ export function TerminalPane({
 
     client
       .call<TerminalSessionStatus[]>("terminal.list", { taskId: task.ID })
-      .then((sessions) => {
+      .then((rawSessions) => {
+        const sessions = rawSessions ?? [];
         if (session.cancelled) return;
 
         // Reconnecting to a session we were already attached to:

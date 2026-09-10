@@ -401,4 +401,22 @@ describe("App live events", () => {
     expect(screen.queryByText("active")).not.toBeInTheDocument();
     expect(screen.getByText("done")).toBeInTheDocument();
   });
+
+  it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {
+    // Regression for the fresh-install crash: workspace.list answered
+    // literal null and useWorkspaceTree called .map on it. Backend now
+    // guarantees [], but the UI must tolerate any daemon version.
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await flush();
+    expect(screen.getByText("Connected to daemon")).toBeInTheDocument();
+
+    respond(socket, "workspace.list", null);
+    await flush();
+    respond(socket, "run.list", null);
+    await flush();
+
+    expect(screen.getByText("No workspaces yet.")).toBeInTheDocument();
+  });
 });

@@ -248,7 +248,7 @@ func taskChangedFiles(worktreePath, branch string) ([]TaskFile, error) {
 		return nil, err
 	}
 
-	var files []TaskFile
+	files := make([]TaskFile, 0)
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line == "" {
 			continue
