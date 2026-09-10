@@ -138,6 +138,43 @@ describe("AppSidebar CRUD", () => {
     expect(await screen.findByText("/tmp/repo")).toBeInTheDocument();
   });
 
+  it("Browse… opens the folder picker; selecting a folder there fills the Path input", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    client.nth("workspace.list", 0).resolve([]);
+    await flush();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New workspace" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Browse…" }));
+
+    const list = await waitFor(() => client.nth("fs.listDir"));
+    expect(list.params).toBeUndefined();
+    await act(async () => {
+      list.resolve({
+        path: "/home/dev",
+        parent: "/home",
+        entries: [{ name: "repo", path: "/home/dev/repo", isGitRepo: true }],
+      });
+    });
+    await flush();
+
+    fireEvent.click(await screen.findByText("repo"));
+    const nav = await waitFor(() => client.nth("fs.listDir", 1));
+    expect(nav.params).toEqual({ path: "/home/dev/repo" });
+    await act(async () => {
+      nav.resolve({ path: "/home/dev/repo", parent: "/home/dev", entries: [] });
+    });
+    await flush();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Use this folder" }));
+    await flush();
+
+    expect(await screen.findByLabelText("Path")).toHaveValue("/home/dev/repo");
+    // Selecting a folder only fills the field -- it must not itself submit
+    // the create form.
+    expect(client.calls.filter((c) => c.method === "workspace.create")).toHaveLength(0);
+  });
+
   it("create-workspace surfaces the daemon's error inline (e.g. not a git repo)", async () => {
     const client = new FakeWsClient();
     mount(client);
