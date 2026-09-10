@@ -417,6 +417,6 @@ describe("App live events", () => {
     respond(socket, "run.list", null);
     await flush();
 
-    expect(screen.getByText("No workspaces yet.")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to smind")).toBeInTheDocument();
   });
 });

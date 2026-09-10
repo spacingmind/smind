@@ -1,12 +1,36 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import { AlertCircle, ChevronRight, FolderGit2, Layers, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  ChevronRight,
+  FolderGit2,
+  Layers,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  Settings,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import type { TaskAttention } from "@/hooks/use-task-attention";
+import { AccountsDialog } from "@/components/accounts-dialog";
+import {
+  ArchiveTaskDialog,
+  CreateSpaceDialog,
+  CreateTaskDialog,
+  CreateWorkspaceDialog,
+} from "@/components/crud-dialogs";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
@@ -16,6 +40,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -43,10 +68,17 @@ interface WorkspaceWithTree extends Workspace {
  * happens client-side here rather than via a per-space query. Returns a
  * discriminated status so the sidebar can render loading/error/empty/loaded
  * states distinctly.
+ *
+ * `refresh` bumps an internal counter that re-runs the fetch -- there are
+ * no cross-connection workspace/space/task-created events (see the crud-ui
+ * plan's Decisions), so the acting client refreshes locally after each
+ * successful create/archive.
  */
 function useWorkspaceTree(client: WsClient | null) {
   const [workspaces, setWorkspaces] = useState<WorkspaceWithTree[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [refreshCounter, setRefreshCounter] = useState(0);
+  const refresh = useCallback(() => setRefreshCounter((c) => c + 1), []);
 
   useEffect(() => {
     if (!client) return;
@@ -97,9 +129,9 @@ function useWorkspaceTree(client: WsClient | null) {
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, refreshCounter]);
 
-  return { workspaces, error };
+  return { workspaces, error, refresh };
 }
 
 /**
@@ -135,6 +167,13 @@ function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null
   return overrides;
 }
 
+/** Which create/archive dialog a sidebar row has opened, if any. */
+type CrudTarget =
+  | { kind: "workspace" }
+  | { kind: "space"; workspace: WorkspaceWithTree }
+  | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
+  | { kind: "archive"; task: Task };
+
 export function AppSidebar({
   client,
   selectedTaskId = null,
@@ -152,19 +191,58 @@ export function AppSidebar({
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
 }) {
-  const { workspaces, error } = useWorkspaceTree(client);
+  const { workspaces, error, refresh } = useWorkspaceTree(client);
   const statusOverrides = useStatusOverrides(client, events ?? null);
+
+  const [crud, setCrud] = useState<CrudTarget | null>(null);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  // The just-created workspace is expanded on landing; existing ones start
+  // collapsed until first refresh happens (empty state -> created).
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const didInitialLoad = useRef(false);
+  useEffect(() => {
+    if (workspaces === null) return;
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      setExpanded(new Set(workspaces.map((ws) => ws.ID)));
+    }
+  }, [workspaces]);
+
+  const empty = !error && workspaces !== null && workspaces.length === 0;
 
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1.5">
           <span className="text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
+          <div className="ml-auto flex items-center gap-1 group-data-[collapsible=icon]:hidden">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Accounts settings"
+              onClick={() => setAccountsOpen(true)}
+            >
+              <Settings />
+            </Button>
+          </div>
         </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Workspaces</SidebarGroupLabel>
+          <SidebarGroupLabel className="justify-between">
+            <span>Workspaces</span>
+            {!empty && (
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="New workspace"
+                onClick={() => setCrud({ kind: "workspace" })}
+                className="mr-1"
+              >
+                <Plus />
+              </Button>
+            )}
+          </SidebarGroupLabel>
           <SidebarGroupContent>
             <ScrollArea className="h-full">
               <SidebarMenu>
@@ -172,11 +250,38 @@ export function AppSidebar({
                 {!error && workspaces === null && (
                   <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
                 )}
-                {!error && workspaces?.length === 0 && <StatusRow text="No workspaces yet." />}
+                {empty && (
+                  <SidebarMenuItem>
+                    <div className="flex flex-col gap-3 px-2 py-4">
+                      <div className="text-xs text-muted-foreground">
+                        <p className="font-medium text-foreground">Welcome to smind</p>
+                        <p className="mt-1">
+                          A workspace points smind at a local git repository. Create
+                          one to start adding tasks.
+                        </p>
+                      </div>
+                      <Button size="sm" className="w-fit" onClick={() => setCrud({ kind: "workspace" })}>
+                        <Plus /> New workspace
+                      </Button>
+                    </div>
+                  </SidebarMenuItem>
+                )}
                 {workspaces?.map((ws) => (
                   <WorkspaceItem
                     key={ws.ID}
                     workspace={ws}
+                    expanded={expanded.has(ws.ID)}
+                    onToggleExpanded={() =>
+                      setExpanded((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(ws.ID)) next.delete(ws.ID);
+                        else next.add(ws.ID);
+                        return next;
+                      })
+                    }
+                    onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
+                    onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
+                    onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                     selectedTaskId={selectedTaskId}
                     onSelectTask={onSelectTask}
                     attention={attention}
@@ -188,6 +293,54 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {client && (
+        <>
+          <CreateWorkspaceDialog
+            client={client}
+            open={crud?.kind === "workspace"}
+            onOpenChange={(o) => !o && setCrud(null)}
+            onCreated={(ws) => {
+              didInitialLoad.current = true;
+              setExpanded((prev) => new Set(prev).add(ws.ID));
+              refresh();
+            }}
+          />
+          {crud?.kind === "space" && (
+            <CreateSpaceDialog
+              client={client}
+              workspaceId={crud.workspace.ID}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onCreated={refresh}
+            />
+          )}
+          {crud?.kind === "task" && (
+            <CreateTaskDialog
+              client={client}
+              workspace={crud.workspace}
+              spaces={crud.workspace.spaces}
+              fixedSpaceId={crud.spaceId}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onCreated={(task) => {
+                onSelectTask?.(task);
+                refresh();
+              }}
+            />
+          )}
+          {crud?.kind === "archive" && (
+            <ArchiveTaskDialog
+              client={client}
+              task={crud.task}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onArchived={refresh}
+            />
+          )}
+          <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
+        </>
+      )}
     </Sidebar>
   );
 }
@@ -203,21 +356,50 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
   );
 }
 
+/** The "⋯" hover/context menu shared by workspace and space rows. */
+function RowMenu({ items }: { items: { label: string; icon: ReactNode; onSelect: () => void }[] }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0">
+          <MoreHorizontal />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" side="right">
+        {items.map((item) => (
+          <DropdownMenuItem key={item.label} onSelect={item.onSelect}>
+            {item.icon}
+            {item.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function WorkspaceItem({
   workspace,
+  expanded,
+  onToggleExpanded,
+  onAddSpace,
+  onAddTask,
+  onArchiveTask,
   selectedTaskId,
   onSelectTask,
   attention,
   statusOverrides,
 }: {
   workspace: WorkspaceWithTree;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onAddSpace: () => void;
+  onAddTask: (spaceId: number | null) => void;
+  onArchiveTask: (task: Task) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
   statusOverrides: Map<number, string>;
 }) {
-  const [open, setOpen] = useState(true);
-
   // A workspace with no spaces (today's common/default case, and every
   // workspace that existed before Space wiring) renders exactly as it did
   // before this change: a flat list of tasks directly under the
@@ -226,12 +408,20 @@ function WorkspaceItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton onClick={() => setOpen((o) => !o)}>
+      <SidebarMenuButton onClick={onToggleExpanded}>
         <FolderGit2 />
         <span className="truncate">{workspace.Title || workspace.Path}</span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
       </SidebarMenuButton>
-      {open && (
+      <SidebarMenuAction>
+        <RowMenu
+          items={[
+            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
+            { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+          ]}
+        />
+      </SidebarMenuAction>
+      {expanded && (
         <SidebarMenuSub>
           {flat ? (
             <TaskRows
@@ -241,11 +431,21 @@ function WorkspaceItem({
               emptyText="No tasks"
               attention={attention}
               statusOverrides={statusOverrides}
+              onArchiveTask={onArchiveTask}
             />
           ) : (
             <>
               {workspace.spaces.map((space) => (
-                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} statusOverrides={statusOverrides} />
+                <SpaceItem
+                  key={space.ID}
+                  space={space}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={onSelectTask}
+                  attention={attention}
+                  statusOverrides={statusOverrides}
+                  onAddTask={onAddTask}
+                  onArchiveTask={onArchiveTask}
+                />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
@@ -255,6 +455,7 @@ function WorkspaceItem({
                   onSelectTask={onSelectTask}
                   attention={attention}
                   statusOverrides={statusOverrides}
+                  onArchiveTask={onArchiveTask}
                 />
               )}
             </>
@@ -271,12 +472,16 @@ function SpaceItem({
   onSelectTask,
   attention,
   statusOverrides,
+  onAddTask,
+  onArchiveTask,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
   statusOverrides: Map<number, string>;
+  onAddTask: (spaceId: number | null) => void;
+  onArchiveTask: (task: Task) => void;
 }) {
   return (
     <SpaceLikeItem
@@ -286,7 +491,14 @@ function SpaceItem({
       onSelectTask={onSelectTask}
       attention={attention}
       statusOverrides={statusOverrides}
-    />
+      onArchiveTask={onArchiveTask}
+    >
+      <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
+        <RowMenu
+          items={[{ label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) }]}
+        />
+      </SidebarMenuSubItem>
+    </SpaceLikeItem>
   );
 }
 
@@ -305,6 +517,8 @@ function SpaceLikeItem({
   onSelectTask,
   attention,
   statusOverrides,
+  onArchiveTask,
+  children,
 }: {
   title: string;
   tasks: Task[];
@@ -312,6 +526,8 @@ function SpaceLikeItem({
   onSelectTask?: (task: Task) => void;
   attention?: TaskAttention;
   statusOverrides: Map<number, string>;
+  onArchiveTask: (task: Task) => void;
+  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
 
@@ -322,6 +538,7 @@ function SpaceLikeItem({
         <span className="truncate">{title}</span>
         <ChevronRight className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
       </SidebarMenuSubButton>
+      {children}
       {open && (
         <SidebarMenuSub>
           <TaskRows
@@ -331,6 +548,7 @@ function SpaceLikeItem({
             emptyText="No tasks"
             attention={attention}
             statusOverrides={statusOverrides}
+            onArchiveTask={onArchiveTask}
           />
         </SidebarMenuSub>
       )}
@@ -345,6 +563,7 @@ function TaskRows({
   emptyText,
   attention,
   statusOverrides,
+  onArchiveTask,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
@@ -352,6 +571,7 @@ function TaskRows({
   emptyText: string;
   attention?: TaskAttention;
   statusOverrides: Map<number, string>;
+  onArchiveTask: (task: Task) => void;
 }) {
   if (tasks.length === 0) {
     return (
@@ -381,6 +601,20 @@ function TaskRows({
                 {statusOverrides.get(task.ID) ?? task.Status}
               </span>
             </SidebarMenuSubButton>
+            <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${task.Title}`} className="size-5 p-0">
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => onArchiveTask(task)}>
+                    <Archive /> Archive task
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
           </SidebarMenuSubItem>
         );
       })}

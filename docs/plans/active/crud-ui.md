@@ -77,12 +77,25 @@ additions (workspace.update, task.rename — see Decisions).
 
 ## Progress
 
-- [ ] First-run empty state + workspace create
-- [ ] Space create + task create + archive action
-- [ ] Accounts settings dialog
-- [ ] Tests + manual first-run pass
-- [ ] Verification
+- [x] First-run empty state + workspace create
+- [x] Space create + task create + archive action
+- [x] Accounts settings dialog
+- [x] Tests
+- [ ] Manual first-run pass in a real browser (not done this pass — no
+      browser available in the agent environment; needs a human check
+      before/at merge)
+- [x] Verification
 
 ## Validation
 
-(Filled as confirmed.)
+- `task build`, `task test`, `task lint` all pass (Go side untouched by
+  this change, verified anyway per the plan).
+- Web: `bunx tsc -b` clean, `bun run test` 124/124 passing across 12
+  files, covering every automated scenario listed above (empty state,
+  workspace/space/task create + refresh, daemon error surfacing,
+  archive confirm + task.archive, accounts list/add/error).
+- NOT done: the manual real-browser first-run walkthrough (empty
+  daemon → create workspace → add task → send a prompt). This agent
+  session has no browser tool. Please run through it manually before
+  merging, or ask the next session to do it with a browser-capable
+  tool.
