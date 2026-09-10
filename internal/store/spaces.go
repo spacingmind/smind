@@ -51,7 +51,7 @@ func (s *Store) ListSpacesByWorkspace(workspaceID int64) ([]Space, error) {
 	}
 	defer rows.Close()
 
-	var spaces []Space
+	spaces := make([]Space, 0)
 	for rows.Next() {
 		var sp Space
 		if err := rows.Scan(&sp.ID, &sp.WorkspaceID, &sp.Title, &sp.EnvData, &sp.CreatedAt, &sp.UpdatedAt); err != nil {
