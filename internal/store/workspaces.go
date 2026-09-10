@@ -50,7 +50,7 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	}
 	defer rows.Close()
 
-	var workspaces []Workspace
+	workspaces := make([]Workspace, 0)
 	for rows.Next() {
 		var w Workspace
 		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt); err != nil {
