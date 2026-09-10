@@ -274,3 +274,15 @@ export interface PermissionPendingEventPayload {
   summary: string;
   options: PermissionOption[];
 }
+
+// One entry in an account.list response (internal/wsapi/handlers.go's
+// accountResult): lowercase json tags, unlike the PascalCase no-tag store
+// structs above. Credential material itself is never returned over RPC.
+export interface Account {
+  id: number;
+  provider: string;
+  label: string;
+  credentialType: string;
+  createdAt: string;
+  updatedAt: string;
+}
