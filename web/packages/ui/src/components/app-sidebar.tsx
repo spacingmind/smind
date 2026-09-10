@@ -256,8 +256,9 @@ export function AppSidebar({
                       <div className="text-xs text-muted-foreground">
                         <p className="font-medium text-foreground">Welcome to smind</p>
                         <p className="mt-1">
-                          A workspace points smind at a local git repository. Create
-                          one to start adding tasks.
+                          A workspace is an existing git repo. Tasks are its isolated
+                          worktrees; group them into spaces if you want. Create a
+                          workspace to start.
                         </p>
                       </div>
                       <Button size="sm" className="w-fit" onClick={() => setCrud({ kind: "workspace" })}>
