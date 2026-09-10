@@ -94,7 +94,8 @@ export function useFileExplorer(client: WsClientLike | null, task: Task | null):
     setDirs((prev) => withDir(prev, path, { loading: true, error: null }));
 
     c.call<FileEntry[]>("file.list", { taskId: t.ID, path })
-      .then((entries) => {
+      .then((rawEntries) => {
+        const entries = rawEntries ?? [];
         if (session.cancelled) return;
         setDirs((prev) => withDir(prev, path, { entries, loading: false, error: null }));
       })

@@ -46,16 +46,51 @@ docs/research/uiux-audit.md and docs/research/test-gap-audit.md.
 
 ## Decisions
 
-(Filled by implementer: exact store function changes, contract-test
- helper shape, where the `?? []` guards land.)
+- Store fixes are exactly `var x []T` → `x := make([]T, 0)` in the four
+  spots the audit named: `internal/store/workspaces.go:53`,
+  `spaces.go:54`, `tasks.go:57`, `internal/workspace/git.go:251`
+  (`taskChangedFiles`). Other `var x []T` sites in internal/store
+  (accounts, routing_decisions, quota_snapshots, terminal_sessions,
+  ListWorkspaceAccountIDs) stay per the audit — none cross the wire.
+- Contract tests live in `internal/wsapi/empty_list_test.go`, split in
+  two: `TestServer_EmptyDaemonListResultsAreArrays` (the 7 RPCs
+  callable with a completely empty store) and
+  `TestServer_EmptyTaskListResultsAreArrays` (task.files + file.list,
+  which require an existing task — a clean worktree and an empty dir
+  respectively). A shared `emptyListResult` helper sends each request
+  and asserts raw `resp.Result` bytes are the expected literal prefix
+  (`[]` / `{"files":[]}` / `{"providers":[`), never `null`.
+  provider.list asserts a prefix only, since its providers content is
+  a hardcoded literal that varies.
+- Client guards: `?? []` / `.then((r) => r ?? [])` at the RPC boundary
+  in `useWorkspaceTree` (workspace.list, space.list, task.list),
+  `useTaskAttention` (run.list), `TerminalPane` (terminal.list), and
+  `useFileExplorer` (file.list). task.files was already guarded
+  (diff-viewer-pane) and provider.list is never null (Go literal), so
+  no change there.
+- The App-level regression test answers `workspace.list` and
+  `run.list` with literal `null` (the only list RPCs that fire on a
+  connect with zero workspaces — space.list/task.list never fire when
+  the outer list is empty) and asserts "No workspaces yet." renders.
 
 ## Progress
 
-- [ ] store nil-slice fixes (4 functions)
-- [ ] contract tests (all list RPCs)
-- [ ] client null guards + empty-daemon App test
-- [ ] Verification (both chains) + manual check
+- [x] store nil-slice fixes (4 functions)
+- [x] contract tests (all list RPCs)
+- [x] client null guards + empty-daemon App test
+- [x] Verification (both chains) + manual check
 
 ## Validation
 
-(Filled as confirmed.)
+- `go build ./...` clean; `gofmt -l .` empty; `go vet ./...` clean.
+- `go test -race ./...` — all packages pass, including the two new
+  contract tests (9 RPC shapes asserted).
+- `task test` (go test + web suite) passes; `task lint` (vet + gofmt)
+  passes.
+- Web: `bunx tsc -b` clean; `bun run test` 112/112 across 10 files,
+  including the new "an empty daemon (every list RPC resolving null)
+  renders the sidebar empty state without throwing" App test (12
+  App.test.tsx tests total). `task build` succeeded; dist restored to
+  committed `.gitkeep`-only state.
+- Manual browser check not run in this sandbox (no browser); the jsdom
+  empty-daemon test stands in, per the scenario's own allowance.
