@@ -105,6 +105,20 @@ func TestManager_CreateWorkspace(t *testing.T) {
 		}
 	})
 
+	t.Run("empty title defaults to repo dir name", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		if want := filepath.Base(repo); w.Title != want {
+			t.Fatalf("CreateWorkspace() title = %q, want repo dir name %q", w.Title, want)
+		}
+	})
+
 	t.Run("rejects non-existent path", func(t *testing.T) {
 		t.Parallel()
 		m := newTestManager(t)

@@ -101,6 +101,40 @@ func TestManager_RunTask(t *testing.T) {
 	}
 }
 
+func TestManager_ListTasks(t *testing.T) {
+	t.Parallel()
+
+	t.Run("excludes archived tasks", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		live, err := m.CreateTask(w.ID, nil, "Live")
+		if err != nil {
+			t.Fatalf("CreateTask(Live) error = %v", err)
+		}
+		doomed, err := m.CreateTask(w.ID, nil, "Doomed")
+		if err != nil {
+			t.Fatalf("CreateTask(Doomed) error = %v", err)
+		}
+		if _, err := m.ArchiveTask(doomed.ID); err != nil {
+			t.Fatalf("ArchiveTask() error = %v", err)
+		}
+
+		tasks, err := m.ListTasks(w.ID)
+		if err != nil {
+			t.Fatalf("ListTasks() error = %v", err)
+		}
+		if len(tasks) != 1 || tasks[0].ID != live.ID {
+			t.Fatalf("ListTasks() = %+v, want only the non-archived task %d", tasks, live.ID)
+		}
+	})
+}
+
 func TestManager_ArchiveTask(t *testing.T) {
 	t.Parallel()
 
