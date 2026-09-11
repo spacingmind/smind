@@ -522,9 +522,14 @@ type permissionRequestParams struct {
 
 // permissionResolvedParams is the params payload of a "permission_resolved"
 // event task.prompt/run.attach emit for taskrunner.EventTypePermissionResolved.
+// Reason is the wire form of taskrunner.PermissionResolution ("human" |
+// "auto_safe" | "timeout") -- what lets a caller (the web UI, or a log
+// reader) distinguish a real person clicking a button from either kind of
+// auto-resolution, per task-permission-ux.md Item 2.
 type permissionResolvedParams struct {
 	RequestID string `json:"requestId"`
 	OptionID  string `json:"optionId"`
+	Reason    string `json:"reason"`
 }
 
 // handleTaskPrompt starts a Run and then behaves like an implicit
@@ -543,15 +548,19 @@ type permissionResolvedParams struct {
 func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			TaskID   int64               `json:"taskId"`
-			Provider taskrunner.Provider `json:"provider"`
-			Prompt   string              `json:"prompt"`
+			TaskID         int64                     `json:"taskId"`
+			Provider       taskrunner.Provider       `json:"provider"`
+			Prompt         string                    `json:"prompt"`
+			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
 		}
+		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
+			return nil, fmt.Errorf("task.prompt: invalid approvalPolicy %q", p.ApprovalPolicy)
+		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -582,15 +591,19 @@ type runStartResult struct {
 func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			TaskID   int64               `json:"taskId"`
-			Provider taskrunner.Provider `json:"provider"`
-			Prompt   string              `json:"prompt"`
+			TaskID         int64                     `json:"taskId"`
+			Provider       taskrunner.Provider       `json:"provider"`
+			Prompt         string                    `json:"prompt"`
+			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
 		}
+		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
+			return nil, fmt.Errorf("run.start: invalid approvalPolicy %q", p.ApprovalPolicy)
+		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
@@ -661,6 +674,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 				rc.Emit("permission_resolved", permissionResolvedParams{
 					RequestID: e.PermissionRequestID,
 					OptionID:  e.PermissionOptionID,
+					Reason:    string(e.PermissionResolution),
 				})
 			}
 		case <-cancelCh:
@@ -704,6 +718,9 @@ type runLogEvent struct {
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
 	OptionID   string                   `json:"optionId,omitempty"`
+	// Reason is the wire form of taskrunner.PermissionResolution, populated
+	// for a "permission_resolved" entry -- see permissionResolvedParams.
+	Reason string `json:"reason,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -730,6 +747,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			Type:      "permission_resolved",
 			RequestID: e.PermissionRequestID,
 			OptionID:  e.PermissionOptionID,
+			Reason:    string(e.PermissionResolution),
 		}
 	default:
 		return runLogEvent{Type: "chunk", Text: e.Text}

@@ -71,7 +71,8 @@ CREATE TABLE IF NOT EXISTS runs (
     started_at TIMESTAMP NOT NULL,
     finished_at TIMESTAMP,
     stop_reason TEXT NOT NULL DEFAULT '',
-    err_msg TEXT NOT NULL DEFAULT ''
+    err_msg TEXT NOT NULL DEFAULT '',
+    approval_policy TEXT NOT NULL DEFAULT 'manual'
 );
 
 CREATE TABLE IF NOT EXISTS run_events (

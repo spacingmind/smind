@@ -395,13 +395,15 @@ type stubDecider struct {
 	mu      sync.Mutex
 	calls   int
 	summary string
+	command string
 	options []PermissionOption
 }
 
-func (d *stubDecider) Decide(_ context.Context, summary string, options []PermissionOption) (string, error) {
+func (d *stubDecider) Decide(_ context.Context, summary, command string, options []PermissionOption) (string, error) {
 	d.mu.Lock()
 	d.calls++
 	d.summary = summary
+	d.command = command
 	d.options = options
 	d.mu.Unlock()
 	return d.optionID, nil
