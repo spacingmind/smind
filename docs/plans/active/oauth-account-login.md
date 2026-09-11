@@ -137,7 +137,9 @@ first access/refresh token pair.
 - [x] CLI: `smind account login`
 - [x] Web: accounts-dialog "Connect" action
 - [x] Tests
-- [ ] Manual real-provider login (anthropic + openai) — **not done**, see Validation
+- [ ] Manual real-provider login — anthropic DONE (2026-09-11, via imported
+      Claude Code credential + a real end-to-end run); openai still pending,
+      see Validation
 - [x] ROADMAP update
 - [x] Verification
 
@@ -245,18 +247,22 @@ first access/refresh token pair.
   all); nothing to close in it, so nothing was added there. The gap that
   *does* exist verbatim in `docs/ROADMAP.md` (Phase 1's "not yet exercised
   with a real provider account" note) is the one actually updated.
-- **Manual real-provider login (anthropic + openai end-to-end against real
-  vendor accounts) — NOT DONE.** This environment has no real Anthropic or
-  OpenAI account credentials and no real browser to drive an interactive
-  OAuth consent screen, so this criterion could not be exercised, full
-  stop. Everything up to the vendor's own authorize/consent page is
-  implemented and unit-tested against fakes (see above); what's genuinely
-  unverified is whether `claude.ai`'s and `auth.openai.com`'s real endpoints
-  accept these exact requests and redirect back the way `refs/cliproxyapi`
-  suggests they do. Recommend a human runs `smind account login anthropic
-  <label>` and `smind account login openai <label>` against a running
-  daemon, with a real browser, before relying on this in production; until
-  then Phase 1's ROADMAP note about real-account validation stays open.
+- **Manual real-provider login — anthropic half DONE (2026-09-11), openai
+  still pending.** The original session had no real credentials and no
+  browser, so this criterion was left open. A later session verified the
+  anthropic side end-to-end: the user's real Claude Code credential
+  (`~/.claude/.credentials.json` claudeAiOauth — accessToken/refreshToken/
+  expiresAt, exactly OAuthCredential's shape) was imported via
+  `smind account add anthropic claude-main`, then a Playwright-driven
+  prompt through the web UI ran a real agent turn against the live
+  provider: assistant reply exact-match, `stopReason: end_turn`, recorded
+  in the daemon's run_events. So routing → credential → live Anthropic
+  API is proven with a real account (imported credential, not an
+  in-browser OAuth consent screen — the authorize/redirect UI path itself
+  still has no real-consent-screen exercise). Openai remains unverified
+  against a real account: run `smind account login openai <label>` with a
+  real browser, or import a Codex credential the same way, then send a
+  run; until then Phase 1's ROADMAP note stays open for the openai half.
 - **Verification**: `task build` (Go + web build), `task test` (full Go
   suite, all packages green, including `internal/accounts` and
   `internal/wsapi` under plain `go test`; the OAuth-specific tests were
