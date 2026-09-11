@@ -29,7 +29,7 @@ additions (workspace.update, task.rename — see Decisions).
 
 - "Add task" at workspace or space level (dialog: title; optional
   space select when started from workspace level) → task.create → tree
-  refreshes → task selected (so the user lands in the chat tab ready
+  refresh → task selected (so the user lands in the chat tab ready
   to prompt).
 - Task row context/hover action: "Archive task" with a confirm step
   (task.archive checkpoints work first — per PR #52; confirm copy
@@ -71,9 +71,24 @@ additions (workspace.update, task.rename — see Decisions).
 
 ## Decisions
 
-(To be filled: dialog components (shadcn Dialog), tree refresh
- mechanism, context menu vs hover buttons, whether workspace.update/
- task.rename RPCs are added this pass — default NO, keep scope.)
+- Dialog components: shadcn Dialog primitives, feature-local wrappers
+  in crud-dialogs.tsx.
+- Tree refresh: local refresh by the acting client after each
+  successful create/archive (no cross-connection events).
+- Context menu vs hover buttons: "⋯" dropdown (RowMenu) on hover for
+  workspace/space rows; task rows get their own per-task trigger.
+- workspace.update/task.rename RPCs: NOT added this pass.
+- Follow-ups found during the Playwright pass (both fixed):
+  - Backend `CreateWorkspace` now defaults an empty title to the repo
+    dir name (`internal/workspace/workspace.go`) — the spec's
+    "defaults to repo dir name" was previously only true in the UI's
+    eyes; the stored title was empty.
+  - Backend `Manager.ListTasks` now filters out archived tasks
+    (`internal/workspace/task.go`) — task.list previously returned
+    archived tasks forever, so an archived task never left the sidebar
+    (component tests missed it because their mock refresh returns []).
+- See also docs/research/ui-test-ids.md: data-testid coverage for
+  Playwright selectors (gaps found during this pass).
 
 ## Progress
 
@@ -81,9 +96,9 @@ additions (workspace.update, task.rename — see Decisions).
 - [x] Space create + task create + archive action
 - [x] Accounts settings dialog
 - [x] Tests
-- [ ] Manual first-run pass in a real browser (not done this pass — no
-      browser available in the agent environment; needs a human check
-      before/at merge)
+- [x] Manual first-run pass in a real browser — done 2026-09-11 as a
+      Playwright pass against a real daemon + real browser (see
+      Validation), plus the two follow-up fixes it surfaced.
 - [x] Verification
 
 ## Validation
@@ -94,8 +109,24 @@ additions (workspace.update, task.rename — see Decisions).
   files, covering every automated scenario listed above (empty state,
   workspace/space/task create + refresh, daemon error surfacing,
   archive confirm + task.archive, accounts list/add/error).
-- NOT done: the manual real-browser first-run walkthrough (empty
-  daemon → create workspace → add task → send a prompt). This agent
-  session has no browser tool. Please run through it manually before
-  merging, or ask the next session to do it with a browser-capable
-  tool.
+- **Manual real-browser walkthrough — DONE (Playwright, 2026-09-11).**
+  Driven headless Chromium against a real daemon (fresh
+  SMIND_HOME, embedded dist UI) with a real local git repo:
+  - First-run empty state renders guide + "New workspace" (PASS);
+  - Create workspace via dialog (path only, no title) → appears in
+    sidebar, auto-expanded (PASS) — and, after the fix, the stored
+    title defaults to the repo dir name ("repo" in `smind workspace
+    ls`, previously empty);
+  - "Add task" via the workspace row's ⋯ menu → dialog → task appears
+    and is selected (PASS);
+  - Prompt sent from the chat form ("Say exactly: smind-e2e-ok") →
+    run created, executed end-to-end against a real Anthropic account,
+    assistant text exactly `smind-e2e-ok`, `stopReason: end_turn`
+    (verified in run_events) (PASS);
+  - Archive task via task row ⋯ menu → confirm dialog shows
+    checkpoint copy → confirm → task archived; after the ListTasks
+    fix the archived task leaves the sidebar on refresh (PASS);
+  - Accounts dialog lists the imported account: label `claude-main`,
+    badge "Anthropic (Claude) · oauth-shape credential" (PASS).
+  Scripts and raw results live outside the repo in /tmp/smind-e2e/
+  (e2e.mjs, e2e2.mjs, E2E-RESULT.md).
