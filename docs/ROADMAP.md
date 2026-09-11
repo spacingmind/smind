@@ -39,14 +39,25 @@ Goal: replace Paseo as daily driver.
 - [x] Extract Claude Code client into its own Go module/repo: [spacingmind/claude-agent-sdk-go](https://github.com/spacingmind/claude-agent-sdk-go) (public, MIT) — no official Go SDK for Claude Code exists yet. `internal/taskrunner` now depends on it externally.
 - [x] WebSocket RPC API (`internal/wsapi`, `GET /ws`) exposing workspace/space/task CRUD and streaming `task.prompt` — the transport the web UI (and later the terminal feature) will drive. REST+SSE was tried first and discarded in favor of RPC-over-WebSocket (bidirectional need); gRPC ruled out for this layer (no browser support) but planned for daemon↔relay in Phase 3.
 - [x] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent timeline (streaming chat); file explorer with git status; CodeMirror 6 editor; custom per-hunk diff viewer; xterm terminal (PTY in task cwd); permission prompts UI
-- [ ] Web UI: preview pane (rendered output alongside the CodeMirror editor) — the one piece of the original Web UI item not yet built
+- [x] Web UI: preview pane (markdown, svg, sandboxed html alongside the CodeMirror editor) — built in #51, e2e-verified in the crud-ui Playwright pass
 - [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
 
-Remaining for Phase 2: editor preview pane; Codex spawning (app-server
-JSON-RPC follow-up); the real scopedocs dogfood that is the definition of
-done.
+Remaining for Phase 2: the dogfood that is the definition of done.
 
-Definition of done: a real scopedocs feature built end-to-end from smind UI, replacing Paseo.
+Codex spawning status (2026-09-11): live-verified up to the real turn.
+`codex app-server` v0.149.1 speaks stdio JSON-RPC directly (bare spawn
+works — invalidating provider-codex's earlier "daemon+proxy required"
+finding); smind's client completed a real initialize + thread/start and
+received a real `turn/completed` (status Failed) with the account's
+usage-limit error surfaced verbatim. The only unexercised step is a
+quota'd successful agent turn, blocked on the account's Codex limit
+(resets Oct 7, 2026) — protocol-level work is done.
+
+Definition of done (re-scoped by user, 2026-09-11 — was "a real
+scopedocs feature built end-to-end from smind UI"): **dogfood smind on
+smind** — use smind (not Paseo) as the daily driver for real work on
+this repo, closing the loop it was built for. A scopedocs feature
+remains a fine future stress test but is no longer the Phase 2 gate.
 
 ## Phase 3 — Relay E2EE + Mobile (weeks 11-14)
 
