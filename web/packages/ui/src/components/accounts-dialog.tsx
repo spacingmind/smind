@@ -187,6 +187,7 @@ export function AccountsDialog({
                 key={p.id}
                 variant="outline"
                 disabled={connecting !== null}
+                data-testid={`accounts-connect-${p.id}`}
                 onClick={() => void connect(p.id)}
               >
                 {connecting === p.id ? "Connecting…" : `Connect ${p.label}`}
@@ -224,6 +225,7 @@ export function AccountsDialog({
           <button
             type="button"
             aria-expanded={showManual}
+            data-testid="accounts-manual-toggle"
             onClick={() => setShowManual((v) => !v)}
             className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
           >
@@ -279,7 +281,7 @@ export function AccountsDialog({
                 />
               </div>
               <div className="flex justify-end">
-                <Button onClick={add} disabled={pending}>
+                <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
                   {pending ? "Adding…" : "Add account"}
                 </Button>
               </div>

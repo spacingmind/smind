@@ -110,6 +110,7 @@ function RunEntryView({
               size="sm"
               className="h-5 px-2 text-xs"
               disabled={stopping}
+              data-testid="chat-stop-button"
               onClick={handleStop}
             >
               Stop
@@ -173,7 +174,7 @@ function PendingPermissionView({
     <div data-testid="pending-permission" className="mt-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-2">
       <p className="text-sm font-medium">{pending.summary}</p>
       <div className="mt-2 flex flex-wrap gap-2">
-        {pending.options.map((option) => (
+        {pending.options.map((option, index) => (
           <Button
             key={option.id}
             type="button"
@@ -181,6 +182,7 @@ function PendingPermissionView({
             size="sm"
             className="h-6 px-2 text-xs"
             disabled={respondingTo !== null}
+            data-testid={`chat-permission-option-${index}`}
             onClick={() => handleClick(option.id)}
           >
             {option.label}
@@ -266,7 +268,7 @@ function PromptForm({
         placeholder="Send a prompt…"
         disabled={inactive}
       />
-      <Button type="submit" disabled={inactive || !prompt.trim()}>
+      <Button type="submit" disabled={inactive || !prompt.trim()} data-testid="chat-send-button">
         Send
       </Button>
       {formError && <span className="text-xs text-destructive">{formError}</span>}

@@ -32,17 +32,21 @@ function FormActions({
   label,
   pending,
   onCancel,
+  submitTestId,
+  cancelTestId,
 }: {
   label: string;
   pending: boolean;
   onCancel: () => void;
+  submitTestId?: string;
+  cancelTestId?: string;
 }) {
   return (
     <DialogFooter>
-      <Button type="button" variant="outline" onClick={onCancel}>
+      <Button type="button" variant="outline" onClick={onCancel} data-testid={cancelTestId}>
         Cancel
       </Button>
-      <Button type="submit" disabled={pending}>
+      <Button type="submit" disabled={pending} data-testid={submitTestId}>
         {pending ? "Creating…" : label}
       </Button>
     </DialogFooter>
@@ -57,6 +61,8 @@ function CrudForm({
   onSubmit,
   onOpenChange,
   children,
+  submitTestId,
+  cancelTestId,
 }: {
   title: string;
   description?: string;
@@ -64,6 +70,8 @@ function CrudForm({
   onSubmit: () => Promise<boolean>;
   onOpenChange: (open: boolean) => void;
   children: ReactNode;
+  submitTestId?: string;
+  cancelTestId?: string;
 }) {
   const [pending, setPending] = useState(false);
 
@@ -84,7 +92,13 @@ function CrudForm({
         }}
       >
         {children}
-        <FormActions label={submitLabel} pending={pending} onCancel={() => onOpenChange(false)} />
+        <FormActions
+          label={submitLabel}
+          pending={pending}
+          onCancel={() => onOpenChange(false)}
+          submitTestId={submitTestId}
+          cancelTestId={cancelTestId}
+        />
       </form>
     </DialogContent>
   );
@@ -116,6 +130,8 @@ export function CreateWorkspaceDialog({
             description="Must be an existing git repository -- tasks are created as worktrees branched off it."
             submitLabel="Create workspace"
             onOpenChange={onOpenChange}
+            submitTestId="dialog-new-workspace-submit"
+            cancelTestId="dialog-new-workspace-cancel"
             onSubmit={async () => {
               if (!path.trim()) {
                 setError("Path is required.");
@@ -143,13 +159,19 @@ export function CreateWorkspaceDialog({
               <div className="flex gap-2">
                 <Input
                   id="workspace-path"
+                  data-testid="dialog-new-workspace-path-input"
                   placeholder="/path/to/repo"
                   value={path}
                   onChange={(e) => setPath(e.target.value)}
                   autoFocus
                   className="flex-1"
                 />
-                <Button type="button" variant="outline" onClick={() => setPickerOpen(true)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-testid="dialog-new-workspace-browse-button"
+                  onClick={() => setPickerOpen(true)}
+                >
                   Browse…
                 </Button>
               </div>
@@ -160,6 +182,7 @@ export function CreateWorkspaceDialog({
               </label>
               <Input
                 id="workspace-title"
+                data-testid="dialog-new-workspace-title-input"
                 placeholder="Defaults to the repository directory name"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
@@ -203,6 +226,8 @@ export function CreateSpaceDialog({
           description="Groups tasks inside this workspace -- it isn't its own repo; the workspace already points at that."
           submitLabel="Create space"
           onOpenChange={onOpenChange}
+          submitTestId="dialog-new-space-submit"
+          cancelTestId="dialog-new-space-cancel"
           onSubmit={async () => {
             if (!title.trim()) {
               setError("Title is required.");
@@ -225,6 +250,7 @@ export function CreateSpaceDialog({
             </label>
             <Input
               id="space-title"
+              data-testid="dialog-new-space-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
@@ -268,6 +294,8 @@ export function CreateTaskDialog({
           description={`A task worktree in ${workspace.Title || workspace.Path}.`}
           submitLabel="Create task"
           onOpenChange={onOpenChange}
+          submitTestId="dialog-new-task-submit"
+          cancelTestId="dialog-new-task-cancel"
           onSubmit={async () => {
             if (!title.trim()) {
               setError("Title is required.");
@@ -294,6 +322,7 @@ export function CreateTaskDialog({
             </label>
             <Input
               id="task-title"
+              data-testid="dialog-new-task-title-input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               autoFocus
@@ -305,7 +334,7 @@ export function CreateTaskDialog({
                 Space <span className="font-normal text-muted-foreground">(optional)</span>
               </label>
               <Select value={spaceId} onValueChange={setSpaceId}>
-                <SelectTrigger id="task-space" className="w-full">
+                <SelectTrigger id="task-space" data-testid="dialog-new-task-space-select" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -381,6 +410,7 @@ export function DeleteWorkspaceDialog({
           <Button
             variant="destructive"
             disabled={pending}
+            data-testid="dialog-delete-workspace-confirm"
             onClick={async () => {
               if (!workspace) return;
               setPending(true);
@@ -443,6 +473,7 @@ export function DeleteSpaceDialog({
           <Button
             variant="destructive"
             disabled={pending}
+            data-testid="dialog-delete-space-confirm"
             onClick={async () => {
               if (!space) return;
               setPending(true);
@@ -505,6 +536,7 @@ export function ArchiveTaskDialog({
           <Button
             variant="destructive"
             disabled={pending}
+            data-testid="dialog-archive-task-confirm"
             onClick={async () => {
               if (!task) return;
               setPending(true);
