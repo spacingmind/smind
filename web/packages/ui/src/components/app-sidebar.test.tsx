@@ -1,6 +1,6 @@
 import { act } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -170,5 +170,58 @@ describe("AppSidebar", () => {
 
     expect(onSelectTask).toHaveBeenCalledTimes(1);
     expect(onSelectTask).toHaveBeenCalledWith(TASK_IN_SPACE_A);
+  });
+
+  describe("notifications toggle", () => {
+    /** jsdom has no Notification API -- installs a minimal fake so the toggle's "default" (clickable) state is reachable at all; without it useNotificationPermission reports "unsupported" and the button stays disabled, which a separate test below covers directly. */
+    function installFakeNotification(initialPermission: NotificationPermission) {
+      const requestPermission = vi
+        .fn<() => Promise<NotificationPermission>>()
+        .mockResolvedValue("granted");
+      class FakeNotification {
+        static permission: NotificationPermission = initialPermission;
+        static requestPermission = requestPermission;
+      }
+      vi.stubGlobal("Notification", FakeNotification);
+      return requestPermission;
+    }
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("never requests Notification permission on mount -- only an explicit click on the toggle does", async () => {
+      const requestPermission = installFakeNotification("default");
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      expect(requestPermission).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("notifications-toggle"));
+      await flush();
+
+      expect(requestPermission).toHaveBeenCalledTimes(1);
+    });
+
+    it("without a Notification API at all, the toggle renders disabled instead of throwing", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const button = screen.getByTestId("notifications-toggle");
+      expect(button).toBeDisabled();
+      expect(() => fireEvent.click(button)).not.toThrow();
+    });
   });
 });
