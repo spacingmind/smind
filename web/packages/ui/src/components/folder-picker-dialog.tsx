@@ -125,6 +125,7 @@ export function FolderPickerDialog({
                   <button
                     type="button"
                     data-testid="folder-row"
+                    data-path={entry.path}
                     onClick={() => void navigate(entry.path)}
                     className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-accent"
                   >
