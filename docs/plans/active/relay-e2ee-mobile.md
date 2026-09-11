@@ -5,8 +5,9 @@ dumb-pipe relay server (`smind relay`) that lets a paired mobile device
 reach a daemon it can't otherwise route to directly, without the relay
 ever seeing plaintext. Based on `docs/research/relay-design-status.md`
 (read-only audit: zero relay code exists today) and
-`docs/decisions/0007-relay-architecture.md` (draft ADR covering the
-architectural choices this plan depends on).
+`docs/decisions/0007-relay-architecture.md` — **Accepted 2026-09-11**:
+crypto is X25519 + ChaCha20-Poly1305 (counter-based nonces); all other
+choices per the ADR's recommendations.
 
 **This plan does not cover** the Expo mobile app UI (pairing screen,
 workspace/task list, timeline, push notifications) — that is a
@@ -25,9 +26,9 @@ reconnect/rotation machinery, and the wire protocol between them.
   layer (which side is which daemon/device) but cannot decrypt or
   inspect application payloads.
 - **E2EE handshake (daemon ↔ mobile, relay as blind forwarder)**:
-  X25519 key agreement plus an AEAD per ADR-0007 decision (c) — pending
-  that decision, implementation must not start on the handshake's
-  crypto step. Handshake completes before either side accepts
+  X25519 key agreement + ChaCha20-Poly1305 AEAD with counter-based
+  (12-byte) nonces, per ADR-0007 (c) as accepted. Handshake completes
+  before either side accepts
   application-level messages; a mismatched or malformed handshake frame
   is rejected, not silently ignored.
 - **QR pairing**: daemon persists an X25519 keypair on disk (mode
@@ -131,8 +132,8 @@ moves from `DRAFT` to `Accepted`. In particular:
 
 ## Progress
 
-- [ ] ADR-0007 approved (blocking — nothing below starts until this is
-      checked)
+- [x] ADR-0007 approved (2026-09-11, user: ChaCha20-Poly1305; rest as
+      recommended)
 - [ ] Daemon X25519 keypair generation + persistence
 - [ ] Pairing offer encoding (URL fragment) + QR rendering
 - [ ] E2EE handshake (daemon + mobile sides)
