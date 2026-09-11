@@ -420,3 +420,46 @@ describe("App live events", () => {
     expect(screen.getByText("Welcome to smind")).toBeInTheDocument();
   });
 });
+
+describe("App sidebar resize", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("renders a drag handle between the sidebar and the content", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
+  });
+
+  it("a fresh mount reads the sidebar width back from persistence (simulating a reload after a previous resize)", async () => {
+    // Simulates "the user dragged the sidebar to 300px, then reloaded" --
+    // useSidebarWidth (see its own dedicated test for the clamp/persist
+    // logic in isolation) reads this back instead of the default on mount.
+    window.localStorage.setItem("smind:sidebar-width", "300");
+
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const { container } = render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const wrapper = container.querySelector('[data-slot="sidebar-wrapper"]') as HTMLElement | null;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper!.style.getPropertyValue("--sidebar-width")).toBe("300px");
+  });
+
+  it("a persisted width past the max bound still clamps on read-back, never rendering wider than SIDEBAR_MAX_WIDTH", async () => {
+    window.localStorage.setItem("smind:sidebar-width", "999999");
+
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const { container } = render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const wrapper = container.querySelector('[data-slot="sidebar-wrapper"]') as HTMLElement | null;
+    expect(wrapper!.style.getPropertyValue("--sidebar-width")).toBe("512px");
+  });
+});

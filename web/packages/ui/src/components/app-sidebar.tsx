@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import {
@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import type { TaskAttention } from "@/hooks/use-task-attention";
+import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
+import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import {
   ArchiveTaskDialog,
@@ -50,6 +52,27 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+
+/** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
+const EMPTY_ATTENTION: TaskAttention = new Map();
+
+/** The notifications toggle's label/tooltip per permission state -- also its accessible name, so a screen reader (or a test's getByRole(..., { name })) can tell the states apart. */
+const NOTIFICATION_LABEL: Record<NotificationPermissionState, string> = {
+  default: "Enable out-of-tab notifications",
+  granted: "Notifications enabled",
+  denied: "Notifications blocked -- allow them in your browser's site settings",
+  unsupported: "Notifications aren't supported in this browser",
+};
+
+/** A plain inline bell glyph -- not from lucide-react, so this doesn't depend on that package happening to export one under this exact name/version. Sized like any other icon here via Button's own `[&_svg:not([class*='size-'])]:size-4` rule. */
+function BellIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  );
+}
 
 /** A space plus the subset of its workspace's tasks scoped to it (Task.SpaceID === Space.ID). */
 interface SpaceWithTasks extends Space {
@@ -199,6 +222,19 @@ export function AppSidebar({
   const { workspaces, error, refresh } = useWorkspaceTree(client);
   const statusOverrides = useStatusOverrides(client, events ?? null);
 
+  // Out-of-tab attention notifications (Item 4): every task across the
+  // whole tree, flattened just far enough to label a Notification by
+  // title -- this list changing (workspace/space/task fetch completing)
+  // never itself fires anything; only a *new* attention reason while the
+  // tab is hidden does, in the hook itself.
+  const allTasks = useMemo(
+    () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
+    [workspaces],
+  );
+  const { permission: notificationPermission, requestPermission: requestNotificationPermission } =
+    useNotificationPermission();
+  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
+
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
   // The just-created workspace is expanded on landing; existing ones start
@@ -221,6 +257,20 @@ export function AppSidebar({
         <div className="flex items-center gap-2 px-2 py-1.5">
           <span className="text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
           <div className="ml-auto flex items-center gap-1 group-data-[collapsible=icon]:hidden">
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={NOTIFICATION_LABEL[notificationPermission]}
+              title={NOTIFICATION_LABEL[notificationPermission]}
+              data-testid="notifications-toggle"
+              disabled={notificationPermission !== "default"}
+              // Explicit user action, per Item 4's requirement -- this is
+              // the only place useNotificationPermission's requestPermission
+              // is ever called; nothing here runs unprompted on load.
+              onClick={requestNotificationPermission}
+            >
+              <BellIcon />
+            </Button>
             <Button
               variant="ghost"
               size="icon-sm"
