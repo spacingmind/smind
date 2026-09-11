@@ -402,6 +402,43 @@ describe("TaskDetailPane", () => {
     expect(screen.queryByTestId("pending-permission")).not.toBeInTheDocument();
   });
 
+  it("keeps the pending-permission card outside the scrolling log, pinned above the prompt form, while log chunks keep streaming in", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    client.emit("run.attach", 0, "permission_request", {
+      requestId: "req-1",
+      summary: "Run a risky command",
+      options: [{ id: "allow-1", label: "Allow", kind: "allow_once" }],
+    });
+    await flush();
+
+    // The card lives in a dock that is a *sibling* of the scrolling log
+    // container, not a descendant of it -- scrolling the log (or it
+    // growing arbitrarily long) can never carry the card off-screen with
+    // it, unlike the old inline-in-the-run-entry placement.
+    const scrollRegion = screen.getByTestId("run-log-scroll");
+    const dock = screen.getByTestId("pending-permission-dock");
+    expect(scrollRegion.contains(dock)).toBe(false);
+    expect(within(dock).getByTestId("pending-permission")).toBeInTheDocument();
+
+    // A long/streaming log keeps growing inside the scroll region...
+    for (let i = 0; i < 50; i++) {
+      client.emit("run.attach", 0, "chunk", { text: `line ${i}\n` });
+    }
+    await flush();
+    expect(screen.getByTestId("run-text")).toHaveTextContent("line 49");
+
+    // ...and the pending permission card is still right there, unaffected,
+    // no scrolling needed to find it.
+    expect(screen.getByTestId("pending-permission-dock")).toBeInTheDocument();
+    expect(screen.getByTestId("pending-permission")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Allow" })).toBeInTheDocument();
+  });
+
   it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} />);

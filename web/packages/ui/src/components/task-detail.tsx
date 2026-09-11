@@ -32,6 +32,14 @@ export function TaskDetailPane({
 }) {
   const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
 
+  // Every run currently holding an unanswered permission request -- in
+  // practice at most one (a task has one active run at a time), but this
+  // stays a list so nothing here assumes that. Rendered in a dock pinned
+  // between the scrolling log and the prompt form (see below) rather than
+  // inline per-run, so it can't be scrolled out of view while log chunks
+  // keep streaming in above/below it.
+  const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b px-4 py-3">
@@ -48,7 +56,7 @@ export function TaskDetailPane({
         </p>
       )}
 
-      <div className="flex-1 overflow-y-auto px-4 py-3">
+      <div data-testid="run-log-scroll" className="flex-1 overflow-y-auto px-4 py-3">
         {error && <p className="text-sm text-destructive">{error}</p>}
         {!error && runs === null && <p className="text-sm text-muted-foreground">Loading runs…</p>}
         {!error && runs !== null && runs.length === 0 && (
@@ -57,11 +65,30 @@ export function TaskDetailPane({
         {runs !== null && runs.length > 0 && (
           <ul className="space-y-4">
             {runs.map((run) => (
-              <RunEntryView key={run.id} run={run} onStop={stopRun} onRespondPermission={respondPermission} />
+              <RunEntryView key={run.id} run={run} onStop={stopRun} />
             ))}
           </ul>
         )}
       </div>
+
+      {/*
+       * The pending-permission dock: a sibling of the scrolling log above,
+       * not a descendant of it, so it stays pinned in place (like the
+       * prompt form right below it) no matter how far the log has
+       * scrolled or how much new output streams in. See the plan's Item 3.
+       */}
+      {pendingRuns.length > 0 && (
+        <div data-testid="pending-permission-dock" className="shrink-0 border-t bg-background px-4 py-2">
+          {pendingRuns.map((run) => (
+            <PendingPermissionView
+              key={run.id}
+              runId={run.id}
+              pending={run.pendingPermission!}
+              onRespond={respondPermission}
+            />
+          ))}
+        </div>
+      )}
 
       <PromptForm client={client} onSubmit={submitPrompt} disabled={!client} />
     </div>
@@ -71,11 +98,9 @@ export function TaskDetailPane({
 function RunEntryView({
   run,
   onStop,
-  onRespondPermission,
 }: {
   run: RunEntry;
   onStop: (runId: string) => Promise<void>;
-  onRespondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
 }) {
   const [stopping, setStopping] = useState(false);
   const [stopError, setStopError] = useState<string | null>(null);
@@ -122,13 +147,6 @@ function RunEntryView({
       <pre className="mt-2 whitespace-pre-wrap text-sm" data-testid="run-text">
         {run.text}
       </pre>
-      {run.pendingPermission && (
-        <PendingPermissionView
-          runId={run.id}
-          pending={run.pendingPermission}
-          onRespond={onRespondPermission}
-        />
-      )}
       {run.err && <p className="mt-1 text-xs text-destructive">{run.err}</p>}
       {stopError && <p className="mt-1 text-xs text-destructive">stop failed: {stopError}</p>}
     </li>
@@ -136,13 +154,14 @@ function RunEntryView({
 }
 
 /**
- * Inline prompt for a run's pending permission request: what's being
- * requested, plus one button per option. Clicking a button calls
- * run.respondPermission (via onRespond); this component never clears the
- * pending state itself on click -- the parent's pendingPermission prop
- * disappearing (once a "permission_resolved" event arrives, from this tab's
- * own click or another connection entirely) is what unmounts it, so both
- * cases are handled identically.
+ * A pending permission request card, rendered in the dock pinned above the
+ * prompt form (see TaskDetailPane): what's being requested, plus one
+ * button per option. Clicking a button calls run.respondPermission (via
+ * onRespond); this component never clears the pending state itself on
+ * click -- the parent's pendingPermission prop disappearing (once a
+ * "permission_resolved" event arrives, from this tab's own click or
+ * another connection entirely) is what unmounts it, so both cases are
+ * handled identically.
  */
 function PendingPermissionView({
   runId,
