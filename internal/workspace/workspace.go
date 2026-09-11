@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -69,6 +70,9 @@ func New(s *store.Store) *Manager {
 func (m *Manager) CreateWorkspace(path, title, routingPolicy string, accountIDs []int64) (store.Workspace, error) {
 	if err := validateGitRepoPath(path); err != nil {
 		return store.Workspace{}, err
+	}
+	if strings.TrimSpace(title) == "" {
+		title = filepath.Base(path)
 	}
 
 	w, err := m.store.CreateWorkspace(store.Workspace{
