@@ -2,14 +2,11 @@
 
 ## Status
 
-**DRAFT — pending user approval.** Per `AGENTS.md` rule (d) ("Material
-ambiguity"), every choice below affects architecture (state model,
-protocol, public API shape, crypto) and none is yet decided in
-`docs/decisions/`. This document presents each choice for the user to
-approve, reject, or amend — it is not itself a decision, and no
-implementation should start against it until Status changes to
-`Accepted`. Item (c) in particular has no safe default and must be
-explicitly resolved by the user before any handshake code is written.
+**Accepted — 2026-09-11.** User decision recorded in-session: (c)
+resolved to **ChaCha20-Poly1305** (keep the roadmap as written); every
+other item (a, b, d, e, f, g, h) approved as recommended. The
+implementation plan (`docs/plans/active/relay-e2ee-mobile.md`) is
+unblocked.
 
 ## Context
 
@@ -144,9 +141,12 @@ matching `refs/paseo`:**
   there's no correctness argument forcing the change, only a
   consistency-with-precedent one.
 
-**Ask:** confirm ChaCha20-Poly1305 (keep the roadmap as written) or
-switch to XSalsa20-Poly1305/NaCl `box` (match paseo) — and if switching,
-approve updating `docs/ROADMAP.md` Phase 3's wording to match.
+**Decision (user, 2026-09-11): ChaCha20-Poly1305** — keep the roadmap
+as written. Consequences accepted with this choice: nonces are
+counter-based (12-byte), never random, which makes the per-direction
+counter of decision (d) load-bearing for nonce uniqueness as well as
+replay detection; `golang.org/x/crypto/chacha20poly1305` becomes a
+direct import. No ROADMAP edit needed.
 
 ### (d) Replay protection — add nonce/counter tracking from the start
 
@@ -292,11 +292,8 @@ into this one as a side effect of building the relay's protocol.
 - `docs/plans/active/relay-e2ee-mobile.md` — implementation plan,
   currently blocked on this ADR's approval.
 
-## Decisions requiring explicit user approval before implementation starts
+## Decision log
 
-1. **(c) Crypto primitive — ChaCha20-Poly1305 vs. XSalsa20-Poly1305/NaCl
-   `box`.** No default; must be explicitly chosen.
-2. All other items (a, b, d, e, f, g, h) carry a recommendation each,
-   but per AGENTS.md rule (d) this entire document is a DRAFT — the
-   user should confirm or amend each before Status moves to `Accepted`
-   and implementation begins.
+- 2026-09-11: (c) resolved by user in-session — **ChaCha20-Poly1305**,
+  roadmap unchanged. (a, b, d, e, f, g, h) approved as recommended;
+  Status → Accepted.
