@@ -50,6 +50,9 @@ repo's history.
   Phase 2 agent spawning (Claude Code, Codex, GLM) via a standard protocol.
 - `refs/codex` — OpenAI Codex CLI, approval/sandbox patterns.
 - `refs/claude-code` — Claude Code CLI, for SDK/protocol edge cases.
+- `refs/deepseek-harness` — DeepSeek's agent harness (`dsh`,
+  everything-is-a-plugin architecture on Cordis) — UI/plugin-system
+  reference for agent-harness patterns.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading
