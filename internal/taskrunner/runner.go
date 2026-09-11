@@ -274,7 +274,17 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	var opts []claudecode.Option
 	switch {
 	case decider != nil:
-		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}))
+		// A human decider is wired up, so ask the CLI for permission-mode
+		// "acceptEdits" (not its "default"): under "default", the CLI blocks
+		// file edits itself without ever emitting a can_use_tool request,
+		// so a headless run with a decider silently loses every edit --
+		// the exact dogfood failure that motivated this (2026-09-11).
+		// "acceptEdits" lets edits through and still routes Bash and other
+		// sensitive tools through can_use_tool -> the decider -> the UI.
+		opts = append(opts,
+			claudecode.WithPermissionMode("acceptEdits"),
+			claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}),
+		)
 	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
 	}
