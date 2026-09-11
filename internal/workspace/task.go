@@ -126,9 +126,22 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 	return t, nil
 }
 
-// ListTasks returns all tasks for workspaceID, ordered by id.
+// ListTasks returns the workspace's non-archived tasks, ordered by id --
+// the sidebar's working set. Archived tasks stay queryable via GetTask
+// but leave the active list, mirroring how the UI treats archive as
+// removal from the tree (the crud-ui spec).
 func (m *Manager) ListTasks(workspaceID int64) ([]store.Task, error) {
-	return m.store.ListTasksByWorkspace(workspaceID)
+	all, err := m.store.ListTasksByWorkspace(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	live := all[:0]
+	for _, t := range all {
+		if t.Status != "archived" {
+			live = append(live, t)
+		}
+	}
+	return live, nil
 }
 
 // GetTask returns the task with the given id.
