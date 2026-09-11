@@ -127,7 +127,7 @@ export function App({
         <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground" data-testid="app-connection-status">
             {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
           </span>
         </header>
@@ -143,12 +143,19 @@ export function App({
                 <div className="mx-3 mt-2 overflow-x-auto">
                   <TabsList className="w-fit">
                     {taskState.tabs.map((entry) => (
-                      <TabsTrigger key={entry.key} value={entry.key} className="max-w-48 gap-1.5">
+                      <TabsTrigger
+                        key={entry.key}
+                        value={entry.key}
+                        data-testid={`workspace-tab-${entry.kind}`}
+                        className="max-w-48 gap-1.5"
+                      >
                         <span className="min-w-0 truncate">{entry.title}</span>
                         {entry.closable && (
                           <span
                             role="button"
                             aria-label={`Close ${entry.title}`}
+                            data-testid="workspace-tab-close"
+                            data-tab-key={entry.key}
                             onClick={(e) => {
                               e.stopPropagation();
                               e.preventDefault();
@@ -170,7 +177,10 @@ export function App({
                 ))}
               </Tabs>
             ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+              <div
+                data-testid="app-empty-state"
+                className="flex h-full items-center justify-center text-sm text-muted-foreground"
+              >
                 Select a task to get started.
               </div>
             )}

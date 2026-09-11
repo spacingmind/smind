@@ -241,6 +241,7 @@ export function AppSidebar({
                 variant="ghost"
                 size="icon-sm"
                 aria-label="New workspace"
+                data-testid="sidebar-new-workspace-button"
                 onClick={() => setCrud({ kind: "workspace" })}
                 className="mr-1"
               >
@@ -266,7 +267,12 @@ export function AppSidebar({
                           workspace to start.
                         </p>
                       </div>
-                      <Button size="sm" className="w-fit" onClick={() => setCrud({ kind: "workspace" })}>
+                      <Button
+                        size="sm"
+                        className="w-fit"
+                        data-testid="sidebar-empty-new-workspace-button"
+                        onClick={() => setCrud({ kind: "workspace" })}
+                      >
                         <Plus /> New workspace
                       </Button>
                     </div>
@@ -389,11 +395,18 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
 }
 
 /** The "⋯" hover/context menu shared by workspace and space rows. */
-function RowMenu({ items }: { items: { label: string; icon: ReactNode; onSelect: () => void }[] }) {
+function RowMenu({
+  items,
+  triggerProps,
+}: {
+  items: { label: string; icon: ReactNode; onSelect: () => void }[];
+  /** Extra DOM attributes (data-testid, data-*-id) so callers can disambiguate this shared trigger's otherwise-identical "Row actions" label between workspace and space rows. */
+  triggerProps?: Record<string, string | number>;
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0">
+        <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0" {...triggerProps}>
           <MoreHorizontal />
         </Button>
       </DropdownMenuTrigger>
@@ -444,7 +457,11 @@ function WorkspaceItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton onClick={onToggleExpanded}>
+      <SidebarMenuButton
+        onClick={onToggleExpanded}
+        data-testid="sidebar-workspace-row"
+        data-workspace-id={workspace.ID}
+      >
         <FolderGit2 />
         <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
         <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
@@ -456,6 +473,10 @@ function WorkspaceItem({
             { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
             { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
           ]}
+          triggerProps={{
+            "data-testid": "sidebar-workspace-actions-trigger",
+            "data-workspace-id": workspace.ID,
+          }}
         />
       </SidebarMenuAction>
       {expanded && (
@@ -532,6 +553,8 @@ function SpaceItem({
       attention={attention}
       statusOverrides={statusOverrides}
       onArchiveTask={onArchiveTask}
+      testId="sidebar-space-row"
+      spaceId={space.ID}
     >
       <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
         <RowMenu
@@ -539,6 +562,10 @@ function SpaceItem({
             { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
             { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
           ]}
+          triggerProps={{
+            "data-testid": "sidebar-space-actions-trigger",
+            "data-space-id": space.ID,
+          }}
         />
       </SidebarMenuSubItem>
     </SpaceLikeItem>
@@ -562,6 +589,8 @@ function SpaceLikeItem({
   statusOverrides,
   onArchiveTask,
   children,
+  testId,
+  spaceId,
 }: {
   title: string;
   tasks: Task[];
@@ -571,12 +600,19 @@ function SpaceLikeItem({
   statusOverrides: Map<number, string>;
   onArchiveTask: (task: Task) => void;
   children?: ReactNode;
+  /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
+  testId?: string;
+  spaceId?: number;
 }) {
   const [open, setOpen] = useState(true);
 
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton onClick={() => setOpen((o) => !o)}>
+      <SidebarMenuSubButton
+        onClick={() => setOpen((o) => !o)}
+        data-testid={testId}
+        data-space-id={spaceId}
+      >
         <Layers className="size-3.5" />
         <span className="min-w-0 truncate">{title}</span>
         <ChevronRight className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
@@ -631,7 +667,12 @@ function TaskRows({
         const hasAttention = reasons !== undefined && reasons.size > 0;
         return (
           <SidebarMenuSubItem key={task.ID}>
-            <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
+            <SidebarMenuSubButton
+              isActive={task.ID === selectedTaskId}
+              onClick={() => onSelectTask?.(task)}
+              data-testid="sidebar-task-row"
+              data-task-id={task.ID}
+            >
               <span className="min-w-0 truncate">{task.Title}</span>
               {hasAttention && (
                 <span
@@ -640,19 +681,29 @@ function TaskRows({
                   className="ml-auto size-2 shrink-0 rounded-full bg-primary"
                 />
               )}
-              <span className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}>
+              <span
+                data-testid="sidebar-task-status"
+                className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}
+              >
                 {statusOverrides.get(task.ID) ?? task.Status}
               </span>
             </SidebarMenuSubButton>
             <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon-sm" aria-label={`Actions for ${task.Title}`} className="size-5 p-0">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Actions for ${task.Title}`}
+                    data-testid="sidebar-task-actions-trigger"
+                    data-task-id={task.ID}
+                    className="size-5 p-0"
+                  >
                     <MoreHorizontal />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onSelect={() => onArchiveTask(task)}>
+                  <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
                     <Archive /> Archive task
                   </DropdownMenuItem>
                 </DropdownMenuContent>
