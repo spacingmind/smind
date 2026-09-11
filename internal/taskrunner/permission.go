@@ -38,7 +38,22 @@ type PermissionOption struct {
 // know which run's event stream to push the request onto (e.g. a
 // human-in-the-loop UI) construct a PermissionDecider per call, closing
 // over that context; internal/runs.Registry is today's only such
-// implementation.
+// implementation, and the only one that inspects command at all (to decide
+// whether ApprovalPolicyAutoSafe can auto-allow this request without ever
+// asking a human -- see AllowlistedCommand).
+//
+// command is the literal shell command this request is asking to run, when
+// the calling adapter can confirm one -- Claude Code's Bash tool
+// (claudeDeciderAdapter, from its Input["command"]) and Codex's
+// command-execution approval (codexDeciderAdapter, from its own Command
+// field) both can; ACP's tool-call schema (acpDeciderAdapter) exposes no
+// field this package has confirmed carries one, so it always passes "".
+// command is empty for any request that isn't shaped like a shell command
+// at all (a file-change approval, an ACP tool call of unknown kind, ...).
+// A PermissionDecider must never treat a non-empty command as anything
+// more than a hint -- ApprovalPolicyAutoSafe's AllowlistedCommand check is
+// the only thing that should ever turn it into an auto-allow decision, and
+// only for its own conservative allowlist.
 //
 // When no PermissionDecider is supplied to RunPrompt, behavior is
 // unchanged from before this type existed: each provider falls back to its
@@ -47,7 +62,7 @@ type PermissionOption struct {
 // turn default to acp.AutoApprovePolicy/claudecode.AutoDenyPolicy if never
 // set at all.
 type PermissionDecider interface {
-	Decide(ctx context.Context, summary string, options []PermissionOption) (optionID string, err error)
+	Decide(ctx context.Context, summary, command string, options []PermissionOption) (optionID string, err error)
 }
 
 // acpDeciderAdapter adapts a PermissionDecider to acp.PermissionPolicy: ACP's
@@ -62,7 +77,16 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
-	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), opts)
+	// command is always "" here: ACP's ToolCallUpdate (req.ToolCall) has no
+	// field this package has confirmed reliably carries the literal command
+	// being executed, unlike Claude Code's Input["command"] or Codex's
+	// Command below. Passing "" means ApprovalPolicyAutoSafe's
+	// AllowlistedCommand check can never match an ACP-driven (GLM/Kimi)
+	// request, so it always falls back to a human decision for this
+	// provider -- the correct, conservative behavior for a command this
+	// package can't actually identify, not a gap to silently paper over
+	// with a guessed schema.
+	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), "", opts)
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a
@@ -121,7 +145,7 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 	}
 	summary := fmt.Sprintf("run %s", req.ToolName)
 
-	optionID, err := a.decider.Decide(ctx, summary, opts)
+	optionID, err := a.decider.Decide(ctx, summary, bashCommand(req), opts)
 	if err != nil {
 		return false, nil, "", nil, false, err
 	}
@@ -129,6 +153,24 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		return true, req.Input, "", nil, false, nil
 	}
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
+}
+
+// bashCommand extracts the literal shell command from req, if req is a
+// Bash tool-use request -- Claude Code's built-in Bash tool's Input schema
+// is {"command": "...", ...}, confirmed against the fake CLI's own
+// "streaming_and_permission"-style scenarios in taskrunner_test.go. Any
+// other ToolName (Read, Edit, Write, a custom MCP tool, ...), or a Bash
+// request whose Input for some reason doesn't carry a string "command"
+// (shouldn't happen for a real Claude Code turn, but this is user-influenced
+// wire data, not something to trust blindly), returns "" -- see
+// PermissionDecider's doc comment on why an empty command is always safe
+// (never auto-allowed).
+func bashCommand(req claudecode.CanUseToolRequest) string {
+	if req.ToolName != "Bash" {
+		return ""
+	}
+	cmd, _ := req.Input["command"].(string)
+	return cmd
 }
 
 // Synthesized PermissionOption IDs for Codex-native turns, whose wire
@@ -150,7 +192,10 @@ type codexDeciderAdapter struct {
 
 func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
 	summary := fmt.Sprintf("run %s", req.Command)
-	return a.decide(ctx, summary)
+	// req.Command is Codex's own decoded field for exactly this request
+	// kind (unlike Claude Code's Input, there's no tool-name check needed
+	// here -- a CommandExecutionApprovalRequest is always a shell command).
+	return a.decide(ctx, summary, req.Command)
 }
 
 func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.FileChangeApprovalRequest) (bool, error) {
@@ -158,15 +203,19 @@ func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.Fil
 	if req.Reason != "" {
 		summary = req.Reason
 	}
-	return a.decide(ctx, summary)
+	// A file-change approval carries no shell command at all -- "" here
+	// means ApprovalPolicyAutoSafe can never auto-allow one, which is
+	// correct: this pass's allowlist only ever covers read-only shell
+	// verification commands, never a file modification.
+	return a.decide(ctx, summary, "")
 }
 
-func (a codexDeciderAdapter) decide(ctx context.Context, summary string) (bool, error) {
+func (a codexDeciderAdapter) decide(ctx context.Context, summary, command string) (bool, error) {
 	opts := []PermissionOption{
 		{ID: codexOptionAccept, Label: "Accept", Kind: "allow_once"},
 		{ID: codexOptionDecline, Label: "Decline", Kind: "reject_once"},
 	}
-	optionID, err := a.decider.Decide(ctx, summary, opts)
+	optionID, err := a.decider.Decide(ctx, summary, command, opts)
 	if err != nil {
 		return false, err
 	}

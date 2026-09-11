@@ -44,6 +44,14 @@ export interface Space {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
+// internal/taskrunner.ApprovalPolicy's two values, carried over the wire as
+// their underlying string -- run.start/task.prompt's optional
+// `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
+// default when omitted (today's always-ask-a-human behavior); "auto-safe"
+// lets a small, conservative allowlist of read-only verification commands
+// (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
+export type ApprovalPolicy = "manual" | "auto-safe";
+
 // One entry in a provider.list response (internal/taskrunner.ProviderInfo):
 // the provider id itself plus an optional human-facing label.
 export interface ProviderInfo {
@@ -114,10 +122,14 @@ export interface PermissionRequestEventParams {
 }
 
 // Params of a "permission_resolved" event task.prompt/run.attach emit
-// (internal/wsapi/handlers.go's permissionResolvedParams).
+// (internal/wsapi/handlers.go's permissionResolvedParams). `reason` is the
+// wire form of taskrunner.PermissionResolution ("human" | "auto_safe" |
+// "timeout") -- optional here (rather than a strict union) so an older
+// server payload with no reason field still decodes fine.
 export interface PermissionResolvedEventParams {
   requestId: string;
   optionId: string;
+  reason?: string;
 }
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
@@ -133,6 +145,7 @@ export interface RunLogEvent {
   summary?: string;
   options?: PermissionOption[];
   optionId?: string;
+  reason?: string;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).

@@ -79,4 +79,34 @@ type Event struct {
 	// PermissionOptionID is the option that was chosen, populated for
 	// EventTypePermissionResolved.
 	PermissionOptionID string
+
+	// PermissionResolution says *how* PermissionOptionID was decided,
+	// populated for EventTypePermissionResolved -- see PermissionResolution's
+	// doc comment. This is what lets a run's event/timeline (and run.logs)
+	// distinguish an auto-resolution (policy match, or a timeout) from an
+	// actual human clicking a button, per
+	// docs/plans/active/task-permission-ux.md Item 2.
+	PermissionResolution PermissionResolution
 }
+
+// PermissionResolution categorizes how an EventTypePermissionResolved
+// event's PermissionOptionID was decided.
+type PermissionResolution string
+
+const (
+	// PermissionResolvedByHuman is a real person answering via
+	// run.respondPermission (internal/runs.Registry.RespondPermission)
+	// before any auto-resolution fired.
+	PermissionResolvedByHuman PermissionResolution = "human"
+
+	// PermissionResolvedByAutoSafe is ApprovalPolicyAutoSafe auto-allowing
+	// the request itself, because its command matched AllowlistedCommand --
+	// no human was ever asked.
+	PermissionResolvedByAutoSafe PermissionResolution = "auto_safe"
+
+	// PermissionResolvedByTimeout is the request having gone unanswered
+	// long enough (see internal/runs's permission-timeout constant) that it
+	// was auto-resolved to a deny option instead of blocking the run
+	// forever -- never an allow, regardless of ApprovalPolicy.
+	PermissionResolvedByTimeout PermissionResolution = "timeout"
+)
