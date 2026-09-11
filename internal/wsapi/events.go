@@ -146,7 +146,12 @@ func (s *subscriber) next() (e Event, dropped int, ok bool) {
 		e, s.queue = s.queue[0], s.queue[1:]
 		return e, dropped, true
 	}
-	return e, dropped, s.closed
+	// Closed and drained: ok=false so pumpEvents falls into its wait(ctx)
+	// branch instead of spinning -- returning s.closed here (true once
+	// closed) made this look like "an event is ready" forever, so the
+	// pump never blocked and never noticed ctx firing: a 100%-CPU
+	// goroutine leaked per closed connection (2026-09-12 dogfood finding).
+	return e, dropped, false
 }
 
 // close marks the subscriber done; the pump exits once drained.
