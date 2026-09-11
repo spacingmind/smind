@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build --outDir ../../../internal/server/dist --emptyOutDir",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "NODE_OPTIONS=--no-experimental-webstorage vitest run"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.0",
