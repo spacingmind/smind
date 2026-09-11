@@ -22,6 +22,36 @@ func newTestTaskForRuns(t *testing.T, s *Store) Task {
 	return task
 }
 
+// TestStore_Runs_ApprovalPolicy_RoundTrips proves an explicitly set
+// ApprovalPolicy survives CreateRun/GetRun unchanged, rather than always
+// being coerced to the "manual" default -- the default only applies when a
+// caller leaves it unset (see TestStore_Runs above).
+func TestStore_Runs_ApprovalPolicy_RoundTrips(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+
+	created, err := s.CreateRun(Run{
+		ID: "run-auto-safe", TaskID: task.ID, Provider: "claude-native", Prompt: "hi",
+		Status: "running", StartedAt: time.Now().UTC(), ApprovalPolicy: "auto-safe",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	if created.ApprovalPolicy != "auto-safe" {
+		t.Fatalf("CreateRun() ApprovalPolicy = %q, want %q", created.ApprovalPolicy, "auto-safe")
+	}
+
+	got, err := s.GetRun("run-auto-safe")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.ApprovalPolicy != "auto-safe" {
+		t.Fatalf("GetRun() ApprovalPolicy = %q, want %q", got.ApprovalPolicy, "auto-safe")
+	}
+}
+
 func TestStore_Runs(t *testing.T) {
 	t.Parallel()
 
@@ -46,6 +76,9 @@ func TestStore_Runs(t *testing.T) {
 	}
 	if got.TaskID != task.ID || got.Provider != "glm" || got.Prompt != "hi" || got.Status != "running" {
 		t.Fatalf("GetRun() = %+v", got)
+	}
+	if got.ApprovalPolicy != "manual" {
+		t.Fatalf("GetRun() ApprovalPolicy = %q, want %q (default when CreateRun's caller doesn't set one)", got.ApprovalPolicy, "manual")
 	}
 	if got.FinishedAt != nil {
 		t.Fatalf("GetRun() FinishedAt = %v, want nil", got.FinishedAt)

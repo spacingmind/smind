@@ -18,11 +18,13 @@ type recordingDecider struct {
 	err      error
 
 	gotSummary string
+	gotCommand string
 	gotOptions []PermissionOption
 }
 
-func (d *recordingDecider) Decide(_ context.Context, summary string, options []PermissionOption) (string, error) {
+func (d *recordingDecider) Decide(_ context.Context, summary, command string, options []PermissionOption) (string, error) {
 	d.gotSummary = summary
+	d.gotCommand = command
 	d.gotOptions = options
 	return d.optionID, d.err
 }
@@ -51,6 +53,9 @@ func TestACPDeciderAdapter_TranslatesOptionsAndChoice(t *testing.T) {
 
 	if d.gotSummary != "Delete a file" {
 		t.Fatalf("summary = %q, want %q", d.gotSummary, "Delete a file")
+	}
+	if d.gotCommand != "" {
+		t.Fatalf("command = %q, want empty -- ACP's ToolCall carries no confirmed command field", d.gotCommand)
 	}
 	want := []PermissionOption{
 		{ID: "opt-1", Label: "Allow once", Kind: "allow_once"},
@@ -138,6 +143,9 @@ func TestClaudeDeciderAdapter_Allow(t *testing.T) {
 	if d.gotSummary != "run Bash" {
 		t.Fatalf("summary = %q, want %q", d.gotSummary, "run Bash")
 	}
+	if d.gotCommand != "echo hi" {
+		t.Fatalf("command = %q, want %q (from req.Input[\"command\"])", d.gotCommand, "echo hi")
+	}
 }
 
 // TestClaudeDeciderAdapter_Deny proves a "deny" choice translates into
@@ -165,6 +173,36 @@ func TestClaudeDeciderAdapter_Deny(t *testing.T) {
 	}
 	if updatedPermissions != nil || interrupt {
 		t.Fatalf("updatedPermissions/interrupt = %+v/%v, want nil/false -- this pass never sets them", updatedPermissions, interrupt)
+	}
+	if d.gotCommand != "rm -rf /" {
+		t.Fatalf("command = %q, want %q -- the decider must still see the real command even when it eventually denies", d.gotCommand, "rm -rf /")
+	}
+}
+
+// TestBashCommand proves bashCommand only ever extracts a command for a
+// Bash tool-use request, and never trusts a non-string "command" value --
+// both cases where returning a wrong non-empty string would be a real
+// safety issue, since a non-empty command is exactly what
+// ApprovalPolicyAutoSafe's AllowlistedCommand check looks at.
+func TestBashCommand(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		req  claudecode.CanUseToolRequest
+		want string
+	}{
+		{"bash with string command", claudecode.CanUseToolRequest{ToolName: "Bash", Input: map[string]any{"command": "go test ./..."}}, "go test ./..."},
+		{"non-bash tool name", claudecode.CanUseToolRequest{ToolName: "Read", Input: map[string]any{"command": "go test ./..."}}, ""},
+		{"bash with no input", claudecode.CanUseToolRequest{ToolName: "Bash"}, ""},
+		{"bash with non-string command", claudecode.CanUseToolRequest{ToolName: "Bash", Input: map[string]any{"command": 123}}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := bashCommand(tt.req); got != tt.want {
+				t.Fatalf("bashCommand() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

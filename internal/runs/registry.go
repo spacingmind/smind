@@ -31,6 +31,18 @@ import (
 // persistence for this pass.
 const finishedRetentionCap = 200
 
+// defaultPermissionTimeout is how long a pending permission request (see
+// runPermissionDecider.Decide) waits for either a human response
+// (RespondPermission) or an ApprovalPolicyAutoSafe auto-allow before it
+// auto-resolves to a deny option itself, rather than blocking the run
+// forever -- see PermissionResolvedByTimeout and
+// docs/plans/active/task-permission-ux.md Item 2. Kept as its own named
+// constant, not a magic duration inline in Decide, specifically so it's
+// easy to find and tune later. 5 minutes is long enough that a human
+// actually looking at the UI has time to notice and act, short enough that
+// an unattended run doesn't hang indefinitely on one unanswered request.
+const defaultPermissionTimeout = 5 * time.Minute
+
 // Registry owns the lifetime of every Run started through it: Start
 // launches a Run's background goroutine (outliving whatever request
 // called Start), and Subscribe/History/Stop/List let any caller -- on any
@@ -53,6 +65,34 @@ type Registry struct {
 	// (runPermissionDecider), so the wsapi server can push them as
 	// subscription events from the points the state actually changes.
 	notifier Notifier
+
+	// permissionTimeout overrides defaultPermissionTimeout when non-zero --
+	// see SetPermissionTimeout.
+	permissionTimeout time.Duration
+}
+
+// SetPermissionTimeout overrides how long a pending permission request
+// waits for a human response (or an ApprovalPolicyAutoSafe auto-allow)
+// before runPermissionDecider.Decide auto-resolves it to deny instead of
+// blocking the run forever (see defaultPermissionTimeout). d <= 0 restores
+// the default. Exists so a test can shrink the timeout to something it can
+// actually wait out in a few milliseconds; production code (cmd/smind)
+// never calls this today, since defaultPermissionTimeout is the right
+// value for real use.
+func (reg *Registry) SetPermissionTimeout(d time.Duration) {
+	reg.mu.Lock()
+	reg.permissionTimeout = d
+	reg.mu.Unlock()
+}
+
+func (reg *Registry) getPermissionTimeout() time.Duration {
+	reg.mu.Lock()
+	d := reg.permissionTimeout
+	reg.mu.Unlock()
+	if d <= 0 {
+		return defaultPermissionTimeout
+	}
+	return d
 }
 
 // Notifier receives run lifecycle and permission notifications, for
@@ -183,6 +223,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		taskID:             row.TaskID,
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
+		approvalPolicy:     taskrunner.ApprovalPolicy(row.ApprovalPolicy),
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -206,6 +247,11 @@ type run struct {
 	provider  taskrunner.Provider
 	prompt    string
 	startedAt time.Time
+
+	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
+	// and immutable thereafter -- see runPermissionDecider.Decide, the only
+	// reader.
+	approvalPolicy taskrunner.ApprovalPolicy
 
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
@@ -276,9 +322,24 @@ func (r *run) statusLocked() RunStatus {
 // background goroutine; runner.RunPrompt performs the same lookup itself,
 // so this is a redundant, cheap check purely for a synchronous error
 // return instead of one only surfacing asynchronously.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID int64, provider taskrunner.Provider, prompt string) (string, error) {
+//
+// approvalPolicy governs how this run's own pending permission requests (if
+// any) get decided -- see taskrunner.ApprovalPolicy and
+// runPermissionDecider.Decide. The empty string is accepted and treated as
+// taskrunner.ApprovalPolicyManual (today's only behavior before this field
+// existed); any other value must be taskrunner.ApprovalPolicy.IsValid, or
+// Start returns an error rather than silently falling back to manual --
+// callers one layer up (internal/wsapi) are expected to have already
+// validated this against user input, but Start itself doesn't trust that.
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy) (string, error) {
 	if _, err := wm.GetTask(taskID); err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
+	}
+
+	if approvalPolicy == "" {
+		approvalPolicy = taskrunner.ApprovalPolicyManual
+	} else if !approvalPolicy.IsValid() {
+		return "", fmt.Errorf("runs: start: invalid approval policy %q", approvalPolicy)
 	}
 
 	id, err := newRunID()
@@ -292,6 +353,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		taskID:             taskID,
 		provider:           provider,
 		prompt:             prompt,
+		approvalPolicy:     approvalPolicy,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -307,7 +369,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// silently, from inside the drive goroutine.
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: id, TaskID: taskID, Provider: string(provider), Prompt: prompt,
-		Status: string(StatusRunning), StartedAt: r.startedAt,
+		Status: string(StatusRunning), StartedAt: r.startedAt, ApprovalPolicy: string(approvalPolicy),
 	}); err != nil {
 		cancel()
 		return "", fmt.Errorf("runs: start: persist run: %w", err)
@@ -358,10 +420,37 @@ type runPermissionDecider struct {
 	r   *run
 }
 
-func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
+func (d runPermissionDecider) Decide(ctx context.Context, summary, command string, options []taskrunner.PermissionOption) (string, error) {
 	requestID, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: permission request id: %w", err)
+	}
+
+	// ApprovalPolicyAutoSafe: if command matches AllowlistedCommand, allow
+	// it immediately without ever registering a pending channel or
+	// notifying anyone that something needs a human decision -- there
+	// genuinely is no pending state here, just a request and its resolution
+	// recorded back-to-back, same as any other resolved request in
+	// history, but tagged PermissionResolvedByAutoSafe so the timeline can
+	// tell it apart from a real human answering. An unrecognized/ambiguous
+	// command (including "" -- see PermissionDecider's doc comment) always
+	// falls through to the manual flow below, never auto-allowed.
+	if d.r.approvalPolicy == taskrunner.ApprovalPolicyAutoSafe && taskrunner.AllowlistedCommand(command) {
+		if optionID, ok := firstOptionByKind(options, "allow_once", "allow_always"); ok {
+			d.reg.record(d.r, taskrunner.Event{
+				Type:                taskrunner.EventTypePermissionRequest,
+				PermissionRequestID: requestID,
+				PermissionSummary:   summary,
+				PermissionOptions:   options,
+			})
+			d.reg.record(d.r, taskrunner.Event{
+				Type:                 taskrunner.EventTypePermissionResolved,
+				PermissionRequestID:  requestID,
+				PermissionOptionID:   optionID,
+				PermissionResolution: taskrunner.PermissionResolvedByAutoSafe,
+			})
+			return optionID, nil
+		}
 	}
 
 	ch := make(chan string, 1)
@@ -380,6 +469,9 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 		PermissionOptions:   options,
 	})
 
+	timer := time.NewTimer(d.reg.getPermissionTimeout())
+	defer timer.Stop()
+
 	select {
 	case optionID := <-ch:
 		// Recorded here, on the same goroutine right after Decide wakes up
@@ -388,9 +480,32 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 		// history, in the correct order relative to Decide actually
 		// returning (see RespondPermission's own doc comment).
 		d.reg.record(d.r, taskrunner.Event{
-			Type:                taskrunner.EventTypePermissionResolved,
-			PermissionRequestID: requestID,
-			PermissionOptionID:  optionID,
+			Type:                 taskrunner.EventTypePermissionResolved,
+			PermissionRequestID:  requestID,
+			PermissionOptionID:   optionID,
+			PermissionResolution: taskrunner.PermissionResolvedByHuman,
+		})
+		return optionID, nil
+
+	case <-timer.C:
+		// Nobody answered within the timeout: auto-resolve to deny (never
+		// allow, regardless of ApprovalPolicy -- see
+		// PermissionResolvedByTimeout) so the run continues instead of
+		// hanging forever on one unanswered request. abandon first, so a
+		// RespondPermission call that arrives right after this fires gets a
+		// clear "already resolved" error instead of racing a send into a
+		// channel nobody will read from again (same reasoning as the
+		// ctx.Done()/d.r.ctx.Done() cases below).
+		d.abandon(requestID)
+		optionID, ok := firstOptionByKind(options, "reject_once", "reject_always")
+		if !ok {
+			return "", fmt.Errorf("runs: permission request %q timed out with no reject option offered: %+v", requestID, options)
+		}
+		d.reg.record(d.r, taskrunner.Event{
+			Type:                 taskrunner.EventTypePermissionResolved,
+			PermissionRequestID:  requestID,
+			PermissionOptionID:   optionID,
+			PermissionResolution: taskrunner.PermissionResolvedByTimeout,
 		})
 		return optionID, nil
 
@@ -408,6 +523,21 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 		d.abandon(requestID)
 		return "", d.r.ctx.Err()
 	}
+}
+
+// firstOptionByKind returns the ID of the first option in options whose
+// Kind matches any of kinds, mirroring acp.AutoApprovePolicy/AutoDenyPolicy's
+// own "first option of a matching kind" selection logic -- used both for
+// ApprovalPolicyAutoSafe's auto-allow and for the timeout's auto-deny.
+func firstOptionByKind(options []taskrunner.PermissionOption, kinds ...string) (string, bool) {
+	for _, o := range options {
+		for _, k := range kinds {
+			if o.Kind == k {
+				return o.ID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // abandon removes requestID's pending channel so a RespondPermission call
