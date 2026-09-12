@@ -178,6 +178,9 @@ func cmdTaskList(args []string) int {
 	return 0
 }
 
+// cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--approval-policy manual|auto-safe]"
+
 // cmdTaskSend starts a run (via run.start, which returns as soon as the
 // run is registered) and then streams it in the foreground exactly like
 // `task attach` would, printing the runId first so a detached user can
@@ -185,18 +188,52 @@ func cmdTaskList(args []string) int {
 // run.start's decoupling from run.attach (see internal/wsapi/handlers.go's
 // handleRunStart) is what makes Ctrl+C here detach instead of stopping the
 // run.
+//
+// --approval-policy is passed through to run.start's approvalPolicy field
+// (default manual when absent -- see internal/runs.Registry.Start);
+// auto-safe lets a headless/monitored run self-approve the allowlisted
+// read-only verification commands (gofmt/go vet/go test) instead of
+// stalling on a permission card nobody is watching.
 func cmdTaskSend(args []string) int {
-	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "usage: smind task send <taskId> <provider> <prompt>")
+	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
+	// free-form positional text, so stdlib flag parsing can't reliably
+	// separate it from flags.
+	var taskIDArg, provider, approvalPolicy string
+	var promptParts []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--approval-policy":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			approvalPolicy = args[i]
+		case strings.HasPrefix(a, "--approval-policy="):
+			approvalPolicy = strings.TrimPrefix(a, "--approval-policy=")
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "task send: unknown flag %q\n", a)
+			fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+			return 2
+		case taskIDArg == "":
+			taskIDArg = a
+		case provider == "":
+			provider = a
+		default:
+			promptParts = append(promptParts, a)
+		}
+	}
+	if taskIDArg == "" || provider == "" || len(promptParts) == 0 {
+		fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
 		return 2
 	}
-	taskID, err := parseInt64(args[0])
+	taskID, err := parseInt64(taskIDArg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task send: invalid taskId %q: %v\n", args[0], err)
+		fmt.Fprintf(os.Stderr, "task send: invalid taskId %q: %v\n", taskIDArg, err)
 		return 2
 	}
-	provider := args[1]
-	prompt := strings.Join(args[2:], " ")
+	prompt := strings.Join(promptParts, " ")
 
 	client, err := dialDaemon(context.Background())
 	if err != nil {
@@ -215,10 +252,14 @@ func cmdTaskSend(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var start runStartResult
-	err = client.Call(ctx, "run.start", map[string]any{
+	params := map[string]any{
 		"taskId": taskID, "provider": provider, "prompt": prompt,
-	}, &start)
+	}
+	if approvalPolicy != "" {
+		params["approvalPolicy"] = approvalPolicy
+	}
+	var start runStartResult
+	err = client.Call(ctx, "run.start", params, &start)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task send: %v\n", err)
 		return 1
