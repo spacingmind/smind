@@ -166,7 +166,16 @@ task/run can pick up one item without needing the others done first.
   lets anyone actually choose `auto-safe` — `run.start`/`task.prompt`
   accept the field but nothing sends it. Folded into Item 7's backlog
   rather than reopening Item 1, since the UI work overlaps with the
-  provider/account-management pass below.
+  provider/account-management pass below. **Partially closed 2026-09-13**:
+  the CLI can now send it (`smind task send --approval-policy auto-safe`,
+  commit `f8b580b`); the web-UI selector is still Item 7's remaining work.
+  **Also surfaced the same session**: `store.Open` only ever runs
+  `CREATE TABLE IF NOT EXISTS` — a pre-#93 database lacked the new
+  `runs.approval_policy` column and the daemon failed to boot
+  (`no such column: approval_policy`) until manually patched with
+  `ALTER TABLE`. Needs a real migration step (e.g. `PRAGMA user_version`
+  or additive-column check) — tracked here rather than in Item 7 since
+  it's a store concern, not UI.
 - **Items 3+4+6** ([PR #94](https://github.com/spacingmind/smind/pull/94)):
   dispatched as a smind task (`claude-native`); unit tests were all
   green as delivered, but manually driving the built UI in a real
