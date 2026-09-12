@@ -560,4 +560,42 @@ describe("TaskDetailPane", () => {
     const startCall = client.nth("run.start", 0);
     expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
   });
+
+  it("defaults the approval-policy selector to manual and omits approvalPolicy from run.start", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+
+    expect(screen.getByLabelText("Approval policy")).toHaveValue("manual");
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    const startCall = client.nth("run.start", 0);
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
+  });
+
+  it("sends approvalPolicy=auto-safe in run.start when auto-safe is selected", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+
+    fireEvent.change(screen.getByLabelText("Approval policy"), { target: { value: "auto-safe" } });
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    const startCall = client.nth("run.start", 0);
+    expect(startCall.params).toEqual({
+      taskId: TASK_A.ID,
+      provider: "claude-native",
+      prompt: "do the thing",
+      approvalPolicy: "auto-safe",
+    });
+  });
 });

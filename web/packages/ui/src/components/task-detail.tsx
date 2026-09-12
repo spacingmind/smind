@@ -4,13 +4,24 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 const FALLBACK_PROVIDERS: ProviderInfo[] = [
   { id: "claude-native" },
   { id: "glm" },
 ];
+
+// internal/taskrunner.ApprovalPolicy's two values, with the human-facing
+// label/help text shown next to the Provider dropdown in the prompt form.
+// "manual" is listed first since it's the default (today's behavior).
+const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
+  { id: "manual", label: "Manual approval" },
+  { id: "auto-safe", label: "Auto-safe" },
+];
+
+const APPROVAL_POLICY_HELP =
+  "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
 
 /**
  * The main-content pane for a selected task: identity header, a chat-log
@@ -219,7 +230,7 @@ function PromptForm({
   disabled,
 }: {
   client: WsClientLike | null;
-  onSubmit: (provider: Provider, prompt: string) => Promise<void>;
+  onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
   disabled: boolean;
 }) {
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
@@ -242,6 +253,7 @@ function PromptForm({
       cancelled = true;
     };
   }, [client]);
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
   const [prompt, setPrompt] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -254,7 +266,7 @@ function PromptForm({
     setSubmitting(true);
     setFormError(null);
     try {
-      await onSubmit(provider, trimmed);
+      await onSubmit(provider, trimmed, approvalPolicy);
       setPrompt("");
     } catch (err) {
       setFormError(err instanceof Error ? err.message : String(err));
@@ -277,6 +289,20 @@ function PromptForm({
         {providers.map((p) => (
           <option key={p.id} value={p.id}>
             {p.label ?? p.id}
+          </option>
+        ))}
+      </select>
+      <select
+        aria-label="Approval policy"
+        title={APPROVAL_POLICY_HELP}
+        value={approvalPolicy}
+        onChange={(e) => setApprovalPolicy(e.target.value as ApprovalPolicy)}
+        disabled={inactive}
+        className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
+      >
+        {APPROVAL_POLICIES.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.label}
           </option>
         ))}
       </select>
