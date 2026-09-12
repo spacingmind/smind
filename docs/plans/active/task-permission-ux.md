@@ -191,7 +191,21 @@ task/run can pick up one item without needing the others done first.
   (`no such column: approval_policy`) until manually patched with
   `ALTER TABLE`. Needs a real migration step (e.g. `PRAGMA user_version`
   or additive-column check) — tracked here rather than in Item 7 since
-  it's a store concern, not UI.
+  it's a store concern, not UI. **Migration landed 2026-09-13**:
+  `internal/store/migrate.go` adds a small additive-column migration
+  mechanism (no external library — stdlib + `modernc.org/sqlite`, matching
+  the package's existing style) that `Open` runs after applying
+  `schema.sql`. It checks `PRAGMA table_info(runs)` for `approval_policy`
+  and issues `ALTER TABLE runs ADD COLUMN approval_policy TEXT NOT NULL
+  DEFAULT 'manual'` only when missing, so a fresh database (which already
+  has the column from `schema.sql`) and an already-migrated one are both
+  no-ops on every subsequent `Open`. `internal/store/migrate_test.go`
+  covers the regression directly: seeds a raw pre-#93-shaped database (no
+  `approval_policy`, one pre-existing `runs` row) and asserts `Open`
+  backfills the column with its default while preserving that row, plus
+  idempotency across repeated `Open` calls for both a fresh database and a
+  pre-#93 one already migrated once. No more manual `ALTER TABLE` needed
+  for this or future additive schema changes.
 - **Items 3+4+6** ([PR #94](https://github.com/spacingmind/smind/pull/94)):
   dispatched as a smind task (`claude-native`); unit tests were all
   green as delivered, but manually driving the built UI in a real
