@@ -39,6 +39,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.fileDiff":         handleTaskFileDiff(wm),
 		"task.stage":            handleTaskStage(wm),
 		"task.commit":           handleTaskCommit(wm),
+		"task.createPr":         handleTaskCreatePR(wm),
 		"task.prompt":           handleTaskPrompt(wm, runner, reg),
 		"run.start":             handleRunStart(wm, runner, reg),
 		"run.list":              handleRunList(reg),
@@ -479,6 +480,36 @@ func handleTaskCommit(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.commit: %w", err)
 		}
 		return taskCommitResult(result), nil
+	}
+}
+
+// taskCreatePRResult is the result of task.createPr: the URL of the pull
+// request gh created.
+type taskCreatePRResult struct {
+	URL string `json:"url"`
+}
+
+// handleTaskCreatePR opens a pull request for a task's branch against
+// baseBranch (or workspace.defaultBaseBranch if empty) -- see
+// workspace.Manager.CreatePR for the push-directly-vs-cherry-pick-onto-a-
+// clean-branch decision (task-permission-ux.md Item 5). Every failure mode
+// (no worktree, fetch/push/gh failure, a diverged base with no commits to
+// PR) comes back as a wrapped, descriptive error -- never swallowed -- so
+// the web UI has something concrete to show inline.
+func handleTaskCreatePR(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID     int64  `json:"taskId"`
+			BaseBranch string `json:"baseBranch"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.createPr: invalid params: %w", err)
+		}
+		result, err := wm.CreatePR(p.TaskID, p.BaseBranch)
+		if err != nil {
+			return nil, fmt.Errorf("task.createPr: %w", err)
+		}
+		return taskCreatePRResult{URL: result.URL}, nil
 	}
 }
 
