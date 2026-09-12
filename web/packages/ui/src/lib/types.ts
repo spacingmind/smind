@@ -52,11 +52,21 @@ export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 // (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
 export type ApprovalPolicy = "manual" | "auto-safe";
 
+// internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
+// spawned as an external CLI subprocess managing its own authentication out
+// of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no
+// credential for it, so accounts-dialog renders it as "managed externally"
+// instead of offering a credential form or flagging a missing key. Absent
+// means "handled through the separate account-credential system instead"
+// (today: everything else provider.list returns).
+export type ProviderKind = "cli";
+
 // One entry in a provider.list response (internal/taskrunner.ProviderInfo):
-// the provider id itself plus an optional human-facing label.
+// the provider id itself plus an optional human-facing label and Kind.
 export interface ProviderInfo {
   id: Provider;
   label?: string;
+  kind?: ProviderKind;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).

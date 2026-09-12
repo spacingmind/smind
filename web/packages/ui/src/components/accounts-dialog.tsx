@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Account } from "@/lib/types";
+import type { Account, ProviderInfo, ProviderListResult } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 /**
@@ -29,6 +29,10 @@ import type { WsClient } from "@/lib/ws-client";
  * manual-add dropdown from. An account added under a task-execution
  * provider ID silently never matches proxy.go's routing lookup, so this
  * dialog must never offer those IDs here.
+ *
+ * provider.list is still consulted below, but only for its `kind: "cli"`
+ * entries (see externalProviders state) -- a purely display-only
+ * "managed externally" row, never fed into this dropdown.
  */
 const MANUAL_PROVIDERS: { id: string; label: string }[] = [
   { id: "anthropic", label: "Anthropic (Claude)" },
@@ -60,6 +64,12 @@ export function AccountsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
+  // Providers whose auth is managed entirely outside the account-credential
+  // system (kind === "cli", e.g. GLM's spawned `npx` subprocess) -- shown as
+  // a read-only "managed externally" row, never merged into MANUAL_PROVIDERS/
+  // OAUTH_PROVIDERS since those are a different ID vocabulary (see the doc
+  // comment above) that this dialog's add/connect flows actually route on.
+  const [externalProviders, setExternalProviders] = useState<ProviderInfo[]>([]);
   const [provider, setProvider] = useState<string>(MANUAL_PROVIDERS[0].id);
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
@@ -88,6 +98,25 @@ export function AccountsDialog({
 
   useEffect(() => {
     if (open) void refresh();
+  }, [open, client]);
+
+  // Separately fetch provider.list for the "managed externally" row(s) --
+  // kept out of `refresh()` since it's a different RPC feeding a purely
+  // display-only section, not the account list. Non-fatal on failure (falls
+  // back to showing none) since it's not the primary content of this dialog.
+  useEffect(() => {
+    if (!open || !client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then((result) => {
+        if (cancelled) return;
+        setExternalProviders(result.providers.filter((p) => p.kind === "cli"));
+      })
+      .catch((err) => console.error("provider.list failed, hiding externally-managed providers", err));
+    return () => {
+      cancelled = true;
+    };
   }, [open, client]);
 
   async function add() {
@@ -167,6 +196,30 @@ export function AccountsDialog({
             </ul>
           )}
         </div>
+
+        {externalProviders.length > 0 && (
+          <div className="grid gap-1 border-t pt-4" data-testid="accounts-external-providers">
+            <p className="text-sm font-medium">Managed externally</p>
+            <ul className="grid gap-1 text-sm">
+              {externalProviders.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1"
+                  data-testid={`accounts-external-provider-${p.id}`}
+                >
+                  <span className="min-w-0 truncate font-medium">{p.label ?? p.id}</span>
+                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                    Managed externally via CLI
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="text-xs text-muted-foreground">
+              These run as a CLI subprocess and handle their own login — nothing to
+              connect or paste here.
+            </p>
+          </div>
+        )}
 
         <div className="grid gap-3 border-t pt-4">
           <p className="text-sm font-medium">Connect an account</p>

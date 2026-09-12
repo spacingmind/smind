@@ -156,6 +156,7 @@ task/run can pick up one item without needing the others done first.
 - [ ] Item 7: provider/account management parity (added 2026-09-12, see below)
 - [x] Item 7a: web-UI approval-policy selector (added 2026-09-13 --
       closes Items 1+2's remaining client-side gap; see Validation)
+- [x] Item 7b: show the GLM provider in the accounts dialog (see below)
 
 ## Validation
 
@@ -310,6 +311,22 @@ task/run can pick up one item without needing the others done first.
     for real before trusting this as done, and if the same sandbox
     restriction recurs, that restriction is itself worth reporting up
     rather than worked around.
+- **Item 5** (PR-in-UI): landed as [PR #96](https://github.com/spacingmind/smind/pull/96) — see the detailed entry above.
+- **Item 7b** (GLM visible in accounts dialog): backend
+  (`internal/wsapi/provider_test.go`'s `TestServer_ProviderList_RoundTrip`
+  extended to assert GLM's `kind: "cli"` alongside the other providers'
+  unset `Kind`) and frontend (`accounts-dialog.test.tsx`: a new "managed
+  externally" row test, a "hides section when no cli-kind providers" test,
+  and the pre-existing manual-add-dropdown regression guard updated to
+  keep passing now that the dialog does call `provider.list`) tests
+  written. **Could not run `task build`/`task test`/`task lint` or
+  `bun run test` in this session** — every invocation of `go`, `task`,
+  `bun`, or `gofmt` was rejected with "this command requires approval" by
+  the harness's permission layer, with no interactive user available to
+  grant it, and `web/packages/ui/node_modules` isn't installed here either
+  (so even `bun install` first would've been required). Changes were
+  reviewed by hand for correctness instead; **please run those four
+  commands before merging** to confirm green.
 
 ### Item 7: provider/account management parity (added 2026-09-12)
 
@@ -350,3 +367,22 @@ via subagent (read-only, `refs/paseo`, `refs/deepseek-harness`,
 To be scoped as its own set of dispatched smind tasks (not hand-coded
 directly — per this plan's own dispatch-via-smind-task pattern), once
 Item 5 or a follow-up plan picks it up.
+
+**Item 7b: show GLM in the accounts dialog (closed 2026-09-13)** — the
+first slice of Item 7, scoped narrowly to just making GLM visible (not the
+full parity backlog above). `taskrunner.ProviderInfo` gained a `Kind`
+field (`ProviderKind`, values so far just `"cli"`) so `provider.list`
+can mark GLM as spawned-via-external-CLI-managed-auth without a
+hand-maintained frontend constant; `SupportedProviders()` sets
+`Kind: ProviderKindCLI` for `ProviderGLM` only, everyone else stays
+unset (handled through the separate account-credential system).
+`accounts-dialog.tsx` now fetches `provider.list` (previously it never
+did — the manual-add dropdown regression-guard test had to be updated to
+still assert GLM never appears in that dropdown, just no longer that
+`provider.list` is uncalled) and renders any `kind: "cli"` entries as a
+read-only "Managed externally" row/badge — no credential form, no
+Connect button, no missing-key warning, following the
+`refs/deepseek-harness` `ui-settings-models` pattern of treating a
+provider with no required credential as automatically "ready". No
+changes to how GLM actually runs (`internal/acp/glm.go`'s
+`npx -y glm-acp-agent` spawn is untouched) — display only.

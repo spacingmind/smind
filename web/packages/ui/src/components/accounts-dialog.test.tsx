@@ -77,12 +77,22 @@ describe("AccountsDialog", () => {
 
     client.nth("account.list").resolve([]);
     await flush();
+    // The dialog does fetch provider.list (for the separate "managed
+    // externally" row -- see below), but must never feed its result into
+    // this dropdown.
+    client.nth("provider.list").resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    await flush();
     await openManualForm();
 
     fireEvent.click(await screen.findByLabelText("Provider"));
     const options = await screen.findAllByRole("option");
     const values = options.map((o) => o.textContent);
 
+    // Regression guard: these are internal/taskrunner.SupportedProviders()'s
+    // task-execution IDs (provider.list's vocabulary), which
+    // internal/server/proxy.go never matches an account against -- an
+    // account added under one of these would silently never route. Notably
+    // no "GLM" here, even though provider.list above returned it.
     expect(values).toEqual([
       "Anthropic (Claude)",
       "OpenAI (Codex)",
@@ -90,11 +100,45 @@ describe("AccountsDialog", () => {
       "xAI (Grok)",
       "Antigravity (Gemini)",
     ]);
-    // Regression guard: these are internal/taskrunner.SupportedProviders()'s
-    // task-execution IDs (provider.list's vocabulary), which
-    // internal/server/proxy.go never matches an account against -- an
-    // account added under one of these would silently never route.
-    expect(client.calls.some((c) => c.method === "provider.list")).toBe(false);
+  });
+
+  it("renders a GLM row as managed-externally, with no credential or add-account affordance", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve([]);
+    await flush();
+    client.nth("provider.list").resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    await flush();
+
+    const row = await screen.findByTestId("accounts-external-provider-glm");
+    expect(row).toHaveTextContent("GLM");
+    expect(row).toHaveTextContent("Managed externally via CLI");
+
+    // No credential/add-account affordance for it: it must never appear in
+    // the manual-add dropdown or as a Connect button.
+    expect(screen.queryByTestId("accounts-connect-glm")).not.toBeInTheDocument();
+    await openManualForm();
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).not.toContain("GLM");
+  });
+
+  it("hides the managed-externally section when provider.list returns no cli-kind providers", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve([]);
+    await flush();
+    client.nth("provider.list").resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "kimi", label: "Kimi" },
+      ],
+    });
+    await flush();
+
+    expect(screen.queryByTestId("accounts-external-providers")).not.toBeInTheDocument();
   });
 
   it("add form requires label and credential before calling account.add", async () => {
