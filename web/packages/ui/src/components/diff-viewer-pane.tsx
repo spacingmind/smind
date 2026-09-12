@@ -10,6 +10,7 @@ import type {
   RunStatusEventPayload,
   Task,
   TaskCommitResult,
+  TaskCreatePrResult,
   TaskFile,
   TaskFileDiffResult,
   TaskFilesResult,
@@ -50,6 +51,9 @@ export function DiffViewerPane({
   const [commitError, setCommitError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [lastCommit, setLastCommit] = useState<TaskCommitResult | null>(null);
+  const [creatingPR, setCreatingPR] = useState(false);
+  const [prError, setPrError] = useState<string | null>(null);
+  const [prUrl, setPrUrl] = useState<string | null>(null);
 
   const fetchFiles = useCallback(() => {
     if (!client) return;
@@ -74,6 +78,8 @@ export function DiffViewerPane({
     setCollapsed({});
     setError(null);
     setLastCommit(null);
+    setPrError(null);
+    setPrUrl(null);
     fetchFiles();
   }, [fetchFiles]);
 
@@ -148,6 +154,23 @@ export function DiffViewerPane({
       });
   };
 
+  const createPR = () => {
+    if (!client) return;
+    setCreatingPR(true);
+    setPrError(null);
+    client
+      .call<TaskCreatePrResult>("task.createPr", { taskId: task.ID })
+      .then((result) => {
+        setPrUrl(result.url);
+      })
+      .catch((err: unknown) => {
+        setPrError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setCreatingPR(false);
+      });
+  };
+
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
   const canCommit = stagedCount > 0 && message.trim() !== "" && !committing;
   const isEmpty = files !== null && files.length === 0;
@@ -156,10 +179,40 @@ export function DiffViewerPane({
     <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">Diff</h2>
-        <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={fetchFiles}>
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={fetchFiles}>
+            Refresh
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!client || creatingPR}
+            onClick={createPR}
+            data-testid="create-pr-button"
+          >
+            {creatingPR ? "Creating PR…" : "Create PR"}
+          </Button>
+        </div>
       </div>
+
+      {(prUrl || prError) && (
+        <div className="border-b px-4 py-2">
+          {prUrl && (
+            <p className="text-sm" data-testid="pr-url">
+              PR opened:{" "}
+              <a href={prUrl} target="_blank" rel="noreferrer" className="underline" data-testid="pr-url-link">
+                {prUrl}
+              </a>
+            </p>
+          )}
+          {prError && (
+            <p className="text-sm text-destructive" data-testid="pr-error">
+              {prError}
+            </p>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto p-4" data-testid="diff-file-list">
         {error && (
