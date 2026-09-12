@@ -29,12 +29,28 @@ const (
 	ProviderCodexNative Provider = "codex-native"
 )
 
+// ProviderKind classifies how a Provider's authentication is managed, for
+// clients that need to render it (see ProviderInfo.Kind).
+type ProviderKind string
+
+// ProviderKindCLI marks a Provider that's spawned as an external CLI
+// subprocess which manages its own authentication out of band (e.g. GLM's
+// `npx -y glm-acp-agent`, see internal/acp/glm.go) -- the daemon tracks no
+// credential for it at all, so there's nothing for account.add/
+// account.oauthStart to do. Clients should render this as "managed
+// externally", not offer a credential form or flag a missing key.
+const ProviderKindCLI ProviderKind = "cli"
+
 // ProviderInfo describes one supported Provider for clients (the wsapi
 // provider.list method's wire shape): the Provider id itself, plus an
-// optional human-facing label.
+// optional human-facing label and an optional Kind. Kind is empty for
+// providers whose auth is handled through the separate account-credential
+// system (internal/accounts, distinct ID vocabulary -- see
+// accounts-dialog.tsx's doc comment) rather than by this package.
 type ProviderInfo struct {
-	ID    Provider `json:"id"`
-	Label string   `json:"label,omitempty"`
+	ID    Provider     `json:"id"`
+	Label string       `json:"label,omitempty"`
+	Kind  ProviderKind `json:"kind,omitempty"`
 }
 
 // SupportedProviders is the single source of truth for which providers the
@@ -45,7 +61,7 @@ type ProviderInfo struct {
 func SupportedProviders() []ProviderInfo {
 	return []ProviderInfo{
 		{ID: ProviderClaudeNative, Label: "Claude Code"},
-		{ID: ProviderGLM, Label: "GLM"},
+		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI},
 		{ID: ProviderKimi, Label: "Kimi"},
 		{ID: ProviderCodexNative, Label: "Codex"},
 	}
