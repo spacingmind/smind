@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
-import type { Task, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
+import type { Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
 
 const TASK: Task = {
   ID: 1,
@@ -228,6 +228,43 @@ describe("DiffViewerPane commit bar", () => {
 
     expect(screen.getByTestId("commit-error")).toHaveTextContent("nothing staged to commit");
     expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(1);
+  });
+});
+
+describe("DiffViewerPane Create PR", () => {
+  it("calls task.createPr and renders the returned URL as a link", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("create-pr-button"));
+    const call = client.nth("task.createPr", 0);
+    expect(call.params).toEqual({ taskId: TASK.ID });
+    call.resolve({ url: "https://github.com/example/repo/pull/42" } satisfies TaskCreatePrResult);
+    await flush();
+
+    const link = screen.getByTestId("pr-url-link");
+    expect(link).toHaveTextContent("https://github.com/example/repo/pull/42");
+    expect(link).toHaveAttribute("href", "https://github.com/example/repo/pull/42");
+    expect(screen.queryByTestId("pr-error")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a task.createPr failure inline instead of failing silently", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("create-pr-button"));
+    client.nth("task.createPr", 0).reject(new Error("gh pr create: HTTP 429: rate limited"));
+    await flush();
+
+    expect(screen.getByTestId("pr-error")).toHaveTextContent("429");
+    expect(screen.queryByTestId("pr-url")).not.toBeInTheDocument();
+  });
+
+  it("disables the Create PR control when there is no client", () => {
+    render(<DiffViewerPane client={null} task={TASK} />);
+    expect(screen.getByTestId("create-pr-button")).toBeDisabled();
   });
 });
 
