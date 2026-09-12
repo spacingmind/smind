@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,102 @@ import (
 // repoPath, creating a real git worktree checked out on a new branch.
 func gitWorktreeAdd(repoPath, worktreePath, branch string) error {
 	return runGit(repoPath, "worktree", "add", worktreePath, "-b", branch)
+}
+
+// gitWorktreeAddFrom is gitWorktreeAdd with an explicit start point (e.g. a
+// remote-tracking ref like "origin/develop") instead of branching off
+// repoPath's current HEAD -- used by createPR to fork its clean
+// smind/pr-<id> branch from the base branch rather than from whatever the
+// workspace checkout happens to have checked out.
+func gitWorktreeAddFrom(repoPath, worktreePath, branch, startPoint string) error {
+	return runGit(repoPath, "worktree", "add", worktreePath, "-b", branch, startPoint)
+}
+
+// gitFetchBranch fetches exactly branch from remote into its remote-tracking
+// ref (refs/remotes/<remote>/<branch>), using an explicit refspec rather than
+// relying on the workspace repo having a default fetch refspec configured
+// (not guaranteed for every checkout smind might be pointed at).
+func gitFetchBranch(dir, remote, branch string) error {
+	refspec := fmt.Sprintf("+refs/heads/%s:refs/remotes/%s/%s", branch, remote, branch)
+	if err := runGit(dir, "fetch", remote, refspec); err != nil {
+		return fmt.Errorf("fetch %s from %s: %w", branch, remote, err)
+	}
+	return nil
+}
+
+// gitIsAncestor reports whether ancestor is an ancestor of (or equal to)
+// descendant, via `git merge-base --is-ancestor`. That command's exit code
+// is the actual answer (0 = yes, 1 = no) rather than an error signal, so
+// only exit codes other than those two are treated as a real failure.
+func gitIsAncestor(dir, ancestor, descendant string) (bool, error) {
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", ancestor, descendant)
+	cmd.Dir = dir
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("git merge-base --is-ancestor %s %s: %w: %s", ancestor, descendant, err, stderr.String())
+}
+
+// gitRevListReverse returns the commit SHAs in revRange (e.g. "base..branch")
+// oldest-first, the order cherry-pick needs to replay them in.
+func gitRevListReverse(dir, revRange string) ([]string, error) {
+	out, err := runGitOutput(dir, "rev-list", "--reverse", revRange)
+	if err != nil {
+		return nil, fmt.Errorf("list commits %s: %w", revRange, err)
+	}
+	trimmed := strings.TrimSpace(out)
+	if trimmed == "" {
+		return nil, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
+}
+
+// gitCherryPick cherry-picks sha onto dir's current branch. On failure it
+// aborts the cherry-pick (best effort -- the abort's own error is discarded
+// since the cherry-pick error is already the one that matters) so the
+// worktree isn't left mid-conflict for whatever cleans it up next.
+func gitCherryPick(dir, sha string) error {
+	if err := runGit(dir, "cherry-pick", sha); err != nil {
+		_, _ = runGitOutputEnv(dir, nil, "cherry-pick", "--abort")
+		return fmt.Errorf("cherry-pick %s: %w", sha, err)
+	}
+	return nil
+}
+
+// gitPushBranch pushes dir's localBranch to remote under the same name,
+// setting the upstream (`-u`) so a following `gh pr create` (with an
+// explicit --head, which never actually needs the upstream) still leaves
+// the branch in the normal "tracks origin" state a human continuing the
+// work by hand would expect.
+func gitPushBranch(dir, remote, localBranch string) error {
+	if err := runGit(dir, "push", "-u", remote, localBranch+":"+localBranch); err != nil {
+		return fmt.Errorf("push %s to %s: %w", localBranch, remote, err)
+	}
+	return nil
+}
+
+// runGH invokes the gh CLI. It's a package-level var (rather than a plain
+// function) so tests can override it: unlike git, which every other test in
+// this package runs for real against local temp repos, gh always needs a
+// real network round trip and real credentials, so there is no local-only
+// equivalent to run it "for real" against in a test.
+var runGH = func(dir string, args ...string) (string, error) {
+	cmd := exec.Command("gh", args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("gh %v: %w: %s", args, err, strings.TrimSpace(stderr.String()))
+	}
+	return stdout.String(), nil
 }
 
 // checkpointCommitMessage marks the machine-generated commits ArchiveTask

@@ -266,6 +266,14 @@ export interface TaskCommitResult {
   files: number;
 }
 
+// Result of task.createPr (internal/wsapi/handlers.go's
+// taskCreatePRResult): the URL of the pull request opened for the task's
+// branch (directly, or from a clean smind/pr-<id> branch if the task
+// branch's base had diverged -- see internal/workspace.Manager.CreatePR).
+export interface TaskCreatePrResult {
+  url: string;
+}
+
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
 // docs/decisions/0005-wsapi-event-subscription.md. Carried in the
 // notification envelope's payload field (lowercase json tags, unlike the
