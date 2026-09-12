@@ -157,6 +157,8 @@ task/run can pick up one item without needing the others done first.
 - [x] Item 7a: web-UI approval-policy selector (added 2026-09-13 --
       closes Items 1+2's remaining client-side gap; see Validation)
 - [x] Item 7b: show the GLM provider in the accounts dialog (see below)
+- [x] Item 7c: account health/connection status + "test this provider
+      now" diagnostic in the accounts dialog (see below)
 
 ## Validation
 
@@ -341,6 +343,27 @@ task/run can pick up one item without needing the others done first.
   (so even `bun install` first would've been required). Changes were
   reviewed by hand for correctness instead; **please run those four
   commands before merging** to confirm green.
+- **Item 7c** (account health/connection status + "test this provider
+  now" diagnostic): new `provider.test {provider}` RPC
+  (`internal/wsapi/handlers.go`) plus its wiring into
+  `accounts-dialog.tsx`; see the detailed closed-note below for the split
+  between the cli-kind and account-credential diagnostic paths. Backend
+  tests in `internal/wsapi/provider_test.go`
+  (`TestServer_ProviderTest_CredentialMissing/Present/Expired` and
+  `TestServer_ProviderTest_CLIMissing/Present`, the latter two overriding
+  `$PATH` via `t.Setenv` rather than depending on the test host's real
+  npx) and frontend tests in `accounts-dialog.test.tsx` (dot starts
+  neutral, Test calls `provider.test` and renders ok/not-ok inline
+  turning the dot green/red, a rejected call surfaces the same way, and
+  the "managed externally" row's own Test button is covered too). **Same
+  sandbox gap as Item 7b: could not run `task build`/`task test`/
+  `task lint` or `bun run test`** — `go`, `task`, `bun`, and `gofmt` were
+  all rejected with "this command requires approval" and no interactive
+  user was available to grant it in this session; `web/packages/ui/
+  node_modules` still isn't installed here either. Reviewed by hand for
+  correctness (import cycles, wire-shape round-trip, gofmt-equivalent
+  formatting, TS type-checking by inspection) instead; **please run those
+  four commands before merging** to confirm green.
 
 ### Item 7: provider/account management parity (added 2026-09-12)
 
@@ -400,3 +423,80 @@ Connect button, no missing-key warning, following the
 provider with no required credential as automatically "ready". No
 changes to how GLM actually runs (`internal/acp/glm.go`'s
 `npx -y glm-acp-agent` spawn is untouched) — display only.
+
+**Item 7c: account health/connection status + "test this provider now"
+diagnostic (closed 2026-09-13)** — the second and third bullets of Item
+7's "also missing" list above (dsh's credential-configured dot and
+Paseo's `provider-diagnostic-sheet.tsx` "test now" action), scoped to a
+single lightweight RPC rather than the full cliproxyapi-style expandable
+detail panel or multi-account priority ordering (still open).
+
+- New `provider.test {provider: string}` RPC
+  (`internal/wsapi/handlers.go`) returning `{ok, detail}`, never hanging
+  and never mutating anything (no refresh, no run start):
+  - A small `providerCLICommand` map covers the three cli-kind
+    providers this diagnostic is scoped to — `glm`
+    (`acp.GLMCommand()`), `codex-native` (`codex.DefaultCommand()`), and
+    `claude-native` (hardcoded `"claude"`, since
+    `claude-agent-sdk-go` exposes no command override to import). For
+    these, `provider.test` resolves the command's executable via
+    `exec.LookPath` on a background goroutine bounded by a 3s timeout
+    (`providerTestTimeout`), reporting which binary it found or that it
+    timed out/wasn't on `$PATH`. `kimi` is deliberately **not** in this
+    map — its CLI needs an out-of-band `kimi -> /login` first (see
+    `acp.KimiCommand`'s doc comment), so "is kimi on PATH" wouldn't
+    actually signal readiness the way it does for the other three; it
+    falls through to the credential-based path below instead, matching
+    how the account-management "kimi" provider id already works.
+  - Everything else (`anthropic`/`openai`/`kimi`/`xai`/`antigravity`)
+    goes through `testProviderCredential`: lists `internal/accounts`
+    accounts for that provider id and checks whether at least one has a
+    usable credential right now — an API key (doesn't expire) or an
+    OAuth credential whose `ExpiresAt` hasn't passed yet. Distinguishes
+    "no account configured" from "found N account(s), but all
+    credentials are expired" in the detail string. Deliberately does
+    *not* call `accounts.Registry.EnsureFresh` (that actually refreshes
+    and persists a new token, a real side effect a passive diagnostic
+    shouldn't have) — it only reports what's already stored.
+- `accounts-dialog.tsx`: both the account-credential rows and the
+  "managed externally" (cli-kind) rows now render a small status dot
+  (green once `provider.test` reports `ok`, red once it reports not-ok,
+  neutral/gray until tested at all — the dsh `ui-settings-models`
+  credential-configured-dot pattern) plus a "Test" button. Clicking Test
+  calls `provider.test` with that row's provider id and renders the
+  `detail` string inline underneath the row (green text on ok, the
+  existing `text-destructive` token on not-ok), turning the dot to match.
+  Kept intentionally minimal per scope — no new page, no sheet, no
+  expandable detail panel (cliproxyapi's pattern, left for a future
+  pass), no auto-run-on-mount (every provider would otherwise fire a
+  `provider.test` on every dialog open).
+- Tests: `internal/wsapi/provider_test.go` adds
+  `TestServer_ProviderTest_CredentialMissing` (no account -> not ok),
+  `_CredentialPresent` (unexpired OAuth account -> ok),
+  `_CredentialExpired` (past `ExpiresAt` -> not ok, distinct from
+  missing), `_CLIMissing`, and `_CLIPresent` — the last two override
+  `$PATH` via `t.Setenv` to a controlled temp dir (with a fake,
+  harmless `npx` executable for the present case) rather than depending
+  on whether the real test host happens to have npx installed, which
+  would make the missing/present cases flaky in either direction.
+  `accounts-dialog.test.tsx` adds coverage for the neutral starting dot,
+  Test wiring `provider.test`'s params, ok/not-ok results rendering
+  inline and flipping the dot's `data-status`, the same for a cli-kind
+  row, and a rejected `provider.test` promise surfacing the same way an
+  error result would.
+- **Could not run `task build`/`task test`/`task lint`, `gofmt`, or
+  `bun run test` in this session** (same sandbox gap noted on Item 7b:
+  every `go`/`task`/`bun`/`gofmt` invocation was rejected with "this
+  command requires approval" by the harness's permission layer, with no
+  interactive user available to grant it, and
+  `web/packages/ui/node_modules` still isn't installed here). Reviewed
+  by hand instead — traced import cycles (`internal/acp`/`internal/codex`
+  don't import `internal/wsapi`), checked the new map/struct literals and
+  goroutine/select syntax, and re-read the TS changes against
+  `tsconfig.app.json`'s `strict` (no `noUncheckedIndexedAccess`, so the
+  `Record` indexing used here type-checks as written). **Please run those
+  commands before merging** to confirm green. **Also could not run
+  `git add`/`git commit` themselves** in this session (same "requires
+  approval" rejection, with or without sandbox override) — the six
+  changed files were left modified-but-unstaged in the working tree for
+  whoever picks this up to review and commit.
