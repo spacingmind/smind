@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
+  ApprovalPolicy,
   PermissionRequestEventParams,
   PermissionResolvedEventParams,
   Provider,
@@ -48,8 +49,15 @@ interface TimelineState {
   /** null while the initial run.list fetch for the current task is in flight. */
   runs: RunEntry[] | null;
   error: string | null;
-  /** Starts a new run (run.start) and immediately begins streaming it (run.attach) into the timeline. */
-  submitPrompt: (provider: Provider, prompt: string) => Promise<void>;
+  /**
+   * Starts a new run (run.start) and immediately begins streaming it
+   * (run.attach) into the timeline. approvalPolicy is omitted from the
+   * run.start payload entirely when it's "manual" -- the backend's default
+   * when the field is absent (internal/wsapi/handlers.go) -- so a run
+   * started without ever touching the approval-policy selector sends the
+   * exact same payload as before that selector existed.
+   */
+  submitPrompt: (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy) => Promise<void>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
    * unmount, which only ever detach. The run's own active run.attach
@@ -256,13 +264,18 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
   }, [client, taskId]);
 
   const submitPrompt = useCallback(
-    async (provider: Provider, prompt: string) => {
+    async (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy) => {
       const session = sessionRef.current;
       if (!client || taskId === null || !session) {
         throw new Error("no task selected");
       }
 
-      const { runId } = await client.call<RunStartResult>("run.start", { taskId, provider, prompt });
+      const { runId } = await client.call<RunStartResult>("run.start", {
+        taskId,
+        provider,
+        prompt,
+        ...(approvalPolicy && approvalPolicy !== "manual" ? { approvalPolicy } : {}),
+      });
       if (session.cancelled) return;
 
       const entry: RunEntry = {

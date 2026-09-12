@@ -154,6 +154,8 @@ task/run can pick up one item without needing the others done first.
 - [x] Item 5: PR creation from the smind UI
 - [x] Item 6: working, persisted resizable layout
 - [ ] Item 7: provider/account management parity (added 2026-09-12, see below)
+- [x] Item 7a: web-UI approval-policy selector (added 2026-09-13 --
+      closes Items 1+2's remaining client-side gap; see Validation)
 
 ## Validation
 
@@ -169,6 +171,19 @@ task/run can pick up one item without needing the others done first.
   provider/account-management pass below. **Partially closed 2026-09-13**:
   the CLI can now send it (`smind task send --approval-policy auto-safe`,
   commit `f8b580b`); the web-UI selector is still Item 7's remaining work.
+  **Web-UI selector closed 2026-09-13** (commit 5e8a80d on the task branch; landed via PR): the
+  prompt form in `web/packages/ui/src/components/task-detail.tsx` (next to
+  the existing Provider dropdown) now has a second "Approval policy"
+  dropdown (`manual` default / `auto-safe`, with a `title` tooltip stating
+  "Auto-safe auto-approves allowlisted read-only verification commands
+  (e.g. gofmt, go vet, go test); everything else still needs human
+  approval") whose value is threaded through `useRunTimeline`'s
+  `submitPrompt` into `run.start`'s payload -- omitted entirely when
+  `manual` (the backend's own default for an absent field) so a run
+  started without ever touching the selector sends byte-for-byte the same
+  payload as before this change. Covered by two new tests in
+  `task-detail.test.tsx` asserting the manual-omits and
+  auto-safe-sends-`approvalPolicy` behaviors.
   **Also surfaced the same session**: `store.Open` only ever runs
   `CREATE TABLE IF NOT EXISTS` — a pre-#93 database lacked the new
   `runs.approval_policy` column and the daemon failed to boot
