@@ -15,12 +15,16 @@ import (
 )
 
 // TestServer_ProviderList_RoundTrip proves provider.list's wire shape --
-// a no-params request producing {providers: [{id, label, kind}]} --
+// a no-params request producing
+// {providers: [{id, label, kind, credentialKind, accountProvider}]} --
 // round-trips over a real WebSocket connection, returning every provider
 // taskrunner.SupportedProviders declares (the single source of truth
 // RunPrompt's dispatch stays in sync with), including GLM's "cli" Kind --
 // the signal accounts-dialog.tsx uses to render it as externally-managed
-// instead of omitting it or offering a credential form.
+// instead of omitting it or offering a credential form -- and, for the
+// other three, the CredentialKind/AccountProvider pair accounts-dialog.tsx
+// derives its Connect-button and manual-add rows from (Item 7d), rather
+// than from its own hand-maintained provider constants.
 func TestServer_ProviderList_RoundTrip(t *testing.T) {
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)
@@ -39,14 +43,16 @@ func TestServer_ProviderList_RoundTrip(t *testing.T) {
 	}
 
 	type wantInfo struct {
-		label string
-		kind  taskrunner.ProviderKind
+		label           string
+		kind            taskrunner.ProviderKind
+		credentialKind  taskrunner.ProviderCredentialKind
+		accountProvider string
 	}
 	want := map[taskrunner.Provider]wantInfo{
-		"claude-native": {label: "Claude Code"},
+		"claude-native": {label: "Claude Code", credentialKind: taskrunner.CredentialKindOAuth, accountProvider: "anthropic"},
 		"glm":           {label: "GLM", kind: taskrunner.ProviderKindCLI},
-		"kimi":          {label: "Kimi"},
-		"codex-native":  {label: "Codex"},
+		"kimi":          {label: "Kimi", credentialKind: taskrunner.CredentialKindAPIKey, accountProvider: "kimi"},
+		"codex-native":  {label: "Codex", credentialKind: taskrunner.CredentialKindOAuth, accountProvider: "openai"},
 	}
 	if len(result.Providers) != len(want) {
 		t.Fatalf("provider.list returned %d providers, want %d: %+v", len(result.Providers), len(want), result.Providers)
@@ -61,6 +67,12 @@ func TestServer_ProviderList_RoundTrip(t *testing.T) {
 		}
 		if p.Kind != info.kind {
 			t.Fatalf("provider %q kind = %q, want %q", p.ID, p.Kind, info.kind)
+		}
+		if p.CredentialKind != info.credentialKind {
+			t.Fatalf("provider %q credentialKind = %q, want %q", p.ID, p.CredentialKind, info.credentialKind)
+		}
+		if p.AccountProvider != info.accountProvider {
+			t.Fatalf("provider %q accountProvider = %q, want %q", p.ID, p.AccountProvider, info.accountProvider)
 		}
 		delete(want, p.ID)
 	}

@@ -16,6 +16,19 @@ const ACCOUNTS = [
   },
 ];
 
+// Mirrors internal/taskrunner.SupportedProviders()'s real shape (Item 7d):
+// this dialog derives every section (managed-externally, Connect buttons,
+// manual-add dropdown) from provider.list rather than a frontend constant,
+// so these tests drive it the same way the daemon would.
+const PROVIDERS = {
+  providers: [
+    { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
+    { id: "glm", label: "GLM", kind: "cli" },
+    { id: "kimi", label: "Kimi", credentialKind: "api-key", accountProvider: "kimi" },
+    { id: "codex-native", label: "Codex", credentialKind: "oauth", accountProvider: "openai" },
+  ],
+};
+
 async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -33,15 +46,31 @@ async function openManualForm(): Promise<void> {
 }
 
 describe("AccountsDialog", () => {
-  it("lists accounts from account.list", async () => {
+  it("lists accounts from account.list, labeling each with provider.list's label for its account-provider id", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve(ACCOUNTS);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    expect(await screen.findByText("main")).toBeInTheDocument();
+    // ACCOUNTS' entry has provider: "anthropic" (internal/accounts' vocabulary) --
+    // its label comes from whichever provider.list entry has
+    // accountProvider: "anthropic" (claude-native's "Claude Code"), not the
+    // taskrunner id itself.
+    expect(screen.getByText(/Claude Code · oauth/)).toBeInTheDocument();
+  });
+
+  it("falls back to the raw provider id when provider.list hasn't described it", async () => {
     const client = new FakeWsClient();
     renderDialog(client);
 
     client.nth("account.list").resolve(ACCOUNTS);
     await flush();
-
-    expect(await screen.findByText("main")).toBeInTheDocument();
-    expect(screen.getByText(/Anthropic \(Claude\) · oauth/)).toBeInTheDocument();
+    // provider.list left unresolved (or could resolve empty) -- no label to
+    // derive from yet.
+    expect(screen.getByText(/anthropic · oauth/)).toBeInTheDocument();
   });
 
   it("shows the empty hint when there are no accounts", async () => {
@@ -59,6 +88,7 @@ describe("AccountsDialog", () => {
     renderDialog(client);
 
     client.nth("account.list").resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
     expect(screen.queryByLabelText("Provider")).not.toBeInTheDocument();
@@ -71,16 +101,13 @@ describe("AccountsDialog", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("manual-add provider dropdown offers account-credential provider IDs, not task-execution ones", async () => {
+  it("manual-add dropdown is derived from provider.list's credential-bearing providers, keyed by accountProvider not id", async () => {
     const client = new FakeWsClient();
     renderDialog(client);
 
     client.nth("account.list").resolve([]);
     await flush();
-    // The dialog does fetch provider.list (for the separate "managed
-    // externally" row -- see below), but must never feed its result into
-    // this dropdown.
-    client.nth("provider.list").resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
     await openManualForm();
 
@@ -88,18 +115,16 @@ describe("AccountsDialog", () => {
     const options = await screen.findAllByRole("option");
     const values = options.map((o) => o.textContent);
 
-    // Regression guard: these are internal/taskrunner.SupportedProviders()'s
-    // task-execution IDs (provider.list's vocabulary), which
-    // internal/server/proxy.go never matches an account against -- an
-    // account added under one of these would silently never route. Notably
-    // no "GLM" here, even though provider.list above returned it.
-    expect(values).toEqual([
-      "Anthropic (Claude)",
-      "OpenAI (Codex)",
-      "Kimi",
-      "xAI (Grok)",
-      "Antigravity (Gemini)",
-    ]);
+    // GLM (kind: "cli", no credentialKind) never appears -- it's rendered
+    // separately as "managed externally" (see below), with no credential
+    // form at all. The remaining three are ordered and labeled exactly as
+    // provider.list returned them (Claude Code/Kimi/Codex, not the
+    // internal/accounts labels this dropdown used to hardcode). Its
+    // default selection (its first entry) is exercised end-to-end by
+    // "submits account.add..." below, which asserts the accountProvider
+    // id ("anthropic") is what actually gets sent, not provider.list's own
+    // "claude-native" -- the whole point of Item 7d's indirection.
+    expect(values).toEqual(["Claude Code", "Kimi", "Codex"]);
   });
 
   it("renders a GLM row as managed-externally, with no credential or add-account affordance", async () => {
@@ -108,7 +133,15 @@ describe("AccountsDialog", () => {
 
     client.nth("account.list").resolve([]);
     await flush();
-    client.nth("provider.list").resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    // A credential-bearing provider rides along so the manual-add dropdown
+    // has at least one option to open -- the assertion is that GLM is
+    // absent from it, not that the dropdown is empty.
+    client.nth("provider.list").resolve({
+      providers: [
+        { id: "kimi", label: "Kimi", credentialKind: "api-key", accountProvider: "kimi" },
+        { id: "glm", label: "GLM", kind: "cli" },
+      ],
+    });
     await flush();
 
     const row = await screen.findByTestId("accounts-external-provider-glm");
@@ -161,6 +194,7 @@ describe("AccountsDialog", () => {
     renderDialog(client);
 
     client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
     await openManualForm();
 
@@ -190,6 +224,7 @@ describe("AccountsDialog", () => {
     renderDialog(client);
 
     client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
     await openManualForm();
 
@@ -211,24 +246,26 @@ describe("AccountsDialog", () => {
     renderDialog(client);
 
     client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Anthropic (Claude)" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Claude Code" }));
     await flush();
 
     expect(screen.getByText(/Label is required/)).toBeInTheDocument();
     expect(client.calls.filter((c) => c.method === "account.oauthStart")).toHaveLength(0);
   });
 
-  it("Connect calls account.oauthStart, renders the authorize link on the event, and refreshes on success", async () => {
+  it("Connect calls account.oauthStart with the accountProvider id, renders the authorize link on the event, and refreshes on success", async () => {
     const client = new FakeWsClient();
     renderDialog(client);
 
     client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
     fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "personal" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect Anthropic (Claude)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
 
     const start = await waitFor(() => client.nth("account.oauthStart"));
     expect(start.params).toEqual({ provider: "anthropic", label: "personal" });
@@ -259,10 +296,11 @@ describe("AccountsDialog", () => {
     renderDialog(client);
 
     client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
     await flush();
 
     fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "personal" } });
-    fireEvent.click(screen.getByRole("button", { name: "Connect OpenAI (Codex)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Connect Codex" }));
 
     const start = await waitFor(() => client.nth("account.oauthStart"));
     await act(async () => {

@@ -61,12 +61,30 @@ export type ApprovalPolicy = "manual" | "auto-safe";
 // (today: everything else provider.list returns).
 export type ProviderKind = "cli";
 
+// internal/taskrunner.ProviderCredentialKind's two values, present only on
+// providers with a credential row in accounts-dialog (i.e. kind is unset).
+// "oauth" gets a Connect button (account.oauthStart) with manual-paste as a
+// fallback; "api-key" gets only the manual-paste form (account.add).
+export type ProviderCredentialKind = "oauth" | "api-key";
+
 // One entry in a provider.list response (internal/taskrunner.ProviderInfo):
-// the provider id itself plus an optional human-facing label and Kind.
+// the provider id itself plus an optional human-facing label, Kind, and (for
+// providers with a credential row) CredentialKind/accountProvider.
+//
+// accountProvider is the id accounts-dialog must actually send to
+// account.add/account.oauthStart -- it's internal/accounts' own provider
+// vocabulary (anthropic/openai/kimi/xai/antigravity), which predates and
+// differs from this Provider union (claude-native/glm/kimi/codex-native).
+// The two aren't fully unified: xai and antigravity are accounts-only
+// providers with no taskrunner counterpart, so provider.list can't (and
+// doesn't try to) describe them -- see accounts-dialog.tsx's doc comment and
+// docs/plans/active/task-permission-ux.md's Item 7d note for that gap.
 export interface ProviderInfo {
   id: Provider;
   label?: string;
   kind?: ProviderKind;
+  credentialKind?: ProviderCredentialKind;
+  accountProvider?: string;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
