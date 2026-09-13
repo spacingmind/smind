@@ -29,6 +29,12 @@ func TestAllowlistedCommand(t *testing.T) {
 		{"cd into a dir then a safe command", "cd /repo && go test ./...", true},
 		{"cd then bare go test", "cd /repo; go test", true},
 		{"cd then gofmt via pipe-style chain separator", "cd /repo && gofmt -l .", true},
+		{"task test is the Taskfile-wrapped form of go test", "task test", true},
+		{"task lint is the Taskfile-wrapped form of go vet/gofmt", "task lint", true},
+		{"task build is allowed like the verification commands it wraps", "task build", true},
+		{"cd then task test", "cd /repo && task test", true},
+		{"an unrelated task target is not auto-allowed", "task clean --force", false},
+		{"task with a dangerous-looking injected flag still matches the plain prefix rule", "task test:slow", false},
 		{"cd segment tolerates whitespace around separators", "cd /repo  &&   go vet ./...", true},
 
 		{"rm -rf is never safe", "rm -rf", false},

@@ -59,6 +59,13 @@ var safeCommandPrefixes = []string{
 	"gofmt -l ",
 	"go vet ",
 	"go test ",
+	// task (go-task) wraps exactly those three verification commands
+	// against this repo's Taskfile (AGENTS.md's own canonical verify
+	// step); allowing the wrapper saves every agent from having to
+	// rediscover and re-run the underlying go invocations by hand.
+	"task test ",
+	"task lint ",
+	"task build ",
 }
 
 // AllowlistedCommand reports whether command is safe to auto-allow under
