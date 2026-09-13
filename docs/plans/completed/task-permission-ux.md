@@ -153,7 +153,7 @@ task/run can pick up one item without needing the others done first.
 - [x] Item 4: out-of-tab attention notification
 - [x] Item 5: PR creation from the smind UI
 - [x] Item 6: working, persisted resizable layout
-- [ ] Item 7: provider/account management parity (added 2026-09-12, see below)
+- [x] Item 7: provider/account management parity (added 2026-09-12, see below)
 - [x] Item 7a: web-UI approval-policy selector (added 2026-09-13 --
       closes Items 1+2's remaining client-side gap; see Validation)
 - [x] Item 7b: show the GLM provider in the accounts dialog (see below)
@@ -567,3 +567,56 @@ detail panel or multi-account priority ordering (still open).
   approval" rejection, with or without sandbox override) — the six
   changed files were left modified-but-unstaged in the working tree for
   whoever picks this up to review and commit.
+
+**Item 7 closed 2026-09-13.** Items 7a-7e, plus three fixes discovered
+while landing them, shipped this session:
+
+- **7a** — web-UI approval-policy selector: [PR #98](https://github.com/spacingmind/smind/pull/98).
+- **7b** — GLM surfaced in the accounts dialog: [PR #99](https://github.com/spacingmind/smind/pull/99).
+- **#100** — `store.Open`'s pre-#93-database migration gap (see the
+  "Migration landed 2026-09-13" note under Items 1+2 above): [PR #100](https://github.com/spacingmind/smind/pull/100).
+- **7c** — `provider.test` diagnostic RPC + accounts-dialog status
+  dots/Test button: [PR #101](https://github.com/spacingmind/smind/pull/101).
+- **7d** — accounts-dialog provider list derived from `provider.list`
+  instead of hand-maintained constants: [PR #102](https://github.com/spacingmind/smind/pull/102).
+- **7e** — allowlist cd-chaining fix (see "Auto-safe matcher fixed"
+  above): [PR #103](https://github.com/spacingmind/smind/pull/103).
+- **#104** — `smind account test <provider>` CLI command, a thin wrapper
+  around the `provider.test` RPC from 7c so the same diagnostic is
+  reachable outside the web UI.
+- **#105** — allowlisted `task test`/`task lint`/`task build`
+  themselves: the auto-safe matcher (post-#103) correctly handled
+  `cd <dir> && go test ./...`, but this repo's own verification commands
+  go through the `Taskfile` wrapper (`task test`, not raw `go test`),
+  which wasn't in the allowlist at all and still fell through to manual.
+
+Every earlier "could not run `task test`/`task lint`/`gofmt` in this
+session, please run before merging" caveat logged against 7b/7c/7d above
+turned out to have the same root cause, not independent sandbox
+misconfiguration: `AllowlistedCommand`'s whole-string prefix match
+didn't recognize the `cd <worktree> && go test ./...` shape a real
+Claude Code turn emits (fixed by #103), and separately never recognized
+this repo's own `task`-wrapped verification commands at all (fixed by
+#105). With both landed, this session validated the `auto-safe` policy
+end-to-end for the first time since Item 1 was written: allowlisted
+verification commands — including `cd <dir> && go test` and
+`task test` — now run unattended under a live run, with no human
+clicking approve and no fallback to manual.
+
+This closes out every numbered item and 7a-7e. **Known gaps recorded,
+not fixed, for whoever picks this plan's threads up next:**
+- **xai/antigravity are unreachable from the accounts dialog** — see the
+  Item 7d note above; `internal/accounts`' provider vocabulary has two
+  entries (`xai`, `antigravity`) with no `taskrunner.SupportedProviders()`
+  counterpart to derive a dialog row from.
+- **`task.createPr` has no per-workspace base-branch config** — see the
+  Item 5 note above; it always targets a fixed `"develop"` default since
+  `store.Workspace` has no base-branch column yet.
+- **Two separate provider-id vocabularies** (`taskrunner`'s
+  task-execution provider ids vs. `internal/accounts`' credential
+  provider ids) remain unreconciled — see the Item 7d note above; 7d
+  bridged them with `AccountProvider`/`CredentialKind` fields rather than
+  unifying the underlying data model.
+
+With this plan now functionally complete, moving it to
+`docs/plans/completed/` per the repo's own workflow rule.
