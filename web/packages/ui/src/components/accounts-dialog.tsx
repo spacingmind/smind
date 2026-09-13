@@ -21,36 +21,39 @@ import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } fr
 import type { WsClient } from "@/lib/ws-client";
 
 /**
- * Account-credential provider IDs (internal/accounts/refresh_providers.go),
- * the vocabulary internal/server/proxy.go actually matches accounts
- * against -- distinct from taskrunner.SupportedProviders()'s
- * claude-native/glm/kimi/codex-native task-execution IDs, which
- * provider.list serves and which this dialog used to (wrongly) source its
- * manual-add dropdown from. An account added under a task-execution
- * provider ID silently never matches proxy.go's routing lookup, so this
- * dialog must never offer those IDs here.
+ * This dialog used to source its Connect buttons and manual-add dropdown
+ * from hand-maintained MANUAL_PROVIDERS/OAUTH_PROVIDERS constants (a
+ * frontend-only copy of internal/accounts' provider vocabulary) that GLM
+ * showed no way to add for -- see Item 7b. Item 7d replaces those constants
+ * entirely: every row below is derived from provider.list
+ * (internal/taskrunner.SupportedProviders), the same RPC/registry
+ * task-detail.tsx's provider dropdown already renders from.
  *
- * provider.list is still consulted below, but only for its `kind: "cli"`
- * entries (see externalProviders state) -- a purely display-only
- * "managed externally" row, never fed into this dropdown.
+ * provider.list's ProviderInfo now carries, per provider,
+ * CredentialKind ("oauth" | "api-key", absent for kind: "cli") and
+ * accountProvider -- the id to actually call account.add/
+ * account.oauthStart with. accountProvider is *not* the same string as
+ * ProviderInfo.id: internal/accounts has its own provider vocabulary
+ * (anthropic/openai/kimi/xai/antigravity) that predates and differs from
+ * taskrunner.Provider (claude-native/glm/kimi/codex-native) -- proxy.go and
+ * LoginCoordinator only ever match against the former, so every add/connect
+ * call below must use accountProvider, never id.
+ *
+ * Known gap (see docs/plans/active/task-permission-ux.md's Item 7d note):
+ * xai and antigravity are accounts-only providers with no taskrunner
+ * counterpart at all, so provider.list has no entry for them and this
+ * dialog can no longer offer to add one -- unifying that would mean
+ * changing the accounts/credential data model itself, out of scope here.
  */
-const MANUAL_PROVIDERS: { id: string; label: string }[] = [
-  { id: "anthropic", label: "Anthropic (Claude)" },
-  { id: "openai", label: "OpenAI (Codex)" },
-  { id: "kimi", label: "Kimi" },
-  { id: "xai", label: "xAI (Grok)" },
-  { id: "antigravity", label: "Antigravity (Gemini)" },
-];
 
-/** Providers with a real browser-based OAuth login flow wired up (account.oauthStart) -- everyone else stays on the manual-paste form below. */
-const OAUTH_PROVIDERS: { id: string; label: string }[] = [
-  { id: "anthropic", label: "Anthropic (Claude)" },
-  { id: "openai", label: "OpenAI (Codex)" },
-];
+/** Providers with a credential row at all (kind is unset) -- feeds the manual-add dropdown. */
+function credentialProviders(providers: ProviderInfo[]): ProviderInfo[] {
+  return providers.filter((p) => p.credentialKind);
+}
 
-/** Friendly display label for a provider id, falling back to the raw id for anything not in MANUAL_PROVIDERS. */
-function providerLabel(id: string): string {
-  return MANUAL_PROVIDERS.find((p) => p.id === id)?.label ?? id;
+/** Friendly display label for an accounts-vocabulary provider id (Account.provider), falling back to the raw id for anything provider.list didn't describe (see the gap noted above). */
+function providerLabel(providers: ProviderInfo[], id: string): string {
+  return providers.find((p) => p.accountProvider === id)?.label ?? id;
 }
 
 /** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern. */
@@ -81,13 +84,13 @@ export function AccountsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
-  // Providers whose auth is managed entirely outside the account-credential
-  // system (kind === "cli", e.g. GLM's spawned `npx` subprocess) -- shown as
-  // a read-only "managed externally" row, never merged into MANUAL_PROVIDERS/
-  // OAUTH_PROVIDERS since those are a different ID vocabulary (see the doc
-  // comment above) that this dialog's add/connect flows actually route on.
-  const [externalProviders, setExternalProviders] = useState<ProviderInfo[]>([]);
-  const [provider, setProvider] = useState<string>(MANUAL_PROVIDERS[0].id);
+  // The daemon's full provider catalog (internal/taskrunner.SupportedProviders,
+  // served by provider.list) -- every row this dialog renders (managed-
+  // externally, Connect buttons, manual-add dropdown) derives from this,
+  // rather than a hand-maintained frontend constant. See the doc comment
+  // above for the accountProvider indirection and its known gap.
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [provider, setProvider] = useState<string>("");
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -98,9 +101,9 @@ export function AccountsDialog({
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
 
-  // Manual paste is the secondary path (only path for kimi/xai/antigravity,
-  // a fallback for anthropic/openai) -- collapsed by default so the primary
-  // Connect flow isn't competing with a full form for attention.
+  // Manual paste is the secondary path (only path for api-key-only
+  // providers, a fallback for oauth ones) -- collapsed by default so the
+  // primary Connect flow isn't competing with a full form for attention.
   const [showManual, setShowManual] = useState(false);
 
   // provider.test results/pending-state per row, keyed by provider id --
@@ -127,6 +130,10 @@ export function AccountsDialog({
     }
   }
 
+  const externalProviders = providers.filter((p) => p.kind === "cli");
+  const manualProviders = credentialProviders(providers);
+  const oauthProviders = manualProviders.filter((p) => p.credentialKind === "oauth");
+
   async function refresh() {
     if (!client) return;
     try {
@@ -141,10 +148,11 @@ export function AccountsDialog({
     if (open) void refresh();
   }, [open, client]);
 
-  // Separately fetch provider.list for the "managed externally" row(s) --
-  // kept out of `refresh()` since it's a different RPC feeding a purely
-  // display-only section, not the account list. Non-fatal on failure (falls
-  // back to showing none) since it's not the primary content of this dialog.
+  // Separately fetch provider.list -- kept out of `refresh()` since it's a
+  // different RPC feeding purely display/config-driven sections, not the
+  // account list itself. Non-fatal on failure (falls back to showing none
+  // of the derived sections) since it's not the primary content of this
+  // dialog.
   useEffect(() => {
     if (!open || !client) return;
     let cancelled = false;
@@ -152,13 +160,26 @@ export function AccountsDialog({
       .call<ProviderListResult>("provider.list")
       .then((result) => {
         if (cancelled) return;
-        setExternalProviders(result.providers.filter((p) => p.kind === "cli"));
+        setProviders(result.providers);
       })
-      .catch((err) => console.error("provider.list failed, hiding externally-managed providers", err));
+      .catch((err) => console.error("provider.list failed, hiding provider-derived sections", err));
     return () => {
       cancelled = true;
     };
   }, [open, client]);
+
+  // Keep the manual-add dropdown's selection valid as provider.list loads
+  // in (it starts empty until the RPC above resolves): default to the first
+  // credential-bearing provider, and only reset it if the current selection
+  // stops being one of the options.
+  useEffect(() => {
+    setProvider((current) => {
+      const options = credentialProviders(providers);
+      if (options.length === 0) return current;
+      if (options.some((p) => p.accountProvider === current)) return current;
+      return options[0].accountProvider ?? current;
+    });
+  }, [providers]);
 
   async function add() {
     if (!provider || !label.trim() || !credential.trim()) {
@@ -235,7 +256,7 @@ export function AccountsDialog({
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
                       <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                        {providerLabel(a.provider)} · {a.credentialType}
+                        {providerLabel(providers, a.provider)} · {a.credentialType}
                       </span>
                       <Button
                         type="button"
@@ -326,15 +347,15 @@ export function AccountsDialog({
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            {OAUTH_PROVIDERS.map((p) => (
+            {oauthProviders.map((p) => (
               <Button
-                key={p.id}
+                key={p.accountProvider}
                 variant="outline"
                 disabled={connecting !== null}
-                data-testid={`accounts-connect-${p.id}`}
-                onClick={() => void connect(p.id)}
+                data-testid={`accounts-connect-${p.accountProvider}`}
+                onClick={() => void connect(p.accountProvider!)}
               >
-                {connecting === p.id ? "Connecting…" : `Connect ${p.label}`}
+                {connecting === p.accountProvider ? "Connecting…" : `Connect ${p.label ?? p.accountProvider}`}
               </Button>
             ))}
           </div>
@@ -377,8 +398,8 @@ export function AccountsDialog({
             Paste a credential instead
           </button>
           <p className="mt-1 pl-4.5 text-xs text-muted-foreground">
-            For Kimi, xAI, and Antigravity (no Connect flow yet), or to paste a
-            credential obtained elsewhere.
+            For providers with no Connect flow yet, or to paste a credential
+            obtained elsewhere.
           </p>
 
           {showManual && (
@@ -394,9 +415,9 @@ export function AccountsDialog({
                         <SelectValue placeholder="Select provider" />
                       </SelectTrigger>
                       <SelectContent>
-                        {MANUAL_PROVIDERS.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.label}
+                        {manualProviders.map((p) => (
+                          <SelectItem key={p.accountProvider} value={p.accountProvider!}>
+                            {p.label ?? p.accountProvider}
                           </SelectItem>
                         ))}
                       </SelectContent>
