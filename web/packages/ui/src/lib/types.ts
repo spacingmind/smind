@@ -74,6 +74,15 @@ export interface ProviderListResult {
   providers: ProviderInfo[];
 }
 
+// Result of provider.test (internal/wsapi/handlers.go's providerTestResult):
+// a lightweight "can this provider actually start?" diagnostic -- ok plus a
+// short human-readable detail either way (which account/credential it used,
+// or why it isn't ready). Never mutates anything (no refresh, no run).
+export interface ProviderTestResult {
+  ok: boolean;
+  detail: string;
+}
+
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried
 // over the wire as their underlying string, same as any other Go string
 // enum with no json tag remapping.

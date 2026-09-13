@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Account, ProviderInfo, ProviderListResult } from "@/lib/types";
+import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 /**
@@ -53,6 +53,23 @@ function providerLabel(id: string): string {
   return MANUAL_PROVIDERS.find((p) => p.id === id)?.label ?? id;
 }
 
+/** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern. */
+function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
+  const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
+  const color =
+    state === "ok" ? "bg-emerald-500" : state === "failed" ? "bg-destructive" : "bg-muted-foreground/40";
+  const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
+  return (
+    <span
+      className={`size-2 shrink-0 rounded-full ${color}`}
+      title={label}
+      aria-label={label}
+      data-testid="accounts-status-dot"
+      data-status={state}
+    />
+  );
+}
+
 /** Accounts settings dialog: list (account.list), a "Connect" OAuth login per known provider (account.oauthStart), and a manual-paste form (account.add) for everything else. No edit/remove this pass. */
 export function AccountsDialog({
   client,
@@ -85,6 +102,30 @@ export function AccountsDialog({
   // a fallback for anthropic/openai) -- collapsed by default so the primary
   // Connect flow isn't competing with a full form for attention.
   const [showManual, setShowManual] = useState(false);
+
+  // provider.test results/pending-state per row, keyed by provider id --
+  // account rows and "managed externally" rows both key on the same
+  // provider id space provider.test accepts, so a single map covers both.
+  // Undefined means "never tested" (neutral dot); present but pending means
+  // a request is in flight for that row.
+  const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
+  const [testing, setTesting] = useState<Record<string, boolean>>({});
+
+  async function testProvider(providerId: string) {
+    if (!client) return;
+    setTesting((t) => ({ ...t, [providerId]: true }));
+    try {
+      const result = await client.call<ProviderTestResult>("provider.test", { provider: providerId });
+      setTestResults((r) => ({ ...r, [providerId]: result }));
+    } catch (err) {
+      setTestResults((r) => ({
+        ...r,
+        [providerId]: { ok: false, detail: err instanceof Error ? err.message : String(err) },
+      }));
+    } finally {
+      setTesting((t) => ({ ...t, [providerId]: false }));
+    }
+  }
 
   async function refresh() {
     if (!client) return;
@@ -186,11 +227,36 @@ export function AccountsDialog({
           ) : (
             <ul className="grid gap-1 text-sm">
               {accounts.map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-2 rounded-md px-2 py-1 hover:bg-accent">
-                  <span className="min-w-0 truncate font-medium">{a.label}</span>
-                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {providerLabel(a.provider)} · {a.credentialType}
-                  </span>
+                <li key={a.id} className="flex flex-col gap-1 rounded-md px-2 py-1 hover:bg-accent" data-testid={`accounts-row-${a.provider}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <StatusDot result={testResults[a.provider]} />
+                      <span className="min-w-0 truncate font-medium">{a.label}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        {providerLabel(a.provider)} · {a.credentialType}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        disabled={testing[a.provider]}
+                        data-testid={`accounts-test-${a.provider}`}
+                        onClick={() => void testProvider(a.provider)}
+                      >
+                        {testing[a.provider] ? "Testing…" : "Test"}
+                      </Button>
+                    </span>
+                  </div>
+                  {testResults[a.provider] && (
+                    <p
+                      className={`pl-3.5 text-xs ${testResults[a.provider].ok ? "text-emerald-600" : "text-destructive"}`}
+                      data-testid={`accounts-test-result-${a.provider}`}
+                    >
+                      {testResults[a.provider].detail}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>
@@ -204,13 +270,38 @@ export function AccountsDialog({
               {externalProviders.map((p) => (
                 <li
                   key={p.id}
-                  className="flex items-center justify-between gap-2 rounded-md px-2 py-1"
+                  className="flex flex-col gap-1 rounded-md px-2 py-1"
                   data-testid={`accounts-external-provider-${p.id}`}
                 >
-                  <span className="min-w-0 truncate font-medium">{p.label ?? p.id}</span>
-                  <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    Managed externally via CLI
-                  </span>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <StatusDot result={testResults[p.id]} />
+                      <span className="min-w-0 truncate font-medium">{p.label ?? p.id}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-2">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        Managed externally via CLI
+                      </span>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="xs"
+                        disabled={testing[p.id]}
+                        data-testid={`accounts-test-${p.id}`}
+                        onClick={() => void testProvider(p.id)}
+                      >
+                        {testing[p.id] ? "Testing…" : "Test"}
+                      </Button>
+                    </span>
+                  </div>
+                  {testResults[p.id] && (
+                    <p
+                      className={`pl-3.5 text-xs ${testResults[p.id].ok ? "text-emerald-600" : "text-destructive"}`}
+                      data-testid={`accounts-test-result-${p.id}`}
+                    >
+                      {testResults[p.id].detail}
+                    </p>
+                  )}
                 </li>
               ))}
             </ul>
