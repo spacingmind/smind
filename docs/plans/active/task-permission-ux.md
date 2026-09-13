@@ -161,6 +161,8 @@ task/run can pick up one item without needing the others done first.
       now" diagnostic in the accounts dialog (see below)
 - [x] Item 7d: stop hand-maintaining the accounts dialog's provider list
       in frontend constants (see below)
+- [x] Item 7e: fix auto-safe allowlist for claude-native runs
+      (root cause: `cd <dir> && go test` chaining; see Validation)
 
 ## Validation
 
@@ -413,6 +415,22 @@ task/run can pick up one item without needing the others done first.
   again via a fresh subagent in this session); changes reviewed by hand
   (types, filters, default-selection effect, gofmt-style tab indentation)
   instead. **Please run those three commands before merging.**
+**Auto-safe matcher fixed 2026-09-13** (root cause of the repeated
+"sandbox blocked everything" pattern): the claude-native decider was
+wired correctly all along (claudeDeciderAdapter passes the literal Bash
+command, and the registry's auto-allow path + PermissionResolvedByAutoSafe
+timeline event from #93 work as designed) -- what broke was
+`AllowlistedCommand`'s whole-string prefix match: real Claude Code turns
+routinely ship verification commands as `cd <worktree> && go test ./...`,
+which starts with "cd ", not "go test ", so every such command fell
+through to the manual flow with no human watching. The matcher now
+splits on chain operators (&&, ;, |) first, rejects subshell/command
+substitution/embedded newlines unconditionally, allows exactly one
+shape of chaining -- a bare `cd <dir>` leading segment followed by a
+single allowlisted command -- and rejects everything else (two chained
+safe commands, any third segment, a smuggled command on either side of
+a safe verb). Covered by 14 new TestAllowlistedCommand subtests
+matching the observed failure shape.
 
 ### Item 7: provider/account management parity (added 2026-09-12)
 
