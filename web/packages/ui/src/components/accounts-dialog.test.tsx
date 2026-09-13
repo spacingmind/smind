@@ -272,4 +272,102 @@ describe("AccountsDialog", () => {
 
     expect(await screen.findByText(/already in progress/)).toBeInTheDocument();
   });
+
+  it("renders a neutral status dot for an untested account row, with a Test button", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve(ACCOUNTS);
+    await flush();
+
+    const row = await screen.findByTestId("accounts-row-anthropic");
+    expect(row.querySelector('[data-testid="accounts-status-dot"]')).toHaveAttribute("data-status", "unknown");
+    expect(screen.getByTestId("accounts-test-anthropic")).toHaveTextContent("Test");
+    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(0);
+  });
+
+  it("Test calls provider.test and shows an ok result inline, turning the dot green", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve(ACCOUNTS);
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("accounts-test-anthropic"));
+
+    const test = await waitFor(() => client.nth("provider.test"));
+    expect(test.params).toEqual({ provider: "anthropic" });
+
+    await act(async () => {
+      test.resolve({ ok: true, detail: 'using "main" (oauth, expires 2099-01-01T00:00:00Z)' });
+    });
+    await flush();
+
+    const row = screen.getByTestId("accounts-row-anthropic");
+    expect(row.querySelector('[data-testid="accounts-status-dot"]')).toHaveAttribute("data-status", "ok");
+    expect(screen.getByTestId("accounts-test-result-anthropic")).toHaveTextContent(
+      'using "main" (oauth, expires 2099-01-01T00:00:00Z)',
+    );
+  });
+
+  it("Test shows a not-ok result inline and turns the dot red", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve(ACCOUNTS);
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("accounts-test-anthropic"));
+    const test = await waitFor(() => client.nth("provider.test"));
+
+    await act(async () => {
+      test.resolve({ ok: false, detail: "found 1 account(s) for \"anthropic\", but all credentials are expired" });
+    });
+    await flush();
+
+    const row = screen.getByTestId("accounts-row-anthropic");
+    expect(row.querySelector('[data-testid="accounts-status-dot"]')).toHaveAttribute("data-status", "failed");
+    expect(screen.getByTestId("accounts-test-result-anthropic")).toHaveTextContent(/all credentials are expired/);
+  });
+
+  it("Test on a managed-externally (cli-kind) row calls provider.test with its provider id and shows the result", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve([]);
+    await flush();
+    client.nth("provider.list").resolve({ providers: [{ id: "glm", label: "GLM", kind: "cli" }] });
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("accounts-test-glm"));
+    const test = await waitFor(() => client.nth("provider.test"));
+    expect(test.params).toEqual({ provider: "glm" });
+
+    await act(async () => {
+      test.resolve({ ok: false, detail: '"npx" not found on PATH: exec: "npx": executable file not found in $PATH' });
+    });
+    await flush();
+
+    const row = screen.getByTestId("accounts-external-provider-glm");
+    expect(row.querySelector('[data-testid="accounts-status-dot"]')).toHaveAttribute("data-status", "failed");
+    expect(screen.getByTestId("accounts-test-result-glm")).toHaveTextContent(/not found on PATH/);
+  });
+
+  it("surfaces a rejected provider.test call as an inline not-ok result", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list").resolve(ACCOUNTS);
+    await flush();
+
+    fireEvent.click(await screen.findByTestId("accounts-test-anthropic"));
+    const test = await waitFor(() => client.nth("provider.test"));
+
+    await act(async () => {
+      test.reject(new Error("provider.test: accounts registry is unavailable"));
+    });
+    await flush();
+
+    expect(screen.getByTestId("accounts-test-result-anthropic")).toHaveTextContent(/accounts registry is unavailable/);
+  });
 });
