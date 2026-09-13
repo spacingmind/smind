@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -21,6 +24,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.add":           handleAccountAdd(acctReg),
 		"account.oauthStart":    handleAccountOAuthStart(coord),
 		"provider.list":         handleProviderList(),
+		"provider.test":         handleProviderTest(acctReg),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
@@ -883,4 +887,127 @@ func handleProviderList() handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
 		return providerListResult{Providers: taskrunner.SupportedProviders()}, nil
 	}
+}
+
+// providerCLICommand maps a taskrunner.Provider to the command whose first
+// argument (the executable name) internal/taskrunner.Runner actually spawns
+// for it, for provider.test's cli-kind diagnostic path below -- mirroring
+// acp.GLMCommand/codex.DefaultCommand and, for ProviderClaudeNative,
+// github.com/spacingmind/claude-agent-sdk-go's own hardcoded "claude"
+// binary (that package exposes no command override, unlike the ACP/Codex
+// backends, so there's nothing to import here). Only the three providers
+// this diagnostic is scoped to are listed; ProviderKimi's CLI needs an
+// out-of-band `kimi -> /login` first (see acp.KimiCommand's doc comment) so
+// "is kimi on PATH" wouldn't actually signal readiness the way it does for
+// the other three -- it's left to fall through to the credential-based
+// check below, same as the account-management "kimi" provider id.
+var providerCLICommand = map[taskrunner.Provider][]string{
+	taskrunner.ProviderGLM:          acp.GLMCommand(),
+	taskrunner.ProviderCodexNative:  codex.DefaultCommand(),
+	taskrunner.ProviderClaudeNative: {"claude"},
+}
+
+// providerTestTimeout bounds how long provider.test's PATH lookup is
+// allowed to take before it's reported as a failure rather than left to
+// hang the request -- exec.LookPath only stats directories on $PATH so it
+// should return near-instantly, but this keeps the RPC's "never hang"
+// contract even against a pathological filesystem (e.g. a stuck network
+// mount on $PATH).
+const providerTestTimeout = 3 * time.Second
+
+// providerTestResult is the result of provider.test: whether the provider
+// looks ready to actually start a turn, plus a short human-readable detail
+// string for either case (accounts-dialog.tsx shows it inline next to the
+// row's status dot).
+type providerTestResult struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+// handleProviderTest is a lightweight "test this provider now" diagnostic:
+// it never actually starts a run, it just checks whether the provider
+// *could* start one. For a cli-kind provider (providerCLICommand above) it
+// checks the underlying agent binary is resolvable on $PATH; otherwise it
+// treats provider as an account-credential provider id (internal/accounts,
+// the anthropic/openai/kimi/xai/antigravity vocabulary) and checks a
+// stored, unexpired credential exists for it. Never hits the network and
+// never refreshes a credential (accounts.Registry.EnsureFresh does that,
+// with real side effects); this only reports what's already there.
+func handleProviderTest(acctReg *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("provider.test: invalid params: %w", err)
+		}
+		if p.Provider == "" {
+			return nil, fmt.Errorf("provider.test: provider is required")
+		}
+		if cmd, ok := providerCLICommand[taskrunner.Provider(p.Provider)]; ok {
+			return testProviderCLI(cmd), nil
+		}
+		return testProviderCredential(acctReg, p.Provider), nil
+	}
+}
+
+// testProviderCLI checks that cmd's executable (cmd[0]) resolves on $PATH,
+// bounded by providerTestTimeout so a pathological PATH lookup can't hang
+// the request.
+func testProviderCLI(cmd []string) providerTestResult {
+	if len(cmd) == 0 {
+		return providerTestResult{Detail: "no command configured for this provider"}
+	}
+	type lookupResult struct {
+		path string
+		err  error
+	}
+	done := make(chan lookupResult, 1)
+	go func() {
+		path, err := exec.LookPath(cmd[0])
+		done <- lookupResult{path: path, err: err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return providerTestResult{Detail: fmt.Sprintf("%q not found on PATH: %v", cmd[0], r.err)}
+		}
+		return providerTestResult{OK: true, Detail: fmt.Sprintf("found %s", r.path)}
+	case <-time.After(providerTestTimeout):
+		return providerTestResult{Detail: fmt.Sprintf("timed out looking for %q on PATH", cmd[0])}
+	}
+}
+
+// testProviderCredential checks whether provider (an internal/accounts
+// provider id) has at least one stored account whose credential looks
+// usable right now: an API key (which doesn't expire) or an OAuth
+// credential not already past its ExpiresAt. It reports the first usable
+// account found, or -- if provider has accounts but none are usable -- says
+// so, distinct from having no account at all.
+func testProviderCredential(acctReg *accounts.Registry, provider string) providerTestResult {
+	if acctReg == nil {
+		return providerTestResult{Detail: "accounts registry is unavailable"}
+	}
+	all, err := acctReg.List()
+	if err != nil {
+		return providerTestResult{Detail: fmt.Sprintf("failed to list accounts: %v", err)}
+	}
+
+	found := 0
+	for _, a := range all {
+		if a.Provider != provider {
+			continue
+		}
+		found++
+		switch {
+		case a.APIKey != nil && a.APIKey.Key != "":
+			return providerTestResult{OK: true, Detail: fmt.Sprintf("using %q (api key)", a.Label)}
+		case a.OAuth != nil && time.Now().Before(a.OAuth.ExpiresAt):
+			return providerTestResult{OK: true, Detail: fmt.Sprintf("using %q (oauth, expires %s)", a.Label, a.OAuth.ExpiresAt.Format(time.RFC3339))}
+		}
+	}
+	if found == 0 {
+		return providerTestResult{Detail: fmt.Sprintf("no account configured for %q", provider)}
+	}
+	return providerTestResult{Detail: fmt.Sprintf("found %d account(s) for %q, but all credentials are expired", found, provider)}
 }
