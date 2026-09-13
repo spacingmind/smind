@@ -159,6 +159,8 @@ task/run can pick up one item without needing the others done first.
 - [x] Item 7b: show the GLM provider in the accounts dialog (see below)
 - [x] Item 7c: account health/connection status + "test this provider
       now" diagnostic in the accounts dialog (see below)
+- [x] Item 7d: stop hand-maintaining the accounts dialog's provider list
+      in frontend constants (see below)
 
 ## Validation
 
@@ -364,6 +366,53 @@ task/run can pick up one item without needing the others done first.
   correctness (import cycles, wire-shape round-trip, gofmt-equivalent
   formatting, TS type-checking by inspection) instead; **please run those
   four commands before merging** to confirm green.
+- **Item 7d** (stop hand-maintaining the accounts dialog's provider list):
+  `internal/taskrunner.ProviderInfo` gained two more optional fields --
+  `CredentialKind` (`"oauth"` | `"api-key"`, unset for `kind: "cli"`
+  providers) and `AccountProvider` (the `internal/accounts` vocabulary id a
+  credential-bearing provider's add/connect calls must actually be sent
+  with) -- set on `SupportedProviders()`'s three credential-bearing entries
+  (`claude-native` -> `oauth`/`anthropic`, `kimi` -> `api-key`/`kimi`,
+  `codex-native` -> `oauth`/`openai`); GLM stays untouched (`kind: "cli"`,
+  no credential fields). `accounts-dialog.tsx`'s hand-maintained
+  `MANUAL_PROVIDERS`/`OAUTH_PROVIDERS` constants are gone: the "Connect"
+  buttons and the manual-add dropdown are now both derived from the same
+  `provider.list` fetch Item 7b already added for the "managed externally"
+  section, filtered by `credentialKind`. Every add/connect call routes on
+  each entry's `accountProvider`, never its `id` -- selecting "Claude Code"
+  in the dropdown submits `account.add` with `provider: "anthropic"`, not
+  `"claude-native"`, since that's the vocabulary `internal/server/proxy.go`
+  and `internal/accounts.LoginCoordinator` actually match against.
+  **Boundary hit and deliberately not crossed**: `internal/accounts`' own
+  provider vocabulary has two entries with no taskrunner counterpart at
+  all -- `xai` and `antigravity` (real, refresher-backed credential types,
+  see `internal/accounts/refresh_providers.go`, just never wired to any
+  task-execution backend or proxy route). Because the full provider list is
+  now *derived* from `provider.list` rather than hand-copied, these two can
+  no longer be added through this dialog -- there is nothing in
+  `taskrunner.SupportedProviders()` to derive a row from. Unifying the two
+  vocabularies for real (e.g. giving `internal/accounts` its own
+  `provider.list`-equivalent registry, independent of task execution) would
+  mean touching the accounts/credential data model itself, which this task
+  was explicitly scoped to stop short of. **Follow-up, not done here**:
+  either expose a small `internal/accounts`-owned catalog (id, label,
+  credential kind) that this dialog also merges in for the two orphaned
+  providers, or fold `xai`/`antigravity` into `taskrunner.SupportedProviders`
+  if/when they gain a real task-execution backend. Until then, adding an
+  xai or antigravity account requires a workaround outside this dialog (e.g.
+  a direct `account.add` RPC call). Tests: `internal/wsapi/provider_test.go`'s
+  `TestServer_ProviderList_RoundTrip` extended to assert
+  `credentialKind`/`accountProvider` per provider; `accounts-dialog.test.tsx`
+  rewritten to drive every section from a fake `provider.list` response
+  (matching `SupportedProviders()`'s real shape) instead of relying on the
+  old constants, including a regression guard that selecting the
+  `provider.list`-derived "Claude Code" entry still submits `"anthropic"`.
+  **Could not run `task test`/`task lint`/`bun run test` in this session**
+  either -- same sandbox restriction as Item 7b above (`go`/`task`/`bun`/
+  `gofmt` all rejected with "this command requires approval", confirmed
+  again via a fresh subagent in this session); changes reviewed by hand
+  (types, filters, default-selection effect, gofmt-style tab indentation)
+  instead. **Please run those three commands before merging.**
 
 ### Item 7: provider/account management parity (added 2026-09-12)
 
