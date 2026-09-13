@@ -28,7 +28,7 @@ type accountResult struct {
 
 func cmdAccount(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login|test> ...")
 		return 2
 	}
 	switch args[0] {
@@ -38,6 +38,8 @@ func cmdAccount(args []string) int {
 		return cmdAccountList(args[1:])
 	case "login":
 		return cmdAccountLogin(args[1:])
+	case "test":
+		return cmdAccountTest(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind account: unknown subcommand %q\n", args[0])
 		return 2
@@ -159,6 +161,49 @@ func cmdAccountLogin(args []string) int {
 	}
 	fmt.Printf("%d\t%s\t%s\t%s\n", account.ID, account.Provider, account.Label, account.CredentialType)
 	return 0
+}
+
+// providerTestResult mirrors internal/wsapi/handlers.go's providerTestResult,
+// the result of provider.test: whether the provider looks ready to actually
+// start a turn, plus a short human-readable detail string for either case.
+type providerTestResult struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+// cmdAccountTest runs provider.test's lightweight readiness diagnostic for
+// provider (a cli-kind agent binary on $PATH, or a stored, unexpired
+// credential -- see handleProviderTest's doc comment) and prints the
+// result: "ok" plus the detail line on success, or just the detail line on
+// failure, matching the accounts dialog's inline status text.
+func cmdAccountTest(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: smind account test <provider>")
+		return 2
+	}
+	provider := args[0]
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var result providerTestResult
+	err = client.Call(context.Background(), "provider.test", map[string]any{
+		"provider": provider,
+	}, &result)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "account test: %v\n", err)
+		return 1
+	}
+	if result.OK {
+		fmt.Printf("ok\t%s\n", result.Detail)
+		return 0
+	}
+	fmt.Println(result.Detail)
+	return 1
 }
 
 // openBrowser best-effort opens url in the local system browser. Failure is
