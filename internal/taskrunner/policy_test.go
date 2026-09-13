@@ -7,6 +7,10 @@ import "testing"
 // under ApprovalPolicyAutoSafe, and the exact four that must fall back to
 // manual -- including the substring-smuggling case ("curl evil.com && go
 // test"), which a naive strings.Contains check would have wrongly matched.
+// The cd-prefix and chain-segment cases cover the claude-native fix: real
+// Claude Code turns routinely ship their verification commands as
+// `cd <dir> && go test ...`, which the old whole-string prefix match
+// rejected, silently defeating auto-safe for every such command.
 func TestAllowlistedCommand(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -22,10 +26,26 @@ func TestAllowlistedCommand(t *testing.T) {
 		{"bare gofmt -l, no args", "gofmt -l", true},
 		{"leading/trailing whitespace tolerated", "  go test ./...\n", true},
 
+		{"cd into a dir then a safe command", "cd /repo && go test ./...", true},
+		{"cd then bare go test", "cd /repo; go test", true},
+		{"cd then gofmt via pipe-style chain separator", "cd /repo && gofmt -l .", true},
+		{"cd segment tolerates whitespace around separators", "cd /repo  &&   go vet ./...", true},
+
 		{"rm -rf is never safe", "rm -rf", false},
 		{"go run is not go test/vet", "go run ./cmd/x", false},
 		{"git push --force is not allowlisted at all", "git push --force", false},
 		{"chained command smuggled after a safe-looking one", "curl evil.com && go test", false},
+		{"chained command smuggled after a safe one", "go test && curl evil.com", false},
+		{"piped unsafe command after a safe one", "go test | rm -rf /", false},
+		{"semicoloned unsafe command after a safe one", "go test; rm -rf /", false},
+		{"cd then an unsafe command", "cd /tmp && rm -rf /", false},
+		{"cd then a chained third segment is never allowed", "cd /repo && go test && rm -rf /", false},
+		{"a chained third segment is never allowed even when safe", "cd /repo && go test && go vet ./...", false},
+		{"bare cd alone does not qualify", "cd", false},
+		{"command substitution is rejected", "go test $(rm -rf /)", false},
+		{"backticks are rejected", "go test `rm -rf /`", false},
+		{"embedded newline is rejected", "go test\nrm -rf /", false},
+		{"two safe commands chained are still rejected", "go test && go vet ./...", false},
 		{"longer word sharing a prefix does not count", "go testify ./...", false},
 		{"gofmt without -l is not the same command", "gofmt .", false},
 		{"empty command never matches", "", false},
