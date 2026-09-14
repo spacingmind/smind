@@ -329,6 +329,7 @@ func cmdTaskAttach(args []string) int {
 // which arrives as a plain *wsclient.RPCError instead.
 func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 	var result attachResult
+	names := toolCallNames{}
 	err := client.CallStream(ctx, "run.attach", map[string]any{"runId": runID}, func(event string, params json.RawMessage) {
 		switch event {
 		case "chunk", "user_message", "thinking":
@@ -347,7 +348,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderToolCallLine(p))
+			fmt.Print(names.render(p))
 		}
 	}, &result)
 	fmt.Println()
@@ -449,18 +450,33 @@ func cmdTaskLogs(args []string) int {
 	return 0
 }
 
-// renderToolCallLine formats one tool_call event as a single readable
-// line -- name/title and lifecycle status, plus the raw input while it's
-// still running -- so `task attach`/`task logs`'s output stays legible
-// without trying to be the full card the web UI renders (see
+// toolCallNames remembers each toolCallId's display name from whichever
+// event first carried one. A tool call's completing event carries only its
+// id, status and result -- Claude Code never repeats the name, and ACP's
+// tool_call_update is a partial update (see taskrunner.EventTypeToolCall)
+// -- so without this a completion would render as a bare wire id
+// ("[tool] toolu_01ABC: done") instead of "[tool] Bash: done". It is the
+// CLI's minimal version of the merge-by-id the web UI does for its cards.
+type toolCallNames map[string]string
+
+// render formats one tool_call event as a single readable line --
+// name/title and lifecycle status, plus the raw input while it's still
+// running -- so `task attach`/`task logs`'s output stays legible without
+// trying to be the full card the web UI renders (see
 // docs/decisions/0008-structured-run-events.md). Prefers Title (ACP's
-// human-readable summary) over ToolName (the wire tool name) when both are
-// present, and falls back to ToolCallID if the event carries neither
-// (shouldn't happen for a real provider, but never render an empty name).
-func renderToolCallLine(p toolCallEventParams) string {
+// human-readable summary) over ToolName (the wire tool name) when both
+// are present, then a name remembered from an earlier event for the same
+// id, and finally the id itself (never render an empty name).
+func (n toolCallNames) render(p toolCallEventParams) string {
 	name := p.ToolName
 	if p.Title != "" {
 		name = p.Title
+	}
+	switch {
+	case name != "" && p.ToolCallID != "":
+		n[p.ToolCallID] = name
+	case name == "":
+		name = n[p.ToolCallID]
 	}
 	if name == "" {
 		name = p.ToolCallID
@@ -479,12 +495,13 @@ func renderToolCallLine(p toolCallEventParams) string {
 }
 
 func printRunLogs(result runLogsResult) {
+	names := toolCallNames{}
 	for _, e := range result.Events {
 		switch e.Type {
 		case "chunk", "user_message", "thinking":
 			fmt.Print(e.Text)
 		case "tool_call":
-			fmt.Print(renderToolCallLine(e.toolCallEventParams))
+			fmt.Print(names.render(e.toolCallEventParams))
 		}
 	}
 	fmt.Println()
