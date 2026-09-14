@@ -5,6 +5,13 @@ import { PlanReviewCard } from "@/components/permission/plan-review-card";
 import { QuestionFormCard } from "@/components/permission/question-form-card";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
 
+/** True when the currently focused element is a text input the user could be mid-keystroke in -- the composer's textarea, chiefly. */
+function isTextEntryFocused(): boolean {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLElement)) return false;
+  return active.tagName === "TEXTAREA" || active.tagName === "INPUT" || active.isContentEditable;
+}
+
 /**
  * Dispatches one pending permission request to its variant, by shape:
  * `plan` wins over `questions` (a plan review that also carried a
@@ -16,13 +23,14 @@ import type { PendingPermission } from "@/hooks/use-run-timeline";
  * every option" (Item 11's own scenario) is this fallthrough.
  *
  * Wrapped in a focusable, labelled group (Item 11's keyboard scenario):
- * `tabIndex={-1}` plus a programmatic focus on first mount is what makes
- * "the pending card is focusable" true for a *screen-reader or
- * keyboard-only* user landing on the page fresh, without stealing focus
- * away from something the user is actively doing (typing in the
- * composer) on every subsequent render -- the effect's empty dependency
- * array means this fires once per requestId, not once per keystroke
- * elsewhere on the page.
+ * `tabIndex={-1}` plus a programmatic focus once per requestId is what
+ * makes "the pending card is focusable" true for a *screen-reader or
+ * keyboard-only* user landing on the page fresh. It skips that focus grab
+ * when the composer (or any other text field) already has focus: a new
+ * request can arrive mid-keystroke -- a run doing several tool calls asks
+ * more than once -- and yanking focus away from an input the user is
+ * actively typing into would silently drop whatever they type next on the
+ * floor, not just annoy them.
  */
 export function PermissionCard({
   runId,
@@ -38,6 +46,7 @@ export function PermissionCard({
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (isTextEntryFocused()) return;
     ref.current?.focus();
   }, [pending.requestId]);
 

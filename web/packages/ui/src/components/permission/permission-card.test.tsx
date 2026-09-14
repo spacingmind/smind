@@ -87,6 +87,27 @@ describe("PermissionCard: options variant", () => {
     expect(document.activeElement).toBe(screen.getByRole("group", { name: "Run another risky command" }));
   });
 
+  it("does not steal focus from a text field the user is actively typing in when a new request arrives", () => {
+    function Harness({ requestId }: { requestId: string }) {
+      return (
+        <>
+          <textarea aria-label="composer" />
+          <PermissionCard runId="run-1" pending={pending({ requestId })} onRespond={vi.fn()} onChat={vi.fn()} />
+        </>
+      );
+    }
+
+    const { rerender } = render(<Harness requestId="req-1" />);
+    const composer = screen.getByLabelText("composer");
+    composer.focus();
+    expect(document.activeElement).toBe(composer);
+
+    // A second, different request must not yank focus off the field the
+    // user is mid-keystroke in.
+    rerender(<Harness requestId="req-2" />);
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("options are real buttons, reachable in tab order and activatable by click", async () => {
     const onRespond = vi.fn().mockResolvedValue(undefined);
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={onRespond} onChat={vi.fn()} />);
