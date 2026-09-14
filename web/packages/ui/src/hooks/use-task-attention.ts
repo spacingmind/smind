@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
-import type { RunLogEvent, RunLogsResult, RunSummary } from "@/lib/types";
+import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/lib/types";
 
 /** Why a task currently has the sidebar's attention marker. */
 export type AttentionReason = "error" | "finished" | "permission";
@@ -10,8 +10,36 @@ export type AttentionReason = "error" | "finished" | "permission";
 /** Task ids that currently warrant an attention dot, with the reasons why. */
 export type TaskAttention = Map<number, Set<AttentionReason>>;
 
-/** The run fields the badge logic needs -- what run.status payloads and RunSummary share. */
-type RunLike = Pick<RunSummary, "ID" | "TaskID" | "Status">;
+/** Stable "nothing known yet" value, so a client-less mount doesn't hand consumers a fresh object every render. */
+const EMPTY_SIGNAL: TaskSignal = { attention: new Map(), runStatus: new Map() };
+
+/**
+ * The status of each task's latest run -- "running" if any of the task's
+ * runs is still going, otherwise the terminal status of the most recently
+ * started one. Tasks that have never run are absent rather than carrying
+ * a fifth "idle" value: "no run yet" is not a run state, and the sidebar
+ * row draws no dot for it.
+ */
+export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
+
+/** Both per-task signals this hook derives from the one run bookkeeping it keeps. */
+export interface TaskSignal {
+  attention: TaskAttention;
+  runStatus: TaskRunStatus;
+}
+
+/**
+ * The run fields the badge logic needs -- what run.status payloads and
+ * RunSummary share -- plus a recency `order`, higher being more recent, so
+ * "the task's latest run" is answerable without StartedAt (which
+ * run.status payloads don't carry). run.list returns newest-first
+ * (internal/runs.Registry.List sorts StartedAt descending), so its rows
+ * take order 0, -1, -2...; every live event afterwards takes a positive
+ * counter, putting it above the whole snapshot.
+ */
+interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "Status"> {
+  order: number;
+}
 
 /**
  * True if events contain a permission_request whose requestId has no
@@ -48,8 +76,8 @@ export function useTaskAttention(
   client: WsClientLike | null,
   selectedTaskId: number | null,
   events: DaemonEvents | null,
-): TaskAttention {
-  const [attention, setAttention] = useState<TaskAttention>(new Map());
+): TaskSignal {
+  const [signal, setSignal] = useState<TaskSignal>(EMPTY_SIGNAL);
 
   // Latest-known run summaries and permission-pending task ids, kept in
   // refs so the selection-change effect can re-derive badges without
@@ -58,17 +86,25 @@ export function useTaskAttention(
   const pendingPermissionTasksRef = useRef<Set<number>>(new Set());
   /** Per task, the terminal run ids already observed at selection time. */
   const seenRef = useRef<Map<number, Set<string>>>(new Map());
+  /** Monotonic counter handing every live run.status an `order` above the whole run.list snapshot's. */
+  const orderRef = useRef(0);
 
   const recompute = useCallback(() => {
     const runs = runsRef.current;
     if (!runs) return;
 
-    const next: TaskAttention = new Map();
+    const attention: TaskAttention = new Map();
     const add = (taskId: number, reason: AttentionReason) => {
-      const set = next.get(taskId) ?? new Set<AttentionReason>();
+      const set = attention.get(taskId) ?? new Set<AttentionReason>();
       set.add(reason);
-      next.set(taskId, set);
+      attention.set(taskId, set);
     };
+
+    // Latest run per task, for the sidebar's run-status dot: a run still
+    // going always wins, so a task with one run finished and another
+    // still in flight reads as running; otherwise the most recent by
+    // `order`.
+    const latest = new Map<number, RunLike>();
 
     for (const run of runs) {
       if (run.Status !== "running") {
@@ -77,59 +113,101 @@ export function useTaskAttention(
           add(run.TaskID, run.Status === "error" ? "error" : "finished");
         }
       }
+      const held = latest.get(run.TaskID);
+      if (!held || (held.Status !== "running" && (run.Status === "running" || run.order > held.order))) {
+        latest.set(run.TaskID, run);
+      }
     }
     for (const taskId of pendingPermissionTasksRef.current) {
       add(taskId, "permission");
     }
 
-    setAttention(next);
+    setSignal({
+      attention,
+      runStatus: new Map([...latest].map(([taskId, run]) => [taskId, run.Status])),
+    });
   }, []);
+
+  /**
+   * The run.list + run.logs resync pass: replaces the ref-held run
+   * bookkeeping wholesale from what the daemon currently reports, same as
+   * a fresh mount. Called on client change (a genuine reconnect) and on
+   * `event.dropped` (ADR 0005: the queue is per-connection, so a drop can
+   * just as well have swallowed a run.status or permission.pending this
+   * hook would otherwise never correct) -- both are "this connection's
+   * live view may have missed something, re-derive truth from the RPCs".
+   */
+  const resync = useCallback(
+    (activeClient: WsClientLike, isStale: () => boolean) => {
+      activeClient
+        .call<RunSummary[]>("run.list")
+        .then(async (rawRuns) => {
+          if (isStale()) return;
+          // Newest-first from the daemon, so index 0 is the most recent:
+          // order 0, -1, -2... leaves every later live event above it.
+          const runs: RunLike[] = (rawRuns ?? []).map((r, index) => ({
+            ID: r.ID,
+            TaskID: r.TaskID,
+            Status: r.Status,
+            order: -index,
+          }));
+          runsRef.current = runs;
+          orderRef.current = 0;
+
+          const pending = new Set<number>();
+          await Promise.all(
+            runs
+              .filter((r) => r.Status === "running")
+              .map((r) =>
+                activeClient
+                  .call<RunLogsResult>("run.logs", { runId: r.ID })
+                  .then((logs) => {
+                    if (!isStale() && hasUnresolvedPermission(logs.events)) pending.add(r.TaskID);
+                  })
+                  .catch(() => {
+                    // Best-effort detection -- a failed run.logs just means
+                    // no permission badge from this pass, not an error state.
+                  }),
+              ),
+          );
+          if (isStale()) return;
+          pendingPermissionTasksRef.current = pending;
+          recompute();
+        })
+        .catch(() => {
+          // No run data -> no badges; the next resync (reconnect or
+          // event.dropped) tries again.
+        });
+    },
+    [recompute],
+  );
 
   useEffect(() => {
     if (!client) {
       runsRef.current = null;
       pendingPermissionTasksRef.current = new Set();
-      setAttention(new Map());
+      orderRef.current = 0;
+      setSignal(EMPTY_SIGNAL);
       return;
     }
 
     let cancelled = false;
-
-    client
-      .call<RunSummary[]>("run.list")
-      .then(async (rawRuns) => {
-        const runs = rawRuns ?? [];
-        if (cancelled) return;
-        runsRef.current = runs;
-
-        const pending = new Set<number>();
-        await Promise.all(
-          runs
-            .filter((r) => r.Status === "running")
-            .map((r) =>
-              client
-                .call<RunLogsResult>("run.logs", { runId: r.ID })
-                .then((logs) => {
-                  if (!cancelled && hasUnresolvedPermission(logs.events)) pending.add(r.TaskID);
-                })
-                .catch(() => {
-                  // Best-effort detection -- a failed run.logs just means
-                  // no permission badge from this pass, not an error state.
-                }),
-            ),
-        );
-        if (cancelled) return;
-        pendingPermissionTasksRef.current = pending;
-        recompute();
-      })
-      .catch(() => {
-        // No run data -> no badges; a reconnect re-runs this effect.
-      });
+    resync(client, () => cancelled);
 
     return () => {
       cancelled = true;
     };
-  }, [client, recompute]);
+  }, [client, resync]);
+
+  useEffect(() => {
+    if (!client || !events) return;
+    let cancelled = false;
+    const off = events.subscribe("event.dropped", () => resync(client, () => cancelled));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [client, events, resync]);
 
   // Live path: badge (or clear) as run.status / permission.pending
   // notifications arrive -- no refetch, the notification IS the state
@@ -141,13 +219,15 @@ export function useTaskAttention(
     if (!events) return;
 
     const offRunStatus = events.subscribe("run.status", (payload) => {
-      const p = payload as { runId?: string; taskId?: number; status?: string };
+      if (typeof payload !== "object" || payload === null) return;
+      const p = payload as { runId?: unknown; taskId?: unknown; status?: unknown };
       if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
 
       const runs = runsRef.current ?? (runsRef.current = []);
       const idx = runs.findIndex((r) => r.ID === p.runId);
-      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, Status: p.status as RunLike["Status"] };
-      else runs.push({ ID: p.runId, TaskID: p.taskId, Status: p.status as RunLike["Status"] });
+      const order = ++orderRef.current;
+      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, Status: p.status as RunLike["Status"], order };
+      else runs.push({ ID: p.runId, TaskID: p.taskId, Status: p.status as RunLike["Status"], order });
 
       if (p.status === "running") {
         // A (re)started run un-terminalizes: clear its seen marker and
@@ -166,7 +246,8 @@ export function useTaskAttention(
     });
 
     const offPermission = events.subscribe("permission.pending", (payload) => {
-      const p = payload as { taskId?: number };
+      if (typeof payload !== "object" || payload === null) return;
+      const p = payload as { taskId?: unknown };
       if (typeof p.taskId !== "number") return;
       pendingPermissionTasksRef.current.add(p.taskId);
       recompute();
@@ -186,5 +267,5 @@ export function useTaskAttention(
     recompute();
   }, [selectedTaskId, recompute]);
 
-  return attention;
+  return signal;
 }

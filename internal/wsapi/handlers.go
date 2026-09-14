@@ -58,6 +58,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"terminal.resize":       handleTerminalResize(treg),
 		"terminal.close":        handleTerminalClose(treg),
 		"terminal.list":         handleTerminalList(treg),
+		"task.stats":            handleTaskStats(wm),
 		"file.list":             handleFileList(wm),
 		"file.read":             handleFileRead(wm),
 		"file.write":            handleFileWrite(wm),
@@ -401,6 +402,35 @@ func handleTaskFiles(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.files: %w", err)
 		}
 		return taskFilesResult{Files: files}, nil
+	}
+}
+
+// taskStatsResult is the result of task.stats: one entry per task in the
+// workspace that has a worktree to diff (see workspace.TaskStat). Tasks
+// with no worktree, and tasks whose stat could not be computed, are absent
+// from the list rather than present with zeroes -- zero changed files is a
+// real and different statement from "not known".
+type taskStatsResult struct {
+	Stats []workspace.TaskStat `json:"stats"`
+}
+
+// handleTaskStats returns every task's branch and diff size for one
+// workspace in a single call -- the sidebar's per-row git signal, which
+// would otherwise be one task.files round trip (and one worktree scan) per
+// row. The counts are of exactly the diff task.diff renders.
+func handleTaskStats(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			WorkspaceID int64 `json:"workspaceId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.stats: invalid params: %w", err)
+		}
+		stats, err := wm.TaskStats(p.WorkspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("task.stats: %w", err)
+		}
+		return taskStatsResult{Stats: stats}, nil
 	}
 }
 
