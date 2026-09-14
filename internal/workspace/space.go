@@ -18,6 +18,9 @@ func (m *Manager) CreateSpace(workspaceID int64, title, envData string) (store.S
 	if err != nil {
 		return store.Space{}, fmt.Errorf("create space: %w", err)
 	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifySpaceCreated(sp)
+	}
 	return sp, nil
 }
 

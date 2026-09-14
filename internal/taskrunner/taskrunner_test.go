@@ -239,6 +239,59 @@ func runFakeClaudeCLI() {
 			"result":      "done",
 		})
 
+	case "tool_call":
+		// Exercises every new claudecode.Message kind
+		// docs/decisions/0008-structured-run-events.md added support for:
+		// a ThinkingBlock, two ToolUseBlocks (one that later succeeds, one
+		// that later fails), and their matching ToolResultBlocks arriving
+		// on a subsequent "user" message -- proving Runner's claudeEvents
+		// translates each into its own taskrunner.EventType.
+		stdin.Scan() // consume the prompt line
+
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "thinking", "thinking": "let me check"},
+					map[string]any{"type": "tool_use", "id": "tool-1", "name": "Bash", "input": map[string]any{"command": "echo hi"}},
+					map[string]any{"type": "tool_use", "id": "tool-2", "name": "Bash", "input": map[string]any{"command": "false"}},
+				},
+			},
+		})
+
+		writeLine(map[string]any{
+			"type":       "user",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"content": []any{
+					map[string]any{"type": "tool_result", "tool_use_id": "tool-1", "content": "hi", "is_error": false},
+					map[string]any{"type": "tool_result", "tool_use_id": "tool-2", "content": "boom", "is_error": true},
+				},
+			},
+		})
+
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "text", "text": "done"},
+				},
+			},
+		})
+
+		writeLine(map[string]any{
+			"type":        "result",
+			"is_error":    false,
+			"num_turns":   1,
+			"session_id":  "sess-1",
+			"stop_reason": "end_turn",
+			"result":      "done",
+		})
+
 	default:
 		fmt.Fprintf(os.Stderr, "fake claude cli: unknown scenario %q\n", scenario)
 		os.Exit(1)

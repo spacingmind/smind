@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -401,6 +402,170 @@ func TestServer_RunLogs_Tail(t *testing.T) {
 	}
 	if tail.Status != string(runs.StatusDone) {
 		t.Fatalf("run.logs (tail) status = %q, want %q", tail.Status, runs.StatusDone)
+	}
+}
+
+// TestServer_RunLogs_StructuredEvents proves run.logs surfaces the new
+// event kinds (docs/decisions/0008-structured-run-events.md) -- "thinking",
+// "user_message", and "tool_call" -- alongside the existing "chunk"/"done",
+// using the fake ACP agent's "structured" scenario.
+func TestServer_RunLogs_StructuredEvents(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "structured")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "task.prompt", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	var runID string
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		env := readEnvelopeFor(t, ws, "1", time.Until(deadline))
+		if env.Event != "" {
+			continue
+		}
+		var result taskPromptResult
+		if err := json.Unmarshal(env.Result, &result); err != nil {
+			t.Fatalf("decode task.prompt result: %v", err)
+		}
+		runID = result.RunID
+		break
+	}
+
+	sendRequest(t, ws, "logs", "run.logs", map[string]any{"runId": runID})
+	logsResp := readEnvelopeFor(t, ws, "logs", 5*time.Second)
+	var logs runLogsResult
+	if err := json.Unmarshal(logsResp.Result, &logs); err != nil {
+		t.Fatalf("decode run.logs result: %v", err)
+	}
+
+	var types []string
+	for _, e := range logs.Events {
+		types = append(types, e.Type)
+	}
+	want := []string{"thinking", "user_message", "tool_call", "tool_call", "chunk", "done"}
+	if !reflect.DeepEqual(types, want) {
+		t.Fatalf("run.logs event types = %v, want %v", types, want)
+	}
+
+	toolStart := logs.Events[2]
+	if toolStart.ToolCallID != "tc-1" || toolStart.ToolName != "execute" || toolStart.Title != "Run tests" || toolStart.Status != "running" {
+		t.Fatalf("first tool_call entry = %+v, want a running tc-1/execute call titled %q", toolStart, "Run tests")
+	}
+	toolDone := logs.Events[3]
+	if toolDone.ToolCallID != "tc-1" || toolDone.Status != "success" || len(toolDone.Result) == 0 {
+		t.Fatalf("second tool_call entry = %+v, want tc-1 completed as success with a result", toolDone)
+	}
+
+	// Decoding into runLogEvent above proves the Go fields round-trip,
+	// not the wire keys the UI track actually codes against. Re-decode
+	// untyped and pin those keys to exactly what
+	// docs/decisions/0008-structured-run-events.md documents -- a
+	// `json:` tag typo here is invisible to every other assertion.
+	var untyped struct {
+		Events []map[string]json.RawMessage `json:"events"`
+	}
+	if err := json.Unmarshal(logsResp.Result, &untyped); err != nil {
+		t.Fatalf("re-decode run.logs result untyped: %v", err)
+	}
+	for _, key := range []string{"type", "toolCallId", "toolName", "title", "status", "input"} {
+		if _, ok := untyped.Events[2][key]; !ok {
+			t.Errorf("tool_call start entry has no %q key: %v", key, untyped.Events[2])
+		}
+	}
+	for _, key := range []string{"type", "toolCallId", "status", "result"} {
+		if _, ok := untyped.Events[3][key]; !ok {
+			t.Errorf("tool_call completion entry has no %q key: %v", key, untyped.Events[3])
+		}
+	}
+	// A partial update must not restate fields it didn't change --
+	// omitting them is what tells a merging client "unchanged".
+	for _, key := range []string{"toolName", "title", "input"} {
+		if _, ok := untyped.Events[3][key]; ok {
+			t.Errorf("tool_call completion entry unexpectedly restates %q: %v", key, untyped.Events[3])
+		}
+	}
+}
+
+// TestServer_RunLogs_PreExistingEventsStillDecode proves run.logs for a
+// run whose events were persisted before
+// docs/decisions/0008-structured-run-events.md (the old four-field JSON
+// shape, no toolCallId/toolName/etc.) still decodes and returns its text
+// events unchanged -- the back-compat guarantee that ADR's Compatibility
+// strategy commits to.
+func TestServer_RunLogs_PreExistingEventsStillDecode(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+
+	now := time.Now().UTC()
+	runID := "pre-existing-run"
+	if _, err := db.CreateRun(store.Run{
+		ID: runID, TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "done", StartedAt: now, FinishedAt: &now, StopReason: "end_turn",
+	}); err != nil {
+		t.Fatalf("store.CreateRun() error = %v", err)
+	}
+	// The exact JSON shape persisted before this ADR: only the four
+	// original fields, none of the tool-call additions.
+	// Every one of the four original EventType integers, not just the two
+	// text-shaped ones: EventType is persisted as a bare int, so this is
+	// what catches a new constant inserted anywhere but the end of the
+	// enum (which would silently re-interpret every historical row).
+	oldEvents := []string{
+		`{"type":0,"text":"hello "}`,
+		`{"type":2,"permissionRequestId":"req-1","permissionSummary":"run ls","permissionOptions":[{"id":"allow-1","label":"Allow","kind":"allow_once"}]}`,
+		`{"type":3,"permissionRequestId":"req-1","permissionOptionId":"allow-1"}`,
+		`{"type":0,"text":"world!"}`,
+		`{"type":1,"stopReason":"end_turn"}`,
+	}
+	for i, data := range oldEvents {
+		if _, err := db.AppendRunEvent(runID, int64(i), data); err != nil {
+			t.Fatalf("store.AppendRunEvent(%d) error = %v", i, err)
+		}
+	}
+
+	// The server's Registry rehydrates from db at construction, so it
+	// picks up the run + events inserted above exactly as if they'd been
+	// written by a previous daemon process.
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "logs", "run.logs", map[string]any{"runId": runID})
+	logsResp := readEnvelopeFor(t, ws, "logs", 5*time.Second)
+	if logsResp.Error != nil {
+		t.Fatalf("run.logs error = %v", logsResp.Error.Message)
+	}
+	var logs runLogsResult
+	if err := json.Unmarshal(logsResp.Result, &logs); err != nil {
+		t.Fatalf("decode run.logs result: %v", err)
+	}
+
+	if len(logs.Events) != 5 {
+		t.Fatalf("run.logs events = %+v, want 5", logs.Events)
+	}
+	if logs.Events[0].Type != "chunk" || logs.Events[0].Text != "hello " {
+		t.Fatalf("event[0] = %+v, want chunk %q", logs.Events[0], "hello ")
+	}
+	if e := logs.Events[1]; e.Type != "permission_request" || e.RequestID != "req-1" ||
+		e.Summary != "run ls" || len(e.Options) != 1 || e.Options[0].ID != "allow-1" {
+		t.Fatalf("event[1] = %+v, want the recorded permission_request", e)
+	}
+	if e := logs.Events[2]; e.Type != "permission_resolved" || e.RequestID != "req-1" || e.OptionID != "allow-1" {
+		t.Fatalf("event[2] = %+v, want the recorded permission_resolved", e)
+	}
+	if logs.Events[3].Type != "chunk" || logs.Events[3].Text != "world!" {
+		t.Fatalf("event[3] = %+v, want chunk %q", logs.Events[3], "world!")
+	}
+	if logs.Events[4].Type != "done" || logs.Events[4].StopReason != "end_turn" {
+		t.Fatalf("event[4] = %+v, want done/end_turn", logs.Events[4])
+	}
+	if logs.Status != string(runs.StatusDone) {
+		t.Fatalf("run.logs status = %q, want %q", logs.Status, runs.StatusDone)
 	}
 }
 
