@@ -776,7 +776,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [ ] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
-- [ ] Item 7: structured timeline events *(Track B — **ADR gate**)*
+- [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [ ] Item 8: timeline renderer *(Track B)*
 - [ ] Item 9: tool-call cards *(Track B)*
 - [ ] Item 10: composer v2 *(Track B)*
@@ -970,3 +970,96 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 7 (structured timeline events)** — 2026-09-14, daemon + wire only
+(this item does not touch `web/`; the timeline renderer that consumes this
+schema is Item 8/9, Track B, separate PR):
+
+- ADR `docs/decisions/0008-structured-run-events.md` written and accepted
+  before implementation, per the plan's gate — schema, wire shape,
+  persistence, and compatibility strategy recorded there.
+- `taskrunner.Event` gains `EventTypeUserMessage`/`EventTypeThinking`/
+  `EventTypeToolCall` (appended after the existing four, per the ADR's
+  append-only-enum rule) plus `ToolCallID`/`ToolName`/`ToolTitle`/
+  `ToolStatus`/`ToolInput`/`ToolResult` fields
+  (`internal/taskrunner/event.go`).
+- Both required backends produce them:
+  `TestRunner_RunPrompt_ClaudeNative_ToolCallEvents` (thinking + two tool
+  calls, one completing success, one failure, via the fake CLI's new
+  `tool_call` scenario) and `TestRunner_RunPrompt_GLM_StructuredEvents`
+  (thinking + user-message + a tool call completing success, via the fake
+  ACP agent's new `structured` scenario) — both in
+  `internal/taskrunner/runner_test.go`. Codex-native is explicitly **not**
+  covered for tool calls (documented gap in the ADR's Decision section —
+  `internal/codex` doesn't model Codex's item-lifecycle protocol at all
+  yet); its text/done/permission events are unchanged and still pass.
+- `internal/wsapi`: new wire event names (`user_message`/`thinking`/
+  `tool_call`) added to `run.attach`'s stream and `run.logs`'s batch shape
+  (`handlers.go`). `TestServer_RunLogs_StructuredEvents` proves all three
+  render correctly over the wire.
+  `TestServer_RunLogs_PreExistingEventsStillDecode` proves the back-compat
+  half of the ADR's Test Scenario: a run whose events were persisted in
+  the old four-field JSON shape (inserted directly into the store, no new
+  fields) still decodes and serves via `run.logs` after a Registry
+  rehydration, unchanged.
+- `internal/runs`: `persist.go`'s `encodeEvent`/`decodeEvent` carry the new
+  fields; no store schema migration needed (`event_data` is already a
+  free-form JSON column — noted explicitly in the ADR).
+  `TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen` proves the new
+  event types (not just the four old ones) survive a simulated daemon
+  restart identically.
+- `cmd/smind/task.go`: `task attach`/`task logs` render the new event
+  kinds as readable text — text-shaped events (`chunk`/`user_message`/
+  `thinking`) print as before; `tool_call` prints one line via the new
+  `toolCallNames.render` (name/title + lifecycle status, input while
+  running), which remembers each `toolCallId`'s name so a completion
+  renders as `[tool] Bash: done` rather than under a raw wire id.
+  `cmd/smind/task_test.go` (new) covers the render table and pins the
+  run.logs wire keys against the CLI's own structs.
+- `task test` (`go test ./...` + the web suite) and `task lint`
+  (`go vet ./...` + `gofmt -l`) both pass clean.
+- **Wire-compat caveats the UI track (Items 8/9) must respect**: (1) a
+  `tool_call` entry's `toolName`/`title`/`input` may be empty on a later
+  event for the same `toolCallId` — ACP's `tool_call_update` is a partial
+  update, so the UI must merge by ID, not replace; (2) Claude Code native
+  never emits `EventTypeUserMessage` (its own prompt echo is dropped, not
+  translated — the UI already has the human's own prompt from its own
+  composer); (3) Codex-native never emits `tool_call` in this pass, so a
+  Codex run's timeline is text-only even after Item 8/9 land, until a
+  follow-up change teaches `internal/codex` its item-lifecycle protocol.
+
+- **Adversarial review pass (2026-09-14)** on top of the above, with
+  tests that fail against the first cut:
+  - `internal/taskrunner/normalize_test.go` (new) tests `claudeEvents`
+    and `acpEvent` directly, as translation tables, rather than only
+    end-to-end through a fake agent. It caught three dropped/incorrect
+    cases, all fixed: a `tool_result` block arriving on an *assistant*
+    message (left its card stuck "running" forever), the server-side
+    tool blocks `WebSearch`/`WebFetch` produce (no tool-call events at
+    all for such a run), and an ACP `tool_call` with an absent or
+    unrecognized `status` (ACP's `ToolCall.status` is optional with a
+    `pending` default, so an initial `tool_call` is running, not
+    status-less).
+  - `internal/wsapi`'s two Item 7 tests were strengthened: the wire-key
+    assertion is now made against untyped JSON (a `json:` tag typo was
+    invisible before), and the pre-ADR row fixture now covers all four
+    original `EventType` integers rather than just 0 and 1 -- only the
+    permission pair can catch a constant inserted mid-enum.
+  - ADR-0008's "additive only, in both directions" claim was corrected:
+    on the ACP path this re-types `agent_thought_chunk`/
+    `user_message_chunk` from `chunk`, so the shipped UI shows less text
+    for a GLM/Kimi run until Item 8 lands.
+
+- **Known gaps left open for Items 8/9 / a follow-up**, none of them
+  regressions:
+  - An ACP update kind neither `Text()` nor `IsToolCall()` accepts
+    (`plan` today, anything ACP adds tomorrow) is silently dropped
+    rather than surfaced as a generic/raw event. Preserving unknown
+    kinds would mean a new wire event name, i.e. its own ADR.
+  - ACP's `rawOutput` is not carried: `ToolResult` is fed from the
+    tool call's display `content` array.
+  - Every event, now including full tool inputs and results, is written
+    as its own `run_events` row and retained in unbounded in-memory
+    history. Nothing new was introduced here, but the per-run volume is
+    substantially higher than before Item 7 (tool results were dropped
+    entirely); if large runs get slow, batching `record`'s
+    `AppendRunEvent` or truncating `ToolResult` is where to look.
