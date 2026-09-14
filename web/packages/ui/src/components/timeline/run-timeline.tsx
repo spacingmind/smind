@@ -1,7 +1,9 @@
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
 
-import { TimelineRow } from "@/components/timeline/timeline-row";
+import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
+import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
+import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
@@ -21,8 +23,14 @@ const RUN_STATUS_DOT: Record<RunStatusValue, StatusDotStatus> = {
  * (`audit-paseo.md` §2). Replaces the single `<pre>` of collected text
  * the run card used to be.
  */
-export function RunTimeline({ run }: { run: RunEntry }) {
+export function RunTimeline({
+  run,
+  detailLevel = "detailed",
+  worktreePath,
+  onOpenFile,
+}: { run: RunEntry; detailLevel?: DetailLevel } & TimelineRowContext) {
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
+  const groups = groupTimeline(run.items, detailLevel);
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border">
@@ -43,9 +51,13 @@ export function RunTimeline({ run }: { run: RunEntry }) {
 
         {run.items.length > 0 && (
           <ol className="mt-2 space-y-2" data-testid="run-timeline">
-            {run.items.map((item) => (
-              <TimelineRow key={item.id} item={item} />
-            ))}
+            {groups.map((group) =>
+              group.kind === "tool-group" ? (
+                <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ) : (
+                <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ),
+            )}
           </ol>
         )}
 

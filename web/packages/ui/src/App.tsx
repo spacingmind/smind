@@ -270,7 +270,7 @@ function TabContent({
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
+    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
     files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
     file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,

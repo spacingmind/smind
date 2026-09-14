@@ -2,8 +2,19 @@ import { memo } from "react";
 import { CircleHelp } from "lucide-react";
 
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
-import { ToolCallCard } from "@/components/timeline/tool-call-card";
+import { ToolCall } from "@/components/timeline/tool-call";
 import type { TimelineItem } from "@/hooks/use-run-timeline";
+
+/**
+ * The file-opening context a tool-call card needs. Both must be stable
+ * across renders or TimelineRow's memo stops bailing out -- TaskDetailPane
+ * pins `onOpenFile` through a ref for exactly that reason.
+ */
+export interface TimelineRowContext {
+  /** The task's worktree root, used to turn an absolute tool-call path into the relative wire path a file tab wants. */
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}
 
 /**
  * One transcript row, dispatched by item kind.
@@ -15,7 +26,11 @@ import type { TimelineItem } from "@/hooks/use-run-timeline";
  * "appending a chunk must not re-render the whole transcript" is this
  * `memo` plus that reducer, and nothing else.
  */
-export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineItem }) {
+export const TimelineRow = memo(function TimelineRow({
+  item,
+  worktreePath,
+  onOpenFile,
+}: { item: TimelineItem } & TimelineRowContext) {
   switch (item.kind) {
     case "user":
       return (
@@ -51,7 +66,7 @@ export const TimelineRow = memo(function TimelineRow({ item }: { item: TimelineI
     case "tool_call":
       return (
         <li data-item-kind="tool_call">
-          <ToolCallCard item={item} />
+          <ToolCall item={item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
         </li>
       );
 

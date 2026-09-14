@@ -1,13 +1,12 @@
-import { useState } from "react";
-import { ChevronRight, Wrench } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ChevronRight } from "lucide-react";
 
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
-import type { StatusDotStatus } from "@/components/ui/status-dot";
 import type { ToolCallStatus } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-/** Tool-call status -> the StatusDot variant that signals it. */
+/** Tool-call status -> the StatusDot signal for it. */
 const STATUS_DOT: Record<ToolCallStatus, StatusDotStatus> = {
   running: "running",
   success: "success",
@@ -28,30 +27,36 @@ export function stringifyToolPayload(value: unknown): string {
 }
 
 /**
- * The generic tool-call card: icon, display name, one-line summary,
- * lifecycle status, and a disclosure for the raw input/result.
+ * The tool-call card frame: icon, display name, one-line summary,
+ * lifecycle status, and a disclosure for the detail body. Identical
+ * chrome for every intent — only the body differs — so a transcript of
+ * mixed tools reads as one list rather than five.
  *
- * This is the fallback every unregistered tool name lands on (Item 9's
- * registry picks a specialised body where one exists) and the frame the
- * specialised ones render inside, so the chrome is identical across all
- * of them.
+ * The card knows nothing about any specific tool: which icon, summary and
+ * body it gets comes from the registry (`tool-renderers.tsx`), which is
+ * why adding a tool renderer never touches this file.
  */
 export function ToolCallCard({
   item,
+  icon: Icon,
+  label,
   summary,
+  onOpenPath,
   children,
 }: {
   item: TimelineToolCallItem;
-  /** The one-line summary shown next to the name. Defaults to the title the daemon sent. */
+  icon: React.ComponentType<{ className?: string }>;
+  /** Display name; defaults to the wire tool name. */
+  label?: string;
+  /** The one-line summary. Falls back to the daemon-supplied title. */
   summary?: string;
-  /** A specialised detail body; the raw input/result JSON is shown when absent. */
-  children?: React.ReactNode;
+  /** Set when this call names a file the UI can open -- makes the summary click-through. */
+  onOpenPath?: () => void;
+  children?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
-  const name = item.toolName || item.toolCallId;
-  const line = summary ?? item.title ?? "";
-  const input = stringifyToolPayload(item.input);
-  const result = stringifyToolPayload(item.result);
+  const name = label || item.toolName || item.toolCallId;
+  const line = summary || item.title || "";
 
   return (
     <div
@@ -61,36 +66,47 @@ export function ToolCallCard({
       data-status={item.status}
       className="rounded-lg border bg-surface-1"
     >
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((prev) => !prev)}
-        data-testid="tool-call-toggle"
-        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-      >
-        <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
-        <Wrench className="size-3 shrink-0 text-foreground-muted" />
-        <span className="shrink-0 font-medium">{name}</span>
-        {line && (
-          <span className="min-w-0 flex-1 truncate text-foreground-muted" data-testid="tool-call-summary">
-            {line}
-          </span>
+      <div className="flex items-center gap-2 px-2.5 py-1.5 text-xs">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={`${open ? "Collapse" : "Expand"} ${name} detail`}
+          onClick={() => setOpen((prev) => !prev)}
+          data-testid="tool-call-toggle"
+          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+        >
+          <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
+          <Icon className="size-3 shrink-0 text-foreground-muted" />
+          <span className="shrink-0 font-medium">{name}</span>
+          {line && !onOpenPath && (
+            <span className="min-w-0 flex-1 truncate text-foreground-muted" data-testid="tool-call-summary">
+              {line}
+            </span>
+          )}
+        </button>
+
+        {/* The path is its own button so the card can be expanded *and*
+            the file opened -- nesting them would make one unreachable. */}
+        {line && onOpenPath && (
+          <button
+            type="button"
+            onClick={onOpenPath}
+            data-testid="tool-call-open-path"
+            className="min-w-0 flex-1 truncate text-left text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
+            <span data-testid="tool-call-summary">{line}</span>
+          </button>
         )}
-        <span className="ml-auto flex shrink-0 items-center gap-1 text-foreground-muted">
+
+        <span className="flex shrink-0 items-center gap-1 text-foreground-muted">
           <StatusDot status={STATUS_DOT[item.status]} />
           <span data-testid="tool-call-status">{item.status}</span>
         </span>
-      </button>
+      </div>
 
       {open && (
         <div className="border-t px-2.5 py-2 text-xs" data-testid="tool-call-detail">
-          {children ?? (
-            <>
-              {input && <ToolPayload label="Input" body={input} testId="tool-call-input" />}
-              {result && <ToolPayload label="Result" body={result} testId="tool-call-result" />}
-              {!input && !result && <p className="text-foreground-muted">No detail recorded</p>}
-            </>
-          )}
+          {children}
         </div>
       )}
     </div>

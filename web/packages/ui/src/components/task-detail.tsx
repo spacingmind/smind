@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { Composer } from "@/components/composer/composer";
+import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
 import { Alert } from "@/components/ui/alert";
@@ -26,11 +27,14 @@ export function TaskDetailPane({
   client,
   task,
   connectionStatus = "connected",
+  onOpenFile,
 }: {
   client: WsClientLike | null;
   task: Task;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
+  /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
+  onOpenFile?: (path: string) => void;
 }) {
   const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
 
@@ -52,6 +56,16 @@ export function TaskDetailPane({
   const itemCount = runs?.reduce((total, run) => total + run.items.length, 0) ?? 0;
   const follow = useAutoFollow<HTMLDivElement>(itemCount);
 
+  const [detailLevel, setDetailLevel] = useDetailLevel();
+
+  // App.tsx re-creates its openFileTab closure on every render, which
+  // would defeat TimelineRow's memo if passed straight through. Pinning
+  // it behind a ref gives every row a callback whose identity never
+  // changes while still calling the current one.
+  const openFileRef = useRef(onOpenFile);
+  openFileRef.current = onOpenFile;
+  const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
+
   return (
     <div className="flex h-full flex-col">
       <PaneHeader
@@ -61,6 +75,18 @@ export function TaskDetailPane({
             <span className="uppercase">{task.Status}</span>
             {task.Branch && <span className="truncate">{task.Branch}</span>}
           </>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            data-testid="detail-level-toggle"
+            aria-pressed={detailLevel === "overview"}
+            onClick={() => setDetailLevel(detailLevel === "overview" ? "detailed" : "overview")}
+          >
+            {detailLevel === "overview" ? "Overview" : "Detailed"}
+          </Button>
         }
       />
 
@@ -89,7 +115,13 @@ export function TaskDetailPane({
           {runs !== null && runs.length > 0 && (
             <ul className="space-y-4">
               {runs.map((run) => (
-                <RunTimeline key={run.id} run={run} />
+                <RunTimeline
+                  key={run.id}
+                  run={run}
+                  detailLevel={detailLevel}
+                  worktreePath={task.WorktreePath ?? undefined}
+                  onOpenFile={openFile}
+                />
               ))}
             </ul>
           )}

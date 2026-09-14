@@ -798,7 +798,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [x] Item 8: timeline renderer *(Track B)*
-- [ ] Item 9: tool-call cards *(Track B)*
+- [x] Item 9: tool-call cards *(Track B)*
 - [x] Item 10: composer v2 *(Track B)*
 - [ ] Item 11: permission UX v2 *(Track B)*
 - [ ] Item 12: sidebar signal *(Track D)*
@@ -990,6 +990,58 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 9 (tool-call cards)** — 2026-09-14, `web/` only:
+
+- `components/timeline/tool-renderers.tsx` is the registry: a `Map` keyed
+  by wire tool name plus `registerToolRenderer`. The built-ins register
+  themselves by *calling* it, and `ToolCallCard` resolves through it and
+  names no tool — so adding a renderer genuinely never edits a central
+  switch. Proven by registering a fixture tool inside the test and
+  asserting it renders, with nothing under `src/` changed.
+- **Both vocabularies key into the same six intents.** Claude's names
+  (`Bash`/`Read`/`Edit`/`Grep`/`WebFetch`…) and ACP's `ToolKind` strings
+  (`execute`/`read`/`edit`/`search`/`fetch`) are registered side by side —
+  `internal/taskrunner/runner.go` sends `u.Kind` as the tool name for ACP,
+  since ACP has no separate name field.
+- Resolution is registry → **shape-based classification** → generic, per
+  the item's "unknown tools classify into one of these by shape where
+  possible". `classifyByShape` checks `command` → terminal, replacement
+  text → edit, a path → read, `pattern`/`query` → search, `url` → fetch.
+  Order matters and is tested: an edit's input also carries a path.
+- Intent bodies implemented and tested: terminal (command + output), read
+  (path + line range), edit (inline diff), search (query + hit count).
+  `toolResultText` unwraps the block shapes *both* providers wrap results
+  in (Claude's `[{type:"text"}]`, ACP's `[{type:"content",content:{…}}]`)
+  rather than showing a serialized envelope.
+- **Lifecycle in place**: running → success and running → failure update
+  the same card (asserted by `data-tool-call-id`, one card not two) — the
+  ADR's merge-by-id contract, exercised end to end through the reducer.
+- **Click-through**: a card naming a file inside the task's worktree opens
+  that path's tab. `worktreeRelativePath` turns the provider's absolute
+  path into the relative wire path and rejects traversal, sibling-prefix
+  (`/wt/task-10` vs `/wt/task-1`) and the worktree root itself — the same
+  cases `internal/taskrunner/permission_edit_test.go` guards on the daemon
+  side. The path is its own button beside the expand toggle, not nested
+  inside it, so both stay reachable.
+- **Detail level**: `detailed | overview` toggle in the pane header,
+  persisted to `localStorage`. `overview` collapses runs of ≥2
+  *consecutive* tool calls into one row showing the count, the distinct
+  tool names and an aggregate status where **any failure dominates** — a
+  collapsed row must not hide a failed call behind a green dot.
+  Switching back restores the individual cards.
+- `task test` (Go + web, 271 web tests), `task lint`, `bunx tsc -b` clean.
+- **Two deliberate deviations, both degradations rather than gaps**:
+  (1) click-through opens in the task's primary tab set, not "in the side
+  pane using `prefer`" — Item 6 hasn't landed, and the item says
+  explicitly this must not block on it. (2) `App.tsx` gained exactly one
+  changed line (passing `onOpenFile` into `TaskDetailPane`), which is
+  additive rather than the restructuring Track A owns.
+- **Memoization is preserved through the new props.** `TimelineRow` now
+  takes `worktreePath`/`onOpenFile`, and `App.tsx` re-creates its
+  `openFileTab` closure every render, which would defeat the memo —
+  `task-detail.tsx` pins it behind a ref so every row gets a
+  never-changing callback identity.
+
 **Item 8 (timeline renderer)** — 2026-09-14, `web/` only:
 
 - `use-run-timeline.ts` grows the transcript model ADR 0008's wire schema
