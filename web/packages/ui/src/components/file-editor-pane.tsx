@@ -140,6 +140,16 @@ export function FileEditorPane({
     setContentState(next);
   }, []);
 
+  // Guards against two overlapping file.write calls. `saving` state alone
+  // isn't enough: the Save button's `disabled` attribute only stops a
+  // second *click*, but CodeMirror's Mod-s keybinding (see
+  // code-mirror-editor.tsx) calls onSave directly, bypassing the DOM
+  // entirely -- a second Ctrl-S while a save is still in flight would
+  // otherwise fire a second concurrent write with the same stale
+  // expectedMtime. A ref (not state) is what makes the check synchronous
+  // with the very first line of this function, before any render.
+  const savingRef = useRef(false);
+
   // One file.write against the buffer. `expected` false is the Overwrite
   // action's unconditional force save (and last-write-wins legacy
   // behavior); a rejected conditional save maps the typed error's code to
@@ -147,7 +157,9 @@ export function FileEditorPane({
   const save = useCallback(
     async (expected: boolean) => {
       if (!client) throw new Error("not connected");
+      if (savingRef.current) return;
 
+      savingRef.current = true;
       setSaving(true);
       setSaveError(null);
       try {
@@ -165,6 +177,7 @@ export function FileEditorPane({
         }
         throw err;
       } finally {
+        savingRef.current = false;
         setSaving(false);
       }
       // `content` must be read fresh at call time, so it's a real dependency.
