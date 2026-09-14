@@ -80,6 +80,9 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
   };
 }
 
+/** How long a container's size must go quiet before fit() re-runs -- see the ResizeObserver effect below. */
+const RESIZE_DEBOUNCE_MS = 100;
+
 function base64ToBytes(b64: string): Uint8Array {
   const binary = atob(b64);
   const bytes = new Uint8Array(binary.length);
@@ -219,6 +222,12 @@ export function TerminalPane({
   // Resize the terminal to fit its container whenever the container's own
   // size changes (pane resize, browser window resize). fit()'s resulting
   // resize is what fires the onResize wiring below into terminal.resize.
+  //
+  // Debounced (settle-based, like Paseo's terminal-resize-debouncer):
+  // ResizeObserver fires on every layout tick of a drag, and a continuous
+  // drag crossing many character-cell boundaries would otherwise send a
+  // terminal.resize RPC (and the PTY's SIGWINCH) once per animation frame
+  // for as long as the drag lasts, instead of once it settles.
   useEffect(() => {
     const container = containerRef.current;
     if (!container || typeof ResizeObserver === "undefined") {
@@ -227,16 +236,24 @@ export function TerminalPane({
       // jsdom can and can't exercise here).
       return;
     }
+    let timeout: ReturnType<typeof setTimeout> | null = null;
     const observer = new ResizeObserver(() => {
-      try {
-        termRef.current?.fit();
-      } catch {
-        // Container may be transiently zero-sized mid-layout; the next
-        // resize observation will retry.
-      }
+      if (timeout !== null) clearTimeout(timeout);
+      timeout = setTimeout(() => {
+        timeout = null;
+        try {
+          termRef.current?.fit();
+        } catch {
+          // Container may be transiently zero-sized mid-layout; the next
+          // resize observation will retry.
+        }
+      }, RESIZE_DEBOUNCE_MS);
     });
     observer.observe(container);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      if (timeout !== null) clearTimeout(timeout);
+    };
   }, []);
 
   // terminal.list then either terminal.attach (a still-running session for

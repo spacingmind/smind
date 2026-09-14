@@ -113,6 +113,26 @@ class FakeTerminalHandle implements TerminalHandle {
   }
 }
 
+/**
+ * A minimal ResizeObserver stub -- jsdom doesn't implement the real thing
+ * (see terminal-pane.tsx's own early-return for why), so the resize-
+ * debounce test below installs this on `global` for its own duration and
+ * drives it manually via `trigger()`, standing in for however many layout
+ * ticks a real browser would deliver during a drag.
+ */
+class FakeResizeObserver {
+  static instances: FakeResizeObserver[] = [];
+  constructor(private readonly callback: ResizeObserverCallback) {
+    FakeResizeObserver.instances.push(this);
+  }
+  observe(): void {}
+  unobserve(): void {}
+  disconnect(): void {}
+  trigger(): void {
+    this.callback([], this as unknown as ResizeObserver);
+  }
+}
+
 /** Flushes pending microtasks, wrapped in `act` so React commits any resulting state updates before the caller asserts -- same helper as task-detail.test.tsx. */
 async function flush(): Promise<void> {
   await act(async () => {
@@ -208,6 +228,44 @@ describe("TerminalPane", () => {
 
     const resizeCall = client.nth("terminal.resize", 0);
     expect(resizeCall.params).toEqual({ terminalId: "term-1", cols: 120, rows: 40 });
+  });
+
+  it("debounces rapid container resize observations into a single fit() call", async () => {
+    vi.useFakeTimers();
+    const originalResizeObserver = global.ResizeObserver;
+    global.ResizeObserver = FakeResizeObserver as unknown as typeof ResizeObserver;
+    FakeResizeObserver.instances = [];
+
+    try {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+
+      const observer = FakeResizeObserver.instances[0];
+      expect(observer).toBeDefined();
+      const fitCallsAtMount = fake.fitCalls;
+
+      // Three observation ticks in quick succession -- what a continuous
+      // pane-resize drag looks like -- must settle into exactly one fit(),
+      // not one per tick.
+      act(() => observer!.trigger());
+      act(() => observer!.trigger());
+      act(() => observer!.trigger());
+      expect(fake.fitCalls).toBe(fitCallsAtMount);
+
+      act(() => {
+        vi.advanceTimersByTime(99);
+      });
+      expect(fake.fitCalls).toBe(fitCallsAtMount);
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(fake.fitCalls).toBe(fitCallsAtMount + 1);
+    } finally {
+      global.ResizeObserver = originalResizeObserver;
+      vi.useRealTimers();
+    }
   });
 
   it("aborts (does not close) an actively streaming terminal.attach on unmount, and disposes the terminal handle", async () => {
