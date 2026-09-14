@@ -35,10 +35,28 @@ type attachResult struct {
 	StopReason string `json:"stopReason"`
 }
 
-// chunkEventParams is the params payload of every "chunk" event
-// task.prompt/run.attach emit while streaming.
+// chunkEventParams is the params payload of every "chunk", "user_message",
+// and "thinking" event task.prompt/run.attach emit while streaming -- all
+// three are just "a chunk of text from some role" on the wire, per
+// docs/decisions/0008-structured-run-events.md.
 type chunkEventParams struct {
 	Text string `json:"text"`
+}
+
+// toolCallEventParams is the params payload of every "tool_call" event
+// task.prompt/run.attach emit while streaming, and (embedded in
+// runLogEvent) the shape of a "tool_call" run.logs entry. Old readers of
+// this file (before docs/decisions/0008-structured-run-events.md) simply
+// don't have this type or the "tool_call"/"user_message"/"thinking" cases
+// below -- an older `smind` CLI ignores those event names/fields
+// entirely, same as any other unrecognized wire addition.
+type toolCallEventParams struct {
+	ToolCallID string          `json:"toolCallId"`
+	ToolName   string          `json:"toolName,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
 }
 
 // runLogEvent is one event in a run.logs response.
@@ -46,6 +64,7 @@ type runLogEvent struct {
 	Type       string `json:"type"`
 	Text       string `json:"text,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
+	toolCallEventParams
 }
 
 // runLogsResult is run.logs's terminal result.
@@ -311,14 +330,25 @@ func cmdTaskAttach(args []string) int {
 func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 	var result attachResult
 	err := client.CallStream(ctx, "run.attach", map[string]any{"runId": runID}, func(event string, params json.RawMessage) {
-		if event != "chunk" {
-			return
+		switch event {
+		case "chunk", "user_message", "thinking":
+			// All three are just "a chunk of text from some role" on the
+			// wire (see chunkEventParams's doc comment): printed the same
+			// way chunk always has been, with no per-fragment framing,
+			// since a fragment boundary here is a streaming artifact, not
+			// a place a reader would want a line break.
+			var p chunkEventParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			fmt.Print(p.Text)
+		case "tool_call":
+			var p toolCallEventParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			fmt.Print(renderToolCallLine(p))
 		}
-		var p chunkEventParams
-		if err := json.Unmarshal(params, &p); err != nil {
-			return
-		}
-		fmt.Print(p.Text)
 	}, &result)
 	fmt.Println()
 
@@ -419,10 +449,42 @@ func cmdTaskLogs(args []string) int {
 	return 0
 }
 
+// renderToolCallLine formats one tool_call event as a single readable
+// line -- name/title and lifecycle status, plus the raw input while it's
+// still running -- so `task attach`/`task logs`'s output stays legible
+// without trying to be the full card the web UI renders (see
+// docs/decisions/0008-structured-run-events.md). Prefers Title (ACP's
+// human-readable summary) over ToolName (the wire tool name) when both are
+// present, and falls back to ToolCallID if the event carries neither
+// (shouldn't happen for a real provider, but never render an empty name).
+func renderToolCallLine(p toolCallEventParams) string {
+	name := p.ToolName
+	if p.Title != "" {
+		name = p.Title
+	}
+	if name == "" {
+		name = p.ToolCallID
+	}
+	switch p.Status {
+	case "success":
+		return fmt.Sprintf("[tool] %s: done\n", name)
+	case "failure":
+		return fmt.Sprintf("[tool] %s: failed\n", name)
+	default:
+		if len(p.Input) > 0 {
+			return fmt.Sprintf("[tool] %s: %s\n", name, p.Input)
+		}
+		return fmt.Sprintf("[tool] %s\n", name)
+	}
+}
+
 func printRunLogs(result runLogsResult) {
 	for _, e := range result.Events {
-		if e.Type == "chunk" {
+		switch e.Type {
+		case "chunk", "user_message", "thinking":
 			fmt.Print(e.Text)
+		case "tool_call":
+			fmt.Print(renderToolCallLine(e.toolCallEventParams))
 		}
 	}
 	fmt.Println()
