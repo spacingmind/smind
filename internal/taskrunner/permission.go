@@ -47,12 +47,12 @@ type PermissionOption struct {
 //
 // command is the literal shell command this request is asking to run, when
 // the calling adapter can confirm one -- Claude Code's Bash tool
-// (claudeDeciderAdapter, from its Input["command"]) and Codex's
+// (claudeDeciderAdapter, from its Input["command"]), Codex's
 // command-execution approval (codexDeciderAdapter, from its own Command
-// field) both can; ACP's tool-call schema (acpDeciderAdapter) exposes no
-// field this package has confirmed carries one, so it always passes "".
-// command is empty for any request that isn't shaped like a shell command
-// at all (a file-change approval, an ACP tool call of unknown kind, ...).
+// field), and ACP's kind-"execute" tool calls (acpDeciderAdapter, from
+// rawInput.command -- see acpCommand) all can. command is empty for any
+// request that isn't shaped like a shell command at all (a file-change
+// approval, an ACP tool call of a different kind, ...).
 // A PermissionDecider must never treat a non-empty command as anything
 // more than a hint -- ApprovalPolicyAutoSafe's AllowlistedCommand check is
 // the only thing that should ever turn it into an auto-allow decision, and
@@ -100,16 +100,15 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 		}
 	}
 
-	// command is always "" here: ACP's ToolCallUpdate (req.ToolCall) has no
-	// field this package has confirmed reliably carries the literal command
-	// being executed, unlike Claude Code's Input["command"] or Codex's
-	// Command below. Passing "" means ApprovalPolicyAutoSafe's
-	// AllowlistedCommand check can never match an ACP-driven (GLM/Kimi)
-	// request, so it always falls back to a human decision for this
-	// provider -- the correct, conservative behavior for a command this
-	// package can't actually identify, not a gap to silently paper over
-	// with a guessed schema.
-	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), "", opts)
+	// kind "execute"'s rawInput.command carries the literal shell command
+	// (confirmed live 2026-09-14: glm-acp-agent's Bash tool call shape is
+	// {"kind":"execute","rawInput":{"command":"go version"},...}), letting
+	// ApprovalPolicyAutoSafe's AllowlistedCommand match ACP-driven
+	// (GLM/Kimi) shell commands the same way it already does for
+	// claude-native's Input["command"] and Codex's Command below. Any
+	// other kind (or a missing rawInput.command) yields "", so it can
+	// never spuriously match the allowlist.
+	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), acpCommand(req.ToolCall), opts)
 }
 
 // autoAllowACPFileEdit reports whether an ACP permission request is a
@@ -212,6 +211,24 @@ func fileEditPathFromTitle(title string) (string, bool) {
 		return "", false
 	}
 	return title[idx+len(" file: "):], true
+}
+
+// acpCommand extracts the literal shell command from an ACP
+// ToolCallUpdate, for the AllowlistedCommand check in Decide above.
+// Confined to kind "execute" -- rawInput's shape is tool-specific, so
+// reading rawInput.command for any other kind would be guessing what a
+// same-named field there happens to mean.
+func acpCommand(raw json.RawMessage) string {
+	var tc struct {
+		Kind     string `json:"kind"`
+		RawInput struct {
+			Command string `json:"command"`
+		} `json:"rawInput"`
+	}
+	if err := json.Unmarshal(raw, &tc); err != nil || tc.Kind != "execute" {
+		return ""
+	}
+	return tc.RawInput.Command
 }
 
 // firstOptionByKind mirrors internal/runs's unexported helper of the same
