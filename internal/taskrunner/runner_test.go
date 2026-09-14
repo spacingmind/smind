@@ -226,6 +226,109 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	}
 }
 
+// TestRunner_RunPrompt_ClaudeNative_ToolCallEvents proves a Claude Agent
+// SDK tool-use message produces a tool-call event with id/name/input, and
+// its later tool-result message (success or failure) completes the same
+// id in place -- the Go test scenario docs/decisions/0008-structured-run-events.md
+// calls for. Also covers ThinkingBlock -> EventTypeThinking, using the
+// fake CLI's "tool_call" scenario (see runFakeClaudeCLI).
+func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "tool_call")
+	r := claudeNativeRunner(t, wm)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if len(got) != 7 {
+		t.Fatalf("got %d events, want 7: %+v", len(got), got)
+	}
+	if got[0].Type != EventTypeThinking || got[0].Text != "let me check" {
+		t.Fatalf("event[0] = %+v, want thinking %q", got[0], "let me check")
+	}
+	if got[1].Type != EventTypeToolCall || got[1].ToolCallID != "tool-1" || got[1].ToolName != "Bash" || got[1].ToolStatus != ToolStatusRunning {
+		t.Fatalf("event[1] = %+v, want a running tool-1/Bash call", got[1])
+	}
+	if !strings.Contains(string(got[1].ToolInput), `"echo hi"`) {
+		t.Fatalf("event[1].ToolInput = %s, want it to carry the command", got[1].ToolInput)
+	}
+	if got[2].Type != EventTypeToolCall || got[2].ToolCallID != "tool-2" || got[2].ToolStatus != ToolStatusRunning {
+		t.Fatalf("event[2] = %+v, want a running tool-2 call", got[2])
+	}
+	if got[3].Type != EventTypeToolCall || got[3].ToolCallID != "tool-1" || got[3].ToolStatus != ToolStatusSuccess {
+		t.Fatalf("event[3] = %+v, want tool-1 to complete as success", got[3])
+	}
+	if !strings.Contains(string(got[3].ToolResult), "hi") {
+		t.Fatalf("event[3].ToolResult = %s, want it to carry the result", got[3].ToolResult)
+	}
+	if got[4].Type != EventTypeToolCall || got[4].ToolCallID != "tool-2" || got[4].ToolStatus != ToolStatusFailure {
+		t.Fatalf("event[4] = %+v, want tool-2 to complete as failure", got[4])
+	}
+	if got[5].Type != EventTypeText || got[5].Text != "done" {
+		t.Fatalf("event[5] = %+v, want text %q", got[5], "done")
+	}
+	if got[6].Type != EventTypeDone || got[6].StopReason != "end_turn" {
+		t.Fatalf("event[6] = %+v, want EventTypeDone/end_turn", got[6])
+	}
+}
+
+// TestRunner_RunPrompt_GLM_StructuredEvents proves the ACP path produces
+// equivalent structured events for GLM: a thought chunk, a user-message
+// chunk, and a tool call reported first as running then completed as
+// success -- using the fake ACP agent's "structured" scenario.
+func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "structured")
+	r := glmRunner(wm)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if len(got) != 6 {
+		t.Fatalf("got %d events, want 6: %+v", len(got), got)
+	}
+	if got[0].Type != EventTypeThinking || got[0].Text != "thinking it over" {
+		t.Fatalf("event[0] = %+v, want thinking %q", got[0], "thinking it over")
+	}
+	if got[1].Type != EventTypeUserMessage || got[1].Text != "a synthesized user turn" {
+		t.Fatalf("event[1] = %+v, want user message %q", got[1], "a synthesized user turn")
+	}
+	if got[2].Type != EventTypeToolCall || got[2].ToolCallID != "tc-1" || got[2].ToolName != "execute" || got[2].ToolTitle != "Run tests" || got[2].ToolStatus != ToolStatusRunning {
+		t.Fatalf("event[2] = %+v, want a running tc-1/execute call titled %q", got[2], "Run tests")
+	}
+	if !strings.Contains(string(got[2].ToolInput), "go test") {
+		t.Fatalf("event[2].ToolInput = %s, want it to carry the command", got[2].ToolInput)
+	}
+	if got[3].Type != EventTypeToolCall || got[3].ToolCallID != "tc-1" || got[3].ToolStatus != ToolStatusSuccess {
+		t.Fatalf("event[3] = %+v, want tc-1 to complete as success", got[3])
+	}
+	if len(got[3].ToolResult) == 0 {
+		t.Fatalf("event[3].ToolResult is empty, want the completed call's content")
+	}
+	if got[4].Type != EventTypeText || got[4].Text != "done" {
+		t.Fatalf("event[4] = %+v, want text %q", got[4], "done")
+	}
+	if got[5].Type != EventTypeDone || got[5].StopReason != "end_turn" {
+		t.Fatalf("event[5] = %+v, want EventTypeDone/end_turn", got[5])
+	}
+}
+
 // TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools proves the
 // auto-safe policy reaches the CLI's own permission gate, not just
 // smind's decider: RunPrompt must spawn claude with --allowedTools

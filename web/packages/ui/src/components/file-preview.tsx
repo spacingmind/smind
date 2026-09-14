@@ -76,7 +76,7 @@ export function HtmlPreview({ content }: { content: string }) {
       srcDoc={srcDoc}
       sandbox=""
       data-testid="html-preview-frame"
-      className="h-full min-h-0 flex-1 border-0 bg-white"
+      className="h-full min-h-0 flex-1 border-0 bg-background"
     />
   );
 }
