@@ -55,7 +55,7 @@ func TestACPDeciderAdapter_TranslatesOptionsAndChoice(t *testing.T) {
 		t.Fatalf("summary = %q, want %q", d.gotSummary, "Delete a file")
 	}
 	if d.gotCommand != "" {
-		t.Fatalf("command = %q, want empty -- ACP's ToolCall carries no confirmed command field", d.gotCommand)
+		t.Fatalf("command = %q, want empty -- this ToolCall has no kind \"execute\", so acpCommand must not guess one", d.gotCommand)
 	}
 	want := []PermissionOption{
 		{ID: "opt-1", Label: "Allow once", Kind: "allow_once"},
@@ -63,6 +63,51 @@ func TestACPDeciderAdapter_TranslatesOptionsAndChoice(t *testing.T) {
 	}
 	if !reflect.DeepEqual(d.gotOptions, want) {
 		t.Fatalf("options = %+v, want %+v", d.gotOptions, want)
+	}
+}
+
+func TestACPDeciderAdapter_ExtractsExecuteCommand(t *testing.T) {
+	t.Parallel()
+	d := &recordingDecider{optionID: "opt-1"}
+	adapter := acpDeciderAdapter{decider: d}
+
+	// Shape confirmed live 2026-09-14 (glm-acp-agent's Bash tool call):
+	// kind "execute" with rawInput.command carrying the literal string.
+	req := acp.RequestPermissionParams{
+		ToolCall: json.RawMessage(`{"toolCallId":"tc-2","title":"Run command: go version","kind":"execute","rawInput":{"command":"go version"}}`),
+		Options: []acp.PermissionOption{
+			{OptionID: "opt-1", Name: "Allow once", Kind: acp.PermissionAllowOnce},
+		},
+	}
+
+	if _, err := adapter.Decide(context.Background(), req); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if d.gotCommand != "go version" {
+		t.Fatalf("command = %q, want %q", d.gotCommand, "go version")
+	}
+}
+
+func TestACPDeciderAdapter_IgnoresRawInputCommandForNonExecuteKinds(t *testing.T) {
+	t.Parallel()
+	d := &recordingDecider{optionID: "opt-1"}
+	adapter := acpDeciderAdapter{decider: d}
+
+	// A rawInput.command-shaped field under a different kind is not this
+	// package's business to interpret -- rawInput's shape is tool-specific
+	// per kind, so reusing the field name here would be guessing.
+	req := acp.RequestPermissionParams{
+		ToolCall: json.RawMessage(`{"toolCallId":"tc-3","title":"Read a file","kind":"read","rawInput":{"command":"rm -rf /"}}`),
+		Options: []acp.PermissionOption{
+			{OptionID: "opt-1", Name: "Allow once", Kind: acp.PermissionAllowOnce},
+		},
+	}
+
+	if _, err := adapter.Decide(context.Background(), req); err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if d.gotCommand != "" {
+		t.Fatalf("command = %q, want empty for a non-execute kind", d.gotCommand)
 	}
 }
 

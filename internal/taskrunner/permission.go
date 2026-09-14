@@ -47,12 +47,12 @@ type PermissionOption struct {
 //
 // command is the literal shell command this request is asking to run, when
 // the calling adapter can confirm one -- Claude Code's Bash tool
-// (claudeDeciderAdapter, from its Input["command"]) and Codex's
+// (claudeDeciderAdapter, from its Input["command"]), Codex's
 // command-execution approval (codexDeciderAdapter, from its own Command
-// field) both can; ACP's tool-call schema (acpDeciderAdapter) exposes no
-// field this package has confirmed carries one, so it always passes "".
-// command is empty for any request that isn't shaped like a shell command
-// at all (a file-change approval, an ACP tool call of unknown kind, ...).
+// field), and ACP's kind-"execute" tool calls (acpDeciderAdapter, from
+// rawInput.command -- see acpCommand) all can. command is empty for any
+// request that isn't shaped like a shell command at all (a file-change
+// approval, an ACP tool call of a different kind, ...).
 // A PermissionDecider must never treat a non-empty command as anything
 // more than a hint -- ApprovalPolicyAutoSafe's AllowlistedCommand check is
 // the only thing that should ever turn it into an auto-allow decision, and
@@ -100,16 +100,15 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 		}
 	}
 
-	// command is always "" here: ACP's ToolCallUpdate (req.ToolCall) has no
-	// field this package has confirmed reliably carries the literal command
-	// being executed, unlike Claude Code's Input["command"] or Codex's
-	// Command below. Passing "" means ApprovalPolicyAutoSafe's
-	// AllowlistedCommand check can never match an ACP-driven (GLM/Kimi)
-	// request, so it always falls back to a human decision for this
-	// provider -- the correct, conservative behavior for a command this
-	// package can't actually identify, not a gap to silently paper over
-	// with a guessed schema.
-	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), "", opts)
+	// kind "execute"'s rawInput.command carries the literal shell command
+	// (confirmed live 2026-09-14: glm-acp-agent's Bash tool call shape is
+	// {"kind":"execute","rawInput":{"command":"go version"},...}), letting
+	// ApprovalPolicyAutoSafe's AllowlistedCommand match ACP-driven
+	// (GLM/Kimi) shell commands the same way it already does for
+	// claude-native's Input["command"] and Codex's Command below. Any
+	// other kind (or a missing rawInput.command) yields "", so it can
+	// never spuriously match the allowlist.
+	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), acpCommand(req.ToolCall), opts)
 }
 
 // autoAllowACPFileEdit reports whether an ACP permission request is a
@@ -127,11 +126,16 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 // ToolCallUpdate inconsistently: the schema's structured fields first
 // (kind edit/move/delete + locations[].path), then -- only when the
 // agent filled in neither -- a conservative title fallback
-// ("<verb> file: <path>", glm-acp-agent's actual shape: it sets Title
-// like "Write file: docs/x.md" but leaves kind and locations empty).
-// Both routes converge on the same inside-worktree check; a title that
-// names no recognizable file-edit verb, or a relative/unparsable path,
-// fails closed.
+// ("<verb> file: <path>", glm-acp-agent's actual shape when it omits
+// locations). Either route's path may be relative: live glm-acp-agent
+// traffic (2026-09-14) showed kind "edit" with locations[].path set to
+// the plain relative path too, not an absolute one, despite the ACP
+// schema not requiring that. A relative path's base is known regardless
+// of route -- the session's own cwd is worktreePath (set via
+// NewSession) -- so it's resolved against that before the same
+// inside-worktree check. A title that names no recognizable file-edit
+// verb, or any path (relative or absolute) that resolves outside the
+// worktree, fails closed.
 func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	if worktreePath == "" {
 		return false
@@ -171,8 +175,14 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	root := filepath.Clean(worktreePath)
 	rootSep := root + string(os.PathSeparator)
 	for _, p := range paths {
-		if p == "" || !filepath.IsAbs(p) {
+		if p == "" {
 			return false
+		}
+		if !filepath.IsAbs(p) {
+			// filepath.Join cleans the result, so a traversal like
+			// "../../etc/passwd" resolves to its real absolute location
+			// before the containment check below, same as any other path.
+			p = filepath.Join(root, p)
 		}
 		cleaned := filepath.Clean(p)
 		// The root itself is rejected along with everything outside it: a
@@ -185,12 +195,10 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	return true
 }
 
-// fileEditPathFromTitle extracts the absolute path from a file-edit
-// permission title of the form "<verb> file: <path>" (verbs observed in
-// the wild: glm-acp-agent's "Write file: ..." / "Edit file: ..."). Only
-// an absolute path counts: the worktree-containment check downstream is
-// meaningless against a relative one, and resolving it against a guessed
-// base would be papering over an ambiguous request.
+// fileEditPathFromTitle extracts the path (absolute or relative -- the
+// caller resolves relative ones against the worktree root) from a
+// file-edit permission title of the form "<verb> file: <path>" (verbs
+// observed in the wild: glm-acp-agent's "Write file: docs/x.md").
 func fileEditPathFromTitle(title string) (string, bool) {
 	idx := strings.LastIndex(title, " file: ")
 	if idx < 0 {
@@ -203,6 +211,24 @@ func fileEditPathFromTitle(title string) (string, bool) {
 		return "", false
 	}
 	return title[idx+len(" file: "):], true
+}
+
+// acpCommand extracts the literal shell command from an ACP
+// ToolCallUpdate, for the AllowlistedCommand check in Decide above.
+// Confined to kind "execute" -- rawInput's shape is tool-specific, so
+// reading rawInput.command for any other kind would be guessing what a
+// same-named field there happens to mean.
+func acpCommand(raw json.RawMessage) string {
+	var tc struct {
+		Kind     string `json:"kind"`
+		RawInput struct {
+			Command string `json:"command"`
+		} `json:"rawInput"`
+	}
+	if err := json.Unmarshal(raw, &tc); err != nil || tc.Kind != "execute" {
+		return ""
+	}
+	return tc.RawInput.Command
 }
 
 // firstOptionByKind mirrors internal/runs's unexported helper of the same
