@@ -1,16 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Diff2HtmlUI } from "diff2html/lib/ui/js/diff2html-ui.js";
-import "diff2html/bundles/css/diff2html.min.css";
-import "highlight.js/styles/github.css";
 
+import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
+import { ReviewComments, type PendingComment } from "@/components/review-comments";
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { useTaskDiff } from "@/hooks/use-task-diff";
+import { formatDiffStat } from "@/lib/diff-stat";
 import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
+import { filePathForElement, type DiffLineRef } from "@/lib/diff-lines";
+import {
+  addReviewDraft,
+  buildReviewPrompt,
+  clearReviewDrafts,
+  useReviewDrafts,
+  type ReviewDraft,
+} from "@/lib/review-drafts";
+import { loadDiffPrefs, saveDiffPrefs } from "@/lib/diff-prefs";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
+  Provider,
+  ProviderListResult,
+  RunStartResult,
   RunStatusEventPayload,
   Task,
   TaskCommitResult,
@@ -35,6 +49,13 @@ interface FileState {
  * with the human-written message only -- this is deliberately a human-only
  * surface; the agent author/trailer path exists at the RPC layer but no UI
  * exposes it.
+ *
+ * Item 19 of the ui-redesign-parity plan adds the review layer on top: a
+ * whole-diff view beside the per-file list, a unified/side-by-side
+ * toggle, per-line draft comments submitted back to the agent as one
+ * prompt, and a files/+/- stat. Per-*hunk* staging stays out of scope --
+ * ADR 0006 deliberately collapses staged/unstaged/untracked into one
+ * base->worktree diff, and Item 19 restates that.
  */
 export function DiffViewerPane({
   client,
@@ -66,6 +87,30 @@ export function DiffViewerPane({
   // as the scroll lands (it's a one-shot action, not a selection).
   const [revealPath, setRevealPath] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // Item 19: the two view toggles, seeded from (and written back to)
+  // localStorage so they survive this pane unmounting on a tab switch.
+  const [prefs, setPrefs] = useState(loadDiffPrefs);
+  function updatePrefs(patch: Partial<typeof prefs>): void {
+    setPrefs((prev) => {
+      const next = { ...prev, ...patch };
+      saveDiffPrefs(next);
+      return next;
+    });
+  }
+
+  // The whole-diff render and the files/+/- stat both come off one
+  // task.diff fetch -- see hooks/use-task-diff.ts.
+  const wholeDiff = useTaskDiff(client, task, events);
+
+  // Review drafts live outside React (lib/review-drafts.ts) so they
+  // survive collapsing a file and switching tabs; `pending` is the
+  // not-yet-written comment whose composer is open, which deliberately
+  // does not.
+  const drafts = useReviewDrafts(task.ID);
+  const [pending, setPending] = useState<PendingComment | null>(null);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   const fetchFiles = useCallback(() => {
     if (!client) return;
@@ -206,6 +251,54 @@ export function DiffViewerPane({
       });
   };
 
+  function selectLine(path: string, ref: DiffLineRef): void {
+    setPending({ path, line: ref.line, side: ref.side, snippet: ref.text });
+  }
+
+  function addDraftFromPending(body: string): void {
+    if (!pending) return;
+    addReviewDraft(task.ID, { path: pending.path, line: pending.line, side: pending.side, snippet: pending.snippet, body });
+    setPending(null);
+  }
+
+  /**
+   * Sends every draft as one prompt (Item 19: "submitted as a single
+   * prompt back to the agent"), then clears them so the same review can't
+   * be sent twice.
+   *
+   * The provider is the daemon's first reported one (the same
+   * daemon-derived list the composer uses -- never a hardcoded client-side
+   * list, per audit-smind-current.md §10's guarantees). Choosing a
+   * provider *per review* belongs to Item 10's composer toolbar; this
+   * surface deliberately doesn't grow a second provider control.
+   */
+  const submitReview = async () => {
+    if (!client || drafts.length === 0) return;
+    setSubmittingReview(true);
+    setReviewError(null);
+    try {
+      let provider: Provider = "claude-native";
+      try {
+        const result = await client.call<ProviderListResult>("provider.list");
+        if (result?.providers?.[0]) provider = result.providers[0].id;
+      } catch {
+        // provider.list failing shouldn't block the review -- the daemon's
+        // own default is the same fallback the composer uses.
+      }
+      await client.call<RunStartResult>("run.start", {
+        taskId: task.ID,
+        provider,
+        prompt: buildReviewPrompt(drafts),
+      });
+      clearReviewDrafts(task.ID);
+      setPending(null);
+    } catch (err: unknown) {
+      setReviewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   const createPR = () => {
     if (!client) return;
     setCreatingPR(true);
@@ -231,9 +324,43 @@ export function DiffViewerPane({
     <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
       <PaneHeader
         title="Diff"
+        subtitle={
+          <span data-testid="diff-stat" data-files={wholeDiff.stat.files} data-additions={wholeDiff.stat.additions} data-deletions={wholeDiff.stat.deletions}>
+            {formatDiffStat(wholeDiff.stat)}
+          </span>
+        }
         actions={
           <>
-            <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={fetchFiles}>
+            <SegmentedToggle
+              testId="diff-view-toggle"
+              label="Diff view"
+              value={prefs.view}
+              onChange={(view) => updatePrefs({ view })}
+              options={[
+                { value: "by-file", label: "By file" },
+                { value: "whole", label: "Whole diff" },
+              ]}
+            />
+            <SegmentedToggle
+              testId="diff-format-toggle"
+              label="Diff layout"
+              value={prefs.format}
+              onChange={(format) => updatePrefs({ format })}
+              options={[
+                { value: "line-by-line", label: "Unified" },
+                { value: "side-by-side", label: "Side by side" },
+              ]}
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!client || loading}
+              onClick={() => {
+                fetchFiles();
+                wholeDiff.refresh();
+              }}
+            >
               Refresh
             </Button>
             <Button
@@ -276,12 +403,58 @@ export function DiffViewerPane({
         )}
         {loading && files === null && <InlineSpinner label="Loading diff…" />}
         {!error && isEmpty && <EmptyState testId="diff-empty" title="No changes" />}
-        {files?.map((file) => (
+
+        {/*
+          Whole-diff view: one render of task.diff, so a review can be read
+          top to bottom without expanding files one at a time. It shares
+          the per-file view's line-click-to-comment wiring -- the path
+          comes from the clicked row's own file wrapper rather than from a
+          React parent, since one render covers every file.
+        */}
+        {prefs.view === "whole" && !isEmpty && !error && (
+          <div data-testid="whole-diff">
+            {wholeDiff.diff === null ? (
+              <InlineSpinner label="Loading diff…" />
+            ) : (
+              <DiffRender
+                diff={wholeDiff.diff}
+                outputFormat={prefs.format}
+                testId="whole-diff-container"
+                onSelectLine={(ref, element) => {
+                  const path = filePathForElement(element);
+                  if (path) selectLine(path, ref);
+                }}
+              />
+            )}
+            {wholeDiff.error && (
+              <p className="text-sm text-destructive" data-testid="whole-diff-error">
+                {wholeDiff.error}
+              </p>
+            )}
+            <ReviewComments
+              taskId={task.ID}
+              drafts={drafts}
+              pending={pending}
+              onCancelPending={() => setPending(null)}
+              onAddDraft={addDraftFromPending}
+            />
+          </div>
+        )}
+
+        {prefs.view === "by-file" &&
+          files?.map((file) => (
             <FileRow
               key={file.path}
+              taskId={task.ID}
               file={file}
               state={fileStates[file.path]}
               collapsed={collapsed[file.path] ?? false}
+              outputFormat={prefs.format}
+              drafts={drafts.filter((d) => d.path === file.path)}
+              pending={pending?.path === file.path ? pending : null}
+              onSelectLine={(ref) => selectLine(file.path, ref)}
+              onCancelPending={() => setPending(null)}
+              onAddDraft={addDraftFromPending}
               onToggleCollapse={() =>
                 setCollapsed((prev) => ({ ...prev, [file.path]: !(prev[file.path] ?? false) }))
               }
@@ -296,6 +469,28 @@ export function DiffViewerPane({
             />
           ))}
       </div>
+
+      {(drafts.length > 0 || reviewError) && (
+        <div className="border-t px-4 py-2" data-testid="review-bar">
+          {reviewError && (
+            <Alert variant="error" description={`Submit failed: ${reviewError}`} className="mb-2" testId="review-error" />
+          )}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={!client || drafts.length === 0 || submittingReview}
+              onClick={() => void submitReview()}
+              data-testid="submit-review-button"
+            >
+              {submittingReview ? "Submitting…" : `Submit review (${drafts.length})`}
+            </Button>
+            <span className="text-xs text-foreground-muted">
+              Sent as one prompt to the agent, then cleared
+            </span>
+          </div>
+        </div>
+      )}
 
       <div className="border-t px-4 py-3" data-testid="commit-bar">
         {lastCommit && (
@@ -325,41 +520,45 @@ export function DiffViewerPane({
   );
 }
 
-/** One collapsible file entry: header (stage checkbox, viewed toggle, status, path) plus its diff2html render when expanded. */
+/**
+ * One collapsible file entry: header (stage checkbox, viewed toggle,
+ * status, path), its diff2html render when expanded, and its review
+ * drafts. Drafts render even while the file is *collapsed* -- Item 19's
+ * scenario is that a draft survives collapsing, and hiding it would make
+ * a surviving draft look lost.
+ */
 function FileRow({
+  taskId,
   file,
   state,
   collapsed,
+  outputFormat,
+  drafts,
+  pending,
+  onSelectLine,
+  onCancelPending,
+  onAddDraft,
   onToggleCollapse,
   onStage,
   onMarkViewed,
   disabled,
 }: {
+  taskId: number;
   file: TaskFile;
   state: FileState | undefined;
   collapsed: boolean;
+  outputFormat: DiffOutputFormat;
+  drafts: ReviewDraft[];
+  pending: PendingComment | null;
+  onSelectLine: (line: DiffLineRef) => void;
+  onCancelPending: () => void;
+  onAddDraft: (body: string) => void;
   onToggleCollapse: () => void;
   onStage: (staged: boolean) => void;
   onMarkViewed: () => void;
   disabled: boolean;
 }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
   const diff = state?.diff ?? null;
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    el.innerHTML = "";
-    if (!diff) return;
-    const ui = new Diff2HtmlUI(el, diff, {
-      outputFormat: "side-by-side",
-      drawFileList: false,
-      matching: "lines",
-      highlight: true,
-    });
-    ui.draw();
-    ui.highlightCode();
-  }, [diff]);
 
   return (
     <div className="mb-2" data-testid={`diff-file-${file.path}`}>
@@ -397,10 +596,68 @@ function FileRow({
           ) : diff === "" ? (
             <p className="text-sm text-muted-foreground">No changes</p>
           ) : (
-            <div ref={containerRef} data-testid={`diff-container-${file.path}`} />
+            <DiffRender
+              diff={diff}
+              outputFormat={outputFormat}
+              onSelectLine={onSelectLine}
+              testId={`diff-container-${file.path}`}
+            />
           )}
         </div>
       )}
+      <ReviewComments
+        taskId={taskId}
+        drafts={drafts}
+        pending={pending}
+        onCancelPending={onCancelPending}
+        onAddDraft={onAddDraft}
+      />
+    </div>
+  );
+}
+
+/**
+ * A two-or-more-option toggle rendered as one bordered group of pressed
+ * buttons -- the shape file-editor-pane.tsx's Edit/Preview control
+ * already uses, generalized here for Item 19's two toggles rather than
+ * hand-rolled a third and fourth time. `aria-pressed` plus the disabled
+ * active option is what makes the current value readable both to a screen
+ * reader and to a test.
+ */
+function SegmentedToggle<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+  testId,
+}: {
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (value: T) => void;
+  label: string;
+  testId: string;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label={label}
+      data-testid={testId}
+      data-value={value}
+      className="flex h-7 items-center rounded-lg border border-input p-0.5"
+    >
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          onClick={() => onChange(option.value)}
+          disabled={value === option.value}
+          aria-pressed={value === option.value}
+          data-testid={`${testId}-${option.value}`}
+          className="flex h-6 items-center rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
+import { DIFF_PREFS_STORAGE_KEY } from "@/lib/diff-prefs";
+import { getReviewDrafts, resetReviewDrafts } from "@/lib/review-drafts";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import type { Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
 
@@ -377,5 +379,238 @@ describe("DiffViewerPane reveal-in-diff (Item 17)", () => {
     await flush();
 
     expect(screen.getByTestId("diff-file-header-file.txt")).toHaveTextContent("▾");
+  });
+});
+
+const WHOLE_DIFF = `diff --git a/file.txt b/file.txt
+index a29bdeb..0226208 100644
+--- a/file.txt
++++ b/file.txt
+@@ -1,2 +1,2 @@
+ line1
+-old line
++line2 added
+diff --git a/new.txt b/new.txt
+new file mode 100644
+index 0000000..f2ba8f8
+--- /dev/null
++++ b/new.txt
+@@ -0,0 +1,1 @@
++brand new
+`;
+
+describe("DiffViewerPane review v2 (Item 19)", () => {
+  afterEach(() => {
+    resetReviewDrafts();
+    resetDiffReveal();
+    window.localStorage.clear();
+  });
+
+  /** Clicks the rendered diff line whose text contains `text`, inside `containerTestId`. */
+  function clickDiffLine(containerTestId: string, text: string): void {
+    const container = screen.getByTestId(containerTestId);
+    const line = [...container.querySelectorAll(".d2h-code-line-ctn")].find((el) => el.textContent?.includes(text));
+    if (!line) throw new Error(`no rendered diff line containing ${JSON.stringify(text)}`);
+    fireEvent.click(line);
+  }
+
+  async function writeComment(body: string): Promise<void> {
+    fireEvent.change(screen.getByTestId("review-composer-body"), { target: { value: body } });
+    fireEvent.click(screen.getByTestId("review-composer-add"));
+    await flush();
+  }
+
+  it("exposes a diff stat matching the file list", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+
+    const stat = screen.getByTestId("diff-stat");
+    // Two files, matching the two-entry task.files list above.
+    expect(stat).toHaveAttribute("data-files", String(FILES.files.length));
+    expect(stat).toHaveAttribute("data-additions", "2");
+    expect(stat).toHaveAttribute("data-deletions", "1");
+    expect(stat).toHaveTextContent("2 files +2 −1");
+  });
+
+  it("renders every changed file in the whole-diff view", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+
+    fireEvent.click(screen.getByTestId("diff-view-toggle-whole"));
+    await flush();
+
+    const whole = screen.getByTestId("whole-diff-container");
+    expect(whole.textContent).toContain("line2 added");
+    expect(whole.textContent).toContain("brand new");
+    // The per-file list is replaced, not shown alongside.
+    expect(screen.queryByTestId("diff-container-file.txt")).not.toBeInTheDocument();
+  });
+
+  it("switches rendering mode with the side-by-side / unified toggle, and persists the choice", async () => {
+    const client = new FakeWsClient();
+    const { unmount } = render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "side-by-side");
+
+    fireEvent.click(screen.getByTestId("diff-format-toggle-line-by-line"));
+    await flush();
+
+    expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "line-by-line");
+    expect(JSON.parse(window.localStorage.getItem(DIFF_PREFS_STORAGE_KEY)!).format).toBe("line-by-line");
+
+    // A tab switch unmounts this pane -- the toggle must not reset.
+    unmount();
+    const next = new FakeWsClient();
+    render(<DiffViewerPane client={next} task={TASK} />);
+    await resolveFilesAndDiffs(next);
+    expect(screen.getByTestId("diff-container-file.txt")).toHaveAttribute("data-output-format", "line-by-line");
+  });
+
+  it("keeps a draft comment across collapsing the file and switching tabs", async () => {
+    const client = new FakeWsClient();
+    const { unmount } = render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    expect(screen.getByTestId("review-composer")).toHaveAttribute("data-path", "file.txt");
+    await writeComment("this leaks the connection");
+
+    const draft = screen.getByTestId("review-draft");
+    expect(draft).toHaveAttribute("data-line", "2");
+    expect(draft).toHaveTextContent("this leaks the connection");
+
+    // Collapsing the file keeps the draft visible (hiding it would look
+    // like it was lost).
+    fireEvent.click(screen.getByTestId("diff-file-header-file.txt"));
+    await flush();
+    expect(screen.getByTestId("review-draft")).toHaveTextContent("this leaks the connection");
+
+    // Switching tabs unmounts the pane entirely.
+    unmount();
+    const next = new FakeWsClient();
+    render(<DiffViewerPane client={next} task={TASK} />);
+    await resolveFilesAndDiffs(next);
+
+    expect(screen.getByTestId("review-draft")).toHaveTextContent("this leaks the connection");
+  });
+
+  it("submits every draft as one prompt and clears them", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("first comment");
+
+    clickDiffLine("diff-container-new.txt", "line2 added");
+    await flush();
+    await writeComment("second comment");
+
+    expect(screen.getAllByTestId("review-draft")).toHaveLength(2);
+    expect(screen.getByTestId("submit-review-button")).toHaveTextContent("Submit review (2)");
+
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+
+    // The provider comes from the daemon's list, never a hardcoded one.
+    expect(client.nth("provider.list", 0)).toBeTruthy();
+    client.nth("provider.list", 0).resolve({ providers: [{ id: "glm" }, { id: "claude-native" }] });
+    await flush();
+
+    const started = client.nth("run.start", 0).params as { taskId: number; provider: string; prompt: string };
+    expect(started.taskId).toBe(TASK.ID);
+    expect(started.provider).toBe("glm");
+    expect(started.prompt).toContain("first comment");
+    expect(started.prompt).toContain("second comment");
+    // One prompt, not one run per comment.
+    expect(client.calls.filter((c) => c.method === "run.start")).toHaveLength(1);
+
+    client.nth("run.start", 0).resolve({ runId: "run-1" });
+    await flush();
+
+    expect(screen.queryByTestId("review-draft")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("submit-review-button")).not.toBeInTheDocument();
+    expect(getReviewDrafts(TASK.ID)).toEqual([]);
+  });
+
+  it("keeps the drafts and surfaces the error when submitting fails", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("keep me");
+
+    fireEvent.click(screen.getByTestId("submit-review-button"));
+    await flush();
+    client.nth("provider.list", 0).resolve({ providers: [{ id: "claude-native" }] });
+    await flush();
+    client.nth("run.start", 0).reject(new Error("daemon said no"));
+    await flush();
+
+    expect(screen.getByTestId("review-error")).toHaveTextContent("daemon said no");
+    expect(screen.getByTestId("review-draft")).toHaveTextContent("keep me");
+  });
+
+  it("removes a single draft without touching the others", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    clickDiffLine("diff-container-file.txt", "line2 added");
+    await flush();
+    await writeComment("first");
+    clickDiffLine("diff-container-file.txt", "line1");
+    await flush();
+    await writeComment("second");
+
+    expect(screen.getAllByTestId("review-draft")).toHaveLength(2);
+
+    fireEvent.click(screen.getAllByTestId("review-draft-remove")[0]!);
+    await flush();
+
+    const remaining = screen.getAllByTestId("review-draft");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).toHaveTextContent("second");
+  });
+
+  it("ignores a click that didn't land on a diff line", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("diff-container-file.txt"));
+    await flush();
+
+    expect(screen.queryByTestId("review-composer")).not.toBeInTheDocument();
+  });
+
+  it("attributes a whole-diff-view comment to the right file", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+    client.nth("task.diff", 0).resolve({ diff: WHOLE_DIFF });
+    await flush();
+
+    fireEvent.click(screen.getByTestId("diff-view-toggle-whole"));
+    await flush();
+
+    clickDiffLine("whole-diff-container", "brand new");
+    await flush();
+
+    expect(screen.getByTestId("review-composer")).toHaveAttribute("data-path", "new.txt");
+    await writeComment("nice");
+
+    expect(getReviewDrafts(TASK.ID)[0]!.path).toBe("new.txt");
   });
 });

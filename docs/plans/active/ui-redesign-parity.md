@@ -794,6 +794,54 @@ this is the pointer:
   item's own acceptance criteria covered it; the plan says "whichever
   lands first owns it"). Nothing was re-done here.
 
+**Item 19 (landed)** — where the plan was ambiguous and what was decided:
+
+- **The diff stat is derived client-side from `task.diff`**, not added as
+  a daemon numstat RPC. The whole-diff view has to fetch that text
+  anyway, so the stat is free on the surface that needs it most, and it
+  stays additive — no wire change, no rule-(d) gate.
+  `hooks/use-task-diff.ts` is the shared consumer point Item 19 asks for
+  ("surfaced outside this pane"): Item 12's sidebar and Item 10's
+  composer can mount it without the diff pane existing. **Caveat for
+  Item 12**: a per-row stat for *every* task in the tree would mean one
+  whole-diff fetch per row, which is the wrong tradeoff — the sidebar
+  should use `task.files`'s count (already available via
+  `hooks/use-task-file-status.ts`) and take `+`/`−` only for the selected
+  task, or the daemon should grow a numstat, which is its own decision.
+- **Per-line comments attach by click, not by an inline gutter widget.**
+  diff2html renders to `innerHTML`, so there is no React tree to hang a
+  per-line control off. One delegated listener on the container resolves
+  the clicked row (`lib/diff-lines.ts`, which handles both output formats
+  — unified's `.line-num1`/`.line-num2` divs and side-by-side's bare-text
+  number cell), and the composer/draft list render *beside* the diff. The
+  alternative — injecting React roots into diff2html's output per line —
+  would couple the pane to that library's exact markup far harder than
+  reading two class names does.
+- **Drafts are persisted to `localStorage`, not just held in memory.**
+  The plan's scenario is that a draft survives switching tabs, and
+  switching tabs *unmounts the diff pane* (App.tsx's Radix Tabs don't
+  force-mount inactive content), so component state couldn't satisfy it
+  by construction. Persisting gets survival across a reload for free, and
+  matches Paseo's own persisted review drafts (`audit-paseo.md` §2) and
+  the plan's "preferences are client-side" stance.
+- **Submitting starts a run with the daemon's first reported provider**,
+  with no provider control of its own. The daemon-derived provider list
+  is a non-negotiable guarantee (`audit-smind-current.md` §10), so the
+  list is fetched rather than hardcoded — but choosing a provider *per
+  review* is composer-toolbar work (Item 10), and a second provider
+  `<select>` on this pane would be exactly the unlabelled-native-select
+  pattern Item 10 exists to remove.
+- **The view/layout toggles persist app-wide, not per task.** Which
+  layout you read diffs in is a fact about the person, not the task.
+  Item 13's settings screen is where they should eventually be
+  *surfaced*; `lib/diff-prefs.ts` is the storage.
+- **Drafts stay visible while their file is collapsed.** Item 19 only
+  requires that they survive; hiding a surviving draft would make it look
+  lost, which is the failure the criterion is guarding against.
+- **Per-hunk staging stayed out of scope**, as the item states — ADR 0006
+  collapses staged/unstaged/untracked into one base→worktree diff and
+  nothing here changes that.
+
 **Track A hook to wire** (noted per the plan's cross-track coordination
 rules): Item 17 makes two small, additive edits to `App.tsx` rather than
 restructuring it — the tab strip renders `<TabLabel entry={entry} />`
@@ -836,7 +884,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
 - [x] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
-- [ ] Item 19: diff / review v2 *(Track C)*
+- [x] Item 19: diff / review v2 *(Track C)*
 - [ ] Item 20: terminal v2 *(Track C)*
 - [ ] Item 21: responsive / compact layout *(Track A)*
 
@@ -1165,4 +1213,58 @@ lookup to the pane's own list rather than the document, so Item 6's
 second diff pane can't scroll the first one's row.
 
 `bunx tsc -b`, `task test` (248 web tests, 30 files; all Go packages) and
+`task lint` green.
+
+### Item 19 — diff / review v2
+
+Every acceptance criterion, and how it was confirmed:
+
+- **A whole-diff view alongside the per-file list, and a side-by-side /
+  unified toggle** — two segmented toggles in the pane header
+  (`SegmentedToggle`, generalized from `file-editor-pane.tsx`'s
+  Edit/Preview control rather than hand-rolled a third time), backed by
+  `lib/diff-prefs.ts`. The diff2html render itself moved into
+  `components/diff-render.tsx` so the per-file rows and the whole-diff
+  view share one implementation instead of two copies of the same effect.
+  `diff-viewer-pane.test.tsx` asserts the whole-diff view renders *every*
+  changed file (both `file.txt` and `new.txt` in one container, and the
+  per-file list gone), that the format toggle actually changes
+  diff2html's `outputFormat`, and that the choice survives the pane
+  unmounting — which is what a tab switch does.
+- **Per-line draft comments, submitted as a single prompt, surviving a
+  collapse and a tab switch** — `lib/review-drafts.ts` (per-task,
+  `useSyncExternalStore`, mirrored to `localStorage`),
+  `lib/diff-lines.ts` (click → `{side, line, text}`, both output
+  formats), `components/review-comments.tsx` (draft list + composer).
+  Covered end to end: writing a comment on a real diff2html-rendered
+  line, collapsing the file, unmounting and re-mounting the pane, then
+  submitting — one `run.start` carrying both comments, drafts cleared
+  after. Failure keeps them (a submit error must not eat a review) and
+  removing one draft leaves the other.
+  `lib/diff-lines.test.ts` asserts the DOM reading against diff2html's
+  *actual* markup (rendered in the test, not a hand-written fixture) for
+  unified, side-by-side, deletions, hunk headers and non-rows.
+  `lib/review-drafts.test.ts` covers per-task isolation, the stable empty
+  array `useSyncExternalStore` requires, persistence, and the prompt's
+  grouping.
+- **A diff stat surfaced outside the pane** — `lib/diff-stat.ts`'s
+  `parseDiffStat`/`formatDiffStat` and `hooks/use-task-diff.ts`. The pane
+  renders it in its header (`data-files`/`data-additions`/
+  `data-deletions` for assertion); the hook is the consumption point for
+  Items 10/12. `diff-stat.test.ts` covers the `+++`/`---` header
+  exclusion, the empty diff, and the headerless-diff fallback; the pane
+  test asserts the rendered stat matches the `task.files` list.
+- **Per-hunk staging out of scope** — unchanged, per ADR 0006.
+- **Existing stage/viewed/commit/PR tests keep passing unchanged** — they
+  do, byte for byte; the 20 pre-Item-19 tests in that file were not
+  touched.
+
+One thing worth stating plainly: a draft written against a file that
+later leaves `task.files` (because it was committed) stops rendering in
+the by-file view but is still counted by the submit bar and still
+included in the prompt. The count is the honest number; surfacing such
+drafts somewhere would need a "stale drafts" affordance that nothing in
+this item asks for.
+
+`bunx tsc -b`, `task test` (272 web tests, 33 files; all Go packages) and
 `task lint` green.
