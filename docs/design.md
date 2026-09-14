@@ -1,9 +1,9 @@
 # smind web UI: design rules
 
 This is the living reference for `web/packages/ui`'s token vocabulary,
-density, primitives, and copy rules — written from what actually landed
-(`docs/plans/active/ui-redesign-parity.md`'s Items 1 and 2), not
-aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
+density, primitives, copy rules, the keyboard/palette registration APIs,
+and routing/persistence — written from what actually landed
+(`docs/plans/active/ui-redesign-parity.md`'s Items 1-5), not aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
 two overlap (Paseo is the parity plan's north star), scoped down to what
 smind's surface actually needs.
 
@@ -153,7 +153,148 @@ wrong").
 - **Alerts**: one `Alert` per region. `error` variant gets `role="alert"`
   (interrupts); every other variant gets `role="status"` (polite).
 
-## 7. Decisions
+## 7. Keyboard actions — the API other surfaces call
+
+The keyboard layer (`src/keyboard/`) is split so that **which keys do
+what** and **who performs the work** are two independent lists:
+
+- `keyboard/actions.ts` — the `ActionId` vocabulary. The contract.
+- `keyboard/shortcuts.ts` — `SHORTCUT_BINDINGS`: combo → action, plus
+  section/label for the help dialog. **Track A owns this file.**
+- `keyboard/keyboard-provider.tsx` — one window-level `keydown` listener
+  and the handler registry.
+
+### Claiming an action
+
+Any component under `<KeyboardProvider>` (i.e. anything inside `App`)
+claims an action by mounting a hook. It needs to know nothing about keys,
+platforms, or focus:
+
+```tsx
+import { useActionHandler } from "@/keyboard/keyboard-provider";
+
+useActionHandler("composer.focus", () => textareaRef.current?.focus());
+useActionHandler("run.interrupt", () => stopRun(), { enabled: runIsLive });
+```
+
+- The **most recently registered enabled** handler wins. React runs effects
+  child-first, so the innermost mounted claimant — the composer of the task
+  actually on screen — takes the action.
+- `enabled: false` keeps the registration but skips it, so the action falls
+  through to an outer handler instead of being swallowed by a component
+  that can't currently perform it. Prefer this over conditionally calling
+  the hook (which breaks the rules of hooks anyway).
+- `handler` is read through a ref: a fresh closure each render is fine, no
+  `useCallback` needed.
+- If **nothing** claims an action, the key event is left alone — the
+  browser's own `Cmd+W` still works rather than being swallowed into a
+  no-op.
+
+`useTheme()`-style, `useActionHandler` is a no-op outside a provider, so a
+component that claims an action still mounts in its own unit test with no
+wrapper.
+
+### Adding a new action
+
+1. Add the id to `ActionId` in `keyboard/actions.ts`.
+2. Add a row to `SHORTCUT_BINDINGS` (`keyboard/shortcuts.ts`) with a
+   `section` and a sentence-case `label` — that's all the help dialog
+   needs; it is generated, never hand-maintained.
+3. Claim it with `useActionHandler` wherever it belongs.
+
+Combos are written in one spelling (`keyboard/shortcut-string.ts`):
+`Mod+Alt+T`, `Shift+?`, `Escape`, `Mod+Alt+Digit`. **`Mod` means Cmd on
+mac, Ctrl everywhere else** — write `Mod`, not two platform rows. Matching
+is `KeyboardEvent.code`-first so non-US layouts work; modifiers must match
+exactly, so `Mod+K` never fires for `Mod+Shift+K`.
+
+### Focus scoping
+
+By default a binding does **not** fire while focus is in an `<input>`,
+`<textarea>`, a `contenteditable`, CodeMirror (`.cm-editor`) or xterm
+(`.xterm`). Set `when: { global: true }` for one that should — `Mod+K`,
+`Escape`-to-interrupt and the navigation shortcuts are global; `Shift+?`
+is not (typing `?` must insert a `?`).
+
+No binding fires while a dialog holds the keyboard. A dialog claims that
+with `useModalKeyboardLock(open)`; locks are counted, so overlapping
+dialogs behave.
+
+### Marking a custom surface
+
+A widget that swallows typing but isn't an `<input>`/`contenteditable`
+should carry `data-keyboard-editor` (or `data-keyboard-terminal`) on its
+wrapper — see `keyboard/focus-scope.ts`.
+
+### Rebinding
+
+Bindings are user-rebindable. Overrides are keyed by **binding id** and
+persisted to `localStorage` (`keyboard/overrides.ts`), so **never rename a
+binding id** — that silently drops a user's rebind. The UI is
+`components/shortcuts-dialog.tsx`; its `<ShortcutRows />` is exported so
+Item 13's settings screen can embed the same list without a dialog around
+it.
+
+## 8. Command palette — contributing entries
+
+`Mod+K` opens `components/command-palette.tsx`. **That component contains
+no commands.** Entries come from sources registered through
+`palette/palette-provider.tsx`:
+
+```tsx
+import { useCommands } from "@/palette/palette-provider";
+import type { Command } from "@/palette/commands";
+
+const commands = useMemo<Command[]>(
+  () => files.map((path) => ({
+    id: `file-${path}`,
+    group: "Files",          // the heading this row appears under
+    title: path.split("/").pop()!,
+    subtitle: path,
+    keywords: [path],        // matched, not displayed
+    action: "tab.close",     // optional: renders that action's shortcut
+    run: () => openFile(path),
+  })),
+  [files, openFile],
+);
+useCommands("my-surface:files", 3, commands);   // (sourceId, groupRank, commands)
+```
+
+- `sourceId` is namespaced into each command's key, so two sources can use
+  the same command `id`. Registering again under the same `sourceId`
+  replaces the previous set; unmounting removes it.
+- `groupRank` orders groups for an empty query. Current ranks: tasks 0,
+  workspaces 1, tabs 2, files 3, shell actions 4, sidebar actions 5.
+- **Memoize `commands`.** Not memoizing is survivable (registration is
+  render-free by design) but re-registers every render.
+- Matching is per-field fuzzy subsequence, title-weighted. Filtered
+  results stay grouped; groups order by their best match.
+- Outside a `<PaletteProvider>`, `useCommands` is a no-op — a component
+  that contributes commands still mounts bare in its own unit test.
+
+A surface registers the commands for the dialogs *it* owns —
+`app-sidebar.tsx` registers New workspace / Open accounts, not `App.tsx`.
+
+## 9. Persisting a UI preference
+
+`lib/storage.ts` is the one mechanism: `readStored(key, fallback, validate)`
+/ `writeStored(key, value)`, both `localStorage`-backed, both unable to
+throw. `readStored` takes a type guard rather than a schema library — check
+the parts you actually read — and falls back on anything that doesn't
+validate: absent, malformed JSON, or well-formed JSON of the wrong shape
+(the normal case after a deploy changes a stored shape, not an exotic one).
+Every key lives in `STORAGE_KEYS`, namespaced `smind:`, so a collision is
+visible in one place. `use-sidebar-width.ts` and `use-task-tabs.ts` are the
+two callers; a pane-size preference (Item 6) is the next.
+
+Hash routing (`lib/route.ts`) is the other piece of Item 3: the URL is a
+*mirror* of selection state (`App.tsx`'s restore/sync effects), not its
+source of truth — selecting a task or switching a tab writes the hash, and
+a `hashchange` (back/forward, a hand-typed URL) feeds back through the
+same restore path. See `App.tsx`'s routing section for the two-effect
+shape and why it's loop-safe.
+
+## 10. Decisions
 
 - **`surface-0..3` alias the existing static scale rather than
   introducing a second independent set of hex values.** The existing
