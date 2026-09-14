@@ -210,6 +210,7 @@ export function AppSidebar({
   onSelectTask,
   attention,
   events,
+  onTasksChange,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -220,6 +221,15 @@ export function AppSidebar({
   attention?: TaskAttention;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
+  /**
+   * Called with every task across the whole tree whenever the tree
+   * changes. The shell needs a flat task list for things the sidebar
+   * itself doesn't do -- `task.prev`/`task.next` shortcuts, the command
+   * palette's task entries, restoring a task id from the URL -- and this
+   * component is the one place that already fetches it. Optional: mounts
+   * that don't care (every existing test) behave exactly as before.
+   */
+  onTasksChange?: (tasks: Task[]) => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -236,6 +246,10 @@ export function AppSidebar({
   const { permission: notificationPermission, requestPermission: requestNotificationPermission } =
     useNotificationPermission();
   useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
+
+  useEffect(() => {
+    onTasksChange?.(allTasks);
+  }, [allTasks, onTasksChange]);
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);

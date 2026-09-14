@@ -1,9 +1,9 @@
 # smind web UI: design rules
 
 This is the living reference for `web/packages/ui`'s token vocabulary,
-density, primitives, and copy rules — written from what actually landed
-(`docs/plans/active/ui-redesign-parity.md`'s Items 1 and 2), not
-aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
+density, primitives, copy rules and keyboard-action API — written from
+what actually landed (`docs/plans/active/ui-redesign-parity.md`'s Items 1,
+2 and 4), not aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
 two overlap (Paseo is the parity plan's north star), scoped down to what
 smind's surface actually needs.
 
@@ -153,7 +153,89 @@ wrong").
 - **Alerts**: one `Alert` per region. `error` variant gets `role="alert"`
   (interrupts); every other variant gets `role="status"` (polite).
 
-## 7. Decisions
+## 7. Keyboard actions — the API other surfaces call
+
+The keyboard layer (`src/keyboard/`) is split so that **which keys do
+what** and **who performs the work** are two independent lists:
+
+- `keyboard/actions.ts` — the `ActionId` vocabulary. The contract.
+- `keyboard/shortcuts.ts` — `SHORTCUT_BINDINGS`: combo → action, plus
+  section/label for the help dialog. **Track A owns this file.**
+- `keyboard/keyboard-provider.tsx` — one window-level `keydown` listener
+  and the handler registry.
+
+### Claiming an action
+
+Any component under `<KeyboardProvider>` (i.e. anything inside `App`)
+claims an action by mounting a hook. It needs to know nothing about keys,
+platforms, or focus:
+
+```tsx
+import { useActionHandler } from "@/keyboard/keyboard-provider";
+
+useActionHandler("composer.focus", () => textareaRef.current?.focus());
+useActionHandler("run.interrupt", () => stopRun(), { enabled: runIsLive });
+```
+
+- The **most recently registered enabled** handler wins. React runs effects
+  child-first, so the innermost mounted claimant — the composer of the task
+  actually on screen — takes the action.
+- `enabled: false` keeps the registration but skips it, so the action falls
+  through to an outer handler instead of being swallowed by a component
+  that can't currently perform it. Prefer this over conditionally calling
+  the hook (which breaks the rules of hooks anyway).
+- `handler` is read through a ref: a fresh closure each render is fine, no
+  `useCallback` needed.
+- If **nothing** claims an action, the key event is left alone — the
+  browser's own `Cmd+W` still works rather than being swallowed into a
+  no-op.
+
+`useTheme()`-style, `useActionHandler` is a no-op outside a provider, so a
+component that claims an action still mounts in its own unit test with no
+wrapper.
+
+### Adding a new action
+
+1. Add the id to `ActionId` in `keyboard/actions.ts`.
+2. Add a row to `SHORTCUT_BINDINGS` (`keyboard/shortcuts.ts`) with a
+   `section` and a sentence-case `label` — that's all the help dialog
+   needs; it is generated, never hand-maintained.
+3. Claim it with `useActionHandler` wherever it belongs.
+
+Combos are written in one spelling (`keyboard/shortcut-string.ts`):
+`Mod+Alt+T`, `Shift+?`, `Escape`, `Mod+Alt+Digit`. **`Mod` means Cmd on
+mac, Ctrl everywhere else** — write `Mod`, not two platform rows. Matching
+is `KeyboardEvent.code`-first so non-US layouts work; modifiers must match
+exactly, so `Mod+K` never fires for `Mod+Shift+K`.
+
+### Focus scoping
+
+By default a binding does **not** fire while focus is in an `<input>`,
+`<textarea>`, a `contenteditable`, CodeMirror (`.cm-editor`) or xterm
+(`.xterm`). Set `when: { global: true }` for one that should — `Mod+K`,
+`Escape`-to-interrupt and the navigation shortcuts are global; `Shift+?`
+is not (typing `?` must insert a `?`).
+
+No binding fires while a dialog holds the keyboard. A dialog claims that
+with `useModalKeyboardLock(open)`; locks are counted, so overlapping
+dialogs behave.
+
+### Marking a custom surface
+
+A widget that swallows typing but isn't an `<input>`/`contenteditable`
+should carry `data-keyboard-editor` (or `data-keyboard-terminal`) on its
+wrapper — see `keyboard/focus-scope.ts`.
+
+### Rebinding
+
+Bindings are user-rebindable. Overrides are keyed by **binding id** and
+persisted to `localStorage` (`keyboard/overrides.ts`), so **never rename a
+binding id** — that silently drops a user's rebind. The UI is
+`components/shortcuts-dialog.tsx`; its `<ShortcutRows />` is exported so
+Item 13's settings screen can embed the same list without a dialog around
+it.
+
+## 8. Decisions
 
 - **`surface-0..3` alias the existing static scale rather than
   introducing a second independent set of hex values.** The existing

@@ -773,7 +773,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 1: design tokens, dark mode, theme switching *(Track A)*
 - [x] Item 2: shared primitives + `docs/design.md` *(Track A)*
 - [ ] Item 3: routing + persisted UI state *(Track A)*
-- [ ] Item 4: keyboard registry + shortcuts help *(Track A)*
+- [x] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [ ] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
@@ -1063,3 +1063,64 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+
+**Item 4 — keyboard action registry + shortcuts help:**
+
+- The registry is three layers, each separately testable:
+  `keyboard/shortcut-string.ts` (combo parsing/matching/formatting, 14
+  scenarios), `keyboard/shortcuts.ts` (the binding table, override
+  resolution, scope gating, help grouping, conflict detection — 23
+  scenarios), and `keyboard/keyboard-provider.tsx` (the React dispatcher
+  and handler registry, 18 scenarios).
+- **Each binding fires for the right event and not for a near-miss** —
+  `shortcuts.test.ts`'s "does not fire for a near-miss modifier" and "does
+  not fire the wrong platform variant" (Cmd+K on a non-mac matches
+  nothing; the same event on a mac matches `palette.open`), plus
+  `shortcut-string.test.ts`'s exact-modifier cases. `SHORTCUT_BINDINGS`
+  has a table test asserting all ten combos are exactly the ones the
+  acceptance criteria name.
+- **No binding fires in an `<input>`, `<textarea>`, or an editor
+  surface** — `keyboard-provider.test.tsx`'s two "does not fire a
+  non-global binding…" cases (input, textarea, `.cm-editor`), with
+  `focus-scope.test.ts` covering the scope resolution itself including
+  xterm-wins-over-its-own-textarea and the `document.activeElement`
+  fallback every `fireEvent.keyDown(document)` relies on. The "except
+  where explicitly marked global" half is covered by "fires a global
+  binding from inside a text input".
+- **`Shift+?` opens the help dialog listing every registered binding** —
+  `shortcuts-dialog.test.tsx` asserts the row count equals
+  `SHORTCUT_BINDINGS.length` and that every binding's label renders under
+  its section heading; `App.test.tsx`'s "Shift+? opens the shortcuts
+  dialog" asserts the same through the real app tree.
+- **The tab-close `×` activates on Enter and on Space, closing only that
+  tab** — `App.test.tsx`'s new case runs the existing
+  `close-only-that-tab` assertions once per key, and also asserts
+  `tabindex="0"` is present (`uiux-audit.md` §4 P1 item 9 closed).
+- **`Cmd+B` moved into the registry**: the bare window listener inside
+  `components/ui/sidebar.tsx` was removed, since leaving it would have
+  toggled twice per press. `App.test.tsx`'s "Ctrl+B toggles the sidebar
+  through the registry" asserts one press = one toggle in both
+  directions.
+- Shell-level actions are claimed in `App.tsx` via `useActionHandler`
+  (`shortcuts.help`, `theme.cycle`, `tab.close`, `tab.jump`,
+  `task.prev`/`task.next`, and `sidebar.toggle` from inside
+  `SidebarProvider`). `App.test.tsx` covers Ctrl+W (closes a file tab,
+  no-ops on a non-closable base tab), Ctrl+Alt+digit (including a digit
+  past the end of the strip) and Ctrl+`[`/`]` wrapping at both ends.
+- **Rebinding** is persisted (`keyboard/overrides.ts`, `localStorage`,
+  same guarded shape as `use-sidebar-width.ts`) and driven from the help
+  dialog: capture, cancel-on-Escape, bare-modifier-stays-in-capture,
+  per-row Reset, Reset all, and a cross-platform conflict warning are each
+  covered in `shortcuts-dialog.test.tsx`; the round-trip across a remount
+  is covered in `keyboard-provider.test.tsx`.
+- `task test` green (34 files / 319 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+  `TestRunner_RunPrompt_PermissionRequest_ClaudeNative` failed once and
+  passed on a re-run — a known flake, unrelated to this item (no Go source
+  changed).
+- **Not done in this item, deliberately:** `palette.open` has a binding
+  but no handler until Item 5 — the dispatcher leaves the browser default
+  alone when nothing claims an action (asserted), so the key is inert
+  rather than broken. `composer.focus` and `run.interrupt` likewise have
+  bindings and no handler: they belong to Track B's composer, which claims
+  them via `useActionHandler` without editing the binding table.

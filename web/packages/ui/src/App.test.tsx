@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
+import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import type { RunSummary, Task, Workspace } from "@/lib/types";
@@ -418,6 +419,162 @@ describe("App live events", () => {
     await flush();
 
     expect(screen.getByText("Welcome to smind")).toBeInTheDocument();
+  });
+});
+
+describe("App keyboard shortcuts", () => {
+  /** Ctrl-based combos: jsdom's navigator is not a mac, so `Mod` resolves to Ctrl. */
+  function pressCtrl(key: string, code: string, extra: Record<string, unknown> = {}): void {
+    fireEvent.keyDown(document, { key, code, ctrlKey: true, ...extra });
+  }
+
+  it("the tab-close x activates on Enter and on Space, closing only that tab", async () => {
+    for (const key of ["Enter", " "]) {
+      const socket = new FakeSocket();
+      const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+      const view = render(<App connect={connect} />);
+      await resolveSidebar(socket, [TASK_A]);
+      await openFileInTask(socket, TASK_A, "# A");
+
+      const close = screen.getByRole("button", { name: "Close README.md" });
+      expect(close).toHaveAttribute("tabindex", "0");
+      close.focus();
+      fireEvent.keyDown(close, { key });
+      await flush();
+
+      expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+      for (const name of ["Chat", "Files", "Diff", "Terminal"]) {
+        expect(screen.getByRole("tab", { name })).toBeInTheDocument();
+      }
+      view.unmount();
+    }
+  });
+
+  it("Ctrl+W closes the active file tab but leaves a non-closable base tab alone", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await openFileInTask(socket, TASK_A, "# A");
+
+    await act(async () => {
+      pressCtrl("w", "KeyW");
+    });
+    await flush();
+    expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+
+    // Chat is active now and isn't closable -- the shortcut matches what
+    // the strip offers, rather than being a stronger way to remove a tab.
+    await act(async () => {
+      pressCtrl("w", "KeyW");
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+Alt+<digit> activates the tab at that position", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
+    // Default strip order is Chat, Files, Diff, Terminal.
+    await act(async () => {
+      pressCtrl("3", "Digit3", { altKey: true });
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+
+    // A digit past the end of the strip is a no-op, not a crash.
+    await act(async () => {
+      pressCtrl("9", "Digit9", { altKey: true });
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Ctrl+] and Ctrl+[ step through tasks and wrap at both ends", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    async function step(key: string, code: string): Promise<void> {
+      await act(async () => {
+        pressCtrl(key, code);
+      });
+      await flush();
+      respondAll(socket, "run.list", []);
+      await flush();
+    }
+
+    await step("]", "BracketRight");
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+
+    // Past the end wraps back to the first task.
+    await step("]", "BracketRight");
+    expect(screen.getByRole("heading", { name: TASK_A.Title })).toBeInTheDocument();
+
+    // ...and backwards wraps the other way.
+    await step("[", "BracketLeft");
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+  });
+
+  it("Ctrl+B toggles the sidebar through the registry (it moved out of the shadcn primitive's own listener)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const sidebar = document.querySelector("[data-slot='sidebar']")!;
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+
+    await act(async () => {
+      pressCtrl("b", "KeyB");
+    });
+    await flush();
+    // One press, one toggle -- a double-toggle here would mean both the
+    // registry and the removed primitive listener fired.
+    expect(document.querySelector("[data-slot='sidebar']")).toHaveAttribute(
+      "data-state",
+      "collapsed",
+    );
+
+    await act(async () => {
+      pressCtrl("b", "KeyB");
+    });
+    await flush();
+    expect(document.querySelector("[data-slot='sidebar']")).toHaveAttribute(
+      "data-state",
+      "expanded",
+    );
+  });
+
+  it("Shift+? opens the shortcuts dialog listing every binding", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    expect(screen.queryByTestId("shortcuts-dialog")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+
+    expect(screen.getByTestId("shortcuts-dialog")).toBeInTheDocument();
+    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);
   });
 });
 
