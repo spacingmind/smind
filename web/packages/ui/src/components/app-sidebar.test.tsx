@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -222,6 +223,39 @@ describe("AppSidebar", () => {
       const button = screen.getByTestId("notifications-toggle");
       expect(button).toBeDisabled();
       expect(() => fireEvent.click(button)).not.toThrow();
+    });
+  });
+
+  describe("task row layout stability (ui-redesign-parity Item 2)", () => {
+    it("the attention-dot slot is present at the same fixed width whether or not the task has attention", async () => {
+      const client = new FakeWsClient();
+      const attention: TaskAttention = new Map([[TASK.ID, new Set<AttentionReason>(["error"])]]);
+
+      const { rerender } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} attention={new Map()} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const row = await screen.findByTestId("sidebar-task-row");
+      const slotWithoutAttention = row.querySelector('[data-testid="task-attention-slot"]');
+      expect(slotWithoutAttention).toBeInTheDocument();
+      expect(slotWithoutAttention?.querySelector('[data-testid="task-attention"]')).not.toBeInTheDocument();
+      const classNameWithoutAttention = slotWithoutAttention?.className;
+
+      rerender(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} attention={attention} />
+        </SidebarProvider>,
+      );
+
+      const slotWithAttention = screen.getByTestId("task-attention-slot");
+      // Same reserved-space wrapper, same width classes -- only the dot
+      // *inside* it (queried separately, and absent above) is what
+      // changes, so the sidebar-task-status label after it never shifts.
+      expect(slotWithAttention.className).toBe(classNameWithoutAttention);
+      expect(slotWithAttention.querySelector('[data-testid="task-attention"]')).toBeInTheDocument();
     });
   });
 });

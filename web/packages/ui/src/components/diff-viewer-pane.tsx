@@ -4,6 +4,9 @@ import "diff2html/bundles/css/diff2html.min.css";
 import "highlight.js/styles/github.css";
 
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { InlineSpinner } from "@/components/ui/inline-spinner";
+import { PaneHeader } from "@/components/ui/pane-header";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
@@ -47,6 +50,10 @@ export function DiffViewerPane({
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Per-file task.stage in-flight tracking -- the checkbox for a given
+  // path disables only while *its own* call is outstanding (Item 2's
+  // "Stage... gain in-flight labels/disabled states"), not the whole list.
+  const [stagingPaths, setStagingPaths] = useState<Set<string>>(new Set());
   const [committing, setCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
   const [message, setMessage] = useState("");
@@ -124,6 +131,7 @@ export function DiffViewerPane({
   const toggleStage = (file: TaskFile, staged: boolean) => {
     if (!client) return;
     setError(null);
+    setStagingPaths((prev) => new Set(prev).add(file.path));
     client
       .call("task.stage", { taskId: task.ID, path: file.path, staged })
       .then(() => {
@@ -131,6 +139,13 @@ export function DiffViewerPane({
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        setStagingPaths((prev) => {
+          const next = new Set(prev);
+          next.delete(file.path);
+          return next;
+        });
       });
   };
 
@@ -177,24 +192,26 @@ export function DiffViewerPane({
 
   return (
     <div className="flex h-full flex-col" data-testid="diff-viewer-pane">
-      <div className="flex items-center justify-between border-b px-4 py-3">
-        <h2 className="text-sm font-semibold">Diff</h2>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={fetchFiles}>
-            Refresh
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={!client || creatingPR}
-            onClick={createPR}
-            data-testid="create-pr-button"
-          >
-            {creatingPR ? "Creating PR…" : "Create PR"}
-          </Button>
-        </div>
-      </div>
+      <PaneHeader
+        title="Diff"
+        actions={
+          <>
+            <Button type="button" variant="outline" size="sm" disabled={!client || loading} onClick={fetchFiles}>
+              Refresh
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!client || creatingPR}
+              onClick={createPR}
+              data-testid="create-pr-button"
+            >
+              {creatingPR ? "Creating PR…" : "Create PR"}
+            </Button>
+          </>
+        }
+      />
 
       {(prUrl || prError) && (
         <div className="border-b px-4 py-2">
@@ -220,12 +237,8 @@ export function DiffViewerPane({
             {error}
           </p>
         )}
-        {loading && files === null && <p className="text-sm text-muted-foreground">Loading diff…</p>}
-        {!error && isEmpty && (
-          <p className="text-sm text-muted-foreground" data-testid="diff-empty">
-            No changes.
-          </p>
-        )}
+        {loading && files === null && <InlineSpinner label="Loading diff…" />}
+        {!error && isEmpty && <EmptyState testId="diff-empty" title="No changes" />}
         {files?.map((file) => (
             <FileRow
               key={file.path}
@@ -242,7 +255,7 @@ export function DiffViewerPane({
                   [file.path]: { diff: prev[file.path]?.diff ?? null, viewed: true },
                 }))
               }
-              disabled={!client}
+              disabled={!client || stagingPaths.has(file.path)}
             />
           ))}
       </div>
@@ -268,7 +281,7 @@ export function DiffViewerPane({
           data-testid="commit-message"
         />
         <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
-          Commit ({stagedCount} staged)
+          {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
         </Button>
       </div>
     </div>
@@ -345,7 +358,7 @@ function FileRow({
           {diff === null ? (
             <p className="text-sm text-muted-foreground">Loading…</p>
           ) : diff === "" ? (
-            <p className="text-sm text-muted-foreground">No changes.</p>
+            <p className="text-sm text-muted-foreground">No changes</p>
           ) : (
             <div ref={containerRef} data-testid={`diff-container-${file.path}`} />
           )}

@@ -72,7 +72,10 @@ function DirChildren({
     return null;
   }
   if (node.entries.length === 0) {
-    return <TreeRow depth={depth} label="(empty)" className="text-muted-foreground" />;
+    // Sentence case, no parens/period -- docs/design.md's copy convention
+    // (ui-redesign-parity plan, Item 2), same rule applied to every other
+    // pane's empty/loading/error strings.
+    return <TreeRow depth={depth} label="Empty" className="text-muted-foreground" />;
   }
 
   return (
