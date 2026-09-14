@@ -160,6 +160,32 @@ func runFakeClaudeCLI() {
 		stdin.Scan() // consume the prompt line, then never respond or exit
 		time.Sleep(time.Hour)
 
+	case "echo-args":
+		// Writes the CLI argv back to an "args" file in the working
+		// directory, so a test can assert exactly which flags RunPrompt
+		// spawned the CLI with (e.g. --allowedTools under auto-safe) --
+		// the flags aren't observable through the wire protocol itself.
+		if err := os.WriteFile(filepath.Join(wd, "args"), []byte(strings.Join(os.Args[1:], "\n")), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude cli: write args: %v\n", err)
+			os.Exit(1)
+		}
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"role": "assistant",
+				"content": []map[string]any{
+					{"type": "text", "text": "ok"},
+				},
+			},
+		})
+		writeLine(map[string]any{
+			"type":    "result",
+			"subtype": "success",
+			"result":  "ok",
+		})
+
 	case "permission":
 		// Mirrors claude-agent-sdk-go's own fakecli_test.go
 		// "streaming_and_permission" scenario: issues a real can_use_tool

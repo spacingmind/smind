@@ -182,6 +182,30 @@ func matchesSafePrefix(segment string) bool {
 	return false
 }
 
+// SafeBashRules returns the Claude Code --allowedTools rule strings that
+// pre-approve exactly the commands AllowlistedCommand auto-allows, in the
+// CLI's own Bash rule syntax ("Bash(go test:*)" -- prefix match with a
+// wildcard tail). Why this exists alongside the decider-side
+// AllowlistedCommand check: the Claude Code CLI applies its own
+// session-level permission gate to Bash tool calls *before* any
+// can_use_tool control request is emitted, so a headless run whose
+// allowlisted commands are only known to smind's decider still stalls on
+// the CLI's gate with no one watching. Passing these rules at spawn time
+// moves the decision to the layer that actually makes it; the decider
+// path stays as the backstop for everything these rules don't cover
+// (non-Bash tools, unlisted commands) under the same auto-safe policy.
+// The cd-chaining shapes AllowlistedCommand additionally tolerates
+// ("cd <dir> && go test ...") are intentionally NOT expressible here --
+// a CLI rule can't encode "two segments, first is bare cd" -- so those
+// still fall through to the decider, which is why both layers exist.
+func SafeBashRules() []string {
+	rules := make([]string, 0, len(safeCommandPrefixes))
+	for _, prefix := range safeCommandPrefixes {
+		rules = append(rules, "Bash("+strings.TrimSuffix(prefix, " ")+":*)")
+	}
+	return rules
+}
+
 // isBareCd reports whether segment is exactly a `cd` invocation with a
 // non-empty argument and nothing else -- the only shape AllowlistedCommand
 // ever unwraps as a leading segment (see its doc comment). "cd" alone (no

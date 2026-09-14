@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,16 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
+
+// denyAllDecider is a PermissionDecider that denies everything; the
+// echo-args scenario never raises a can_use_tool request, so its Decide
+// never actually runs -- it exists only so RunPrompt takes the
+// decider-wired branch this test needs to observe.
+type denyAllDecider struct{}
+
+func (denyAllDecider) Decide(_ context.Context, _ string, _ string, _ []PermissionOption) (string, error) {
+	return "", nil
+}
 
 func drainEvents(events <-chan Event) []Event {
 	var got []Event
@@ -67,7 +78,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -105,7 +116,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -160,7 +171,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -190,7 +201,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -212,6 +223,70 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	}
 	if _, ok := got[2].Raw.(claudecode.ResultMessage); !ok {
 		t.Fatalf("event[2].Raw = %#v, want claudecode.ResultMessage", got[2].Raw)
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools proves the
+// auto-safe policy reaches the CLI's own permission gate, not just
+// smind's decider: RunPrompt must spawn claude with --allowedTools
+// carrying exactly SafeBashRules() (see SafeBashRules for why the
+// decider-side check alone can't help -- the CLI blocks Bash before
+// can_use_tool ever fires). Uses the fake CLI's echo-args scenario to
+// capture the actual argv.
+func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		approvalPolicy ApprovalPolicy
+		wantRules      bool
+	}{
+		{name: "auto-safe pre-approves the allowlist at the CLI gate", approvalPolicy: ApprovalPolicyAutoSafe, wantRules: true},
+		{name: "manual spawns with no pre-approved tools", approvalPolicy: ApprovalPolicyManual, wantRules: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "echo-args")
+			r := claudeNativeRunner(t, wm)
+
+			decider := denyAllDecider{}
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, tc.approvalPolicy, events)
+			}()
+
+			got := drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			if len(got) == 0 || got[len(got)-1].Type != EventTypeDone {
+				t.Fatalf("expected a Done event, got %+v", got)
+			}
+
+			data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "args"))
+			if err != nil {
+				t.Fatalf("read args file: %v", err)
+			}
+			args := strings.Split(string(data), "\n")
+			var allowed []string
+			for i, a := range args {
+				if a == "--allowedTools" && i+1 < len(args) {
+					allowed = strings.Split(args[i+1], ",")
+				}
+			}
+
+			if !tc.wantRules {
+				if allowed != nil {
+					t.Fatalf("got --allowedTools %v, want none under %q", allowed, tc.approvalPolicy)
+				}
+				return
+			}
+			want := SafeBashRules()
+			if strings.Join(allowed, ",") != strings.Join(want, ",") {
+				t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+			}
+		})
 	}
 }
 
@@ -257,7 +332,7 @@ func TestRunner_RunPrompt_NoWorktree(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -277,7 +352,7 @@ func TestRunner_RunPrompt_UnknownProvider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -306,7 +381,7 @@ func TestRunner_RunPrompt_ContextCancellationStopsSubprocess(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", nil, events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", nil, "", events)
 	}()
 
 	select {
@@ -359,7 +434,7 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	defer cancel()
 
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", nil, events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", nil, "", events)
 	}()
 
 	select {
@@ -432,7 +507,7 @@ func TestRunner_RunPrompt_PermissionRequest_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -487,7 +562,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -534,7 +609,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", events)
 	}()
 
 	got := drainEvents(events)
