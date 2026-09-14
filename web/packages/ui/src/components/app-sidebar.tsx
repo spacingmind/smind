@@ -6,6 +6,7 @@ import {
   Archive,
   ChevronRight,
   FolderGit2,
+  GitBranch,
   Layers,
   Loader2,
   MoreHorizontal,
@@ -16,7 +17,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import type { Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import {
   applyLifecycleEvent,
   buildWorkspaceTree,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { AccountsDialog } from "@/components/accounts-dialog";
@@ -195,11 +197,13 @@ interface RowSignal {
   attention?: TaskAttention;
   /** Live task.status overrides keyed by task id (see useStatusOverrides). */
   statusOverrides: Map<number, string>;
-  /** Latest run status per task (see useTaskRunStatus). */
+  /** Latest run status per task (see useTaskAttention). */
   runStatus: TaskRunStatus;
+  /** Per-task branch and diff size (see useTaskStats). */
+  stats: TaskStats;
 }
 
-const EMPTY_SIGNAL: RowSignal = { statusOverrides: new Map(), runStatus: new Map() };
+const EMPTY_SIGNAL: RowSignal = { statusOverrides: new Map(), runStatus: new Map(), stats: new Map() };
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
 
@@ -271,9 +275,11 @@ export function AppSidebar({
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
+  const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
+  const stats = useTaskStats(client, events ?? null, workspaceIds);
   const rowSignal = useMemo<RowSignal>(
-    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS }),
-    [attention, statusOverrides, runStatus],
+    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS, stats }),
+    [attention, statusOverrides, runStatus, stats],
   );
 
   // Out-of-tab attention notifications (Item 4): every task across the
@@ -741,6 +747,49 @@ function AggregateSlot({ status, label }: { status: StatusDotStatus | null; labe
   );
 }
 
+/**
+ * The task row's second line: its branch and the size of its diff, the two
+ * things `audit-paseo.md` §5's sidebar meta row leads with.
+ *
+ * Always rendered, even with nothing to say, so the row's height is the
+ * same for every task at every moment -- Item 2's layout-stability rule
+ * applied to the one thing a reserved-width slot cannot fix. A task with
+ * no stat (never run, no worktree, or a stat the daemon could not compute)
+ * shows its coarse lifecycle status instead of a fabricated "0 files",
+ * which would read as "no changes" and be a different, wrong claim.
+ */
+function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
+  return (
+    <span
+      data-testid="sidebar-task-meta"
+      className="flex h-4 w-full items-center gap-1.5 overflow-hidden text-[10px] text-muted-foreground"
+    >
+      {stat ? (
+        <>
+          <GitBranch className="size-2.5 shrink-0" />
+          <span data-testid="sidebar-task-branch" className="min-w-0 truncate" title={stat.branch}>
+            {stat.branch}
+          </span>
+          {stat.filesChanged > 0 && (
+            <span
+              data-testid="sidebar-task-diffstat"
+              className="ml-auto shrink-0 tabular-nums"
+              title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
+            >
+              {stat.filesChanged}f <span className="text-status-success">+{stat.insertions}</span>{" "}
+              <span className="text-status-danger">-{stat.deletions}</span>
+            </span>
+          )}
+        </>
+      ) : (
+        <span data-testid="sidebar-task-status" className="uppercase">
+          {status}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function TaskRows({
   tasks,
   selectedTaskId,
@@ -754,7 +803,7 @@ function TaskRows({
   emptyText: string;
   onArchiveTask: (task: Task) => void;
 }) {
-  const { attention, statusOverrides, runStatus } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats } = useRowSignal();
 
   if (tasks.length === 0) {
     return (
@@ -770,14 +819,17 @@ function TaskRows({
         const reason = primaryAttentionReason(attention?.get(task.ID));
         const runState = runStatus.get(task.ID);
         const runDot = runDotStatus(runState);
+        const stat = stats.get(task.ID);
         return (
           <SidebarMenuSubItem key={task.ID}>
             <SidebarMenuSubButton
+              className="h-auto flex-col items-stretch gap-0.5 py-1"
               isActive={task.ID === selectedTaskId}
               onClick={() => onSelectTask?.(task)}
               data-testid="sidebar-task-row"
               data-task-id={task.ID}
             >
+              <span className="flex w-full items-center gap-2">
               {/*
                * Leading run-status dot -- the task's latest run, live off
                * run.status (Item 12). In its own reserved slot for the
@@ -826,9 +878,8 @@ function TaskRows({
                   />
                 )}
               </span>
-              <span data-testid="sidebar-task-status" className="shrink-0 text-[10px] uppercase text-muted-foreground">
-                {statusOverrides.get(task.ID) ?? task.Status}
               </span>
+              <TaskMetaRow stat={stat} status={statusOverrides.get(task.ID) ?? task.Status} />
             </SidebarMenuSubButton>
             <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
               <DropdownMenu>

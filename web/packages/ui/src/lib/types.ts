@@ -279,6 +279,25 @@ export interface TaskFilesResult {
   files: TaskFile[];
 }
 
+// One entry in a task.stats response (internal/workspace.TaskStat): a
+// task's branch and the size of the same base->worktree diff task.diff
+// renders. Tasks with no worktree, and tasks whose stat could not be
+// computed, are absent from the list -- zero changed files is a real and
+// different statement from "not known", so the sidebar must be able to
+// tell them apart.
+export interface TaskStat {
+  taskId: number;
+  branch: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+// Result of task.stats (internal/wsapi/handlers.go's taskStatsResult).
+export interface TaskStatsResult {
+  stats: TaskStat[];
+}
+
 // Result of task.fileDiff (internal/wsapi/handlers.go's
 // taskFileDiffResult): one file's slice of the task's unified diff, or ""
 // for a path with no changes.

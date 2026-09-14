@@ -508,6 +508,67 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
   });
 
+  it("a task row shows its branch and diff stat once task.stats reports them", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.stats", 0).resolve({
+      stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
+    });
+    await flush();
+
+    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug");
+    const diffstat = screen.getByTestId("sidebar-task-diffstat");
+    expect(diffstat).toHaveTextContent("3f");
+    expect(diffstat).toHaveTextContent("+12");
+    expect(diffstat).toHaveTextContent("-4");
+  });
+
+  it("a task the daemon reports no stat for falls back to its lifecycle status, never a fabricated zero", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.stats", 0).resolve({ stats: [] });
+    await flush();
+
+    expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-task-branch")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
+  });
+
+  it("a clean task shows its branch but no diff stat -- zero changed files is not a count worth printing", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    client.nth("task.stats", 0).resolve({
+      stats: [{ taskId: TASK.ID, branch: "feat/clean", filesChanged: 0, insertions: 0, deletions: 0 }],
+    });
+    await flush();
+
+    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/clean");
+    expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+  });
+
+  it("the meta line is present at a fixed height whether or not a stat has arrived", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const metaBefore = await screen.findByTestId("sidebar-task-meta");
+    const classNameBefore = metaBefore.className;
+
+    client.nth("task.stats", 0).resolve({
+      stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
+    });
+    await flush();
+
+    // Same reserved line, same height class -- only its contents changed,
+    // so no row below it moves when a stat lands.
+    expect(screen.getByTestId("sidebar-task-meta").className).toBe(classNameBefore);
+  });
+
   it("selecting a task still invokes onSelectTask with the whole Task, dots or no dots", async () => {
     const onSelectTask = vi.fn();
     const client = new FakeWsClient();
