@@ -144,15 +144,31 @@ story, not re-litigating whether to do it.
 
 ## Compatibility strategy
 
-**Additive only, in both directions:**
+**Additive for every wire name and every persisted row; see the ACP
+caveat under "Old client, new daemon" for the one place it is a re-typing
+rather than a pure addition.**
 
 - **Old client, new daemon.** A client that only recognizes
   `chunk`/`done`/`permission_request`/`permission_resolved` ignores any
-  event name it doesn't handle — this is already how
+  event name it doesn't handle -- this is already how
   `cmd/smind/task.go`'s `streamRun` behaves (`if event != "chunk" {
   return }`) and how Go's `encoding/json` behaves when unmarshaling a
   `runLogEvent` with unrecognized extra keys into an older, narrower local
-  struct (silently dropped, not an error). No old client changes.
+  struct (silently dropped, not an error). No old client *breaks*.
+
+  It is not, however, purely additive on the ACP path, and this ADR
+  originally overstated that. An ACP provider's `agent_thought_chunk` and
+  `user_message_chunk` used to reach the wire as `chunk` (everything
+  `SessionUpdate.Text()` accepted did); they now reach it as `thinking`
+  and `user_message`. So a client that renders only `chunk` -- which
+  `web/packages/ui`'s `use-run-timeline.ts` `collectText` is, until Item 8
+  lands -- shows *less* text for a GLM/Kimi run than it did before,
+  without erroring. That is the intended end state (reasoning belongs in
+  its own timeline item, not concatenated into assistant prose), but it is
+  a visible interim regression for the unmodified UI, not a no-op. Claude
+  Code native is unaffected: its thinking blocks were dropped entirely
+  before this change, so `thinking` there is genuinely new data.
+
 - **New client, old persisted run.** A run recorded before this change has
   only the four old event types in its `run_events` history; a new
   client's timeline renders exactly what it always would have (text +
