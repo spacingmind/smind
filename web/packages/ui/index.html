@@ -1,9 +1,38 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>smind</title>
+    <!--
+      Pre-paint theme bootstrap (ui-redesign-parity plan, Item 1): sets the
+      `dark` class on <html> from the persisted preference before any
+      bundled JS runs, so there is no flash of the wrong theme on load.
+      Deliberately plain, dependency-free JS -- a classic (non-module)
+      inline script runs synchronously during head parsing, before
+      main.tsx's module graph even starts fetching, which is the whole
+      point. It is a hand-synced copy of the same decision logic as
+      src/lib/theme.ts's `resolveTheme`/`readStoredThemePreference`
+      (that file's test suite is what's unit-tested; this script can't
+      import it, so keep the two in sync by hand on any change to either).
+      STORAGE_KEY must match src/lib/theme.ts's THEME_STORAGE_KEY.
+    -->
+    <script>
+      (function () {
+        var STORAGE_KEY = "smind:theme";
+        var pref = null;
+        try {
+          pref = window.localStorage.getItem(STORAGE_KEY);
+        } catch (e) {
+          // Storage can throw (disabled storage, private browsing quotas);
+          // fall through to the system preference below.
+        }
+        var dark =
+          pref === "dark" ||
+          (pref !== "light" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
