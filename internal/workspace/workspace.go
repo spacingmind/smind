@@ -17,36 +17,72 @@ import (
 type Manager struct {
 	store *store.Store
 
-	// taskNotifier, if set via SetTaskNotifier, is invoked after every
-	// successful task status transition (created/running/archived) so a
-	// caller (the wsapi server) can push task.status events from the point
-	// the state actually changed, rather than polling.
-	taskMu       sync.Mutex
-	taskNotifier func(taskID int64, status string)
+	// notifier, if set via SetNotifier, receives workspace/space/task
+	// lifecycle notifications (create/update/archive/delete, plus the
+	// pre-existing task.status transitions) so a caller (the wsapi server)
+	// can push them as ADR 0005/0009 subscription events from the point
+	// state actually changed, rather than a client polling. Mirrors
+	// internal/runs.Registry's Notifier/SetNotifier pattern.
+	notifierMu sync.Mutex
+	notifier   Notifier
 }
 
-// SetTaskNotifier registers f as the callback fired on task lifecycle
-// transitions. Nil-safe: transitions with no notifier registered are
-// no-ops, and a nil *Manager (wsapi tests construct the server without a
-// workspace manager) accepts the call rather than panicking.
-func (m *Manager) SetTaskNotifier(f func(taskID int64, status string)) {
+// Notifier receives workspace/space/task lifecycle notifications. Every
+// method is called synchronously from the Manager method that made the
+// change, after the underlying store write committed; implementations
+// (internal/wsapi's bus adapter) must not block.
+type Notifier interface {
+	// NotifyTaskStatus fires after every task status transition
+	// (created/running/archived) -- wsapi's task.status topic (ADR 0005),
+	// unchanged by ADR 0009.
+	NotifyTaskStatus(taskID int64, status string)
+
+	// The rest are ADR 0009's lifecycle topics: workspace.created/deleted,
+	// space.created/deleted, task.created/updated/archived/deleted.
+	NotifyWorkspaceCreated(w store.Workspace)
+	NotifyWorkspaceDeleted(id int64)
+	NotifySpaceCreated(sp store.Space)
+	NotifySpaceDeleted(id, workspaceID int64)
+	NotifyTaskCreated(t store.Task)
+	NotifyTaskUpdated(t store.Task)
+	NotifyTaskArchived(t store.Task)
+	NotifyTaskDeleted(id, workspaceID int64, spaceID *int64)
+}
+
+// SetNotifier registers n. Nil-safe: notifications with no notifier
+// registered are no-ops, and a nil *Manager (wsapi tests construct the
+// server without a workspace manager) accepts the call rather than
+// panicking.
+func (m *Manager) SetNotifier(n Notifier) {
 	if m == nil {
 		return
 	}
-	m.taskMu.Lock()
-	m.taskNotifier = f
-	m.taskMu.Unlock()
+	m.notifierMu.Lock()
+	m.notifier = n
+	m.notifierMu.Unlock()
 }
 
+// getNotifier returns the registered Notifier, or nil if none is set (or m
+// itself is nil) -- callers check for nil rather than getNotifier itself
+// no-oping, matching internal/runs.Registry.getNotifier's shape.
+func (m *Manager) getNotifier() Notifier {
+	if m == nil {
+		return nil
+	}
+	m.notifierMu.Lock()
+	n := m.notifier
+	m.notifierMu.Unlock()
+	return n
+}
+
+// notifyTask fires NotifyTaskStatus for t's current status -- the
+// pre-ADR-0009 task.status notification path, called in addition to (and
+// after) the lifecycle-specific Notify* call at each of CreateTask/
+// RunTask/ArchiveTask's call sites, so a client subscribed to both a
+// lifecycle topic and task.status sees the row before its status.
 func (m *Manager) notifyTask(t store.Task) {
-	if m == nil {
-		return
-	}
-	m.taskMu.Lock()
-	f := m.taskNotifier
-	m.taskMu.Unlock()
-	if f != nil {
-		f(t.ID, t.Status)
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskStatus(t.ID, t.Status)
 	}
 }
 
@@ -82,6 +118,9 @@ func (m *Manager) CreateWorkspace(path, title, routingPolicy string, accountIDs 
 	})
 	if err != nil {
 		return store.Workspace{}, fmt.Errorf("create workspace: %w", err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyWorkspaceCreated(w)
 	}
 
 	for i, accountID := range accountIDs {
