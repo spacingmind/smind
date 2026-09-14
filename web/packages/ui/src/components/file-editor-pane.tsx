@@ -7,6 +7,8 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { fileTabKey } from "@/components/tab-registry";
+import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
@@ -76,6 +78,23 @@ export function FileEditorPane({
   const dirtyRef = useRef(false);
   const dirty = content !== savedContent;
   dirtyRef.current = dirty;
+
+  // Publish the dirty flag to the tab strip (Item 17). The strip is a
+  // sibling of this pane's subtree, not an ancestor, so this goes through
+  // lib/dirty-buffers.ts's store rather than a prop -- see that module's
+  // doc comment. Effect, not render-time: setBufferDirty notifies
+  // subscribers, and notifying another component mid-render is exactly
+  // what React forbids.
+  const tabKey = fileTabKey(task.ID, path);
+  useEffect(() => {
+    setBufferDirty(tabKey, dirty);
+  }, [tabKey, dirty]);
+  useEffect(() => {
+    // Unmounting (tab closed, task switched) or moving to a different
+    // path drops the entry entirely -- a stale `true` would mark a tab
+    // whose editor no longer exists.
+    return () => forgetBuffer(tabKey);
+  }, [tabKey]);
 
   const applyRead = useCallback((result: FileReadResult) => {
     setContentState(result.content);

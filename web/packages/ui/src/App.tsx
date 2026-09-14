@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { fileTab, filePathFromTabKey, TabLabel, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
@@ -120,6 +120,16 @@ export function App({
     openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
   }
 
+  /**
+   * The explorer's "Reveal in diff" row action (Item 17). The *payload*
+   * travels through lib/diff-reveal.ts's latch, which the diff pane reads
+   * on mount -- the shell's only job is to bring that tab forward.
+   */
+  function revealInDiff() {
+    if (!selectedTask) return;
+    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+  }
+
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
 
   return (
@@ -210,7 +220,7 @@ export function App({
                           data-testid={`workspace-tab-${entry.kind}`}
                           className="max-w-48 gap-1.5"
                         >
-                          <span className="min-w-0 truncate">{entry.title}</span>
+                          <TabLabel entry={entry} />
                           {entry.closable && (
                             <span
                               role="button"
@@ -233,7 +243,7 @@ export function App({
                   </div>
                   {taskState.tabs.map((entry) => (
                     <TabsContent key={entry.key} value={entry.key} className="min-h-0">
-                      <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
+                      <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} onRevealInDiff={revealInDiff} events={events} />
                     </TabsContent>
                   ))}
                 </Tabs>
@@ -260,6 +270,7 @@ function TabContent({
   task,
   connectionStatus,
   onOpenFile,
+  onRevealInDiff,
   events,
 }: {
   entry: TabEntry;
@@ -267,19 +278,15 @@ function TabContent({
   task: Task;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
+  onRevealInDiff: () => void;
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
     task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
-    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
+    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} onRevealInDiff={onRevealInDiff} events={events} />,
+    file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
     terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
   };
   return renderers[entry.kind];
-}
-
-/** Extracts the file path from a file tab's `${taskId}:file:${path}` key. */
-function filePathFromKey(entry: TabEntry): string {
-  return entry.key.slice(entry.key.indexOf(":file:") + ":file:".length);
 }

@@ -755,6 +755,54 @@ this is the pointer:
   required adopters for `PaneHeader`. Wiring either into a real surface is
   left to whichever later item first needs one.
 
+**Item 17 (landed)** — where the plan was ambiguous and what was decided:
+
+- **"Untracked" is not a status the wire can report.**
+  `internal/workspace/git.go`'s `taskChangedFiles` diffs a *snapshot
+  index* against the task's base commit, which reports a brand-new
+  untracked file as `A` — so the three decorations the tree can honestly
+  draw are added (`A`), modified (`M`) and deleted (`D`), and Item 17's
+  "an untracked one shows a different marker" is satisfied as
+  added-vs-modified. Any other git code (`R` for a rename) is carried
+  through by the daemon rather than collapsed, and renders as its own
+  letter in the muted tier instead of being mislabelled as one of the
+  three. Teaching the daemon a real `untracked` status would be a wire
+  change (rule (d)) for no dogfood gain.
+- **Directory rows get a rolled-up decoration**, beyond what the item
+  asked for: a folder whose descendants are all added reads as added, any
+  mix reads as modified. Without it a change several levels down is
+  invisible until you expand to find it, which is the thing tree
+  decorations exist to prevent.
+- **The dirty marker travels through a module-level store**
+  (`lib/dirty-buffers.ts`), not React state. The two ends live in
+  different subtrees — `FileEditorPane` is inside one tab's *content*,
+  the tab strip is its *sibling* — so lifting the state would mean
+  App.tsx threading a setter into every pane, and a context provider
+  would mean Track C owning a provider in Track A's shell. The store is
+  keyed by the tab key both ends already have.
+- **"Reveal in diff" uses a latch, not an event**
+  (`lib/diff-reveal.ts`). The diff pane is almost always *unmounted* at
+  the moment the explorer asks (its tab isn't in front), so a live-only
+  broadcast would be missed every time; the pane consumes the pending
+  request on mount instead. App.tsx's part is one call to `activate` —
+  it doesn't carry the payload.
+- **"Open to side" is absent from the row menu, not disabled.** Item 6
+  hasn't landed; a permanently-dead menu entry is worse than one that
+  isn't there yet. `FileExplorerPane` already takes the callback shape it
+  will need.
+- **CodeMirror theme-follows-app was already closed by Item 1** (that
+  item's own acceptance criteria covered it; the plan says "whichever
+  lands first owns it"). Nothing was re-done here.
+
+**Track A hook to wire** (noted per the plan's cross-track coordination
+rules): Item 17 makes two small, additive edits to `App.tsx` rather than
+restructuring it — the tab strip renders `<TabLabel entry={entry} />`
+from `tab-registry.tsx` instead of a bare title `<span>` (this is what
+puts the file-type icon and the dirty marker on the tab), and
+`FileExplorerPane` is passed `onRevealInDiff`, which activates the
+`${taskId}:diff` tab. Items 3 and 6 should preserve both when they
+restructure the shell.
+
 ---
 
 ## Progress
@@ -786,7 +834,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
 - [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
-- [ ] Item 17: file explorer / editor polish *(Track C)*
+- [x] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
 - [ ] Item 19: diff / review v2 *(Track C)*
 - [ ] Item 20: terminal v2 *(Track C)*
@@ -1063,3 +1111,58 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+### Item 17 — file explorer and editor polish
+
+Every acceptance criterion, and how it was confirmed:
+
+- **File-type icons in the tree and on tabs** — `lib/file-icons.tsx` maps
+  a whole-filename table (`Dockerfile`, `bun.lock`, `.gitignore` — files a
+  repo view is largely made of, which have no extension or a lying one)
+  then an extension table onto a `FileIconKey`, which is rendered as
+  `data-icon` so tests assert the resolution, not lucide's SVG markup.
+  Adopted by `file-explorer-pane.tsx`'s rows and by `TabLabel` (base tabs
+  get a per-kind icon from `TAB_KINDS`, file tabs get the file-type one).
+  `lib/file-icons.test.tsx` (6 tests) covers the plan's scenario (*a `.go`
+  path renders its icon; an unknown extension renders the generic one*)
+  plus case-insensitivity, multi-dot names, dotfiles and
+  no-extension-at-all.
+- **Git status decoration in the tree, sourced from `task.files`** —
+  `hooks/use-task-file-status.ts` (new, shared) fetches `task.files` and
+  refetches on the same signal `diff-viewer-pane.tsx` already uses (a
+  *terminal* `run.status` for this task). `components/file-status-marker.tsx`
+  renders A/M/D on the `status-{success,warning,danger}` tokens.
+  `file-explorer-pane.test.tsx` covers the plan's scenario (*a modified
+  file shows its git decoration; an untracked one shows a different
+  marker* — see Decisions for why that reads as added-vs-modified), that
+  an unchanged file is undecorated, and the directory roll-up.
+- **A dirty indicator on the file tab itself** — `lib/dirty-buffers.ts`
+  (a `useSyncExternalStore` store keyed by tab key); `FileEditorPane`
+  publishes, `TabLabel` subscribes. `tab-registry.test.tsx` (7 tests)
+  covers the plan's scenario (*a dirty buffer marks its tab; saving
+  clears it*) end to end — a real CodeMirror transaction into a real
+  `FileEditorPane`, then a real `file.write` — plus the two cases a
+  module-level store makes possible to get wrong: unmounting a dirty
+  editor clears the marker, and only the owning tab is marked.
+- **Context actions on tree rows** — a Radix context menu
+  (`components/ui/context-menu.tsx`, new primitive) with *Reveal in diff*
+  (disabled, not hidden, for an unchanged path) and *Copy path*.
+  "Open to side" is deliberately absent until Item 6 — see Decisions.
+  Reveal is covered from both ends: the explorer latches the request and
+  calls `onRevealInDiff`, and `diff-viewer-pane.test.tsx` asserts the
+  pane consumes a request latched *before it mounted* (the normal case —
+  the diff tab isn't in front when you right-click in the tree),
+  re-expands a collapsed file when revealed while already mounted, and
+  leaves a request aimed at a different task alone.
+- **CodeMirror's theme follows the app theme** — already closed by Item 1
+  (`code-mirror-editor.tsx`'s `appChromeTheme`); the plan assigns it to
+  whichever item lands first. Not re-done.
+
+A real bug the tests caught before commit: the reveal-scroll effect
+cleared its pending path unconditionally, so a reveal latched before
+`task.files` resolved (i.e. every reveal, on a cold diff tab) scrolled
+nowhere and then forgot itself. It now waits for `files` and scopes the
+lookup to the pane's own list rather than the document, so Item 6's
+second diff pane can't scroll the first one's row.
+
+`bunx tsc -b`, `task test` (248 web tests, 30 files; all Go packages) and
+`task lint` green.

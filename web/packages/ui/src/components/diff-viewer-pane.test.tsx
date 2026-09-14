@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { requestDiffReveal, resetDiffReveal } from "@/lib/diff-reveal";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import type { Task, TaskCreatePrResult, TaskFileDiffResult, TaskFilesResult } from "@/lib/types";
 
@@ -320,5 +321,61 @@ describe("DiffViewerPane live refresh", () => {
     await flush();
 
     expect(client.calls.filter((c) => c.method === "task.files")).toHaveLength(1);
+  });
+});
+
+describe("DiffViewerPane reveal-in-diff (Item 17)", () => {
+  afterEach(() => {
+    resetDiffReveal();
+  });
+
+  it("consumes a request latched before it mounted, expanding and scrolling to the file", async () => {
+    const scrollIntoView = vi.fn();
+    // jsdom implements no layout, so Element.scrollIntoView doesn't exist
+    // at all -- stub it on the prototype to observe the call.
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      value: scrollIntoView,
+      configurable: true,
+      writable: true,
+    });
+
+    requestDiffReveal(TASK.ID, "new.txt");
+
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    expect(scrollIntoView).toHaveBeenCalled();
+    // Consumed, not merely read: re-mounting must not re-scroll.
+    expect(screen.getByTestId("diff-file-new.txt")).toBeInTheDocument();
+  });
+
+  it("leaves a request aimed at a different task alone", async () => {
+    requestDiffReveal(TASK.ID + 1, "new.txt");
+
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    // Still latched for the task it was meant for.
+    const { takeDiffReveal } = await import("@/lib/diff-reveal");
+    expect(takeDiffReveal(TASK.ID + 1)).toEqual({ taskId: TASK.ID + 1, path: "new.txt" });
+  });
+
+  it("re-expands a collapsed file when revealed while already mounted", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("diff-file-header-file.txt"));
+    await flush();
+    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveTextContent("▸");
+
+    act(() => {
+      requestDiffReveal(TASK.ID, "file.txt");
+    });
+    await flush();
+
+    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveTextContent("▾");
   });
 });

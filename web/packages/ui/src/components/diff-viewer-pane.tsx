@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
@@ -61,6 +62,10 @@ export function DiffViewerPane({
   const [creatingPR, setCreatingPR] = useState(false);
   const [prError, setPrError] = useState<string | null>(null);
   const [prUrl, setPrUrl] = useState<string | null>(null);
+  // The path a pending "Reveal in diff" wants scrolled to, cleared as soon
+  // as the scroll lands (it's a one-shot action, not a selection).
+  const [revealPath, setRevealPath] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const fetchFiles = useCallback(() => {
     if (!client) return;
@@ -101,6 +106,38 @@ export function DiffViewerPane({
       fetchFiles();
     });
   }, [events, fetchFiles, task.ID]);
+
+  // "Reveal in diff" from the explorer's row menu (Item 17): expand the
+  // requested file (even if the user had collapsed it) and scroll it into
+  // view. The request is usually *latched* rather than live -- this pane
+  // is unmounted while the Files tab is in front -- so the mount path
+  // consumes takeDiffReveal(), and the subscription only covers the case
+  // where this tab was already open.
+  const reveal = useCallback((path: string) => {
+    setCollapsed((prev) => (prev[path] ? { ...prev, [path]: false } : prev));
+    setRevealPath(path);
+  }, []);
+
+  useEffect(() => {
+    const latched = takeDiffReveal(task.ID);
+    if (latched) reveal(latched.path);
+    return subscribeDiffReveal((request) => {
+      if (request.taskId === task.ID) reveal(request.path);
+    });
+  }, [reveal, task.ID]);
+
+  // Scrolling has to wait for the row to exist: a reveal raised while
+  // task.files is still in flight has nothing to scroll to yet, so the
+  // request stays pending (rather than being dropped) until `files`
+  // arrives and this effect re-runs. The lookup is scoped to this pane's
+  // own list, not the document, so a second diff pane (Item 6's side
+  // dock) can't have its row scrolled by the other one's request.
+  useEffect(() => {
+    if (!revealPath || !files) return;
+    const row = listRef.current?.querySelector(`[data-testid="diff-file-${CSS.escape(revealPath)}"]`);
+    row?.scrollIntoView?.({ block: "start" });
+    setRevealPath(null);
+  }, [revealPath, files]);
 
   const fetchFileDiff = useCallback(
     (path: string) => {
@@ -231,7 +268,7 @@ export function DiffViewerPane({
         </div>
       )}
 
-      <div className="flex-1 overflow-auto p-4" data-testid="diff-file-list">
+      <div ref={listRef} className="flex-1 overflow-auto p-4" data-testid="diff-file-list">
         {error && (
           <p className="text-sm text-destructive" data-testid="diff-error">
             {error}
