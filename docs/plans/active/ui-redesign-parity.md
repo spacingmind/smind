@@ -797,7 +797,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
-- [ ] Item 8: timeline renderer *(Track B)*
+- [x] Item 8: timeline renderer *(Track B)*
 - [ ] Item 9: tool-call cards *(Track B)*
 - [x] Item 10: composer v2 *(Track B)*
 - [ ] Item 11: permission UX v2 *(Track B)*
@@ -990,6 +990,56 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 8 (timeline renderer)** — 2026-09-14, `web/` only:
+
+- `use-run-timeline.ts` grows the transcript model ADR 0008's wire schema
+  implies: `RunEntry.text: string` becomes `RunEntry.items: TimelineItem[]`
+  (`assistant | user | thinking | tool_call | unknown`), built by one pure
+  reducer (`appendTimelineEvent`) that both the `run.logs` backfill and
+  the live `run.attach` stream fold through — so a replayed event and a
+  streamed one cannot diverge.
+- `components/timeline/`: `run-timeline.tsx` (the turn, with its footer),
+  `timeline-row.tsx` (memoized per-kind dispatch), `timeline-markdown.tsx`,
+  `tool-call-card.tsx` (generic card; Item 9 adds the registry),
+  `use-auto-follow.ts`, `timeline-text.ts` (copy + elapsed).
+- **Streaming cost is asserted, not assumed.** The approach is memoized
+  rows over an identity-stable reducer, not windowing: `appendTimelineEvent`
+  rebuilds only the tail item and keeps every earlier item's object
+  reference, and `TimelineRow` is `memo`'d, so one chunk re-renders one
+  row. `timeline-model.test.ts` pins the identity guarantee directly;
+  `run-timeline.test.tsx`'s memoization pair proves the bailout with a
+  getter-based render probe (verified non-vacuous — aliasing `memo` to
+  the identity function makes it fail). The 2000-event scenario folds in
+  well under its budget (the reducer is linear; the guard is against a
+  quadratic regression).
+- **Auto-follow**: `useAutoFollow` pins the scroller to the tail in a
+  layout effect, releases once the user scrolls more than
+  `FOLLOW_THRESHOLD_PX` from the bottom, and surfaces a "Jump to latest"
+  button while released. Tested with stubbed scroll geometry (jsdom has
+  no layout), including the threshold boundary in both directions.
+- **Resilience**: an unrecognised `type` renders a labelled fallback row
+  and the rows around it still render; a `chunk` with no text, a
+  `tool_call` with no `toolCallId`, and every non-row event are ignored
+  rather than throwing. `buildTimeline` over a deliberately malformed
+  batch is asserted as a whole.
+- **Tool-call merge semantics** from ADR 0008 are pinned: a completion
+  event carrying only `status`/`result` updates the same card in place and
+  does *not* blank `toolName`/`title`/`input`; an ACP `tool_call` with no
+  `status` is `running`.
+- Turn footer carries elapsed time (`formatElapsed`, which counts up for
+  free on a live run because the run re-renders per chunk — no timer) and
+  a copy action producing readable plain text, clipboard failures
+  swallowed.
+- Existing `task-detail.test.tsx` assertions moved from the removed
+  `run-text` `<pre>` to `timeline-assistant`; every other guarantee
+  (reconnect re-attach, permission dock pinning, stale-fetch discard) is
+  unchanged and passing.
+- `task test` (Go + web, 253 web tests), `task lint`, `bunx tsc -b` clean.
+- **Deferred to Item 9**, per that item's own scope: the keyed renderer
+  registry, per-intent cards, file click-through, and the
+  `detailed | overview` grouping control. Item 8 ships the generic card
+  only.
+
 **Item 10 (composer v2)** — 2026-09-14, `web/` only:
 
 - New `components/composer/`: `composer.tsx` (the composer itself),

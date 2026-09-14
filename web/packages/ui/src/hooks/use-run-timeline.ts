@@ -7,12 +7,12 @@ import type {
   PermissionResolvedEventParams,
   Provider,
   RunAttachResult,
-  RunChunkEventParams,
   RunLogEvent,
   RunLogsResult,
   RunStartResult,
   RunStatusValue,
   RunSummary,
+  ToolCallStatus,
 } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
@@ -22,6 +22,135 @@ export interface PendingPermission {
   options: { id: string; label: string; kind: string }[];
 }
 
+/**
+ * One rendered row of a run's transcript. The wire's event stream is a
+ * flat sequence of small deltas (ADR 0008); this is the coalesced view of
+ * it -- consecutive text chunks of the same role become one item, and a
+ * tool call is one item however many events describe it.
+ *
+ * `id` is assigned once, at the moment the item is first appended, and
+ * never changes. That is what lets the renderer memoize a row: a new
+ * chunk produces a new array with a new *last* item and every earlier
+ * item at its original object identity, so React re-renders exactly one
+ * row instead of the whole transcript.
+ */
+export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelineUnknownItem;
+
+/** Assistant output, the human's own turn, or the model's reasoning -- three roles, one shape. */
+export interface TimelineTextItem {
+  kind: "assistant" | "user" | "thinking";
+  id: string;
+  text: string;
+}
+
+/** One tool call, merged across every event carrying its toolCallId. */
+export interface TimelineToolCallItem {
+  kind: "tool_call";
+  id: string;
+  toolCallId: string;
+  toolName?: string;
+  title?: string;
+  status: ToolCallStatus;
+  input?: unknown;
+  result?: unknown;
+}
+
+/**
+ * An event whose `type` this client does not know. The daemon's event
+ * enum is append-only (ADR 0008), so a newer daemon talking to an older
+ * tab is a supported state, not a bug -- it renders as a labelled
+ * placeholder rather than throwing or silently vanishing.
+ */
+export interface TimelineUnknownItem {
+  kind: "unknown";
+  id: string;
+  eventType: string;
+}
+
+/** The wire event names that carry a text delta, and the row role each becomes. */
+const TEXT_EVENT_KINDS: Record<string, TimelineTextItem["kind"]> = {
+  chunk: "assistant",
+  user_message: "user",
+  thinking: "thinking",
+};
+
+/** Event names that are not transcript rows at all -- they drive run status and the permission dock instead. */
+const NON_ITEM_EVENTS = new Set(["done", "permission_request", "permission_resolved"]);
+
+/**
+ * Appends one wire event to a run's item list, returning a new array.
+ *
+ * Every branch preserves the object identity of items it did not touch
+ * (see TimelineItem's doc comment for why that matters), and no branch
+ * ever throws: a malformed event -- missing text, missing toolCallId, an
+ * unrecognized type -- degrades to either "ignore" or "render a fallback
+ * row", because a transcript that crashes on one bad event loses the
+ * whole run's history with it.
+ */
+export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): TimelineItem[] {
+  const type = event.type;
+
+  if (NON_ITEM_EVENTS.has(type)) return items;
+
+  const textKind = TEXT_EVENT_KINDS[type];
+  if (textKind) {
+    const text = event.text ?? "";
+    if (text === "") return items;
+    const last = items[items.length - 1];
+    if (last && last.kind === textKind) {
+      // Coalesce into the run of text already in progress -- only the
+      // last item gets a new object.
+      const merged: TimelineTextItem = { ...last, text: last.text + text };
+      return [...items.slice(0, -1), merged];
+    }
+    return [...items, { kind: textKind, id: `${textKind}-${items.length}`, text }];
+  }
+
+  if (type === "tool_call") {
+    const toolCallId = event.toolCallId;
+    if (!toolCallId) return items;
+    const index = items.findIndex((item) => item.kind === "tool_call" && item.toolCallId === toolCallId);
+    if (index === -1) {
+      return [
+        ...items,
+        {
+          kind: "tool_call",
+          id: `tool-${items.length}`,
+          toolCallId,
+          toolName: event.toolName,
+          title: event.title,
+          // ACP's initial tool_call may omit status entirely; a call
+          // that has been announced but not completed is running.
+          status: event.status ?? "running",
+          input: event.input,
+          result: event.result,
+        },
+      ];
+    }
+    // Merge, never replace: a completion event legitimately omits
+    // toolName/title/input, and those mean "unchanged", not "cleared".
+    const existing = items[index] as TimelineToolCallItem;
+    const merged: TimelineToolCallItem = {
+      ...existing,
+      toolName: event.toolName ?? existing.toolName,
+      title: event.title ?? existing.title,
+      status: event.status ?? existing.status,
+      input: event.input ?? existing.input,
+      result: event.result ?? existing.result,
+    };
+    const next = items.slice();
+    next[index] = merged;
+    return next;
+  }
+
+  return [...items, { kind: "unknown", id: `unknown-${items.length}`, eventType: type }];
+}
+
+/** Folds a whole backfilled event batch (run.logs) into the same item list the live stream builds. */
+export function buildTimeline(events: RunLogEvent[]): TimelineItem[] {
+  return events.reduce<TimelineItem[]>(appendTimelineEvent, []);
+}
+
 /** One run in a task's timeline, as rendered by the detail pane. */
 export interface RunEntry {
   id: string;
@@ -29,8 +158,10 @@ export interface RunEntry {
   prompt: string;
   status: RunStatusValue;
   startedAt: string;
-  /** Collected text -- backfilled history plus, for a run still streaming, live chunks appended as they arrive. */
-  text: string;
+  /** When the run reached a terminal state, if known -- drives the turn footer's elapsed time. */
+  finishedAt?: string;
+  /** The run's transcript: backfilled history plus, for a run still streaming, live events folded in as they arrive. */
+  items: TimelineItem[];
   stopReason?: string;
   err?: string;
   /**
@@ -83,19 +214,23 @@ interface Session {
   controller: AbortController;
 }
 
-function collectText(events: RunLogEvent[]): string {
-  return events
-    .filter((e) => e.type === "chunk")
-    .map((e) => e.text ?? "")
-    .join("");
-}
-
 function patch(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, changes: Partial<RunEntry>): void {
   setRuns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, ...changes } : r)) : prev));
 }
 
-function appendChunk(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, text: string): void {
-  setRuns((prev) => (prev ? prev.map((r) => (r.id === id ? { ...r, text: r.text + text } : r)) : prev));
+function appendEvent(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: string, event: RunLogEvent): void {
+  setRuns((prev) =>
+    prev
+      ? prev.map((r) => {
+          if (r.id !== id) return r;
+          const items = appendTimelineEvent(r.items, event);
+          // Identical array means the event changed nothing (an empty
+          // chunk, a "done") -- returning the same run object keeps the
+          // whole list's identity stable and skips the re-render.
+          return items === r.items ? r : { ...r, items };
+        })
+      : prev,
+  );
 }
 
 function setPendingPermission(
@@ -150,19 +285,26 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
       { runId },
       (event, params) => {
         if (session.cancelled) return;
-        if (event === "chunk") {
-          appendChunk(setRuns, runId, (params as RunChunkEventParams).text);
-        } else if (event === "permission_request") {
+        if (event === "permission_request") {
           setPendingPermission(setRuns, runId, params as PermissionRequestEventParams);
-        } else if (event === "permission_resolved") {
-          clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
+          return;
         }
+        if (event === "permission_resolved") {
+          clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
+          return;
+        }
+        // Everything else goes through the same reducer the backfill
+        // does, so a live event and a replayed one can't diverge. The
+        // streamed shape is the batched one minus its `type` field
+        // (internal/wsapi/handlers.go emits the same params either way),
+        // so re-attaching the name is the whole translation.
+        appendEvent(setRuns, runId, { ...(params as object), type: event } as RunLogEvent);
       },
       { signal: session.controller.signal },
     )
     .then((result) => {
       if (session.cancelled) return;
-      patch(setRuns, runId, { status: "done", stopReason: result.stopReason });
+      patch(setRuns, runId, { status: "done", stopReason: result.stopReason, finishedAt: new Date().toISOString() });
     })
     .catch(() => {
       if (session.cancelled) return;
@@ -170,7 +312,12 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         .call<RunLogsResult>("run.logs", { runId })
         .then((logs) => {
           if (session.cancelled) return;
-          patch(setRuns, runId, { status: logs.status, stopReason: logs.stopReason, err: logs.err });
+          patch(setRuns, runId, {
+            status: logs.status,
+            stopReason: logs.stopReason,
+            err: logs.err,
+            finishedAt: new Date().toISOString(),
+          });
         })
         .catch(() => {
           // Best-effort finalize only -- the timeline already shows
@@ -225,7 +372,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
           prompt: r.Prompt,
           status: r.Status,
           startedAt: r.StartedAt,
-          text: "",
+          finishedAt: r.FinishedAt ?? undefined,
+          items: [],
           stopReason: r.StopReason || undefined,
           err: r.Err || undefined,
         }));
@@ -240,7 +388,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
               .then((logs) => {
                 if (session.cancelled) return;
                 patch(setRuns, r.ID, {
-                  text: collectText(logs.events),
+                  items: buildTimeline(logs.events),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   err: logs.err,
@@ -284,7 +432,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         prompt,
         status: "running",
         startedAt: new Date().toISOString(),
-        text: "",
+        items: [],
       };
       setRuns((prev) => (prev ? [...prev, entry] : [entry]));
 

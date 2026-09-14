@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { ArrowDown } from "lucide-react";
 
 import { Composer } from "@/components/composer/composer";
+import { RunTimeline } from "@/components/timeline/run-timeline";
+import { useAutoFollow } from "@/components/timeline/use-auto-follow";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -43,6 +46,12 @@ export function TaskDetailPane({
   // first match is the one the composer's Stop and queue drain act on.
   const runningRunId = runs?.find((run) => run.status === "running")?.id ?? null;
 
+  // Auto-follow keys off the total item count across every run: that is
+  // the one number that changes whenever anything is appended anywhere in
+  // the transcript, and it's O(runs) rather than O(items) to compute.
+  const itemCount = runs?.reduce((total, run) => total + run.items.length, 0) ?? 0;
+  const follow = useAutoFollow<HTMLDivElement>(itemCount);
+
   return (
     <div className="flex h-full flex-col">
       <PaneHeader
@@ -64,18 +73,40 @@ export function TaskDetailPane({
         />
       )}
 
-      <div data-testid="run-log-scroll" className="flex-1 overflow-y-auto px-4 py-3">
-        {error && <Alert variant="error" description={error} />}
-        {!error && runs === null && <InlineSpinner label="Loading runs…" />}
-        {!error && runs !== null && runs.length === 0 && (
-          <EmptyState title="No runs yet" description="Send a prompt to start one" />
-        )}
-        {runs !== null && runs.length > 0 && (
-          <ul className="space-y-4">
-            {runs.map((run) => (
-              <RunEntryView key={run.id} run={run} />
-            ))}
-          </ul>
+      <div className="relative flex-1 min-h-0">
+        <div
+          ref={follow.ref}
+          onScroll={follow.onScroll}
+          data-testid="run-log-scroll"
+          data-following={follow.following}
+          className="h-full overflow-y-auto px-4 py-3"
+        >
+          {error && <Alert variant="error" description={error} />}
+          {!error && runs === null && <InlineSpinner label="Loading runs…" />}
+          {!error && runs !== null && runs.length === 0 && (
+            <EmptyState title="No runs yet" description="Send a prompt to start one" />
+          )}
+          {runs !== null && runs.length > 0 && (
+            <ul className="space-y-4">
+              {runs.map((run) => (
+                <RunTimeline key={run.id} run={run} />
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {!follow.following && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="jump-to-latest"
+            onClick={follow.jumpToLatest}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 shadow-sm"
+          >
+            <ArrowDown className="size-3" />
+            Jump to latest
+          </Button>
         )}
       </div>
 
@@ -107,31 +138,6 @@ export function TaskDetailPane({
         onStop={stopRun}
       />
     </div>
-  );
-}
-
-/**
- * One run in the task's log: its provider/status header, the prompt that
- * started it, and its collected output. Stopping a live run lives in the
- * composer now (ui-redesign-parity Item 10) rather than here -- one Stop
- * control per task, always in the same place, instead of one per run card
- * that scrolls away mid-run.
- */
-function RunEntryView({ run }: { run: RunEntry }) {
-  return (
-    <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border p-3">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{run.provider}</span>
-        <span className="uppercase" data-testid="run-status">
-          {run.status}
-        </span>
-      </div>
-      <p className="mt-1 text-sm font-medium">{run.prompt}</p>
-      <pre className="mt-2 whitespace-pre-wrap text-sm" data-testid="run-text">
-        {run.text}
-      </pre>
-      {run.err && <p className="mt-1 text-xs text-destructive">{run.err}</p>}
-    </li>
   );
 }
 

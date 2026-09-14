@@ -169,13 +169,61 @@ export interface PermissionResolvedEventParams {
   reason?: string;
 }
 
+// A tool call's lifecycle status (internal/taskrunner.Event's ToolStatus,
+// per docs/decisions/0008-structured-run-events.md). Absent on a partial
+// update means "unchanged", never "cleared".
+export type ToolCallStatus = "running" | "success" | "failure";
+
+// Params of a "tool_call" event run.attach/task.prompt emit, and the
+// tool-call half of a run.logs entry (internal/wsapi/handlers.go's
+// runToolCallParams), added by ADR 0008.
+//
+// **Merge by toolCallId, never replace.** A later event for the same call
+// carries its new `status` and `result`, and -- on the ACP path, whose
+// tool_call_update is a partial update -- may omit `toolName`, `title`
+// and `input` entirely. Treating each event as the call's full current
+// state would blank the card's identity the moment it completes.
+//
+// `input`/`result` are deliberately `unknown`: the daemon forwards each
+// provider's own argument/result JSON unnormalized (ADR 0008's Decision
+// section says so explicitly), so a renderer must narrow what it wants
+// rather than trust a shared schema that does not exist.
+export interface RunToolCallEventParams {
+  toolCallId: string;
+  /** Claude's wire tool name ("Bash", "Read", …) or ACP's kind ("execute", "read", …) -- one vocabulary per provider, both keys into the same renderer registry. */
+  toolName?: string;
+  title?: string;
+  status?: ToolCallStatus;
+  input?: unknown;
+  result?: unknown;
+}
+
+// Every event name run.attach/run.logs can carry today
+// (internal/wsapi/handlers.go's toRunLogEvent). The three structured ones
+// were added by ADR 0008 and are additive: a run recorded before it still
+// decodes as chunk/done/permission_* only.
+export type RunEventType =
+  | "chunk"
+  | "user_message"
+  | "thinking"
+  | "tool_call"
+  | "done"
+  | "permission_request"
+  | "permission_resolved";
+
 // One event in a run.logs response (internal/wsapi/handlers.go's
-// runLogEvent) -- the same fields chunk/permission events and terminal
+// runLogEvent) -- the same fields the streamed events and terminal
 // results carry, batched instead of streamed. Which of the other fields
 // are populated depends on `type`, mirroring internal/taskrunner.Event's
 // own discriminated-by-Type shape.
-export interface RunLogEvent {
-  type: "chunk" | "done" | "permission_request" | "permission_resolved";
+//
+// `type` is intentionally widened past RunEventType: the enum is
+// append-only on the daemon side (ADR 0008), so a newer daemon can send a
+// name this client has never heard of, and the timeline renders those as
+// a fallback row rather than crashing. The union is still spelled out so
+// the known names autocomplete.
+export interface RunLogEvent extends Partial<RunToolCallEventParams> {
+  type: RunEventType | (string & {});
   text?: string;
   stopReason?: string;
   requestId?: string;
