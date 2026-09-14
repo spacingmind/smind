@@ -589,3 +589,143 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(onSelectTask).toHaveBeenCalledWith(TASK);
   });
 });
+
+/**
+ * The collapsed-search field (ui-redesign-parity Item 12,
+ * audit-deepseek-harness.md §3): a header toggle that expands into a
+ * field; a non-blank query flattens the tree; an outside click collapses
+ * only an empty query.
+ */
+describe("AppSidebar search (ui-redesign-parity Item 12)", () => {
+  it("is collapsed by default and expands into a field on the toggle", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    expect(screen.queryByTestId("sidebar-search-input")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    expect(screen.getByTestId("sidebar-search-input")).toBeInTheDocument();
+  });
+
+  it("a non-blank query replaces the tree with a flat result list", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A, SPACE_B], [TASK_IN_SPACE_A, TASK_IN_SPACE_B, TASK]);
+    await screen.findByText("Space A");
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "space a" } });
+
+    // The grouping UI is gone; only the matching task remains, flat.
+    expect(screen.queryByText("Space A")).not.toBeInTheDocument();
+    expect(screen.queryByText("Space B")).not.toBeInTheDocument();
+    expect(screen.getByText("Task in Space A")).toBeInTheDocument();
+    expect(screen.queryByText("Task in Space B")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fix the bug")).not.toBeInTheDocument();
+  });
+
+  it("a query matching nothing shows an empty state, not a blank pane", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "nothing matches this" } });
+
+    expect(await screen.findByTestId("sidebar-search-empty")).toBeInTheDocument();
+  });
+
+  it("an outside click collapses the field while the query is empty", async () => {
+    const client = new FakeWsClient();
+    render(
+      <div>
+        <div data-testid="outside" />
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>
+      </div>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    expect(screen.getByTestId("sidebar-search-input")).toBeInTheDocument();
+
+    fireEvent.mouseDown(screen.getByTestId("outside"));
+    expect(screen.queryByTestId("sidebar-search-input")).not.toBeInTheDocument();
+  });
+
+  it("an outside click does not collapse a field with a typed query", async () => {
+    const client = new FakeWsClient();
+    render(
+      <div>
+        <div data-testid="outside" />
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>
+      </div>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "fix" } });
+
+    fireEvent.mouseDown(screen.getByTestId("outside"));
+    expect(screen.getByTestId("sidebar-search-input")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-search-input")).toHaveValue("fix");
+  });
+
+  it("clearing the query restores the tree with its previous expansion state", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK_IN_SPACE_A]);
+    await screen.findByText("Space A");
+
+    // Collapse the workspace row before searching -- the state search
+    // must leave untouched.
+    fireEvent.click(screen.getByTestId("sidebar-workspace-row"));
+    expect(screen.queryByText("Space A")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "space" } });
+    expect(await screen.findByText("Task in Space A")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "" } });
+
+    // Back to the tree, still collapsed -- exactly as it was left.
+    expect(screen.queryByText("Space A")).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-workspace-row")).toBeInTheDocument();
+  });
+
+  it("selecting a task from search results still invokes onSelectTask with the whole Task", async () => {
+    const onSelectTask = vi.fn();
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} onSelectTask={onSelectTask} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "fix" } });
+    fireEvent.click(await screen.findByText("Fix the bug"));
+
+    expect(onSelectTask).toHaveBeenCalledWith(TASK);
+  });
+});

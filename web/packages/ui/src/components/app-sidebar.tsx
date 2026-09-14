@@ -11,6 +11,7 @@ import {
   Loader2,
   MoreHorizontal,
   Plus,
+  Search,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -22,7 +23,9 @@ import {
   applyLifecycleEvent,
   buildWorkspaceTree,
   LIFECYCLE_TOPICS,
+  searchTasks,
   type SpaceWithTasks,
+  type TaskSearchResult,
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
@@ -48,6 +51,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
@@ -309,6 +314,32 @@ export function AppSidebar({
     }
   }, [workspaces]);
 
+  // Collapsed search (audit-deepseek-harness.md §3): a header action that
+  // expands into a field. An outside click collapses it only while the
+  // query is empty -- a typed query survives clicking away, because
+  // dismissing someone's search by accident is worse than leaving a field
+  // open. The tree's `expanded` set is never touched while searching, so
+  // clearing the query restores exactly the expansion state it had.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLDivElement | null>(null);
+  const searching = query.trim() !== "";
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (searchRef.current?.contains(e.target as Node)) return;
+      setQuery((current) => {
+        if (current.trim() === "") setSearchOpen(false);
+        return current;
+      });
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [searchOpen]);
+
+  const results = useMemo(() => searchTasks(workspaces ?? [], query), [workspaces, query]);
+
   const empty = !error && workspaces !== null && workspaces.length === 0;
 
   return (
@@ -345,19 +376,52 @@ export function AppSidebar({
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel className="justify-between">
-            <span>Workspaces</span>
-            {!empty && (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="New workspace"
-                data-testid="sidebar-new-workspace-button"
-                onClick={() => setCrud({ kind: "workspace" })}
-                className="mr-1"
-              >
-                <Plus />
-              </Button>
+          <SidebarGroupLabel className="justify-between" ref={searchRef}>
+            {searchOpen ? (
+              <Input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Escape") return;
+                  // Escape clears a query first and only closes an
+                  // already-empty field, so one keystroke never loses
+                  // both the search and what was typed into it.
+                  if (query === "") setSearchOpen(false);
+                  else setQuery("");
+                }}
+                placeholder="Search tasks"
+                aria-label="Search tasks"
+                data-testid="sidebar-search-input"
+                className="h-6 rounded-md px-1.5 text-xs"
+              />
+            ) : (
+              <>
+                <span>Workspaces</span>
+                <span className="flex items-center">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Search tasks"
+                    data-testid="sidebar-search-toggle"
+                    onClick={() => setSearchOpen(true)}
+                  >
+                    <Search />
+                  </Button>
+                  {!empty && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="New workspace"
+                      data-testid="sidebar-new-workspace-button"
+                      onClick={() => setCrud({ kind: "workspace" })}
+                      className="mr-1"
+                    >
+                      <Plus />
+                    </Button>
+                  )}
+                </span>
+              </>
             )}
           </SidebarGroupLabel>
           <SidebarGroupContent>
@@ -368,7 +432,7 @@ export function AppSidebar({
                   {!error && workspaces === null && (
                     <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
                   )}
-                  {empty && (
+                  {empty && !searching && (
                     <SidebarMenuItem>
                       <div className="flex flex-col gap-3 px-2 py-4">
                         <div className="text-xs text-muted-foreground">
@@ -390,7 +454,17 @@ export function AppSidebar({
                       </div>
                     </SidebarMenuItem>
                   )}
-                  {workspaces?.map((ws) => (
+                  {searching && (
+                    <SearchResults
+                      results={results}
+                      query={query}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
+                  {!searching &&
+                    workspaces?.map((ws) => (
                     <WorkspaceItem
                       key={ws.ID}
                       workspace={ws}
@@ -491,6 +565,54 @@ export function AppSidebar({
         </>
       )}
     </Sidebar>
+  );
+}
+
+/**
+ * The flat list a non-blank query replaces the tree with
+ * (audit-deepseek-harness.md §3). Rows are the same TaskRows the tree
+ * renders -- same dots, same meta line, same actions menu -- so a task
+ * found by search behaves identically to one found by browsing; only the
+ * grouping is gone.
+ */
+function SearchResults({
+  results,
+  query,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  results: TaskSearchResult[];
+  query: string;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  if (results.length === 0) {
+    return (
+      <SidebarMenuItem>
+        <EmptyState
+          testId="sidebar-search-empty"
+          title="No matching tasks"
+          description={`Nothing matches “${query.trim()}”`}
+          className="py-6"
+        />
+      </SidebarMenuItem>
+    );
+  }
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-search-results">
+      <SidebarMenuSub>
+        <TaskRows
+          tasks={results.map((r) => r.task)}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          emptyText="No tasks"
+          onArchiveTask={onArchiveTask}
+        />
+      </SidebarMenuSub>
+    </SidebarMenuItem>
   );
 }
 

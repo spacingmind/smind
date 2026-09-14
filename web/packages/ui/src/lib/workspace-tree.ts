@@ -238,3 +238,48 @@ export function applyLifecycleEvent(
       return tree;
   }
 }
+
+/** One hit from `searchTasks`: the task, plus the containers it was found under, so a flat row can still say where it lives. */
+export interface TaskSearchResult {
+  task: Task;
+  workspace: WorkspaceWithTree;
+  /** The space the task sits in, or null for an ungrouped task. */
+  space: SpaceWithTasks | null;
+}
+
+/**
+ * Flattens the tree to the tasks matching `query`, in tree order.
+ *
+ * Matching is a case-insensitive substring over the task's own title *and*
+ * over the names of the containers it sits in -- following
+ * `audit-deepseek-harness.md` §3, whose collapsed search matches "title
+ * and workspace substrings". Typing a workspace or space name is therefore
+ * a way to list everything under it, which is the thing a tree filter is
+ * usually wanted for.
+ *
+ * A blank (or whitespace-only) query returns no results rather than every
+ * task: the caller's rule is that a blank query means "not searching at
+ * all", and it renders the tree instead.
+ */
+export function searchTasks(tree: readonly WorkspaceWithTree[], query: string): TaskSearchResult[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return [];
+
+  const results: TaskSearchResult[] = [];
+  const matches = (...haystack: (string | null | undefined)[]) =>
+    haystack.some((h) => h != null && h.toLowerCase().includes(needle));
+
+  for (const workspace of tree) {
+    const workspaceMatches = matches(workspace.Title, workspace.Path);
+    for (const space of workspace.spaces) {
+      const containerMatches = workspaceMatches || matches(space.Title);
+      for (const task of space.tasks) {
+        if (containerMatches || matches(task.Title)) results.push({ task, workspace, space });
+      }
+    }
+    for (const task of workspace.ungroupedTasks) {
+      if (workspaceMatches || matches(task.Title)) results.push({ task, workspace, space: null });
+    }
+  }
+  return results;
+}

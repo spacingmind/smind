@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyLifecycleEvent, buildWorkspaceTree, LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
+import { applyLifecycleEvent, buildWorkspaceTree, LIFECYCLE_TOPICS, searchTasks } from "@/lib/workspace-tree";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WS_1: Workspace = {
@@ -165,5 +165,39 @@ describe("applyLifecycleEvent", () => {
       }
     }
     expect(applyLifecycleEvent(tree, "run.status", { runId: "r1" })).toBe(tree);
+  });
+});
+
+describe("searchTasks", () => {
+  const tree = [
+    buildWorkspaceTree(WS_1, [SPACE], [task(1, { Title: "Fix the bug" }), task(2, { SpaceID: 10, Title: "Add feature" })]),
+    buildWorkspaceTree({ ...WS_2, Title: "Other workspace" }, [], [task(3, { WorkspaceID: 2, Title: "Unrelated" })]),
+  ];
+
+  it("returns nothing for a blank query -- blank means not searching", () => {
+    expect(searchTasks(tree, "")).toEqual([]);
+    expect(searchTasks(tree, "   ")).toEqual([]);
+  });
+
+  it("matches a task's own title, case-insensitively", () => {
+    const results = searchTasks(tree, "FIX");
+    expect(results.map((r) => r.task.ID)).toEqual([1]);
+  });
+
+  it("matches a workspace or space name, returning every task under it", () => {
+    // "space" is a substring of both SPACE's own title and "workspace" --
+    // deliberately matched, since substring matching over container names
+    // has no notion of "whole word".
+    expect(searchTasks(tree, "Space").map((r) => r.task.ID).sort()).toEqual([2, 3]);
+    expect(searchTasks(tree, "Other workspace").map((r) => r.task.ID)).toEqual([3]);
+  });
+
+  it("carries the containing workspace and space on each hit", () => {
+    const [hit] = searchTasks(tree, "Add feature");
+    expect(hit!.workspace.ID).toBe(1);
+    expect(hit!.space?.ID).toBe(10);
+
+    const [ungroupedHit] = searchTasks(tree, "Fix the bug");
+    expect(ungroupedHit!.space).toBeNull();
   });
 });

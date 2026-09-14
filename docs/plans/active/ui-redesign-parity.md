@@ -781,7 +781,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 9: tool-call cards *(Track B)*
 - [ ] Item 10: composer v2 *(Track B)*
 - [ ] Item 11: permission UX v2 *(Track B)*
-- [ ] Item 12: sidebar signal *(Track D)*
+- [x] Item 12: sidebar signal *(Track D)*
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
@@ -905,6 +905,82 @@ and any manual check performed. Follow the per-item format used in
   Tailwind's CSS generation). Fixed by rewording the comment; worth
   remembering that any future doc comment in this file must avoid a bare
   `*/` substring.
+
+### Item 12 — sidebar signal
+
+Task rows now carry real state. A leading dot shows the task's latest run
+status (`hooks/use-task-attention.ts`'s `runStatus`, live off
+`run.status` -- `Task.Status` is deliberately not the source, since
+`internal/workspace` moves a task `created` -> `running` on its first run
+and never back). The attention dot now names *why* it fired: error,
+permission and finished each render their own `StatusDot` variant with
+their own accessible name, where all three used to share one warning dot
+(`lib/sidebar-signal.ts`'s `attentionDotStatus`/`primaryAttentionReason`,
+precedence error > permission > finished). A second meta line shows the
+task's branch and diff size (new `task.stats` RPC,
+`internal/workspace.Manager.TaskStats` + `internal/workspace/git.go`'s
+`taskDiffStat`, `hooks/use-task-stats.ts`), falling back to the task's
+lifecycle status when no stat is available -- never a fabricated zero.
+Workspace and space rows carry an `aggregateStatus` derived from their
+tasks (`audit-paseo.md` §5's workspace status bucket), the single loudest
+signal below a collapsed container. A collapsed-search field
+(`audit-deepseek-harness.md` §3) replaces the tree with a flat
+`searchTasks` result list on a non-blank query; an outside click
+collapses the field only while it's empty.
+
+All four signal sources (`attention`, `runStatus`, `stats`,
+`statusOverrides`) reach the row components through one `RowSignalContext`
+instead of being threaded as props through
+`WorkspaceItem`/`SpaceItem`/`SpaceLikeItem`/`TaskRows`.
+
+- **Run status dot** (`sidebar-run-status-tests` in `app-sidebar.test.tsx`
+  + `use-task-attention.test.ts`'s `runStatus` suite): a running run shows
+  the running dot; a task that has never run shows none; a still-running
+  run outranks a later-started one that already finished; live
+  `run.status` events update it without a refetch, using an `order`
+  counter above the whole `run.list` snapshot so a live event always wins
+  ties (pinned by a dedicated ordering test, since `run.list` returns
+  newest-first per `internal/runs.Registry.List`).
+- **Attention by reason**: `error | finished | permission` each render a
+  distinguishable `data-attention-reason` and a distinct `data-status`
+  variant — asserted by testid/attribute, never colour.
+- **Workspace/space aggregate**: a task with an error surfaces `danger` on
+  both its space row and its workspace row; an idle bucket (nothing
+  running, nothing unseen) shows no dot at all rather than a neutral one.
+  `sidebar-signal.test.ts` covers the full precedence table at the unit
+  level (`aggregateStatus`).
+- **Search**: typing replaces the tree with a flat list matching task
+  title *and* container (workspace/space) name substrings
+  (`searchTasks`, `workspace-tree.test.ts`); clearing it restores the tree
+  with the expansion state it had before searching (a collapsed workspace
+  stays collapsed); an outside click while the field is empty collapses
+  it, a typed query survives an outside click; a query matching nothing
+  renders `EmptyState`, not a blank pane.
+- **Branch + diff stat** (`task.stats`, new additive RPC): daemon-side
+  tests (`internal/workspace/stats_test.go`,
+  `internal/wsapi/stats_test.go`) cover the untracked-files-count case
+  (the reason this goes through the same snapshot-index computation as
+  `task.diff`/`task.files` rather than a plain `git diff --shortstat`), a
+  broken worktree being omitted without failing the other tasks'
+  stats, id-order preservation across the `taskStatWorkers`-sized worker
+  pool, and an archived task leaving the list. UI-side
+  (`use-task-stats.test.ts`): a task absent from the response stays absent
+  from the map (never a zeroed stat); a finished run refetches only that
+  run's workspace, not every workspace; a run merely starting triggers no
+  refetch (nothing has changed on disk yet).
+- **Selecting a task still clears its attention** and still invokes
+  `onSelectTask` with the full `Task` — unchanged, re-asserted with the
+  new signal props present, confirming the new dots don't intercept the
+  click.
+- **Layout stability** (Item 2's rule, re-applied here): the run-status
+  slot, the attention slot, the aggregate slot, and the whole meta line
+  are always in the DOM at a fixed size — a dot or a stat arriving never
+  moves anything beside it. Each has a dedicated before/after
+  className-equality test.
+- `task test` (Go + 294 web tests, up from 247 before this item), `task
+  lint`, and `bunx tsc -b` all pass clean.
+
+
 ### Item 16 — daemon lifecycle events (backend half)
 
 `docs/decisions/0009-lifecycle-event-topics.md` records the topic set,
