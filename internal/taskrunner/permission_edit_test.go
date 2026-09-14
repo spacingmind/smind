@@ -38,6 +38,18 @@ func TestAutoAllowACPFileEdit(t *testing.T) {
 		{"no locations", `{"kind":"edit"}`, false},
 		{"empty location path", `{"kind":"edit","locations":[{"path":""}]}`, false},
 		{"unparsable json", `{`, false},
+
+		// Title-fallback route: glm-acp-agent sets no kind/locations, only a
+		// "Write file: <abs path>" title (observed live 2026-09-14).
+		{"glm-style write title inside the worktree", `{"title":"Write file: ` + wt + `/docs/plans/active/smind-dogfood.md"}`, true},
+		{"glm-style edit title inside the worktree", `{"title":"Edit file: ` + wt + `/cmd/x.go"}`, true},
+		{"glm-style write title outside the worktree", `{"title":"Write file: /etc/passwd"}`, false},
+		{"glm-style write title with traversal", `{"title":"Write file: ` + wt + `/../../etc/passwd"}`, false},
+		{"glm-style write title with relative path", `{"title":"Write file: docs/rel.go"}`, false},
+		{"non-edit verb in title", `{"title":"Run file: /wt/task-1/x.sh"}`, false},
+		{"unknown verb in title", `{"title":"Touch file: ` + wt + `/x"}`, false},
+		{"title without the file marker", `{"title":"update the docs"}`, false},
+		{"declared execute kind is never rescued by its title", `{"kind":"execute","title":"Write file: ` + wt + `/x"}`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
