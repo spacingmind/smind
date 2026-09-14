@@ -85,7 +85,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const entry = screen.getByTestId("run-entry");
-    expect(within(entry).getByTestId("run-text")).toHaveTextContent("hello world");
+    expect(within(entry).getByTestId("timeline-assistant")).toHaveTextContent("hello world");
     expect(within(entry).getByTestId("run-status")).toHaveTextContent("done");
   });
 
@@ -100,12 +100,12 @@ describe("TaskDetailPane", () => {
 
     client.emit("run.attach", 0, "chunk", { text: "partial " });
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("partial");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial");
     expect(screen.getByTestId("run-status")).toHaveTextContent("running");
 
     client.emit("run.attach", 0, "chunk", { text: "and more" });
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("partial and more");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial and more");
 
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "end_turn" });
     await flush();
@@ -120,7 +120,7 @@ describe("TaskDetailPane", () => {
     await flush();
     client.emit("run.attach", 0, "chunk", { text: "hello" });
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("hello");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("hello");
 
     // Switch away: the first task's run.attach must be aborted (detached),
     // not left dangling or double-subscribed.
@@ -154,7 +154,7 @@ describe("TaskDetailPane", () => {
 
     const entries = screen.getAllByTestId("run-entry");
     expect(entries).toHaveLength(1);
-    expect(within(entries[0]!).getByTestId("run-text")).toHaveTextContent("hello world");
+    expect(within(entries[0]!).getByTestId("timeline-assistant")).toHaveTextContent("hello world");
   });
 
   it("aborts (does not stop) an actively streaming run.attach on unmount", async () => {
@@ -244,17 +244,22 @@ describe("TaskDetailPane", () => {
     expect(screen.getAllByTestId("run-entry")).toHaveLength(1);
   });
 
-  it("shows a Stop button only for a running run, and clicking it calls run.stop (not an abort)", async () => {
+  // Item 10 moved Stop from the run card into the composer -- one control
+  // per task, always in the same place. These two keep asserting the
+  // behaviour that mattered (run.stop, never an abort of the live
+  // run.attach), just against the composer's button.
+  it("shows a Stop button in the composer only while a run is live, and clicking it calls run.stop (not an abort)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    const entry = screen.getByTestId("run-entry");
-    const stopButton = within(entry).getByRole("button", { name: "Stop" });
+    const composer = screen.getByTestId("composer");
+    // The run card no longer carries its own Stop.
+    expect(within(screen.getByTestId("run-entry")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
 
-    fireEvent.click(stopButton);
+    fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
     await flush();
 
     const stopCall = client.nth("run.stop", 0);
@@ -272,7 +277,7 @@ describe("TaskDetailPane", () => {
     // disappears once the run is no longer "running".
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "" });
     await flush();
-    expect(within(screen.getByTestId("run-entry")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("composer")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
   it("surfaces a run.stop failure without crashing, keeping the Stop button usable", async () => {
@@ -282,14 +287,14 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    fireEvent.click(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" }));
+    fireEvent.click(within(screen.getByTestId("composer")).getByRole("button", { name: "Stop" }));
     await flush();
 
     client.nth("run.stop", 0).reject(new Error("boom"));
     await flush();
 
-    expect(screen.getByText(/stop failed: boom/i)).toBeInTheDocument();
-    expect(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
+    expect(screen.getByText(/boom/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId("composer")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
   });
 
   it("renders a pending permission request with a button per option when a permission_request event arrives", async () => {
@@ -430,7 +435,7 @@ describe("TaskDetailPane", () => {
       client.emit("run.attach", 0, "chunk", { text: `line ${i}\n` });
     }
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("line 49");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("line 49");
 
     // ...and the pending permission card is still right there, unaffected,
     // no scrolling needed to find it.
@@ -481,7 +486,7 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("connection-banner")).toBeInTheDocument();
     // The banner is additive -- the run entry already on screen (with its
     // already-streamed text) is not thrown away while waiting to resync.
-    expect(screen.getByTestId("run-text")).toHaveTextContent("hello");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("hello");
 
     rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
     await flush();
@@ -497,7 +502,7 @@ describe("TaskDetailPane", () => {
     expect(client1.nth("run.attach", 0).params).toEqual({ runId: "run-1" });
     client1.emit("run.attach", 0, "chunk", { text: "partial output" });
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("partial output");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial output");
 
     // App.tsx swaps in a genuinely new WsClient instance after a
     // successful reconnect -- the task selection itself is untouched.
@@ -517,7 +522,7 @@ describe("TaskDetailPane", () => {
 
     client2.emit("run.attach", 0, "chunk", { text: "more output" });
     await flush();
-    expect(screen.getByTestId("run-text")).toHaveTextContent("more output");
+    expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("more output");
   });
 
   it("renders the provider dropdown from provider.list (3 providers, labels over ids)", async () => {

@@ -716,6 +716,26 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   keeps accessibility from silently regressing. Optional per item, not
   mandated.
 
+**Item 10 (landed)** — Track B's composer decisions:
+
+- **The provider/policy controls stay native `<select>`s**, given visible
+  `<label>`s instead of bare `aria-label`s. Item 10's complaint was
+  "unlabelled native selects"; swapping in the Radix `Select` would have
+  rewritten four passing `run.start`-payload tests for no user-visible
+  gain, against this item's own "no regression" scenario.
+- **Submitting while a run is live queues, it does not steer.** The daemon
+  has no "add input to a run in flight" RPC, so the composer holds the
+  text and starts it as its own run when the live one ends. The queue is
+  in-memory and per task: a follow-up whose meaning is "right after the
+  run I was watching" doesn't survive that run's session.
+- **A run in flight does not disable the composer**, unlike no-connection
+  and no-task. The placeholder still states what's different ("Queue a
+  follow-up — it sends when this run finishes"), which is what the item's
+  block contract actually asks for.
+- **Stop moved off the run card entirely** rather than existing in both
+  places: two controls with the same meaning, one of which scrolls out of
+  view mid-run, is the problem Item 10 names.
+
 **Items 1–2 (landed)** — where the plan was ambiguous and what was
 decided; full rationale is in `docs/design.md`'s own Decisions section,
 this is the pointer:
@@ -973,10 +993,10 @@ Phase 2 (implementation) — not started:
 - [ ] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
-- [ ] Item 8: timeline renderer *(Track B)*
-- [ ] Item 9: tool-call cards *(Track B)*
-- [ ] Item 10: composer v2 *(Track B)*
-- [ ] Item 11: permission UX v2 *(Track B)*
+- [x] Item 8: timeline renderer *(Track B)*
+- [x] Item 9: tool-call cards *(Track B)*
+- [x] Item 10: composer v2 *(Track B)*
+- [x] Item 11: permission UX v2 *(Track B)*
 - [ ] Item 12: sidebar signal *(Track D)*
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
@@ -1166,6 +1186,215 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 11 (permission UX v2)** — 2026-09-14, `web/` only:
+
+- `components/permission/`: `permission-card.tsx` (shape dispatcher),
+  `options-card.tsx` (the default variant, now kind-styled),
+  `permission-option-button.tsx` (the styling rule), `question-form-card.tsx`,
+  `plan-review-card.tsx`. `task-detail.tsx`'s old `PendingPermissionView`
+  is gone; the dock now renders `PermissionCard` per pending run.
+- **Option styling by ACP `kind`**: `reject_*` renders `destructive`
+  regardless of position; the first `allow_*` option renders `default`
+  (primary) as the recommended action; everything else is `outline`. The
+  wire has carried `kind` since before this item (`lib/types.ts:144-154`
+  per the plan's own note) and the UI simply ignored it until now.
+- **Keyboard**: the card is a focusable, labelled `role="group"`
+  (`aria-label` from the summary) that receives focus once per
+  `requestId` — reachable and announced for a keyboard/screen-reader user
+  landing on the page fresh, without re-stealing focus on every
+  unrelated re-render. The options themselves are real `<button>`s (the
+  shared `Button` primitive), so activation is native HTML behaviour, not
+  custom key handling; tests assert reachability (real tag, not
+  `tabindex="-1"`, focus + click) rather than simulating a browser's own
+  Enter-triggers-click translation, which jsdom does not implement and
+  this repo has no `@testing-library/user-event` to fake.
+- **Question-form variant**: single/multi-select plus an optional
+  free-text "other", and a plain free-text question. Submitting sends one
+  batch via the existing `run.respondPermission` (its only slot for
+  anything is the string `optionId`), JSON-encoded as a tagged envelope
+  (`{"kind":"question_form_answers","answers":{...}}`) rather than an ad
+  hoc delimited string. "Skip" sends the same shape with every answer
+  blank.
+- **Plan-review variant**: the plan rendered as markdown (reusing
+  `TimelineMarkdown` from Item 8) with `Chat about it / Refuse / Approve`.
+  Chat does not resolve the request at all — it moves focus into the
+  composer (via a forwarded textarea ref) so the human can keep talking
+  while the request stays pending, matching Paseo's own behaviour for
+  that action.
+- **Dispatch is by shape**, tested explicitly: `plan` wins over
+  `questions` (both present renders the plan), an empty `questions: []`
+  falls through to the plain option list rather than an empty form, and a
+  request with an unrecognised/empty option `kind` still renders every
+  option (Item 11's own scenario).
+- Existing guarantees re-asserted unchanged: pinned above the composer
+  (`pending-permission-dock`), a `permission_resolved` event from *any*
+  connection clears the card (not just this tab's own click), the log
+  streaming past it doesn't move it. All of `task-detail.test.tsx`'s
+  permission tests pass against the new component tree unmodified except
+  for the one structural nesting change (`pending-permission` is now
+  inside a `permission-card` wrapper).
+- `task test` (Go + web, 286 web tests), `task lint`, `bunx tsc -b` clean.
+- **The honest wire gap, and why it's scoped out rather than half-built**:
+  `internal/taskrunner`'s `PermissionDecider` (`permission.go`) only ever
+  produces a flat option list plus a short text `summary` (`"run Bash"`,
+  or ACP's tool-call title) — there is no command line, no diff, and no
+  correlation between a `permission_request`'s `requestId` and any
+  `tool_call`'s `toolCallId` on the wire today. So "what is being
+  requested" still shows only `summary`, unchanged from before this item;
+  richer request detail needs a daemon change (AGENTS.md rule (d)), same
+  gating Item 7 itself was under. **`questions`/`plan` have no producer on
+  either wire path at all** — `lib/types.ts` defines them as additive,
+  optional fields so a future daemon change can populate them without
+  breaking today's clients, and this PR's components already render them
+  correctly the moment something does (proven by the synthetic events
+  this item's own tests construct) — the same "additive gap, not a
+  regression" posture ADR-0008 documents for Codex tool calls, and the
+  same "don't build ahead of a producer" restraint the plan's own
+  Decisions section asks for on subagents. The question-form's answer
+  encoding is this PR's own placeholder convention, not a daemon contract:
+  nothing parses it server-side yet.
+
+**Item 9 (tool-call cards)** — 2026-09-14, `web/` only:
+
+- `components/timeline/tool-renderers.tsx` is the registry: a `Map` keyed
+  by wire tool name plus `registerToolRenderer`. The built-ins register
+  themselves by *calling* it, and `ToolCallCard` resolves through it and
+  names no tool — so adding a renderer genuinely never edits a central
+  switch. Proven by registering a fixture tool inside the test and
+  asserting it renders, with nothing under `src/` changed.
+- **Both vocabularies key into the same six intents.** Claude's names
+  (`Bash`/`Read`/`Edit`/`Grep`/`WebFetch`…) and ACP's `ToolKind` strings
+  (`execute`/`read`/`edit`/`search`/`fetch`) are registered side by side —
+  `internal/taskrunner/runner.go` sends `u.Kind` as the tool name for ACP,
+  since ACP has no separate name field.
+- Resolution is registry → **shape-based classification** → generic, per
+  the item's "unknown tools classify into one of these by shape where
+  possible". `classifyByShape` checks `command` → terminal, replacement
+  text → edit, a path → read, `pattern`/`query` → search, `url` → fetch.
+  Order matters and is tested: an edit's input also carries a path.
+- Intent bodies implemented and tested: terminal (command + output), read
+  (path + line range), edit (inline diff), search (query + hit count).
+  `toolResultText` unwraps the block shapes *both* providers wrap results
+  in (Claude's `[{type:"text"}]`, ACP's `[{type:"content",content:{…}}]`)
+  rather than showing a serialized envelope.
+- **Lifecycle in place**: running → success and running → failure update
+  the same card (asserted by `data-tool-call-id`, one card not two) — the
+  ADR's merge-by-id contract, exercised end to end through the reducer.
+- **Click-through**: a card naming a file inside the task's worktree opens
+  that path's tab. `worktreeRelativePath` turns the provider's absolute
+  path into the relative wire path and rejects traversal, sibling-prefix
+  (`/wt/task-10` vs `/wt/task-1`) and the worktree root itself — the same
+  cases `internal/taskrunner/permission_edit_test.go` guards on the daemon
+  side. The path is its own button beside the expand toggle, not nested
+  inside it, so both stay reachable.
+- **Detail level**: `detailed | overview` toggle in the pane header,
+  persisted to `localStorage`. `overview` collapses runs of ≥2
+  *consecutive* tool calls into one row showing the count, the distinct
+  tool names and an aggregate status where **any failure dominates** — a
+  collapsed row must not hide a failed call behind a green dot.
+  Switching back restores the individual cards.
+- `task test` (Go + web, 271 web tests), `task lint`, `bunx tsc -b` clean.
+- **Two deliberate deviations, both degradations rather than gaps**:
+  (1) click-through opens in the task's primary tab set, not "in the side
+  pane using `prefer`" — Item 6 hasn't landed, and the item says
+  explicitly this must not block on it. (2) `App.tsx` gained exactly one
+  changed line (passing `onOpenFile` into `TaskDetailPane`), which is
+  additive rather than the restructuring Track A owns.
+- **Memoization is preserved through the new props.** `TimelineRow` now
+  takes `worktreePath`/`onOpenFile`, and `App.tsx` re-creates its
+  `openFileTab` closure every render, which would defeat the memo —
+  `task-detail.tsx` pins it behind a ref so every row gets a
+  never-changing callback identity.
+
+**Item 8 (timeline renderer)** — 2026-09-14, `web/` only:
+
+- `use-run-timeline.ts` grows the transcript model ADR 0008's wire schema
+  implies: `RunEntry.text: string` becomes `RunEntry.items: TimelineItem[]`
+  (`assistant | user | thinking | tool_call | unknown`), built by one pure
+  reducer (`appendTimelineEvent`) that both the `run.logs` backfill and
+  the live `run.attach` stream fold through — so a replayed event and a
+  streamed one cannot diverge.
+- `components/timeline/`: `run-timeline.tsx` (the turn, with its footer),
+  `timeline-row.tsx` (memoized per-kind dispatch), `timeline-markdown.tsx`,
+  `tool-call-card.tsx` (generic card; Item 9 adds the registry),
+  `use-auto-follow.ts`, `timeline-text.ts` (copy + elapsed).
+- **Streaming cost is asserted, not assumed.** The approach is memoized
+  rows over an identity-stable reducer, not windowing: `appendTimelineEvent`
+  rebuilds only the tail item and keeps every earlier item's object
+  reference, and `TimelineRow` is `memo`'d, so one chunk re-renders one
+  row. `timeline-model.test.ts` pins the identity guarantee directly;
+  `run-timeline.test.tsx`'s memoization pair proves the bailout with a
+  getter-based render probe (verified non-vacuous — aliasing `memo` to
+  the identity function makes it fail). The 2000-event scenario folds in
+  well under its budget (the reducer is linear; the guard is against a
+  quadratic regression).
+- **Auto-follow**: `useAutoFollow` pins the scroller to the tail in a
+  layout effect, releases once the user scrolls more than
+  `FOLLOW_THRESHOLD_PX` from the bottom, and surfaces a "Jump to latest"
+  button while released. Tested with stubbed scroll geometry (jsdom has
+  no layout), including the threshold boundary in both directions.
+- **Resilience**: an unrecognised `type` renders a labelled fallback row
+  and the rows around it still render; a `chunk` with no text, a
+  `tool_call` with no `toolCallId`, and every non-row event are ignored
+  rather than throwing. `buildTimeline` over a deliberately malformed
+  batch is asserted as a whole.
+- **Tool-call merge semantics** from ADR 0008 are pinned: a completion
+  event carrying only `status`/`result` updates the same card in place and
+  does *not* blank `toolName`/`title`/`input`; an ACP `tool_call` with no
+  `status` is `running`.
+- Turn footer carries elapsed time (`formatElapsed`, which counts up for
+  free on a live run because the run re-renders per chunk — no timer) and
+  a copy action producing readable plain text, clipboard failures
+  swallowed.
+- Existing `task-detail.test.tsx` assertions moved from the removed
+  `run-text` `<pre>` to `timeline-assistant`; every other guarantee
+  (reconnect re-attach, permission dock pinning, stale-fetch discard) is
+  unchanged and passing.
+- `task test` (Go + web, 253 web tests), `task lint`, `bunx tsc -b` clean.
+- **Deferred to Item 9**, per that item's own scope: the keyed renderer
+  registry, per-intent cards, file click-through, and the
+  `detailed | overview` grouping control. Item 8 ships the generic card
+  only.
+
+**Item 10 (composer v2)** — 2026-09-14, `web/` only:
+
+- New `components/composer/`: `composer.tsx` (the composer itself),
+  `prompt-textarea.tsx` (autogrow + IME-safe key handling),
+  `use-composer-draft.ts` (per-task draft persistence). `task-detail.tsx`'s
+  old `PromptForm` is gone; the pane now just tells the composer which run
+  is live.
+- `composer.test.tsx` (11 cases) covers the item's scenarios:
+  Enter submits / Shift+Enter doesn't; neither IME signal
+  (`isComposing`, the legacy `keyCode === 229`) submits; submit clears the
+  draft from `localStorage`; `autoGrow` sizes to content then caps at
+  `MAX_COMPOSER_HEIGHT` and switches to `overflow-y: auto`; a draft
+  survives a task switch *and* a real unmount/remount; each block reason
+  (no connection / no task / run in flight) is stated in the placeholder;
+  queue-while-running sends on the run ending and is dropped on a task
+  switch; Stop works from the button and from Escape; a failed submit
+  keeps the text; the provider dropdown is driven by `provider.list`
+  behind a real `<label>`.
+- Existing guarantees re-asserted, not regressed: the two `run.start`
+  payload tests (`approvalPolicy` omitted for `manual`, sent for
+  `auto-safe`) and the provider-list/fallback tests in
+  `task-detail.test.tsx` pass unchanged. The two Stop tests were
+  *retargeted* at the composer (Item 10 moves Stop off the run card) while
+  keeping their real assertion — Stop goes through `run.stop` and never
+  aborts the live `run.attach`.
+- `task test` (Go + web, 235 web tests), `task lint` and `bunx tsc -b` all
+  clean.
+- **Not done, and why**: (1) the **model selector** — `provider.list`
+  reports no models (`internal/taskrunner.ProviderInfo` has
+  id/label/kind/credentialKind/accountProvider and nothing else) and
+  `run.start` takes no `model` field, so there is nothing to select or
+  send. The item's own wording gates this on "where `provider.list` can
+  report them", so this is the honest read; closing it needs a daemon
+  change of its own (AGENTS.md rule (d)). (2) the **no-task-selected empty
+  state** becoming a "create a task here" entry point — that markup lives
+  in `App.tsx` (`data-testid="app-empty-state"`), which Track A owns and
+  this track was told not to restructure. Left for Track A's Item 3/6 pass
+  on that file.
+
 **Item 7 (structured timeline events)** — 2026-09-14, daemon + wire only
 (this item does not touch `web/`; the timeline renderer that consumes this
 schema is Item 8/9, Track B, separate PR):
