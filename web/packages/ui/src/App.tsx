@@ -57,7 +57,7 @@ export function App({
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
   const events = useDaemonEvents(client);
-  const attention = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
 
   // The sidebar's user-resized width (px), persisted across reloads -- see
   // the plan's Item 6. react-resizable-panels' Panel API takes numeric
@@ -156,6 +156,7 @@ export function App({
             selectedTaskId={selectedTask?.ID ?? null}
             onSelectTask={selectTask}
             attention={attention}
+            runStatus={runStatus}
             events={events}
           />
         </ResizablePanel>

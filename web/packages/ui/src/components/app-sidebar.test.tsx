@@ -257,6 +257,38 @@ describe("AppSidebar", () => {
       expect(slotWithAttention.className).toBe(classNameWithoutAttention);
       expect(slotWithAttention.querySelector('[data-testid="task-attention"]')).toBeInTheDocument();
     });
+
+    it("the run-status and aggregate slots are equally reserved, before any run exists", async () => {
+      const client = new FakeWsClient();
+
+      const { rerender } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} runStatus={new Map()} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK_IN_SPACE_A]);
+
+      const runSlotBefore = (await screen.findByTestId("task-run-status-slot")).className;
+      const aggregateSlotBefore = screen.getAllByTestId("row-aggregate-slot")[0]!.className;
+      expect(screen.queryByTestId("task-run-status")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("row-aggregate")).not.toBeInTheDocument();
+
+      rerender(
+        <SidebarProvider>
+          <AppSidebar
+            client={client as never}
+            selectedTaskId={null}
+            runStatus={new Map([[TASK_IN_SPACE_A.ID, "running" as const]])}
+          />
+        </SidebarProvider>,
+      );
+
+      // The dots arrive; the slots holding them do not change width.
+      expect(screen.getByTestId("task-run-status-slot").className).toBe(runSlotBefore);
+      expect(screen.getAllByTestId("row-aggregate-slot")[0]!.className).toBe(aggregateSlotBefore);
+      expect(screen.getByTestId("task-run-status")).toBeInTheDocument();
+      expect(screen.getAllByTestId("row-aggregate").length).toBeGreaterThan(0);
+    });
   });
 });
 
@@ -394,5 +426,105 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     await flush();
 
     expect(client.calls.filter((c) => c.method === "workspace.list")).toHaveLength(2);
+  });
+});
+
+/**
+ * Item 12's sidebar signal: the row state a user reads without opening a
+ * task. Every assertion goes through a testid or a data-* attribute, never
+ * a colour -- a design-token change must not be able to fail these.
+ */
+describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
+  function renderSidebar(props: Partial<Parameters<typeof AppSidebar>[0]> = {}) {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} {...props} />
+      </SidebarProvider>,
+    );
+    return client;
+  }
+
+  it("a task with a running run shows the running dot", async () => {
+    const client = renderSidebar({ runStatus: new Map([[TASK.ID, "running"]]) });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    expect(await screen.findByTestId("task-run-status")).toHaveAttribute("data-run-status", "running");
+  });
+
+  it("a task that has never run shows no run dot, rather than an idle one", async () => {
+    const client = renderSidebar({ runStatus: new Map() });
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    await screen.findByTestId("sidebar-task-row");
+    expect(screen.queryByTestId("task-run-status")).not.toBeInTheDocument();
+  });
+
+  it("error, finished and permission attention each render a distinguishable marker", async () => {
+    const seen = new Map<AttentionReason, string>();
+
+    for (const reason of ["error", "finished", "permission"] as AttentionReason[]) {
+      const client = new FakeWsClient();
+      const { unmount } = render(
+        <SidebarProvider>
+          <AppSidebar
+            client={client as never}
+            selectedTaskId={null}
+            attention={new Map([[TASK.ID, new Set<AttentionReason>([reason])]])}
+          />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const dot = await screen.findByTestId("task-attention");
+      expect(dot).toHaveAttribute("data-attention-reason", reason);
+      seen.set(reason, dot.getAttribute("data-status")!);
+      unmount();
+    }
+
+    // Three reasons, three variants -- they used to share one.
+    expect(new Set(seen.values()).size).toBe(3);
+  });
+
+  it("a workspace whose task has an error shows the aggregate marker, and its space row does too", async () => {
+    const client = renderSidebar({ attention: new Map([[TASK_IN_SPACE_A.ID, new Set<AttentionReason>(["error"])]]) });
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A, SPACE_B], [TASK_IN_SPACE_A, TASK_IN_SPACE_B]);
+
+    await screen.findByText("Task in Space A");
+    const workspaceAggregate = screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]');
+    expect(workspaceAggregate).toHaveAttribute("data-aggregate", "danger");
+
+    const spaceRows = screen.getAllByTestId("sidebar-space-row");
+    expect(spaceRows[0]!.querySelector('[data-testid="row-aggregate"]')).toHaveAttribute("data-aggregate", "danger");
+    // Space B holds no errored task, so it says nothing.
+    expect(spaceRows[1]!.querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
+  });
+
+  it("an idle workspace carries no aggregate dot at all", async () => {
+    const client = renderSidebar();
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    await screen.findByText("Fix the bug");
+    expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
+  });
+
+  it("selecting a task still invokes onSelectTask with the whole Task, dots or no dots", async () => {
+    const onSelectTask = vi.fn();
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          onSelectTask={onSelectTask}
+          attention={new Map([[TASK.ID, new Set<AttentionReason>(["permission"])]])}
+          runStatus={new Map([[TASK.ID, "running"]])}
+        />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    fireEvent.click(await screen.findByText("Fix the bug"));
+    expect(onSelectTask).toHaveBeenCalledWith(TASK);
   });
 });

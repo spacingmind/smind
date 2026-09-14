@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import {
@@ -24,12 +24,13 @@ import {
   type SpaceWithTasks,
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
-import type { TaskAttention } from "@/hooks/use-task-attention";
+import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
   ArchiveTaskDialog,
   CreateSpaceDialog,
@@ -65,12 +66,22 @@ import {
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
 
+/** Stable empty fallback for the optional `runStatus` prop, for the same reason EMPTY_ATTENTION exists: a literal `new Map()` inline would re-run the row-signal memo every render. */
+const EMPTY_RUN_STATUS: TaskRunStatus = new Map();
+
 /** The notifications toggle's label/tooltip per permission state -- also its accessible name, so a screen reader (or a test's getByRole(..., { name })) can tell the states apart. */
 const NOTIFICATION_LABEL: Record<NotificationPermissionState, string> = {
   default: "Enable out-of-tab notifications",
   granted: "Notifications enabled",
   denied: "Notifications blocked -- allow them in your browser's site settings",
   unsupported: "Notifications aren't supported in this browser",
+};
+
+/** Human-readable reason text for the task row's attention dot -- part of its accessible name, so the three reasons are distinguishable to a screen reader and not only by colour. */
+const ATTENTION_LABEL: Record<AttentionReason, string> = {
+  error: "a run failed",
+  permission: "a permission is waiting",
+  finished: "a run finished",
 };
 
 /** A plain inline bell glyph -- not from lucide-react, so this doesn't depend on that package happening to export one under this exact name/version. Sized like any other icon here via Button's own `[&_svg:not([class*='size-'])]:size-4` rule. */
@@ -173,6 +184,30 @@ function useWorkspaceTree(client: WsClient | null, events: DaemonEvents | null) 
 }
 
 /**
+ * Everything a sidebar row needs to draw its signal, in one context
+ * rather than several props threaded through four levels of nesting
+ * (AppSidebar -> WorkspaceItem -> SpaceItem -> SpaceLikeItem -> TaskRows).
+ * A mount without live data -- a test, or a connection whose
+ * events.subscribe failed -- renders the same rows with the signal slots
+ * empty rather than throwing.
+ */
+interface RowSignal {
+  attention?: TaskAttention;
+  /** Live task.status overrides keyed by task id (see useStatusOverrides). */
+  statusOverrides: Map<number, string>;
+  /** Latest run status per task (see useTaskRunStatus). */
+  runStatus: TaskRunStatus;
+}
+
+const EMPTY_SIGNAL: RowSignal = { statusOverrides: new Map(), runStatus: new Map() };
+
+const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
+
+function useRowSignal(): RowSignal {
+  return useContext(RowSignalContext);
+}
+
+/**
  * Live task.Status patching over the fetched tree: task.status
  * notifications (ADR 0005) update an override map in-memory; the tree
  * itself is only refetched on client change (reconnect), exactly as
@@ -219,6 +254,7 @@ export function AppSidebar({
   selectedTaskId = null,
   onSelectTask,
   attention,
+  runStatus,
   events,
 }: {
   client: WsClient | null;
@@ -228,11 +264,17 @@ export function AppSidebar({
   onSelectTask?: (task: Task) => void;
   /** Per-task attention badges (App.tsx's useTaskAttention) -- renders a dot on each row that has any reason. */
   attention?: TaskAttention;
+  /** Per-task latest-run status (App.tsx's useTaskAttention, same hook) -- renders the row's leading run dot and feeds the container rows' aggregate. */
+  runStatus?: TaskRunStatus;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
+  const rowSignal = useMemo<RowSignal>(
+    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS }),
+    [attention, statusOverrides, runStatus],
+  );
 
   // Out-of-tab attention notifications (Item 4): every task across the
   // whole tree, flattened just far enough to label a Notification by
@@ -314,58 +356,58 @@ export function AppSidebar({
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <ScrollArea className="h-full">
-              <SidebarMenu>
-                {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
-                {!error && workspaces === null && (
-                  <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
-                )}
-                {empty && (
-                  <SidebarMenuItem>
-                    <div className="flex flex-col gap-3 px-2 py-4">
-                      <div className="text-xs text-muted-foreground">
-                        <p className="font-medium text-foreground">Welcome to smind</p>
-                        <p className="mt-1">
-                          A workspace is an existing git repo. Tasks are its isolated
-                          worktrees; group them into spaces if you want. Create a
-                          workspace to start.
-                        </p>
+              <RowSignalContext.Provider value={rowSignal}>
+                <SidebarMenu>
+                  {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
+                  {!error && workspaces === null && (
+                    <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
+                  )}
+                  {empty && (
+                    <SidebarMenuItem>
+                      <div className="flex flex-col gap-3 px-2 py-4">
+                        <div className="text-xs text-muted-foreground">
+                          <p className="font-medium text-foreground">Welcome to smind</p>
+                          <p className="mt-1">
+                            A workspace is an existing git repo. Tasks are its isolated
+                            worktrees; group them into spaces if you want. Create a
+                            workspace to start.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="w-fit"
+                          data-testid="sidebar-empty-new-workspace-button"
+                          onClick={() => setCrud({ kind: "workspace" })}
+                        >
+                          <Plus /> New workspace
+                        </Button>
                       </div>
-                      <Button
-                        size="sm"
-                        className="w-fit"
-                        data-testid="sidebar-empty-new-workspace-button"
-                        onClick={() => setCrud({ kind: "workspace" })}
-                      >
-                        <Plus /> New workspace
-                      </Button>
-                    </div>
-                  </SidebarMenuItem>
-                )}
-                {workspaces?.map((ws) => (
-                  <WorkspaceItem
-                    key={ws.ID}
-                    workspace={ws}
-                    expanded={expanded.has(ws.ID)}
-                    onToggleExpanded={() =>
-                      setExpanded((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(ws.ID)) next.delete(ws.ID);
-                        else next.add(ws.ID);
-                        return next;
-                      })
-                    }
-                    onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
-                    onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
-                    onArchiveTask={(task) => setCrud({ kind: "archive", task })}
-                    onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
-                    onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={onSelectTask}
-                    attention={attention}
-                    statusOverrides={statusOverrides}
-                  />
-                ))}
-              </SidebarMenu>
+                    </SidebarMenuItem>
+                  )}
+                  {workspaces?.map((ws) => (
+                    <WorkspaceItem
+                      key={ws.ID}
+                      workspace={ws}
+                      expanded={expanded.has(ws.ID)}
+                      onToggleExpanded={() =>
+                        setExpanded((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ws.ID)) next.delete(ws.ID);
+                          else next.add(ws.ID);
+                          return next;
+                        })
+                      }
+                      onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
+                      onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
+                      onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                    />
+                  ))}
+                </SidebarMenu>
+              </RowSignalContext.Provider>
             </ScrollArea>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -496,8 +538,6 @@ function WorkspaceItem({
   onDeleteSpace,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
 }: {
   workspace: WorkspaceWithTree;
   expanded: boolean;
@@ -509,14 +549,14 @@ function WorkspaceItem({
   onDeleteSpace: (space: SpaceWithTasks) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
 }) {
   // A workspace with no spaces (today's common/default case, and every
   // workspace that existed before Space wiring) renders exactly as it did
   // before this change: a flat list of tasks directly under the
   // workspace, no "Ungrouped" heading noise.
   const flat = workspace.spaces.length === 0;
+  const { attention, runStatus } = useRowSignal();
+  const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
 
   return (
     <SidebarMenuItem>
@@ -527,7 +567,8 @@ function WorkspaceItem({
       >
         <FolderGit2 />
         <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
+        <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+        <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
       </SidebarMenuButton>
       <SidebarMenuAction>
         <RowMenu
@@ -550,8 +591,6 @@ function WorkspaceItem({
               selectedTaskId={selectedTaskId}
               onSelectTask={onSelectTask}
               emptyText="No tasks"
-              attention={attention}
-              statusOverrides={statusOverrides}
               onArchiveTask={onArchiveTask}
             />
           ) : (
@@ -562,8 +601,6 @@ function WorkspaceItem({
                   space={space}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
-                  attention={attention}
-                  statusOverrides={statusOverrides}
                   onAddTask={onAddTask}
                   onArchiveTask={onArchiveTask}
                   onDeleteSpace={onDeleteSpace}
@@ -575,8 +612,6 @@ function WorkspaceItem({
                   tasks={workspace.ungroupedTasks}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
-                  attention={attention}
-                  statusOverrides={statusOverrides}
                   onArchiveTask={onArchiveTask}
                 />
               )}
@@ -592,8 +627,6 @@ function SpaceItem({
   space,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
   onAddTask,
   onArchiveTask,
   onDeleteSpace,
@@ -601,8 +634,6 @@ function SpaceItem({
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
@@ -613,8 +644,6 @@ function SpaceItem({
       tasks={space.tasks}
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
-      attention={attention}
-      statusOverrides={statusOverrides}
       onArchiveTask={onArchiveTask}
       testId="sidebar-space-row"
       spaceId={space.ID}
@@ -648,8 +677,6 @@ function SpaceLikeItem({
   tasks,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
   onArchiveTask,
   children,
   testId,
@@ -659,8 +686,6 @@ function SpaceLikeItem({
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
   onArchiveTask: (task: Task) => void;
   children?: ReactNode;
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
@@ -668,6 +693,8 @@ function SpaceLikeItem({
   spaceId?: number;
 }) {
   const [open, setOpen] = useState(true);
+  const { attention, runStatus } = useRowSignal();
+  const aggregate = aggregateStatus(tasks, attention, runStatus);
 
   return (
     <SidebarMenuSubItem>
@@ -678,7 +705,8 @@ function SpaceLikeItem({
       >
         <Layers className="size-3.5" />
         <span className="min-w-0 truncate">{title}</span>
-        <ChevronRight className={cn("ml-auto size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
+        <AggregateSlot status={aggregate} label={`${title} activity`} />
+        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
       </SidebarMenuSubButton>
       {children}
       {open && (
@@ -688,8 +716,6 @@ function SpaceLikeItem({
             selectedTaskId={selectedTaskId}
             onSelectTask={onSelectTask}
             emptyText="No tasks"
-            attention={attention}
-            statusOverrides={statusOverrides}
             onArchiveTask={onArchiveTask}
           />
         </SidebarMenuSub>
@@ -698,23 +724,38 @@ function SpaceLikeItem({
   );
 }
 
+/**
+ * The aggregate-activity dot a workspace or space row carries for the
+ * tasks beneath it (audit-paseo.md §5's workspace status bucket), so a
+ * collapsed container still says whether anything below it needs the
+ * user. Always in the DOM at a fixed width, dot or no dot, so a container
+ * row never reflows when something below it starts or finishes -- the
+ * same reserved-slot rule the task row's attention dot follows (Item 2's
+ * layout stability; refs/paseo/docs/design.md §11).
+ */
+function AggregateSlot({ status, label }: { status: StatusDotStatus | null; label: string }) {
+  return (
+    <span data-testid="row-aggregate-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+      {status && <StatusDot status={status} data-testid="row-aggregate" data-aggregate={status} aria-label={label} />}
+    </span>
+  );
+}
+
 function TaskRows({
   tasks,
   selectedTaskId,
   onSelectTask,
   emptyText,
-  attention,
-  statusOverrides,
   onArchiveTask,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
   onArchiveTask: (task: Task) => void;
 }) {
+  const { attention, statusOverrides, runStatus } = useRowSignal();
+
   if (tasks.length === 0) {
     return (
       <SidebarMenuSubItem>
@@ -726,8 +767,9 @@ function TaskRows({
   return (
     <>
       {tasks.map((task) => {
-        const reasons = attention?.get(task.ID);
-        const hasAttention = reasons !== undefined && reasons.size > 0;
+        const reason = primaryAttentionReason(attention?.get(task.ID));
+        const runState = runStatus.get(task.ID);
+        const runDot = runDotStatus(runState);
         return (
           <SidebarMenuSubItem key={task.ID}>
             <SidebarMenuSubButton
@@ -736,6 +778,25 @@ function TaskRows({
               data-testid="sidebar-task-row"
               data-task-id={task.ID}
             >
+              {/*
+               * Leading run-status dot -- the task's latest run, live off
+               * run.status (Item 12). In its own reserved slot for the
+               * same reason the attention slot below is reserved: a task's
+               * first run must not shove the title sideways. Task.Status
+               * is not the source: internal/workspace moves a task
+               * created -> running on its first run and never back, so it
+               * means "has ever run", not "is running now".
+               */}
+              <span data-testid="task-run-status-slot" className="flex w-2.5 shrink-0 items-center justify-center">
+                {runDot && (
+                  <StatusDot
+                    status={runDot}
+                    data-testid="task-run-status"
+                    data-run-status={runState}
+                    aria-label={`latest run ${runState}`}
+                  />
+                )}
+              </span>
               <span className="min-w-0 truncate">{task.Title}</span>
               {/*
                * The attention-dot slot is always in the DOM at a fixed
@@ -747,13 +808,22 @@ function TaskRows({
                * exactly the "changing state must not move the layout"
                * rule from refs/paseo/docs/design.md §11 that Item 2 calls
                * out for this row specifically.
+               *
+               * The dot's variant now names *why* the task wants
+               * attention (Item 12): error, permission and finished each
+               * get their own, where all three used to render the same
+               * warning dot. The reason is on data-attention-reason and
+               * in the accessible name, so neither a test nor a screen
+               * reader has to tell them apart by colour.
                */}
-              <span
-                data-testid="task-attention-slot"
-                className="ml-auto flex w-2.5 shrink-0 items-center justify-center"
-              >
-                {hasAttention && (
-                  <StatusDot status="warning" data-testid="task-attention" aria-label="task needs attention" />
+              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+                {reason && (
+                  <StatusDot
+                    status={attentionDotStatus(reason)}
+                    data-testid="task-attention"
+                    data-attention-reason={reason}
+                    aria-label={`task needs attention: ${ATTENTION_LABEL[reason]}`}
+                  />
                 )}
               </span>
               <span data-testid="sidebar-task-status" className="shrink-0 text-[10px] uppercase text-muted-foreground">
