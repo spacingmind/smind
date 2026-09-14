@@ -23,6 +23,7 @@ import { useTaskTabs } from "@/hooks/use-task-tabs";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
+import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import type { ThemePreference } from "@/lib/theme";
 import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
@@ -80,6 +81,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
   const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
+  // Set once AppSidebar's first workspace/space/task fetch resolves --
+  // the signal that "the tree came back empty/without this task" means
+  // the task is really gone, not merely not-loaded-yet. Without it, a
+  // deep link to an archived task would wait on `pendingRoute` forever
+  // instead of degrading to the empty state.
+  const [treeLoaded, setTreeLoaded] = useState(false);
+  // The route this mount started at, consumed (and cleared) once its
+  // target task is found in `allTasks` or the tree finishes loading
+  // without it -- see the restore effect below.
+  const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
+    typeof window === "undefined" ? null : parseRoute(window.location.hash),
+  );
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -150,6 +163,63 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   }
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+
+  // --- Routing (Item 3) ------------------------------------------------
+  //
+  // Hash routing: the URL is a *mirror* of selection state, not its
+  // source. Selecting a task or switching tabs writes the hash; a
+  // hashchange (back/forward, a hand-typed URL, or our own write) feeds
+  // back through `pendingRoute`, which the restore effect below resolves
+  // against whatever the tree currently knows. Both directions go through
+  // the same path, so there's exactly one place that turns a route into a
+  // selection.
+
+  useEffect(() => {
+    function onHashChange() {
+      setPendingRoute(parseRoute(window.location.hash));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingRoute) return;
+    console.log("DEBUG restore effect", JSON.stringify(pendingRoute));
+    const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
+    if (match) {
+      selectTask(match);
+      if (pendingRoute.tab.kind === "file") {
+        openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
+      } else if (pendingRoute.tab.kind !== "task") {
+        activate(match.ID, `${match.ID}:${pendingRoute.tab.kind}`);
+      }
+      setPendingRoute(null);
+    } else if (treeLoaded) {
+      // The tree has answered and this task isn't in it (archived,
+      // deleted, or never existed) -- degrade to the empty state rather
+      // than waiting on a task that will never arrive.
+      setPendingRoute(null);
+    }
+  }, [pendingRoute, allTasks, treeLoaded, selectTask, openTab, activate]);
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    const activeEntry = taskState?.tabs.find((t) => t.key === taskState.activeKey);
+    const tab: Route["tab"] =
+      activeEntry?.kind === "file"
+        ? { kind: "file", path: filePathFromKey(activeEntry) }
+        : { kind: (activeEntry?.kind ?? "task") as Exclude<TabKind, "file"> };
+    const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
+    // Comparing against the live hash (not a ref of "what we last wrote")
+    // is what keeps this idempotent under the hashchange listener above:
+    // a route restore that lands on the same selection the URL already
+    // named writes nothing, so there's no write -> hashchange -> write
+    // loop even though both effects run on every relevant state change.
+    if (window.location.hash !== nextHash) {
+      console.log("DEBUG hash write", window.location.hash, "->", nextHash);
+      window.location.hash = nextHash;
+    }
+  }, [selectedTask, taskState?.activeKey, taskState?.tabs]);
 
   // --- Keyboard actions the shell itself performs ---------------------
   //
@@ -267,7 +337,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             attention={attention}
             events={events}
             onTasksChange={setAllTasks}
-            onWorkspacesChange={setAllWorkspaces}
+            onWorkspacesChange={(workspaces) => {
+              setAllWorkspaces(workspaces);
+              setTreeLoaded(true);
+            }}
           />
         </ResizablePanel>
         {/*

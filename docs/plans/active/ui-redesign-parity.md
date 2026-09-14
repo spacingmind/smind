@@ -772,7 +772,7 @@ Phase 2 (implementation) — not started:
 
 - [x] Item 1: design tokens, dark mode, theme switching *(Track A)*
 - [x] Item 2: shared primitives + `docs/design.md` *(Track A)*
-- [ ] Item 3: routing + persisted UI state *(Track A)*
+- [x] Item 3: routing + persisted UI state *(Track A)*
 - [x] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [x] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
@@ -1182,3 +1182,69 @@ schema is Item 8/9, Track B, separate PR):
   shortcut fires underneath it), which would otherwise make `Cmd+K` a
   one-way door. It re-checks that single binding through
   `matchCombo`, so a rebound palette shortcut still toggles.
+
+**Item 3 — routing and persisted UI state:**
+
+- `lib/route.ts` (`route.test.ts`, 7 scenarios) is the pure parse/format
+  half: `#/workspace/<id>/task/<id>/<tabKind>[/<path>]`, hash routing per
+  the plan (the daemon serves one embedded SPA — no server-side route
+  table). `lib/storage.ts` (`storage.test.ts`) is the one validated
+  read/write mechanism the criterion asks for; `use-sidebar-width.ts` was
+  migrated onto it (its own 6 tests unchanged, since a plain number
+  round-trips through `JSON.parse` the same as `Number()` did).
+- **A URL identifies workspace + task + active tab; reload restores all
+  three; back/forward work** — `App.test.tsx`'s "App routing" describe:
+  mounting at a `.../diff` URL selects that task and activates Diff
+  (`hook-level "restore" test`); selecting a task or switching tabs
+  writes the hash (asserted directly); a file tab's URL round-trips its
+  path; a `hashchange` to an earlier URL (simulating back) re-selects
+  that task. `App.tsx`'s restore/sync effects are the two directions of
+  one mechanism: state → hash (write, skipped when already equal — the
+  idempotence that stops a write→hashchange→write loop) and
+  hash → `pendingRoute` → state (consumed once the target task is found
+  in the tree or the tree finishes loading without it).
+- **Per-task open tabs persist across reload** — `use-task-tabs.ts` gains
+  a storage layer (`use-task-tabs.test.ts`, 7 scenarios): open/close/
+  activate all persist, two tasks stay independent, and a corrupted entry
+  (an `activeKey` naming a tab that isn't in its own list, or a tab
+  claiming the wrong `taskId`) is dropped rather than rendered broken.
+  `App.test.tsx`'s "opening two file tabs, remounting the app..." proves
+  it end to end through a real unmount/remount.
+- **Restoring a task that no longer exists degrades to the empty state
+  without throwing** — `App.test.tsx` asserts both: `render()` itself
+  doesn't throw, and `app-empty-state` renders once `task.list` resolves
+  without the named id. This needed a "has the tree actually loaded, or
+  is it just empty so far" signal (`treeLoaded`, set from
+  `AppSidebar`'s `onWorkspacesChange`) — without it, a deep link to an
+  archived task would wait on `pendingRoute` forever instead of
+  degrading.
+- **Sidebar width (already persisted) ... use the same storage
+  mechanism** — done (see above). Pane sizes will follow once Item 6
+  introduces them.
+- `task test` green (39 files / 367 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+
+*Where the plan was ambiguous, and what was decided:*
+
+- **The URL carries `workspaceId` but restoration only ever keys on
+  `taskId`.** Task ids are globally unique (one autoincrement sequence
+  across all workspaces), so there's no real "which workspace" ambiguity
+  to resolve; `workspaceId` is carried for a legible URL and a future
+  `smind task open` deep link, not because restoration needs it. A
+  mismatched workspace segment in a hand-edited URL is silently ignored
+  rather than treated as an error.
+- **Persisted task-tab state is capped at 50 tasks**, evicting the
+  oldest-inserted entries once exceeded. Not a true LRU (that would need
+  every *read*, not just every write, to reorder) — an approximation
+  against unbounded `localStorage` growth over a long-lived install,
+  which the acceptance criteria don't mention but which a real reviewer
+  would flag on an unbounded per-task persisted map.
+- **Two test-writing pitfalls surfaced and got fixed, not worked around:**
+  this file's tests share one jsdom `window` per file, so
+  `window.location.hash` and `localStorage` now leak across tests reusing
+  the same `TASK_A`/`TASK_B` ids unless reset — both are now cleared in
+  the top-level `afterEach`. Separately, Radix's `TabsTrigger` activates
+  on `mousedown` or `onFocus` (automatic mode), not `onClick` — a test
+  reselecting an already-focused tab via `.focus()` a second time is a
+  no-op (no refocus, no `onFocus` refire); `fireEvent.mouseDown` is what
+  a test needs when re-clicking a trigger that might already have focus.

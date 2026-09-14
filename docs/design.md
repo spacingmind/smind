@@ -1,10 +1,9 @@
 # smind web UI: design rules
 
 This is the living reference for `web/packages/ui`'s token vocabulary,
-density, primitives, copy rules, and the keyboard/palette registration
-APIs — written from what actually landed
-(`docs/plans/active/ui-redesign-parity.md`'s Items 1, 2, 4 and 5), not
-aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
+density, primitives, copy rules, the keyboard/palette registration APIs,
+and routing/persistence — written from what actually landed
+(`docs/plans/active/ui-redesign-parity.md`'s Items 1-5), not aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
 two overlap (Paseo is the parity plan's north star), scoped down to what
 smind's surface actually needs.
 
@@ -276,7 +275,26 @@ useCommands("my-surface:files", 3, commands);   // (sourceId, groupRank, command
 A surface registers the commands for the dialogs *it* owns —
 `app-sidebar.tsx` registers New workspace / Open accounts, not `App.tsx`.
 
-## 9. Decisions
+## 9. Persisting a UI preference
+
+`lib/storage.ts` is the one mechanism: `readStored(key, fallback, validate)`
+/ `writeStored(key, value)`, both `localStorage`-backed, both unable to
+throw. `readStored` takes a type guard rather than a schema library — check
+the parts you actually read — and falls back on anything that doesn't
+validate: absent, malformed JSON, or well-formed JSON of the wrong shape
+(the normal case after a deploy changes a stored shape, not an exotic one).
+Every key lives in `STORAGE_KEYS`, namespaced `smind:`, so a collision is
+visible in one place. `use-sidebar-width.ts` and `use-task-tabs.ts` are the
+two callers; a pane-size preference (Item 6) is the next.
+
+Hash routing (`lib/route.ts`) is the other piece of Item 3: the URL is a
+*mirror* of selection state (`App.tsx`'s restore/sync effects), not its
+source of truth — selecting a task or switching a tab writes the hash, and
+a `hashchange` (back/forward, a hand-typed URL) feeds back through the
+same restore path. See `App.tsx`'s routing section for the two-effect
+shape and why it's loop-safe.
+
+## 10. Decisions
 
 - **`surface-0..3` alias the existing static scale rather than
   introducing a second independent set of hex values.** The existing
