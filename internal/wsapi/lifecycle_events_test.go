@@ -351,3 +351,118 @@ func TestEvents_LifecycleTopicsAreOptIn(t *testing.T) {
 	}
 	ec.expectNoEvent(300 * time.Millisecond)
 }
+
+// TestEvents_TaskDeletedSpaceIDIsNullNotOmitted pins the delete payload's
+// wire shape for an ungrouped task: ADR 0009 documents
+// {"id", "workspaceId", "spaceId": 2 | null}, and store.Task.SpaceID
+// (carried by task.created/task.archived for the same row) marshals as an
+// explicit null. If task.deleted omits the key instead, a client comparing
+// the event's spaceId against a task it already holds compares undefined
+// against null and never prunes an ungrouped task. Asserted against the raw
+// payload map rather than decodePayload, which cannot tell null from absent.
+func TestEvents_TaskDeletedSpaceIDIsNullNotOmitted(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+	ec.subscribe("sub", TopicTaskDeleted)
+
+	task := newTestTask(t, wm, "")
+	if _, err := wm.DeleteTask(task.ID); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	raw, ok := ev.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("task.deleted payload = %T, want a JSON object", ev.Payload)
+	}
+	got, present := raw["spaceId"]
+	if !present {
+		t.Fatalf("task.deleted payload = %v, want an explicit \"spaceId\" key (null for an ungrouped task)", raw)
+	}
+	if got != nil {
+		t.Fatalf("task.deleted spaceId = %v, want null for an ungrouped task", got)
+	}
+}
+
+// TestEvents_TaskDeletedCarriesSpaceIDForGroupedTask is the other half of
+// the delete payload's scope contract: a task inside a space must report
+// that space, since that -- not the workspace -- is the subtree the sidebar
+// prunes the row from.
+func TestEvents_TaskDeletedCarriesSpaceIDForGroupedTask(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+
+	task := newTestTask(t, wm, "")
+	sp, err := wm.CreateSpace(task.WorkspaceID, "S", "")
+	if err != nil {
+		t.Fatalf("CreateSpace() error = %v", err)
+	}
+	grouped, err := wm.CreateTask(task.WorkspaceID, &sp.ID, "Grouped")
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	ec.subscribe("sub", TopicTaskDeleted)
+
+	if _, err := wm.DeleteTask(grouped.ID); err != nil {
+		t.Fatalf("DeleteTask() error = %v", err)
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	var p taskDeletedPayload
+	decodePayload(t, ev, &p)
+	if p.ID != grouped.ID || p.WorkspaceID != task.WorkspaceID || p.SpaceID == nil || *p.SpaceID != sp.ID {
+		t.Fatalf("task.deleted payload = %+v (spaceId %v), want id %d workspaceId %d spaceId %d",
+			p, p.SpaceID, grouped.ID, task.WorkspaceID, sp.ID)
+	}
+	ec.expectNoEvent(300 * time.Millisecond)
+}
+
+// TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails pins the one
+// mutation path whose notification is not on the method's success return:
+// CreateWorkspace publishes as soon as the workspace row commits, before
+// the AddWorkspaceAccount loop that can still fail. That is deliberate --
+// the row is left in place on that failure (see CreateWorkspace's doc
+// comment), so the event still describes state workspace.list agrees with,
+// and suppressing it would hide a real workspace from every other client
+// until a manual reload. Exactly one event either way.
+func TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+	ec.subscribe("sub", TopicWorkspaceCreated)
+
+	repo := newTestRepo(t)
+	// Account id 424242 does not exist: AddWorkspaceAccount trips the
+	// foreign key and CreateWorkspace returns an error after the workspace
+	// row is already committed.
+	if _, err := wm.CreateWorkspace(repo, "W", "hard", []int64{424242}); err == nil {
+		t.Fatal("CreateWorkspace() with an unknown account id = nil error, want a foreign-key failure")
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	if ev.Topic != TopicWorkspaceCreated {
+		t.Fatalf("event topic = %q, want %q", ev.Topic, TopicWorkspaceCreated)
+	}
+	var p workspaceCreatedPayload
+	decodePayload(t, ev, &p)
+	if p.Workspace.Path != repo {
+		t.Fatalf("workspace.created payload path = %q, want %q", p.Workspace.Path, repo)
+	}
+	// The committed row the event describes is the one workspace.list returns.
+	list, err := wm.ListWorkspaces()
+	if err != nil {
+		t.Fatalf("ListWorkspaces() error = %v", err)
+	}
+	if len(list) != 1 || list[0].ID != p.Workspace.ID {
+		t.Fatalf("ListWorkspaces() = %+v, want exactly the workspace the event announced (id %d)", list, p.Workspace.ID)
+	}
+	ec.expectNoEvent(300 * time.Millisecond)
+}

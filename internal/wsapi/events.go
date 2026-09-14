@@ -132,11 +132,17 @@ type taskArchivedPayload struct {
 }
 
 // taskDeletedPayload is the payload of task.deleted events:
-// {id, workspaceId, spaceId}. SpaceID is omitted for an ungrouped task.
+// {id, workspaceId, spaceId}. SpaceID is null (present, not omitted) for
+// an ungrouped task: that is what ADR 0009 documents as the wire shape,
+// and it matches store.Task.SpaceID, which has no `json:` tag and so also
+// marshals as an explicit null. Omitting the key instead would hand a
+// client `undefined` where the task.created/task.archived payload for the
+// same task gives `null`, so the obvious `ev.spaceId === task.SpaceID`
+// prune check would silently miss every ungrouped task.
 type taskDeletedPayload struct {
 	ID          int64  `json:"id"`
 	WorkspaceID int64  `json:"workspaceId"`
-	SpaceID     *int64 `json:"spaceId,omitempty"`
+	SpaceID     *int64 `json:"spaceId"`
 }
 
 // Event is what the bus's publish sites hand it: a topic plus an

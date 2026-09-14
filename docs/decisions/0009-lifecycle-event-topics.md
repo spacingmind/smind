@@ -87,7 +87,11 @@ task.deleted       {"id": 3, "workspaceId": 1, "spaceId": 2 | null}
 Every payload is a JSON object with named fields rather than a bare
 entity, so the deleted variants are the same *kind* of thing as the rest
 (an object you read fields off) and so a payload can gain a field later
-without changing its type.
+without changing its type. `task.deleted`'s `spaceId` is always *present*
+— `null` for an ungrouped task, never omitted — matching how the same
+task's `store.Task.SpaceID` marshals in `task.created`/`task.archived`, so
+a client can compare the two directly instead of having to normalise
+`undefined` and `null` to each other.
 
 Alternative considered: **id + change kind, client refetches**
 (`{"id": 3, "kind": "created"}`). Smaller frames and no risk of a stale
@@ -133,7 +137,17 @@ lifecycle events:
 
 - **Publish happens after the store write commits**, from the goroutine
   that performed it, so a delivered event always describes state a
-  subsequent RPC would agree with.
+  subsequent RPC would agree with. Note this is "after the write", not
+  "only on the method's success return": `CreateWorkspace` publishes
+  `workspace.created` as soon as the workspace row commits, before the
+  `AddWorkspaceAccount` loop that can still fail the call. That loop's
+  failure deliberately leaves the workspace row in place (see
+  `CreateWorkspace`'s doc comment), so the event still describes a row
+  `workspace.list` returns; suppressing it would hide a real workspace
+  from every other client until a manual reload, which is exactly the
+  staleness this ADR exists to remove. The client that made the failing
+  call sees an error *and* the event, and its upsert-by-`ID` rule (below)
+  makes that consistent.
 - **An event is not ordered against the RPC response that caused it.**
   The bus hands the event to a per-connection pump goroutine while the
   handler is still returning, so the connection that issued

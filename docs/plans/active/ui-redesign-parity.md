@@ -830,6 +830,18 @@ old task-status-only `SetTaskNotifier`).
   the descendant topics too and assert silence after the one root event.
 - **Ordering**: `TestEvents_TaskArchivedPrecedesTaskStatus` pins
   lifecycle-before-status on one connection subscribed to both.
+- **Delete payload scope**: `TestEvents_TaskDeletedSpaceIDIsNullNotOmitted`
+  asserts the raw payload always carries a `spaceId` key (null, not
+  omitted, for an ungrouped task -- `decodePayload` cannot tell the two
+  apart, so this one inspects the payload map directly), and
+  `TestEvents_TaskDeletedCarriesSpaceIDForGroupedTask` asserts a task
+  inside a space reports that space, which is the subtree the sidebar
+  actually prunes from.
+- **Emit-vs-error edge**: `TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails`
+  pins the one path that publishes before its method's success return --
+  `CreateWorkspace` emits once the workspace row commits, before the
+  `AddWorkspaceAccount` loop that can still fail, because that failure
+  leaves the row in place (ADR 0009's "Ordering and delivery" note).
 - **Non-regression**: `TestEvents_LifecycleTopicsAreOptIn` — a
   `task.status`-only subscriber sees nothing from a workspace create,
   confirming the change is additive; the full pre-existing
