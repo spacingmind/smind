@@ -86,7 +86,7 @@ export function useTaskStats(
     let cancelled = false;
     const isStale = () => cancelled;
 
-    const off = events.subscribe("run.status", (payload) => {
+    const offRunStatus = events.subscribe("run.status", (payload) => {
       if (typeof payload !== "object" || payload === null) return;
       const p = payload as { taskId?: unknown; status?: unknown };
       if (typeof p.taskId !== "number" || typeof p.status !== "string") return;
@@ -98,11 +98,21 @@ export function useTaskStats(
       void fetchWorkspace(client, workspaceId, isStale);
     });
 
+    // ADR 0005's queue is per-connection: a drop can just as well have
+    // swallowed the run.status that would have triggered the refetch
+    // above, leaving a stat stale with nothing left to correct it short
+    // of a reconnect. Re-fetch every workspace this hook currently knows
+    // about, same as the initial mount does.
+    const offDropped = events.subscribe("event.dropped", () => {
+      for (const workspaceId of workspaceIds) void fetchWorkspace(client, workspaceId, isStale);
+    });
+
     return () => {
       cancelled = true;
-      off();
+      offRunStatus();
+      offDropped();
     };
-  }, [client, events, fetchWorkspace]);
+  }, [client, events, fetchWorkspace, workspaceIds]);
 
   return stats;
 }

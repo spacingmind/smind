@@ -128,6 +128,60 @@ export function useTaskAttention(
     });
   }, []);
 
+  /**
+   * The run.list + run.logs resync pass: replaces the ref-held run
+   * bookkeeping wholesale from what the daemon currently reports, same as
+   * a fresh mount. Called on client change (a genuine reconnect) and on
+   * `event.dropped` (ADR 0005: the queue is per-connection, so a drop can
+   * just as well have swallowed a run.status or permission.pending this
+   * hook would otherwise never correct) -- both are "this connection's
+   * live view may have missed something, re-derive truth from the RPCs".
+   */
+  const resync = useCallback(
+    (activeClient: WsClientLike, isStale: () => boolean) => {
+      activeClient
+        .call<RunSummary[]>("run.list")
+        .then(async (rawRuns) => {
+          if (isStale()) return;
+          // Newest-first from the daemon, so index 0 is the most recent:
+          // order 0, -1, -2... leaves every later live event above it.
+          const runs: RunLike[] = (rawRuns ?? []).map((r, index) => ({
+            ID: r.ID,
+            TaskID: r.TaskID,
+            Status: r.Status,
+            order: -index,
+          }));
+          runsRef.current = runs;
+          orderRef.current = 0;
+
+          const pending = new Set<number>();
+          await Promise.all(
+            runs
+              .filter((r) => r.Status === "running")
+              .map((r) =>
+                activeClient
+                  .call<RunLogsResult>("run.logs", { runId: r.ID })
+                  .then((logs) => {
+                    if (!isStale() && hasUnresolvedPermission(logs.events)) pending.add(r.TaskID);
+                  })
+                  .catch(() => {
+                    // Best-effort detection -- a failed run.logs just means
+                    // no permission badge from this pass, not an error state.
+                  }),
+              ),
+          );
+          if (isStale()) return;
+          pendingPermissionTasksRef.current = pending;
+          recompute();
+        })
+        .catch(() => {
+          // No run data -> no badges; the next resync (reconnect or
+          // event.dropped) tries again.
+        });
+    },
+    [recompute],
+  );
+
   useEffect(() => {
     if (!client) {
       runsRef.current = null;
@@ -138,50 +192,22 @@ export function useTaskAttention(
     }
 
     let cancelled = false;
-
-    client
-      .call<RunSummary[]>("run.list")
-      .then(async (rawRuns) => {
-        if (cancelled) return;
-        // Newest-first from the daemon, so index 0 is the most recent:
-        // order 0, -1, -2... leaves every later live event above it.
-        const runs: RunLike[] = (rawRuns ?? []).map((r, index) => ({
-          ID: r.ID,
-          TaskID: r.TaskID,
-          Status: r.Status,
-          order: -index,
-        }));
-        runsRef.current = runs;
-        orderRef.current = 0;
-
-        const pending = new Set<number>();
-        await Promise.all(
-          runs
-            .filter((r) => r.Status === "running")
-            .map((r) =>
-              client
-                .call<RunLogsResult>("run.logs", { runId: r.ID })
-                .then((logs) => {
-                  if (!cancelled && hasUnresolvedPermission(logs.events)) pending.add(r.TaskID);
-                })
-                .catch(() => {
-                  // Best-effort detection -- a failed run.logs just means
-                  // no permission badge from this pass, not an error state.
-                }),
-            ),
-        );
-        if (cancelled) return;
-        pendingPermissionTasksRef.current = pending;
-        recompute();
-      })
-      .catch(() => {
-        // No run data -> no badges; a reconnect re-runs this effect.
-      });
+    resync(client, () => cancelled);
 
     return () => {
       cancelled = true;
     };
-  }, [client, recompute]);
+  }, [client, resync]);
+
+  useEffect(() => {
+    if (!client || !events) return;
+    let cancelled = false;
+    const off = events.subscribe("event.dropped", () => resync(client, () => cancelled));
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, [client, events, resync]);
 
   // Live path: badge (or clear) as run.status / permission.pending
   // notifications arrive -- no refetch, the notification IS the state
