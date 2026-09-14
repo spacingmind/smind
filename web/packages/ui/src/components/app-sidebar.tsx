@@ -268,7 +268,7 @@ export function AppSidebar({
   // Registered here rather than in App.tsx on purpose: the surface that
   // owns a dialog is the one that can open it, and `useCommands` is the
   // API that lets it contribute without either file importing the other
-  // (docs/design.md §9).
+  // (docs/design.md §8).
   const paletteCommands = useMemo<Command[]>(() => {
     const commands: Command[] = [
       {

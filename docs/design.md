@@ -1,9 +1,10 @@
 # smind web UI: design rules
 
 This is the living reference for `web/packages/ui`'s token vocabulary,
-density, primitives, copy rules and keyboard-action API — written from
-what actually landed (`docs/plans/active/ui-redesign-parity.md`'s Items 1,
-2 and 4), not aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
+density, primitives, copy rules, and the keyboard/palette registration
+APIs — written from what actually landed
+(`docs/plans/active/ui-redesign-parity.md`'s Items 1, 2, 4 and 5), not
+aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
 two overlap (Paseo is the parity plan's north star), scoped down to what
 smind's surface actually needs.
 
