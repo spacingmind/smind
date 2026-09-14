@@ -66,6 +66,16 @@ var safeCommandPrefixes = []string{
 	"task test ",
 	"task lint ",
 	"task build ",
+	// Local git staging/committing only -- no git push, fetch, reset,
+	// checkout, rebase or anything that moves refs on a remote or
+	// destroys work. With verification already unattended (the entries
+	// above), the commit step was the only thing keeping a headless
+	// dogfood run from completing end to end; a local commit is
+	// reversible (git reset --soft) and touches nothing outside the
+	// task's own throwaway worktree branch. Approved by the user
+	// 2026-09-14; the decider layer and SafeBashRules both pick this up.
+	"git add ",
+	"git commit ",
 }
 
 // AllowlistedCommand reports whether command is safe to auto-allow under
