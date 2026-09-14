@@ -161,6 +161,50 @@ describe("TimelineRow memoization", () => {
   });
 });
 
+describe("RunTimeline memoization", () => {
+  /** Same render-probe technique as TimelineRow's memo test above, one level up: RunTimeline reads `run.prompt` unconditionally while rendering, so counting getter hits counts renders exactly. */
+  function probeRun(id: string, items: TimelineItem[]): { run: RunEntry; renders: () => number } {
+    let reads = 0;
+    const runEntry = {
+      id,
+      provider: "claude-native" as const,
+      status: "done" as const,
+      startedAt: "2024-01-01T00:00:00Z",
+      get prompt() {
+        reads += 1;
+        return "do the thing";
+      },
+      items,
+    };
+    return { run: runEntry as RunEntry, renders: () => reads };
+  }
+
+  it("does not recompute an untouched run's timeline when a sibling run's items change", () => {
+    const other = probeRun("run-other", buildTimeline([{ type: "chunk", text: "unrelated" }]));
+    const active = probeRun("run-active", buildTimeline([{ type: "chunk", text: "a" }]));
+
+    function List({ runs }: { runs: RunEntry[] }) {
+      return (
+        <ul>
+          {runs.map((r) => (
+            <RunTimeline key={r.id} run={r} />
+          ))}
+        </ul>
+      );
+    }
+
+    const { rerender } = render(<List runs={[other.run, active.run]} />);
+    expect(other.renders()).toBe(1);
+
+    // Simulate use-run-timeline.ts's appendEvent: only the touched run gets
+    // a new object, exactly as `{ ...r, items }` does there.
+    const updatedActive = { ...active.run, items: buildTimeline([{ type: "chunk", text: "ab" }]) };
+    rerender(<List runs={[other.run, updatedActive]} />);
+
+    expect(other.renders()).toBe(1); // still 1 -- RunTimeline's own memo bailed
+  });
+});
+
 describe("useAutoFollow", () => {
   function Harness({ revision }: { revision: number }) {
     const follow = useAutoFollow<HTMLDivElement>(revision);

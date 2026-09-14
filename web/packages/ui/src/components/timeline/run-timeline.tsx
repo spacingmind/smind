@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
@@ -22,8 +22,16 @@ const RUN_STATUS_DOT: Record<RunStatusValue, StatusDotStatus> = {
  * transcript, and a footer with elapsed time and a copy action
  * (`audit-paseo.md` §2). Replaces the single `<pre>` of collected text
  * the run card used to be.
+ *
+ * Memoized on `run`'s object identity: use-run-timeline.ts's `appendEvent`
+ * only replaces the touched run's object in the `runs` array (every other
+ * run keeps its prior reference), so without this memo a chunk landing in
+ * one run would re-run `groupTimeline` -- an O(items) pass -- for every
+ * other run in the task's history on every single chunk, not the O(1)
+ * per-chunk cost TimelineRow's own memo (see timeline-row.tsx) is supposed
+ * to buy the transcript as a whole.
  */
-export function RunTimeline({
+export const RunTimeline = memo(function RunTimeline({
   run,
   detailLevel = "detailed",
   worktreePath,
@@ -75,7 +83,7 @@ export function RunTimeline({
       </div>
     </li>
   );
-}
+});
 
 /**
  * Copies the whole turn as plain text. Clipboard access can be absent
