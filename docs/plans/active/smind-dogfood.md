@@ -43,11 +43,11 @@ commits that came out of the session.
 
 ## Progress
 
-- [ ] Real daemon + account running (user's ~/.spacingmind)
-- [ ] Session 1 (real task, committed via smind UI)
-- [ ] Session 2
-- [ ] Session 3
-- [ ] Session 4
+- [x] Real daemon + account running (user's ~/.spacingmind)
+- [x] Session 1 (real task, committed via smind UI)
+- [x] Session 2
+- [x] Session 3
+- [x] Session 4
 - [ ] Session 5 — gate reached
 
 ## Validation
@@ -90,3 +90,47 @@ gaps hit.)
     mode that defers Bash decisions to the decider (or an explicit
     pre-approved command set at spawn time) — next session's first
     candidate.
+
+- **Session 4** (2026-09-14) — closing the harness-level gate found in
+  Session 3, plus GLM's ACP file-edit gap:
+  - Root-caused Session 3's harness-gate gap: the Claude Code CLI only
+    routes Bash decisions through smind's `can_use_tool` decider when
+    the command isn't already pre-approved at spawn time via
+    `--allowedTools`. Fixed by deriving `Bash(<prefix>:*)` rules from the
+    same `safeCommandPrefixes` the decider already trusts and passing
+    them to `RunPrompt` when `approvalPolicy == auto-safe` (#107).
+    Validated live: task 13 (a real README doc task, dispatched
+    `claude-native` + `auto-safe`) ran `task test` (full Go suite + 178
+    UI tests) and `task lint` with **zero** approval prompts, then wrote
+    and landed its own change (#108) — first fully unattended
+    edit-verify loop.
+  - Extended auto-safe to local `git add`/`git commit` (not push) so the
+    commit step doesn't need a human either (#109) — user confirmed this
+    was in scope ("có" when asked).
+  - Re-ran the GLM validation task (idle since Session 3's 3 dead runs)
+    now that a Z.ai API key was configured. GLM's ACP session now
+    connects, authenticates, and streams turns correctly, but every file
+    write timed out to auto-deny: `acpDeciderAdapter` only auto-allows
+    edit/move/delete tool calls when the request carries structured
+    `kind`+`locations`, and glm-acp-agent's Write/Edit tool calls carry
+    neither — only a free-text `"Write file: <path>"` title. Fixed with
+    a title-parsing fallback, used only when `kind` is absent entirely,
+    still requiring an absolute path inside the task's worktree (#111,
+    then a bug in the first cut's test file introduced by a mid-edit
+    interruption was fixed in #115).
+  - Live re-validation of #111/#115 together was attempted but blocked
+    by a Z.ai-side `429 Usage limit reached for 5 hour` on the GLM
+    account (resets 2026-09-14 17:24:54) — external quota, not a smind
+    bug. The fix itself is covered by unit tests
+    (`TestAutoAllowACPFileEdit`, including the title-fallback cases) but
+    still needs one live GLM run to confirm end-to-end once quota
+    resets.
+  - **Gaps carried forward**: (1) live GLM dispatch is still unproven
+    end-to-end (auth + protocol work, but no run has gone
+    prompt-to-commit yet — first Session 3's `max_turn_requests`/
+    `max_tokens` deaths, now a provider-side rate limit); (2) the
+    two-vocabulary provider id issue (taskrunner ids like
+    `claude-native` vs. accounts ids like `anthropic`) noted while
+    merging #101/#102 is still unresolved; (3) xai/antigravity still
+    can't be added through the accounts dialog; (4) no per-workspace
+    base-branch config yet (every PR path assumes `develop`).
