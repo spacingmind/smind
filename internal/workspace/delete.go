@@ -72,6 +72,9 @@ func (m *Manager) DeleteTask(id int64) (DeleteSummary, error) {
 	if err := m.store.DeleteTask(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete task %d: %w", id, err)
 	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskDeleted(t.ID, t.WorkspaceID, t.SpaceID)
+	}
 	return DeleteSummary{TasksRemoved: 1}, nil
 }
 
@@ -82,7 +85,8 @@ func (m *Manager) DeleteTask(id int64) (DeleteSummary, error) {
 // git cleanup has succeeded. A checkpoint failure on any task aborts before
 // the store is touched at all, leaving the database exactly as it was.
 func (m *Manager) DeleteSpace(id int64) (DeleteSummary, error) {
-	if _, err := m.store.GetSpace(id); err != nil {
+	sp, err := m.store.GetSpace(id)
+	if err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete space: %w", err)
 	}
 	tasks, err := m.store.ListTasksBySpace(id)
@@ -97,6 +101,12 @@ func (m *Manager) DeleteSpace(id int64) (DeleteSummary, error) {
 
 	if err := m.store.DeleteSpace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete space %d: %w", id, err)
+	}
+	// Only the root space.deleted event is published, not one per cascaded
+	// task -- see ADR 0009 ("cascades emit only the root event"): a client
+	// pruning the space subtree needs nothing more.
+	if n := m.getNotifier(); n != nil {
+		n.NotifySpaceDeleted(sp.ID, sp.WorkspaceID)
 	}
 	return DeleteSummary{TasksRemoved: len(tasks), SpacesRemoved: 1}, nil
 }
@@ -140,6 +150,11 @@ func (m *Manager) DeleteWorkspace(id int64) (DeleteSummary, error) {
 
 	if err := m.store.DeleteWorkspace(id); err != nil {
 		return DeleteSummary{}, fmt.Errorf("delete workspace %d: %w", id, err)
+	}
+	// Only the root workspace.deleted event is published, not one per
+	// cascaded space/task -- see ADR 0009.
+	if n := m.getNotifier(); n != nil {
+		n.NotifyWorkspaceDeleted(id)
 	}
 	return DeleteSummary{TasksRemoved: len(tasks), SpacesRemoved: len(spaces)}, nil
 }
