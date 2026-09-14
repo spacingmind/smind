@@ -30,7 +30,8 @@ func TestAutoAllowACPFileEdit(t *testing.T) {
 		{"sibling directory sharing the prefix", `{"kind":"edit","locations":[{"path":"/wt/task-10/c.go"}]}`, false},
 		{"one of several locations outside", `{"kind":"edit","locations":[{"path":"/wt/task-1/a.go"},{"path":"/elsewhere"}]}`, false},
 		{"parent traversal", `{"kind":"edit","locations":[{"path":"/wt/task-1/../../etc/passwd"}]}`, false},
-		{"relative path", `{"kind":"edit","locations":[{"path":"a.go"}]}`, false},
+		{"relative location path resolves inside the worktree", `{"kind":"edit","locations":[{"path":"a.go"}]}`, true},
+		{"relative location traversal escapes the worktree", `{"kind":"edit","locations":[{"path":"../../etc/passwd"}]}`, false},
 
 		{"execute kind is not auto-allowed", `{"kind":"execute","locations":[{"path":"/wt/task-1"}]}`, false},
 		{"read kind is not covered", `{"kind":"read","locations":[{"path":"/wt/task-1/a.go"}]}`, false},

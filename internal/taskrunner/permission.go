@@ -125,17 +125,18 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 //
 // The path is identified two ways, because real agents populate
 // ToolCallUpdate inconsistently: the schema's structured fields first
-// (kind edit/move/delete + locations[].path, which must be absolute --
-// this package has no basis to resolve a relative one), then -- only
-// when the agent filled in neither -- a conservative title fallback
-// ("<verb> file: <path>", glm-acp-agent's actual shape: it sets Title
-// like "Write file: docs/x.md" but leaves kind and locations empty).
-// A title-fallback path may be relative: unlike the structured route,
-// its base is known -- the session's own cwd is worktreePath (set via
-// NewSession) -- so it's resolved against that, not guessed, before the
-// same inside-worktree check. A title that names no recognizable
-// file-edit verb, or any path (absolute or resolved) that lands outside
-// the worktree, fails closed.
+// (kind edit/move/delete + locations[].path), then -- only when the
+// agent filled in neither -- a conservative title fallback
+// ("<verb> file: <path>", glm-acp-agent's actual shape when it omits
+// locations). Either route's path may be relative: live glm-acp-agent
+// traffic (2026-09-14) showed kind "edit" with locations[].path set to
+// the plain relative path too, not an absolute one, despite the ACP
+// schema not requiring that. A relative path's base is known regardless
+// of route -- the session's own cwd is worktreePath (set via
+// NewSession) -- so it's resolved against that before the same
+// inside-worktree check. A title that names no recognizable file-edit
+// verb, or any path (relative or absolute) that resolves outside the
+// worktree, fails closed.
 func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	if worktreePath == "" {
 		return false
@@ -151,12 +152,7 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 		return false
 	}
 
-	// fromTitle paths may be relative (resolved against worktreePath
-	// below); structured locations[].path must already be absolute --
-	// see the doc comment above for why the two routes trust paths
-	// differently.
 	var paths []string
-	fromTitle := false
 	switch tc.Kind {
 	case "edit", "move", "delete":
 		for _, loc := range tc.Locations {
@@ -170,7 +166,6 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 		if tc.Kind == "" {
 			if p, ok := fileEditPathFromTitle(tc.Title); ok {
 				paths = append(paths, p)
-				fromTitle = true
 			}
 		}
 	}
@@ -185,9 +180,6 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 			return false
 		}
 		if !filepath.IsAbs(p) {
-			if !fromTitle {
-				return false
-			}
 			// filepath.Join cleans the result, so a traversal like
 			// "../../etc/passwd" resolves to its real absolute location
 			// before the containment check below, same as any other path.
