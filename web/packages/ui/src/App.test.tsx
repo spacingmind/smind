@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
+import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import type { RunSummary, Task, Workspace } from "@/lib/types";
@@ -132,6 +133,16 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  // Item 3's hash routing writes `window.location.hash`, and jsdom's
+  // location survives across tests within a file -- without this, a
+  // route left over from an earlier test would hijack the next test's
+  // mount via its own initial-pendingRoute read.
+  window.location.hash = "";
+  // Item 3's tab persistence writes to localStorage keyed by task id, and
+  // this file's tests reuse the same TASK_A/TASK_B ids (1/2) across many
+  // cases -- without this, an earlier test's opened tab or active-tab
+  // choice leaks into a later test's "freshly selected task" assumptions.
+  window.localStorage.clear();
 });
 
 describe("App", () => {
@@ -418,6 +429,451 @@ describe("App live events", () => {
     await flush();
 
     expect(screen.getByText("Welcome to smind")).toBeInTheDocument();
+  });
+});
+
+describe("App keyboard shortcuts", () => {
+  /** Ctrl-based combos: jsdom's navigator is not a mac, so `Mod` resolves to Ctrl. */
+  function pressCtrl(key: string, code: string, extra: Record<string, unknown> = {}): void {
+    fireEvent.keyDown(document, { key, code, ctrlKey: true, ...extra });
+  }
+
+  it("the tab-close x activates on Enter and on Space, closing only that tab", async () => {
+    for (const key of ["Enter", " "]) {
+      const socket = new FakeSocket();
+      const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+      const view = render(<App connect={connect} />);
+      await resolveSidebar(socket, [TASK_A]);
+      await openFileInTask(socket, TASK_A, "# A");
+
+      const close = screen.getByRole("button", { name: "Close README.md" });
+      expect(close).toHaveAttribute("tabindex", "0");
+      close.focus();
+      fireEvent.keyDown(close, { key });
+      await flush();
+
+      expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+      for (const name of ["Chat", "Files", "Diff", "Terminal"]) {
+        expect(screen.getByRole("tab", { name })).toBeInTheDocument();
+      }
+      view.unmount();
+    }
+  });
+
+  it("Ctrl+W closes the active file tab but leaves a non-closable base tab alone", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await openFileInTask(socket, TASK_A, "# A");
+
+    await act(async () => {
+      pressCtrl("w", "KeyW");
+    });
+    await flush();
+    expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+
+    // Chat is active now and isn't closable -- the shortcut matches what
+    // the strip offers, rather than being a stronger way to remove a tab.
+    await act(async () => {
+      pressCtrl("w", "KeyW");
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toBeInTheDocument();
+  });
+
+  it("Ctrl+Alt+<digit> activates the tab at that position", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
+    // Default strip order is Chat, Files, Diff, Terminal.
+    await act(async () => {
+      pressCtrl("3", "Digit3", { altKey: true });
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+
+    // A digit past the end of the strip is a no-op, not a crash.
+    await act(async () => {
+      pressCtrl("9", "Digit9", { altKey: true });
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Ctrl+] and Ctrl+[ step through tasks and wrap at both ends", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    async function step(key: string, code: string): Promise<void> {
+      await act(async () => {
+        pressCtrl(key, code);
+      });
+      await flush();
+      respondAll(socket, "run.list", []);
+      await flush();
+    }
+
+    await step("]", "BracketRight");
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+
+    // Past the end wraps back to the first task.
+    await step("]", "BracketRight");
+    expect(screen.getByRole("heading", { name: TASK_A.Title })).toBeInTheDocument();
+
+    // ...and backwards wraps the other way.
+    await step("[", "BracketLeft");
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+  });
+
+  it("Ctrl+B toggles the sidebar through the registry (it moved out of the shadcn primitive's own listener)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const sidebar = document.querySelector("[data-slot='sidebar']")!;
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+
+    await act(async () => {
+      pressCtrl("b", "KeyB");
+    });
+    await flush();
+    // One press, one toggle -- a double-toggle here would mean both the
+    // registry and the removed primitive listener fired.
+    expect(document.querySelector("[data-slot='sidebar']")).toHaveAttribute(
+      "data-state",
+      "collapsed",
+    );
+
+    await act(async () => {
+      pressCtrl("b", "KeyB");
+    });
+    await flush();
+    expect(document.querySelector("[data-slot='sidebar']")).toHaveAttribute(
+      "data-state",
+      "expanded",
+    );
+  });
+
+  it("Shift+? opens the shortcuts dialog listing every binding", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    expect(screen.queryByTestId("shortcuts-dialog")).not.toBeInTheDocument();
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+
+    expect(screen.getByTestId("shortcuts-dialog")).toBeInTheDocument();
+    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);
+  });
+});
+
+describe("App command palette", () => {
+  function openPalette(): void {
+    fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+  }
+
+  function rowTitles(): string[] {
+    return screen
+      .queryAllByTestId("command-palette-row")
+      .map((r) => r.querySelector("span span")?.textContent ?? "");
+  }
+
+  it("Ctrl+K opens a palette carrying every shell source: tasks, workspaces, tabs and actions", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const titles = rowTitles();
+    expect(titles).toContain(TASK_A.Title);
+    expect(titles).toContain(TASK_B.Title);
+    // A workspace lands on its first task; with no task selected there are
+    // no tab entries yet, but the sidebar's own registered actions are there.
+    expect(titles).toContain(WORKSPACE.Title);
+    expect(titles).toContain("New workspace");
+    expect(titles).toContain("Open accounts");
+    expect(titles).toContain("Cycle theme");
+  });
+
+  it("running a task entry selects that task", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: TASK_B.Title } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+  });
+
+  it("with a task selected, an Open <tab> entry activates that tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "Open Diff" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("lists the selected task's changed files, and opening one opens its editor tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    // ShellCommands' task.files fetch for the newly selected task.
+    respondAll(socket, "task.files", {
+      files: [{ path: "src/main.go", status: "modified", staged: false }],
+    });
+    await flush();
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "main.go" } });
+    expect(rowTitles()).toContain("main.go");
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondAll(socket, "file.read", { content: "package main" });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /main\.go/ })).toBeInTheDocument();
+  });
+
+  it("a task.files failure still leaves the palette usable", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    for (const env of socket.sent.filter((e) => e.method === "task.files")) {
+      if (env.id) socket.emit({ id: env.id, error: { message: "no worktree" } });
+    }
+    await flush();
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    expect(screen.getByTestId("command-palette")).toBeInTheDocument();
+    expect(rowTitles()).toContain(TASK_A.Title);
+  });
+});
+
+describe("App routing", () => {
+  /** Simulates the browser firing hashchange for a URL edit or back/forward -- jsdom's own auto-fire timing under fake timers isn't something a test should depend on. */
+  function navigateHash(hash: string): void {
+    window.location.hash = hash;
+    window.dispatchEvent(new Event("hashchange"));
+  }
+
+  it("mounting at a task URL selects that task and its active tab", async () => {
+    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/${TASK_B.ID}/diff`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    // The restore effect's own selectTask -> TaskDetailPane mount fetch.
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // The route's tab is "diff", so Radix's own unmount-inactive-content
+    // behavior means the Chat pane (and its task-title heading) isn't
+    // rendered at all -- the sidebar's own active-row marker is what
+    // stands in for "this task got selected" here.
+    expect(
+      document.querySelector(`[data-testid="sidebar-task-row"][data-task-id="${TASK_B.ID}"]`),
+    ).toHaveAttribute("data-active", "true");
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("selecting a task updates the URL, and switching tabs updates it again", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
+
+    const diffTab = screen.getByRole("tab", { name: "Diff" });
+    diffTab.focus();
+    fireEvent.click(diffTab);
+    await flush();
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/diff`);
+  });
+
+  it("a file tab's URL round-trips its path", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    await openFileInTask(socket, TASK_A, "# A");
+
+    expect(window.location.hash).toBe(
+      `#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/file/README.md`,
+    );
+  });
+
+  it("back (a hashchange to an earlier URL) re-selects that task", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    const taskAHash = window.location.hash;
+
+    clickTaskRow(TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+
+    await act(async () => {
+      navigateHash(taskAHash);
+    });
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.getByRole("heading", { name: TASK_A.Title })).toBeInTheDocument();
+  });
+
+  it("a URL naming a task task.list doesn't return lands on the empty state without throwing", async () => {
+    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/999/task`;
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    expect(() => render(<App connect={connect} />)).not.toThrow();
+    await resolveSidebar(socket, [TASK_A]);
+    await flush();
+
+    expect(screen.getByTestId("app-empty-state")).toBeInTheDocument();
+  });
+
+  it("opening two file tabs, remounting the app, restores both and the active one", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const first = render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Opening a file switches the active tab away from Files (Radix
+    // unmounts the inactive pane), so Files has to be reselected before
+    // each pick -- refetching file.list each time, same as a real remount.
+    for (const name of ["a.md", "b.md"]) {
+      const filesTab = screen.getByRole("tab", { name: "Files" });
+      // Radix activates a tab on mousedown (or on focus, in its default
+      // "automatic" mode) -- not on click. `.focus()` alone is a no-op
+      // the second time around here, since the Files trigger is already
+      // `document.activeElement` from the first iteration (nothing else
+      // in this flow steals it), so mousedown is the one that reliably
+      // reactivates it regardless of where focus currently sits.
+      fireEvent.mouseDown(filesTab, { button: 0 });
+      await flush();
+      respondAll(socket, "file.list", [
+        { name: "a.md", isDir: false, size: 1 },
+        { name: "b.md", isDir: false, size: 1 },
+      ]);
+      await flush();
+      fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="${name}"]`)!);
+      await flush();
+      respondAll(socket, "file.read", { content: `# ${name}` });
+      await flush();
+    }
+    expect(screen.getByRole("tab", { name: /b\.md/ })).toHaveAttribute("aria-selected", "true");
+    first.unmount();
+
+    // A fresh mount, socket and connect -- as a real reload produces --
+    // against the same localStorage and location.hash.
+    const socket2 = new FakeSocket();
+    const connect2 = vi.fn().mockResolvedValue(new WsClient(socket2));
+    render(<App connect={connect2} />);
+    await resolveSidebar(socket2, [TASK_A]);
+    respondAll(socket2, "run.list", []);
+    await flush();
+    respondAll(socket2, "file.read", { content: "# b.md" });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /a\.md/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /b\.md/ })).toHaveAttribute("aria-selected", "true");
   });
 });
 

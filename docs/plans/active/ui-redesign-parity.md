@@ -988,9 +988,9 @@ Phase 2 (implementation) — not started:
 
 - [x] Item 1: design tokens, dark mode, theme switching *(Track A)*
 - [x] Item 2: shared primitives + `docs/design.md` *(Track A)*
-- [ ] Item 3: routing + persisted UI state *(Track A)*
-- [ ] Item 4: keyboard registry + shortcuts help *(Track A)*
-- [ ] Item 5: command palette *(Track A)*
+- [x] Item 3: routing + persisted UI state *(Track A)*
+- [x] Item 4: keyboard registry + shortcuts help *(Track A)*
+- [x] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [x] Item 8: timeline renderer *(Track B)*
@@ -1488,6 +1488,192 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+
+**Item 4 — keyboard action registry + shortcuts help:**
+
+- The registry is three layers, each separately testable:
+  `keyboard/shortcut-string.ts` (combo parsing/matching/formatting, 14
+  scenarios), `keyboard/shortcuts.ts` (the binding table, override
+  resolution, scope gating, help grouping, conflict detection — 23
+  scenarios), and `keyboard/keyboard-provider.tsx` (the React dispatcher
+  and handler registry, 18 scenarios).
+- **Each binding fires for the right event and not for a near-miss** —
+  `shortcuts.test.ts`'s "does not fire for a near-miss modifier" and "does
+  not fire the wrong platform variant" (Cmd+K on a non-mac matches
+  nothing; the same event on a mac matches `palette.open`), plus
+  `shortcut-string.test.ts`'s exact-modifier cases. `SHORTCUT_BINDINGS`
+  has a table test asserting all ten combos are exactly the ones the
+  acceptance criteria name.
+- **No binding fires in an `<input>`, `<textarea>`, or an editor
+  surface** — `keyboard-provider.test.tsx`'s two "does not fire a
+  non-global binding…" cases (input, textarea, `.cm-editor`), with
+  `focus-scope.test.ts` covering the scope resolution itself including
+  xterm-wins-over-its-own-textarea and the `document.activeElement`
+  fallback every `fireEvent.keyDown(document)` relies on. The "except
+  where explicitly marked global" half is covered by "fires a global
+  binding from inside a text input".
+- **`Shift+?` opens the help dialog listing every registered binding** —
+  `shortcuts-dialog.test.tsx` asserts the row count equals
+  `SHORTCUT_BINDINGS.length` and that every binding's label renders under
+  its section heading; `App.test.tsx`'s "Shift+? opens the shortcuts
+  dialog" asserts the same through the real app tree.
+- **The tab-close `×` activates on Enter and on Space, closing only that
+  tab** — `App.test.tsx`'s new case runs the existing
+  `close-only-that-tab` assertions once per key, and also asserts
+  `tabindex="0"` is present (`uiux-audit.md` §4 P1 item 9 closed).
+- **`Cmd+B` moved into the registry**: the bare window listener inside
+  `components/ui/sidebar.tsx` was removed, since leaving it would have
+  toggled twice per press. `App.test.tsx`'s "Ctrl+B toggles the sidebar
+  through the registry" asserts one press = one toggle in both
+  directions.
+- Shell-level actions are claimed in `App.tsx` via `useActionHandler`
+  (`shortcuts.help`, `theme.cycle`, `tab.close`, `tab.jump`,
+  `task.prev`/`task.next`, and `sidebar.toggle` from inside
+  `SidebarProvider`). `App.test.tsx` covers Ctrl+W (closes a file tab,
+  no-ops on a non-closable base tab), Ctrl+Alt+digit (including a digit
+  past the end of the strip) and Ctrl+`[`/`]` wrapping at both ends.
+- **Rebinding** is persisted (`keyboard/overrides.ts`, `localStorage`,
+  same guarded shape as `use-sidebar-width.ts`) and driven from the help
+  dialog: capture, cancel-on-Escape, bare-modifier-stays-in-capture,
+  per-row Reset, Reset all, and a cross-platform conflict warning are each
+  covered in `shortcuts-dialog.test.tsx`; the round-trip across a remount
+  is covered in `keyboard-provider.test.tsx`.
+- `task test` green (34 files / 319 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+  `TestRunner_RunPrompt_PermissionRequest_ClaudeNative` failed once and
+  passed on a re-run — a known flake, unrelated to this item (no Go source
+  changed).
+- **Not done in this item, deliberately:** `palette.open` has a binding
+  but no handler until Item 5 — the dispatcher leaves the browser default
+  alone when nothing claims an action (asserted), so the key is inert
+  rather than broken. `composer.focus` and `run.interrupt` likewise have
+  bindings and no handler: they belong to Track B's composer, which claims
+  them via `useActionHandler` without editing the binding table.
+
+**Item 5 — command palette:**
+
+- `palette/commands.ts` is the pure half (filtering, grouping, ordering —
+  15 scenarios in `commands.test.ts`), `palette/palette-provider.tsx` the
+  registry, `components/command-palette.tsx` the view. The view contains
+  **no commands**: every entry arrives through `useCommands`.
+- **`Cmd+K` opens; typing filters across sources; Enter runs the
+  highlighted entry** — `command-palette.test.tsx` covers open/close via
+  the binding (including the toggle-closed path, which the palette has to
+  handle itself since it holds the modal keyboard lock), filtering across
+  two sources, Enter, and click-to-run.
+- **Escape closes and returns focus to the previously focused element** —
+  asserted directly (`document.activeElement` is the button that was
+  focused before opening). Focus restoration is done explicitly rather
+  than left to Radix, which restores to a *trigger* the palette doesn't
+  have.
+- **Arrow navigation wraps and skips group headers** — headings are a
+  property of a command row (`toRows`'s `groupStart`), never rows of their
+  own, so there is nothing to skip past: the test asserts three commands
+  produce three navigable rows across two headings, and that Down from the
+  last wraps to the first / Up from the first wraps to the last.
+- **A registered contribution appears without the palette being
+  modified** — the "another surface" test registers a source with an
+  unknown group and asserts both the row and its heading render.
+  `app-sidebar.tsx` is the real proof: it registers New workspace / New
+  task / Open accounts itself, and neither it nor `command-palette.tsx`
+  imports the other.
+- Shell sources (`App.tsx`'s `ShellCommands`): Tasks, Workspaces, Open
+  <tab>, Files, and the theme action. `App.test.tsx` covers all of them
+  through the real tree, including running a task entry, activating a tab,
+  and opening a changed file into its editor tab.
+- `task test` green (36 files / 340 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+
+*Where the plan was ambiguous, and what was decided:*
+
+- **"Workspaces" entries land on the workspace's first task.** smind has
+  no "selected workspace" in the shell — selection is per task (ADR 0004)
+  — so there is no state for a workspace entry to set. A workspace with
+  no tasks contributes no entry rather than a row that does nothing.
+- **"Files in the selected task's worktree" ships as the task's *changed*
+  files** (`task.files`), not a worktree index. The wire has no recursive
+  list or search RPC — `file.list` is one directory per call — so a real
+  index needs a daemon change, which per AGENTS.md rule (d) and this
+  track's scope is written down rather than built here. **Follow-up:** a
+  `file.search`/`file.tree` RPC for Item 18 (Track C), which the plan
+  already pairs with a measure-before-adding-an-RPC rule. Item 18 adds a
+  source through `useCommands`; `command-palette.tsx` does not change.
+- **"New task" is registered per workspace** when there is more than one.
+  The dialog needs a workspace to create into, and picking one for the
+  user would be a guess; with exactly one workspace the entry is just
+  "New task".
+- **The palette's own `Cmd+K`-to-close is handled in the input**, not via
+  the registry. The palette holds the modal keyboard lock (so no global
+  shortcut fires underneath it), which would otherwise make `Cmd+K` a
+  one-way door. It re-checks that single binding through
+  `matchCombo`, so a rebound palette shortcut still toggles.
+
+**Item 3 — routing and persisted UI state:**
+
+- `lib/route.ts` (`route.test.ts`, 7 scenarios) is the pure parse/format
+  half: `#/workspace/<id>/task/<id>/<tabKind>[/<path>]`, hash routing per
+  the plan (the daemon serves one embedded SPA — no server-side route
+  table). `lib/storage.ts` (`storage.test.ts`) is the one validated
+  read/write mechanism the criterion asks for; `use-sidebar-width.ts` was
+  migrated onto it (its own 6 tests unchanged, since a plain number
+  round-trips through `JSON.parse` the same as `Number()` did).
+- **A URL identifies workspace + task + active tab; reload restores all
+  three; back/forward work** — `App.test.tsx`'s "App routing" describe:
+  mounting at a `.../diff` URL selects that task and activates Diff
+  (`hook-level "restore" test`); selecting a task or switching tabs
+  writes the hash (asserted directly); a file tab's URL round-trips its
+  path; a `hashchange` to an earlier URL (simulating back) re-selects
+  that task. `App.tsx`'s restore/sync effects are the two directions of
+  one mechanism: state → hash (write, skipped when already equal — the
+  idempotence that stops a write→hashchange→write loop) and
+  hash → `pendingRoute` → state (consumed once the target task is found
+  in the tree or the tree finishes loading without it).
+- **Per-task open tabs persist across reload** — `use-task-tabs.ts` gains
+  a storage layer (`use-task-tabs.test.ts`, 7 scenarios): open/close/
+  activate all persist, two tasks stay independent, and a corrupted entry
+  (an `activeKey` naming a tab that isn't in its own list, or a tab
+  claiming the wrong `taskId`) is dropped rather than rendered broken.
+  `App.test.tsx`'s "opening two file tabs, remounting the app..." proves
+  it end to end through a real unmount/remount.
+- **Restoring a task that no longer exists degrades to the empty state
+  without throwing** — `App.test.tsx` asserts both: `render()` itself
+  doesn't throw, and `app-empty-state` renders once `task.list` resolves
+  without the named id. This needed a "has the tree actually loaded, or
+  is it just empty so far" signal (`treeLoaded`, set from
+  `AppSidebar`'s `onWorkspacesChange`) — without it, a deep link to an
+  archived task would wait on `pendingRoute` forever instead of
+  degrading.
+- **Sidebar width (already persisted) ... use the same storage
+  mechanism** — done (see above). Pane sizes will follow once Item 6
+  introduces them.
+- `task test` green (39 files / 367 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+
+*Where the plan was ambiguous, and what was decided:*
+
+- **The URL carries `workspaceId` but restoration only ever keys on
+  `taskId`.** Task ids are globally unique (one autoincrement sequence
+  across all workspaces), so there's no real "which workspace" ambiguity
+  to resolve; `workspaceId` is carried for a legible URL and a future
+  `smind task open` deep link, not because restoration needs it. A
+  mismatched workspace segment in a hand-edited URL is silently ignored
+  rather than treated as an error.
+- **Persisted task-tab state is capped at 50 tasks**, evicting the
+  oldest-inserted entries once exceeded. Not a true LRU (that would need
+  every *read*, not just every write, to reorder) — an approximation
+  against unbounded `localStorage` growth over a long-lived install,
+  which the acceptance criteria don't mention but which a real reviewer
+  would flag on an unbounded per-task persisted map.
+- **Two test-writing pitfalls surfaced and got fixed, not worked around:**
+  this file's tests share one jsdom `window` per file, so
+  `window.location.hash` and `localStorage` now leak across tests reusing
+  the same `TASK_A`/`TASK_B` ids unless reset — both are now cleared in
+  the top-level `afterEach`. Separately, Radix's `TabsTrigger` activates
+  on `mousedown` or `onFocus` (automatic mode), not `onClick` — a test
+  reselecting an already-focused tab via `.focus()` a second time is a
+  no-op (no refocus, no `onFocus` refire); `fireEvent.mouseDown` is what
+  a test needs when re-clicking a trigger that might already have focus.
+
 ### Item 17 — file explorer and editor polish
 
 Every acceptance criterion, and how it was confirmed:
