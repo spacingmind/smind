@@ -5,6 +5,31 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * Token layering (ui-redesign-parity plan, Item 1). Two layers, same as
+ * audit-deepseek-harness.md §5 and audit-paseo.md §6:
+ *
+ *   1. Static layer: the shadcn oklch scale below (background, foreground,
+ *      card, popover, primary, secondary, muted, accent, destructive,
+ *      border, input, ring, chart-1..5, sidebar and friends), one value
+ *      per name per theme. This was already the whole palette pre-Item-1
+ *      and stays as-is -- it's achromatic-plus-one-red and every
+ *      primitive already composes from it correctly (see docs/design.md's
+ *      "no hardcoded colour" rule).
+ *   2. Semantic layer: named-by-purpose tokens that alias into the static
+ *      layer or introduce a new hue where none existed. This is the part
+ *      Item 1 actually adds: `surface-0..3` (elevation, aliased onto the
+ *      existing scale -- see docs/design.md's Decisions for why a second
+ *      independent scale wasn't introduced), `foreground-muted` (an
+ *      explicit alias of `muted-foreground`, so new code can spell it the
+ *      audit-paseo.md §6 way without a second source of truth), and the
+ *      status family below.
+ *
+ * `@theme inline` re-exports every semantic token as a `--color-*` var,
+ * which is what makes `bg-status-warning`, `text-foreground-muted`, etc.
+ * exist as Tailwind utilities with zero extra config (Tailwind v4 is
+ * CSS-first -- there is no tailwind.config.js in this package).
+ */
 @theme inline {
     --font-heading: var(--font-sans);
     --font-sans: 'Geist Variable', sans-serif;
@@ -46,6 +71,21 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* Semantic layer additions -- see the comment above this block. */
+    --color-surface-0: var(--surface-0);
+    --color-surface-1: var(--surface-1);
+    --color-surface-2: var(--surface-2);
+    --color-surface-3: var(--surface-3);
+    --color-foreground-muted: var(--foreground-muted);
+    --color-status-success: var(--status-success);
+    --color-status-danger: var(--status-danger);
+    --color-status-warning: var(--status-warning);
+    --color-status-running: var(--status-running);
+    --color-status-dot-success: var(--status-dot-success);
+    --color-status-dot-danger: var(--status-dot-danger);
+    --color-status-dot-warning: var(--status-dot-warning);
+    --color-status-dot-running: var(--status-dot-running);
 }
 
 :root {
@@ -81,6 +121,58 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+
+    /*
+     * Elevation scale (audit-paseo.md §6's surface0..3 vocabulary),
+     * aliased onto the existing static scale rather than a second
+     * independent set of hex values -- see docs/design.md's Decisions.
+     * surface-0 is the page; each step up is one visible notch more
+     * raised/elevated.
+     */
+    --surface-0: var(--background);
+    --surface-1: var(--card);
+    --surface-2: var(--muted);
+    --surface-3: var(--accent);
+    --foreground-muted: var(--muted-foreground);
+
+    /*
+     * Status family -- text/icon tier (pills, PR-state icons, diff
+     * stats). One token per signal, per audit-paseo.md §13: a surface
+     * never gets a quieter/louder variant of the same signal. `danger`
+     * is a deliberate alias of the existing `--destructive` rather than a
+     * second red (see docs/design.md's Decisions) -- smind has exactly
+     * one flavor of "bad" today, unlike Paseo's PR/CI-state red vs.
+     * destructive-action red.
+     *
+     * success/warning hues are carried over from
+     * refs/paseo/packages/app/src/styles/theme.ts's lightStatusColors
+     * (L=0.50, chroma ~60% of gamut max at that lightness). `running` is
+     * a new hue smind needs that Paseo's text tier doesn't define
+     * (Paseo only carries a running dot, not a running pill/text color) --
+     * blue at the same L/chroma band, hue chosen clear of the identity
+     * palette per refs/paseo/docs/design.md §13's own reasoning for its
+     * running dot.
+     */
+    --status-success: #3e704a;
+    --status-danger: var(--destructive);
+    --status-warning: #7b5d39;
+    --status-running: oklch(0.50 0.09 250);
+
+    /*
+     * Status dot family -- refs/paseo/docs/design.md §13: a dot is 6px
+     * of solid color with no shape or label, so it needs to read louder
+     * than the status-family text tier or it goes backwards (a state dot
+     * reading dimmer than the row's own metadata). Same hues, higher
+     * chroma, own lightness band. Values below are Paseo's own generated
+     * light-band table (L=0.62, chroma 90% of gamut max) -- reused
+     * directly rather than re-derived, since the generation is exactly
+     * the rule this file's comment describes and re-picking the numbers
+     * by eye would just drift from it.
+     */
+    --status-dot-success: #299f51;
+    --status-dot-danger: #f12e2f;
+    --status-dot-warning: #b37824;
+    --status-dot-running: #268ae0;
 }
 
 .dark {
@@ -109,12 +201,42 @@
     --chart-5: oklch(0.269 0 0);
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
+    /*
+     * Was oklch(0.488 0.243 264.376) -- a saturated blue, the one
+     * chromatic token in an otherwise achromatic dark palette
+     * (docs/research/uiux-audit.md §2.5's flagged anomaly), and unused:
+     * `grep -rn "sidebar-primary" src` outside this file returns nothing,
+     * confirmed while landing this item. Resolved deliberately (Item 1's
+     * acceptance criterion) by making it achromatic like every other
+     * primary pair, matching the light theme's own polarity (near-black
+     * bg / near-white foreground, inverted here) rather than deleting the
+     * token outright -- a future shadcn component that reads it should
+     * get a sane grayscale value, not a random accent.
+     */
+    --sidebar-primary: oklch(0.985 0 0);
+    --sidebar-primary-foreground: oklch(0.205 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    --surface-0: var(--background);
+    --surface-1: var(--card);
+    --surface-2: var(--muted);
+    --surface-3: var(--accent);
+    --foreground-muted: var(--muted-foreground);
+
+    /* Dark-band status family: refs/paseo/packages/app/src/styles/theme.ts's darkStatusColors (L=0.70, chroma ~55% of gamut max). running's dark value keeps the same hue as the light band, lightened/desaturated to the same band as success/danger/warning above. */
+    --status-success: #6cb17b;
+    --status-danger: var(--destructive);
+    --status-warning: #c09664;
+    --status-running: oklch(0.70 0.08 250);
+
+    /* Dark-band status dots: Paseo's own generated table (L=0.72, chroma 90% of gamut max -- see refs/paseo/packages/app/src/styles/theme.ts's darkStatusDotColors). */
+    --status-dot-success: #35c264;
+    --status-dot-danger: #f7796d;
+    --status-dot-warning: #db932e;
+    --status-dot-running: #5caaf6;
 }
 
 @layer base {
@@ -127,4 +249,42 @@
   html {
     @apply font-sans;
     }
+}
+
+/*
+ * diff2html ships its own light/dark variable pairs
+ * (node_modules/diff2html/bundles/css/diff2html.min.css), gated behind a
+ * `.d2h-dark-color-scheme` class or an `(prefers-color-scheme: dark)`
+ * media query -- neither of which lines up with this app's own `.dark`
+ * class, which reflects the user's explicit light/dark/system choice
+ * (see hooks/use-theme.tsx), not the OS query directly. Overriding
+ * diff2html's base variable names to point at this app's own tokens
+ * means diff-viewer-pane.tsx needs no `d2h-dark-color-scheme` class
+ * juggling at all -- the library's own selectors already read these var
+ * names, so this is the whole integration.
+ */
+:root {
+  --d2h-bg-color: var(--surface-1);
+  --d2h-border-color: var(--border);
+  --d2h-line-border-color: var(--border);
+  --d2h-dim-color: var(--foreground-muted);
+  --d2h-file-header-bg-color: var(--surface-2);
+  --d2h-file-header-border-color: var(--border);
+  --d2h-empty-placeholder-bg-color: var(--surface-2);
+  --d2h-empty-placeholder-border-color: var(--border);
+  --d2h-selected-color: color-mix(in oklch, var(--status-running) 15%, transparent);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--status-success) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--status-success) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--status-success) 30%, transparent);
+  --d2h-ins-label-color: var(--status-success);
+  --d2h-del-bg-color: color-mix(in oklch, var(--status-danger) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--status-danger) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--status-danger) 30%, transparent);
+  --d2h-del-label-color: var(--status-danger);
+  --d2h-change-del-color: color-mix(in oklch, var(--status-warning) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--status-success) 20%, transparent);
+  --d2h-info-bg-color: var(--surface-2);
+  --d2h-info-border-color: var(--border);
+  --d2h-change-label-color: var(--status-warning);
+  --d2h-moved-label-color: var(--status-running);
 }

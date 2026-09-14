@@ -16,6 +16,47 @@ import { keymap } from "@codemirror/view";
 export const editorViewRegistry = new WeakMap<HTMLElement, EditorView>();
 
 /**
+ * Chrome-level theming (background/foreground/gutter/cursor/selection) via
+ * literal `var(...)` references into the app's own tokens, rather than a
+ * fixed light or dark color set -- unlike xterm.js (see
+ * terminal-pane.tsx/lib/terminal-theme.ts), CodeMirror's `EditorView.theme`
+ * accepts arbitrary CSS values, so this needs no re-application when
+ * `.dark` toggles: the browser's own cascade handles it for free, the same
+ * way every other component's Tailwind classes do. This is chrome only --
+ * syntax-highlighting colors (basicSetup's defaultHighlightStyle) are a
+ * separate, static token set left alone here; ui-redesign-parity's Item 1
+ * scope is "CodeMirror ... take[s] its palette from app tokens" for the
+ * always-visible white-box-in-dark-mode bug, not full per-language syntax
+ * theming.
+ */
+const appChromeTheme = EditorView.theme({
+  "&": {
+    color: "var(--foreground)",
+    backgroundColor: "var(--background)",
+  },
+  ".cm-content": {
+    caretColor: "var(--foreground)",
+  },
+  ".cm-cursor, .cm-dropCursor": {
+    borderLeftColor: "var(--foreground)",
+  },
+  "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection": {
+    backgroundColor: "var(--accent)",
+  },
+  ".cm-activeLine": {
+    backgroundColor: "var(--surface-2)",
+  },
+  ".cm-gutters": {
+    backgroundColor: "var(--surface-1)",
+    color: "var(--foreground-muted)",
+    border: "none",
+  },
+  ".cm-activeLineGutter": {
+    backgroundColor: "var(--surface-2)",
+  },
+});
+
+/**
  * A minimal CodeMirror 6 editor bound to `value`/`onChange` like a
  * controlled input, plus a Mod-s (Ctrl/Cmd-S) keybinding that calls
  * `onSave`. The EditorView is created once per mount and never recreated
@@ -55,6 +96,7 @@ export function CodeMirrorEditor({
       doc: value,
       extensions: [
         basicSetup,
+        appChromeTheme,
         keymap.of([
           {
             key: "Mod-s",

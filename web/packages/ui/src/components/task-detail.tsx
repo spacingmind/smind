@@ -1,7 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react";
 
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { Input } from "@/components/ui/input";
+import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
@@ -53,25 +57,30 @@ export function TaskDetailPane({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b px-4 py-3">
-        <h2 className="truncate text-sm font-semibold">{task.Title}</h2>
-        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="uppercase">{task.Status}</span>
-          {task.Branch && <span className="truncate">{task.Branch}</span>}
-        </div>
-      </div>
+      <PaneHeader
+        title={task.Title}
+        subtitle={
+          <>
+            <span className="uppercase">{task.Status}</span>
+            {task.Branch && <span className="truncate">{task.Branch}</span>}
+          </>
+        }
+      />
 
       {connectionStatus === "reconnecting" && (
-        <p data-testid="connection-banner" className="border-b bg-amber-500/10 px-4 py-1 text-xs text-amber-600">
-          Connection lost -- reconnecting to daemon…
-        </p>
+        <Alert
+          testId="connection-banner"
+          variant="warning"
+          className="rounded-none border-x-0 border-t-0"
+          description="Connection lost -- reconnecting to daemon…"
+        />
       )}
 
       <div data-testid="run-log-scroll" className="flex-1 overflow-y-auto px-4 py-3">
-        {error && <p className="text-sm text-destructive">{error}</p>}
-        {!error && runs === null && <p className="text-sm text-muted-foreground">Loading runs…</p>}
+        {error && <Alert variant="error" description={error} />}
+        {!error && runs === null && <InlineSpinner label="Loading runs…" />}
         {!error && runs !== null && runs.length === 0 && (
-          <p className="text-sm text-muted-foreground">No runs yet. Send a prompt to start one.</p>
+          <EmptyState title="No runs yet" description="Send a prompt to start one" />
         )}
         {runs !== null && runs.length > 0 && (
           <ul className="space-y-4">
@@ -201,9 +210,13 @@ function PendingPermissionView({
   }
 
   return (
-    <div data-testid="pending-permission" className="mt-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-2">
-      <p className="text-sm font-medium">{pending.summary}</p>
-      <div className="mt-2 flex flex-wrap gap-2">
+    <div className="mt-2">
+      <Alert
+        testId="pending-permission"
+        variant="warning"
+        title={pending.summary}
+        description={respondError ? `respond failed: ${respondError}` : undefined}
+      >
         {pending.options.map((option, index) => (
           <Button
             key={option.id}
@@ -218,8 +231,7 @@ function PendingPermissionView({
             {option.label}
           </Button>
         ))}
-      </div>
-      {respondError && <p className="mt-1 text-xs text-destructive">{respondError}</p>}
+      </Alert>
     </div>
   );
 }
