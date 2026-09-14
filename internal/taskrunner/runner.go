@@ -206,7 +206,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
+		return r.runACP(ctx, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderCodexNative:
@@ -221,7 +221,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -230,7 +230,7 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	var opts []acp.Option
 	switch {
 	case decider != nil:
-		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider}))
+		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider, worktreePath: worktreePath, approvalPolicy: approvalPolicy}))
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}

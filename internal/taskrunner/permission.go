@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
@@ -70,6 +73,10 @@ type PermissionDecider interface {
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
+	// worktreePath/approvalPolicy carry the run's auto-safe edit policy
+	// down to this adapter -- see autoAllowACPFileEdit.
+	worktreePath   string
+	approvalPolicy ApprovalPolicy
 }
 
 func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermissionParams) (string, error) {
@@ -77,6 +84,22 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
+
+	// ApprovalPolicyAutoSafe's file-edit analog for ACP: claude-native
+	// runs get the CLI's own acceptEdits mode for this exact purpose, but
+	// ACP has no permission-mode concept -- every sensitive tool call
+	// arrives as a session/request_permission. Without this, a headless
+	// auto-safe GLM/Kimi run can never write a single file (every edit
+	// times out to auto-deny), which is the ACP twin of the 2026-09-11
+	// acceptEdits failure. Scoped to edits (kind edit/move/delete) whose
+	// every reported location stays inside the task's own worktree --
+	// see autoAllowACPFileEdit for why that boundary is the safe one.
+	if a.approvalPolicy == ApprovalPolicyAutoSafe && autoAllowACPFileEdit(req.ToolCall, a.worktreePath) {
+		if optionID, ok := firstOptionByKind(opts, "allow_once", "allow_always"); ok {
+			return optionID, nil
+		}
+	}
+
 	// command is always "" here: ACP's ToolCallUpdate (req.ToolCall) has no
 	// field this package has confirmed reliably carries the literal command
 	// being executed, unlike Claude Code's Input["command"] or Codex's
@@ -87,6 +110,65 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	// package can't actually identify, not a gap to silently paper over
 	// with a guessed schema.
 	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), "", opts)
+}
+
+// autoAllowACPFileEdit reports whether an ACP permission request is a
+// file edit (ToolCallUpdate kind edit/move/delete) confined to the task's
+// own worktree, making it safe to auto-allow under ApprovalPolicyAutoSafe:
+// a write that can't escape the throwaway task worktree is no more
+// dangerous than the local git commits that policy already allows, and
+// the diff is human-reviewable afterward (task.diff). Kind execute (shell
+// commands) is deliberately NOT covered here -- those requests keep
+// going to the decider's AllowlistedCommand path, which can't identify
+// an ACP command string anyway (see Decide above) and therefore stays
+// manual. A tool call with no kind or no locations fails closed (false).
+func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
+	if worktreePath == "" {
+		return false
+	}
+	var tc struct {
+		Kind      string `json:"kind"`
+		Locations []struct {
+			Path string `json:"path"`
+		} `json:"locations"`
+	}
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		return false
+	}
+	switch tc.Kind {
+	case "edit", "move", "delete":
+	default:
+		return false
+	}
+	if len(tc.Locations) == 0 {
+		return false
+	}
+	root := filepath.Clean(worktreePath)
+	rootSep := root + string(os.PathSeparator)
+	for _, loc := range tc.Locations {
+		cleaned := filepath.Clean(loc.Path)
+		// The root itself is rejected along with everything outside it: a
+		// "location" equal to the worktree isn't a file this edit targets,
+		// it's at best a malformed request -- fail closed.
+		if loc.Path == "" || cleaned == root || !strings.HasPrefix(cleaned+string(os.PathSeparator), rootSep) {
+			return false
+		}
+	}
+	return true
+}
+
+// firstOptionByKind mirrors internal/runs's unexported helper of the same
+// name, for this package's adapters' own auto-allow paths (the runs-side
+// helper is not importable from here).
+func firstOptionByKind(options []PermissionOption, kinds ...string) (string, bool) {
+	for _, o := range options {
+		for _, k := range kinds {
+			if o.Kind == k {
+				return o.ID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a
