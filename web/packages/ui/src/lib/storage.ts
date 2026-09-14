@@ -25,6 +25,7 @@ export const STORAGE_KEYS = {
   theme: "smind:theme",
   shortcutOverrides: "smind:shortcut-overrides",
   taskTabs: "smind:task-tabs",
+  sidePaneWidth: "smind:side-pane-width",
 } as const;
 
 /**

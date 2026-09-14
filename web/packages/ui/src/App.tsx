@@ -19,8 +19,9 @@ import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
-import { useTaskTabs } from "@/hooks/use-task-tabs";
+import { isMovableKind, useTaskTabs, type PaneId, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
+import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
@@ -94,7 +95,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
+  const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
   const events = useDaemonEvents(client);
   const attention = useTaskAttention(client, selectedTask?.ID ?? null, events);
 
@@ -104,6 +105,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // strings are treated as percentages), so these pixel values pass
   // straight through with no percentage conversion needed.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
+  // Persisted per task (Item 6's criterion) -- taskId is null before any
+  // task is selected, in which case the hook just returns the default
+  // and ignores writes.
+  const [sidePaneWidth, setSidePaneWidth] = useSidePaneWidth(selectedTask?.ID ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,7 +164,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
-    openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
+    // Implicit open (file-tree click): prefer the side pane if the task
+    // already has one, but never yank a tab already placed -- openTab's
+    // own "prefer" placement is exactly this rule.
+    openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer");
   }
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
@@ -184,7 +192,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   useEffect(() => {
     if (!pendingRoute) return;
-    console.log("DEBUG restore effect", JSON.stringify(pendingRoute));
     const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
     if (match) {
       selectTask(match);
@@ -204,7 +211,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   useEffect(() => {
     if (!selectedTask) return;
-    const activeEntry = taskState?.tabs.find((t) => t.key === taskState.activeKey);
+    const activeEntry = taskState?.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
     const tab: Route["tab"] =
       activeEntry?.kind === "file"
         ? { kind: "file", path: filePathFromKey(activeEntry) }
@@ -216,10 +223,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     // named writes nothing, so there's no write -> hashchange -> write
     // loop even though both effects run on every relevant state change.
     if (window.location.hash !== nextHash) {
-      console.log("DEBUG hash write", window.location.hash, "->", nextHash);
       window.location.hash = nextHash;
     }
-  }, [selectedTask, taskState?.activeKey, taskState?.tabs]);
+  }, [selectedTask, taskState?.primary.activeKey, taskState?.primary.tabs]);
 
   // --- Keyboard actions the shell itself performs ---------------------
   //
@@ -242,11 +248,16 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     setPreference(next);
   });
 
+  // Both bindings are scoped to the primary pane -- Item 6 adds no
+  // "which pane has keyboard focus" concept (Paseo's pane.focus.*
+  // actions were already out of scope for Item 4's binding table), so
+  // Ctrl+W/Ctrl+Alt+<digit> reach primary's tabs only. The side pane's
+  // tabs stay mouse/palette-operable.
   useActionHandler(
     "tab.close",
     () => {
-      if (!selectedTask || !taskState?.activeKey) return;
-      const active = taskState.tabs.find((t) => t.key === taskState.activeKey);
+      if (!selectedTask || !taskState?.primary.activeKey) return;
+      const active = taskState.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
       // A non-closable base tab (Chat/Files/Diff/Terminal) has no close
       // affordance in the strip either -- the shortcut matches what
       // clicking would do, rather than being a second, stronger way to
@@ -254,14 +265,14 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       if (!active?.closable) return;
       closeTab(selectedTask.ID, active.key);
     },
-    { enabled: Boolean(selectedTask && taskState?.activeKey) },
+    { enabled: Boolean(selectedTask && taskState?.primary.activeKey) },
   );
 
   useActionHandler(
     "tab.jump",
     (payload) => {
       if (!selectedTask || !taskState || payload === null) return;
-      const entry = taskState.tabs[payload.digit - 1];
+      const entry = taskState.primary.tabs[payload.digit - 1];
       if (entry) activate(selectedTask.ID, entry.key);
     },
     { enabled: Boolean(selectedTask && taskState) },
@@ -309,7 +320,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         tasks={allTasks}
         workspaces={allWorkspaces}
         selectedTask={selectedTask}
-        tabs={taskState?.tabs ?? null}
+        tabs={taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : null}
         onSelectTask={selectTask}
         onOpenTab={openTab}
         onActivateTab={activate}
@@ -379,64 +390,59 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
              */}
             <div className="flex-1 min-h-0">
               {selectedTask && taskState ? (
-                <Tabs
-                  key={selectedTask.ID}
-                  value={taskState.activeKey ?? undefined}
-                  onValueChange={(key) => activate(selectedTask.ID, key)}
-                  className="h-full gap-0"
-                >
-                  <div className="mx-3 mt-2 overflow-x-auto">
-                    <TabsList className="w-fit">
-                      {taskState.tabs.map((entry) => (
-                        <TabsTrigger
-                          key={entry.key}
-                          value={entry.key}
-                          data-testid={`workspace-tab-${entry.kind}`}
-                          className="max-w-48 gap-1.5"
-                        >
-                          <span className="min-w-0 truncate">{entry.title}</span>
-                          {entry.closable && (
-                            <span
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Close ${entry.title}`}
-                              data-testid="workspace-tab-close"
-                              data-tab-key={entry.key}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                e.preventDefault();
-                                closeTab(selectedTask.ID, entry.key);
-                              }}
-                              // A `role="button"` element gets none of a
-                              // real <button>'s key handling for free, so
-                              // Enter and Space are wired explicitly
-                              // (uiux-audit.md §4 P1 item 9). It stays a
-                              // span rather than becoming a <button>
-                              // because it sits inside Radix's
-                              // TabsTrigger, which is already a button --
-                              // nesting one inside another is invalid HTML
-                              // and React warns about it.
-                              onKeyDown={(e) => {
-                                if (e.key !== "Enter" && e.key !== " ") return;
-                                e.stopPropagation();
-                                e.preventDefault();
-                                closeTab(selectedTask.ID, entry.key);
-                              }}
-                              className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
-                            >
-                              ×
-                            </span>
-                          )}
-                        </TabsTrigger>
-                      ))}
-                    </TabsList>
-                  </div>
-                  {taskState.tabs.map((entry) => (
-                    <TabsContent key={entry.key} value={entry.key} className="min-h-0">
-                      <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
-                    </TabsContent>
-                  ))}
-                </Tabs>
+                // The side dock (Item 6): one optional split, primary +
+                // side, each its own Radix Tabs root. Moving a tab between
+                // them (PaneTabStrip's move button) is a plain data move
+                // in useTaskTabs -- the pane component underneath *does*
+                // fully unmount from one root and mount in the other,
+                // which is fine because every such component already
+                // tolerates ADR 0004's "switching tabs unmounts inactive
+                // content" and reattaches to its server-side session
+                // rather than recreating it (see use-task-tabs.ts's doc
+                // comment).
+                <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+                  <ResizablePanel minSize={30} className="min-w-0">
+                    <PaneTabStrip
+                      paneId="primary"
+                      tabs={taskState.primary.tabs}
+                      activeKey={taskState.primary.activeKey}
+                      task={selectedTask}
+                      client={client}
+                      connectionStatus={connectionStatus}
+                      events={events}
+                      onOpenFile={openFileTab}
+                      onActivate={(key) => activate(selectedTask.ID, key)}
+                      onClose={(key) => closeTab(selectedTask.ID, key)}
+                      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+                    />
+                  </ResizablePanel>
+                  {taskState.side && (
+                    <>
+                      <ResizableHandle withHandle id="side-pane-resize-handle" />
+                      <ResizablePanel
+                        defaultSize={sidePaneWidth}
+                        minSize={SIDE_PANE_MIN_WIDTH}
+                        maxSize={SIDE_PANE_MAX_WIDTH}
+                        onResize={(size) => setSidePaneWidth(size.inPixels)}
+                        className="min-w-0 border-l"
+                      >
+                        <PaneTabStrip
+                          paneId="side"
+                          tabs={taskState.side.tabs}
+                          activeKey={taskState.side.activeKey}
+                          task={selectedTask}
+                          client={client}
+                          connectionStatus={connectionStatus}
+                          events={events}
+                          onOpenFile={openFileTab}
+                          onActivate={(key) => activate(selectedTask.ID, key)}
+                          onClose={(key) => closeTab(selectedTask.ID, key)}
+                          onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
+                        />
+                      </ResizablePanel>
+                    </>
+                  )}
+                </ResizablePanelGroup>
               ) : (
                 <div
                   data-testid="app-empty-state"
@@ -479,7 +485,7 @@ function ShellCommands({
   selectedTask: Task | null;
   tabs: TabEntry[] | null;
   onSelectTask: (task: Task) => void;
-  onOpenTab: (taskId: number, entry: TabEntry) => void;
+  onOpenTab: (taskId: number, entry: TabEntry, placement?: TabPlacement) => void;
   onActivateTab: (taskId: number, key: string) => void;
 }) {
   const { preference, setPreference } = useTheme();
@@ -536,7 +542,7 @@ function ShellCommands({
       keywords: [entry.kind],
       run: () => {
         if (open.has(entry.key)) onActivateTab(selectedTask.ID, entry.key);
-        else onOpenTab(selectedTask.ID, entry);
+        else onOpenTab(selectedTask.ID, entry, "prefer");
       },
     }));
   }, [selectedTask, tabs, onOpenTab, onActivateTab]);
@@ -551,7 +557,7 @@ function ShellCommands({
       title: path.split("/").pop() || path,
       subtitle: path,
       keywords: [path],
-      run: () => onOpenTab(selectedTask.ID, fileTab(selectedTask.ID, path)),
+      run: () => onOpenTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer"),
     }));
   }, [files, selectedTask, onOpenTab]);
   useCommands("shell:files", 3, fileCommands);
@@ -625,6 +631,136 @@ function SidebarToggleAction() {
 }
 
 /** The kind→renderer lookup: adding a new tab kind means adding an entry here plus a TAB_KINDS descriptor, never editing the strip's layout logic. */
+/**
+ * One pane's tab strip + content: title, an "Open to side"/"Move to
+ * primary" affordance on movable kinds (file/diff/terminal -- Chat and
+ * Files stay pinned, per Item 6), and the existing close affordance on
+ * closable kinds. Shared between the primary and side panes rather than
+ * written twice, parameterized by `paneId` only for the move button's
+ * direction and label.
+ */
+function PaneTabStrip({
+  paneId,
+  tabs,
+  activeKey,
+  task,
+  client,
+  connectionStatus,
+  events,
+  onOpenFile,
+  onActivate,
+  onClose,
+  onMove,
+}: {
+  paneId: PaneId;
+  tabs: TabEntry[];
+  activeKey: string | null;
+  task: Task;
+  client: WsClient | null;
+  connectionStatus: ConnectionStatus;
+  events: ReturnType<typeof useDaemonEvents>;
+  onOpenFile: (path: string) => void;
+  onActivate: (key: string) => void;
+  onClose: (key: string) => void;
+  onMove: (key: string) => void;
+}) {
+  return (
+    <Tabs
+      key={`${task.ID}:${paneId}`}
+      value={activeKey ?? undefined}
+      onValueChange={onActivate}
+      className="h-full gap-0"
+    >
+      <div className="mx-3 mt-2 overflow-x-auto">
+        <TabsList className="w-fit">
+          {tabs.map((entry) => (
+            <TabsTrigger
+              key={entry.key}
+              value={entry.key}
+              data-testid={`workspace-tab-${entry.kind}`}
+              className="max-w-48 gap-1.5"
+            >
+              <span className="min-w-0 truncate">{entry.title}</span>
+              {isMovableKind(entry.kind) && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    paneId === "primary"
+                      ? `Open ${entry.title} to the side`
+                      : `Move ${entry.title} to the primary pane`
+                  }
+                  data-testid="workspace-tab-move"
+                  data-tab-key={entry.key}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMove(entry.key);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMove(entry.key);
+                  }}
+                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  {/* aria-hidden: this span's own aria-label already names it; without
+                      hiding the glyph too, its text content leaks into the *ancestor*
+                      TabsTrigger's computed accessible name ("Diff" -> "Diff⇥"). */}
+                  <span aria-hidden="true">{paneId === "primary" ? "⇥" : "⇤"}</span>
+                </span>
+              )}
+              {entry.closable && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Close ${entry.title}`}
+                  data-testid="workspace-tab-close"
+                  data-tab-key={entry.key}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onClose(entry.key);
+                  }}
+                  // A `role="button"` element gets none of a real
+                  // <button>'s key handling for free, so Enter and Space
+                  // are wired explicitly (uiux-audit.md §4 P1 item 9). It
+                  // stays a span rather than becoming a <button> because
+                  // it sits inside Radix's TabsTrigger, which is already
+                  // a button -- nesting one inside another is invalid
+                  // HTML and React warns about it.
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onClose(entry.key);
+                  }}
+                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  <span aria-hidden="true">×</span>
+                </span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      {tabs.map((entry) => (
+        <TabsContent key={entry.key} value={entry.key} className="min-h-0">
+          <TabContent
+            entry={entry}
+            client={client}
+            task={task}
+            connectionStatus={connectionStatus}
+            onOpenFile={onOpenFile}
+            events={events}
+          />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
 function TabContent({
   entry,
   client,
