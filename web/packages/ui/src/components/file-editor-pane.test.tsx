@@ -151,6 +151,39 @@ describe("FileEditorPane", () => {
       content: "edited via keyboard",
     });
   });
+
+  it("a second Ctrl-S while a save is still in flight does not fire a second concurrent file.write", async () => {
+    const client = new FakeWsClient();
+    render(<FileEditorPane client={client} task={TASK} path={PATH} />);
+
+    client.nth("file.read", 0).resolve({ content: "original" });
+    await flush();
+
+    typeInEditor("edited content");
+    await flush();
+
+    const view = editorViewRegistry.get(screen.getByTestId("file-editor"));
+    if (!view) throw new Error("no view");
+
+    // Ctrl-S bypasses the Save button's `disabled` attribute entirely (it
+    // calls onSave directly), so the in-flight guard has to live in the
+    // save function itself, not just the button's UI state.
+    fireEvent.keyDown(view.contentDOM, { key: "s", code: "KeyS", ctrlKey: true });
+    fireEvent.keyDown(view.contentDOM, { key: "s", code: "KeyS", ctrlKey: true });
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "file.write")).toHaveLength(1);
+
+    client.nth("file.write", 0).resolve(undefined);
+    await flush();
+
+    // Once the first save lands, a fresh Ctrl-S is a normal, independent save.
+    typeInEditor("edited again");
+    await flush();
+    fireEvent.keyDown(view.contentDOM, { key: "s", code: "KeyS", ctrlKey: true });
+    await flush();
+    expect(client.calls.filter((c) => c.method === "file.write")).toHaveLength(2);
+  });
 });
 
 // Preview-mode tests ported from file-explorer-pane.test.tsx (develop's

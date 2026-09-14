@@ -8,11 +8,21 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
+import { QuickOpen } from "@/components/quick-open";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { TAB_KINDS, defaultTabsForTask, fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import {
+  TAB_KINDS,
+  defaultTabsForTask,
+  fileTab,
+  filePathFromTabKey,
+  nextTerminalTab,
+  TabLabel,
+  type TabEntry,
+  type TabKind,
+} from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTheme } from "@/hooks/use-theme";
 import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
@@ -20,6 +30,7 @@ import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-prov
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { isMovableKind, useTaskTabs, type PaneId, type TabPlacement } from "@/hooks/use-task-tabs";
+import { useQuickOpenShortcut } from "@/hooks/use-quick-open-shortcut";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
@@ -94,6 +105,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
+  // Item 18: Cmd/Ctrl+P opens quick-open for the selected task. A local
+  // shortcut, not a global registry entry -- see useQuickOpenShortcut's
+  // doc comment for why, and what Track A should do once Item 4 lands.
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -170,6 +185,26 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer");
   }
 
+  /**
+   * The explorer's "Reveal in diff" row action (Item 17). The *payload*
+   * travels through lib/diff-reveal.ts's latch, which the diff pane reads
+   * on mount -- the shell's only job is to bring that tab forward.
+   */
+  function revealInDiff() {
+    if (!selectedTask) return;
+    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+  }
+
+  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
+  function openTerminalTab() {
+    if (!selectedTask) return;
+    const state = tabsByTask.get(selectedTask.ID);
+    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, [
+      ...(state?.primary.tabs ?? []),
+      ...(state?.side?.tabs ?? []),
+    ]));
+  }
+
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
 
   // --- Routing (Item 3) ------------------------------------------------
@@ -214,7 +249,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     const activeEntry = taskState?.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
     const tab: Route["tab"] =
       activeEntry?.kind === "file"
-        ? { kind: "file", path: filePathFromKey(activeEntry) }
+        ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
         : { kind: (activeEntry?.kind ?? "task") as Exclude<TabKind, "file"> };
     const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
     // Comparing against the live hash (not a ref of "what we last wrote")
@@ -292,7 +327,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
   useActionHandler("task.prev", () => stepTask(-1), { enabled: allTasks.length > 0 });
   useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
-
+  useQuickOpenShortcut(() => setQuickOpenOpen(true), selectedTask !== null);
   return (
     // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
     // definite height), which used to be fine when its child just flowed
@@ -414,6 +449,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                       onActivate={(key) => activate(selectedTask.ID, key)}
                       onClose={(key) => closeTab(selectedTask.ID, key)}
                       onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+                      onRevealInDiff={revealInDiff}
+                      onNewTerminal={openTerminalTab}
                     />
                   </ResizablePanel>
                   {taskState.side && (
@@ -438,12 +475,13 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                           onActivate={(key) => activate(selectedTask.ID, key)}
                           onClose={(key) => closeTab(selectedTask.ID, key)}
                           onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
+                          onRevealInDiff={revealInDiff}
+                          onNewTerminal={openTerminalTab}
                         />
                       </ResizablePanel>
                     </>
                   )}
-                </ResizablePanelGroup>
-              ) : (
+                </ResizablePanelGroup>              ) : (
                 <div
                   data-testid="app-empty-state"
                   className="flex h-full items-center justify-center text-sm text-muted-foreground"
@@ -455,6 +493,14 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           </SidebarInset>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <QuickOpen
+        client={client}
+        task={selectedTask}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={openFileTab}
+        events={events}
+      />
     </SidebarProvider>
   );
 }
@@ -651,6 +697,8 @@ function PaneTabStrip({
   onActivate,
   onClose,
   onMove,
+  onRevealInDiff,
+  onNewTerminal,
 }: {
   paneId: PaneId;
   tabs: TabEntry[];
@@ -663,6 +711,8 @@ function PaneTabStrip({
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
   onMove: (key: string) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
 }) {
   return (
     <Tabs
@@ -680,7 +730,7 @@ function PaneTabStrip({
               data-testid={`workspace-tab-${entry.kind}`}
               className="max-w-48 gap-1.5"
             >
-              <span className="min-w-0 truncate">{entry.title}</span>
+              <TabLabel entry={entry} />
               {isMovableKind(entry.kind) && (
                 <span
                   role="button"
@@ -746,13 +796,30 @@ function PaneTabStrip({
         </TabsList>
       </div>
       {tabs.map((entry) => (
-        <TabsContent key={entry.key} value={entry.key} className="min-h-0">
+        /*
+         * Terminal tabs force-mount (and hide when inactive) so a
+         * backgrounded terminal keeps streaming into its buffer -- which
+         * is what lets its tab show an activity dot, and what stops
+         * switching panes or tabs from dropping output on the floor
+         * (Item 20). The detach-not-close contract is unchanged: the
+         * pane still aborts its attach, and never calls terminal.close,
+         * when it genuinely unmounts (tab closed, task switched).
+         */
+        <TabsContent
+          key={entry.key}
+          value={entry.key}
+          forceMount={entry.kind === "terminal" ? true : undefined}
+          className="min-h-0 data-[state=inactive]:hidden"
+        >
           <TabContent
             entry={entry}
             client={client}
             task={task}
+            active={activeKey === entry.key}
             connectionStatus={connectionStatus}
             onOpenFile={onOpenFile}
+            onRevealInDiff={onRevealInDiff}
+            onNewTerminal={onNewTerminal}
             events={events}
           />
         </TabsContent>
@@ -765,28 +832,39 @@ function TabContent({
   entry,
   client,
   task,
+  active,
   connectionStatus,
   onOpenFile,
+  onRevealInDiff,
+  onNewTerminal,
   events,
 }: {
   entry: TabEntry;
   client: WsClient | null;
   task: Task;
+  /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
+  active: boolean;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
-    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
+    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
+    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} onRevealInDiff={onRevealInDiff} events={events} />,
+    file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
-    terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
+    terminal: (
+      <TerminalPane
+        client={client}
+        task={task}
+        tabKey={entry.key}
+        active={active}
+        connectionStatus={connectionStatus}
+        onNewTerminal={onNewTerminal}
+      />
+    ),
   };
   return renderers[entry.kind];
-}
-
-/** Extracts the file path from a file tab's `${taskId}:file:${path}` key. */
-function filePathFromKey(entry: TabEntry): string {
-  return entry.key.slice(entry.key.indexOf(":file:") + ":file:".length);
 }
