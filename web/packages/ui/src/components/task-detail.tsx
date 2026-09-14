@@ -1,7 +1,8 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { Composer } from "@/components/composer/composer";
+import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -10,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
-import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
+import { useRunTimeline } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -65,6 +66,9 @@ export function TaskDetailPane({
   const openFileRef = useRef(onOpenFile);
   openFileRef.current = onOpenFile;
   const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
+
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
   return (
     <div className="flex h-full flex-col">
@@ -151,11 +155,12 @@ export function TaskDetailPane({
       {pendingRuns.length > 0 && (
         <div data-testid="pending-permission-dock" className="shrink-0 border-t bg-background px-4 py-2">
           {pendingRuns.map((run) => (
-            <PendingPermissionView
+            <PermissionCard
               key={run.id}
               runId={run.id}
               pending={run.pendingPermission!}
               onRespond={respondPermission}
+              onChat={focusComposer}
             />
           ))}
         </div>
@@ -168,70 +173,8 @@ export function TaskDetailPane({
         runningRunId={runningRunId}
         onSubmit={submitPrompt}
         onStop={stopRun}
+        textareaRef={composerTextareaRef}
       />
-    </div>
-  );
-}
-
-/**
- * A pending permission request card, rendered in the dock pinned above the
- * prompt form (see TaskDetailPane): what's being requested, plus one
- * button per option. Clicking a button calls run.respondPermission (via
- * onRespond); this component never clears the pending state itself on
- * click -- the parent's pendingPermission prop disappearing (once a
- * "permission_resolved" event arrives, from this tab's own click or
- * another connection entirely) is what unmounts it, so both cases are
- * handled identically.
- */
-function PendingPermissionView({
-  runId,
-  pending,
-  onRespond,
-}: {
-  runId: string;
-  pending: NonNullable<RunEntry["pendingPermission"]>;
-  onRespond: (runId: string, requestId: string, optionId: string) => Promise<void>;
-}) {
-  const [respondingTo, setRespondingTo] = useState<string | null>(null);
-  const [respondError, setRespondError] = useState<string | null>(null);
-
-  async function handleClick(optionId: string) {
-    setRespondingTo(optionId);
-    setRespondError(null);
-    try {
-      await onRespond(runId, pending.requestId, optionId);
-    } catch (err) {
-      setRespondError(err instanceof Error ? err.message : String(err));
-      setRespondingTo(null);
-    }
-    // On success, leave the buttons disabled: the run's own subscription
-    // observes the matching "permission_resolved" event and this component
-    // unmounts (pendingPermission clears) shortly -- no need to reset here.
-  }
-
-  return (
-    <div className="mt-2">
-      <Alert
-        testId="pending-permission"
-        variant="warning"
-        title={pending.summary}
-        description={respondError ? `respond failed: ${respondError}` : undefined}
-      >
-        {pending.options.map((option, index) => (
-          <Button
-            key={option.id}
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            disabled={respondingTo !== null}
-            data-testid={`chat-permission-option-${index}`}
-            onClick={() => handleClick(option.id)}
-          >
-            {option.label}
-          </Button>
-        ))}
-      </Alert>
     </div>
   );
 }

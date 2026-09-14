@@ -800,7 +800,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 8: timeline renderer *(Track B)*
 - [x] Item 9: tool-call cards *(Track B)*
 - [x] Item 10: composer v2 *(Track B)*
-- [ ] Item 11: permission UX v2 *(Track B)*
+- [x] Item 11: permission UX v2 *(Track B)*
 - [ ] Item 12: sidebar signal *(Track D)*
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
@@ -990,6 +990,74 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 11 (permission UX v2)** — 2026-09-14, `web/` only:
+
+- `components/permission/`: `permission-card.tsx` (shape dispatcher),
+  `options-card.tsx` (the default variant, now kind-styled),
+  `permission-option-button.tsx` (the styling rule), `question-form-card.tsx`,
+  `plan-review-card.tsx`. `task-detail.tsx`'s old `PendingPermissionView`
+  is gone; the dock now renders `PermissionCard` per pending run.
+- **Option styling by ACP `kind`**: `reject_*` renders `destructive`
+  regardless of position; the first `allow_*` option renders `default`
+  (primary) as the recommended action; everything else is `outline`. The
+  wire has carried `kind` since before this item (`lib/types.ts:144-154`
+  per the plan's own note) and the UI simply ignored it until now.
+- **Keyboard**: the card is a focusable, labelled `role="group"`
+  (`aria-label` from the summary) that receives focus once per
+  `requestId` — reachable and announced for a keyboard/screen-reader user
+  landing on the page fresh, without re-stealing focus on every
+  unrelated re-render. The options themselves are real `<button>`s (the
+  shared `Button` primitive), so activation is native HTML behaviour, not
+  custom key handling; tests assert reachability (real tag, not
+  `tabindex="-1"`, focus + click) rather than simulating a browser's own
+  Enter-triggers-click translation, which jsdom does not implement and
+  this repo has no `@testing-library/user-event` to fake.
+- **Question-form variant**: single/multi-select plus an optional
+  free-text "other", and a plain free-text question. Submitting sends one
+  batch via the existing `run.respondPermission` (its only slot for
+  anything is the string `optionId`), JSON-encoded as a tagged envelope
+  (`{"kind":"question_form_answers","answers":{...}}`) rather than an ad
+  hoc delimited string. "Skip" sends the same shape with every answer
+  blank.
+- **Plan-review variant**: the plan rendered as markdown (reusing
+  `TimelineMarkdown` from Item 8) with `Chat about it / Refuse / Approve`.
+  Chat does not resolve the request at all — it moves focus into the
+  composer (via a forwarded textarea ref) so the human can keep talking
+  while the request stays pending, matching Paseo's own behaviour for
+  that action.
+- **Dispatch is by shape**, tested explicitly: `plan` wins over
+  `questions` (both present renders the plan), an empty `questions: []`
+  falls through to the plain option list rather than an empty form, and a
+  request with an unrecognised/empty option `kind` still renders every
+  option (Item 11's own scenario).
+- Existing guarantees re-asserted unchanged: pinned above the composer
+  (`pending-permission-dock`), a `permission_resolved` event from *any*
+  connection clears the card (not just this tab's own click), the log
+  streaming past it doesn't move it. All of `task-detail.test.tsx`'s
+  permission tests pass against the new component tree unmodified except
+  for the one structural nesting change (`pending-permission` is now
+  inside a `permission-card` wrapper).
+- `task test` (Go + web, 286 web tests), `task lint`, `bunx tsc -b` clean.
+- **The honest wire gap, and why it's scoped out rather than half-built**:
+  `internal/taskrunner`'s `PermissionDecider` (`permission.go`) only ever
+  produces a flat option list plus a short text `summary` (`"run Bash"`,
+  or ACP's tool-call title) — there is no command line, no diff, and no
+  correlation between a `permission_request`'s `requestId` and any
+  `tool_call`'s `toolCallId` on the wire today. So "what is being
+  requested" still shows only `summary`, unchanged from before this item;
+  richer request detail needs a daemon change (AGENTS.md rule (d)), same
+  gating Item 7 itself was under. **`questions`/`plan` have no producer on
+  either wire path at all** — `lib/types.ts` defines them as additive,
+  optional fields so a future daemon change can populate them without
+  breaking today's clients, and this PR's components already render them
+  correctly the moment something does (proven by the synthetic events
+  this item's own tests construct) — the same "additive gap, not a
+  regression" posture ADR-0008 documents for Codex tool calls, and the
+  same "don't build ahead of a producer" restraint the plan's own
+  Decisions section asks for on subagents. The question-form's answer
+  encoding is this PR's own placeholder convention, not a daemon contract:
+  nothing parses it server-side yet.
+
 **Item 9 (tool-call cards)** — 2026-09-14, `web/` only:
 
 - `components/timeline/tool-renderers.tsx` is the registry: a `Map` keyed

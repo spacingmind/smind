@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   ApprovalPolicy,
+  PermissionQuestion,
   PermissionRequestEventParams,
   PermissionResolvedEventParams,
   Provider,
@@ -20,6 +21,10 @@ export interface PendingPermission {
   requestId: string;
   summary: string;
   options: { id: string; label: string; kind: string }[];
+  /** See PermissionQuestion's doc comment in lib/types.ts -- present only for a question-form-shaped request. */
+  questions?: PermissionQuestion[];
+  /** Present only for a plan-review-shaped request. */
+  plan?: string;
 }
 
 /**
@@ -239,7 +244,13 @@ function setPendingPermission(
   params: PermissionRequestEventParams,
 ): void {
   patch(setRuns, runId, {
-    pendingPermission: { requestId: params.requestId, summary: params.summary, options: params.options },
+    pendingPermission: {
+      requestId: params.requestId,
+      summary: params.summary,
+      options: params.options,
+      questions: params.questions,
+      plan: params.plan,
+    },
   });
 }
 

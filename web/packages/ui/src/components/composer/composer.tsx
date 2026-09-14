@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
@@ -65,6 +65,7 @@ export function Composer({
   runningRunId,
   onSubmit,
   onStop,
+  textareaRef,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -74,6 +75,8 @@ export function Composer({
   runningRunId: string | null;
   onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
   onStop: (runId: string) => Promise<void>;
+  /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
+  textareaRef?: Ref<HTMLTextAreaElement>;
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
@@ -230,6 +233,7 @@ export function Composer({
       )}
 
       <PromptTextarea
+        ref={textareaRef}
         label="Prompt"
         value={draft.value}
         onChange={draft.setValue}

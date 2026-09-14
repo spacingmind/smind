@@ -152,10 +152,33 @@ export interface PermissionOption {
 
 // Params of a "permission_request" event task.prompt/run.attach emit
 // (internal/wsapi/handlers.go's permissionRequestParams).
+// One question in a structured, multi-question permission ask
+// (ui-redesign-parity Item 11, per audit-deepseek-harness.md's question-
+// form card). **No provider on either wire path produces this shape
+// today** -- internal/taskrunner's PermissionDecider always resolves to a
+// flat PermissionOption list (see permission.go), so `questions` is
+// defined here as forward-compatible, additive surface: a future daemon
+// change could populate it without breaking today's clients, and today's
+// UI can already render it correctly (see permission-card.tsx's
+// Validation note) the moment something does.
+export interface PermissionQuestion {
+  id: string;
+  prompt: string;
+  kind: "single_select" | "multi_select" | "free_text";
+  /** Present for single_select/multi_select. */
+  options?: { id: string; label: string }[];
+  /** Whether a free-text "other" answer is accepted alongside the listed options. */
+  allowOther?: boolean;
+}
+
 export interface PermissionRequestEventParams {
   requestId: string;
   summary: string;
   options: PermissionOption[];
+  /** Present only for a question-form-shaped request -- see PermissionQuestion's doc comment on why nothing produces this yet. */
+  questions?: PermissionQuestion[];
+  /** Present only for a plan-review-shaped request: the plan as markdown, reviewed via Chat about it / Refuse / Approve rather than a plain option list. Same "additive, no producer yet" status as `questions`. */
+  plan?: string;
 }
 
 // Params of a "permission_resolved" event task.prompt/run.attach emit
