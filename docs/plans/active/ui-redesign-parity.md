@@ -774,7 +774,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 2: shared primitives + `docs/design.md` *(Track A)*
 - [ ] Item 3: routing + persisted UI state *(Track A)*
 - [x] Item 4: keyboard registry + shortcuts help *(Track A)*
-- [ ] Item 5: command palette *(Track A)*
+- [x] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [ ] Item 8: timeline renderer *(Track B)*
@@ -1124,3 +1124,61 @@ schema is Item 8/9, Track B, separate PR):
   rather than broken. `composer.focus` and `run.interrupt` likewise have
   bindings and no handler: they belong to Track B's composer, which claims
   them via `useActionHandler` without editing the binding table.
+
+**Item 5 — command palette:**
+
+- `palette/commands.ts` is the pure half (filtering, grouping, ordering —
+  15 scenarios in `commands.test.ts`), `palette/palette-provider.tsx` the
+  registry, `components/command-palette.tsx` the view. The view contains
+  **no commands**: every entry arrives through `useCommands`.
+- **`Cmd+K` opens; typing filters across sources; Enter runs the
+  highlighted entry** — `command-palette.test.tsx` covers open/close via
+  the binding (including the toggle-closed path, which the palette has to
+  handle itself since it holds the modal keyboard lock), filtering across
+  two sources, Enter, and click-to-run.
+- **Escape closes and returns focus to the previously focused element** —
+  asserted directly (`document.activeElement` is the button that was
+  focused before opening). Focus restoration is done explicitly rather
+  than left to Radix, which restores to a *trigger* the palette doesn't
+  have.
+- **Arrow navigation wraps and skips group headers** — headings are a
+  property of a command row (`toRows`'s `groupStart`), never rows of their
+  own, so there is nothing to skip past: the test asserts three commands
+  produce three navigable rows across two headings, and that Down from the
+  last wraps to the first / Up from the first wraps to the last.
+- **A registered contribution appears without the palette being
+  modified** — the "another surface" test registers a source with an
+  unknown group and asserts both the row and its heading render.
+  `app-sidebar.tsx` is the real proof: it registers New workspace / New
+  task / Open accounts itself, and neither it nor `command-palette.tsx`
+  imports the other.
+- Shell sources (`App.tsx`'s `ShellCommands`): Tasks, Workspaces, Open
+  <tab>, Files, and the theme action. `App.test.tsx` covers all of them
+  through the real tree, including running a task entry, activating a tab,
+  and opening a changed file into its editor tab.
+- `task test` green (36 files / 340 web tests, Go suites all `ok`);
+  `task lint` green; `bunx tsc -b` clean.
+
+*Where the plan was ambiguous, and what was decided:*
+
+- **"Workspaces" entries land on the workspace's first task.** smind has
+  no "selected workspace" in the shell — selection is per task (ADR 0004)
+  — so there is no state for a workspace entry to set. A workspace with
+  no tasks contributes no entry rather than a row that does nothing.
+- **"Files in the selected task's worktree" ships as the task's *changed*
+  files** (`task.files`), not a worktree index. The wire has no recursive
+  list or search RPC — `file.list` is one directory per call — so a real
+  index needs a daemon change, which per AGENTS.md rule (d) and this
+  track's scope is written down rather than built here. **Follow-up:** a
+  `file.search`/`file.tree` RPC for Item 18 (Track C), which the plan
+  already pairs with a measure-before-adding-an-RPC rule. Item 18 adds a
+  source through `useCommands`; `command-palette.tsx` does not change.
+- **"New task" is registered per workspace** when there is more than one.
+  The dialog needs a workspace to create into, and picking one for the
+  user would be a guess; with exactly one workspace the entry is just
+  "New task".
+- **The palette's own `Cmd+K`-to-close is handled in the input**, not via
+  the registry. The palette holds the modal keyboard lock (so no global
+  shortcut fires underneath it), which would otherwise make `Cmd+K` a
+  one-way door. It re-checks that single binding through
+  `matchCombo`, so a rebound palette shortcut still toggles.

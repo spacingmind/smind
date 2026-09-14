@@ -235,7 +235,47 @@ binding id** — that silently drops a user's rebind. The UI is
 Item 13's settings screen can embed the same list without a dialog around
 it.
 
-## 8. Decisions
+## 8. Command palette — contributing entries
+
+`Mod+K` opens `components/command-palette.tsx`. **That component contains
+no commands.** Entries come from sources registered through
+`palette/palette-provider.tsx`:
+
+```tsx
+import { useCommands } from "@/palette/palette-provider";
+import type { Command } from "@/palette/commands";
+
+const commands = useMemo<Command[]>(
+  () => files.map((path) => ({
+    id: `file-${path}`,
+    group: "Files",          // the heading this row appears under
+    title: path.split("/").pop()!,
+    subtitle: path,
+    keywords: [path],        // matched, not displayed
+    action: "tab.close",     // optional: renders that action's shortcut
+    run: () => openFile(path),
+  })),
+  [files, openFile],
+);
+useCommands("my-surface:files", 3, commands);   // (sourceId, groupRank, commands)
+```
+
+- `sourceId` is namespaced into each command's key, so two sources can use
+  the same command `id`. Registering again under the same `sourceId`
+  replaces the previous set; unmounting removes it.
+- `groupRank` orders groups for an empty query. Current ranks: tasks 0,
+  workspaces 1, tabs 2, files 3, shell actions 4, sidebar actions 5.
+- **Memoize `commands`.** Not memoizing is survivable (registration is
+  render-free by design) but re-registers every render.
+- Matching is per-field fuzzy subsequence, title-weighted. Filtered
+  results stay grouped; groups order by their best match.
+- Outside a `<PaletteProvider>`, `useCommands` is a no-op — a component
+  that contributes commands still mounts bare in its own unit test.
+
+A surface registers the commands for the dialogs *it* owns —
+`app-sidebar.tsx` registers New workspace / Open accounts, not `App.tsx`.
+
+## 9. Decisions
 
 - **`surface-0..3` alias the existing static scale rather than
   introducing a second independent set of hex values.** The existing

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { CommandPalette } from "@/components/command-palette";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -11,17 +12,19 @@ import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { TAB_KINDS, defaultTabsForTask, fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTheme } from "@/hooks/use-theme";
 import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
+import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
+import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import type { ThemePreference } from "@/lib/theme";
-import type { Task } from "@/lib/types";
+import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -60,7 +63,9 @@ export function App({
   // including AppShell itself, which claims the shell-level actions.
   return (
     <KeyboardProvider>
-      <AppShell connect={connect} />
+      <PaletteProvider>
+        <AppShell connect={connect} />
+      </PaletteProvider>
     </KeyboardProvider>
   );
 }
@@ -74,6 +79,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // Every task across the tree, handed up by AppSidebar (the one component
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
+  const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -156,6 +162,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   useActionHandler("shortcuts.help", () => setShortcutsOpen(true));
 
+  const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
+  useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
+
   const { preference, setPreference } = useTheme();
   useActionHandler("theme.cycle", () => {
     const order: ThemePreference[] = ["light", "dark", "system"];
@@ -224,6 +233,17 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
        */}
       <SidebarToggleAction />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <CommandPalette />
+      <ShellCommands
+        client={client}
+        tasks={allTasks}
+        workspaces={allWorkspaces}
+        selectedTask={selectedTask}
+        tabs={taskState?.tabs ?? null}
+        onSelectTask={selectTask}
+        onOpenTab={openTab}
+        onActivateTab={activate}
+      />
       <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
         {/*
          * The sidebar-vs-content split itself -- the whole point of Item 6.
@@ -247,6 +267,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             attention={attention}
             events={events}
             onTasksChange={setAllTasks}
+            onWorkspacesChange={setAllWorkspaces}
           />
         </ResizablePanel>
         {/*
@@ -357,6 +378,170 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       </ResizablePanelGroup>
     </SidebarProvider>
   );
+}
+
+/**
+ * The shell's own command-palette contributions: tasks, workspaces, the
+ * selected task's tabs and changed files, and the theme action.
+ *
+ * It is a component rather than a block inside AppShell so each source's
+ * `useMemo` sits next to the data it derives from, and so nothing here
+ * re-renders the shell. Other surfaces contribute their own sources the
+ * same way -- `app-sidebar.tsx` registers its create/accounts dialogs
+ * without this file knowing about them (see `docs/design.md` §9).
+ */
+function ShellCommands({
+  client,
+  tasks,
+  workspaces,
+  selectedTask,
+  tabs,
+  onSelectTask,
+  onOpenTab,
+  onActivateTab,
+}: {
+  client: WsClient | null;
+  tasks: Task[];
+  workspaces: Workspace[];
+  selectedTask: Task | null;
+  tabs: TabEntry[] | null;
+  onSelectTask: (task: Task) => void;
+  onOpenTab: (taskId: number, entry: TabEntry) => void;
+  onActivateTab: (taskId: number, key: string) => void;
+}) {
+  const { preference, setPreference } = useTheme();
+
+  const taskCommands = useMemo<Command[]>(
+    () =>
+      tasks.map((task) => ({
+        id: `task-${task.ID}`,
+        group: "Tasks",
+        title: task.Title,
+        subtitle: task.Branch ?? undefined,
+        keywords: [task.Status],
+        run: () => onSelectTask(task),
+      })),
+    [tasks, onSelectTask],
+  );
+  useCommands("shell:tasks", 0, taskCommands);
+
+  const workspaceCommands = useMemo<Command[]>(
+    () =>
+      workspaces
+        .map((workspace): Command | null => {
+          // smind has no "selected workspace" in the shell -- selection is
+          // per task (ADR 0004) -- so a workspace entry lands on its first
+          // task. A workspace with no tasks has nothing to land on, so it
+          // contributes no entry rather than a row that does nothing.
+          const first = tasks.find((t) => t.WorkspaceID === workspace.ID);
+          if (!first) return null;
+          return {
+            id: `workspace-${workspace.ID}`,
+            group: "Workspaces",
+            title: workspace.Title || workspace.Path,
+            subtitle: workspace.Path,
+            run: () => onSelectTask(first),
+          };
+        })
+        .filter((c): c is Command => c !== null),
+    [workspaces, tasks, onSelectTask],
+  );
+  useCommands("shell:workspaces", 1, workspaceCommands);
+
+  const tabCommands = useMemo<Command[]>(() => {
+    if (!selectedTask) return [];
+    // Every base tab kind, whether or not it's currently open: "Open
+    // Terminal" should work after the tab was closed, which is the case a
+    // list built from `tabs` alone would miss.
+    const base = defaultTabsForTask(selectedTask.ID);
+    const open = new Map((tabs ?? []).map((t) => [t.key, t]));
+    return base.map((entry) => ({
+      id: `tab-${entry.kind}`,
+      group: "Open",
+      title: `Open ${TAB_KINDS[entry.kind].defaultTitle}`,
+      subtitle: selectedTask.Title,
+      keywords: [entry.kind],
+      run: () => {
+        if (open.has(entry.key)) onActivateTab(selectedTask.ID, entry.key);
+        else onOpenTab(selectedTask.ID, entry);
+      },
+    }));
+  }, [selectedTask, tabs, onOpenTab, onActivateTab]);
+  useCommands("shell:tabs", 2, tabCommands);
+
+  const files = useTaskChangedFiles(client, selectedTask);
+  const fileCommands = useMemo<Command[]>(() => {
+    if (!selectedTask) return [];
+    return files.map((path) => ({
+      id: `file-${path}`,
+      group: "Files",
+      title: path.split("/").pop() || path,
+      subtitle: path,
+      keywords: [path],
+      run: () => onOpenTab(selectedTask.ID, fileTab(selectedTask.ID, path)),
+    }));
+  }, [files, selectedTask, onOpenTab]);
+  useCommands("shell:files", 3, fileCommands);
+
+  const actionCommands = useMemo<Command[]>(
+    () => [
+      {
+        id: "cycle-theme",
+        group: "Actions",
+        title: "Cycle theme",
+        subtitle: `Currently ${preference}`,
+        keywords: ["dark mode", "light mode", "appearance"],
+        action: "theme.cycle",
+        run: () => {
+          const order: ThemePreference[] = ["light", "dark", "system"];
+          setPreference(order[(order.indexOf(preference) + 1) % order.length]!);
+        },
+      },
+    ],
+    [preference, setPreference],
+  );
+  useCommands("shell:actions", 4, actionCommands);
+
+  return null;
+}
+
+/**
+ * The selected task's changed file paths, for the palette's Files group.
+ *
+ * `task.files` is the task's *diff* -- the files it has touched -- not an
+ * index of the worktree. That is the whole of what the wire offers today
+ * (there is no recursive list or search RPC; `file.list` is one directory
+ * per call), and it is also the more useful set for a palette: the files
+ * of the task you're in. A full worktree index needs a daemon change and
+ * belongs to Item 18, which is where the plan already puts the
+ * measure-before-adding-an-RPC decision.
+ *
+ * Failures are swallowed to an empty list: the palette must still open
+ * and show its other groups when a task's diff can't be read.
+ */
+function useTaskChangedFiles(client: WsClient | null, task: Task | null): string[] {
+  const [files, setFiles] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!client || !task) {
+      setFiles([]);
+      return;
+    }
+    let cancelled = false;
+    client
+      .call<TaskFilesResult>("task.files", { taskId: task.ID })
+      .then((result) => {
+        if (!cancelled) setFiles((result?.files ?? []).map((f) => f.path));
+      })
+      .catch(() => {
+        if (!cancelled) setFiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, task]);
+
+  return files;
 }
 
 /** Claims `sidebar.toggle` from inside SidebarProvider (where `useSidebar()` is legal) and renders nothing. */

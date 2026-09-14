@@ -578,6 +578,145 @@ describe("App keyboard shortcuts", () => {
   });
 });
 
+describe("App command palette", () => {
+  function openPalette(): void {
+    fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+  }
+
+  function rowTitles(): string[] {
+    return screen
+      .queryAllByTestId("command-palette-row")
+      .map((r) => r.querySelector("span span")?.textContent ?? "");
+  }
+
+  it("Ctrl+K opens a palette carrying every shell source: tasks, workspaces, tabs and actions", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const titles = rowTitles();
+    expect(titles).toContain(TASK_A.Title);
+    expect(titles).toContain(TASK_B.Title);
+    // A workspace lands on its first task; with no task selected there are
+    // no tab entries yet, but the sidebar's own registered actions are there.
+    expect(titles).toContain(WORKSPACE.Title);
+    expect(titles).toContain("New workspace");
+    expect(titles).toContain("Open accounts");
+    expect(titles).toContain("Cycle theme");
+  });
+
+  it("running a task entry selects that task", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: TASK_B.Title } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+  });
+
+  it("with a task selected, an Open <tab> entry activates that tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "Open Diff" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("lists the selected task's changed files, and opening one opens its editor tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    // ShellCommands' task.files fetch for the newly selected task.
+    respondAll(socket, "task.files", {
+      files: [{ path: "src/main.go", status: "modified", staged: false }],
+    });
+    await flush();
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "main.go" } });
+    expect(rowTitles()).toContain("main.go");
+
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondAll(socket, "file.read", { content: "package main" });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /main\.go/ })).toBeInTheDocument();
+  });
+
+  it("a task.files failure still leaves the palette usable", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    for (const env of socket.sent.filter((e) => e.method === "task.files")) {
+      if (env.id) socket.emit({ id: env.id, error: { message: "no worktree" } });
+    }
+    await flush();
+
+    await act(async () => {
+      openPalette();
+    });
+    await flush();
+    expect(screen.getByTestId("command-palette")).toBeInTheDocument();
+    expect(rowTitles()).toContain(TASK_A.Title);
+  });
+});
+
 describe("App sidebar resize", () => {
   afterEach(() => {
     window.localStorage.clear();
