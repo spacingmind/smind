@@ -7,6 +7,8 @@ import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { fileTabKey } from "@/components/tab-registry";
+import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
@@ -77,6 +79,23 @@ export function FileEditorPane({
   const dirty = content !== savedContent;
   dirtyRef.current = dirty;
 
+  // Publish the dirty flag to the tab strip (Item 17). The strip is a
+  // sibling of this pane's subtree, not an ancestor, so this goes through
+  // lib/dirty-buffers.ts's store rather than a prop -- see that module's
+  // doc comment. Effect, not render-time: setBufferDirty notifies
+  // subscribers, and notifying another component mid-render is exactly
+  // what React forbids.
+  const tabKey = fileTabKey(task.ID, path);
+  useEffect(() => {
+    setBufferDirty(tabKey, dirty);
+  }, [tabKey, dirty]);
+  useEffect(() => {
+    // Unmounting (tab closed, task switched) or moving to a different
+    // path drops the entry entirely -- a stale `true` would mark a tab
+    // whose editor no longer exists.
+    return () => forgetBuffer(tabKey);
+  }, [tabKey]);
+
   const applyRead = useCallback((result: FileReadResult) => {
     setContentState(result.content);
     setSavedContent(result.content);
@@ -121,6 +140,16 @@ export function FileEditorPane({
     setContentState(next);
   }, []);
 
+  // Guards against two overlapping file.write calls. `saving` state alone
+  // isn't enough: the Save button's `disabled` attribute only stops a
+  // second *click*, but CodeMirror's Mod-s keybinding (see
+  // code-mirror-editor.tsx) calls onSave directly, bypassing the DOM
+  // entirely -- a second Ctrl-S while a save is still in flight would
+  // otherwise fire a second concurrent write with the same stale
+  // expectedMtime. A ref (not state) is what makes the check synchronous
+  // with the very first line of this function, before any render.
+  const savingRef = useRef(false);
+
   // One file.write against the buffer. `expected` false is the Overwrite
   // action's unconditional force save (and last-write-wins legacy
   // behavior); a rejected conditional save maps the typed error's code to
@@ -128,7 +157,9 @@ export function FileEditorPane({
   const save = useCallback(
     async (expected: boolean) => {
       if (!client) throw new Error("not connected");
+      if (savingRef.current) return;
 
+      savingRef.current = true;
       setSaving(true);
       setSaveError(null);
       try {
@@ -146,6 +177,7 @@ export function FileEditorPane({
         }
         throw err;
       } finally {
+        savingRef.current = false;
         setSaving(false);
       }
       // `content` must be read fresh at call time, so it's a real dependency.

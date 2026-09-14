@@ -775,6 +775,202 @@ this is the pointer:
   required adopters for `PaneHeader`. Wiring either into a real surface is
   left to whichever later item first needs one.
 
+**Item 17 (landed)** — where the plan was ambiguous and what was decided:
+
+- **"Untracked" is not a status the wire can report.**
+  `internal/workspace/git.go`'s `taskChangedFiles` diffs a *snapshot
+  index* against the task's base commit, which reports a brand-new
+  untracked file as `A` — so the three decorations the tree can honestly
+  draw are added (`A`), modified (`M`) and deleted (`D`), and Item 17's
+  "an untracked one shows a different marker" is satisfied as
+  added-vs-modified. Any other git code (`R` for a rename) is carried
+  through by the daemon rather than collapsed, and renders as its own
+  letter in the muted tier instead of being mislabelled as one of the
+  three. Teaching the daemon a real `untracked` status would be a wire
+  change (rule (d)) for no dogfood gain.
+- **Directory rows get a rolled-up decoration**, beyond what the item
+  asked for: a folder whose descendants are all added reads as added, any
+  mix reads as modified. Without it a change several levels down is
+  invisible until you expand to find it, which is the thing tree
+  decorations exist to prevent.
+- **The dirty marker travels through a module-level store**
+  (`lib/dirty-buffers.ts`), not React state. The two ends live in
+  different subtrees — `FileEditorPane` is inside one tab's *content*,
+  the tab strip is its *sibling* — so lifting the state would mean
+  App.tsx threading a setter into every pane, and a context provider
+  would mean Track C owning a provider in Track A's shell. The store is
+  keyed by the tab key both ends already have.
+- **"Reveal in diff" uses a latch, not an event**
+  (`lib/diff-reveal.ts`). The diff pane is almost always *unmounted* at
+  the moment the explorer asks (its tab isn't in front), so a live-only
+  broadcast would be missed every time; the pane consumes the pending
+  request on mount instead. App.tsx's part is one call to `activate` —
+  it doesn't carry the payload.
+- **"Open to side" is absent from the row menu, not disabled.** Item 6
+  hasn't landed; a permanently-dead menu entry is worse than one that
+  isn't there yet. `FileExplorerPane` already takes the callback shape it
+  will need.
+- **CodeMirror theme-follows-app was already closed by Item 1** (that
+  item's own acceptance criteria covered it; the plan says "whichever
+  lands first owns it"). Nothing was re-done here.
+
+**Item 18 (landed)** — where the plan was ambiguous and what was decided:
+
+- **A daemon RPC was added, per the plan's own "measure before adding"
+  rule.** Measured against this repo's own worktree before reaching for
+  one: a client-side walk (repeatedly calling `file.list`, one directory
+  at a time — the plan's stated default) is O(directories) round trips,
+  and this worktree alone has ~150 directories excluding `node_modules`
+  and ~3,900 including it (`web/` doesn't gitignore it — bun vendors
+  there). Each would be its own WS round trip under a client-side walk.
+  `task.searchIndex` (`internal/workspace/search.go`,
+  `internal/wsapi/handlers.go`) returns the whole list in one RPC via a
+  single `git ls-files -co --exclude-standard` invocation — additive (a
+  new method, no change to `file.list`/`file.read`/`file.write`), and it
+  gets gitignore correctness for free: smind doesn't parse `.gitignore`
+  itself, git already does.
+- **It's a `task.*` method, not a `file.*` one.** `file.list`/`file.read`/
+  `file.write` take a user-supplied `path` and sandbox it inside the
+  worktree (`resolveInRoot`); `task.searchIndex` takes only `taskId` and
+  is inherently scoped to the whole worktree, so it follows
+  `task.files`/`task.fileDiff`'s naming and Manager-method shape instead.
+  Named `searchIndex`, not `files`, to stay unambiguous next to the
+  already-existing `task.files` (which means something different: the
+  base→worktree *diff*'s changed-file list, not "every file").
+- **Fuzzy matching and ranking are entirely client-side**
+  (`lib/fuzzy-match.ts`), not part of the RPC. The daemon's job is
+  enumeration (which needs git); ranking is product logic that belongs
+  next to the UI it's rendered in, and keeping it client-side means it's
+  unit-testable without a wire round trip and free to change without
+  touching the RPC contract.
+- **Two-tier scoring, not a single edit-distance score**: a substring
+  match on the **filename** always outranks a scattered subsequence match
+  anywhere in the path. A person typing a name they remember
+  ("editor-pane") and a person typing initials across directories
+  ("cmpne") are doing different things, and conflating them into one
+  score produced surprising rankings during testing (see the two-tier
+  design's own doc comment in `lib/fuzzy-match.ts`).
+- **The dialog prefetches the index while closed**, as soon as a task is
+  selected — not lazily on first open. "Quick" open should not show a
+  loading spinner the first time it's opened; App.tsx already mounts
+  `QuickOpen` once per task-selection lifetime (see the Track A hook note
+  below), so prefetching costs one RPC per task selection, not per open.
+- **No global shortcut registry exists yet (Item 4 hasn't landed)**, so
+  `hooks/use-quick-open-shortcut.ts` is a plain, swappable function — a
+  local `document`-level Ctrl/Cmd+P listener — rather than a component or
+  a registered action, exactly per this track's scoping instructions.
+  Track A should replace the call site in `App.tsx` with a real
+  `keyboard/actions.ts` entry once Item 4 lands; the hook's own doc
+  comment says so.
+
+**Item 19 (landed)** — where the plan was ambiguous and what was decided:
+
+- **The diff stat is derived client-side from `task.diff`**, not added as
+  a daemon numstat RPC. The whole-diff view has to fetch that text
+  anyway, so the stat is free on the surface that needs it most, and it
+  stays additive — no wire change, no rule-(d) gate.
+  `hooks/use-task-diff.ts` is the shared consumer point Item 19 asks for
+  ("surfaced outside this pane"): Item 12's sidebar and Item 10's
+  composer can mount it without the diff pane existing. **Caveat for
+  Item 12**: a per-row stat for *every* task in the tree would mean one
+  whole-diff fetch per row, which is the wrong tradeoff — the sidebar
+  should use `task.files`'s count (already available via
+  `hooks/use-task-file-status.ts`) and take `+`/`−` only for the selected
+  task, or the daemon should grow a numstat, which is its own decision.
+- **Per-line comments attach by click, not by an inline gutter widget.**
+  diff2html renders to `innerHTML`, so there is no React tree to hang a
+  per-line control off. One delegated listener on the container resolves
+  the clicked row (`lib/diff-lines.ts`, which handles both output formats
+  — unified's `.line-num1`/`.line-num2` divs and side-by-side's bare-text
+  number cell), and the composer/draft list render *beside* the diff. The
+  alternative — injecting React roots into diff2html's output per line —
+  would couple the pane to that library's exact markup far harder than
+  reading two class names does.
+- **Drafts are persisted to `localStorage`, not just held in memory.**
+  The plan's scenario is that a draft survives switching tabs, and
+  switching tabs *unmounts the diff pane* (App.tsx's Radix Tabs don't
+  force-mount inactive content), so component state couldn't satisfy it
+  by construction. Persisting gets survival across a reload for free, and
+  matches Paseo's own persisted review drafts (`audit-paseo.md` §2) and
+  the plan's "preferences are client-side" stance.
+- **Submitting starts a run with the daemon's first reported provider**,
+  with no provider control of its own. The daemon-derived provider list
+  is a non-negotiable guarantee (`audit-smind-current.md` §10), so the
+  list is fetched rather than hardcoded — but choosing a provider *per
+  review* is composer-toolbar work (Item 10), and a second provider
+  `<select>` on this pane would be exactly the unlabelled-native-select
+  pattern Item 10 exists to remove.
+- **The view/layout toggles persist app-wide, not per task.** Which
+  layout you read diffs in is a fact about the person, not the task.
+  Item 13's settings screen is where they should eventually be
+  *surfaced*; `lib/diff-prefs.ts` is the storage.
+- **Drafts stay visible while their file is collapsed.** Item 19 only
+  requires that they survive; hiding a surviving draft would make it look
+  lost, which is the failure the criterion is guarding against.
+- **Per-hunk staging stayed out of scope**, as the item states — ADR 0006
+  collapses staged/unstaged/untracked into one base→worktree diff and
+  nothing here changes that.
+
+**Item 20 (landed)** — where the plan was ambiguous and what was decided:
+
+- **"More than one terminal per task, each its own tab" needed a
+  session↔tab binding**, not just a second `TerminalPane` mount. Without
+  one, two terminal tabs' independent `terminal.list` calls could both
+  see the same running session and both attach to it (rendering one
+  shell twice) — the existing single-terminal code picked "the first
+  running session" unconditionally, which was fine when only one tab
+  could ever ask. `lib/terminal-sessions.ts` (a module-level store, same
+  shape as `lib/dirty-buffers.ts`) records which tab owns which session
+  id; a fresh attach excludes ids already claimed elsewhere.
+- **The activity indicator requires the backgrounded pane to keep
+  attaching**, which requires App.tsx's tab strip to `forceMount` a
+  terminal `TabsContent` and hide it with CSS
+  (`data-[state=inactive]:hidden`) instead of the default
+  mount-only-when-active. This is the one place Item 20 reaches past its
+  own files into `App.tsx` — additively, as the plan's cross-track rules
+  ask: only terminal tabs force-mount, every other kind is unchanged.
+  Without it, "an inactive terminal receiving data marks its tab" would
+  be unsatisfiable — a truly unmounted pane can't observe data arriving
+  at all, active or not. The existing detach-not-close contract is
+  unaffected: the pane still aborts its `terminal.attach` and never calls
+  `terminal.close` when it genuinely unmounts (tab closed, task
+  switched); force-mounting only changes when *that* happens.
+- **Copy asks the handle whether anything is reportable before disabling
+  itself.** A `TerminalHandle` without `onSelectionChange` (this file's
+  own test fake, historically) would otherwise wire a button that can
+  never enable — worse than an always-enabled one that's a no-op on an
+  empty selection.
+- **Paste writes through `terminal.write`, never into the emulator's own
+  buffer.** The PTY is what echoes; a local write would show the pasted
+  text twice and never actually reach the shell.
+- **Scrollback size is a stored preference** (`lib/terminal-prefs.ts`),
+  read once at terminal-creation time, following the plan's "as a
+  setting (Item 13)" wording — this item wires the storage and the
+  read, not a new control in the terminal's own header (which would be
+  the un-grouped-setting pattern Item 13 exists to collect).
+
+**Track A hook to wire** (noted per the plan's cross-track coordination
+rules): Item 17 makes two small, additive edits to `App.tsx` rather than
+restructuring it — the tab strip renders `<TabLabel entry={entry} />`
+from `tab-registry.tsx` instead of a bare title `<span>` (this is what
+puts the file-type icon and the dirty marker on the tab), and
+`FileExplorerPane` is passed `onRevealInDiff`, which activates the
+`${taskId}:diff` tab. Item 20 adds a third: terminal `TabsContent`
+entries `forceMount` and are hidden via
+`data-[state=inactive]:hidden` instead of the default mount-only-when-
+active, and `TerminalPane` takes `tabKey`/`active`/`onNewTerminal`. Item
+18 adds a fourth, outside the `Tabs` tree entirely: `<QuickOpen>` is
+mounted once as a sibling of `ResizablePanelGroup`, with its own
+`open`/`onOpenChange` state and a `useQuickOpenShortcut` call that wires
+Ctrl/Cmd+P — no layout change, since `Dialog` portals to `document.body`
+regardless of where it's rendered. Items 3 and 6 should preserve all
+four when they restructure the shell — in particular, Item 6's side dock
+must keep the force-mount behavior for any terminal tab it moves, or a
+moved terminal would silently stop being able to mark its own activity
+while backgrounded, and Items 4/5 should replace the local
+`useQuickOpenShortcut` call with a real `keyboard/actions.ts` entry
+(`hooks/use-quick-open-shortcut.ts`'s own doc comment says the same).
+
 ---
 
 ## Progress
@@ -806,10 +1002,10 @@ Phase 2 (implementation) — not started:
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
 - [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
-- [ ] Item 17: file explorer / editor polish *(Track C)*
-- [ ] Item 18: quick file open *(Track C)*
-- [ ] Item 19: diff / review v2 *(Track C)*
-- [ ] Item 20: terminal v2 *(Track C)*
+- [x] Item 17: file explorer / editor polish *(Track C)*
+- [x] Item 18: quick file open *(Track C)*
+- [x] Item 19: diff / review v2 *(Track C)*
+- [x] Item 20: terminal v2 *(Track C)*
 - [ ] Item 21: responsive / compact layout *(Track A)*
 
 ---
@@ -1292,3 +1488,205 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+### Item 17 — file explorer and editor polish
+
+Every acceptance criterion, and how it was confirmed:
+
+- **File-type icons in the tree and on tabs** — `lib/file-icons.tsx` maps
+  a whole-filename table (`Dockerfile`, `bun.lock`, `.gitignore` — files a
+  repo view is largely made of, which have no extension or a lying one)
+  then an extension table onto a `FileIconKey`, which is rendered as
+  `data-icon` so tests assert the resolution, not lucide's SVG markup.
+  Adopted by `file-explorer-pane.tsx`'s rows and by `TabLabel` (base tabs
+  get a per-kind icon from `TAB_KINDS`, file tabs get the file-type one).
+  `lib/file-icons.test.tsx` (6 tests) covers the plan's scenario (*a `.go`
+  path renders its icon; an unknown extension renders the generic one*)
+  plus case-insensitivity, multi-dot names, dotfiles and
+  no-extension-at-all.
+- **Git status decoration in the tree, sourced from `task.files`** —
+  `hooks/use-task-file-status.ts` (new, shared) fetches `task.files` and
+  refetches on the same signal `diff-viewer-pane.tsx` already uses (a
+  *terminal* `run.status` for this task). `components/file-status-marker.tsx`
+  renders A/M/D on the `status-{success,warning,danger}` tokens.
+  `file-explorer-pane.test.tsx` covers the plan's scenario (*a modified
+  file shows its git decoration; an untracked one shows a different
+  marker* — see Decisions for why that reads as added-vs-modified), that
+  an unchanged file is undecorated, and the directory roll-up.
+- **A dirty indicator on the file tab itself** — `lib/dirty-buffers.ts`
+  (a `useSyncExternalStore` store keyed by tab key); `FileEditorPane`
+  publishes, `TabLabel` subscribes. `tab-registry.test.tsx` (7 tests)
+  covers the plan's scenario (*a dirty buffer marks its tab; saving
+  clears it*) end to end — a real CodeMirror transaction into a real
+  `FileEditorPane`, then a real `file.write` — plus the two cases a
+  module-level store makes possible to get wrong: unmounting a dirty
+  editor clears the marker, and only the owning tab is marked.
+- **Context actions on tree rows** — a Radix context menu
+  (`components/ui/context-menu.tsx`, new primitive) with *Reveal in diff*
+  (disabled, not hidden, for an unchanged path) and *Copy path*.
+  "Open to side" is deliberately absent until Item 6 — see Decisions.
+  Reveal is covered from both ends: the explorer latches the request and
+  calls `onRevealInDiff`, and `diff-viewer-pane.test.tsx` asserts the
+  pane consumes a request latched *before it mounted* (the normal case —
+  the diff tab isn't in front when you right-click in the tree),
+  re-expands a collapsed file when revealed while already mounted, and
+  leaves a request aimed at a different task alone.
+- **CodeMirror's theme follows the app theme** — already closed by Item 1
+  (`code-mirror-editor.tsx`'s `appChromeTheme`); the plan assigns it to
+  whichever item lands first. Not re-done.
+
+A real bug the tests caught before commit: the reveal-scroll effect
+cleared its pending path unconditionally, so a reveal latched before
+`task.files` resolved (i.e. every reveal, on a cold diff tab) scrolled
+nowhere and then forgot itself. It now waits for `files` and scopes the
+lookup to the pane's own list rather than the document, so Item 6's
+second diff pane can't scroll the first one's row.
+
+`bunx tsc -b`, `task test` (248 web tests, 30 files; all Go packages) and
+`task lint` green.
+
+### Item 19 — diff / review v2
+
+Every acceptance criterion, and how it was confirmed:
+
+- **A whole-diff view alongside the per-file list, and a side-by-side /
+  unified toggle** — two segmented toggles in the pane header
+  (`SegmentedToggle`, generalized from `file-editor-pane.tsx`'s
+  Edit/Preview control rather than hand-rolled a third time), backed by
+  `lib/diff-prefs.ts`. The diff2html render itself moved into
+  `components/diff-render.tsx` so the per-file rows and the whole-diff
+  view share one implementation instead of two copies of the same effect.
+  `diff-viewer-pane.test.tsx` asserts the whole-diff view renders *every*
+  changed file (both `file.txt` and `new.txt` in one container, and the
+  per-file list gone), that the format toggle actually changes
+  diff2html's `outputFormat`, and that the choice survives the pane
+  unmounting — which is what a tab switch does.
+- **Per-line draft comments, submitted as a single prompt, surviving a
+  collapse and a tab switch** — `lib/review-drafts.ts` (per-task,
+  `useSyncExternalStore`, mirrored to `localStorage`),
+  `lib/diff-lines.ts` (click → `{side, line, text}`, both output
+  formats), `components/review-comments.tsx` (draft list + composer).
+  Covered end to end: writing a comment on a real diff2html-rendered
+  line, collapsing the file, unmounting and re-mounting the pane, then
+  submitting — one `run.start` carrying both comments, drafts cleared
+  after. Failure keeps them (a submit error must not eat a review) and
+  removing one draft leaves the other.
+  `lib/diff-lines.test.ts` asserts the DOM reading against diff2html's
+  *actual* markup (rendered in the test, not a hand-written fixture) for
+  unified, side-by-side, deletions, hunk headers and non-rows.
+  `lib/review-drafts.test.ts` covers per-task isolation, the stable empty
+  array `useSyncExternalStore` requires, persistence, and the prompt's
+  grouping.
+- **A diff stat surfaced outside the pane** — `lib/diff-stat.ts`'s
+  `parseDiffStat`/`formatDiffStat` and `hooks/use-task-diff.ts`. The pane
+  renders it in its header (`data-files`/`data-additions`/
+  `data-deletions` for assertion); the hook is the consumption point for
+  Items 10/12. `diff-stat.test.ts` covers the `+++`/`---` header
+  exclusion, the empty diff, and the headerless-diff fallback; the pane
+  test asserts the rendered stat matches the `task.files` list.
+- **Per-hunk staging out of scope** — unchanged, per ADR 0006.
+- **Existing stage/viewed/commit/PR tests keep passing unchanged** — they
+  do, byte for byte; the 20 pre-Item-19 tests in that file were not
+  touched.
+
+One thing worth stating plainly: a draft written against a file that
+later leaves `task.files` (because it was committed) stops rendering in
+the by-file view but is still counted by the submit bar and still
+included in the prompt. The count is the honest number; surfacing such
+drafts somewhere would need a "stale drafts" affordance that nothing in
+this item asks for.
+
+`bunx tsc -b`, `task test` (272 web tests, 33 files; all Go packages) and
+`task lint` green.
+
+### Item 20 — terminal v2
+
+Every acceptance criterion, and how it was confirmed:
+
+- **More than one terminal per task, each its own tab** —
+  `tab-registry.tsx`'s `terminalTab`/`nextTerminalTab` (indices from 2 up,
+  the base non-closable `${taskId}:terminal` tab being the implicit
+  first, freed indices reused rather than counted forever) and
+  `lib/terminal-sessions.ts`'s tab↔session binding (see Decisions for why
+  a binding was necessary at all). `tab-registry.test.tsx` covers index
+  assignment and reuse; `terminal-pane.test.tsx`'s new "multiple terminals
+  per task" describe block drives two real `TerminalPane` mounts against
+  two `FakeWsClient`s and asserts they land on two distinct session ids
+  even when both sessions are already running server-side — the
+  regression the binding exists to prevent.
+- **An activity indicator on an inactive terminal tab** —
+  `TerminalPane` takes `active`; a `data` event arriving while `active` is
+  false calls `markTerminalActivity(tabKey)`, cleared the moment `active`
+  flips true. `TabLabel` renders it as a `status-dot-running` dot,
+  distinct from Item 17's dirty marker. Covered from both ends: a
+  standalone `useTerminalActivity` consumer proves the flag flips on
+  inactive data and clears on activation (and stays clear for data
+  received while already active), and `tab-registry.test.tsx` proves
+  `TabLabel` renders it correctly and distinctly from the dirty dot.
+- **Scrollback size as a setting** — `lib/terminal-prefs.ts`
+  (load/save, clamped, `DEFAULT_TERMINAL_SCROLLBACK` stated explicitly),
+  read once via `createTerminal({ scrollback })` at terminal-creation
+  time. `terminal-prefs.test.ts` covers the default, round-trip, and
+  clamping a corrupted/hand-edited value; `terminal-pane.test.tsx`
+  asserts the persisted value reaches xterm's constructor options.
+- **A copy/paste affordance** — Copy reads `handle.getSelection()`,
+  disabled until something is selected (and never permanently disabled
+  for a handle that can't report selection at all — see Decisions); Paste
+  reads the clipboard and sends it via `terminal.write`, never into the
+  emulator's local buffer. Both, plus a paste-failure error line, are
+  covered in `terminal-pane.test.tsx`'s new "copy/paste" describe block.
+- **The existing detach-not-close contract, including the `interrupted`
+  status path, is preserved** — unmounting still aborts the attach
+  without calling `terminal.close`; the pre-Item-20 reconnect-resync
+  tests (all 16 of the file's original tests) pass unchanged after adding
+  a `resetTerminalSessions()` `afterEach` (the new tab↔session store is
+  module-level, like `lib/dirty-buffers.ts`, so it needs the same
+  per-test reset the dirty-buffer tests already established).
+
+`bunx tsc -b`, `task test` (292 web tests, 35 files; all Go packages) and
+`task lint` green.
+
+### Item 18 — quick file open
+
+Every acceptance criterion, and how it was confirmed:
+
+- **Fuzzy file search over the selected task's worktree, opening the
+  match as a file tab** — `components/quick-open.tsx` (a controlled
+  dialog, `Dialog`-based, matching `FolderPickerDialog`'s shape),
+  `lib/fuzzy-match.ts` (scoring, see Decisions for the two-tier design),
+  `hooks/use-task-search-index.ts` (fetch + cache the path list, same
+  terminal-`run.status` refresh signal as every other task-scoped hook in
+  this plan). `quick-open.test.tsx` (9 tests) covers the plan's exact
+  scenario — *typing a fuzzy query ranks the expected path first; Enter
+  opens it as a file tab; Escape closes without opening* — plus arrow-key
+  navigation, the empty/error states, and that reopening resets the
+  query. `fuzzy-match.test.ts` (9 tests) covers the scoring function in
+  isolation: no-match returns null (not a low score), substring beats
+  subsequence, start-of-filename beats mid-filename, and the highlighted-
+  index output the dialog renders.
+- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching Paseo** —
+  `hooks/use-quick-open-shortcut.ts`, a local `document`-level listener
+  rather than a global registry entry (Item 4 hasn't landed — see
+  Decisions and the Track A hook note above).
+  `use-quick-open-shortcut.test.ts` covers both platforms, the disabled
+  case, and that it stops listening on unmount.
+  `App.test.tsx`'s new "quick-open" describe block proves the whole path
+  end to end against a real `App` render: Ctrl+P opens the dialog for the
+  selected task, typing narrows to the expected file, Enter opens it as a
+  real tab in the strip — and that the shortcut does nothing before any
+  task is selected (no task, nothing to search).
+- **Backed by `file.list` walking, or a new daemon-side search RPC if
+  walking proves too slow — measure before adding an RPC** — measured (see
+  Decisions) and an RPC added: `internal/workspace/search.go`'s
+  `Manager.TaskSearchIndex` (one `git ls-files -co --exclude-standard`
+  call) plus `internal/wsapi`'s `task.searchIndex` handler. Go-tested at
+  both layers: `internal/workspace/search_test.go` proves a real git
+  worktree's tracked, staged, and untracked-not-ignored files are
+  returned and a gitignored one is excluded, without smind parsing
+  `.gitignore` itself; `internal/wsapi/search_test.go` proves the same
+  over a real WS connection, plus an unknown-task error.
+
+`bunx tsc -b`, `task test` (317 web tests, 38 files; all Go packages
+including 5 new: `TestManager_TaskSearchIndex`,
+`TestManager_TaskSearchIndex_NoChanges`,
+`TestManager_TaskSearchIndex_UnknownTask`, `TestServer_TaskSearchIndex`,
+`TestServer_TaskSearchIndex_UnknownTask`) and `task lint` green.
