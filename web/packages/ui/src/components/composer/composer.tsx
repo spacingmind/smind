@@ -1,0 +1,307 @@
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+
+import { useComposerDraft } from "@/components/composer/use-composer-draft";
+import { PromptTextarea } from "@/components/composer/prompt-textarea";
+import { Button } from "@/components/ui/button";
+import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
+import type { WsClientLike } from "@/lib/ws-client";
+
+/** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
+const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
+
+// internal/taskrunner.ApprovalPolicy's two values. "manual" is first since
+// it's the daemon's default when run.start omits the field entirely.
+const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
+  { id: "manual", label: "Manual approval" },
+  { id: "auto-safe", label: "Auto-safe" },
+];
+
+const APPROVAL_POLICY_HELP =
+  "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
+
+const SELECT_CLASS =
+  "h-7 shrink-0 rounded-md border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50";
+
+/**
+ * Why the composer can't send right now, phrased for the placeholder. A
+ * disabled composer must say *why* rather than silently greying out
+ * (ui-redesign-parity Item 10, from audit-deepseek-harness.md §2's block
+ * contract) -- and a run being in flight is deliberately not a block at
+ * all here: that case queues instead (see Composer's doc comment).
+ */
+export function composerPlaceholder({
+  connected,
+  hasTask,
+  running,
+}: {
+  connected: boolean;
+  hasTask: boolean;
+  running: boolean;
+}): string {
+  if (!connected) return "Not connected — reconnecting to the daemon…";
+  if (!hasTask) return "Select a task to send a prompt";
+  if (running) return "Queue a follow-up — it sends when this run finishes";
+  return "Send a prompt…";
+}
+
+/**
+ * The task composer (ui-redesign-parity Item 10): an autogrowing multiline
+ * prompt box, a labelled toolbar for provider and approval policy, a Stop
+ * that interrupts the live run, and per-task draft persistence.
+ *
+ * **Queue, not steer.** The daemon exposes no "send more input to a run
+ * already in flight" RPC (internal/wsapi/handlers.go's method table has
+ * run.start/attach/stop/logs/respondPermission and nothing else), so
+ * submitting while a run is live holds the text client-side and starts it
+ * as its own run when the live one reaches a terminal state. The queue is
+ * deliberately in-memory: an unsent *draft* is worth persisting, but a
+ * queued follow-up whose whole meaning is "right after the run I was
+ * watching" is not, once that session is gone.
+ */
+export function Composer({
+  client,
+  taskId,
+  connected,
+  runningRunId,
+  onSubmit,
+  onStop,
+  textareaRef,
+}: {
+  client: WsClientLike | null;
+  /** null when no task is selected -- the composer renders, disabled, and says so. */
+  taskId: number | null;
+  connected: boolean;
+  /** The task's currently-running run, or null. Drives Stop and the queue drain. */
+  runningRunId: string | null;
+  onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
+  onStop: (runId: string) => Promise<void>;
+  /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
+  textareaRef?: Ref<HTMLTextAreaElement>;
+}) {
+  const draft = useComposerDraft(taskId);
+  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  const [provider, setProvider] = useState<Provider>("claude-native");
+  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
+  const [submitting, setSubmitting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [queued, setQueued] = useState<string[]>([]);
+  const providerFieldId = useId();
+  const policyFieldId = useId();
+
+  // A queued follow-up belongs to the task it was typed for; switching
+  // tasks drops it rather than firing it at whatever is selected next.
+  const lastTaskId = useRef<number | null>(taskId);
+  if (lastTaskId.current !== taskId) {
+    lastTaskId.current = taskId;
+    if (queued.length > 0) setQueued([]);
+  }
+
+  useEffect(() => {
+    setProviders(FALLBACK_PROVIDERS);
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then((result) => {
+        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
+      })
+      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const canSend = connected && taskId !== null;
+  const running = runningRunId !== null;
+
+  const send = useCallback(
+    async (text: string) => {
+      setSubmitting(true);
+      setFormError(null);
+      try {
+        await onSubmit(provider, text, approvalPolicy);
+        return true;
+      } catch (err) {
+        setFormError(err instanceof Error ? err.message : String(err));
+        return false;
+      } finally {
+        setSubmitting(false);
+      }
+    },
+    [onSubmit, provider, approvalPolicy],
+  );
+
+  // draft is a fresh object every render (it closes over the current
+  // text), so the drain effect reads it through a ref instead of taking
+  // it as a dependency -- otherwise every keystroke would re-run a drain.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+
+  // Drains one queued prompt per terminal run. draining guards against a
+  // second drain being kicked off by the re-render that setQueued causes
+  // before onSubmit has had a chance to flip runningRunId back on.
+  const draining = useRef(false);
+  useEffect(() => {
+    if (running || draining.current || queued.length === 0 || !canSend) return;
+    const [next, ...rest] = queued;
+    draining.current = true;
+    setQueued(rest);
+    void send(next)
+      .then((ok) => {
+        // A failed send puts the text back in the composer rather than
+        // back in the queue: re-queuing would retry against the same
+        // failing condition forever, with no way for the user to see or
+        // edit what's looping.
+        if (!ok) {
+          const current = draftRef.current;
+          current.setValue(current.value ? `${current.value}\n${next}` : next);
+        }
+      })
+      .finally(() => {
+        draining.current = false;
+      });
+  }, [running, queued, canSend, send]);
+
+  const submit = useCallback(() => {
+    const trimmed = draft.value.trim();
+    if (!trimmed || !canSend || submitting) return;
+    if (running) {
+      setQueued((prev) => [...prev, trimmed]);
+      draft.clear();
+      return;
+    }
+    draft.clear();
+    void send(trimmed).then((ok) => {
+      // Restore the text if the run never started, so it isn't lost.
+      if (!ok) draft.setValue(trimmed);
+    });
+  }, [draft, canSend, submitting, running, send]);
+
+  async function handleStop() {
+    if (!runningRunId) return;
+    setStopping(true);
+    try {
+      await onStop(runningRunId);
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : String(err));
+    } finally {
+      // Unlike the old run-card button this control outlives the run, so
+      // it has to re-enable itself rather than counting on unmounting.
+      setStopping(false);
+    }
+  }
+
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Escape" && running) {
+      e.preventDefault();
+      void handleStop();
+    }
+  }
+
+  function handleFormSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    submit();
+  }
+
+  const inactive = !canSend || submitting;
+
+  return (
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="flex shrink-0 flex-col gap-2 border-t px-4 py-3">
+      {queued.length > 0 && (
+        <ul data-testid="composer-queue" className="flex flex-col gap-1">
+          {queued.map((text, index) => (
+            <li
+              key={`${index}-${text}`}
+              data-testid="composer-queued-item"
+              className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1 text-xs text-foreground-muted"
+            >
+              <span className="shrink-0 uppercase">Queued</span>
+              <span className="min-w-0 flex-1 truncate">{text}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove queued prompt ${index + 1}`}
+                onClick={() => setQueued((prev) => prev.filter((_, i) => i !== index))}
+              >
+                ×
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <PromptTextarea
+        ref={textareaRef}
+        label="Prompt"
+        value={draft.value}
+        onChange={draft.setValue}
+        onSubmit={submit}
+        onKeyDown={handleKeyDown}
+        placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
+        disabled={inactive}
+      />
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex items-center gap-1.5">
+          <label htmlFor={providerFieldId} className="text-xs text-foreground-muted">
+            Provider
+          </label>
+          <select
+            id={providerFieldId}
+            value={provider}
+            onChange={(e) => setProvider(e.target.value as Provider)}
+            disabled={inactive}
+            className={SELECT_CLASS}
+          >
+            {providers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label ?? p.id}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <label htmlFor={policyFieldId} className="text-xs text-foreground-muted">
+            Approval policy
+          </label>
+          <select
+            id={policyFieldId}
+            title={APPROVAL_POLICY_HELP}
+            value={approvalPolicy}
+            onChange={(e) => setApprovalPolicy(e.target.value as ApprovalPolicy)}
+            disabled={inactive}
+            className={SELECT_CLASS}
+          >
+            {APPROVAL_POLICIES.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          {formError && <span className="text-xs text-destructive">{formError}</span>}
+          {running && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={stopping}
+              data-testid="chat-stop-button"
+              onClick={handleStop}
+            >
+              {stopping ? "Stopping…" : "Stop"}
+            </Button>
+          )}
+          <Button type="submit" size="sm" disabled={inactive || !draft.value.trim()} data-testid="chat-send-button">
+            {running ? "Queue" : "Send"}
+          </Button>
+        </div>
+      </div>
+    </form>
+  );
+}
