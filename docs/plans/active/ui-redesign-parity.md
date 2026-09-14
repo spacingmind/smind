@@ -737,7 +737,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [ ] Item 5: command palette *(Track A)*
 - [ ] Item 6: split panes / side dock *(Track A)*
-- [ ] Item 7: structured timeline events *(Track B — **ADR gate**)*
+- [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [ ] Item 8: timeline renderer *(Track B)*
 - [ ] Item 9: tool-call cards *(Track B)*
 - [ ] Item 10: composer v2 *(Track B)*
@@ -794,3 +794,60 @@ Phase 2 — to be filled in per item as it lands: which test(s) cover which
 acceptance criterion, plus `task test` / `task lint` / `task build` results
 and any manual check performed. Follow the per-item format used in
 `docs/plans/completed/task-permission-ux.md`'s Validation section.
+
+**Item 7 (structured timeline events)** — 2026-09-14, daemon + wire only
+(this item does not touch `web/`; the timeline renderer that consumes this
+schema is Item 8/9, Track B, separate PR):
+
+- ADR `docs/decisions/0008-structured-run-events.md` written and accepted
+  before implementation, per the plan's gate — schema, wire shape,
+  persistence, and compatibility strategy recorded there.
+- `taskrunner.Event` gains `EventTypeUserMessage`/`EventTypeThinking`/
+  `EventTypeToolCall` (appended after the existing four, per the ADR's
+  append-only-enum rule) plus `ToolCallID`/`ToolName`/`ToolTitle`/
+  `ToolStatus`/`ToolInput`/`ToolResult` fields
+  (`internal/taskrunner/event.go`).
+- Both required backends produce them:
+  `TestRunner_RunPrompt_ClaudeNative_ToolCallEvents` (thinking + two tool
+  calls, one completing success, one failure, via the fake CLI's new
+  `tool_call` scenario) and `TestRunner_RunPrompt_GLM_StructuredEvents`
+  (thinking + user-message + a tool call completing success, via the fake
+  ACP agent's new `structured` scenario) — both in
+  `internal/taskrunner/runner_test.go`. Codex-native is explicitly **not**
+  covered for tool calls (documented gap in the ADR's Decision section —
+  `internal/codex` doesn't model Codex's item-lifecycle protocol at all
+  yet); its text/done/permission events are unchanged and still pass.
+- `internal/wsapi`: new wire event names (`user_message`/`thinking`/
+  `tool_call`) added to `run.attach`'s stream and `run.logs`'s batch shape
+  (`handlers.go`). `TestServer_RunLogs_StructuredEvents` proves all three
+  render correctly over the wire.
+  `TestServer_RunLogs_PreExistingEventsStillDecode` proves the back-compat
+  half of the ADR's Test Scenario: a run whose events were persisted in
+  the old four-field JSON shape (inserted directly into the store, no new
+  fields) still decodes and serves via `run.logs` after a Registry
+  rehydration, unchanged.
+- `internal/runs`: `persist.go`'s `encodeEvent`/`decodeEvent` carry the new
+  fields; no store schema migration needed (`event_data` is already a
+  free-form JSON column — noted explicitly in the ADR).
+  `TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen` proves the new
+  event types (not just the four old ones) survive a simulated daemon
+  restart identically.
+- `cmd/smind/task.go`: `task attach`/`task logs` render the new event
+  kinds as readable text — text-shaped events (`chunk`/`user_message`/
+  `thinking`) print as before; `tool_call` prints one line via the new
+  `renderToolCallLine` (name/title + lifecycle status, input while
+  running). No dedicated CLI test added (no prior test coverage existed
+  for this rendering path either); covered by manual inspection of
+  `renderToolCallLine`'s output for both the running and
+  success/failure cases.
+- `task test` (`go test ./...` + the web suite) and `task lint`
+  (`go vet ./...` + `gofmt -l`) both pass clean.
+- **Wire-compat caveats the UI track (Items 8/9) must respect**: (1) a
+  `tool_call` entry's `toolName`/`title`/`input` may be empty on a later
+  event for the same `toolCallId` — ACP's `tool_call_update` is a partial
+  update, so the UI must merge by ID, not replace; (2) Claude Code native
+  never emits `EventTypeUserMessage` (its own prompt echo is dropped, not
+  translated — the UI already has the human's own prompt from its own
+  composer); (3) Codex-native never emits `tool_call` in this pass, so a
+  Codex run's timeline is text-only even after Item 8/9 land, until a
+  follow-up change teaches `internal/codex` its item-lifecycle protocol.
