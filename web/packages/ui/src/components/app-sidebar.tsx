@@ -21,6 +21,8 @@ import type { TaskAttention } from "@/hooks/use-task-attention";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import { AccountsDialog } from "@/components/accounts-dialog";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { StatusDot } from "@/components/ui/status-dot";
 import {
   ArchiveTaskDialog,
   CreateSpaceDialog,
@@ -271,6 +273,7 @@ export function AppSidebar({
             >
               <BellIcon />
             </Button>
+            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -724,17 +727,26 @@ function TaskRows({
               data-task-id={task.ID}
             >
               <span className="min-w-0 truncate">{task.Title}</span>
-              {hasAttention && (
-                <span
-                  data-testid="task-attention"
-                  aria-label="task needs attention"
-                  className="ml-auto size-2 shrink-0 rounded-full bg-primary"
-                />
-              )}
+              {/*
+               * The attention-dot slot is always in the DOM at a fixed
+               * width, whether or not there's anything to show -- only
+               * the dot *inside* it is conditional (queried by testid
+               * elsewhere, so it must stay absent-when-none). Without the
+               * reserved slot, the status text below shifts left/right by
+               * the dot's width whenever attention arrives or clears --
+               * exactly the "changing state must not move the layout"
+               * rule from refs/paseo/docs/design.md §11 that Item 2 calls
+               * out for this row specifically.
+               */}
               <span
-                data-testid="sidebar-task-status"
-                className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}
+                data-testid="task-attention-slot"
+                className="ml-auto flex w-2.5 shrink-0 items-center justify-center"
               >
+                {hasAttention && (
+                  <StatusDot status="warning" data-testid="task-attention" aria-label="task needs attention" />
+                )}
+              </span>
+              <span data-testid="sidebar-task-status" className="shrink-0 text-[10px] uppercase text-muted-foreground">
                 {statusOverrides.get(task.ID) ?? task.Status}
               </span>
             </SidebarMenuSubButton>

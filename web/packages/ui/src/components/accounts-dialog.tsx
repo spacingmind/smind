@@ -17,6 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import type { Account, ProviderInfo, ProviderListResult, ProviderTestResult } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -56,15 +57,15 @@ function providerLabel(providers: ProviderInfo[], id: string): string {
   return providers.find((p) => p.accountProvider === id)?.label ?? id;
 }
 
-/** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern. */
+/** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern, now on the shared StatusDot primitive (ui-redesign-parity plan, Item 2). */
 function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
   const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
-  const color =
-    state === "ok" ? "bg-emerald-500" : state === "failed" ? "bg-destructive" : "bg-muted-foreground/40";
+  const status = state === "ok" ? "success" : state === "failed" ? "danger" : "neutral";
   const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
   return (
-    <span
-      className={`size-2 shrink-0 rounded-full ${color}`}
+    <SharedStatusDot
+      status={status}
+      className="size-2"
       title={label}
       aria-label={label}
       data-testid="accounts-status-dot"
@@ -272,7 +273,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[a.provider] && (
                     <p
-                      className={`pl-3.5 text-xs ${testResults[a.provider].ok ? "text-emerald-600" : "text-destructive"}`}
+                      className={`pl-3.5 text-xs ${testResults[a.provider].ok ? "text-status-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${a.provider}`}
                     >
                       {testResults[a.provider].detail}
@@ -317,7 +318,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[p.id] && (
                     <p
-                      className={`pl-3.5 text-xs ${testResults[p.id].ok ? "text-emerald-600" : "text-destructive"}`}
+                      className={`pl-3.5 text-xs ${testResults[p.id].ok ? "text-status-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${p.id}`}
                     >
                       {testResults[p.id].detail}

@@ -524,10 +524,38 @@ type taskPromptResult struct {
 	StopReason string `json:"stopReason"`
 }
 
-// taskChunkParams is the params payload of every "chunk" event task.prompt
-// and run.attach emit.
+// taskChunkParams is the params payload of every "chunk", "user_message",
+// and "thinking" event task.prompt and run.attach emit -- all three are
+// just "a chunk of text from some role", differing only in the event name,
+// per docs/decisions/0008-structured-run-events.md.
 type taskChunkParams struct {
 	Text string `json:"text"`
+}
+
+// runToolCallParams is the params payload of every "tool_call" event
+// task.prompt/run.attach emit for taskrunner.EventTypeToolCall, and (via
+// toRunLogEvent) the shape of a "tool_call" run.logs entry. A later event
+// with the same ToolCallID updates the same card in place (see
+// taskrunner.EventTypeToolCall's doc comment) -- Title/Input may be empty
+// on such an update, meaning "unchanged", not "cleared".
+type runToolCallParams struct {
+	ToolCallID string          `json:"toolCallId"`
+	ToolName   string          `json:"toolName,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
+}
+
+func toRunToolCallParams(e taskrunner.Event) runToolCallParams {
+	return runToolCallParams{
+		ToolCallID: e.ToolCallID,
+		ToolName:   e.ToolName,
+		Title:      e.ToolTitle,
+		Status:     e.ToolStatus,
+		Input:      e.ToolInput,
+		Result:     e.ToolResult,
+	}
 }
 
 // permissionOptionParams is one choice offered by a "permission_request"
@@ -699,6 +727,12 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 			switch e.Type {
 			case taskrunner.EventTypeText:
 				rc.Emit("chunk", taskChunkParams{Text: e.Text})
+			case taskrunner.EventTypeUserMessage:
+				rc.Emit("user_message", taskChunkParams{Text: e.Text})
+			case taskrunner.EventTypeThinking:
+				rc.Emit("thinking", taskChunkParams{Text: e.Text})
+			case taskrunner.EventTypeToolCall:
+				rc.Emit("tool_call", toRunToolCallParams(e))
 			case taskrunner.EventTypePermissionRequest:
 				rc.Emit("permission_request", permissionRequestParams{
 					RequestID: e.PermissionRequestID,
@@ -741,10 +775,13 @@ func terminalResult(reg *runs.Registry, runID string) (any, error) {
 
 // runLogEvent is the wire shape of one event in a run.logs response --
 // the same fields task.prompt/run.attach's streamed events and terminal
-// results carry, just batched instead of streamed. Type is "chunk", "done",
-// "permission_request", or "permission_resolved"; which of the other fields
-// are populated depends on it, mirroring taskrunner.Event's own
-// discriminated-by-Type shape.
+// results carry, just batched instead of streamed. Type is "chunk",
+// "user_message", "thinking", "tool_call", "done", "permission_request",
+// or "permission_resolved"; which of the other fields are populated
+// depends on it, mirroring taskrunner.Event's own discriminated-by-Type
+// shape. The tool-call fields (ToolCallID/ToolName/Title/Status/Input/
+// Result) are additive, added by
+// docs/decisions/0008-structured-run-events.md.
 type runLogEvent struct {
 	Type       string                   `json:"type"`
 	Text       string                   `json:"text,omitempty"`
@@ -756,6 +793,15 @@ type runLogEvent struct {
 	// Reason is the wire form of taskrunner.PermissionResolution, populated
 	// for a "permission_resolved" entry -- see permissionResolvedParams.
 	Reason string `json:"reason,omitempty"`
+	// ToolCallID, ToolName, Title, Status, Input, and Result are populated
+	// for a "tool_call" entry -- see runToolCallParams for the shared
+	// shape this mirrors.
+	ToolCallID string          `json:"toolCallId,omitempty"`
+	ToolName   string          `json:"toolName,omitempty"`
+	Title      string          `json:"title,omitempty"`
+	Status     string          `json:"status,omitempty"`
+	Input      json.RawMessage `json:"input,omitempty"`
+	Result     json.RawMessage `json:"result,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -768,6 +814,21 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 	switch e.Type {
 	case taskrunner.EventTypeText:
 		return runLogEvent{Type: "chunk", Text: e.Text}
+	case taskrunner.EventTypeUserMessage:
+		return runLogEvent{Type: "user_message", Text: e.Text}
+	case taskrunner.EventTypeThinking:
+		return runLogEvent{Type: "thinking", Text: e.Text}
+	case taskrunner.EventTypeToolCall:
+		p := toRunToolCallParams(e)
+		return runLogEvent{
+			Type:       "tool_call",
+			ToolCallID: p.ToolCallID,
+			ToolName:   p.ToolName,
+			Title:      p.Title,
+			Status:     p.Status,
+			Input:      p.Input,
+			Result:     p.Result,
+		}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
 	case taskrunner.EventTypePermissionRequest:
