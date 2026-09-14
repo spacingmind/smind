@@ -835,11 +835,11 @@ schema is Item 8/9, Track B, separate PR):
 - `cmd/smind/task.go`: `task attach`/`task logs` render the new event
   kinds as readable text — text-shaped events (`chunk`/`user_message`/
   `thinking`) print as before; `tool_call` prints one line via the new
-  `renderToolCallLine` (name/title + lifecycle status, input while
-  running). No dedicated CLI test added (no prior test coverage existed
-  for this rendering path either); covered by manual inspection of
-  `renderToolCallLine`'s output for both the running and
-  success/failure cases.
+  `toolCallNames.render` (name/title + lifecycle status, input while
+  running), which remembers each `toolCallId`'s name so a completion
+  renders as `[tool] Bash: done` rather than under a raw wire id.
+  `cmd/smind/task_test.go` (new) covers the render table and pins the
+  run.logs wire keys against the CLI's own structs.
 - `task test` (`go test ./...` + the web suite) and `task lint`
   (`go vet ./...` + `gofmt -l`) both pass clean.
 - **Wire-compat caveats the UI track (Items 8/9) must respect**: (1) a
@@ -851,3 +851,40 @@ schema is Item 8/9, Track B, separate PR):
   composer); (3) Codex-native never emits `tool_call` in this pass, so a
   Codex run's timeline is text-only even after Item 8/9 land, until a
   follow-up change teaches `internal/codex` its item-lifecycle protocol.
+
+- **Adversarial review pass (2026-09-14)** on top of the above, with
+  tests that fail against the first cut:
+  - `internal/taskrunner/normalize_test.go` (new) tests `claudeEvents`
+    and `acpEvent` directly, as translation tables, rather than only
+    end-to-end through a fake agent. It caught three dropped/incorrect
+    cases, all fixed: a `tool_result` block arriving on an *assistant*
+    message (left its card stuck "running" forever), the server-side
+    tool blocks `WebSearch`/`WebFetch` produce (no tool-call events at
+    all for such a run), and an ACP `tool_call` with an absent or
+    unrecognized `status` (ACP's `ToolCall.status` is optional with a
+    `pending` default, so an initial `tool_call` is running, not
+    status-less).
+  - `internal/wsapi`'s two Item 7 tests were strengthened: the wire-key
+    assertion is now made against untyped JSON (a `json:` tag typo was
+    invisible before), and the pre-ADR row fixture now covers all four
+    original `EventType` integers rather than just 0 and 1 -- only the
+    permission pair can catch a constant inserted mid-enum.
+  - ADR-0008's "additive only, in both directions" claim was corrected:
+    on the ACP path this re-types `agent_thought_chunk`/
+    `user_message_chunk` from `chunk`, so the shipped UI shows less text
+    for a GLM/Kimi run until Item 8 lands.
+
+- **Known gaps left open for Items 8/9 / a follow-up**, none of them
+  regressions:
+  - An ACP update kind neither `Text()` nor `IsToolCall()` accepts
+    (`plan` today, anything ACP adds tomorrow) is silently dropped
+    rather than surfaced as a generic/raw event. Preserving unknown
+    kinds would mean a new wire event name, i.e. its own ADR.
+  - ACP's `rawOutput` is not carried: `ToolResult` is fed from the
+    tool call's display `content` array.
+  - Every event, now including full tool inputs and results, is written
+    as its own `run_events` row and retained in unbounded in-memory
+    history. Nothing new was introduced here, but the per-run volume is
+    substantially higher than before Item 7 (tool results were dropped
+    entirely); if large runs get slow, batching `record`'s
+    `AppendRunEvent` or truncating `ToolResult` is where to look.
