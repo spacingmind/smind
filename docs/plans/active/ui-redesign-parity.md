@@ -997,11 +997,11 @@ Phase 2 (implementation) — not started:
 - [x] Item 9: tool-call cards *(Track B)*
 - [x] Item 10: composer v2 *(Track B)*
 - [x] Item 11: permission UX v2 *(Track B)*
-- [ ] Item 12: sidebar signal *(Track D)*
+- [x] Item 12: sidebar signal *(Track D)*
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
-- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
+- [x] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — backend (ADR 0009, `internal/wsapi`/`internal/workspace`) and UI consumption (`lib/workspace-tree.ts`, `hooks/use-daemon-events.ts`, `useWorkspaceTree`) both landed
 - [x] Item 17: file explorer / editor polish *(Track C)*
 - [x] Item 18: quick file open *(Track C)*
 - [x] Item 19: diff / review v2 *(Track C)*
@@ -1121,6 +1121,82 @@ and any manual check performed. Follow the per-item format used in
   Tailwind's CSS generation). Fixed by rewording the comment; worth
   remembering that any future doc comment in this file must avoid a bare
   `*/` substring.
+
+### Item 12 — sidebar signal
+
+Task rows now carry real state. A leading dot shows the task's latest run
+status (`hooks/use-task-attention.ts`'s `runStatus`, live off
+`run.status` -- `Task.Status` is deliberately not the source, since
+`internal/workspace` moves a task `created` -> `running` on its first run
+and never back). The attention dot now names *why* it fired: error,
+permission and finished each render their own `StatusDot` variant with
+their own accessible name, where all three used to share one warning dot
+(`lib/sidebar-signal.ts`'s `attentionDotStatus`/`primaryAttentionReason`,
+precedence error > permission > finished). A second meta line shows the
+task's branch and diff size (new `task.stats` RPC,
+`internal/workspace.Manager.TaskStats` + `internal/workspace/git.go`'s
+`taskDiffStat`, `hooks/use-task-stats.ts`), falling back to the task's
+lifecycle status when no stat is available -- never a fabricated zero.
+Workspace and space rows carry an `aggregateStatus` derived from their
+tasks (`audit-paseo.md` §5's workspace status bucket), the single loudest
+signal below a collapsed container. A collapsed-search field
+(`audit-deepseek-harness.md` §3) replaces the tree with a flat
+`searchTasks` result list on a non-blank query; an outside click
+collapses the field only while it's empty.
+
+All four signal sources (`attention`, `runStatus`, `stats`,
+`statusOverrides`) reach the row components through one `RowSignalContext`
+instead of being threaded as props through
+`WorkspaceItem`/`SpaceItem`/`SpaceLikeItem`/`TaskRows`.
+
+- **Run status dot** (`sidebar-run-status-tests` in `app-sidebar.test.tsx`
+  + `use-task-attention.test.ts`'s `runStatus` suite): a running run shows
+  the running dot; a task that has never run shows none; a still-running
+  run outranks a later-started one that already finished; live
+  `run.status` events update it without a refetch, using an `order`
+  counter above the whole `run.list` snapshot so a live event always wins
+  ties (pinned by a dedicated ordering test, since `run.list` returns
+  newest-first per `internal/runs.Registry.List`).
+- **Attention by reason**: `error | finished | permission` each render a
+  distinguishable `data-attention-reason` and a distinct `data-status`
+  variant — asserted by testid/attribute, never colour.
+- **Workspace/space aggregate**: a task with an error surfaces `danger` on
+  both its space row and its workspace row; an idle bucket (nothing
+  running, nothing unseen) shows no dot at all rather than a neutral one.
+  `sidebar-signal.test.ts` covers the full precedence table at the unit
+  level (`aggregateStatus`).
+- **Search**: typing replaces the tree with a flat list matching task
+  title *and* container (workspace/space) name substrings
+  (`searchTasks`, `workspace-tree.test.ts`); clearing it restores the tree
+  with the expansion state it had before searching (a collapsed workspace
+  stays collapsed); an outside click while the field is empty collapses
+  it, a typed query survives an outside click; a query matching nothing
+  renders `EmptyState`, not a blank pane.
+- **Branch + diff stat** (`task.stats`, new additive RPC): daemon-side
+  tests (`internal/workspace/stats_test.go`,
+  `internal/wsapi/stats_test.go`) cover the untracked-files-count case
+  (the reason this goes through the same snapshot-index computation as
+  `task.diff`/`task.files` rather than a plain `git diff --shortstat`), a
+  broken worktree being omitted without failing the other tasks'
+  stats, id-order preservation across the `taskStatWorkers`-sized worker
+  pool, and an archived task leaving the list. UI-side
+  (`use-task-stats.test.ts`): a task absent from the response stays absent
+  from the map (never a zeroed stat); a finished run refetches only that
+  run's workspace, not every workspace; a run merely starting triggers no
+  refetch (nothing has changed on disk yet).
+- **Selecting a task still clears its attention** and still invokes
+  `onSelectTask` with the full `Task` — unchanged, re-asserted with the
+  new signal props present, confirming the new dots don't intercept the
+  click.
+- **Layout stability** (Item 2's rule, re-applied here): the run-status
+  slot, the attention slot, the aggregate slot, and the whole meta line
+  are always in the DOM at a fixed size — a dot or a stat arriving never
+  moves anything beside it. Each has a dedicated before/after
+  className-equality test.
+- `task test` (Go + 294 web tests, up from 247 before this item), `task
+  lint`, and `bunx tsc -b` all pass clean.
+
+
 ### Item 16 — daemon lifecycle events (backend half)
 
 `docs/decisions/0009-lifecycle-event-topics.md` records the topic set,
@@ -1488,6 +1564,64 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+
+### Item 16 — daemon lifecycle events (UI half)
+
+The consuming half of ADR 0009. `hooks/use-daemon-events.ts` now issues
+its one `events.subscribe` per connection with all eleven topics (ADR
+0005's three plus ADR 0009's eight); the tree-folding logic lives in a new
+pure module, `lib/workspace-tree.ts`
+(`buildWorkspaceTree`/`applyLifecycleEvent`/`LIFECYCLE_TOPICS`), which
+also now owns the `WorkspaceWithTree`/`SpaceWithTasks` shapes that
+`app-sidebar.tsx` previously declared inline. `useWorkspaceTree` folds
+each event into its state instead of refetching.
+
+- **Acceptance criterion** ("a task created in another browser tab, or by
+  the CLI, appears in this tab's sidebar without a reload"): covered by
+  `app-sidebar.test.tsx`'s `AppSidebar lifecycle events` block — the
+  two-client scenario fires `task.created` on a mounted sidebar and
+  asserts both that the row appears and that `FakeWsClient` recorded **no
+  further RPC**, so it is genuinely a splice rather than a refetch in
+  disguise.
+- **Upsert-by-ID / no double-insert** (ADR 0009: "an event is not ordered
+  against the RPC response that caused it"): the acting client still calls
+  `refresh()` after its own mutation — `events.subscribe` is
+  fire-and-forget, so a connection that failed to subscribe must not stop
+  showing this user's own new rows — and delivering the same
+  `task.created` twice yields one row
+  (`findAllByText(...)` is asserted to have length 1), plus
+  `workspace-tree.test.ts`'s upsert case at the unit level.
+- **Insert position**: `upsertById` inserts in ascending-ID order because
+  every `*.list` query behind this tree is `ORDER BY id`
+  (`internal/store/{workspaces,spaces,tasks}.go`), so an event-spliced row
+  lands exactly where the next reconnect's refetch puts it.
+- **Cascades**: `workspace.deleted` / `space.deleted` prune the subtree
+  client-side, since ADR 0009 publishes only the root event. Asserted at
+  both levels (`workspace.deleted` removes the workspace *and* its task
+  row from the DOM).
+- **Archive-is-removal**: ADR 0009 explicitly leaves this to the client;
+  `task.archived` removes the row here, matching `ListTasks` (which
+  filters archived rows out) and therefore matching what a refetch would
+  return. A `task.created`/`task.updated` carrying an already-archived row
+  is treated the same way.
+- **Scoping**: an event naming a workspace (or a space) this client has
+  not fetched returns the *same tree reference*, so an unrelated tab's
+  activity neither disturbs the tree nor re-renders it. Asserted by
+  reference identity in `workspace-tree.test.ts` and through the DOM in
+  `app-sidebar.test.tsx`.
+- **Reconciliation**: `event.dropped` — the daemon's synthetic overflow
+  notification, deliberately *not* in the `events.subscribe` list because
+  `knownTopics` would reject the name — triggers a full refetch
+  (asserted: a second `workspace.list`). Reconnect already refetches, via
+  the new-`WsClient`-on-reconnect property from
+  `daemon-restart-resync.md`.
+- **Malformed payloads**: every topic is exercised against `null`,
+  `undefined`, a number, a string, `{}`, and entity fields missing an
+  `ID`; each returns the tree unchanged rather than throwing.
+- `task test` (Go suite + 247 web tests), `task lint`, and `bunx tsc -b`
+  all pass clean. The one Go failure seen mid-session
+  (`TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny`) is the
+  known-flaky ClaudeNative case and passed on re-run.
 
 **Item 4 — keyboard action registry + shortcuts help:**
 
