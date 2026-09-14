@@ -396,7 +396,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.approvalPolicy, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
