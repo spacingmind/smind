@@ -244,17 +244,22 @@ describe("TaskDetailPane", () => {
     expect(screen.getAllByTestId("run-entry")).toHaveLength(1);
   });
 
-  it("shows a Stop button only for a running run, and clicking it calls run.stop (not an abort)", async () => {
+  // Item 10 moved Stop from the run card into the composer -- one control
+  // per task, always in the same place. These two keep asserting the
+  // behaviour that mattered (run.stop, never an abort of the live
+  // run.attach), just against the composer's button.
+  it("shows a Stop button in the composer only while a run is live, and clicking it calls run.stop (not an abort)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    const entry = screen.getByTestId("run-entry");
-    const stopButton = within(entry).getByRole("button", { name: "Stop" });
+    const composer = screen.getByTestId("composer");
+    // The run card no longer carries its own Stop.
+    expect(within(screen.getByTestId("run-entry")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
 
-    fireEvent.click(stopButton);
+    fireEvent.click(within(composer).getByRole("button", { name: "Stop" }));
     await flush();
 
     const stopCall = client.nth("run.stop", 0);
@@ -272,7 +277,7 @@ describe("TaskDetailPane", () => {
     // disappears once the run is no longer "running".
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "" });
     await flush();
-    expect(within(screen.getByTestId("run-entry")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("composer")).queryByRole("button", { name: "Stop" })).not.toBeInTheDocument();
   });
 
   it("surfaces a run.stop failure without crashing, keeping the Stop button usable", async () => {
@@ -282,14 +287,14 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    fireEvent.click(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" }));
+    fireEvent.click(within(screen.getByTestId("composer")).getByRole("button", { name: "Stop" }));
     await flush();
 
     client.nth("run.stop", 0).reject(new Error("boom"));
     await flush();
 
-    expect(screen.getByText(/stop failed: boom/i)).toBeInTheDocument();
-    expect(within(screen.getByTestId("run-entry")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
+    expect(screen.getByText(/boom/i)).toBeInTheDocument();
+    expect(within(screen.getByTestId("composer")).getByRole("button", { name: "Stop" })).not.toBeDisabled();
   });
 
   it("renders a pending permission request with a button per option when a permission_request event arrives", async () => {

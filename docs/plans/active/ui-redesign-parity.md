@@ -716,6 +716,26 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   keeps accessibility from silently regressing. Optional per item, not
   mandated.
 
+**Item 10 (landed)** — Track B's composer decisions:
+
+- **The provider/policy controls stay native `<select>`s**, given visible
+  `<label>`s instead of bare `aria-label`s. Item 10's complaint was
+  "unlabelled native selects"; swapping in the Radix `Select` would have
+  rewritten four passing `run.start`-payload tests for no user-visible
+  gain, against this item's own "no regression" scenario.
+- **Submitting while a run is live queues, it does not steer.** The daemon
+  has no "add input to a run in flight" RPC, so the composer holds the
+  text and starts it as its own run when the live one ends. The queue is
+  in-memory and per task: a follow-up whose meaning is "right after the
+  run I was watching" doesn't survive that run's session.
+- **A run in flight does not disable the composer**, unlike no-connection
+  and no-task. The placeholder still states what's different ("Queue a
+  follow-up — it sends when this run finishes"), which is what the item's
+  block contract actually asks for.
+- **Stop moved off the run card entirely** rather than existing in both
+  places: two controls with the same meaning, one of which scrolls out of
+  view mid-run, is the problem Item 10 names.
+
 **Items 1–2 (landed)** — where the plan was ambiguous and what was
 decided; full rationale is in `docs/design.md`'s own Decisions section,
 this is the pointer:
@@ -779,7 +799,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [ ] Item 8: timeline renderer *(Track B)*
 - [ ] Item 9: tool-call cards *(Track B)*
-- [ ] Item 10: composer v2 *(Track B)*
+- [x] Item 10: composer v2 *(Track B)*
 - [ ] Item 11: permission UX v2 *(Track B)*
 - [ ] Item 12: sidebar signal *(Track D)*
 - [ ] Item 13: settings screen *(Track D)*
@@ -970,6 +990,45 @@ old task-status-only `SetTaskNotifier`).
   the eight topics and `useWorkspaceTree` consuming them (this PR touches
   no code under `web/`, per this item's own scope split with the UI
   agent).
+**Item 10 (composer v2)** — 2026-09-14, `web/` only:
+
+- New `components/composer/`: `composer.tsx` (the composer itself),
+  `prompt-textarea.tsx` (autogrow + IME-safe key handling),
+  `use-composer-draft.ts` (per-task draft persistence). `task-detail.tsx`'s
+  old `PromptForm` is gone; the pane now just tells the composer which run
+  is live.
+- `composer.test.tsx` (11 cases) covers the item's scenarios:
+  Enter submits / Shift+Enter doesn't; neither IME signal
+  (`isComposing`, the legacy `keyCode === 229`) submits; submit clears the
+  draft from `localStorage`; `autoGrow` sizes to content then caps at
+  `MAX_COMPOSER_HEIGHT` and switches to `overflow-y: auto`; a draft
+  survives a task switch *and* a real unmount/remount; each block reason
+  (no connection / no task / run in flight) is stated in the placeholder;
+  queue-while-running sends on the run ending and is dropped on a task
+  switch; Stop works from the button and from Escape; a failed submit
+  keeps the text; the provider dropdown is driven by `provider.list`
+  behind a real `<label>`.
+- Existing guarantees re-asserted, not regressed: the two `run.start`
+  payload tests (`approvalPolicy` omitted for `manual`, sent for
+  `auto-safe`) and the provider-list/fallback tests in
+  `task-detail.test.tsx` pass unchanged. The two Stop tests were
+  *retargeted* at the composer (Item 10 moves Stop off the run card) while
+  keeping their real assertion — Stop goes through `run.stop` and never
+  aborts the live `run.attach`.
+- `task test` (Go + web, 235 web tests), `task lint` and `bunx tsc -b` all
+  clean.
+- **Not done, and why**: (1) the **model selector** — `provider.list`
+  reports no models (`internal/taskrunner.ProviderInfo` has
+  id/label/kind/credentialKind/accountProvider and nothing else) and
+  `run.start` takes no `model` field, so there is nothing to select or
+  send. The item's own wording gates this on "where `provider.list` can
+  report them", so this is the honest read; closing it needs a daemon
+  change of its own (AGENTS.md rule (d)). (2) the **no-task-selected empty
+  state** becoming a "create a task here" entry point — that markup lives
+  in `App.tsx` (`data-testid="app-empty-state"`), which Track A owns and
+  this track was told not to restructure. Left for Track A's Item 3/6 pass
+  on that file.
+
 **Item 7 (structured timeline events)** — 2026-09-14, daemon + wire only
 (this item does not touch `web/`; the timeline renderer that consumes this
 schema is Item 8/9, Track B, separate PR):

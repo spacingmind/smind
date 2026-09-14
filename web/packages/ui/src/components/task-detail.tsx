@@ -1,39 +1,23 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useState } from "react";
 
+import { Composer } from "@/components/composer/composer";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
-import { Input } from "@/components/ui/input";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, Task } from "@/lib/types";
+import type { Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
-
-const FALLBACK_PROVIDERS: ProviderInfo[] = [
-  { id: "claude-native" },
-  { id: "glm" },
-];
-
-// internal/taskrunner.ApprovalPolicy's two values, with the human-facing
-// label/help text shown next to the Provider dropdown in the prompt form.
-// "manual" is listed first since it's the default (today's behavior).
-const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
-  { id: "manual", label: "Manual approval" },
-  { id: "auto-safe", label: "Auto-safe" },
-];
-
-const APPROVAL_POLICY_HELP =
-  "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
 
 /**
  * The main-content pane for a selected task: identity header, a chat-log
- * timeline of its runs (history plus any still-live streaming), and a
- * prompt form that starts new runs via run.start + run.attach (never
+ * timeline of its runs (history plus any still-live streaming), and the
+ * composer that starts new runs via run.start + run.attach (never
  * task.prompt -- see the hook this delegates to for why). All data comes
- * from useRunTimeline; this component is presentation plus the form's own
- * local (provider/prompt/submitting) state.
+ * from useRunTimeline; this component is presentation plus the wiring
+ * that tells the composer which run (if any) is currently live.
  */
 export function TaskDetailPane({
   client,
@@ -54,6 +38,10 @@ export function TaskDetailPane({
   // inline per-run, so it can't be scrolled out of view while log chunks
   // keep streaming in above/below it.
   const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
+
+  // The task's live run, if any. A task has at most one at a time, so the
+  // first match is the one the composer's Stop and queue drain act on.
+  const runningRunId = runs?.find((run) => run.status === "running")?.id ?? null;
 
   return (
     <div className="flex h-full flex-col">
@@ -85,7 +73,7 @@ export function TaskDetailPane({
         {runs !== null && runs.length > 0 && (
           <ul className="space-y-4">
             {runs.map((run) => (
-              <RunEntryView key={run.id} run={run} onStop={stopRun} />
+              <RunEntryView key={run.id} run={run} />
             ))}
           </ul>
         )}
@@ -110,65 +98,39 @@ export function TaskDetailPane({
         </div>
       )}
 
-      <PromptForm client={client} onSubmit={submitPrompt} disabled={!client} />
+      <Composer
+        client={client}
+        taskId={task.ID}
+        connected={client !== null && connectionStatus === "connected"}
+        runningRunId={runningRunId}
+        onSubmit={submitPrompt}
+        onStop={stopRun}
+      />
     </div>
   );
 }
 
-function RunEntryView({
-  run,
-  onStop,
-}: {
-  run: RunEntry;
-  onStop: (runId: string) => Promise<void>;
-}) {
-  const [stopping, setStopping] = useState(false);
-  const [stopError, setStopError] = useState<string | null>(null);
-
-  async function handleStop() {
-    setStopping(true);
-    setStopError(null);
-    try {
-      await onStop(run.id);
-    } catch (err) {
-      setStopError(err instanceof Error ? err.message : String(err));
-      setStopping(false);
-    }
-    // On success, leave `stopping` true: the run's own run.attach
-    // subscription observes the stop as its terminal response and patches
-    // `run.status` away from "running" shortly, which unmounts this button
-    // (see the status !== "running" guard below) -- no need to reset here.
-  }
-
+/**
+ * One run in the task's log: its provider/status header, the prompt that
+ * started it, and its collected output. Stopping a live run lives in the
+ * composer now (ui-redesign-parity Item 10) rather than here -- one Stop
+ * control per task, always in the same place, instead of one per run card
+ * that scrolls away mid-run.
+ */
+function RunEntryView({ run }: { run: RunEntry }) {
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border p-3">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{run.provider}</span>
-        <div className="flex items-center gap-2">
-          <span className="uppercase" data-testid="run-status">
-            {run.status}
-          </span>
-          {run.status === "running" && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-5 px-2 text-xs"
-              disabled={stopping}
-              data-testid="chat-stop-button"
-              onClick={handleStop}
-            >
-              Stop
-            </Button>
-          )}
-        </div>
+        <span className="uppercase" data-testid="run-status">
+          {run.status}
+        </span>
       </div>
       <p className="mt-1 text-sm font-medium">{run.prompt}</p>
       <pre className="mt-2 whitespace-pre-wrap text-sm" data-testid="run-text">
         {run.text}
       </pre>
       {run.err && <p className="mt-1 text-xs text-destructive">{run.err}</p>}
-      {stopError && <p className="mt-1 text-xs text-destructive">stop failed: {stopError}</p>}
     </li>
   );
 }
@@ -233,102 +195,5 @@ function PendingPermissionView({
         ))}
       </Alert>
     </div>
-  );
-}
-
-function PromptForm({
-  client,
-  onSubmit,
-  disabled,
-}: {
-  client: WsClientLike | null;
-  onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
-  disabled: boolean;
-}) {
-  const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
-  const [provider, setProvider] = useState<Provider>("claude-native");
-
-  // Fetch the provider list once per client connection, like the other
-  // one-shot fetches; on failure keep the fallback list (console.error,
-  // non-fatal) so the form still works.
-  useEffect(() => {
-    setProviders(FALLBACK_PROVIDERS);
-    if (!client) return;
-    let cancelled = false;
-    client
-      .call<ProviderListResult>("provider.list")
-      .then((result) => {
-        if (!cancelled && result.providers.length > 0) setProviders(result.providers);
-      })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [client]);
-  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
-  const [prompt, setPrompt] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const trimmed = prompt.trim();
-    if (!trimmed || submitting) return;
-
-    setSubmitting(true);
-    setFormError(null);
-    try {
-      await onSubmit(provider, trimmed, approvalPolicy);
-      setPrompt("");
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  const inactive = disabled || submitting;
-
-  return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 border-t px-4 py-3">
-      <select
-        aria-label="Provider"
-        value={provider}
-        onChange={(e) => setProvider(e.target.value as Provider)}
-        disabled={inactive}
-        className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
-      >
-        {providers.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label ?? p.id}
-          </option>
-        ))}
-      </select>
-      <select
-        aria-label="Approval policy"
-        title={APPROVAL_POLICY_HELP}
-        value={approvalPolicy}
-        onChange={(e) => setApprovalPolicy(e.target.value as ApprovalPolicy)}
-        disabled={inactive}
-        className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50"
-      >
-        {APPROVAL_POLICIES.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.label}
-          </option>
-        ))}
-      </select>
-      <Input
-        aria-label="Prompt"
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        placeholder="Send a prompt…"
-        disabled={inactive}
-      />
-      <Button type="submit" disabled={inactive || !prompt.trim()} data-testid="chat-send-button">
-        Send
-      </Button>
-      {formError && <span className="text-xs text-destructive">{formError}</span>}
-    </form>
   );
 }
