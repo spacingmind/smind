@@ -35,6 +35,13 @@ func TestAllowlistedCommand(t *testing.T) {
 		{"cd then task test", "cd /repo && task test", true},
 		{"an unrelated task target is not auto-allowed", "task clean --force", false},
 		{"task with a dangerous-looking injected flag still matches the plain prefix rule", "task test:slow", false},
+		{"git add is allowed (local staging only)", "git add -A", true},
+		{"git commit is allowed (local commit only)", "git commit -m \"feat: x\"", true},
+		{"cd then git commit", "cd /repo && git commit -m y", true},
+		{"git push is never allowlisted", "git push origin main", false},
+		{"git push --force is never allowlisted", "git push --force", false},
+		{"git reset is never allowlisted", "git reset --hard", false},
+		{"git checkout is never allowlisted", "git checkout main", false},
 		{"cd segment tolerates whitespace around separators", "cd /repo  &&   go vet ./...", true},
 
 		{"rm -rf is never safe", "rm -rf", false},
