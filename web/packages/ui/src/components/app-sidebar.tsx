@@ -1,5 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { useCommands } from "@/palette/palette-provider";
+import type { Command } from "@/palette/commands";
+
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import {
   AlertCircle,
@@ -274,6 +277,8 @@ export function AppSidebar({
   attention,
   runStatus,
   events,
+  onTasksChange,
+  onWorkspacesChange,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -286,6 +291,17 @@ export function AppSidebar({
   runStatus?: TaskRunStatus;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
+  /**
+   * Called with every task across the whole tree whenever the tree
+   * changes. The shell needs a flat task list for things the sidebar
+   * itself doesn't do -- `task.prev`/`task.next` shortcuts, the command
+   * palette's task entries, restoring a task id from the URL -- and this
+   * component is the one place that already fetches it. Optional: mounts
+   * that don't care (every existing test) behave exactly as before.
+   */
+  onTasksChange?: (tasks: Task[]) => void;
+  /** Called with the workspace list whenever the tree changes -- same rationale as onTasksChange, for the palette's workspace entries. */
+  onWorkspacesChange?: (workspaces: Workspace[]) => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -309,8 +325,57 @@ export function AppSidebar({
     useNotificationPermission();
   useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
 
+  useEffect(() => {
+    onTasksChange?.(allTasks);
+  }, [allTasks, onTasksChange]);
+
+  useEffect(() => {
+    if (workspaces) onWorkspacesChange?.(workspaces);
+  }, [workspaces, onWorkspacesChange]);
+
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
+
+  // Command-palette contributions for the dialogs this component owns.
+  // Registered here rather than in App.tsx on purpose: the surface that
+  // owns a dialog is the one that can open it, and `useCommands` is the
+  // API that lets it contribute without either file importing the other
+  // (docs/design.md §8).
+  const paletteCommands = useMemo<Command[]>(() => {
+    const commands: Command[] = [
+      {
+        id: "new-workspace",
+        group: "Actions",
+        title: "New workspace",
+        keywords: ["create", "add", "project", "repo"],
+        run: () => setCrud({ kind: "workspace" }),
+      },
+      {
+        id: "accounts",
+        group: "Actions",
+        title: "Open accounts",
+        keywords: ["providers", "credentials", "login", "oauth"],
+        run: () => setAccountsOpen(true),
+      },
+    ];
+    // "New task" needs a workspace to create the task in. With exactly one
+    // workspace the choice is unambiguous; with several, picking one for
+    // the user would be a guess, so the entry is per workspace instead.
+    for (const ws of workspaces ?? []) {
+      commands.push({
+        id: `new-task-${ws.ID}`,
+        group: "Actions",
+        title:
+          (workspaces ?? []).length === 1
+            ? "New task"
+            : `New task in ${ws.Title || ws.Path}`,
+        keywords: ["create", "add", ws.Title, ws.Path],
+        run: () => setCrud({ kind: "task", workspace: ws, spaceId: null }),
+      });
+    }
+    return commands;
+  }, [workspaces]);
+  useCommands("sidebar:actions", 5, paletteCommands);
   // The just-created workspace is expanded on landing; existing ones start
   // collapsed until first refresh happens (empty state -> created).
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
