@@ -785,7 +785,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
-- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)*
+- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
 - [ ] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
 - [ ] Item 19: diff / review v2 *(Track C)*
@@ -999,3 +999,69 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+
+### Item 16 — daemon lifecycle events (backend half)
+
+`docs/decisions/0009-lifecycle-event-topics.md` records the topic set,
+payload shape (full entity for create/update/archive, id+scope for
+delete), ordering, and reconciliation story. Implemented in
+`internal/workspace` (new `Notifier` interface, `SetNotifier`, and a
+`Notify*` call at every mutation site: `CreateWorkspace`, `DeleteWorkspace`,
+`CreateSpace`, `DeleteSpace`, `CreateTask`, `RunTask`, `ArchiveTask`,
+`DeleteTask`) and `internal/wsapi` (eight new topics/payload types in
+`events.go`, `busWorkspaceNotifier` adapter in `server.go` replacing the
+old task-status-only `SetTaskNotifier`).
+
+- **Acceptance criterion** ("subscribing to each new topic delivers the
+  event on create/update/archive/delete; an unknown topic still errors"):
+  covered by `internal/wsapi/lifecycle_events_test.go` — one test per
+  topic (`TestEvents_WorkspaceCreatedSubscribeAndReceive`,
+  `TestEvents_WorkspaceDeletedIsRootOnlyCascade`,
+  `TestEvents_SpaceCreatedSubscribeAndReceive`,
+  `TestEvents_SpaceDeletedCascadesWithoutPerTaskEvents`,
+  `TestEvents_TaskCreatedSubscribeAndReceive`,
+  `TestEvents_TaskUpdatedOnRunTask`,
+  `TestEvents_TaskArchivedSubscribeAndReceive`,
+  `TestEvents_TaskDeletedOnManagerDeleteTask`), each asserting exactly one
+  event with the documented payload and no extra event; unknown-topic
+  rejection was already covered by ADR 0005's `TestEvents_UnknownTopicIsError`
+  and needed no change (`knownTopics` is additive).
+- **Two-client delivery**: `TestEvents_WorkspaceCreatedReachesASecondClient`
+  — client A calls `workspace.create`, client B (subscribed, never having
+  made the call itself) receives `workspace.created` — the actual
+  cross-client-staleness scenario from `gap-matrix.md` item 8.
+- **Cascade-is-root-only**: `TestEvents_WorkspaceDeletedIsRootOnlyCascade`
+  and `TestEvents_SpaceDeletedCascadesWithoutPerTaskEvents` subscribe to
+  the descendant topics too and assert silence after the one root event.
+- **Ordering**: `TestEvents_TaskArchivedPrecedesTaskStatus` pins
+  lifecycle-before-status on one connection subscribed to both.
+- **Delete payload scope**: `TestEvents_TaskDeletedSpaceIDIsNullNotOmitted`
+  asserts the raw payload always carries a `spaceId` key (null, not
+  omitted, for an ungrouped task -- `decodePayload` cannot tell the two
+  apart, so this one inspects the payload map directly), and
+  `TestEvents_TaskDeletedCarriesSpaceIDForGroupedTask` asserts a task
+  inside a space reports that space, which is the subtree the sidebar
+  actually prunes from.
+- **Emit-vs-error edge**: `TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails`
+  pins the one path that publishes before its method's success return --
+  `CreateWorkspace` emits once the workspace row commits, before the
+  `AddWorkspaceAccount` loop that can still fail, because that failure
+  leaves the row in place (ADR 0009's "Ordering and delivery" note).
+- **Non-regression**: `TestEvents_LifecycleTopicsAreOptIn` — a
+  `task.status`-only subscriber sees nothing from a workspace create,
+  confirming the change is additive; the full pre-existing
+  `internal/wsapi`/`internal/workspace` suites pass unchanged.
+- `task test` (Go suite + web UI suite, `web/` untouched) and `task lint`
+  (`go vet` + `gofmt -l`) both pass clean.
+- **Not wired**: `task.commit` and `task.createPr` emit nothing (by
+  design — see the ADR's Consequences; they don't change the task row).
+  `RunTask`/`DeleteTask` have no wsapi RPC calling them today (confirmed
+  by grep — `task.prompt`/`run.start` never transition `store.Task.Status`,
+  and there is no standalone `task.delete` method), so `task.updated` and
+  a directly-invoked `task.deleted` are tested against the Manager
+  directly rather than over the wire; the moment either method gets an
+  RPC, its event fires for free.
+- **Left for the UI track**: `hooks/use-daemon-events.ts` subscribing to
+  the eight topics and `useWorkspaceTree` consuming them (this PR touches
+  no code under `web/`, per this item's own scope split with the UI
+  agent).
