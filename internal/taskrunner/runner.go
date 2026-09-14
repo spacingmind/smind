@@ -179,12 +179,20 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // today's behavior exactly: each provider falls through to its own
 // Runner-level default.
 //
+// approvalPolicy is the run's ApprovalPolicy (see policy.go): it only
+// matters when decider is non-nil, and only widens what may run without a
+// human -- ApprovalPolicyAutoSafe pre-approves the allowlisted
+// verification commands at the provider's own gate (see SafeBashRules for
+// why the decider-side check alone is not enough for claude-native) in
+// addition to auto-allowing them in the decider itself. The zero value
+// (ApprovalPolicyManual) preserves today's behavior exactly.
+//
 // The backend client spawned for this call is not reused: RunPrompt owns
 // its subprocess end to end and closes it before returning. ctx cancellation
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -200,7 +208,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, worktreePath, prompt, decider, events)
 	default:
@@ -270,7 +278,7 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	return nil
 }
 
-func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch {
 	case decider != nil:
@@ -285,6 +293,14 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 			claudecode.WithPermissionMode("acceptEdits"),
 			claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}),
 		)
+		// The CLI's own session gate blocks allowlisted Bash commands
+		// before can_use_tool ever fires (see SafeBashRules), so under
+		// auto-safe the allowlist has to be handed to the CLI at spawn
+		// time too -- the decider-side check alone only helps ACP/codex
+		// backends, whose permission flow starts at the decider.
+		if approvalPolicy == ApprovalPolicyAutoSafe {
+			opts = append(opts, claudecode.WithAllowedTools(SafeBashRules()...))
+		}
 	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
 	}
