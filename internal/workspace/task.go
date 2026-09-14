@@ -56,6 +56,9 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string) (s
 	if err != nil {
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskCreated(t)
+	}
 	m.notifyTask(t)
 	return t, nil
 }
@@ -87,6 +90,9 @@ func (m *Manager) RunTask(id int64) (store.Task, error) {
 	t, err = m.store.UpdateTaskStatus(id, "running")
 	if err != nil {
 		return store.Task{}, fmt.Errorf("run task %d: %w", id, err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskUpdated(t)
 	}
 	m.notifyTask(t)
 	return t, nil
@@ -121,6 +127,9 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 	t, err = m.store.ArchiveTask(id)
 	if err != nil {
 		return store.Task{}, fmt.Errorf("archive task %d: %w", id, err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskArchived(t)
 	}
 	m.notifyTask(t)
 	return t, nil

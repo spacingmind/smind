@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
-import { Terminal } from "@xterm/xterm";
+import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
+import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { PaneHeader } from "@/components/ui/pane-header";
+import { useTheme } from "@/hooks/use-theme";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { resolveTerminalTheme } from "@/lib/terminal-theme";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   Task,
@@ -38,6 +42,8 @@ export interface TerminalHandle {
   write(data: string | Uint8Array): void;
   /** Resizes the terminal to fit `container`'s current dimensions (wraps FitAddon.fit()); firing onResize if the size actually changed. */
   fit(): void;
+  /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
+  setTheme?(theme: ITheme): void;
   dispose(): void;
 }
 
@@ -51,6 +57,9 @@ function createRealTerminal(): TerminalHandle {
     onResize: (callback) => term.onResize(callback),
     write: (data) => term.write(data),
     fit: () => fit.fit(),
+    setTheme: (theme) => {
+      term.options.theme = theme;
+    },
     dispose: () => term.dispose(),
   };
 }
@@ -102,6 +111,7 @@ export function TerminalPane({
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
   createTerminal?: () => TerminalHandle;
 }) {
+  const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
@@ -135,13 +145,24 @@ export function TerminalPane({
       // been laid out) -- best-effort only, the terminal keeps its
       // default size.
     }
+    term.setTheme?.(resolveTerminalTheme());
     termRef.current = term;
 
     return () => {
       term.dispose();
       termRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [createTerminal]);
+
+  // Re-applies the terminal's chrome whenever the app's resolved theme
+  // changes (a live toggle, or the OS query flipping while on "system") --
+  // unlike CodeMirror's var()-based styling, xterm's theme option needs
+  // literal colors re-applied on every change (see lib/terminal-theme.ts's
+  // doc comment).
+  useEffect(() => {
+    termRef.current?.setTheme?.(resolveTerminalTheme());
+  }, [resolved]);
 
   // Resize the terminal to fit its container whenever the container's own
   // size changes (pane resize, browser window resize). fit()'s resulting
@@ -342,25 +363,32 @@ export function TerminalPane({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
-        <span data-testid="terminal-status">
-          {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-6 px-2 text-xs"
-          disabled={!terminalId || closing}
-          onClick={handleClose}
-        >
-          Close terminal
-        </Button>
-      </div>
+      <PaneHeader
+        title={
+          <span data-testid="terminal-status" className="font-normal text-foreground-muted">
+            {endedStatus ? `session ${endedStatus}` : terminalId ? `terminal ${terminalId}` : "starting terminal…"}
+          </span>
+        }
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-6 px-2 text-xs"
+            disabled={!terminalId || closing}
+            onClick={handleClose}
+          >
+            Close terminal
+          </Button>
+        }
+      />
       {connectionStatus === "reconnecting" && (
-        <p data-testid="connection-banner" className="border-b bg-amber-500/10 px-3 py-1 text-xs text-amber-600">
-          Connection lost -- reconnecting to daemon…
-        </p>
+        <Alert
+          testId="connection-banner"
+          variant="warning"
+          className="rounded-none border-x-0 border-t-0"
+          description="Connection lost -- reconnecting to daemon…"
+        />
       )}
       {endedStatus === "interrupted" && (
         <p className="px-3 py-1 text-xs text-muted-foreground" data-testid="terminal-ended">

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
@@ -70,6 +73,10 @@ type PermissionDecider interface {
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
+	// worktreePath/approvalPolicy carry the run's auto-safe edit policy
+	// down to this adapter -- see autoAllowACPFileEdit.
+	worktreePath   string
+	approvalPolicy ApprovalPolicy
 }
 
 func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermissionParams) (string, error) {
@@ -77,6 +84,22 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
+
+	// ApprovalPolicyAutoSafe's file-edit analog for ACP: claude-native
+	// runs get the CLI's own acceptEdits mode for this exact purpose, but
+	// ACP has no permission-mode concept -- every sensitive tool call
+	// arrives as a session/request_permission. Without this, a headless
+	// auto-safe GLM/Kimi run can never write a single file (every edit
+	// times out to auto-deny), which is the ACP twin of the 2026-09-11
+	// acceptEdits failure. Scoped to edits (kind edit/move/delete) whose
+	// every reported location stays inside the task's own worktree --
+	// see autoAllowACPFileEdit for why that boundary is the safe one.
+	if a.approvalPolicy == ApprovalPolicyAutoSafe && autoAllowACPFileEdit(req.ToolCall, a.worktreePath) {
+		if optionID, ok := firstOptionByKind(opts, "allow_once", "allow_always"); ok {
+			return optionID, nil
+		}
+	}
+
 	// command is always "" here: ACP's ToolCallUpdate (req.ToolCall) has no
 	// field this package has confirmed reliably carries the literal command
 	// being executed, unlike Claude Code's Input["command"] or Codex's
@@ -87,6 +110,113 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	// package can't actually identify, not a gap to silently paper over
 	// with a guessed schema.
 	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), "", opts)
+}
+
+// autoAllowACPFileEdit reports whether an ACP permission request is a
+// file edit confined to the task's own worktree, making it safe to
+// auto-allow under ApprovalPolicyAutoSafe: a write that can't escape the
+// throwaway task worktree is no more dangerous than the local git
+// commits that policy already allows, and the diff is human-reviewable
+// afterward (task.diff). Kind execute (shell commands) is deliberately
+// NOT covered here -- those requests keep going to the decider's
+// AllowlistedCommand path, which can't identify an ACP command string
+// anyway (see Decide above) and therefore stays manual. Anything
+// unparsable or incomplete fails closed (false).
+//
+// The path is identified two ways, because real agents populate
+// ToolCallUpdate inconsistently: the schema's structured fields first
+// (kind edit/move/delete + locations[].path), then -- only when the
+// agent filled in neither -- a conservative title fallback
+// ("<verb> file: <path>", glm-acp-agent's actual shape: it sets Title
+// like "Write file: docs/x.md" but leaves kind and locations empty).
+// Both routes converge on the same inside-worktree check; a title that
+// names no recognizable file-edit verb, or a relative/unparsable path,
+// fails closed.
+func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
+	if worktreePath == "" {
+		return false
+	}
+	var tc struct {
+		Kind      string `json:"kind"`
+		Title     string `json:"title"`
+		Locations []struct {
+			Path string `json:"path"`
+		} `json:"locations"`
+	}
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		return false
+	}
+
+	var paths []string
+	switch tc.Kind {
+	case "edit", "move", "delete":
+		for _, loc := range tc.Locations {
+			paths = append(paths, loc.Path)
+		}
+	case "", "execute", "read", "search", "other", "think", "fetch":
+		// Structured fields absent or not an edit kind: try the title
+		// fallback only when the agent provided no kind at all -- a tool
+		// call that *declared* a non-edit kind is not second-guessed from
+		// its title.
+		if tc.Kind == "" {
+			if p, ok := fileEditPathFromTitle(tc.Title); ok {
+				paths = append(paths, p)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		return false
+	}
+
+	root := filepath.Clean(worktreePath)
+	rootSep := root + string(os.PathSeparator)
+	for _, p := range paths {
+		if p == "" || !filepath.IsAbs(p) {
+			return false
+		}
+		cleaned := filepath.Clean(p)
+		// The root itself is rejected along with everything outside it: a
+		// "location" equal to the worktree isn't a file this edit targets,
+		// it's at best a malformed request -- fail closed.
+		if cleaned == root || !strings.HasPrefix(cleaned+string(os.PathSeparator), rootSep) {
+			return false
+		}
+	}
+	return true
+}
+
+// fileEditPathFromTitle extracts the absolute path from a file-edit
+// permission title of the form "<verb> file: <path>" (verbs observed in
+// the wild: glm-acp-agent's "Write file: ..." / "Edit file: ..."). Only
+// an absolute path counts: the worktree-containment check downstream is
+// meaningless against a relative one, and resolving it against a guessed
+// base would be papering over an ambiguous request.
+func fileEditPathFromTitle(title string) (string, bool) {
+	idx := strings.LastIndex(title, " file: ")
+	if idx < 0 {
+		return "", false
+	}
+	verb := title[:idx]
+	switch verb {
+	case "Write", "Edit", "Create", "Move", "Rename", "Delete", "Remove", "Overwrite":
+	default:
+		return "", false
+	}
+	return title[idx+len(" file: "):], true
+}
+
+// firstOptionByKind mirrors internal/runs's unexported helper of the same
+// name, for this package's adapters' own auto-allow paths (the runs-side
+// helper is not importable from here).
+func firstOptionByKind(options []PermissionOption, kinds ...string) (string, bool) {
+	for _, o := range options {
+		for _, k := range kinds {
+			if o.Kind == k {
+				return o.ID, true
+			}
+		}
+	}
+	return "", false
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a

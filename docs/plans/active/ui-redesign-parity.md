@@ -716,6 +716,45 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
   keeps accessibility from silently regressing. Optional per item, not
   mandated.
 
+**Items 1–2 (landed)** — where the plan was ambiguous and what was
+decided; full rationale is in `docs/design.md`'s own Decisions section,
+this is the pointer:
+
+- **`surface-0..3` alias the existing static token scale** rather than a
+  second independent set of hex values — the plan named the vocabulary
+  (`audit-paseo.md` §6) but not the implementation shape, and smind's
+  existing background/card/muted/accent scale already satisfies the
+  elevation need with no known contrast problems.
+- **`status-danger` aliases `--destructive`** rather than introducing a
+  second red — smind has exactly one flavor of "bad" today, unlike Paseo,
+  which distinguishes a PR/CI-state red from a destructive-action red.
+- **`status-running`'s hue is new**, since Paseo's own status-family text
+  tier has no running color (only its dot tier does) and the plan asks
+  for one at both tiers.
+- **`useTheme()` outside a `<ThemeProvider>` returns a fully-functional,
+  non-reactive default instead of throwing** — this codebase's component
+  tests render one component directly rather than the whole app tree
+  (confirmed while landing this item: `terminal-pane.test.tsx`,
+  `app-sidebar.test.tsx` etc. all do this already), so a strict
+  throw-without-provider design would have forced wrapping dozens of
+  existing test call sites. `main.tsx`'s real `ThemeProvider` is what
+  every reactive behavior in this item's own test suite exercises.
+- **CodeMirror, diff2html and xterm each needed a different theming
+  mechanism**, not one shared one: CodeMirror's chrome uses live
+  `var(--x)` references (no JS reactivity needed), diff2html's own
+  shipped dark variable pairs are activated by overriding its *base*
+  variable names to point at smind's tokens (its own dark-mode gate,
+  `.d2h-dark-color-scheme`/`prefers-color-scheme`, doesn't line up with
+  smind's explicit theme state), and xterm needs literal re-applied
+  colors on every theme change (`lib/terminal-theme.ts`'s computed-style
+  probe). Full terminal ANSI-16 theming is deferred to Item 20 — Item 1's
+  bar was the chrome (background/foreground/cursor/selection), not a full
+  palette, which is its own design decision.
+- **`StatusBadge` and `Toast` ship with no consumer yet** — both are
+  complete, tested primitives; Item 2's acceptance criteria only named
+  required adopters for `PaneHeader`. Wiring either into a real surface is
+  left to whichever later item first needs one.
+
 ---
 
 ## Progress
@@ -731,8 +770,8 @@ Phase 1 (research + plan) — this commit:
 
 Phase 2 (implementation) — not started:
 
-- [ ] Item 1: design tokens, dark mode, theme switching *(Track A)*
-- [ ] Item 2: shared primitives + `docs/design.md` *(Track A)*
+- [x] Item 1: design tokens, dark mode, theme switching *(Track A)*
+- [x] Item 2: shared primitives + `docs/design.md` *(Track A)*
 - [ ] Item 3: routing + persisted UI state *(Track A)*
 - [ ] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [ ] Item 5: command palette *(Track A)*
@@ -746,7 +785,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
-- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)*
+- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
 - [ ] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
 - [ ] Item 19: diff / review v2 *(Track C)*
@@ -795,6 +834,142 @@ acceptance criterion, plus `task test` / `task lint` / `task build` results
 and any manual check performed. Follow the per-item format used in
 `docs/plans/completed/task-permission-ux.md`'s Validation section.
 
+**Item 1 — design tokens, dark mode, theme switching:**
+
+- Two-layer token set landed in `web/packages/ui/src/index.css`:
+  `surface-0..3`, `foreground-muted`, `status-{success,danger,warning,
+  running}` and `status-dot-{success,danger,warning,running}`, all
+  re-exported via `@theme inline` as Tailwind utilities.
+- `hooks/use-theme.tsx`'s `ThemeProvider`/`useTheme` persists
+  `light|dark|system` to `localStorage` (`lib/theme.ts`), resolves
+  `system` via `matchMedia`, applies/removes the `dark` class, and
+  live-reacts to an OS change only while `system` is selected — covered
+  by `hooks/use-theme.test.tsx` (4 scenarios matching the acceptance
+  criteria verbatim) and `lib/theme.test.ts` (pure-function coverage).
+- `index.html` gained a dependency-free pre-paint `<script>`
+  (`src/test/index-html-bootstrap.test.ts` asserts it's embedded before
+  `main.tsx` and shares `lib/theme.ts`'s storage key) — the file's
+  previous hardcoded `class="dark"` (permanently-on dev-time dark mode,
+  not a real toggle) is gone.
+- CodeMirror, diff2html and xterm all take their chrome from app tokens
+  (see `docs/design.md` §2 for the three different mechanisms this
+  needed) — manually verified via `task dev` in both themes plus the
+  toggle's own tests; no automated visual test exists for this (out of
+  scope for this pass).
+- The stray chromatic dark `--sidebar-primary` is resolved (achromatic,
+  confirmed unused in `src/` beforehand).
+- Theme control: `components/theme-toggle.tsx` in the sidebar header,
+  covered by `theme-toggle.test.tsx` (opens via pointerdown — Radix's
+  `DropdownMenuTrigger` opens on `onPointerDown`, not `onClick` — sets the
+  preference, marks the active option, and renders standalone without a
+  provider).
+- `src/test/no-hardcoded-colors.test.ts`: a grep-based test across every
+  `.ts`/`.tsx` file for hardcoded hex/oklch literals and Tailwind
+  palette-color utilities. It caught and forced the fix of pre-existing
+  instances: `bg-amber-500`/`text-amber-600`/`text-amber-900` (connection
+  banners, pending-permission card, file-conflict banner) and
+  `bg-emerald-500`/`text-emerald-600` (accounts-dialog's connection dot)
+  — all now on the new status tokens.
+
+**Item 2 — shared primitives + `docs/design.md`:**
+
+- `components/ui/{pane-header,status-dot,status-badge,alert,empty-state,
+  inline-spinner,toast}.tsx`, each with its own test file.
+  `PaneHeader` is adopted by all four named panes (`task-detail.tsx`,
+  `file-editor-pane.tsx`, `diff-viewer-pane.tsx`, `terminal-pane.tsx`),
+  unifying their padding to one scale as a side effect.
+- `file-editor-pane.tsx`'s hand-rolled Save/Reload/Overwrite buttons moved
+  to the shared `Button`; all three (plus Commit and the diff pane's
+  per-file Stage checkbox) gained in-flight labels/disabled states
+  ("Saving…"/"Reloading…"/"Overwriting…"/"Committing…", each tied to its
+  own in-flight state rather than a single pane-wide flag for Stage).
+- Layout stability: the sidebar's task-attention dot now sits in a
+  fixed-width reserved slot (`task-attention-slot`) present regardless of
+  whether the dot itself renders — `app-sidebar.test.tsx`'s new
+  "layout stability" test asserts the slot's class is identical with and
+  without attention.
+- Empty/error copy normalized to sentence case, no trailing period,
+  across task-detail ("No runs yet"), diff-viewer ("No changes"), and
+  file-explorer ("Empty", was "(empty)").
+- `docs/design.md` written: token layers, theming mechanism per
+  third-party pane, the primitive table, density/copy/state rules, and a
+  Decisions section (mirrored, pointer-only, in this plan's own
+  Decisions above).
+- `task test` (224 web tests, all Go packages), `task lint`
+  (`go vet`/`gofmt`), `bunx tsc -b`, and `task build` all pass. `task
+  build` surfaced one real bug worth recording: a doc comment containing
+  the literal substring `chart-*/sidebar*` closed its own CSS comment
+  early (`*/` inside prose), silently corrupting everything after it into
+  raw CSS that Tailwind's build-time parser then failed on — caught only
+  by `task build`, not by `tsc -b` or vitest (jsdom doesn't validate
+  Tailwind's CSS generation). Fixed by rewording the comment; worth
+  remembering that any future doc comment in this file must avoid a bare
+  `*/` substring.
+### Item 16 — daemon lifecycle events (backend half)
+
+`docs/decisions/0009-lifecycle-event-topics.md` records the topic set,
+payload shape (full entity for create/update/archive, id+scope for
+delete), ordering, and reconciliation story. Implemented in
+`internal/workspace` (new `Notifier` interface, `SetNotifier`, and a
+`Notify*` call at every mutation site: `CreateWorkspace`, `DeleteWorkspace`,
+`CreateSpace`, `DeleteSpace`, `CreateTask`, `RunTask`, `ArchiveTask`,
+`DeleteTask`) and `internal/wsapi` (eight new topics/payload types in
+`events.go`, `busWorkspaceNotifier` adapter in `server.go` replacing the
+old task-status-only `SetTaskNotifier`).
+
+- **Acceptance criterion** ("subscribing to each new topic delivers the
+  event on create/update/archive/delete; an unknown topic still errors"):
+  covered by `internal/wsapi/lifecycle_events_test.go` — one test per
+  topic (`TestEvents_WorkspaceCreatedSubscribeAndReceive`,
+  `TestEvents_WorkspaceDeletedIsRootOnlyCascade`,
+  `TestEvents_SpaceCreatedSubscribeAndReceive`,
+  `TestEvents_SpaceDeletedCascadesWithoutPerTaskEvents`,
+  `TestEvents_TaskCreatedSubscribeAndReceive`,
+  `TestEvents_TaskUpdatedOnRunTask`,
+  `TestEvents_TaskArchivedSubscribeAndReceive`,
+  `TestEvents_TaskDeletedOnManagerDeleteTask`), each asserting exactly one
+  event with the documented payload and no extra event; unknown-topic
+  rejection was already covered by ADR 0005's `TestEvents_UnknownTopicIsError`
+  and needed no change (`knownTopics` is additive).
+- **Two-client delivery**: `TestEvents_WorkspaceCreatedReachesASecondClient`
+  — client A calls `workspace.create`, client B (subscribed, never having
+  made the call itself) receives `workspace.created` — the actual
+  cross-client-staleness scenario from `gap-matrix.md` item 8.
+- **Cascade-is-root-only**: `TestEvents_WorkspaceDeletedIsRootOnlyCascade`
+  and `TestEvents_SpaceDeletedCascadesWithoutPerTaskEvents` subscribe to
+  the descendant topics too and assert silence after the one root event.
+- **Ordering**: `TestEvents_TaskArchivedPrecedesTaskStatus` pins
+  lifecycle-before-status on one connection subscribed to both.
+- **Delete payload scope**: `TestEvents_TaskDeletedSpaceIDIsNullNotOmitted`
+  asserts the raw payload always carries a `spaceId` key (null, not
+  omitted, for an ungrouped task -- `decodePayload` cannot tell the two
+  apart, so this one inspects the payload map directly), and
+  `TestEvents_TaskDeletedCarriesSpaceIDForGroupedTask` asserts a task
+  inside a space reports that space, which is the subtree the sidebar
+  actually prunes from.
+- **Emit-vs-error edge**: `TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails`
+  pins the one path that publishes before its method's success return --
+  `CreateWorkspace` emits once the workspace row commits, before the
+  `AddWorkspaceAccount` loop that can still fail, because that failure
+  leaves the row in place (ADR 0009's "Ordering and delivery" note).
+- **Non-regression**: `TestEvents_LifecycleTopicsAreOptIn` — a
+  `task.status`-only subscriber sees nothing from a workspace create,
+  confirming the change is additive; the full pre-existing
+  `internal/wsapi`/`internal/workspace` suites pass unchanged.
+- `task test` (Go suite + web UI suite, `web/` untouched) and `task lint`
+  (`go vet` + `gofmt -l`) both pass clean.
+- **Not wired**: `task.commit` and `task.createPr` emit nothing (by
+  design — see the ADR's Consequences; they don't change the task row).
+  `RunTask`/`DeleteTask` have no wsapi RPC calling them today (confirmed
+  by grep — `task.prompt`/`run.start` never transition `store.Task.Status`,
+  and there is no standalone `task.delete` method), so `task.updated` and
+  a directly-invoked `task.deleted` are tested against the Manager
+  directly rather than over the wire; the moment either method gets an
+  RPC, its event fires for free.
+- **Left for the UI track**: `hooks/use-daemon-events.ts` subscribing to
+  the eight topics and `useWorkspaceTree` consuming them (this PR touches
+  no code under `web/`, per this item's own scope split with the UI
+  agent).
 **Item 7 (structured timeline events)** — 2026-09-14, daemon + wire only
 (this item does not touch `web/`; the timeline renderer that consumes this
 schema is Item 8/9, Track B, separate PR):

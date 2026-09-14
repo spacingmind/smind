@@ -8,14 +8,28 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/store"
 )
 
 // Event topics (ADR 0005): domain.verb, dotted lowercase. The set is
-// open-ended -- new topics extend it without protocol change.
+// open-ended -- new topics extend it without protocol change. The eight
+// workspace/space/task lifecycle topics below are ADR 0009's addition,
+// covering entity create/update/archive/delete so a second client (another
+// browser tab, or the CLI, which mutates through this same daemon) shows up
+// without a manual reload -- see internal/workspace.Manager's Notifier for
+// the publish sites.
 const (
 	TopicTaskStatus        = "task.status"
 	TopicRunStatus         = "run.status"
 	TopicPermissionPending = "permission.pending"
+	TopicWorkspaceCreated  = "workspace.created"
+	TopicWorkspaceDeleted  = "workspace.deleted"
+	TopicSpaceCreated      = "space.created"
+	TopicSpaceDeleted      = "space.deleted"
+	TopicTaskCreated       = "task.created"
+	TopicTaskUpdated       = "task.updated"
+	TopicTaskArchived      = "task.archived"
+	TopicTaskDeleted       = "task.deleted"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
@@ -24,6 +38,14 @@ var knownTopics = map[string]bool{
 	TopicTaskStatus:        true,
 	TopicRunStatus:         true,
 	TopicPermissionPending: true,
+	TopicWorkspaceCreated:  true,
+	TopicWorkspaceDeleted:  true,
+	TopicSpaceCreated:      true,
+	TopicSpaceDeleted:      true,
+	TopicTaskCreated:       true,
+	TopicTaskUpdated:       true,
+	TopicTaskArchived:      true,
+	TopicTaskDeleted:       true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):
@@ -55,6 +77,72 @@ type permissionPendingPayload struct {
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`
+}
+
+// Lifecycle event payloads (ADR 0009). The create/update/archive payloads
+// carry the full store entity, marshalled exactly as workspace.get/
+// space.get/task.get already return it (those structs carry no json tags,
+// so their Go field names are the wire keys verbatim) -- a client can
+// splice the payload straight into a list it already fetched, no second
+// mapping layer. The delete payloads carry identity plus parent scope
+// instead, since there is no row left to snapshot.
+
+// workspaceCreatedPayload is the payload of workspace.created events:
+// {workspace: store.Workspace}.
+type workspaceCreatedPayload struct {
+	Workspace store.Workspace `json:"workspace"`
+}
+
+// workspaceDeletedPayload is the payload of workspace.deleted events:
+// {id}.
+type workspaceDeletedPayload struct {
+	ID int64 `json:"id"`
+}
+
+// spaceCreatedPayload is the payload of space.created events:
+// {space: store.Space}.
+type spaceCreatedPayload struct {
+	Space store.Space `json:"space"`
+}
+
+// spaceDeletedPayload is the payload of space.deleted events:
+// {id, workspaceId}.
+type spaceDeletedPayload struct {
+	ID          int64 `json:"id"`
+	WorkspaceID int64 `json:"workspaceId"`
+}
+
+// taskCreatedPayload is the payload of task.created events:
+// {task: store.Task}.
+type taskCreatedPayload struct {
+	Task store.Task `json:"task"`
+}
+
+// taskUpdatedPayload is the payload of task.updated events (any task
+// transition that is neither a create nor an archive -- today, RunTask's
+// created->running): {task: store.Task}.
+type taskUpdatedPayload struct {
+	Task store.Task `json:"task"`
+}
+
+// taskArchivedPayload is the payload of task.archived events:
+// {task: store.Task}.
+type taskArchivedPayload struct {
+	Task store.Task `json:"task"`
+}
+
+// taskDeletedPayload is the payload of task.deleted events:
+// {id, workspaceId, spaceId}. SpaceID is null (present, not omitted) for
+// an ungrouped task: that is what ADR 0009 documents as the wire shape,
+// and it matches store.Task.SpaceID, which has no `json:` tag and so also
+// marshals as an explicit null. Omitting the key instead would hand a
+// client `undefined` where the task.created/task.archived payload for the
+// same task gives `null`, so the obvious `ev.spaceId === task.SpaceID`
+// prune check would silently miss every ungrouped task.
+type taskDeletedPayload struct {
+	ID          int64  `json:"id"`
+	WorkspaceID int64  `json:"workspaceId"`
+	SpaceID     *int64 `json:"spaceId"`
 }
 
 // Event is what the bus's publish sites hand it: a topic plus an
