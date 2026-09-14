@@ -113,21 +113,32 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 }
 
 // autoAllowACPFileEdit reports whether an ACP permission request is a
-// file edit (ToolCallUpdate kind edit/move/delete) confined to the task's
-// own worktree, making it safe to auto-allow under ApprovalPolicyAutoSafe:
-// a write that can't escape the throwaway task worktree is no more
-// dangerous than the local git commits that policy already allows, and
-// the diff is human-reviewable afterward (task.diff). Kind execute (shell
-// commands) is deliberately NOT covered here -- those requests keep
-// going to the decider's AllowlistedCommand path, which can't identify
-// an ACP command string anyway (see Decide above) and therefore stays
-// manual. A tool call with no kind or no locations fails closed (false).
+// file edit confined to the task's own worktree, making it safe to
+// auto-allow under ApprovalPolicyAutoSafe: a write that can't escape the
+// throwaway task worktree is no more dangerous than the local git
+// commits that policy already allows, and the diff is human-reviewable
+// afterward (task.diff). Kind execute (shell commands) is deliberately
+// NOT covered here -- those requests keep going to the decider's
+// AllowlistedCommand path, which can't identify an ACP command string
+// anyway (see Decide above) and therefore stays manual. Anything
+// unparsable or incomplete fails closed (false).
+//
+// The path is identified two ways, because real agents populate
+// ToolCallUpdate inconsistently: the schema's structured fields first
+// (kind edit/move/delete + locations[].path), then -- only when the
+// agent filled in neither -- a conservative title fallback
+// ("<verb> file: <path>", glm-acp-agent's actual shape: it sets Title
+// like "Write file: docs/x.md" but leaves kind and locations empty).
+// Both routes converge on the same inside-worktree check; a title that
+// names no recognizable file-edit verb, or a relative/unparsable path,
+// fails closed.
 func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	if worktreePath == "" {
 		return false
 	}
 	var tc struct {
 		Kind      string `json:"kind"`
+		Title     string `json:"title"`
 		Locations []struct {
 			Path string `json:"path"`
 		} `json:"locations"`
@@ -135,26 +146,63 @@ func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
 	if err := json.Unmarshal(raw, &tc); err != nil {
 		return false
 	}
+
+	var paths []string
 	switch tc.Kind {
 	case "edit", "move", "delete":
-	default:
+		for _, loc := range tc.Locations {
+			paths = append(paths, loc.Path)
+		}
+	case "", "execute", "read", "search", "other", "think", "fetch":
+		// Structured fields absent or not an edit kind: try the title
+		// fallback only when the agent provided no kind at all -- a tool
+		// call that *declared* a non-edit kind is not second-guessed from
+		// its title.
+		if tc.Kind == "" {
+			if p, ok := fileEditPathFromTitle(tc.Title); ok {
+				paths = append(paths, p)
+			}
+		}
+	}
+	if len(paths) == 0 {
 		return false
 	}
-	if len(tc.Locations) == 0 {
-		return false
-	}
+
 	root := filepath.Clean(worktreePath)
 	rootSep := root + string(os.PathSeparator)
-	for _, loc := range tc.Locations {
-		cleaned := filepath.Clean(loc.Path)
+	for _, p := range paths {
+		if p == "" || !filepath.IsAbs(p) {
+			return false
+		}
+		cleaned := filepath.Clean(p)
 		// The root itself is rejected along with everything outside it: a
 		// "location" equal to the worktree isn't a file this edit targets,
 		// it's at best a malformed request -- fail closed.
-		if loc.Path == "" || cleaned == root || !strings.HasPrefix(cleaned+string(os.PathSeparator), rootSep) {
+		if cleaned == root || !strings.HasPrefix(cleaned+string(os.PathSeparator), rootSep) {
 			return false
 		}
 	}
 	return true
+}
+
+// fileEditPathFromTitle extracts the absolute path from a file-edit
+// permission title of the form "<verb> file: <path>" (verbs observed in
+// the wild: glm-acp-agent's "Write file: ..." / "Edit file: ..."). Only
+// an absolute path counts: the worktree-containment check downstream is
+// meaningless against a relative one, and resolving it against a guessed
+// base would be papering over an ambiguous request.
+func fileEditPathFromTitle(title string) (string, bool) {
+	idx := strings.LastIndex(title, " file: ")
+	if idx < 0 {
+		return "", false
+	}
+	verb := title[:idx]
+	switch verb {
+	case "Write", "Edit", "Create", "Move", "Rename", "Delete", "Remove", "Overwrite":
+	default:
+		return "", false
+	}
+	return title[idx+len(" file: "):], true
 }
 
 // firstOptionByKind mirrors internal/runs's unexported helper of the same
