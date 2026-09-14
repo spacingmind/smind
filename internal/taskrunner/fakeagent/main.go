@@ -220,6 +220,54 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	if scenario == "structured" {
+		// Exercises every new ACP session/update kind
+		// docs/decisions/0008-structured-run-events.md added support for:
+		// a thought chunk, a user-message chunk, and a tool call reported
+		// first as "tool_call" (running) then completed via a
+		// "tool_call_update" -- proving Runner's acpEvent translates each
+		// into its own taskrunner.EventType.
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "agent_thought_chunk",
+				"content":       map[string]any{"type": "text", "text": "thinking it over"},
+			},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "user_message_chunk",
+				"content":       map[string]any{"type": "text", "text": "a synthesized user turn"},
+			},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call",
+				"toolCallId":    "tc-1",
+				"title":         "Run tests",
+				"kind":          "execute",
+				"status":        "in_progress",
+				"rawInput":      map[string]any{"command": "go test ./..."},
+			},
+		})
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "tool_call_update",
+				"toolCallId":    "tc-1",
+				"status":        "completed",
+				"content": []any{
+					map[string]any{"type": "content", "content": map[string]any{"type": "text", "text": "ok"}},
+				},
+			},
+		})
+		sessionUpdate("done")
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
 	sessionUpdate("Hello, ")
 	sessionUpdate("world!")
 	respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})

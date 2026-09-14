@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
@@ -254,12 +255,12 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	go func() {
 		defer close(forwardDone)
 		for u := range updates {
-			text, ok := u.Text()
+			e, ok := acpEvent(u)
 			if !ok {
 				continue
 			}
 			select {
-			case events <- Event{Type: EventTypeText, Text: text, Raw: u}:
+			case events <- e:
 			case <-ctx.Done():
 			}
 		}
@@ -276,6 +277,65 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// acpEvent translates one ACP SessionUpdate into its taskrunner.Event, or
+// (Event{}, false) for an update Type this package doesn't forward (ACP
+// also streams plan updates -- out of scope for RunPrompt's callers today,
+// same reasoning as Event's own doc comment on not chasing every variant
+// speculatively).
+func acpEvent(u acp.SessionUpdate) (Event, bool) {
+	if text, ok := u.Text(); ok {
+		switch u.Type {
+		case acp.SessionUpdateUserMessageChunk:
+			return Event{Type: EventTypeUserMessage, Text: text, Raw: u}, true
+		case acp.SessionUpdateAgentThoughtChunk:
+			return Event{Type: EventTypeThinking, Text: text, Raw: u}, true
+		default: // acp.SessionUpdateAgentMessageChunk
+			return Event{Type: EventTypeText, Text: text, Raw: u}, true
+		}
+	}
+	if u.IsToolCall() {
+		status := acpToolStatus(u.Status)
+		if status == "" && u.Type == acp.SessionUpdateToolCall {
+			// An initial tool_call announces a call that by definition
+			// hasn't finished, and ACP's ToolCall.status is optional with
+			// a "pending" default -- so an absent (or unrecognized, e.g.
+			// a status added by a later ACP revision) status here means
+			// "running", not "no status at all". Only tool_call_update's
+			// absent status genuinely means "unchanged".
+			status = ToolStatusRunning
+		}
+		return Event{
+			Type:       EventTypeToolCall,
+			Raw:        u,
+			ToolCallID: u.ToolCallID,
+			ToolName:   u.Kind,
+			ToolTitle:  u.Title,
+			ToolStatus: status,
+			ToolInput:  u.RawInput,
+			ToolResult: u.Content,
+		}, true
+	}
+	return Event{}, false
+}
+
+// acpToolStatus maps ACP's four-value ToolCallStatus to taskrunner's
+// unified three-value ToolStatus -- see ToolStatusRunning's doc comment
+// for why "pending" and "in_progress" collapse together. An update that
+// doesn't repeat status (a partial tool_call_update) maps "" to "", which
+// EventTypeToolCall's own doc comment documents as "no change reported".
+func acpToolStatus(status string) string {
+	switch status {
+	case "completed":
+		return ToolStatusSuccess
+	case "failed":
+		return ToolStatusFailure
+	case "pending", "in_progress":
+		return ToolStatusRunning
+	default:
+		return ""
+	}
 }
 
 func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
@@ -316,22 +376,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	go func() {
 		defer close(forwardDone)
 		for msg := range updates {
-			// Only AssistantMessage carries text chunks from the agent.
-			// SystemMessage is a lifecycle/init event and UserMessage
-			// echoes turns fed back to the model (including tool results)
-			// -- neither is "text from the agent", so both are dropped
-			// here rather than passed through as opaque events.
-			am, ok := msg.(claudecode.AssistantMessage)
-			if !ok {
-				continue
-			}
-			for _, block := range am.Content {
-				tb, ok := block.(claudecode.TextBlock)
-				if !ok {
-					continue
-				}
+			for _, e := range claudeEvents(msg) {
 				select {
-				case events <- Event{Type: EventTypeText, Text: tb.Text, Raw: msg}:
+				case events <- e:
 				case <-ctx.Done():
 				}
 			}
@@ -349,6 +396,93 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// claudeEvents translates one claudecode.Message into zero or more
+// taskrunner.Events. Both AssistantMessage and UserMessage are walked the
+// same way -- the CLI decodes both with the same block decoder, and a
+// tool_result block can arrive on either one (see claudecode's
+// ToolResultBlock doc comment) -- differing only in that a UserMessage's
+// text blocks are dropped rather than becoming EventTypeText: a user turn
+// is either an echo of the human's own prompt (which the UI already has,
+// see EventTypeUserMessage's doc comment) or the envelope carrying tool
+// results back to the model, never new assistant prose. SystemMessage,
+// ResultMessage (handled separately by runClaudeNative itself), and every
+// other message type yield nothing.
+func claudeEvents(msg claudecode.Message) []Event {
+	var (
+		blocks    []claudecode.ContentBlock
+		assistant bool
+	)
+	switch m := msg.(type) {
+	case claudecode.AssistantMessage:
+		blocks, assistant = m.Content, true
+	case claudecode.UserMessage:
+		blocks = m.Content
+	default:
+		return nil
+	}
+
+	var out []Event
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case claudecode.TextBlock:
+			if !assistant {
+				continue
+			}
+			out = append(out, Event{Type: EventTypeText, Text: b.Text, Raw: msg})
+		case claudecode.ThinkingBlock:
+			out = append(out, Event{Type: EventTypeThinking, Text: b.Thinking, Raw: msg})
+		case claudecode.ToolUseBlock:
+			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
+		case claudecode.ServerToolUseBlock:
+			// A server-side tool (WebSearch/WebFetch) is still a tool call
+			// as far as a timeline card is concerned -- same id/name/input
+			// shape, just executed by the CLI rather than locally.
+			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
+		case claudecode.ToolResultBlock:
+			status := ToolStatusSuccess
+			if b.IsError {
+				status = ToolStatusFailure
+			}
+			out = append(out, Event{
+				Type:       EventTypeToolCall,
+				Raw:        msg,
+				ToolCallID: b.ToolUseID,
+				ToolStatus: status,
+				ToolResult: b.Content,
+			})
+		case claudecode.ServerToolResultBlock:
+			// No IsError equivalent on the wire for these -- an errored
+			// server tool reports the failure inside Content instead.
+			out = append(out, Event{
+				Type:       EventTypeToolCall,
+				Raw:        msg,
+				ToolCallID: b.ToolUseID,
+				ToolStatus: ToolStatusSuccess,
+				ToolResult: b.Content,
+			})
+		}
+	}
+	return out
+}
+
+// claudeToolUseEvent builds the "call started" event shared by
+// ToolUseBlock and ServerToolUseBlock.
+func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[string]any) Event {
+	// json.Marshal on a map[string]any built by decoding the CLI's own
+	// NDJSON never fails, so the error is ignored -- same reasoning as
+	// every other json.Marshal call in this package that round-trips
+	// already-decoded provider data.
+	raw, _ := json.Marshal(input)
+	return Event{
+		Type:       EventTypeToolCall,
+		Raw:        msg,
+		ToolCallID: id,
+		ToolName:   name,
+		ToolStatus: ToolStatusRunning,
+		ToolInput:  raw,
+	}
 }
 
 // runCodexNative drives one turn against a Codex-native agent (internal/codex).

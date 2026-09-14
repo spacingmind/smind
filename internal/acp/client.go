@@ -44,7 +44,14 @@ type SessionUpdate struct {
 	Title      string          `json:"title,omitempty"`
 	Kind       string          `json:"kind,omitempty"`
 	Status     string          `json:"status,omitempty"`
-	Raw        json.RawMessage `json:"-"`
+	// RawInput is a tool_call/tool_call_update's rawInput field: the
+	// tool's arguments, in whatever shape the agent reported them. Absent
+	// (nil) for every other update Type, and for a SessionUpdateToolCallUpdate
+	// that doesn't repeat it -- ACP's tool_call_update only carries changed
+	// fields (see ACP's ToolCallUpdate schema), so its absence means
+	// "unchanged", not "cleared".
+	RawInput json.RawMessage `json:"rawInput,omitempty"`
+	Raw      json.RawMessage `json:"-"`
 }
 
 // SessionUpdate.Type values, per ACP's SessionUpdate discriminator.
@@ -71,6 +78,12 @@ func (u SessionUpdate) Text() (string, bool) {
 		return "", false
 	}
 	return block.Text, true
+}
+
+// IsToolCall reports whether u is a tool_call or tool_call_update update --
+// the two ACP variants a caller translates into a taskrunner.EventTypeToolCall.
+func (u SessionUpdate) IsToolCall() bool {
+	return u.Type == SessionUpdateToolCall || u.Type == SessionUpdateToolCallUpdate
 }
 
 type sessionNotificationParams struct {
