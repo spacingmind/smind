@@ -794,6 +794,55 @@ this is the pointer:
   item's own acceptance criteria covered it; the plan says "whichever
   lands first owns it"). Nothing was re-done here.
 
+**Item 18 (landed)** — where the plan was ambiguous and what was decided:
+
+- **A daemon RPC was added, per the plan's own "measure before adding"
+  rule.** Measured against this repo's own worktree before reaching for
+  one: a client-side walk (repeatedly calling `file.list`, one directory
+  at a time — the plan's stated default) is O(directories) round trips,
+  and this worktree alone has ~150 directories excluding `node_modules`
+  and ~3,900 including it (`web/` doesn't gitignore it — bun vendors
+  there). Each would be its own WS round trip under a client-side walk.
+  `task.searchIndex` (`internal/workspace/search.go`,
+  `internal/wsapi/handlers.go`) returns the whole list in one RPC via a
+  single `git ls-files -co --exclude-standard` invocation — additive (a
+  new method, no change to `file.list`/`file.read`/`file.write`), and it
+  gets gitignore correctness for free: smind doesn't parse `.gitignore`
+  itself, git already does.
+- **It's a `task.*` method, not a `file.*` one.** `file.list`/`file.read`/
+  `file.write` take a user-supplied `path` and sandbox it inside the
+  worktree (`resolveInRoot`); `task.searchIndex` takes only `taskId` and
+  is inherently scoped to the whole worktree, so it follows
+  `task.files`/`task.fileDiff`'s naming and Manager-method shape instead.
+  Named `searchIndex`, not `files`, to stay unambiguous next to the
+  already-existing `task.files` (which means something different: the
+  base→worktree *diff*'s changed-file list, not "every file").
+- **Fuzzy matching and ranking are entirely client-side**
+  (`lib/fuzzy-match.ts`), not part of the RPC. The daemon's job is
+  enumeration (which needs git); ranking is product logic that belongs
+  next to the UI it's rendered in, and keeping it client-side means it's
+  unit-testable without a wire round trip and free to change without
+  touching the RPC contract.
+- **Two-tier scoring, not a single edit-distance score**: a substring
+  match on the **filename** always outranks a scattered subsequence match
+  anywhere in the path. A person typing a name they remember
+  ("editor-pane") and a person typing initials across directories
+  ("cmpne") are doing different things, and conflating them into one
+  score produced surprising rankings during testing (see the two-tier
+  design's own doc comment in `lib/fuzzy-match.ts`).
+- **The dialog prefetches the index while closed**, as soon as a task is
+  selected — not lazily on first open. "Quick" open should not show a
+  loading spinner the first time it's opened; App.tsx already mounts
+  `QuickOpen` once per task-selection lifetime (see the Track A hook note
+  below), so prefetching costs one RPC per task selection, not per open.
+- **No global shortcut registry exists yet (Item 4 hasn't landed)**, so
+  `hooks/use-quick-open-shortcut.ts` is a plain, swappable function — a
+  local `document`-level Ctrl/Cmd+P listener — rather than a component or
+  a registered action, exactly per this track's scoping instructions.
+  Track A should replace the call site in `App.tsx` with a real
+  `keyboard/actions.ts` entry once Item 4 lands; the hook's own doc
+  comment says so.
+
 **Item 19 (landed)** — where the plan was ambiguous and what was decided:
 
 - **The diff stat is derived client-side from `task.diff`**, not added as
@@ -889,11 +938,18 @@ puts the file-type icon and the dirty marker on the tab), and
 `${taskId}:diff` tab. Item 20 adds a third: terminal `TabsContent`
 entries `forceMount` and are hidden via
 `data-[state=inactive]:hidden` instead of the default mount-only-when-
-active, and `TerminalPane` takes `tabKey`/`active`/`onNewTerminal`. Items
-3 and 6 should preserve all three when they restructure the shell — in
-particular, Item 6's side dock must keep the force-mount behavior for
-any terminal tab it moves, or a moved terminal would silently stop being
-able to mark its own activity while backgrounded.
+active, and `TerminalPane` takes `tabKey`/`active`/`onNewTerminal`. Item
+18 adds a fourth, outside the `Tabs` tree entirely: `<QuickOpen>` is
+mounted once as a sibling of `ResizablePanelGroup`, with its own
+`open`/`onOpenChange` state and a `useQuickOpenShortcut` call that wires
+Ctrl/Cmd+P — no layout change, since `Dialog` portals to `document.body`
+regardless of where it's rendered. Items 3 and 6 should preserve all
+four when they restructure the shell — in particular, Item 6's side dock
+must keep the force-mount behavior for any terminal tab it moves, or a
+moved terminal would silently stop being able to mark its own activity
+while backgrounded, and Items 4/5 should replace the local
+`useQuickOpenShortcut` call with a real `keyboard/actions.ts` entry
+(`hooks/use-quick-open-shortcut.ts`'s own doc comment says the same).
 
 ---
 
@@ -927,7 +983,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 15: quota / usage surface *(Track D)*
 - [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
 - [x] Item 17: file explorer / editor polish *(Track C)*
-- [ ] Item 18: quick file open *(Track C)*
+- [x] Item 18: quick file open *(Track C)*
 - [x] Item 19: diff / review v2 *(Track C)*
 - [x] Item 20: terminal v2 *(Track C)*
 - [ ] Item 21: responsive / compact layout *(Track A)*
@@ -1359,3 +1415,49 @@ Every acceptance criterion, and how it was confirmed:
 
 `bunx tsc -b`, `task test` (292 web tests, 35 files; all Go packages) and
 `task lint` green.
+
+### Item 18 — quick file open
+
+Every acceptance criterion, and how it was confirmed:
+
+- **Fuzzy file search over the selected task's worktree, opening the
+  match as a file tab** — `components/quick-open.tsx` (a controlled
+  dialog, `Dialog`-based, matching `FolderPickerDialog`'s shape),
+  `lib/fuzzy-match.ts` (scoring, see Decisions for the two-tier design),
+  `hooks/use-task-search-index.ts` (fetch + cache the path list, same
+  terminal-`run.status` refresh signal as every other task-scoped hook in
+  this plan). `quick-open.test.tsx` (9 tests) covers the plan's exact
+  scenario — *typing a fuzzy query ranks the expected path first; Enter
+  opens it as a file tab; Escape closes without opening* — plus arrow-key
+  navigation, the empty/error states, and that reopening resets the
+  query. `fuzzy-match.test.ts` (9 tests) covers the scoring function in
+  isolation: no-match returns null (not a low score), substring beats
+  subsequence, start-of-filename beats mid-filename, and the highlighted-
+  index output the dialog renders.
+- **Bound to Cmd+P (mac) / Ctrl+P (elsewhere), matching Paseo** —
+  `hooks/use-quick-open-shortcut.ts`, a local `document`-level listener
+  rather than a global registry entry (Item 4 hasn't landed — see
+  Decisions and the Track A hook note above).
+  `use-quick-open-shortcut.test.ts` covers both platforms, the disabled
+  case, and that it stops listening on unmount.
+  `App.test.tsx`'s new "quick-open" describe block proves the whole path
+  end to end against a real `App` render: Ctrl+P opens the dialog for the
+  selected task, typing narrows to the expected file, Enter opens it as a
+  real tab in the strip — and that the shortcut does nothing before any
+  task is selected (no task, nothing to search).
+- **Backed by `file.list` walking, or a new daemon-side search RPC if
+  walking proves too slow — measure before adding an RPC** — measured (see
+  Decisions) and an RPC added: `internal/workspace/search.go`'s
+  `Manager.TaskSearchIndex` (one `git ls-files -co --exclude-standard`
+  call) plus `internal/wsapi`'s `task.searchIndex` handler. Go-tested at
+  both layers: `internal/workspace/search_test.go` proves a real git
+  worktree's tracked, staged, and untracked-not-ignored files are
+  returned and a gitignored one is excluded, without smind parsing
+  `.gitignore` itself; `internal/wsapi/search_test.go` proves the same
+  over a real WS connection, plus an unknown-task error.
+
+`bunx tsc -b`, `task test` (317 web tests, 38 files; all Go packages
+including 5 new: `TestManager_TaskSearchIndex`,
+`TestManager_TaskSearchIndex_NoChanges`,
+`TestManager_TaskSearchIndex_UnknownTask`, `TestServer_TaskSearchIndex`,
+`TestServer_TaskSearchIndex_UnknownTask`) and `task lint` green.

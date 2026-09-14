@@ -265,6 +265,15 @@ export interface TaskDiffResult {
   diff: string;
 }
 
+// Result of task.searchIndex (internal/wsapi/handlers.go's
+// taskSearchIndexResult): every worktree-relative path eligible for
+// quick-open (Item 18) -- git's own notion of the worktree's contents,
+// fuzzy-matched client-side (lib/fuzzy-match.ts) rather than server-side,
+// so ranking/highlighting stay in the UI's own testable code.
+export interface TaskSearchIndexResult {
+  paths: string[];
+}
+
 // One entry in a task.files response (internal/workspace.TaskFile): a path
 // in the task's base→worktree diff, its change kind, and whether it's
 // currently staged in the worktree's real index.

@@ -6,6 +6,7 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
+import { QuickOpen } from "@/components/quick-open";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -14,6 +15,7 @@ import { fileTab, filePathFromTabKey, nextTerminalTab, TabLabel, type TabEntry, 
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
+import { useQuickOpenShortcut } from "@/hooks/use-quick-open-shortcut";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
@@ -54,6 +56,10 @@ export function App({
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // Item 18: Cmd/Ctrl+P opens quick-open for the selected task. A local
+  // shortcut, not a global registry entry -- see useQuickOpenShortcut's
+  // doc comment for why, and what Track A should do once Item 4 lands.
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -138,6 +144,8 @@ export function App({
   }
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+
+  useQuickOpenShortcut(() => setQuickOpenOpen(true), selectedTask !== null);
 
   return (
     // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
@@ -292,6 +300,14 @@ export function App({
           </SidebarInset>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <QuickOpen
+        client={client}
+        task={selectedTask}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={openFileTab}
+        events={events}
+      />
     </SidebarProvider>
   );
 }
