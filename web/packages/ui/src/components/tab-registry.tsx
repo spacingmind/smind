@@ -3,6 +3,7 @@ import { File, FolderTree, GitCompare, MessageSquare, SquareTerminal } from "luc
 
 import { FileIcon } from "@/lib/file-icons";
 import { useBufferDirty } from "@/lib/dirty-buffers";
+import { useTerminalActivity } from "@/lib/terminal-sessions";
 
 /**
  * The tab registry: the vocabulary of tab kinds App.tsx's tab strip is
@@ -74,6 +75,36 @@ export function fileTab(taskId: number, path: string): TabEntry {
   };
 }
 
+/**
+ * An additional terminal tab for a task (Item 20: more than one terminal
+ * per task, each its own tab). `index` starts at 2 -- index 1 is the base
+ * `${taskId}:terminal` tab every task already gets from
+ * defaultTabsForTask, which stays non-closable so a task always has at
+ * least one terminal.
+ */
+export function terminalTab(taskId: number, index: number): TabEntry {
+  return {
+    kind: "terminal",
+    key: `${taskId}:terminal:${index}`,
+    taskId,
+    title: `Terminal ${index}`,
+    closable: true,
+  };
+}
+
+/**
+ * The next terminal tab for a task, given its current strip: the lowest
+ * unused index from 2 up. Re-uses a number freed by closing a tab rather
+ * than counting forever, so a task that's had ten terminals opened and
+ * closed doesn't end up with "Terminal 11" next to "Terminal".
+ */
+export function nextTerminalTab(taskId: number, tabs: TabEntry[]): TabEntry {
+  const taken = new Set(tabs.filter((t) => t.kind === "terminal").map((t) => t.key));
+  let index = 2;
+  while (taken.has(`${taskId}:terminal:${index}`)) index++;
+  return terminalTab(taskId, index);
+}
+
 /** Extracts a file tab's worktree-relative path from its key. Returns "" for a tab of any other kind. */
 export function filePathFromTabKey(key: string): string {
   const marker = ":file:";
@@ -90,6 +121,10 @@ export function filePathFromTabKey(key: string): string {
  */
 export function TabLabel({ entry }: { entry: TabEntry }) {
   const dirty = useBufferDirty(entry.key);
+  // Output arrived on a terminal you weren't looking at (Item 20). Only
+  // meaningful for terminal tabs; the store is keyed by tab key, so
+  // asking for any other kind is a cheap constant false.
+  const busy = useTerminalActivity(entry.key);
   const KindIcon = TAB_KINDS[entry.kind].icon;
 
   return (
@@ -106,6 +141,14 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
           data-tab-key={entry.key}
           aria-label="unsaved changes"
           className="size-1.5 shrink-0 rounded-full bg-status-dot-warning"
+        />
+      )}
+      {busy && (
+        <span
+          data-testid="tab-activity-marker"
+          data-tab-key={entry.key}
+          aria-label="new output"
+          className="size-1.5 shrink-0 rounded-full bg-status-dot-running"
         />
       )}
     </>

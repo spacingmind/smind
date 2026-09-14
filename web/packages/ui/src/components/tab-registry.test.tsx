@@ -4,8 +4,17 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { editorViewRegistry } from "@/components/code-mirror-editor";
 import { FileEditorPane } from "@/components/file-editor-pane";
-import { TabLabel, defaultTabsForTask, fileTab, fileTabKey, filePathFromTabKey } from "@/components/tab-registry";
+import {
+  TabLabel,
+  defaultTabsForTask,
+  fileTab,
+  fileTabKey,
+  filePathFromTabKey,
+  nextTerminalTab,
+  terminalTab,
+} from "@/components/tab-registry";
 import { resetDirtyBuffers } from "@/lib/dirty-buffers";
+import { clearTerminalActivity, markTerminalActivity, resetTerminalSessions } from "@/lib/terminal-sessions";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Task } from "@/lib/types";
 
@@ -26,6 +35,7 @@ const PATH = "cmd/smind/main.go";
 
 afterEach(() => {
   resetDirtyBuffers();
+  resetTerminalSessions();
 });
 
 async function flush(): Promise<void> {
@@ -149,5 +159,43 @@ describe("TabLabel", () => {
     const markers = screen.getAllByTestId("tab-dirty-marker");
     expect(markers).toHaveLength(1);
     expect(markers[0]).toHaveAttribute("data-tab-key", mine.key);
+  });
+});
+
+describe("terminal tabs (Item 20)", () => {
+  it("assigns increasing indices starting at 2, the base terminal tab being index 1 implicitly", () => {
+    const base = defaultTabsForTask(TASK.ID).find((t) => t.kind === "terminal")!;
+    expect(base.key).toBe(`${TASK.ID}:terminal`);
+    expect(base.closable).toBe(false);
+
+    const second = nextTerminalTab(TASK.ID, [base]);
+    expect(second).toEqual(terminalTab(TASK.ID, 2));
+    expect(second.closable).toBe(true);
+
+    const third = nextTerminalTab(TASK.ID, [base, second]);
+    expect(third.key).toBe(`${TASK.ID}:terminal:3`);
+  });
+
+  it("reuses an index freed by closing a tab, rather than counting forever", () => {
+    const base = defaultTabsForTask(TASK.ID).find((t) => t.kind === "terminal")!;
+    const second = terminalTab(TASK.ID, 2);
+    const third = terminalTab(TASK.ID, 3);
+
+    // Tab 2 was closed; only base and tab 3 remain open.
+    const next = nextTerminalTab(TASK.ID, [base, third]);
+    expect(next.key).toBe(second.key);
+  });
+
+  it("marks a terminal tab with an activity dot, distinct from the dirty marker", () => {
+    const entry = terminalTab(TASK.ID, 2);
+    markTerminalActivity(entry.key);
+
+    render(<TabLabel entry={entry} />);
+    const marker = screen.getByTestId("tab-activity-marker");
+    expect(marker).toHaveAttribute("data-tab-key", entry.key);
+    expect(marker).toHaveAccessibleName("new output");
+    expect(screen.queryByTestId("tab-dirty-marker")).not.toBeInTheDocument();
+
+    clearTerminalActivity(entry.key);
   });
 });

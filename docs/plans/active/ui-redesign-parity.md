@@ -842,14 +842,58 @@ this is the pointer:
   collapses staged/unstaged/untracked into one base→worktree diff and
   nothing here changes that.
 
+**Item 20 (landed)** — where the plan was ambiguous and what was decided:
+
+- **"More than one terminal per task, each its own tab" needed a
+  session↔tab binding**, not just a second `TerminalPane` mount. Without
+  one, two terminal tabs' independent `terminal.list` calls could both
+  see the same running session and both attach to it (rendering one
+  shell twice) — the existing single-terminal code picked "the first
+  running session" unconditionally, which was fine when only one tab
+  could ever ask. `lib/terminal-sessions.ts` (a module-level store, same
+  shape as `lib/dirty-buffers.ts`) records which tab owns which session
+  id; a fresh attach excludes ids already claimed elsewhere.
+- **The activity indicator requires the backgrounded pane to keep
+  attaching**, which requires App.tsx's tab strip to `forceMount` a
+  terminal `TabsContent` and hide it with CSS
+  (`data-[state=inactive]:hidden`) instead of the default
+  mount-only-when-active. This is the one place Item 20 reaches past its
+  own files into `App.tsx` — additively, as the plan's cross-track rules
+  ask: only terminal tabs force-mount, every other kind is unchanged.
+  Without it, "an inactive terminal receiving data marks its tab" would
+  be unsatisfiable — a truly unmounted pane can't observe data arriving
+  at all, active or not. The existing detach-not-close contract is
+  unaffected: the pane still aborts its `terminal.attach` and never calls
+  `terminal.close` when it genuinely unmounts (tab closed, task
+  switched); force-mounting only changes when *that* happens.
+- **Copy asks the handle whether anything is reportable before disabling
+  itself.** A `TerminalHandle` without `onSelectionChange` (this file's
+  own test fake, historically) would otherwise wire a button that can
+  never enable — worse than an always-enabled one that's a no-op on an
+  empty selection.
+- **Paste writes through `terminal.write`, never into the emulator's own
+  buffer.** The PTY is what echoes; a local write would show the pasted
+  text twice and never actually reach the shell.
+- **Scrollback size is a stored preference** (`lib/terminal-prefs.ts`),
+  read once at terminal-creation time, following the plan's "as a
+  setting (Item 13)" wording — this item wires the storage and the
+  read, not a new control in the terminal's own header (which would be
+  the un-grouped-setting pattern Item 13 exists to collect).
+
 **Track A hook to wire** (noted per the plan's cross-track coordination
 rules): Item 17 makes two small, additive edits to `App.tsx` rather than
 restructuring it — the tab strip renders `<TabLabel entry={entry} />`
 from `tab-registry.tsx` instead of a bare title `<span>` (this is what
 puts the file-type icon and the dirty marker on the tab), and
 `FileExplorerPane` is passed `onRevealInDiff`, which activates the
-`${taskId}:diff` tab. Items 3 and 6 should preserve both when they
-restructure the shell.
+`${taskId}:diff` tab. Item 20 adds a third: terminal `TabsContent`
+entries `forceMount` and are hidden via
+`data-[state=inactive]:hidden` instead of the default mount-only-when-
+active, and `TerminalPane` takes `tabKey`/`active`/`onNewTerminal`. Items
+3 and 6 should preserve all three when they restructure the shell — in
+particular, Item 6's side dock must keep the force-mount behavior for
+any terminal tab it moves, or a moved terminal would silently stop being
+able to mark its own activity while backgrounded.
 
 ---
 
@@ -885,7 +929,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
 - [x] Item 19: diff / review v2 *(Track C)*
-- [ ] Item 20: terminal v2 *(Track C)*
+- [x] Item 20: terminal v2 *(Track C)*
 - [ ] Item 21: responsive / compact layout *(Track A)*
 
 ---
@@ -1267,4 +1311,51 @@ drafts somewhere would need a "stale drafts" affordance that nothing in
 this item asks for.
 
 `bunx tsc -b`, `task test` (272 web tests, 33 files; all Go packages) and
+`task lint` green.
+
+### Item 20 — terminal v2
+
+Every acceptance criterion, and how it was confirmed:
+
+- **More than one terminal per task, each its own tab** —
+  `tab-registry.tsx`'s `terminalTab`/`nextTerminalTab` (indices from 2 up,
+  the base non-closable `${taskId}:terminal` tab being the implicit
+  first, freed indices reused rather than counted forever) and
+  `lib/terminal-sessions.ts`'s tab↔session binding (see Decisions for why
+  a binding was necessary at all). `tab-registry.test.tsx` covers index
+  assignment and reuse; `terminal-pane.test.tsx`'s new "multiple terminals
+  per task" describe block drives two real `TerminalPane` mounts against
+  two `FakeWsClient`s and asserts they land on two distinct session ids
+  even when both sessions are already running server-side — the
+  regression the binding exists to prevent.
+- **An activity indicator on an inactive terminal tab** —
+  `TerminalPane` takes `active`; a `data` event arriving while `active` is
+  false calls `markTerminalActivity(tabKey)`, cleared the moment `active`
+  flips true. `TabLabel` renders it as a `status-dot-running` dot,
+  distinct from Item 17's dirty marker. Covered from both ends: a
+  standalone `useTerminalActivity` consumer proves the flag flips on
+  inactive data and clears on activation (and stays clear for data
+  received while already active), and `tab-registry.test.tsx` proves
+  `TabLabel` renders it correctly and distinctly from the dirty dot.
+- **Scrollback size as a setting** — `lib/terminal-prefs.ts`
+  (load/save, clamped, `DEFAULT_TERMINAL_SCROLLBACK` stated explicitly),
+  read once via `createTerminal({ scrollback })` at terminal-creation
+  time. `terminal-prefs.test.ts` covers the default, round-trip, and
+  clamping a corrupted/hand-edited value; `terminal-pane.test.tsx`
+  asserts the persisted value reaches xterm's constructor options.
+- **A copy/paste affordance** — Copy reads `handle.getSelection()`,
+  disabled until something is selected (and never permanently disabled
+  for a handle that can't report selection at all — see Decisions); Paste
+  reads the clipboard and sends it via `terminal.write`, never into the
+  emulator's local buffer. Both, plus a paste-failure error line, are
+  covered in `terminal-pane.test.tsx`'s new "copy/paste" describe block.
+- **The existing detach-not-close contract, including the `interrupted`
+  status path, is preserved** — unmounting still aborts the attach
+  without calling `terminal.close`; the pre-Item-20 reconnect-resync
+  tests (all 16 of the file's original tests) pass unchanged after adding
+  a `resetTerminalSessions()` `afterEach` (the new tab↔session store is
+  module-level, like `lib/dirty-buffers.ts`, so it needs the same
+  per-test reset the dirty-buffer tests already established).
+
+`bunx tsc -b`, `task test` (292 web tests, 35 files; all Go packages) and
 `task lint` green.

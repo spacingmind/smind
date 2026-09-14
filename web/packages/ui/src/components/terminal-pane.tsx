@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ClipboardPaste, Copy, Plus } from "lucide-react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
@@ -8,6 +9,15 @@ import { Button } from "@/components/ui/button";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useTheme } from "@/hooks/use-theme";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { loadTerminalScrollback } from "@/lib/terminal-prefs";
+import {
+  bindTerminal,
+  boundTerminalId,
+  clearTerminalActivity,
+  markTerminalActivity,
+  terminalIdsBoundElsewhere,
+  unbindTerminal,
+} from "@/lib/terminal-sessions";
 import { resolveTerminalTheme } from "@/lib/terminal-theme";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
@@ -44,11 +54,15 @@ export interface TerminalHandle {
   fit(): void;
   /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
   setTheme?(theme: ITheme): void;
+  /** The currently selected text, for the Copy affordance (Item 20). Optional for the same reason setTheme is. */
+  getSelection?(): string;
+  /** Fires whenever the selection changes, so Copy can be disabled when there's nothing to copy. A handle that can't report this leaves Copy enabled -- a silent no-op beats a permanently-dead button. */
+  onSelectionChange?(callback: () => void): { dispose(): void };
   dispose(): void;
 }
 
-function createRealTerminal(): TerminalHandle {
-  const term = new Terminal({ convertEol: true, cursorBlink: true });
+function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHandle {
+  const term = new Terminal({ convertEol: true, cursorBlink: true, scrollback });
   const fit = new FitAddon();
   term.loadAddon(fit);
   return {
@@ -60,6 +74,8 @@ function createRealTerminal(): TerminalHandle {
     setTheme: (theme) => {
       term.options.theme = theme;
     },
+    getSelection: () => term.getSelection(),
+    onSelectionChange: (callback) => term.onSelectionChange(callback),
     dispose: () => term.dispose(),
   };
 }
@@ -94,39 +110,75 @@ function base64ToBytes(b64: string): Uint8Array {
  * TaskDetailPane's Stop button going through run.stop rather than an
  * abort.
  *
- * Only one session is driven at a time -- if terminal.list turns up more
- * than one running session for the task (e.g. one created from another
- * tab), the first one found is what this component attaches to.
+ * One pane drives exactly one session, and which one is recorded in
+ * lib/terminal-sessions.ts against this pane's *tab key* -- so Item 20's
+ * several-terminals-per-task works: a second terminal tab will not adopt
+ * the session a first tab is already driving, and a pane re-mounting
+ * (tab switch, reconnect) lands back on its own session rather than on
+ * "whichever is first in the list".
+ *
+ * Output arriving while this pane's tab is not the active one marks the
+ * tab (Item 20's activity indicator); activating it clears the mark. That
+ * requires the pane to stay mounted while its tab is in the background --
+ * see App.tsx's forceMount on terminal tabs, and the plan's Item 20
+ * decisions for why that is the right reading of the detach-not-close
+ * contract.
  */
 export function TerminalPane({
   client,
   task,
+  tabKey,
+  active = true,
   connectionStatus = "connected",
+  onNewTerminal,
   createTerminal = createRealTerminal,
 }: {
   client: WsClientLike | null;
   task: Task;
+  /** This pane's tab key -- what its session binding and activity flag are recorded against. Defaults to the base terminal tab's key, so an existing single-terminal caller behaves exactly as before. */
+  tabKey?: string;
+  /** Whether this pane's tab is the one in front. Output arriving while false marks the tab; flipping to true clears the mark. Defaults true for a caller that has no tab strip. */
+  active?: boolean;
   /** Real-time connection status from App.tsx -- see TaskDetailPane's identical prop for why. Defaults to "connected" so every existing caller/test keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
+  /** Opens another terminal tab for this task (Item 20). Absent means the caller has no tab strip to open one in, and the control isn't rendered at all -- never as a dead button. */
+  onNewTerminal?: () => void;
   /** Overridable for tests -- see TerminalHandle's doc comment. Defaults to a real xterm.js + FitAddon instance. */
-  createTerminal?: () => TerminalHandle;
+  createTerminal?: (options: { scrollback: number }) => TerminalHandle;
 }) {
+  const key = tabKey ?? `${task.ID}:terminal`;
   const { resolved } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<TerminalHandle | null>(null);
   const terminalIdRef = useRef<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
-  // Tracks task.ID across renders so the create/attach effect below can
-  // tell "the client reference changed because we reconnected" (task.ID
-  // unchanged -- reuse lastTerminalIdRef to re-discover the same session)
-  // apart from "the user switched tasks" (task.ID changed -- start fresh).
-  const prevTaskIdRef = useRef<number | null>(null);
-  const lastTerminalIdRef = useRef<string | null>(null);
-
   const [terminalId, setTerminalId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [endedStatus, setEndedStatus] = useState<"interrupted" | "closed" | null>(null);
   const [closing, setClosing] = useState(false);
+  // Copy is disabled only when the handle can actually report "nothing is
+  // selected" -- a handle without onSelectionChange leaves it enabled, so
+  // the button is never permanently dead (see TerminalHandle).
+  const [hasSelection, setHasSelection] = useState(false);
+  const [selectionReportable, setSelectionReportable] = useState(false);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Read at data-arrival time rather than captured by the attach closure,
+  // which is created once per session and would otherwise pin whichever
+  // value `active` had when the tab was opened.
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  // Looking at the tab is what clears its activity mark.
+  useEffect(() => {
+    if (active) clearTerminalActivity(key);
+  }, [active, key]);
+
+  // A tab that goes away (closed, or its task deselected) must not leave a
+  // dot behind on a strip it's no longer in.
+  useEffect(() => {
+    return () => clearTerminalActivity(key);
+  }, [key]);
 
   // Create the terminal handle once per mount, and dispose it on unmount.
   // This is independent of the terminal.create/attach lifecycle below --
@@ -136,7 +188,7 @@ export function TerminalPane({
     const container = containerRef.current;
     if (!container) return;
 
-    const term = createTerminal();
+    const term = createTerminal({ scrollback: loadTerminalScrollback() });
     term.open(container);
     try {
       term.fit();
@@ -200,10 +252,6 @@ export function TerminalPane({
   // one still running server-side (see
   // docs/plans/active/daemon-restart-resync.md's Acceptance Criteria).
   useEffect(() => {
-    const taskChanged = prevTaskIdRef.current !== task.ID;
-    prevTaskIdRef.current = task.ID;
-    if (taskChanged) lastTerminalIdRef.current = null;
-
     setError(null);
     setEndedStatus(null);
     setTerminalId(null);
@@ -216,10 +264,13 @@ export function TerminalPane({
 
     const session: Session = { cancelled: false, controller: new AbortController() };
     sessionRef.current = session;
-    const previousId = lastTerminalIdRef.current;
+    // The session this *tab* already owns, if any. Switching tasks changes
+    // `key`, so a different task's binding is never consulted; a reconnect
+    // or a re-mount keeps the same key and therefore the same session.
+    const previousId = boundTerminalId(key);
 
     function attach(id: string): void {
-      lastTerminalIdRef.current = id;
+      bindTerminal(key, id);
       terminalIdRef.current = id;
       setTerminalId(id);
 
@@ -232,6 +283,8 @@ export function TerminalPane({
             if (event === "data") {
               const { data } = params as TerminalDataEventParams;
               termRef.current?.write(base64ToBytes(data));
+              // Output you weren't looking at marks the tab (Item 20).
+              if (!activeRef.current) markTerminalActivity(key);
             }
           },
           { signal: session.controller.signal },
@@ -275,10 +328,13 @@ export function TerminalPane({
           return;
         }
 
-        // No previousId: a genuinely fresh attach for this component
-        // instance (first mount for this task, not a reconnect) -- fine
-        // to reuse any already-running session found, or create one.
-        const existing = sessions.find((s) => s.Status === "running");
+        // No previousId: a genuinely fresh attach for this tab (first
+        // mount for this task, not a reconnect) -- fine to reuse an
+        // already-running session, *except* one another terminal tab is
+        // already driving, which would render the same shell twice
+        // (Item 20).
+        const taken = terminalIdsBoundElsewhere(key);
+        const existing = sessions.find((s) => s.Status === "running" && !taken.has(s.ID));
         if (existing) {
           attach(existing.ID);
           return;
@@ -303,7 +359,7 @@ export function TerminalPane({
       session.controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [client, task.ID]);
+  }, [client, key, task.ID]);
 
   // Keystrokes/paste -> terminal.write. Wired once the terminal handle
   // exists; terminalIdRef (not React state) is read at call time so this
@@ -338,13 +394,59 @@ export function TerminalPane({
     return () => disposable.dispose();
   }, [client, createTerminal]);
 
+  // Selection tracking, for the Copy button's enabled state. A handle
+  // that can't report it (the test fake) leaves Copy enabled.
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term?.onSelectionChange) return;
+    setSelectionReportable(true);
+    const disposable = term.onSelectionChange(() => {
+      setHasSelection(Boolean(term.getSelection?.()));
+    });
+    return () => disposable.dispose();
+  }, [createTerminal]);
+
+  /**
+   * Copy/paste without relying on the browser's own terminal-unfriendly
+   * defaults (Ctrl+C is an interrupt in a shell, not a copy).
+   *
+   * Paste goes through terminal.write rather than into the emulator's
+   * local buffer: the PTY is what echoes, so writing locally would show
+   * the text twice and never send it.
+   */
+  async function handleCopy() {
+    const text = termRef.current?.getSelection?.() ?? "";
+    if (!text) return;
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      // Clipboard permission denied / no secure context -- the selection
+      // is still there to copy by hand; nothing worth an error surface.
+    }
+  }
+
+  async function handlePaste() {
+    const id = terminalIdRef.current;
+    if (!client || !id) return;
+    setPasteError(null);
+    try {
+      const text = await navigator.clipboard?.readText();
+      if (!text) return;
+      await client.call("terminal.write", { terminalId: id, data: text });
+    } catch (err) {
+      // Unlike copy, a failed paste is invisible otherwise -- nothing
+      // appears, and the user can't tell whether the shell ignored it.
+      setPasteError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function handleClose() {
     const id = terminalIdRef.current;
     if (!client || !id) return;
     setClosing(true);
     try {
       await client.call("terminal.close", { terminalId: id });
-      // Reset every trace of this session, including lastTerminalIdRef --
+      // Reset every trace of this session, including the tab's binding --
       // otherwise a *later* reconnect's list-then-attach effect above
       // would still find previousId pointing at this now-closed session,
       // see it as no longer running, and get permanently stuck showing
@@ -352,7 +454,7 @@ export function TerminalPane({
       // Clearing it here makes the next effect run treat this exactly
       // like a fresh attach, same as if the task had just been selected.
       terminalIdRef.current = null;
-      lastTerminalIdRef.current = null;
+      unbindTerminal(key);
       setTerminalId(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -370,16 +472,56 @@ export function TerminalPane({
           </span>
         }
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            disabled={!terminalId || closing}
-            onClick={handleClose}
-          >
-            Close terminal
-          </Button>
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              disabled={!terminalId || (selectionReportable && !hasSelection)}
+              onClick={() => void handleCopy()}
+              data-testid="terminal-copy"
+            >
+              <Copy className="size-3" />
+              Copy
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              disabled={!terminalId}
+              onClick={() => void handlePaste()}
+              data-testid="terminal-paste"
+            >
+              <ClipboardPaste className="size-3" />
+              Paste
+            </Button>
+            {onNewTerminal && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={onNewTerminal}
+                data-testid="terminal-new"
+              >
+                <Plus className="size-3" />
+                New
+              </Button>
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              disabled={!terminalId || closing}
+              onClick={handleClose}
+              data-testid="terminal-close"
+            >
+              Close terminal
+            </Button>
+          </>
         }
       />
       {connectionStatus === "reconnecting" && (
@@ -398,6 +540,11 @@ export function TerminalPane({
       {error && (
         <p className="px-3 py-1 text-xs text-destructive" data-testid="terminal-error">
           {error}
+        </p>
+      )}
+      {pasteError && (
+        <p className="px-3 py-1 text-xs text-destructive" data-testid="terminal-paste-error">
+          paste failed: {pasteError}
         </p>
       )}
       <div ref={containerRef} data-testid="terminal-container" className="min-h-0 flex-1" />
