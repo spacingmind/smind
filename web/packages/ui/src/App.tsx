@@ -6,14 +6,16 @@ import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
+import { QuickOpen } from "@/components/quick-open";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { fileTab, filePathFromTabKey, nextTerminalTab, TabLabel, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
+import { useQuickOpenShortcut } from "@/hooks/use-quick-open-shortcut";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
@@ -54,6 +56,10 @@ export function App({
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  // Item 18: Cmd/Ctrl+P opens quick-open for the selected task. A local
+  // shortcut, not a global registry entry -- see useQuickOpenShortcut's
+  // doc comment for why, and what Track A should do once Item 4 lands.
+  const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -120,7 +126,26 @@ export function App({
     openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
   }
 
+  /**
+   * The explorer's "Reveal in diff" row action (Item 17). The *payload*
+   * travels through lib/diff-reveal.ts's latch, which the diff pane reads
+   * on mount -- the shell's only job is to bring that tab forward.
+   */
+  function revealInDiff() {
+    if (!selectedTask) return;
+    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+  }
+
+  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
+  function openTerminalTab() {
+    if (!selectedTask) return;
+    const state = tabsByTask.get(selectedTask.ID);
+    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, state?.tabs ?? []));
+  }
+
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+
+  useQuickOpenShortcut(() => setQuickOpenOpen(true), selectedTask !== null);
 
   return (
     // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
@@ -211,7 +236,7 @@ export function App({
                           data-testid={`workspace-tab-${entry.kind}`}
                           className="max-w-48 gap-1.5"
                         >
-                          <span className="min-w-0 truncate">{entry.title}</span>
+                          <TabLabel entry={entry} />
                           {entry.closable && (
                             <span
                               role="button"
@@ -233,8 +258,34 @@ export function App({
                     </TabsList>
                   </div>
                   {taskState.tabs.map((entry) => (
-                    <TabsContent key={entry.key} value={entry.key} className="min-h-0">
-                      <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
+                    /*
+                     * Terminal tabs force-mount (and hide when inactive)
+                     * so a backgrounded terminal keeps streaming into its
+                     * buffer -- which is what lets its tab show an
+                     * activity dot, and what stops switching tabs from
+                     * dropping output on the floor (Item 20). The
+                     * detach-not-close contract is unchanged: the pane
+                     * still aborts its attach, and never calls
+                     * terminal.close, when it genuinely unmounts (tab
+                     * closed, task switched).
+                     */
+                    <TabsContent
+                      key={entry.key}
+                      value={entry.key}
+                      forceMount={entry.kind === "terminal" ? true : undefined}
+                      className="min-h-0 data-[state=inactive]:hidden"
+                    >
+                      <TabContent
+                        entry={entry}
+                        client={client}
+                        task={selectedTask}
+                        active={taskState.activeKey === entry.key}
+                        connectionStatus={connectionStatus}
+                        onOpenFile={openFileTab}
+                        onRevealInDiff={revealInDiff}
+                        onNewTerminal={openTerminalTab}
+                        events={events}
+                      />
                     </TabsContent>
                   ))}
                 </Tabs>
@@ -250,6 +301,14 @@ export function App({
           </SidebarInset>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <QuickOpen
+        client={client}
+        task={selectedTask}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={openFileTab}
+        events={events}
+      />
     </SidebarProvider>
   );
 }
@@ -259,28 +318,39 @@ function TabContent({
   entry,
   client,
   task,
+  active,
   connectionStatus,
   onOpenFile,
+  onRevealInDiff,
+  onNewTerminal,
   events,
 }: {
   entry: TabEntry;
   client: WsClient | null;
   task: Task;
+  /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
+  active: boolean;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
-    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
+    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
+    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} onRevealInDiff={onRevealInDiff} events={events} />,
+    file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
-    terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
+    terminal: (
+      <TerminalPane
+        client={client}
+        task={task}
+        tabKey={entry.key}
+        active={active}
+        connectionStatus={connectionStatus}
+        onNewTerminal={onNewTerminal}
+      />
+    ),
   };
   return renderers[entry.kind];
-}
-
-/** Extracts the file path from a file tab's `${taskId}:file:${path}` key. */
-function filePathFromKey(entry: TabEntry): string {
-  return entry.key.slice(entry.key.indexOf(":file:") + ":file:".length);
 }

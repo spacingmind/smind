@@ -41,6 +41,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.diff":             handleTaskDiff(wm),
 		"task.files":            handleTaskFiles(wm),
 		"task.fileDiff":         handleTaskFileDiff(wm),
+		"task.searchIndex":      handleTaskSearchIndex(wm),
 		"task.stage":            handleTaskStage(wm),
 		"task.commit":           handleTaskCommit(wm),
 		"task.createPr":         handleTaskCreatePR(wm),
@@ -459,6 +460,33 @@ func handleTaskFileDiff(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.fileDiff: %w", err)
 		}
 		return taskFileDiffResult{Diff: diff}, nil
+	}
+}
+
+// taskSearchIndexResult is the result of task.searchIndex: every path in
+// the task's worktree eligible for the web UI's quick-open (Item 18),
+// git's own notion of the worktree's contents (tracked plus
+// untracked-but-not-ignored) rather than a client-side directory walk.
+type taskSearchIndexResult struct {
+	Paths []string `json:"paths"`
+}
+
+// handleTaskSearchIndex returns the whole-worktree path list quick-open
+// fuzzy-matches against client-side; see workspace.Manager.TaskSearchIndex
+// for why this is one RPC rather than a client-side file.list walk.
+func handleTaskSearchIndex(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.searchIndex: invalid params: %w", err)
+		}
+		paths, err := wm.TaskSearchIndex(p.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("task.searchIndex: %w", err)
+		}
+		return taskSearchIndexResult{Paths: paths}, nil
 	}
 }
 

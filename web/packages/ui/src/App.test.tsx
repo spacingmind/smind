@@ -463,3 +463,50 @@ describe("App sidebar resize", () => {
     expect(wrapper!.style.getPropertyValue("--sidebar-width")).toBe("512px");
   });
 });
+
+describe("App quick-open (Item 18)", () => {
+  it("Ctrl+P opens quick-open for the selected task, and Enter opens the chosen file as a tab", async () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "Linux x86_64" });
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    clickTaskRow(TASK);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    fireEvent.keyDown(document, { key: "p", ctrlKey: true });
+    await flush();
+
+    expect(screen.getByTestId("quick-open")).toBeInTheDocument();
+    respond(socket, "task.searchIndex", { paths: ["README.md", "src/main.go"] });
+    await flush();
+
+    fireEvent.change(screen.getByTestId("quick-open-input"), { target: { value: "main" } });
+    await flush();
+    fireEvent.keyDown(screen.getByTestId("quick-open-input"), { key: "Enter" });
+    await flush();
+
+    expect(screen.queryByTestId("quick-open")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /main\.go/ })).toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("does not open before any task is selected", async () => {
+    vi.stubGlobal("navigator", { ...navigator, platform: "Linux x86_64" });
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    fireEvent.keyDown(document, { key: "p", ctrlKey: true });
+    await flush();
+
+    expect(screen.queryByTestId("quick-open")).not.toBeInTheDocument();
+
+    vi.unstubAllGlobals();
+  });
+});
