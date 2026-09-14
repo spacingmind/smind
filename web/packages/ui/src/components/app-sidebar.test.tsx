@@ -259,3 +259,140 @@ describe("AppSidebar", () => {
     });
   });
 });
+
+/** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as diff-viewer-pane.test.tsx's). */
+function makeEventsStub() {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    events: {
+      subscribe(topic: string, listener: (payload: unknown) => void): () => void {
+        let set = listeners.get(topic);
+        if (!set) {
+          set = new Set();
+          listeners.set(topic, set);
+        }
+        set.add(listener);
+        return () => set!.delete(listener);
+      },
+    },
+    fire(topic: string, payload: unknown): void {
+      act(() => {
+        for (const l of listeners.get(topic) ?? []) l(payload);
+      });
+    },
+  };
+}
+
+/**
+ * ADR 0009's lifecycle topics, from this tab's point of view: every event
+ * here stands in for a mutation made somewhere else -- a second browser
+ * tab, or the CLI, both of which drive the same daemon over the same /ws
+ * -- so the assertion in each case is that the tree changes with no
+ * further RPC.
+ */
+describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
+  it("a task created in another client appears without a reload and without a refetch", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+    const callsBefore = client.calls.length;
+
+    const other: Task = { ...TASK, ID: 43, Title: "Created in the other tab" };
+    stub.fire("task.created", { task: other });
+
+    expect(await screen.findByText("Created in the other tab")).toBeInTheDocument();
+    // The splice is the whole point: no second workspace.list/task.list.
+    expect(client.calls.length).toBe(callsBefore);
+  });
+
+  it("the acting client's own refresh and the matching event converge on one row, not two", async () => {
+    // ADR 0009: an event is not ordered against the RPC response that
+    // caused it, so this client can see task.created for a row its own
+    // refetch is about to return (or already returned).
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const created: Task = { ...TASK, ID: 43, Title: "Created here" };
+    stub.fire("task.created", { task: created });
+    // ...and now the local refresh()-driven refetch lands, carrying it too.
+    stub.fire("task.created", { task: created });
+
+    expect(await screen.findAllByText("Created here")).toHaveLength(1);
+  });
+
+  it("an archived task leaves the tree, and a deleted workspace takes its subtree with it", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK_IN_SPACE_A, TASK]);
+    await screen.findByText("Task in Space A");
+
+    stub.fire("task.archived", { task: TASK_IN_SPACE_A });
+    await screen.findByText("Fix the bug");
+    expect(screen.queryByText("Task in Space A")).not.toBeInTheDocument();
+
+    stub.fire("workspace.deleted", { id: WORKSPACE.ID });
+    expect(screen.queryByText("My Workspace")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fix the bug")).not.toBeInTheDocument();
+  });
+
+  it("an event for a workspace this client does not hold leaves the tree alone", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await screen.findByText("Fix the bug");
+
+    stub.fire("task.created", { task: { ...TASK, ID: 44, WorkspaceID: 999, Title: "Elsewhere" } });
+
+    expect(screen.queryByText("Elsewhere")).not.toBeInTheDocument();
+    expect(screen.getByText("Fix the bug")).toBeInTheDocument();
+  });
+
+  it("event.dropped refetches the tree, since a dropped event may have been a create or a delete", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    expect(client.calls.filter((c) => c.method === "workspace.list")).toHaveLength(1);
+
+    stub.fire("event.dropped", { count: 3 });
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "workspace.list")).toHaveLength(2);
+  });
+});

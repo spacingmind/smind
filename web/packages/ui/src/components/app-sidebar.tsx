@@ -17,6 +17,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import {
+  applyLifecycleEvent,
+  buildWorkspaceTree,
+  LIFECYCLE_TOPICS,
+  type SpaceWithTasks,
+  type WorkspaceWithTree,
+} from "@/lib/workspace-tree";
 import type { TaskAttention } from "@/hooks/use-task-attention";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
@@ -76,17 +83,6 @@ function BellIcon() {
   );
 }
 
-/** A space plus the subset of its workspace's tasks scoped to it (Task.SpaceID === Space.ID). */
-interface SpaceWithTasks extends Space {
-  tasks: Task[];
-}
-
-interface WorkspaceWithTree extends Workspace {
-  spaces: SpaceWithTasks[];
-  /** Tasks with SpaceID === null -- always present here even when spaces.length > 0, never dropped. */
-  ungroupedTasks: Task[];
-}
-
 /**
  * Loads workspace.list plus, per workspace, space.list and task.list (both
  * scoped by workspaceId, fetched in parallel), over the given WsClient (a
@@ -97,12 +93,24 @@ interface WorkspaceWithTree extends Workspace {
  * discriminated status so the sidebar can render loading/error/empty/loaded
  * states distinctly.
  *
- * `refresh` bumps an internal counter that re-runs the fetch -- there are
- * no cross-connection workspace/space/task-created events (see the crud-ui
- * plan's Decisions), so the acting client refreshes locally after each
- * successful create/archive.
+ * ADR 0009's lifecycle topics then keep that tree live: a workspace,
+ * space or task created, archived or deleted anywhere -- a second browser
+ * tab, or the CLI, both of which drive this same daemon -- is spliced into
+ * the tree here without a refetch. Delivery is live-only with no replay,
+ * so the full fetch remains the source of truth and re-runs on the two
+ * occasions an event stream cannot cover: a new connection (`client`
+ * changes on every reconnect) and `event.dropped`, the daemon's synthetic
+ * notification that its per-connection queue overflowed.
+ *
+ * `refresh` bumps an internal counter that re-runs the fetch. The acting
+ * client still calls it after its own successful mutation even though the
+ * event covers that case too -- events.subscribe is fire-and-forget, so a
+ * connection that failed to subscribe must not silently stop showing this
+ * user's own new rows. `applyLifecycleEvent` upserts by ID, so the two
+ * paths converge instead of double-inserting (ADR 0009: an event is not
+ * ordered against the RPC response that caused it).
  */
-function useWorkspaceTree(client: WsClient | null) {
+function useWorkspaceTree(client: WsClient | null, events: DaemonEvents | null) {
   const [workspaces, setWorkspaces] = useState<WorkspaceWithTree[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshCounter, setRefreshCounter] = useState(0);
@@ -119,33 +127,15 @@ function useWorkspaceTree(client: WsClient | null) {
       // ?? [] tolerates a daemon that answers null for an empty list
       // (defense in depth; the wire contract is backend-owned).
       const list = (await client.call<Workspace[]>("workspace.list")) ?? [];
-      const withTree = await Promise.all(
+      return await Promise.all(
         list.map(async (ws) => {
           const [spaces, tasks] = await Promise.all([
             client.call<Space[]>("space.list", { workspaceId: ws.ID }).then((r) => r ?? []),
             client.call<Task[]>("task.list", { workspaceId: ws.ID }).then((r) => r ?? []),
           ]);
-
-          const tasksBySpaceId = new Map<number, Task[]>();
-          const ungroupedTasks: Task[] = [];
-          for (const task of tasks) {
-            if (task.SpaceID === null) {
-              ungroupedTasks.push(task);
-              continue;
-            }
-            const bucket = tasksBySpaceId.get(task.SpaceID);
-            if (bucket) bucket.push(task);
-            else tasksBySpaceId.set(task.SpaceID, [task]);
-          }
-
-          return {
-            ...ws,
-            spaces: spaces.map((sp) => ({ ...sp, tasks: tasksBySpaceId.get(sp.ID) ?? [] })),
-            ungroupedTasks,
-          };
+          return buildWorkspaceTree(ws, spaces, tasks);
         }),
       );
-      return withTree;
     })()
       .then((withTree) => {
         if (!cancelled) setWorkspaces(withTree);
@@ -158,6 +148,26 @@ function useWorkspaceTree(client: WsClient | null) {
       cancelled = true;
     };
   }, [client, refreshCounter]);
+
+  useEffect(() => {
+    if (!events) return;
+    const offs = LIFECYCLE_TOPICS.map((topic) =>
+      events.subscribe(topic, (payload) => {
+        // A null tree means the initial fetch is still in flight; that
+        // fetch reads committed state, so it already includes whatever
+        // this event describes and splicing into nothing would be lost
+        // anyway.
+        setWorkspaces((prev) => (prev === null ? prev : applyLifecycleEvent(prev, topic, payload)));
+      }),
+    );
+    // The daemon dropped events for this connection, so the tree may have
+    // missed a create or a delete entirely -- ADR 0009's reconciliation
+    // rule is a full refetch, the same one a reconnect performs.
+    offs.push(events.subscribe("event.dropped", () => refresh()));
+    return () => {
+      for (const off of offs) off();
+    };
+  }, [events, refresh]);
 
   return { workspaces, error, refresh };
 }
@@ -221,7 +231,7 @@ export function AppSidebar({
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
 }) {
-  const { workspaces, error, refresh } = useWorkspaceTree(client);
+  const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
 
   // Out-of-tab attention notifications (Item 4): every task across the

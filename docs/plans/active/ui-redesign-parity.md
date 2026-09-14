@@ -785,7 +785,7 @@ Phase 2 (implementation) — not started:
 - [ ] Item 13: settings screen *(Track D)*
 - [ ] Item 14: accounts v2 *(Track D)*
 - [ ] Item 15: quota / usage surface *(Track D)*
-- [ ] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — **backend done** (ADR 0009, `internal/wsapi`/`internal/workspace`); UI consumption (`hooks/use-daemon-events.ts`, `useWorkspaceTree`) still open
+- [x] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — backend (ADR 0009, `internal/wsapi`/`internal/workspace`) and UI consumption (`lib/workspace-tree.ts`, `hooks/use-daemon-events.ts`, `useWorkspaceTree`) both landed
 - [ ] Item 17: file explorer / editor polish *(Track C)*
 - [ ] Item 18: quick file open *(Track C)*
 - [ ] Item 19: diff / review v2 *(Track C)*
@@ -1063,3 +1063,61 @@ schema is Item 8/9, Track B, separate PR):
     substantially higher than before Item 7 (tool results were dropped
     entirely); if large runs get slow, batching `record`'s
     `AppendRunEvent` or truncating `ToolResult` is where to look.
+
+### Item 16 — daemon lifecycle events (UI half)
+
+The consuming half of ADR 0009. `hooks/use-daemon-events.ts` now issues
+its one `events.subscribe` per connection with all eleven topics (ADR
+0005's three plus ADR 0009's eight); the tree-folding logic lives in a new
+pure module, `lib/workspace-tree.ts`
+(`buildWorkspaceTree`/`applyLifecycleEvent`/`LIFECYCLE_TOPICS`), which
+also now owns the `WorkspaceWithTree`/`SpaceWithTasks` shapes that
+`app-sidebar.tsx` previously declared inline. `useWorkspaceTree` folds
+each event into its state instead of refetching.
+
+- **Acceptance criterion** ("a task created in another browser tab, or by
+  the CLI, appears in this tab's sidebar without a reload"): covered by
+  `app-sidebar.test.tsx`'s `AppSidebar lifecycle events` block — the
+  two-client scenario fires `task.created` on a mounted sidebar and
+  asserts both that the row appears and that `FakeWsClient` recorded **no
+  further RPC**, so it is genuinely a splice rather than a refetch in
+  disguise.
+- **Upsert-by-ID / no double-insert** (ADR 0009: "an event is not ordered
+  against the RPC response that caused it"): the acting client still calls
+  `refresh()` after its own mutation — `events.subscribe` is
+  fire-and-forget, so a connection that failed to subscribe must not stop
+  showing this user's own new rows — and delivering the same
+  `task.created` twice yields one row
+  (`findAllByText(...)` is asserted to have length 1), plus
+  `workspace-tree.test.ts`'s upsert case at the unit level.
+- **Insert position**: `upsertById` inserts in ascending-ID order because
+  every `*.list` query behind this tree is `ORDER BY id`
+  (`internal/store/{workspaces,spaces,tasks}.go`), so an event-spliced row
+  lands exactly where the next reconnect's refetch puts it.
+- **Cascades**: `workspace.deleted` / `space.deleted` prune the subtree
+  client-side, since ADR 0009 publishes only the root event. Asserted at
+  both levels (`workspace.deleted` removes the workspace *and* its task
+  row from the DOM).
+- **Archive-is-removal**: ADR 0009 explicitly leaves this to the client;
+  `task.archived` removes the row here, matching `ListTasks` (which
+  filters archived rows out) and therefore matching what a refetch would
+  return. A `task.created`/`task.updated` carrying an already-archived row
+  is treated the same way.
+- **Scoping**: an event naming a workspace (or a space) this client has
+  not fetched returns the *same tree reference*, so an unrelated tab's
+  activity neither disturbs the tree nor re-renders it. Asserted by
+  reference identity in `workspace-tree.test.ts` and through the DOM in
+  `app-sidebar.test.tsx`.
+- **Reconciliation**: `event.dropped` — the daemon's synthetic overflow
+  notification, deliberately *not* in the `events.subscribe` list because
+  `knownTopics` would reject the name — triggers a full refetch
+  (asserted: a second `workspace.list`). Reconnect already refetches, via
+  the new-`WsClient`-on-reconnect property from
+  `daemon-restart-resync.md`.
+- **Malformed payloads**: every topic is exercised against `null`,
+  `undefined`, a number, a string, `{}`, and entity fields missing an
+  `ID`; each returns the tree unchanged rather than throwing.
+- `task test` (Go suite + 247 web tests), `task lint`, and `bunx tsc -b`
+  all pass clean. The one Go failure seen mid-session
+  (`TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny`) is the
+  known-flaky ClaudeNative case and passed on re-run.
