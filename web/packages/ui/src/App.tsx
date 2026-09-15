@@ -175,10 +175,23 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
-    // Implicit open (file-tree click): prefer the side pane if the task
-    // already has one, but never yank a tab already placed -- openTab's
-    // own "prefer" placement is exactly this rule.
+    // Implicit open (file-tree click, a tool-call's click-through): prefer
+    // the side pane if the task already has one, but never yank a tab
+    // already placed -- openTab's own "prefer" placement is exactly this
+    // rule.
     openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer");
+  }
+
+  /**
+   * The explorer's "Open to side" row action (Item 6/17): unlike
+   * `openFileTab`'s implicit "prefer", this always lands in the side pane,
+   * creating one if the task doesn't have one yet -- the explicit
+   * placement Item 6's own acceptance criteria distinguish from the
+   * implicit case.
+   */
+  function openFileTabToSide(path: string) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "side");
   }
 
   /**
@@ -443,6 +456,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                       connectionStatus={connectionStatus}
                       events={events}
                       onOpenFile={openFileTab}
+                      onOpenFileToSide={openFileTabToSide}
                       onActivate={(key) => activate(selectedTask.ID, key)}
                       onClose={(key) => closeTab(selectedTask.ID, key)}
                       onMove={(key) => moveTab(selectedTask.ID, key, "side")}
@@ -469,6 +483,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                           connectionStatus={connectionStatus}
                           events={events}
                           onOpenFile={openFileTab}
+                          onOpenFileToSide={openFileTabToSide}
                           onActivate={(key) => activate(selectedTask.ID, key)}
                           onClose={(key) => closeTab(selectedTask.ID, key)}
                           onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
@@ -691,6 +706,7 @@ function PaneTabStrip({
   connectionStatus,
   events,
   onOpenFile,
+  onOpenFileToSide,
   onActivate,
   onClose,
   onMove,
@@ -705,6 +721,7 @@ function PaneTabStrip({
   connectionStatus: ConnectionStatus;
   events: ReturnType<typeof useDaemonEvents>;
   onOpenFile: (path: string) => void;
+  onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
   onMove: (key: string) => void;
@@ -714,6 +731,7 @@ function PaneTabStrip({
   return (
     <Tabs
       key={`${task.ID}:${paneId}`}
+      data-testid={paneId === "primary" ? "primary-pane" : "side-pane"}
       value={activeKey ?? undefined}
       onValueChange={onActivate}
       className="h-full gap-0"
@@ -815,6 +833,7 @@ function PaneTabStrip({
             active={activeKey === entry.key}
             connectionStatus={connectionStatus}
             onOpenFile={onOpenFile}
+            onOpenFileToSide={onOpenFileToSide}
             onRevealInDiff={onRevealInDiff}
             onNewTerminal={onNewTerminal}
             events={events}
@@ -832,6 +851,7 @@ function TabContent({
   active,
   connectionStatus,
   onOpenFile,
+  onOpenFileToSide,
   onRevealInDiff,
   onNewTerminal,
   events,
@@ -843,13 +863,23 @@ function TabContent({
   active: boolean;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
+  onOpenFileToSide: (path: string) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
     task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
-    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} onRevealInDiff={onRevealInDiff} events={events} />,
+    files: (
+      <FileExplorerPane
+        client={client}
+        task={task}
+        onOpenFile={onOpenFile}
+        onOpenFileToSide={onOpenFileToSide}
+        onRevealInDiff={onRevealInDiff}
+        events={events}
+      />
+    ),
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
     terminal: (
