@@ -28,6 +28,13 @@ UI; the same code will back the Phase 4 Tauri desktop wrapper) automatically
 reconnects and resyncs its view of server state after losing the
 connection, without a manual reload.
 
+**Implemented in two parallel tracks** (separate worktrees/branches, merged
+back together): daemon-side terminal persistence (`internal/store`,
+`internal/terminal`, `internal/wsapi`) and client-side reconnect/resync
+(`web/packages/ui`). The two tracks share no files and needed zero
+coordination beyond the wire contract already specified below, which held
+exactly as specified on both sides.
+
 ## Acceptance Criteria
 
 ### Daemon-side: terminal session persistence (mirrors `internal/runs`)
@@ -257,22 +264,77 @@ connection, without a manual reload.
 
 ## Decisions
 
-(To be filled in as implementation makes concrete choices — checkpoint
-cadence/trigger, backoff policy numbers, exact rehydration retention cap,
-whether reconnect lives inside `WsClient` itself or a wrapper — each with
-its reasoning, following this repo's existing plan-doc convention of
-recording *why*, not just *what*.)
-
 - Go `internal/wsclient.Client` reconnect is explicitly out of scope (see
   Acceptance Criteria) — no long-lived CLI use case exists today.
 - Terminal output is not write-through persisted per-chunk (unlike
   `run_events`) — bounded-cadence checkpointing instead, trading "a crash
   loses only the tail since last checkpoint" for avoiding a disk write per
-  PTY chunk. Exact cadence is an implementation-time choice to document
-  here.
+  PTY chunk.
 - Reconnect resync relies on existing hooks' `useEffect` being keyed on
   `client` reference identity, deliberately reusing that existing pattern
   rather than introducing a new event-bus/invalidation mechanism.
+
+### Daemon-side implementation decisions
+
+- **Checkpoint cadence: a fixed 2-second ticker per session** (`internal/
+  terminal.checkpointCadence`), started alongside the existing read loop in
+  `Registry.Create`, not hooked into the existing byte-count-driven
+  `scrollbackCap`/`scrollbackHardCap` compaction pass. A byte-count trigger
+  bounds loss in *bytes since the last compaction*, which for a mostly-idle
+  interactive session (a human typing, not a log firehose) could mean
+  "since whenever the buffer last happened to cross 256KiB" — effectively
+  unbounded in wall-clock terms for typical usage. A fixed wall-clock
+  ticker gives a bound that's meaningful for the actual failure mode this
+  guards against (a SIGKILL mid-session): at most ~2s of output/typing
+  lost, regardless of throughput. 2s specifically: frequent enough that
+  the loss is "a couple of lines", while three orders of magnitude cheaper
+  than a persist-per-chunk on a session that can emit hundreds of chunks/
+  second. The checkpoint write is skip-if-unchanged (tracked via a
+  per-session `historyVersion` counter bumped on every append, compared
+  without diffing the buffer itself), so an idle session between ticks
+  costs nothing beyond one version comparison.
+- **Rehydration retention cap: reuses the existing `closedRetentionCap`
+  (200)** rather than introducing a second constant, the same way
+  `internal/runs` reuses a single cap for both "how many finished runs may
+  I hold in memory" and "how many may I load back in after a restart" —
+  they're the same in-memory cost, just incurred at a different time, so
+  one number serving both is deliberate, not an oversight.
+- **New `StatusInterrupted`**, distinct from `StatusClosed`: a "running"
+  row surviving to a fresh process start means the PTY subprocess (a real
+  child of the old daemon process) is definitely gone, but nothing
+  observed *how* it ended — reporting it as `"closed"` would claim more
+  than is actually known, the same reasoning `internal/runs.StatusInterrupted`
+  already established for runs.
+- **`Write`/`Resize` against a non-running session** (closed or
+  interrupted, current-process or rehydrated) return
+  `"session no longer running"` rather than a silent no-op — `Resize`
+  previously had no such guard at all (a rehydrated session has no live
+  `ptmx` to `Setsize` against, which would otherwise nil-panic); `Write`
+  already had the guard, just a less specific message, now made consistent
+  with `Resize`'s.
+- **`Registry.finish` persists final status/`closed_at`/scrollback
+  synchronously before the in-memory status transition**, mirroring
+  `runs.Registry.finish` exactly (including its CI-reproducible race
+  rationale): this is what gives `Close`'s "final scrollback persisted
+  before returning" contract for free, since `Close` already blocks on
+  `closedCh`, which only closes after `finish` has run. `finish` runs for
+  *both* an explicit `terminal.close` and the shell exiting on its own
+  (e.g. the user typing `exit`) — both are the same "graceful" path from
+  persistence's point of view; only a crash (no `finish` call at all)
+  leaves a "running" row behind for reconciliation to find.
+- **`terminal_sessions.task_id` keeps the `REFERENCES tasks(id)` foreign
+  key** (matching the Acceptance Criteria's explicit ask), which meant
+  `internal/terminal`'s existing tests — which predate this table and
+  hardcode `taskID` literal `1` throughout — needed a real `tasks` row to
+  satisfy it. Rather than editing every hardcoded call site, `newTestRegistry`
+  now creates exactly one workspace+task (directly via `store.Store`, not
+  `workspace.Manager`, since these tests already pass their own worktree
+  path straight to `Create` and have no need for a real git worktree) —
+  the first task in a fresh store is always id 1
+  (`INTEGER PRIMARY KEY AUTOINCREMENT`), so every existing hardcoded `1`
+  stays valid unchanged.
+
+### Client-side implementation decisions
 
 - **Reconnect lives in a new wrapper (`web/packages/ui/src/lib/reconnect.ts`'s
   `watchForReconnect`), not inside `WsClient` itself.** `WsClient` gained
@@ -346,23 +408,24 @@ recording *why*, not just *what*.)
   or silently starting a replacement shell.
 - `TerminalStatusValue` (`web/packages/ui/src/lib/types.ts`) gained the
   `"interrupted"` value ahead of the daemon-side work landing — purely
-  additive to the wire contract (no method shape changed), needed so the
-  client's own tests can exercise the daemon's future behavior; the current
-  `develop` backend never actually returns it yet.
+  additive to the wire contract (no method shape changed). Verified after
+  merging both tracks: the daemon-side `internal/terminal.StatusInterrupted`
+  constant is literally `"interrupted"` too, so the two independently-built
+  halves agree on the wire value with zero coordination needed.
 - `FileExplorerPane`/`DiffViewerPane` needed no changes: neither has a
   create-on-mount step like `TerminalPane`'s old `terminal.create`, and
   both already key their fetch effects on `[client, task.ID]`.
 
 ## Progress
 
-- [ ] Schema: `terminal_sessions` table
-- [ ] `internal/store`: CRUD methods + tests
-- [ ] `internal/terminal`: checkpointed persistence on the write path;
+- [x] Schema: `terminal_sessions` table
+- [x] `internal/store`: CRUD methods + tests
+- [x] `internal/terminal`: checkpointed persistence on the write path;
       `New(st *store.Store)` reconciliation + rehydration; write/resize
       error on rehydrated sessions
-- [ ] `internal/terminal`: tests (checkpoint, graceful close, restart
+- [x] `internal/terminal`: tests (checkpoint, graceful close, restart
       simulation, interrupted reconciliation, race)
-- [ ] `internal/wsapi`: rehydrated-session test coverage
+- [x] `internal/wsapi`: rehydrated-session test coverage
 - [x] `web/packages/ui`: `WsClient` reconnect (backoff, token refetch,
       explicit-close vs. unexpected-close distinction) + tests
 - [x] `web/packages/ui`: `App.tsx` real connection-status state + swaps in
@@ -379,23 +442,93 @@ recording *why*, not just *what*.)
 
 ## Validation
 
-(Filled in as each Acceptance Criterion is confirmed. This section covers
-only the client-side half of the plan — `web/packages/ui`'s reconnect/resync
-work. The daemon-side terminal-persistence half's Validation is the other
-agent's to fill in.)
+Both tracks were implemented in parallel worktrees (branches
+`terminal-restart-persistence` and `web-client-reconnect`, off `develop`)
+and merged into `daemon-restart-resync`. Each track's own validation below
+is as reported by its implementing agent; the merge itself only touched
+this plan document (a content conflict from both branches editing the same
+sections independently — resolved by combining, no code conflicts at all,
+consistent with the two tracks sharing no source files). Combined
+post-merge verification is recorded in the last subsection.
 
-**Unit tests** (`web/packages/ui`):
+### Daemon-side (`internal/store`, `internal/terminal`, `internal/wsapi`)
+
+- **Schema + `internal/store` CRUD** (`internal/store/terminal_sessions_test.go`):
+  `TestStore_TerminalSessions`, `TestStore_GetTerminalSessionMissing`,
+  `TestStore_ListRecentTerminalSessions`,
+  `TestStore_MarkRunningTerminalSessionsInterrupted`,
+  `TestStore_TerminalSessionsSurviveReopen` (Close + reopen the same db
+  file, confirm the session + its checkpointed scrollback are readable) --
+  all pass.
+- **Write path** (`internal/terminal/persistence_test.go`):
+  `TestRegistry_Checkpoint_PersistsScrollback` (real PTY output through a
+  session; waits for a real `checkpointCadence` tick to land, confirms the
+  persisted scrollback matches the in-memory buffer exactly),
+  `TestRegistry_GracefulClose_PersistsFinalState` (`terminal.close` on a
+  real session leaves `status = "closed"`, `closed_at` set, final
+  scrollback matching what was written) -- both pass.
+- **Rehydrate-on-restart** (`TestRegistry_RestartSimulation_ScrollbackSurvivesAcrossRegistries`):
+  drives a session to a graceful close on one `Registry` against a real
+  temp-file store, discards it, builds a new `Registry` against the same
+  store, confirms `List`/`Subscribe` return the identical scrollback as
+  backfill with no live tail, and that `Write`/`Resize` against it both
+  return the documented "session no longer running" error -- pass.
+- **Interrupted reconciliation, concrete crash-loss bound**
+  (`TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint`):
+  a session left "running" in the store (`Registry` discarded without
+  `Close`/`CloseAll`, simulating a crash) comes back `StatusInterrupted`
+  from a new `Registry`, with scrollback containing output written before
+  the last observed checkpoint tick but *not* output written after it and
+  before the simulated crash -- proving the "loses only since the last
+  checkpoint" bound concretely rather than just in prose -- pass.
+- **Full suite**: `go build ./...`, `go vet ./...`, `gofmt -l` clean;
+  `go test -race -count=3 ./...` clean across every package (including
+  `internal/terminal`'s existing `subscribe_race_test.go`/
+  `registry_linux_test.go` coverage, unaffected by the new checkpoint
+  goroutine).
+- **`internal/wsapi`**: existing `terminal_test.go` suite passes unchanged
+  (now threading a real store through, as it already did for `runs`); new
+  `TestServer_TerminalAttach_RehydratedSessionAfterRestart` builds a second
+  server (and so a second `terminal.Registry`, via its own `New(db)` call)
+  against the same `db` a first server used, after closing a session on
+  the first -- confirms `terminal.list`/`terminal.attach` on the second
+  server work identically for the rehydrated session, and
+  `terminal.write`/`terminal.resize` against it both error -- pass.
+- **Live-daemon E2E, graceful restart**: real `smind serve` (built binary),
+  a real terminal session with real shell output over a real WebSocket
+  connection, graceful `SIGTERM` shutdown, fresh daemon restart. Confirmed
+  via direct sqlite query that the row flipped `running` -> `closed`
+  immediately on shutdown (not just eventually); after restart,
+  `terminal.list` reports `status = "closed"` and `terminal.attach`
+  delivers the full pre-shutdown scrollback (including a written marker)
+  as backfill, then a clean terminal result with no live tail.
+- **Live-daemon E2E, crash + reconciliation**: same shape, but the daemon
+  `SIGKILL`ed with no graceful shutdown, timed against a real checkpoint
+  tick observed by polling the sqlite file directly (rather than a fixed
+  sleep, which risks landing close to the next tick's boundary): wrote a
+  first marker, waited for it to actually appear in the persisted
+  scrollback (proving a real checkpoint landed), wrote a second marker,
+  then killed immediately. Confirmed via direct sqlite query, immediately
+  after the kill, that the row was left `status = "running"` with the
+  first marker persisted but not the second; after restarting the daemon,
+  `terminal.list` reports `status = "interrupted"` and `terminal.attach`'s
+  backfill contains the first marker but not the second -- the concrete
+  gap this design accepts, observed directly rather than assumed.
+
+### Client-side (`web/packages/ui`)
+
+**Unit tests**:
 - `lib/ws-client.test.ts` (unchanged, still 8/8 passing) plus the new
   `onClose` hook's behavior exercised indirectly through `reconnect.test.ts`.
 - `lib/reconnect.test.ts` (new, 6 tests): unexpected close triggers a
   reconnect attempt; explicit `close()` never does; a failed attempt
-  retries again with backoff (verified via vitest's built-in fake timers —
-  no new dependency needed, per the plan's own suggestion to check first);
-  a successful reconnect resolves to a client usable for a real `call()`
-  against its new fake socket; the reconnect loop re-arms itself on the new
-  client so a second unexpected close also reconnects; the default
-  `connect` (real `connectDaemon`) is invoked fresh on every attempt,
-  proving the token is refetched each time rather than reused.
+  retries again with backoff (verified via vitest's built-in fake timers --
+  no new dependency needed); a successful reconnect resolves to a client
+  usable for a real `call()` against its new fake socket; the reconnect
+  loop re-arms itself on the new client so a second unexpected close also
+  reconnects; the default `connect` (real `connectDaemon`) is invoked
+  fresh on every attempt, proving the token is refetched each time rather
+  than reused.
 - `App.test.tsx` (new, 4 tests, driving the real `WsClient` class against
   fake sockets rather than `FakeWsClient`, since this needed genuine
   new-instance-per-reconnect semantics): an initial connect failure still
@@ -405,9 +538,7 @@ agent's to fill in.)
   reconnect brings "Connected to daemon" back; after reconnect, a *fresh*
   `workspace.list` fires against the new socket (the only way that could
   happen is if `AppSidebar` actually received a new `client` reference,
-  since `useWorkspaceTree`'s effect is keyed on it — this is the concrete,
-  checkable proxy for "AppSidebar received a different client prop
-  reference" the plan's test scenario asks for, verified behaviorally
+  since `useWorkspaceTree`'s effect is keyed on it -- verified behaviorally
   rather than by reaching into React internals); a task selected before
   disconnect is still selected and rendered after reconnect, with its pane
   re-fetching fresh (`run.list`) against the new client rather than being
@@ -416,9 +547,9 @@ agent's to fill in.)
   a "Connection lost — reconnecting…" banner appears/disappears with
   `connectionStatus`, additively (an already-rendered run's streamed text
   stays on screen, nothing is discarded); given a new post-reconnect
-  client, `useRunTimeline` (no code changes needed — see Decisions) issues
-  a fresh `run.list` and re-attaches to the same still-`"running"` run id,
-  never a fresh `run.start`.
+  client, `useRunTimeline` (no code changes needed) issues a fresh
+  `run.list` and re-attaches to the same still-`"running"` run id, never a
+  fresh `run.start`.
 - `components/terminal-pane.test.tsx` (rewritten for the new
   list-before-create flow, 14 tests total, 3 new): given a new
   post-reconnect client, re-issues `terminal.list` and re-attaches to the
@@ -488,8 +619,8 @@ repo's established no-real-browser E2E pattern, kept as a throwaway script
 per prior plans' precedent, not committed): a hand-rolled client mirroring
 `WsClient` plus a `watchForReconnect`-equivalent (unexpected-close
 detection, backoff redial, fresh `/api/token` fetch per attempt) connected
-to the real daemon and confirmed an initial `workspace.list` succeeded;
-the daemon process was then sent `SIGTERM` while a supervisor shell loop
+to the real daemon and confirmed an initial `workspace.list` succeeded; the
+daemon process was then sent `SIGTERM` while a supervisor shell loop
 watched for its exit and restarted the same binary against the same
 `SMIND_HOME` (same token file, so the daemon-restart-preserves-the-token
 assumption in the Acceptance Criteria held); the driver observed the
