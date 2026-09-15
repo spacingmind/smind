@@ -1,5 +1,5 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -74,7 +74,19 @@ function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
   );
 }
 
-/** Accounts settings dialog: list (account.list), a "Connect" OAuth login per known provider (account.oauthStart), and a manual-paste form (account.add) for everything else. No edit/remove this pass. */
+/**
+ * Accounts settings dialog: list (account.list), a cancellable "Connect"
+ * OAuth login per known provider (account.oauthStart, Item 14's
+ * start/show-URL/poll/cancel state machine), and a manual-paste form
+ * (account.add) for everything else.
+ *
+ * No edit/disable/remove/status-richness this pass (ui-redesign-parity
+ * Item 14's fuller `audit-cliproxyapi.md` §2 row model): `store.Account`
+ * (internal/store/types.go) has no status/disabled/last_refresh/
+ * next_retry_after/counters columns, and there is no `account.remove` or
+ * `account.disable`/`account.update` RPC -- adding any of it is a wire/
+ * data-model change gated on AGENTS.md rule (d), not a Track D UI change.
+ */
 export function AccountsDialog({
   client,
   open,
@@ -101,6 +113,15 @@ export function AccountsDialog({
   const [connecting, setConnecting] = useState<string | null>(null);
   const [authorizeUrl, setAuthorizeUrl] = useState<string | null>(null);
   const [oauthError, setOauthError] = useState<string | null>(null);
+  // The in-flight account.oauthStart call's own AbortController (ui-redesign-
+  // parity Item 14: "start -> show URL -> poll -> cancel" rather than a
+  // fire-and-forget button). WsClient.callStream already treats `signal` as
+  // "send task.cancel for this request's own id and keep waiting for its
+  // terminal response" (lib/ws-client.ts's CallOptions doc comment) -- no
+  // daemon change needed, cancellation of an arbitrary in-flight request by
+  // id already exists at the wire layer (internal/wsapi/conn.go's inflight
+  // map is keyed by request id, not by method).
+  const connectAbortRef = useRef<AbortController | null>(null);
 
   // Manual paste is the secondary path (only path for api-key-only
   // providers, a fallback for oauth ones) -- collapsed by default so the
@@ -213,20 +234,38 @@ export function AccountsDialog({
     setOauthError(null);
     setAuthorizeUrl(null);
     setConnecting(providerId);
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
     try {
-      await client!.callStream("account.oauthStart", { provider: providerId, label: oauthLabel.trim() }, (event, params) => {
-        if (event !== "authorizeUrl") return;
-        const url = (params as { url?: string } | undefined)?.url;
-        if (url) setAuthorizeUrl(url);
-      });
+      await client!.callStream(
+        "account.oauthStart",
+        { provider: providerId, label: oauthLabel.trim() },
+        (event, params) => {
+          if (event !== "authorizeUrl") return;
+          const url = (params as { url?: string } | undefined)?.url;
+          if (url) setAuthorizeUrl(url);
+        },
+        { signal: controller.signal },
+      );
       setOauthLabel("");
       setAuthorizeUrl(null);
       await refresh();
     } catch (err) {
-      setOauthError(err instanceof Error ? err.message : String(err));
+      // A user-initiated cancel already reflects itself in the UI by
+      // clearing `connecting` below -- surfacing the resulting "cancelled"
+      // error on top of that would read as a failure the user didn't cause.
+      if (!controller.signal.aborted) {
+        setOauthError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setConnecting(null);
+      connectAbortRef.current = null;
     }
+  }
+
+  /** Cancels the in-flight OAuth login -- the "cancel" step of the start/show-URL/poll/cancel state machine. */
+  function cancelConnect() {
+    connectAbortRef.current?.abort();
   }
 
   return (
@@ -371,19 +410,31 @@ export function AccountsDialog({
             </p>
           )}
           {connecting && (
-            <p className="rounded-md border bg-muted/50 px-2.5 py-1.5 text-sm text-muted-foreground">
-              {authorizeUrl ? (
-                <>
-                  Waiting for login — if a browser didn't open automatically,{" "}
-                  <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
-                    open the login page
-                  </a>
-                  .
-                </>
-              ) : (
-                "Starting login…"
-              )}
-            </p>
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-sm text-muted-foreground">
+              <p>
+                {authorizeUrl ? (
+                  <>
+                    Waiting for login — if a browser didn't open automatically,{" "}
+                    <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
+                      open the login page
+                    </a>
+                    .
+                  </>
+                ) : (
+                  "Starting login…"
+                )}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                data-testid="accounts-connect-cancel"
+                onClick={cancelConnect}
+              >
+                Cancel
+              </Button>
+            </div>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 import { act } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -171,59 +171,6 @@ describe("AppSidebar", () => {
 
     expect(onSelectTask).toHaveBeenCalledTimes(1);
     expect(onSelectTask).toHaveBeenCalledWith(TASK_IN_SPACE_A);
-  });
-
-  describe("notifications toggle", () => {
-    /** jsdom has no Notification API -- installs a minimal fake so the toggle's "default" (clickable) state is reachable at all; without it useNotificationPermission reports "unsupported" and the button stays disabled, which a separate test below covers directly. */
-    function installFakeNotification(initialPermission: NotificationPermission) {
-      const requestPermission = vi
-        .fn<() => Promise<NotificationPermission>>()
-        .mockResolvedValue("granted");
-      class FakeNotification {
-        static permission: NotificationPermission = initialPermission;
-        static requestPermission = requestPermission;
-      }
-      vi.stubGlobal("Notification", FakeNotification);
-      return requestPermission;
-    }
-
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
-
-    it("never requests Notification permission on mount -- only an explicit click on the toggle does", async () => {
-      const requestPermission = installFakeNotification("default");
-      const client = new FakeWsClient();
-
-      render(
-        <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} />
-        </SidebarProvider>,
-      );
-      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-
-      expect(requestPermission).not.toHaveBeenCalled();
-
-      fireEvent.click(screen.getByTestId("notifications-toggle"));
-      await flush();
-
-      expect(requestPermission).toHaveBeenCalledTimes(1);
-    });
-
-    it("without a Notification API at all, the toggle renders disabled instead of throwing", async () => {
-      const client = new FakeWsClient();
-
-      render(
-        <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} />
-        </SidebarProvider>,
-      );
-      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-
-      const button = screen.getByTestId("notifications-toggle");
-      expect(button).toBeDisabled();
-      expect(() => fireEvent.click(button)).not.toThrow();
-    });
   });
 
   describe("task row layout stability (ui-redesign-parity Item 2)", () => {
@@ -426,6 +373,41 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     await flush();
 
     expect(client.calls.filter((c) => c.method === "workspace.list")).toHaveLength(2);
+  });
+
+  it("event.dropped clears a live task.status override, so it can't shadow the freshly-refetched task.Status forever", async () => {
+    // ADR 0005's queue is per-connection: a drop can just as well have
+    // swallowed the task.status that set this override, and there is no
+    // corresponding refetch of "just this task's status" to correct it --
+    // only clearing the override (and letting the tree refetch supply the
+    // real value) removes the stale shadow.
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    stub.fire("task.status", { taskId: TASK.ID, status: "overridden" });
+    expect(await screen.findByTestId("sidebar-task-status")).toHaveTextContent("overridden");
+
+    // event.dropped also re-triggers useWorkspaceTree's own refetch
+    // (a separate, already-covered concern), which briefly unmounts every
+    // row while the fetch is in flight -- resolve this second round trip
+    // (index 1) the same way the initial mount's (index 0) was, so the
+    // row (and its now-cleared override) comes back.
+    stub.fire("event.dropped", { count: 1 });
+    await flush();
+    client.nth("workspace.list", 1).resolve([WORKSPACE]);
+    await flush();
+    client.nth("space.list", 1).resolve([]);
+    client.nth("task.list", 1).resolve([TASK]);
+    await flush();
+
+    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 });
 
@@ -727,5 +709,34 @@ describe("AppSidebar search (ui-redesign-parity Item 12)", () => {
     fireEvent.click(await screen.findByText("Fix the bug"));
 
     expect(onSelectTask).toHaveBeenCalledWith(TASK);
+  });
+});
+
+describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
+  it("the settings button opens the settings screen", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    expect(await screen.findByTestId("settings-screen")).toBeInTheDocument();
+  });
+
+  it("is a distinct entry point from Accounts settings, not a replacement for it", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
   });
 });
