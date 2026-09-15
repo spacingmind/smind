@@ -30,7 +30,6 @@ import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-prov
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { isMovableKind, useTaskTabs, type PaneId, type TabPlacement } from "@/hooks/use-task-tabs";
-import { useQuickOpenShortcut } from "@/hooks/use-quick-open-shortcut";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
@@ -105,9 +104,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
-  // Item 18: Cmd/Ctrl+P opens quick-open for the selected task. A local
-  // shortcut, not a global registry entry -- see useQuickOpenShortcut's
-  // doc comment for why, and what Track A should do once Item 4 lands.
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
@@ -340,7 +336,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
   useActionHandler("task.prev", () => stepTask(-1), { enabled: allTasks.length > 0 });
   useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
-  useQuickOpenShortcut(() => setQuickOpenOpen(true), selectedTask !== null);
+  useActionHandler("quick-open.open", () => setQuickOpenOpen(true), { enabled: selectedTask !== null });
   return (
     // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
     // definite height), which used to be fine when its child just flowed
