@@ -602,12 +602,19 @@ must also leave `bunx tsc -b`, `task test` and `task lint` clean, and
 - An inactive terminal receiving data marks its tab; activating clears it.
 
 **Item 21 — responsive**
-- Below the breakpoint, exactly one destination is rendered as active and
-  the other two are inert.
-- Switching destinations is idempotent for the current destination.
-- The composer and permission card render without horizontal overflow at
-  the declared narrow viewport (assert layout-affecting classes/props,
-  since jsdom has no layout — plus a manual check recorded in Validation).
+- Below the breakpoint, the sidebar-vs-content split and the side dock
+  (Item 6) both stop being resizable panels: no drag handle renders for
+  either, and the sidebar becomes an overlay instead of a fixed column.
+- The side dock's split doesn't apply below the breakpoint even when a
+  task already has one open from a wider session — its tabs merge back
+  into the single visible strip rather than disappearing, and the split
+  reappears, unchanged, once back above the breakpoint.
+- The "open to side" affordance is absent below the breakpoint (there is
+  nowhere for a moved tab to land).
+- The composer and permission-card controls carry a stated compact touch-
+  target size below the breakpoint, and the original dense size at/above
+  it (assert the class list, since jsdom has no layout — plus a manual
+  check recorded in Validation).
 
 ---
 
@@ -705,6 +712,19 @@ top-10): 1, 2 → 7 (ADR in parallel), 10, 4 → 8, 3, 12, 16 → 9, 5, 11,
 - **Responsive work (Item 21) is scheduled, not optional.**
   `docs/plans/active/relay-e2ee-mobile.md` makes the daemon reachable from
   a phone; a desktop-only UI would waste that.
+- **Item 21's compact model is two destinations, not Paseo's three.**
+  `audit-paseo.md` §8 describes `agent-list` / `agent` / `file-explorer` as
+  three mutually exclusive top-level destinations because Paseo's file
+  explorer is its own screen. smind's Files pane is already one of a
+  task's tabs (ADR 0004's tab registry, Item 17), not a sibling route —
+  building a third top-level destination for it would duplicate
+  navigation smind already has. The compact model that actually fits is
+  two: the sidebar (task list), rendered as shadcn's existing
+  `useIsMobile()`-driven Sheet overlay, and the task pane (which already
+  contains Files as one of its tabs) — one shared boolean (the Sidebar
+  primitive's own `openMobile`) is the "one selection value" the plan
+  calls for, so the two can't disagree the way a hand-rolled second flag
+  could.
 - **Performance is asserted, not assumed.** Item 8's long-run scenario and
   Item 18's measure-before-adding-an-RPC rule exist because both
   references treat streaming and diff performance as tracked concerns with
@@ -971,6 +991,54 @@ while backgrounded, and Items 4/5 should replace the local
 `useQuickOpenShortcut` call with a real `keyboard/actions.ts` entry
 (`hooks/use-quick-open-shortcut.ts`'s own doc comment says the same).
 
+**Item 21 (landed)** — where the plan was ambiguous and what was decided:
+
+- **The breakpoint is 768px** — `hooks/use-mobile.ts`'s existing
+  `useIsMobile()` (already shipped for the shadcn Sidebar primitive) uses
+  this number, and it's Tailwind's own `md` breakpoint, so the compact
+  touch-target classes below (`h-11 ... md:h-6`) key off the exact same
+  threshold with zero JS coordination between the two. No new hook was
+  written; `useIsMobile()` was fit for purpose as-is.
+- **Two destinations, not three** — see the Decisions section above.
+- **The sidebar overlay was already half-built and defeated by Item 6's
+  layout.** shadcn's `Sidebar` primitive (`components/ui/sidebar.tsx`)
+  already renders itself as a `Sheet` once `useIsMobile()` is true — that
+  was never the gap. The gap was `App.tsx` unconditionally wrapping it in
+  a `ResizablePanel` with `SIDEBAR_MIN_WIDTH` (192px): on a 375px viewport
+  that reserved over half the screen for a component rendering into a
+  portal, which is what a "compact layout" that was actually zero lines
+  of code would look like from the outside. The fix is entirely in
+  `App.tsx`: below the breakpoint, `AppSidebar` and `SidebarInset` render
+  as plain flex children instead of `ResizablePanel`s, so the overlay
+  gets the full-width, unsqueezed shell the primitive was already built
+  to assume.
+- **The side dock's tabs merge into one strip on compact, rather than
+  being hidden.** An earlier draft of this work only rendered `primary`'s
+  tabs below the breakpoint and left `side`'s tabs unreachable until the
+  window widened again — technically "gracefully doesn't apply" (nothing
+  crashes, no data is lost), but a tab the user had open simply vanishing
+  from view is not graceful in any user-facing sense. Since
+  `useTaskTabs.ts`'s `activate`/`closeTab` already resolve a key to
+  whichever pane holds it, merging `[...primary.tabs, ...side.tabs]` into
+  one `PaneTabStrip` (primary's kinds first, side's after) costs nothing
+  extra and keeps every open tab reachable regardless of viewport width;
+  only the "open to side" affordance (`showMoveAffordance`) disappears,
+  since there's nowhere left for it to move a tab to.
+- **44px (WCAG 2.5.5 AAA / Apple HIG) for the compact touch targets** —
+  the permission-card buttons (`h-6`, 24px) and the composer's Send/Stop/
+  provider/policy controls (`h-7`, 28px) were both below any reasonable
+  minimum for a phone. Rather than threading an `isMobile` prop through
+  every one of these components, the fix is plain responsive Tailwind —
+  `COMPACT_TOUCH_BUTTON_CLASS`/`SELECT_CLASS`/
+  `COMPACT_TOUCH_ACTION_BUTTON_CLASS` all read `h-11 ... md:h-<original>`
+  — since `md:` already keys off the same 768px, and `cn`'s `twMerge`
+  correctly resolves the unprefixed/`md:`-prefixed pair without either
+  clobbering the other. The timeline's own tool-call-toggle button was
+  left alone: its tap target is the *whole row* (`min-w-0 flex-1`), not a
+  small icon, so height alone already clears the 24px WCAG AA floor by a
+  comfortable margin, and bumping it would visually disrupt the timeline's
+  established row density for no reachability gain.
+
 ---
 
 ## Progress
@@ -1013,7 +1081,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 18: quick file open *(Track C)*
 - [x] Item 19: diff / review v2 *(Track C)*
 - [x] Item 20: terminal v2 *(Track C)*
-- [ ] Item 21: responsive / compact layout *(Track A)*
+- [x] Item 21: responsive / compact layout *(Track A)*
 
 ---
 
@@ -2409,3 +2477,83 @@ including 5 new: `TestManager_TaskSearchIndex`,
 `TestManager_TaskSearchIndex_NoChanges`,
 `TestManager_TaskSearchIndex_UnknownTask`, `TestServer_TaskSearchIndex`,
 `TestServer_TaskSearchIndex_UnknownTask`) and `task lint` green.
+
+### Item 21 — responsive / compact layout
+
+An earlier attempt at this item (the PR that titled itself "Track A —
+shell (keyboard, palette, routing, splits, responsive)") shipped none of
+this — confirmed by grep, before this pass, only the unused shadcn
+`use-mobile.ts` stub existed, and it was already tracked as unchecked
+above. This entry replaces that gap. Every acceptance criterion, and how
+it was confirmed:
+
+- **Below the breakpoint, the sidebar-vs-content split and the side dock
+  both stop being resizable panels; the sidebar becomes an overlay** —
+  `App.tsx`'s `AppShell` reads `hooks/use-mobile.ts`'s `useIsMobile()`
+  (768px, already Tailwind's `md`, unchanged) and branches the whole
+  shell: below it, `AppSidebar` and `SidebarInset` render as plain flex
+  children of a `<div className="flex h-svh w-full flex-col">` instead of
+  being handed to `ResizablePanelGroup`/`ResizablePanel`/`ResizableHandle`.
+  shadcn's `Sidebar` primitive (unchanged) already renders itself as a
+  `Sheet` once `useIsMobile()` is true — see Decisions for why the gap was
+  never that primitive, only `App.tsx`'s unconditional `ResizablePanel`
+  wrapper around it. `App.responsive.test.tsx` asserts no
+  `sidebar-resize-handle` and no `[data-slot="resizable-panel-group"]`
+  anywhere in the tree below the breakpoint, that one still renders at/
+  above it (regression), and that opening the sidebar below the
+  breakpoint renders `[data-mobile="true"]` (the Sheet content) without
+  duplicating the connection-status header.
+- **The side dock doesn't apply below the breakpoint even with an
+  existing split, and it isn't lossy** — `mainContentElement` merges
+  `taskState.primary.tabs` and `taskState.side.tabs` into one
+  `PaneTabStrip` below the breakpoint (see Decisions for why merge rather
+  than hide), with `showMoveAffordance={false}` hiding "open to side"
+  since there's nowhere left for it to land.
+  `App.responsive.test.tsx`'s split-pane test moves the Diff tab to the
+  side pane at desktop width, resizes down and asserts
+  `side-pane-resize-handle` and the `workspace-tab-move` affordance are
+  both gone while the Diff tab itself is still visible and selectable,
+  then resizes back up and asserts the split (and its drag handle)
+  reappear unchanged.
+- **The composer and permission card stay usable one-handed; touch
+  targets meet a stated minimum** — 44px (see Decisions), via plain
+  responsive Tailwind classes (`h-11 ... md:h-<original>`) on the
+  permission-card buttons (`permission-option-button.tsx`'s
+  `COMPACT_TOUCH_BUTTON_CLASS`, shared by all three permission-card
+  variants — options, question-form, plan-review) and the composer's
+  Send/Stop buttons and provider/policy `<select>`s
+  (`composer.tsx`'s `COMPACT_TOUCH_ACTION_BUTTON_CLASS`/`SELECT_CLASS`).
+  `permission-card.test.tsx` and `composer.test.tsx` each assert the
+  rendered class list carries both the compact (`h-11`) and the `md:`-
+  reverted dense (`md:h-6`/`md:h-7`) classes — a computed pixel height
+  isn't assertable under jsdom, which is why the plan itself calls for
+  asserting classes plus a manual check. The composer/timeline's existing
+  layout (flex-wrap toolbar, `truncate`/`min-w-0` queue rows, `max-w-[85%]`
+  timeline bubbles, `overflow-x-auto` tab strips and code blocks) already
+  had no horizontal-overflow-prone fixed widths; the only actual source
+  of horizontal overflow was the shell-level `ResizablePanel` layout fixed
+  above.
+- **Compact is verified at a declared set of viewport sizes, not
+  assumed** — `App.responsive.test.tsx` covers 375px (compact) and 1024px
+  (desktop, regression) via a `window.innerWidth` + `matchMedia` stub that
+  can fire `useIsMobile()`'s 'change' listener after mount, the same
+  "stub matchMedia, then fire its change callback" shape
+  `hooks/use-theme.test.tsx` already established for `prefers-color-
+  scheme`. **A real browser was also driven**, not just mocked tests:
+  `task dev` running against the real daemon, checked with a headless
+  Playwright Chromium at 1280×800 and 375×800 against the live app —
+  confirmed no `sidebar-resize-handle`/`resizable-panel-group` below
+  768px (present above it), no `document.body` horizontal overflow at
+  either width including with a real task selected, and a screenshot of
+  the opened sidebar rendering as a genuine overlay (a dimmed backdrop
+  beside a ~18rem drawer) rather than a squeezed column.
+- **A prerequisite for `relay-e2ee-mobile.md`** — no code in that plan
+  depends on this one yet; this item only removes the "desktop-only UI"
+  blocker its own Decisions section named.
+
+`bunx tsc -b`, `task test` (664 web tests, 64 files — 7 new: 4 in the new
+`App.responsive.test.tsx`, plus one each in `composer.test.tsx`,
+`permission-card.test.tsx`'s options and plan-review describe blocks; all
+Go packages unchanged) and `task lint` green. `task build` also
+succeeded end to end (`internal/server/dist/.gitkeep` restored
+afterward, per this file's own recurring-step note).

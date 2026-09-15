@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
 
@@ -52,7 +53,7 @@ export function PlanReviewCard({
             type="button"
             variant="outline"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={COMPACT_TOUCH_BUTTON_CLASS}
             disabled={submitting !== null}
             data-testid="plan-review-chat"
             onClick={onChat}
@@ -63,7 +64,7 @@ export function PlanReviewCard({
             type="button"
             variant="destructive"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={COMPACT_TOUCH_BUTTON_CLASS}
             disabled={submitting !== null}
             data-testid="plan-review-refuse"
             onClick={() => resolve(PLAN_REVIEW_REFUSE)}
@@ -73,7 +74,7 @@ export function PlanReviewCard({
           <Button
             type="button"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={COMPACT_TOUCH_BUTTON_CLASS}
             disabled={submitting !== null}
             data-testid="plan-review-approve"
             onClick={() => resolve(PLAN_REVIEW_APPROVE)}
