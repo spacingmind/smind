@@ -16,6 +16,7 @@ import {
   Plus,
   Search,
   Settings,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 
@@ -35,8 +36,10 @@ import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
-import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
+import { useNotificationPermission } from "@/hooks/use-notification-permission";
+import { useSettingsOpen } from "@/hooks/use-settings-open";
 import { AccountsDialog } from "@/components/accounts-dialog";
+import { SettingsScreen } from "@/components/settings/settings-screen";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -79,30 +82,12 @@ const EMPTY_ATTENTION: TaskAttention = new Map();
 /** Stable empty fallback for the optional `runStatus` prop, for the same reason EMPTY_ATTENTION exists: a literal `new Map()` inline would re-run the row-signal memo every render. */
 const EMPTY_RUN_STATUS: TaskRunStatus = new Map();
 
-/** The notifications toggle's label/tooltip per permission state -- also its accessible name, so a screen reader (or a test's getByRole(..., { name })) can tell the states apart. */
-const NOTIFICATION_LABEL: Record<NotificationPermissionState, string> = {
-  default: "Enable out-of-tab notifications",
-  granted: "Notifications enabled",
-  denied: "Notifications blocked -- allow them in your browser's site settings",
-  unsupported: "Notifications aren't supported in this browser",
-};
-
 /** Human-readable reason text for the task row's attention dot -- part of its accessible name, so the three reasons are distinguishable to a screen reader and not only by colour. */
 const ATTENTION_LABEL: Record<AttentionReason, string> = {
   error: "a run failed",
   permission: "a permission is waiting",
   finished: "a run finished",
 };
-
-/** A plain inline bell glyph -- not from lucide-react, so this doesn't depend on that package happening to export one under this exact name/version. Sized like any other icon here via Button's own `[&_svg:not([class*='size-'])]:size-4` rule. */
-function BellIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-    </svg>
-  );
-}
 
 /**
  * Loads workspace.list plus, per workspace, space.list and task.list (both
@@ -321,8 +306,7 @@ export function AppSidebar({
     () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
     [workspaces],
   );
-  const { permission: notificationPermission, requestPermission: requestNotificationPermission } =
-    useNotificationPermission();
+  const { permission: notificationPermission } = useNotificationPermission();
   useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
 
   useEffect(() => {
@@ -335,6 +319,7 @@ export function AppSidebar({
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
+  const { open: settingsOpen, openSettings, setOpen: setSettingsOpen } = useSettingsOpen();
 
   // Command-palette contributions for the dialogs this component owns.
   // Registered here rather than in App.tsx on purpose: the surface that
@@ -422,21 +407,16 @@ export function AppSidebar({
         <div className="flex items-center gap-2 px-2 py-1.5">
           <span className="text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
           <div className="ml-auto flex items-center gap-1 group-data-[collapsible=icon]:hidden">
+            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={NOTIFICATION_LABEL[notificationPermission]}
-              title={NOTIFICATION_LABEL[notificationPermission]}
-              data-testid="notifications-toggle"
-              disabled={notificationPermission !== "default"}
-              // Explicit user action, per Item 4's requirement -- this is
-              // the only place useNotificationPermission's requestPermission
-              // is ever called; nothing here runs unprompted on load.
-              onClick={requestNotificationPermission}
+              aria-label="Settings"
+              data-testid="sidebar-settings-button"
+              onClick={openSettings}
             >
-              <BellIcon />
+              <SlidersHorizontal />
             </Button>
-            <ThemeToggle />
             <Button
               variant="ghost"
               size="icon-sm"
@@ -636,6 +616,7 @@ export function AppSidebar({
             />
           )}
           <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
+          <SettingsScreen client={client} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </>
       )}
     </Sidebar>

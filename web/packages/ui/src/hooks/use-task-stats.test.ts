@@ -147,4 +147,23 @@ describe("useTaskStats", () => {
 
     expect(result.current.size).toBe(0);
   });
+
+  it("event.dropped refetches every tracked workspace, not just the one the last run.status named", () => {
+    // ADR 0005's queue is per-connection: a drop can just as well have
+    // swallowed the run.status that would have triggered a targeted
+    // refetch, leaving a stat stale with nothing left to correct it short
+    // of a reconnect.
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    renderHook(() => useTaskStats(client, stub.events, [1, 2]));
+    expect(client.calls.filter((c) => c.method === "task.stats")).toHaveLength(2);
+
+    stub.fire("event.dropped", { count: 1 });
+
+    const calls = client.calls.filter((c) => c.method === "task.stats");
+    expect(calls).toHaveLength(4);
+    expect(calls.map((c) => c.params)).toEqual(
+      expect.arrayContaining([{ workspaceId: 1 }, { workspaceId: 2 }, { workspaceId: 1 }, { workspaceId: 2 }]),
+    );
+  });
 });
