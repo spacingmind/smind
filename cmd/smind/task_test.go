@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -68,7 +69,25 @@ func TestRenderRaw(t *testing.T) {
 	t.Parallel()
 
 	got := renderRaw(rawEventParams{Kind: "plan", Payload: json.RawMessage(`{"sessionUpdate":"plan"}`)})
-	want := "[raw] plan: {\"sessionUpdate\":\"plan\"}\n"
+	want := "[raw] \"plan\": {\"sessionUpdate\":\"plan\"}\n"
+	if got != want {
+		t.Fatalf("renderRaw() = %q, want %q", got, want)
+	}
+}
+
+// TestRenderRaw_KindWithControlCharacters proves a Kind carrying an
+// embedded newline or other control character (a JSON-decoded Go string,
+// unlike Payload's raw wire bytes -- see renderRaw's doc comment) can't
+// smear its "raw" line across multiple physical lines and corrupt a
+// line-oriented consumer of `task logs`/`task attach` output.
+func TestRenderRaw_KindWithControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	got := renderRaw(rawEventParams{Kind: "plan\nINJECTED", Payload: json.RawMessage(`{}`)})
+	if strings.Count(got, "\n") != 1 {
+		t.Fatalf("renderRaw() = %q, want exactly one newline (the trailing one)", got)
+	}
+	want := "[raw] \"plan\\nINJECTED\": {}\n"
 	if got != want {
 		t.Fatalf("renderRaw() = %q, want %q", got, want)
 	}

@@ -73,8 +73,16 @@ type rawEventParams struct {
 // renderRaw formats one "raw" event as a single readable line: the
 // unrecognized kind, and its raw payload's compact JSON -- there is no
 // typed shape to render more richly than that.
+//
+// Kind is quoted (strconv.Quote) rather than printed verbatim: unlike
+// Payload -- raw wire bytes that can never contain a literal newline,
+// since ACP's transport is itself newline-delimited JSON -- Kind is a
+// JSON-decoded Go string, so a provider whose sessionUpdate value embeds
+// "\n"/control characters would otherwise let a single event smear across
+// multiple physical lines, breaking any line-oriented consumer of `task
+// logs`/`task attach` output.
 func renderRaw(p rawEventParams) string {
-	return fmt.Sprintf("[raw] %s: %s\n", p.Kind, p.Payload)
+	return fmt.Sprintf("[raw] %s: %s\n", strconv.Quote(p.Kind), p.Payload)
 }
 
 // runLogEvent is one event in a run.logs response.
