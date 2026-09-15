@@ -21,9 +21,12 @@ export function worktreeRelativePath(absolute: string, worktreePath: string): st
  * icon, display name, summary and file path; `ToolCallDetail` supplies
  * the intent-specific body. Nothing here is keyed to a particular tool.
  *
- * Click-through opens the file in the task's primary tab set. Item 6's
- * side dock (and its `prefer` placement) hasn't landed, so this
- * deliberately degrades to "open the tab" rather than blocking on it.
+ * Click-through calls `onOpenFile` with the worktree-relative path;
+ * App.tsx wires that straight to the same `openFileTab` the file
+ * explorer's row click uses, so it inherits Item 6's "prefer" placement
+ * for free -- it opens in the side pane when the task already has one,
+ * and in primary otherwise, without this file knowing the side dock
+ * exists.
  */
 export function ToolCall({
   item,

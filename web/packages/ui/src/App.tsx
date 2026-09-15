@@ -148,7 +148,43 @@ export function App({
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
-    openTab(selectedTask.ID, fileTab(selectedTask.ID, path));
+    // Implicit open (file-tree click, a tool-call's click-through): prefer
+    // the side pane if the task already has one, but never yank a tab
+    // already placed -- openTab's own "prefer" placement is exactly this
+    // rule.
+    openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer");
+  }
+
+  /**
+   * The explorer's "Open to side" row action (Item 6/17): unlike
+   * `openFileTab`'s implicit "prefer", this always lands in the side pane,
+   * creating one if the task doesn't have one yet -- the explicit
+   * placement Item 6's own acceptance criteria distinguish from the
+   * implicit case.
+   */
+  function openFileTabToSide(path: string) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, fileTab(selectedTask.ID, path), "side");
+  }
+
+  /**
+   * The explorer's "Reveal in diff" row action (Item 17). The *payload*
+   * travels through lib/diff-reveal.ts's latch, which the diff pane reads
+   * on mount -- the shell's only job is to bring that tab forward.
+   */
+  function revealInDiff() {
+    if (!selectedTask) return;
+    activate(selectedTask.ID, `${selectedTask.ID}:diff`);
+  }
+
+  /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
+  function openTerminalTab() {
+    if (!selectedTask) return;
+    const state = tabsByTask.get(selectedTask.ID);
+    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, [
+      ...(state?.primary.tabs ?? []),
+      ...(state?.side?.tabs ?? []),
+    ]));
   }
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
@@ -159,7 +195,151 @@ export function App({
         client={client}
         selectedTaskId={selectedTask?.ID ?? null}
         onSelectTask={selectTask}
-        attention={attention}
+        onOpenTab={openTab}
+        onActivateTab={activate}
+      />
+      <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
+        {/*
+         * The sidebar-vs-content split itself -- the whole point of Item 6.
+         * defaultSize/minSize/maxSize take plain numbers as pixels
+         * directly (react-resizable-panels only treats unitless *strings*
+         * as percentages), so SIDEBAR_MIN_WIDTH/SIDEBAR_MAX_WIDTH (12rem/
+         * 32rem) apply as-is -- dragging past either bound still can't
+         * collapse the sidebar to 0 or push it off-screen.
+         */}
+        <ResizablePanel
+          defaultSize={sidebarWidth}
+          minSize={SIDEBAR_MIN_WIDTH}
+          maxSize={SIDEBAR_MAX_WIDTH}
+          onResize={(size) => setSidebarWidth(size.inPixels)}
+          className="min-w-0"
+        >
+          <AppSidebar
+            client={client}
+            selectedTaskId={selectedTask?.ID ?? null}
+            onSelectTask={selectTask}
+            attention={attention}
+            runStatus={runStatus}
+            events={events}
+            onTasksChange={setAllTasks}
+            onWorkspacesChange={(workspaces) => {
+              setAllWorkspaces(workspaces);
+              setTreeLoaded(true);
+            }}
+          />
+        </ResizablePanel>
+        {/*
+         * react-resizable-panels' Separator always sets its own
+         * `data-testid` (and `id`) to its resolved `id` prop, clobbering
+         * any `data-testid` passed directly -- so the only way to control
+         * the rendered data-testid here is via `id`, not `data-testid`.
+         */}
+        <ResizableHandle withHandle id="sidebar-resize-handle" />
+        <ResizablePanel minSize={30} className="min-w-0">
+          {/*
+           * Panel's own box gets its height from the group's flex-stretch,
+           * not from content -- SidebarInset's <main> needs an explicit
+           * h-full to actually fill it (it's a plain block child of Panel
+           * now, not a flex sibling of the sidebar the way it was before
+           * Item 6's restructuring), which is what every pane under it
+           * (TaskDetailPane's own "flex h-full flex-col" root, etc.) relies
+           * on to size its scrollable region correctly.
+           */}
+          <SidebarInset className="h-full">
+            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+              <SidebarTrigger />
+              <Separator orientation="vertical" className="h-4" />
+              <span className="text-sm text-muted-foreground" data-testid="app-connection-status">
+                {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+              </span>
+            </header>
+            {/*
+             * flex-1 (grow from a 0 basis) + min-h-0 is what the old inner
+             * ResizablePanelGroup gave this area for free -- it filled all
+             * height left over after the header's own (shrink-0) box,
+             * rather than a percentage height fighting the header for
+             * space. Restated explicitly here now that that group's gone
+             * (it wrapped a single always-100% panel, which was never
+             * actually resizable -- see Item 6).
+             */}
+            <div className="flex-1 min-h-0">
+              {selectedTask && taskState ? (
+                // The side dock (Item 6): one optional split, primary +
+                // side, each its own Radix Tabs root. Moving a tab between
+                // them (PaneTabStrip's move button) is a plain data move
+                // in useTaskTabs -- the pane component underneath *does*
+                // fully unmount from one root and mount in the other,
+                // which is fine because every such component already
+                // tolerates ADR 0004's "switching tabs unmounts inactive
+                // content" and reattaches to its server-side session
+                // rather than recreating it (see use-task-tabs.ts's doc
+                // comment).
+                <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+                  <ResizablePanel minSize={30} className="min-w-0">
+                    <PaneTabStrip
+                      paneId="primary"
+                      tabs={taskState.primary.tabs}
+                      activeKey={taskState.primary.activeKey}
+                      task={selectedTask}
+                      client={client}
+                      connectionStatus={connectionStatus}
+                      events={events}
+                      onOpenFile={openFileTab}
+                      onOpenFileToSide={openFileTabToSide}
+                      onActivate={(key) => activate(selectedTask.ID, key)}
+                      onClose={(key) => closeTab(selectedTask.ID, key)}
+                      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+                      onRevealInDiff={revealInDiff}
+                      onNewTerminal={openTerminalTab}
+                    />
+                  </ResizablePanel>
+                  {taskState.side && (
+                    <>
+                      <ResizableHandle withHandle id="side-pane-resize-handle" />
+                      <ResizablePanel
+                        defaultSize={sidePaneWidth}
+                        minSize={SIDE_PANE_MIN_WIDTH}
+                        maxSize={SIDE_PANE_MAX_WIDTH}
+                        onResize={(size) => setSidePaneWidth(size.inPixels)}
+                        className="min-w-0 border-l"
+                      >
+                        <PaneTabStrip
+                          paneId="side"
+                          tabs={taskState.side.tabs}
+                          activeKey={taskState.side.activeKey}
+                          task={selectedTask}
+                          client={client}
+                          connectionStatus={connectionStatus}
+                          events={events}
+                          onOpenFile={openFileTab}
+                          onOpenFileToSide={openFileTabToSide}
+                          onActivate={(key) => activate(selectedTask.ID, key)}
+                          onClose={(key) => closeTab(selectedTask.ID, key)}
+                          onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
+                          onRevealInDiff={revealInDiff}
+                          onNewTerminal={openTerminalTab}
+                        />
+                      </ResizablePanel>
+                    </>
+                  )}
+                </ResizablePanelGroup>              ) : (
+                <div
+                  data-testid="app-empty-state"
+                  className="flex h-full items-center justify-center text-sm text-muted-foreground"
+                >
+                  Select a task to get started.
+                </div>
+              )}
+            </div>
+          </SidebarInset>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+      <QuickOpen
+        client={client}
+        task={selectedTask}
+        open={quickOpenOpen}
+        onOpenChange={setQuickOpenOpen}
+        onOpenFile={openFileTab}
         events={events}
       />
       <SidebarInset>
@@ -219,12 +399,170 @@ export function App({
 }
 
 /** The kind→renderer lookup: adding a new tab kind means adding an entry here plus a TAB_KINDS descriptor, never editing the strip's layout logic. */
+/**
+ * One pane's tab strip + content: title, an "Open to side"/"Move to
+ * primary" affordance on movable kinds (file/diff/terminal -- Chat and
+ * Files stay pinned, per Item 6), and the existing close affordance on
+ * closable kinds. Shared between the primary and side panes rather than
+ * written twice, parameterized by `paneId` only for the move button's
+ * direction and label.
+ */
+function PaneTabStrip({
+  paneId,
+  tabs,
+  activeKey,
+  task,
+  client,
+  connectionStatus,
+  events,
+  onOpenFile,
+  onOpenFileToSide,
+  onActivate,
+  onClose,
+  onMove,
+  onRevealInDiff,
+  onNewTerminal,
+}: {
+  paneId: PaneId;
+  tabs: TabEntry[];
+  activeKey: string | null;
+  task: Task;
+  client: WsClient | null;
+  connectionStatus: ConnectionStatus;
+  events: ReturnType<typeof useDaemonEvents>;
+  onOpenFile: (path: string) => void;
+  onOpenFileToSide: (path: string) => void;
+  onActivate: (key: string) => void;
+  onClose: (key: string) => void;
+  onMove: (key: string) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
+}) {
+  return (
+    <Tabs
+      key={`${task.ID}:${paneId}`}
+      data-testid={paneId === "primary" ? "primary-pane" : "side-pane"}
+      value={activeKey ?? undefined}
+      onValueChange={onActivate}
+      className="h-full gap-0"
+    >
+      <div className="mx-3 mt-2 overflow-x-auto">
+        <TabsList className="w-fit">
+          {tabs.map((entry) => (
+            <TabsTrigger
+              key={entry.key}
+              value={entry.key}
+              data-testid={`workspace-tab-${entry.kind}`}
+              className="max-w-48 gap-1.5"
+            >
+              <TabLabel entry={entry} />
+              {isMovableKind(entry.kind) && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={
+                    paneId === "primary"
+                      ? `Open ${entry.title} to the side`
+                      : `Move ${entry.title} to the primary pane`
+                  }
+                  data-testid="workspace-tab-move"
+                  data-tab-key={entry.key}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMove(entry.key);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onMove(entry.key);
+                  }}
+                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  {/* aria-hidden: this span's own aria-label already names it; without
+                      hiding the glyph too, its text content leaks into the *ancestor*
+                      TabsTrigger's computed accessible name ("Diff" -> "Diff⇥"). */}
+                  <span aria-hidden="true">{paneId === "primary" ? "⇥" : "⇤"}</span>
+                </span>
+              )}
+              {entry.closable && (
+                <span
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Close ${entry.title}`}
+                  data-testid="workspace-tab-close"
+                  data-tab-key={entry.key}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onClose(entry.key);
+                  }}
+                  // A `role="button"` element gets none of a real
+                  // <button>'s key handling for free, so Enter and Space
+                  // are wired explicitly (uiux-audit.md §4 P1 item 9). It
+                  // stays a span rather than becoming a <button> because
+                  // it sits inside Radix's TabsTrigger, which is already
+                  // a button -- nesting one inside another is invalid
+                  // HTML and React warns about it.
+                  onKeyDown={(e) => {
+                    if (e.key !== "Enter" && e.key !== " ") return;
+                    e.stopPropagation();
+                    e.preventDefault();
+                    onClose(entry.key);
+                  }}
+                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                >
+                  <span aria-hidden="true">×</span>
+                </span>
+              )}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </div>
+      {tabs.map((entry) => (
+        /*
+         * Terminal tabs force-mount (and hide when inactive) so a
+         * backgrounded terminal keeps streaming into its buffer -- which
+         * is what lets its tab show an activity dot, and what stops
+         * switching panes or tabs from dropping output on the floor
+         * (Item 20). The detach-not-close contract is unchanged: the
+         * pane still aborts its attach, and never calls terminal.close,
+         * when it genuinely unmounts (tab closed, task switched).
+         */
+        <TabsContent
+          key={entry.key}
+          value={entry.key}
+          forceMount={entry.kind === "terminal" ? true : undefined}
+          className="min-h-0 data-[state=inactive]:hidden"
+        >
+          <TabContent
+            entry={entry}
+            client={client}
+            task={task}
+            active={activeKey === entry.key}
+            connectionStatus={connectionStatus}
+            onOpenFile={onOpenFile}
+            onOpenFileToSide={onOpenFileToSide}
+            onRevealInDiff={onRevealInDiff}
+            onNewTerminal={onNewTerminal}
+            events={events}
+          />
+        </TabsContent>
+      ))}
+    </Tabs>
+  );
+}
+
 function TabContent({
   entry,
   client,
   task,
   connectionStatus,
   onOpenFile,
+  onOpenFileToSide,
+  onRevealInDiff,
+  onNewTerminal,
   events,
 }: {
   entry: TabEntry;
@@ -232,12 +570,24 @@ function TabContent({
   task: Task;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
+  onOpenFileToSide: (path: string) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} />,
-    files: <FileExplorerPane client={client} task={task} onOpenFile={onOpenFile} />,
-    file: <FileEditorPane client={client} task={task} path={filePathFromKey(entry)} events={events} />,
+    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
+    files: (
+      <FileExplorerPane
+        client={client}
+        task={task}
+        onOpenFile={onOpenFile}
+        onOpenFileToSide={onOpenFileToSide}
+        onRevealInDiff={onRevealInDiff}
+        events={events}
+      />
+    ),
+    file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
     terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
   };

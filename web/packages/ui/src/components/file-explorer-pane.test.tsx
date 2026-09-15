@@ -113,3 +113,141 @@ describe("FileExplorerPane", () => {
     expect(screen.queryByTestId("file-editor")).not.toBeInTheDocument();
   });
 });
+
+describe("FileExplorerPane git decoration and row actions (Item 17)", () => {
+  /** Renders the pane with both file.list and task.files resolved -- the shared prefix of the Item 17 tests. */
+  async function renderTree(): Promise<FakeWsClient> {
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} />);
+    client.nth("file.list", 0).resolve(ROOT_ENTRIES);
+    client.nth("task.files", 0).resolve({ files: CHANGED_FILES });
+    await flush();
+    return client;
+  }
+
+  it("renders a file-type icon per row, generic for an unknown extension", async () => {
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} />);
+    client.nth("file.list", 0).resolve([
+      { name: "main.go", isDir: false, size: 1 },
+      { name: "notes.qqq", isDir: false, size: 1 },
+    ] satisfies FileEntry[]);
+    client.nth("task.files", 0).resolve({ files: [] });
+    await flush();
+
+    const rows = screen.getAllByTestId("file-row");
+    expect(within(rows[0]!).getByTestId("file-icon")).toHaveAttribute("data-icon", "go");
+    expect(within(rows[1]!).getByTestId("file-icon")).toHaveAttribute("data-icon", "file");
+  });
+
+  it("decorates a changed file with its git status, and leaves an unchanged one undecorated", async () => {
+    await renderTree();
+
+    const readme = screen.getByTestId("file-row");
+    expect(within(readme).getByTestId("file-status-marker")).toHaveAttribute("data-status", "modified");
+    expect(within(readme).getByTestId("file-status-marker")).toHaveTextContent("M");
+  });
+
+  it("gives an added file a different marker than a modified one", async () => {
+    const client = await renderTree();
+
+    // src/new.go is added; expanding src/ reveals it next to the
+    // modified README.md already in the tree.
+    fireEvent.click(screen.getByTestId("dir-row"));
+    await flush();
+    client.nth("file.list", 1).resolve([{ name: "new.go", isDir: false, size: 1 }] satisfies FileEntry[]);
+    await flush();
+
+    const markers = screen.getAllByTestId("file-status-marker");
+    const statuses = markers.map((m) => m.getAttribute("data-status"));
+    expect(statuses).toContain("modified");
+    expect(statuses).toContain("added");
+    const added = markers.find((m) => m.getAttribute("data-status") === "added")!;
+    const modified = markers.find((m) => m.getAttribute("data-status") === "modified")!;
+    expect(added.textContent).toBe("A");
+    expect(modified.textContent).toBe("M");
+    expect(added.className).not.toBe(modified.className);
+  });
+
+  it("rolls a descendant's status up onto its directory row, so a nested change is visible while collapsed", async () => {
+    await renderTree();
+
+    const dirRow = screen.getByTestId("dir-row");
+    expect(within(dirRow).getByTestId("file-status-marker")).toHaveAttribute("data-status", "added");
+  });
+
+  it("refreshes decorations when task.files changes, without re-listing the tree", async () => {
+    const client = await renderTree();
+    expect(screen.getAllByTestId("file-status-marker")).toHaveLength(2);
+
+    // A second task.files result (what the run.status subscription
+    // triggers in the app) replaces the decorations in place.
+    expect(client.calls.filter((c) => c.method === "file.list")).toHaveLength(1);
+  });
+
+  it("reveals a changed file in the diff: latches the request and tells the shell to switch tabs", async () => {
+    const onRevealInDiff = vi.fn();
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} onRevealInDiff={onRevealInDiff} />);
+    client.nth("file.list", 0).resolve(ROOT_ENTRIES);
+    client.nth("task.files", 0).resolve({ files: CHANGED_FILES });
+    await flush();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-reveal-in-diff"));
+    await flush();
+
+    expect(onRevealInDiff).toHaveBeenCalledWith("README.md");
+    expect(takeDiffReveal(TASK.ID)).toEqual({ taskId: TASK.ID, path: "README.md" });
+  });
+
+  it("disables Reveal in diff for a path with no changes", async () => {
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} />);
+    client.nth("file.list", 0).resolve(ROOT_ENTRIES);
+    client.nth("task.files", 0).resolve({ files: [] });
+    await flush();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    expect(screen.getByTestId("file-menu-reveal-in-diff")).toHaveAttribute("data-disabled");
+    expect(takeDiffReveal(TASK.ID)).toBeNull();
+  });
+
+  it("\"Open to side\" calls onOpenFileToSide with the row's path, regardless of git status", async () => {
+    const onOpenFileToSide = vi.fn();
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} onOpenFileToSide={onOpenFileToSide} />);
+    client.nth("file.list", 0).resolve(ROOT_ENTRIES);
+    client.nth("task.files", 0).resolve({ files: [] });
+    await flush();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-open-to-side"));
+    await flush();
+
+    expect(onOpenFileToSide).toHaveBeenCalledWith("README.md");
+  });
+
+  it("disables \"Open to side\" when the caller supplies no handler, rather than rendering a dead entry", async () => {
+    await renderTree();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    expect(screen.getByTestId("file-menu-open-to-side")).toHaveAttribute("data-disabled");
+  });
+
+  it("copies a row's path to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      await renderTree();
+
+      fireEvent.contextMenu(screen.getByTestId("file-row"));
+      fireEvent.click(screen.getByTestId("file-menu-copy-path"));
+      await flush();
+
+      expect(writeText).toHaveBeenCalledWith("README.md");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
