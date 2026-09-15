@@ -240,4 +240,20 @@ describe("Composer", () => {
     expect(screen.getByText("Provider").tagName).toBe("LABEL");
     expect(screen.getByText("Approval policy").tagName).toBe("LABEL");
   });
+
+  // Item 21: touch targets need a stated minimum below the compact
+  // breakpoint -- jsdom has no layout, so this asserts the class list
+  // carries both the 44px compact rule and the `md:`-scoped revert to the
+  // original dense size, rather than a computed pixel height.
+  it("Send and the provider/policy selects carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
+    renderComposer();
+
+    const send = screen.getByTestId("chat-send-button");
+    expect(send.className).toContain("h-11");
+    expect(send.className).toContain("md:h-7");
+
+    const provider = screen.getByLabelText("Provider");
+    expect(provider.className).toContain("h-11");
+    expect(provider.className).toContain("md:h-7");
+  });
 });

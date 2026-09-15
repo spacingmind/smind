@@ -19,8 +19,14 @@ const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
 const APPROVAL_POLICY_HELP =
   "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
 
+// Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
+// the original dense sizing at `md:` and above -- see
+// COMPACT_TOUCH_BUTTON_CLASS's doc comment for why this is plain
+// responsive Tailwind rather than a threaded `isMobile` prop.
 const SELECT_CLASS =
-  "h-7 shrink-0 rounded-md border border-input bg-transparent px-1.5 text-xs outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50";
+  "h-11 shrink-0 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:h-7 md:px-1.5 md:text-xs";
+
+const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
 
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
@@ -290,6 +296,7 @@ export function Composer({
               type="button"
               variant="outline"
               size="sm"
+              className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
               disabled={stopping}
               data-testid="chat-stop-button"
               onClick={handleStop}
@@ -297,7 +304,13 @@ export function Composer({
               {stopping ? "Stopping…" : "Stop"}
             </Button>
           )}
-          <Button type="submit" size="sm" disabled={inactive || !draft.value.trim()} data-testid="chat-send-button">
+          <Button
+            type="submit"
+            size="sm"
+            className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
+            disabled={inactive || !draft.value.trim()}
+            data-testid="chat-send-button"
+          >
             {running ? "Queue" : "Send"}
           </Button>
         </div>

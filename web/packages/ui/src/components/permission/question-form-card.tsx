@@ -3,6 +3,7 @@ import { useId, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { COMPACT_TOUCH_BUTTON_CLASS } from "@/components/permission/permission-option-button";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
 import type { PermissionQuestion } from "@/lib/types";
 
@@ -91,7 +92,7 @@ export function QuestionFormCard({
           <Button
             type="button"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={COMPACT_TOUCH_BUTTON_CLASS}
             disabled={submitting}
             data-testid="question-form-submit"
             onClick={() => submit(encodeAnswerBatch(answers))}
@@ -102,7 +103,7 @@ export function QuestionFormCard({
             type="button"
             variant="outline"
             size="sm"
-            className="h-6 px-2 text-xs"
+            className={COMPACT_TOUCH_BUTTON_CLASS}
             disabled={submitting}
             data-testid="question-form-skip"
             onClick={() => submit(blankAnswerBatch(pending.questions))}
@@ -155,7 +156,7 @@ function QuestionField({
                 type="button"
                 variant={selected ? "default" : "outline"}
                 size="sm"
-                className="h-6 px-2 text-xs"
+                className={COMPACT_TOUCH_BUTTON_CLASS}
                 disabled={disabled}
                 aria-pressed={selected}
                 data-testid={`question-option-${option.id}`}

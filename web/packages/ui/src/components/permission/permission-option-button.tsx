@@ -5,6 +5,16 @@ import type { PendingPermission } from "@/hooks/use-run-timeline";
 type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>;
 
 /**
+ * The permission surfaces' shared button size: 44px (WCAG 2.5.5 AAA /
+ * Apple HIG's touch minimum) below the Item 21 compact breakpoint, the
+ * original dense `h-6` above it. Plain Tailwind responsive classes rather
+ * than a JS `isMobile` prop threaded through every card -- `md:` already
+ * keys off the same 768px breakpoint `useIsMobile()` does, and `cn`'s
+ * `twMerge` resolves the unprefixed/`md:`-prefixed pair without conflict.
+ */
+export const COMPACT_TOUCH_BUTTON_CLASS = "h-11 px-3 text-sm md:h-6 md:px-2 md:text-xs";
+
+/**
  * The Button variant one option renders with, from its ACP `kind`
  * (`allow_once | allow_always | reject_once | reject_always` -- the wire
  * already carries this, per lib/types.ts, and the pre-Item-11 UI ignored
@@ -45,7 +55,7 @@ export function PermissionOptionButton({
       type="button"
       variant={optionVariant(option.kind, isRecommended)}
       size="sm"
-      className="h-6 px-2 text-xs"
+      className={COMPACT_TOUCH_BUTTON_CLASS}
       disabled={disabled}
       data-testid={testId}
       data-option-kind={option.kind}
