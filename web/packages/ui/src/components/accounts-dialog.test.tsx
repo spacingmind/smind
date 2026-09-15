@@ -311,6 +311,47 @@ describe("AccountsDialog", () => {
     expect(await screen.findByText(/already in progress/)).toBeInTheDocument();
   });
 
+  it("Cancel aborts the in-flight account.oauthStart via its own signal (ui-redesign-parity Item 14)", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "personal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
+
+    const start = await waitFor(() => client.nth("account.oauthStart"));
+    expect(start.options?.signal?.aborted).toBeFalsy();
+
+    fireEvent.click(await screen.findByTestId("accounts-connect-cancel"));
+    expect(start.options?.signal?.aborted).toBe(true);
+  });
+
+  it("a cancelled login does not surface its rejection as an error", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    fireEvent.change(screen.getByLabelText("Label", { selector: "#account-oauth-label" }), { target: { value: "personal" } });
+    fireEvent.click(screen.getByRole("button", { name: "Connect Claude Code" }));
+
+    const start = await waitFor(() => client.nth("account.oauthStart"));
+    fireEvent.click(await screen.findByTestId("accounts-connect-cancel"));
+
+    await act(async () => {
+      start.reject(new Error("account.oauthStart: cancelled"));
+    });
+    await flush();
+
+    expect(screen.queryByText(/cancelled/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("accounts-connect-cancel")).not.toBeInTheDocument();
+  });
+
   it("renders a neutral status dot for an untested account row, with a Test button", async () => {
     const client = new FakeWsClient();
     renderDialog(client);

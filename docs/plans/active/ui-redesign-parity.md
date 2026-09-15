@@ -998,9 +998,13 @@ Phase 2 (implementation) — not started:
 - [x] Item 10: composer v2 *(Track B)*
 - [x] Item 11: permission UX v2 *(Track B)*
 - [x] Item 12: sidebar signal *(Track D)*
-- [ ] Item 13: settings screen *(Track D)*
-- [ ] Item 14: accounts v2 *(Track D)*
-- [ ] Item 15: quota / usage surface *(Track D)*
+- [x] Item 13: settings screen *(Track D)*
+- [x] Item 14: accounts v2 *(Track D)* — OAuth cancel shipped; disable/
+  enable/remove/status-richness need a wire change, gated on AGENTS.md
+  rule (d) (see Validation)
+- [x] Item 15: quota / usage surface *(Track D)* — scoping note only, per
+  the item's own gate: `internal/quota` has no real data source and no
+  RPC (see Validation)
 - [x] Item 16: daemon lifecycle events *(Track D — **ADR gate**)* — backend (ADR 0009, `internal/wsapi`/`internal/workspace`) and UI consumption (`lib/workspace-tree.ts`, `hooks/use-daemon-events.ts`, `useWorkspaceTree`) both landed
 - [x] Item 17: file explorer / editor polish *(Track C)*
 - [x] Item 18: quick file open *(Track C)*
@@ -1196,6 +1200,202 @@ instead of being threaded as props through
 - `task test` (Go + 294 web tests, up from 247 before this item), `task
   lint`, and `bunx tsc -b` all pass clean.
 
+### Item 13 — settings screen
+
+A settings shell (`components/settings/settings-screen.tsx`) with a
+section list down the left and the active section's content on the
+right (`audit-paseo.md` §4's list+detail shape). Sections are registered
+through a plain module-level registry
+(`components/settings/settings-registry.ts`'s `registerSettingsSection`/
+`listSettingsSections`), not hardcoded into the shell -- `appearance-
+section.tsx` and `general-section.tsx` each register themselves at
+import time, and Items 14/15 (accounts, quota) are expected to do the
+same from their own files.
+
+Appearance ships with theme (reusing Item 1's `useTheme`) and the
+interface/content/code font-size split (`audit-paseo.md` §6), persisted
+via new `lib/settings-preferences.ts` (localStorage, same defensive
+per-key read/write shape as `lib/theme.ts`) and applied as
+`--font-scale-*` CSS custom properties (`index.css`). Only
+`--font-scale-interface` is wired to a real effect in this pass (the root
+font-size, rescaling every rem-based Tailwind text utility app-wide);
+`--font-scale-content`/`--font-scale-code` are plumbed through and
+persisted but have no consumer yet, since the chat-prose and code
+surfaces they'd style (`task-detail.tsx`, the terminal/diff panes) belong
+to Tracks B and C.
+
+General carries the composer's two defaults -- default provider, default
+approval policy (`hooks/use-default-run-preferences.ts`) -- and the
+notifications control that used to be the sidebar header's bell button,
+moved here per the acceptance criterion. The sidebar keeps a distinct
+"Settings" button (`SlidersHorizontal` icon, separate from the existing
+"Accounts settings" gear, which Item 14 is expected to fold into a
+registered section) opening this screen via a new plain hook,
+`hooks/use-settings-open.ts`.
+
+Preferences persist client-side only, and the plan's own Decisions
+section (not just a code comment) says so: no daemon settings API exists
+yet.
+
+- **Cross-track seam**: "the default-provider preference is applied to a
+  newly opened composer" needs `task-detail.tsx`, which is Track B's file
+  and out of this track's ownership (see the plan's Tracks section on
+  file boundaries). `use-default-run-preferences.ts` is the seam --
+  read/write/persist is implemented and tested here
+  (`use-default-run-preferences.test.ts`); wiring the composer's initial
+  provider/approval-policy state to this hook is noted as a Track B
+  follow-up, not silently dropped.
+- **Registry, not hardcoding**: `settings-registry.test.ts`'s "registering
+  a new section in the test makes it appear without editing the shell"
+  registers a throwaway section against the live registry and asserts it
+  renders, unregistering afterward so it doesn't leak into other tests.
+- **Theme/font-size update the document and persist**: `settings-
+  screen.test.tsx` clicks the theme and font-size controls and asserts
+  both the DOM (`dark` class, `--font-scale-*` custom properties) and
+  `localStorage` (via `lib/theme.ts`/`lib/settings-preferences.ts`'s own
+  readers) in the same test, plus a second-mount check that a font-size
+  choice survives a remount. `settings-preferences.test.ts` covers the
+  persistence module in isolation, including per-axis fallback for a
+  partially corrupt stored value and surviving malformed JSON entirely.
+- **Notifications toggle move**: `settings-screen.test.tsx` ports the
+  sidebar's former "notifications toggle" describe block verbatim (never
+  auto-prompts on mount; disabled without a Notification API) onto the
+  new General-section button; `app-sidebar.test.tsx` loses that block and
+  gains two tests confirming the sidebar's own Settings button opens the
+  new screen and remains distinct from the pre-existing Accounts button.
+  Making the same permission state observable from two simultaneous
+  mounts (sidebar's gating read, settings screen's control) required
+  rewriting `use-notification-permission.ts` from component state to a
+  `useSyncExternalStore` module-level store -- otherwise a click in
+  settings would leave the sidebar's copy of `permission` stale until an
+  unrelated re-render happened to catch up. The store re-syncs from the
+  live `Notification` global whenever it has no active subscribers, which
+  is what lets a test swap in a fresh fake between cases the same way the
+  old per-mount `useState` initializer did (real usage never hits that
+  path, since something is always mounted after the first render).
+- **Test-coverage gap closed for an earlier fix**: `fix(ui): resync
+  sidebar signal hooks on event.dropped, not just reconnect` (a prior
+  commit on this branch) taught `useStatusOverrides`, `useTaskAttention`
+  and `useTaskStats` to also resync on `event.dropped` (ADR 0005's
+  per-connection queue overflow), alongside `useWorkspaceTree`, which
+  already did -- but shipped with no test for any of the three. Added one
+  each: `app-sidebar.test.tsx` asserts a live `task.status` override is
+  cleared (not left shadowing the real `task.Status` forever) after a
+  drop; `use-task-attention.test.ts` asserts a second `run.list` fires
+  and the resulting status wins; `use-task-stats.test.ts` asserts every
+  currently-tracked workspace is refetched, not just the one a stray
+  `run.status` last named.
+- `task test` (Go + 323 web tests, up from 294), `task lint`, `bunx tsc
+  -b`, and `task build` all pass clean (the `.gitkeep` restore step was
+  needed again, as the plan's own Test Scenarios note predicts).
+- **Follow-up landed in the same PR that finished Item 14/15**: the
+  paragraph above already described the sidebar's Settings button and
+  `SettingsScreen` as wired together, but the session that wrote it ran
+  out of budget before actually editing `app-sidebar.tsx` -- the button,
+  the `SettingsScreen` render, and the old bell-button removal were all
+  still missing, and `app-sidebar.test.tsx`'s two new tests for it
+  (`sidebar-settings-button`) were failing against the real component.
+  That wiring (plus deleting the now-dead `BellIcon`/`NOTIFICATION_LABEL`
+  and the unused `requestNotificationPermission` destructure) is what
+  actually landed in this pass; everything else Item 13 describes was
+  already sound and needed no changes. `task test` now reports 642 web
+  tests passing (up from the 323 this section originally cited, which
+  reflects Items 17/19/20 landing on this branch afterward too, not just
+  this fix).
+
+### Item 14 — accounts v2
+
+**Scope was cut down from the acceptance criteria during implementation**,
+and that cut is itself the main decision worth recording. A research pass
+against the current daemon (`internal/store/types.go`,
+`internal/store/accounts.go`, `internal/wsapi/handlers.go:24-28`) found:
+
+- `store.Account` has exactly `ID, Provider, Label, CredentialType,
+  CredentialData, CreatedAt, UpdatedAt` -- no `status`, `status_message`,
+  `disabled`, `last_refresh`, `next_retry_after`, or success/failure
+  counters anywhere in the data model.
+- The only account RPCs are `account.add`, `account.oauthStart`,
+  `account.list`, `provider.list`, `provider.test` -- there is no
+  `account.remove`, `account.disable`/`account.enable`, or
+  `account.update` (relabel) of any kind.
+- `internal/quota`'s poller is wired to a `noopQuotaFetcher` that always
+  reports zero usage (`cmd/smind/serve.go`), and is never exposed over
+  wsapi at all.
+
+Per the item's own acceptance criteria ("each one gated on the daemon
+being able to report it; a field the daemon cannot supply is omitted, not
+faked"), the honest scope for a Track D, UI-only pass (no wire change,
+AGENTS.md rule (d)) is smaller than the full row model
+`audit-cliproxyapi.md` §2 describes:
+
+- **Shipped**: the OAuth flow's missing half of `audit-cliproxyapi.md`
+  §3's state machine -- **cancel**. `account.oauthStart` already blocks
+  on a single request id rather than exposing a separate poll/status RPC,
+  but request-id cancellation is already generic at the wire layer
+  (`internal/wsapi/conn.go`'s `inflight` map keys on request id, not
+  method; `task.cancel` works against any in-flight call). `connect()` in
+  `accounts-dialog.tsx` now passes its own `AbortController.signal` to
+  `callStream`, and a Cancel button appears next to the "Waiting for
+  login…"/"Starting login…" status row for as long as a connection is in
+  flight. A cancelled login's resulting rejection is swallowed rather
+  than shown as an error (checked via `controller.signal.aborted`) --
+  the user already knows they cancelled it; re-surfacing that as a
+  daemon error would misrepresent it as a failure.
+- **Not shipped, and not fakeable without a wire change**: disable/
+  enable, remove, per-account label edit, `status`/`status_message`,
+  token last-refresh, `next_retry_after`, and success/failure counters.
+  All of them require new `store.Account` columns and new/extended RPCs
+  (`account.remove`, `account.disable`, `account.update`, a richer
+  `accountResult`/`Account` wire shape) -- a data-model and public-API
+  change, which is exactly what AGENTS.md rule (d) reserves for a
+  maintainer decision + ADR, not something a Track D UI pass decides
+  unilaterally. This is flagged here rather than silently dropped; it's
+  the natural next slice once/if that ADR happens.
+- **The `ProviderInfo.id`/`accountProvider` seam and the `xai`/
+  `antigravity` gap** (both already documented in
+  `accounts-dialog.tsx`'s top-of-file comment from Item 7d) are left as
+  documented, not additionally "surfaced" in the UI copy: Item 7d's own
+  decision was to derive every row from `provider.list`
+  (`internal/taskrunner.SupportedProviders`) rather than a hand-
+  maintained frontend provider list, specifically because a hardcoded
+  list had gone stale before. Hardcoding a UI note about two providers
+  the frontend has no daemon-supplied knowledge of would reintroduce
+  exactly that hand-maintained list, for two providers this dialog
+  cannot act on anyway (closing the gap needs the same wire change as
+  the paragraph above). Closing it is the wire change; hardcoding a
+  warning about it is not an improvement over the existing code comment.
+- New tests: `accounts-dialog.test.tsx` gains "Cancel aborts the
+  in-flight account.oauthStart via its own signal" (asserts
+  `options.signal.aborted` flips from false to true) and "a cancelled
+  login does not surface its rejection as an error" (rejects the aborted
+  call and asserts no error text and no lingering Cancel button).
+- `task test` (642 web tests), `task lint`, and `bunx tsc -b` all pass
+  clean.
+
+### Item 15 — quota / usage surface
+
+**Reduces to the scoping note the item's own acceptance criteria allow**,
+per the same research as Item 14: `internal/quota.Poller` is real code,
+but `cmd/smind/serve.go` wires it with a `noopQuotaFetcher` whose doc
+comment says outright that real per-provider usage polling (Anthropic/
+OpenAI/etc. quota APIs) isn't implemented yet, and it always returns
+`quota.Usage{}` (zero). There is no `quota` field, no `model_quotas`, no
+`recent_requests`, and no wsapi RPC exposing any of it -- the gap is
+total, not partial (a missing field here or there would still be
+workable; there is no live data source at all).
+
+The item's own text is explicit about this exact case: "Gated on
+`internal/quota` being able to report it; if it cannot, this item
+reduces to a daemon-side scoping note and does not ship UI that invents
+numbers." No quota/usage UI was written. Building one against the
+current wire contract would mean either wiring a real `Fetcher`
+implementation (a whole quota-polling backend, not a Track D UI change)
+and a new `quota.*` RPC, or rendering bars against data the daemon
+admits is fake zeros -- both out of scope for this pass and the second
+one explicitly disallowed by the item's own wording. This item is
+recorded as complete-as-scoped, not deferred silently: revisiting it is
+gated on a real `quota.Fetcher` landing first, which is its own,
+separate piece of work.
 
 ### Item 16 — daemon lifecycle events (backend half)
 

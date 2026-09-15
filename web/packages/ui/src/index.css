@@ -288,3 +288,25 @@
   --d2h-change-label-color: var(--status-warning);
   --d2h-moved-label-color: var(--status-running);
 }
+
+/*
+ * Font-size scale (ui-redesign-parity plan, Item 13's Appearance
+ * section) -- three independent step variables the settings screen
+ * writes (lib/settings-preferences.ts's applyFontSizes), following
+ * audit-paseo.md's interface/content/code split. `--font-scale-interface`
+ * is wired to the root font-size here, so it rescales every rem-based
+ * Tailwind text utility app-wide -- the one axis this pass gives a real
+ * visual effect. `--font-scale-content` and `--font-scale-code` are
+ * plumbed as variables only; wiring them into the chat prose and code
+ * surfaces they name is Track B and Track C's own CSS to adopt (those
+ * files are outside this track), not a placeholder left unfinished here.
+ */
+:root {
+  --font-scale-interface: 1;
+  --font-scale-content: 1;
+  --font-scale-code: 1;
+}
+
+html {
+  font-size: calc(16px * var(--font-scale-interface));
+}
