@@ -29,7 +29,8 @@ export type ActionId =
   | "tab.close"
   | "tab.jump"
   | "task.prev"
-  | "task.next";
+  | "task.next"
+  | "quick-open.open";
 
 /**
  * Where keyboard focus is, as far as shortcut routing cares.

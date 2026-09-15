@@ -145,6 +145,14 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
   },
   {
+    id: "quick-open-open",
+    action: "quick-open.open",
+    combo: "Mod+P",
+    section: "navigation",
+    label: "Quick open a file",
+    when: { global: true },
+  },
+  {
     id: "run-interrupt",
     action: "run.interrupt",
     combo: "Escape",
