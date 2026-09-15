@@ -294,7 +294,46 @@ a `hashchange` (back/forward, a hand-typed URL) feeds back through the
 same restore path. See `App.tsx`'s routing section for the two-effect
 shape and why it's loop-safe.
 
-## 10. Decisions
+## 10. Responsive / compact layout
+
+`hooks/use-mobile.ts`'s `useIsMobile()` is the one breakpoint: 768px,
+Tailwind's own `md`. Nothing below the breakpoint uses a different number
+— the shell's layout branch (`App.tsx`), the shadcn Sidebar primitive's
+own overlay switch, and every compact touch-target class all read the
+same `md:` cutoff, so there's no separate JS threshold to keep in sync
+with the CSS one.
+
+**The shell** (`App.tsx`'s `AppShell`): below the breakpoint, the
+sidebar-vs-content split and the side dock (Item 6) both stop being
+`ResizablePanelGroup`/`ResizablePanel` layouts and become plain flex
+children instead — a `ResizablePanel` reserves its `minSize` even for a
+child that renders nothing into its own DOM position (shadcn's `Sidebar`
+primitive renders into a portaled `Sheet` once `useIsMobile()` is true),
+so wrapping one in a panel below the breakpoint would reserve real
+column width for an invisible box. The side dock's two tabs merge into
+one visible strip rather than one of them disappearing — `useTaskTabs.ts`
+already resolves a tab key to whichever pane holds it, so a merged strip
+costs nothing beyond hiding the now-nowhere-to-go "open to side"
+affordance.
+
+**Touch targets**: 44px (WCAG 2.5.5 AAA / Apple HIG) below the
+breakpoint, reverting to the existing dense size at/above it, via plain
+responsive Tailwind (`h-11 ... md:h-6`, etc.) rather than a JS `isMobile`
+prop threaded through each component — `cn`'s `twMerge` resolves the
+unprefixed/`md:`-prefixed pair without conflict, so the same className
+string is correct at every width. `permission-option-button.tsx`'s
+`COMPACT_TOUCH_BUTTON_CLASS` (shared by all three permission-card
+variants) and `composer.tsx`'s `COMPACT_TOUCH_ACTION_BUTTON_CLASS`/
+`SELECT_CLASS` are the two places this landed; a surface with a small
+(non-full-row) tap target follows the same pattern rather than inventing
+a new size scale.
+
+See `docs/plans/active/ui-redesign-parity.md`'s Item 21 Decisions and
+Validation for why this is two compact destinations (sidebar overlay,
+task pane) rather than Paseo's three, and the full acceptance-criteria
+trace.
+
+## 11. Decisions
 
 - **`surface-0..3` alias the existing static scale rather than
   introducing a second independent set of hex values.** The existing

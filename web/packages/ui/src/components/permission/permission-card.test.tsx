@@ -54,6 +54,18 @@ describe("PermissionCard: options variant", () => {
     expect(allow.className).not.toBe(deny.className);
   });
 
+  // Item 21: touch targets need a stated minimum below the compact
+  // breakpoint -- jsdom has no layout, so this asserts the class list
+  // carries both the 44px compact rule and the `md:`-scoped revert to the
+  // original dense size, rather than a computed pixel height.
+  it("options carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+
+    const allow = screen.getByRole("button", { name: "Allow" });
+    expect(allow.className).toContain("h-11");
+    expect(allow.className).toContain("md:h-6");
+  });
+
   it("renders every option even when no kind is recognised", () => {
     render(
       <PermissionCard
@@ -218,6 +230,12 @@ describe("PermissionCard: plan-review variant", () => {
     fireEvent.click(screen.getByTestId("plan-review-refuse"));
     await flush();
     expect(onRespond).toHaveBeenCalledWith("run-1", "req-1", PLAN_REVIEW_REFUSE);
+  });
+
+  it("its actions carry the same compact touch-target class as the options variant (Item 21)", () => {
+    render(<PermissionCard runId="run-1" pending={withPlan} onRespond={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.getByTestId("plan-review-approve").className).toContain("h-11");
+    expect(screen.getByTestId("plan-review-approve").className).toContain("md:h-6");
   });
 
   it("a plan shape wins over a questions shape carried on the same request", () => {
