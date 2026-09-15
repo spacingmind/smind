@@ -16,7 +16,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useTaskAttention } from "@/hooks/use-task-attention";
-import { useTaskTabs } from "@/hooks/use-task-tabs";
+import { isMovableKind, useTaskTabs, type PaneId, type TabPlacement } from "@/hooks/use-task-tabs";
+import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
+import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
@@ -73,9 +75,6 @@ export function App({
   const [pendingRoute, setPendingRoute] = useState<Route | null>(() =>
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
-  // Item 18: Cmd/Ctrl+P opens quick-open for the selected task. A local
-  // shortcut, not a global registry entry -- see useQuickOpenShortcut's
-  // doc comment for why, and what Track A should do once Item 4 lands.
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
@@ -189,6 +188,127 @@ export function App({
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
 
+  // --- Routing (Item 3) ------------------------------------------------
+  //
+  // Hash routing: the URL is a *mirror* of selection state, not its
+  // source. Selecting a task or switching tabs writes the hash; a
+  // hashchange (back/forward, a hand-typed URL, or our own write) feeds
+  // back through `pendingRoute`, which the restore effect below resolves
+  // against whatever the tree currently knows. Both directions go through
+  // the same path, so there's exactly one place that turns a route into a
+  // selection.
+
+  useEffect(() => {
+    function onHashChange() {
+      setPendingRoute(parseRoute(window.location.hash));
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (!pendingRoute) return;
+    const match = allTasks.find((t) => t.ID === pendingRoute.taskId);
+    if (match) {
+      selectTask(match);
+      if (pendingRoute.tab.kind === "file") {
+        openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
+      } else if (pendingRoute.tab.kind !== "task") {
+        activate(match.ID, `${match.ID}:${pendingRoute.tab.kind}`);
+      }
+      setPendingRoute(null);
+    } else if (treeLoaded) {
+      // The tree has answered and this task isn't in it (archived,
+      // deleted, or never existed) -- degrade to the empty state rather
+      // than waiting on a task that will never arrive.
+      setPendingRoute(null);
+    }
+  }, [pendingRoute, allTasks, treeLoaded, selectTask, openTab, activate]);
+
+  useEffect(() => {
+    if (!selectedTask) return;
+    const activeEntry = taskState?.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
+    const tab: Route["tab"] =
+      activeEntry?.kind === "file"
+        ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
+        : { kind: (activeEntry?.kind ?? "task") as Exclude<TabKind, "file"> };
+    const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
+    // Comparing against the live hash (not a ref of "what we last wrote")
+    // is what keeps this idempotent under the hashchange listener above:
+    // a route restore that lands on the same selection the URL already
+    // named writes nothing, so there's no write -> hashchange -> write
+    // loop even though both effects run on every relevant state change.
+    if (window.location.hash !== nextHash) {
+      window.location.hash = nextHash;
+    }
+  }, [selectedTask, taskState?.primary.activeKey, taskState?.primary.tabs]);
+
+  // --- Keyboard actions the shell itself performs ---------------------
+  //
+  // Everything below is claimed through `useActionHandler`, never through
+  // a key listener: the binding table (`keyboard/shortcuts.ts`) decides
+  // *which keys* reach these, and the command palette (Item 5) can invoke
+  // the same handlers with no key involved. Actions that belong to a pane
+  // rather than the shell -- `composer.focus`, `run.interrupt` -- are
+  // deliberately absent here; the composer claims them itself.
+
+  useActionHandler("shortcuts.help", () => setShortcutsOpen(true));
+
+  const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
+  useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
+
+  const { preference, setPreference } = useTheme();
+  useActionHandler("theme.cycle", () => {
+    const order: ThemePreference[] = ["light", "dark", "system"];
+    const next = order[(order.indexOf(preference) + 1) % order.length]!;
+    setPreference(next);
+  });
+
+  // Both bindings are scoped to the primary pane -- Item 6 adds no
+  // "which pane has keyboard focus" concept (Paseo's pane.focus.*
+  // actions were already out of scope for Item 4's binding table), so
+  // Ctrl+W/Ctrl+Alt+<digit> reach primary's tabs only. The side pane's
+  // tabs stay mouse/palette-operable.
+  useActionHandler(
+    "tab.close",
+    () => {
+      if (!selectedTask || !taskState?.primary.activeKey) return;
+      const active = taskState.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
+      // A non-closable base tab (Chat/Files/Diff/Terminal) has no close
+      // affordance in the strip either -- the shortcut matches what
+      // clicking would do, rather than being a second, stronger way to
+      // remove a tab the UI says can't be removed.
+      if (!active?.closable) return;
+      closeTab(selectedTask.ID, active.key);
+    },
+    { enabled: Boolean(selectedTask && taskState?.primary.activeKey) },
+  );
+
+  useActionHandler(
+    "tab.jump",
+    (payload) => {
+      if (!selectedTask || !taskState || payload === null) return;
+      const entry = taskState.primary.tabs[payload.digit - 1];
+      if (entry) activate(selectedTask.ID, entry.key);
+    },
+    { enabled: Boolean(selectedTask && taskState) },
+  );
+
+  const stepTask = useCallback(
+    (delta: 1 | -1) => {
+      if (allTasks.length === 0) return;
+      const current = allTasks.findIndex((t) => t.ID === selectedTask?.ID);
+      // Wraps, like Paseo's own workspace-prev/next: at either end the
+      // next press lands on the other end rather than doing nothing, so
+      // holding one direction cycles the whole list.
+      const next = current === -1 ? 0 : (current + delta + allTasks.length) % allTasks.length;
+      selectTask(allTasks[next]!);
+    },
+    [allTasks, selectedTask, selectTask],
+  );
+  useActionHandler("task.prev", () => stepTask(-1), { enabled: allTasks.length > 0 });
+  useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
+  useActionHandler("quick-open.open", () => setQuickOpenOpen(true), { enabled: selectedTask !== null });
   return (
     <SidebarProvider>
       <AppSidebar
