@@ -991,7 +991,7 @@ Phase 2 (implementation) — not started:
 - [x] Item 3: routing + persisted UI state *(Track A)*
 - [x] Item 4: keyboard registry + shortcuts help *(Track A)*
 - [x] Item 5: command palette *(Track A)*
-- [ ] Item 6: split panes / side dock *(Track A)*
+- [x] Item 6: split panes / side dock *(Track A)*
 - [x] Item 7: structured timeline events *(Track B — **ADR gate**)*
 - [x] Item 8: timeline renderer *(Track B)*
 - [x] Item 9: tool-call cards *(Track B)*
@@ -2147,6 +2147,64 @@ each event into its state instead of refetching.
   no-op (no refocus, no `onFocus` refire); `fireEvent.mouseDown` is what
   a test needs when re-clicking a trigger that might already have focus.
 
+### Item 6 — split panes and the side dock
+
+The mechanism (one split, resizable and persisted per task; "Open to
+side"/move on the tab strip for file/diff/terminal tabs; the
+`pane`/`prefer` placement model; closing the last side tab removes the
+pane) landed earlier and was already tested at the reducer level
+(`use-task-tabs.test.ts`) and the widget level
+(`use-side-pane-width.ts`). An independent audit of that landing (whose
+squash commit is `728a5db`, PR #124 on `develop`) found two real gaps,
+both closed here:
+
+- **No App-level detach-not-stop test for the terminal.** The commit that
+  did the Item 6 work, before it was squashed
+  (`59617f8`, `feat(ui): split panes and the side dock (Item 6)`, still
+  reachable at `origin/feat/ui-parity-track-a-shell`), said in its own
+  message: *"App-level scenarios (notably the terminal detach-not-stop
+  assertion) are added in the follow-up commit."* No such commit was ever
+  made (`git log --all --oneline | grep -i detach` finds none touching
+  this). `App.test.tsx`'s new "App splits (Item 6)" describe block adds
+  it: moving the default terminal tab to the side pane via the tab
+  strip's own move affordance, then asserting `terminal.close` is never
+  sent and `terminal.create` is sent exactly once — the pane's remount in
+  the new `<Tabs>` root re-lists then re-attaches to the same
+  still-running session, exactly like the reconnect-resync path
+  `terminal-pane.test.tsx` already covers. **No underlying bug**: the
+  session binding in `lib/terminal-sessions.ts` is keyed by the tab's
+  *key*, which a pane move never changes (only which `<Tabs>` root renders
+  it), so the existing list-before-create logic was already correct — the
+  gap was purely missing coverage of this specific path at the App level,
+  not a behavior defect.
+- **The two "once Item 6 lands" follow-ups were never wired.** Both
+  `file-explorer-pane.tsx`'s row context menu and
+  `components/timeline/tool-call.tsx`'s click-through carried comments
+  saying the side dock hadn't landed, after it had:
+  - The file explorer's menu gains a real "Open to side" item (a new
+    `onOpenFileToSide` prop, wired in `App.tsx` to `openTab(..., "side")`
+    — explicit placement, unlike the row's own click which only
+    `prefer`s an existing side pane and never creates one). This closes
+    Item 17's own acceptance criterion ("open to side once Item 6
+    lands"), stubbed out at the time with the comment this replaces.
+    Covered in `file-explorer-pane.test.tsx` (calls the handler; disables
+    rather than hides when the caller supplies none) and end to end in
+    `App.test.tsx` (right-click → "Open to side" creates a new side pane
+    carrying that file, distinct from a plain row click with no side pane
+    yet).
+  - The tool-call click-through comment claimed `prefer` placement "hasn't
+    landed" — it already had, transparently: `onOpenFile` was always a
+    generic callback, and App.tsx had wired it to the same `openFileTab`
+    the file tree uses since Item 6 landed. Only the comment was stale;
+    no code changed. `App.test.tsx` adds the missing end-to-end proof: a
+    tool-call naming a file, clicked while a side pane already holds
+    another file, opens into that side pane rather than primary.
+- `task test` (662 web tests / 63 files; all Go packages `ok`),
+  `task lint` and `bunx tsc -b` all green.
+
+Every Item 6 acceptance criterion is now confirmed end to end; ticked in
+Progress.
+
 ### Item 17 — file explorer and editor polish
 
 Every acceptance criterion, and how it was confirmed:
@@ -2181,9 +2239,11 @@ Every acceptance criterion, and how it was confirmed:
   editor clears the marker, and only the owning tab is marked.
 - **Context actions on tree rows** — a Radix context menu
   (`components/ui/context-menu.tsx`, new primitive) with *Reveal in diff*
-  (disabled, not hidden, for an unchanged path) and *Copy path*.
-  "Open to side" is deliberately absent until Item 6 — see Decisions.
-  Reveal is covered from both ends: the explorer latches the request and
+  (disabled, not hidden, for an unchanged path), *Open to side* and *Copy
+  path*. "Open to side" was deliberately absent when this item first
+  landed, since Item 6 hadn't yet (see Decisions); it was wired once Item
+  6 landed — see that item's own Validation entry. Reveal is covered from
+  both ends: the explorer latches the request and
   calls `onRevealInDiff`, and `diff-viewer-pane.test.tsx` asserts the
   pane consumes a request latched *before it mounted* (the normal case —
   the diff tab isn't in front when you right-click in the tree),
