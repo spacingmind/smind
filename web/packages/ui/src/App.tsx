@@ -24,6 +24,7 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
@@ -83,6 +84,12 @@ export function App({
 }
 
 function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
+  // Item 21: below the 768px breakpoint (Tailwind's own `md`, and the
+  // number `hooks/use-mobile.ts` already used for the shadcn Sidebar's
+  // built-in mobile Sheet), the sidebar-vs-content split and the side
+  // dock (Item 6) both stop being resizable panels -- see the compact
+  // branch below.
+  const isMobile = useIsMobile();
   const [client, setClient] = useState<WsClient | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
@@ -337,6 +344,148 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   useActionHandler("task.prev", () => stepTask(-1), { enabled: allTasks.length > 0 });
   useActionHandler("task.next", () => stepTask(1), { enabled: allTasks.length > 0 });
   useActionHandler("quick-open.open", () => setQuickOpenOpen(true), { enabled: selectedTask !== null });
+
+  // Item 21: shared across both the compact and desktop branches below so
+  // the two layouts don't hand-duplicate AppSidebar/header/content JSX --
+  // only one of them is ever mounted at a time (isMobile flips which),
+  // which is the normal "element as a variable" React pattern, not two
+  // live instances.
+  const sidebarElement = (
+    <AppSidebar
+      client={client}
+      selectedTaskId={selectedTask?.ID ?? null}
+      onSelectTask={selectTask}
+      attention={attention}
+      runStatus={runStatus}
+      events={events}
+      onTasksChange={setAllTasks}
+      onWorkspacesChange={(workspaces) => {
+        setAllWorkspaces(workspaces);
+        setTreeLoaded(true);
+      }}
+    />
+  );
+
+  const headerElement = (
+    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+      <SidebarTrigger />
+      <Separator orientation="vertical" className="h-4" />
+      <span className="text-sm text-muted-foreground" data-testid="app-connection-status">
+        {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+      </span>
+    </header>
+  );
+
+  const emptyStateElement = (
+    <div data-testid="app-empty-state" className="flex h-full items-center justify-center text-sm text-muted-foreground">
+      Select a task to get started.
+    </div>
+  );
+
+  // Item 21: on compact, the side dock (Item 6) gracefully doesn't apply --
+  // primary and side merge into one strip (no "open to side" affordance,
+  // via PaneTabStrip's showMoveAffordance) rather than a split with
+  // nowhere for a moved tab to land or, worse, silently hiding whatever
+  // was in the side pane. `activate`/`closeTab` are already pane-agnostic
+  // (useTaskTabs.ts finds a key's pane by lookup), so both merged tabs
+  // keep working through the same handlers unmodified. The side pane's
+  // own activeKey wins the merged strip's initial focus over primary's --
+  // a side pane only exists because something was deliberately opened
+  // into it, so that's more likely to be what the user was just looking
+  // at than whichever base tab primary was last on.
+  const compactTabs = taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : [];
+  const compactActiveKey = taskState ? (taskState.side?.activeKey ?? taskState.primary.activeKey) : null;
+  const compactPrimaryStrip = selectedTask && taskState && (
+    <PaneTabStrip
+      paneId="primary"
+      tabs={compactTabs}
+      activeKey={compactActiveKey}
+      task={selectedTask}
+      client={client}
+      connectionStatus={connectionStatus}
+      events={events}
+      onOpenFile={openFileTab}
+      onOpenFileToSide={openFileTabToSide}
+      onActivate={(key) => activate(selectedTask.ID, key)}
+      onClose={(key) => closeTab(selectedTask.ID, key)}
+      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+      onRevealInDiff={revealInDiff}
+      onNewTerminal={openTerminalTab}
+      showMoveAffordance={false}
+    />
+  );
+
+  const mainContentElement = (
+    <div className="flex-1 min-h-0">
+      {selectedTask && taskState ? (
+        isMobile ? (
+          compactPrimaryStrip
+        ) : (
+          // The side dock (Item 6): one optional split, primary + side,
+          // each its own Radix Tabs root. Moving a tab between them
+          // (PaneTabStrip's move button) is a plain data move in
+          // useTaskTabs -- the pane component underneath *does* fully
+          // unmount from one root and mount in the other, which is fine
+          // because every such component already tolerates ADR 0004's
+          // "switching tabs unmounts inactive content" and reattaches to
+          // its server-side session rather than recreating it (see
+          // use-task-tabs.ts's doc comment).
+          <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
+            <ResizablePanel minSize={30} className="min-w-0">
+              <PaneTabStrip
+                paneId="primary"
+                tabs={taskState.primary.tabs}
+                activeKey={taskState.primary.activeKey}
+                task={selectedTask}
+                client={client}
+                connectionStatus={connectionStatus}
+                events={events}
+                onOpenFile={openFileTab}
+                onOpenFileToSide={openFileTabToSide}
+                onActivate={(key) => activate(selectedTask.ID, key)}
+                onClose={(key) => closeTab(selectedTask.ID, key)}
+                onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+                onRevealInDiff={revealInDiff}
+                onNewTerminal={openTerminalTab}
+              />
+            </ResizablePanel>
+            {taskState.side && (
+              <>
+                <ResizableHandle withHandle id="side-pane-resize-handle" />
+                <ResizablePanel
+                  defaultSize={sidePaneWidth}
+                  minSize={SIDE_PANE_MIN_WIDTH}
+                  maxSize={SIDE_PANE_MAX_WIDTH}
+                  onResize={(size) => setSidePaneWidth(size.inPixels)}
+                  className="min-w-0 border-l"
+                >
+                  <PaneTabStrip
+                    paneId="side"
+                    tabs={taskState.side.tabs}
+                    activeKey={taskState.side.activeKey}
+                    task={selectedTask}
+                    client={client}
+                    connectionStatus={connectionStatus}
+                    events={events}
+                    onOpenFile={openFileTab}
+                    onOpenFileToSide={openFileTabToSide}
+                    onActivate={(key) => activate(selectedTask.ID, key)}
+                    onClose={(key) => closeTab(selectedTask.ID, key)}
+                    onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
+                    onRevealInDiff={revealInDiff}
+                    onNewTerminal={openTerminalTab}
+                  />
+                </ResizablePanel>
+              </>
+            )}
+          </ResizablePanelGroup>
+        )
+      ) : (
+        emptyStateElement
+      )}
+    </div>
+  );
+
   return (
     // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
     // definite height), which used to be fine when its child just flowed
@@ -369,142 +518,66 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         onOpenTab={openTab}
         onActivateTab={activate}
       />
-      <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
-        {/*
-         * The sidebar-vs-content split itself -- the whole point of Item 6.
-         * defaultSize/minSize/maxSize take plain numbers as pixels
-         * directly (react-resizable-panels only treats unitless *strings*
-         * as percentages), so SIDEBAR_MIN_WIDTH/SIDEBAR_MAX_WIDTH (12rem/
-         * 32rem) apply as-is -- dragging past either bound still can't
-         * collapse the sidebar to 0 or push it off-screen.
-         */}
-        <ResizablePanel
-          defaultSize={sidebarWidth}
-          minSize={SIDEBAR_MIN_WIDTH}
-          maxSize={SIDEBAR_MAX_WIDTH}
-          onResize={(size) => setSidebarWidth(size.inPixels)}
-          className="min-w-0"
-        >
-          <AppSidebar
-            client={client}
-            selectedTaskId={selectedTask?.ID ?? null}
-            onSelectTask={selectTask}
-            attention={attention}
-            runStatus={runStatus}
-            events={events}
-            onTasksChange={setAllTasks}
-            onWorkspacesChange={(workspaces) => {
-              setAllWorkspaces(workspaces);
-              setTreeLoaded(true);
-            }}
-          />
-        </ResizablePanel>
-        {/*
-         * react-resizable-panels' Separator always sets its own
-         * `data-testid` (and `id`) to its resolved `id` prop, clobbering
-         * any `data-testid` passed directly -- so the only way to control
-         * the rendered data-testid here is via `id`, not `data-testid`.
-         */}
-        <ResizableHandle withHandle id="sidebar-resize-handle" />
-        <ResizablePanel minSize={30} className="min-w-0">
-          {/*
-           * Panel's own box gets its height from the group's flex-stretch,
-           * not from content -- SidebarInset's <main> needs an explicit
-           * h-full to actually fill it (it's a plain block child of Panel
-           * now, not a flex sibling of the sidebar the way it was before
-           * Item 6's restructuring), which is what every pane under it
-           * (TaskDetailPane's own "flex h-full flex-col" root, etc.) relies
-           * on to size its scrollable region correctly.
-           */}
-          <SidebarInset className="h-full">
-            <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-              <SidebarTrigger />
-              <Separator orientation="vertical" className="h-4" />
-              <span className="text-sm text-muted-foreground" data-testid="app-connection-status">
-                {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
-              </span>
-            </header>
-            {/*
-             * flex-1 (grow from a 0 basis) + min-h-0 is what the old inner
-             * ResizablePanelGroup gave this area for free -- it filled all
-             * height left over after the header's own (shrink-0) box,
-             * rather than a percentage height fighting the header for
-             * space. Restated explicitly here now that that group's gone
-             * (it wrapped a single always-100% panel, which was never
-             * actually resizable -- see Item 6).
-             */}
-            <div className="flex-1 min-h-0">
-              {selectedTask && taskState ? (
-                // The side dock (Item 6): one optional split, primary +
-                // side, each its own Radix Tabs root. Moving a tab between
-                // them (PaneTabStrip's move button) is a plain data move
-                // in useTaskTabs -- the pane component underneath *does*
-                // fully unmount from one root and mount in the other,
-                // which is fine because every such component already
-                // tolerates ADR 0004's "switching tabs unmounts inactive
-                // content" and reattaches to its server-side session
-                // rather than recreating it (see use-task-tabs.ts's doc
-                // comment).
-                <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-                  <ResizablePanel minSize={30} className="min-w-0">
-                    <PaneTabStrip
-                      paneId="primary"
-                      tabs={taskState.primary.tabs}
-                      activeKey={taskState.primary.activeKey}
-                      task={selectedTask}
-                      client={client}
-                      connectionStatus={connectionStatus}
-                      events={events}
-                      onOpenFile={openFileTab}
-                      onOpenFileToSide={openFileTabToSide}
-                      onActivate={(key) => activate(selectedTask.ID, key)}
-                      onClose={(key) => closeTab(selectedTask.ID, key)}
-                      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
-                      onRevealInDiff={revealInDiff}
-                      onNewTerminal={openTerminalTab}
-                    />
-                  </ResizablePanel>
-                  {taskState.side && (
-                    <>
-                      <ResizableHandle withHandle id="side-pane-resize-handle" />
-                      <ResizablePanel
-                        defaultSize={sidePaneWidth}
-                        minSize={SIDE_PANE_MIN_WIDTH}
-                        maxSize={SIDE_PANE_MAX_WIDTH}
-                        onResize={(size) => setSidePaneWidth(size.inPixels)}
-                        className="min-w-0 border-l"
-                      >
-                        <PaneTabStrip
-                          paneId="side"
-                          tabs={taskState.side.tabs}
-                          activeKey={taskState.side.activeKey}
-                          task={selectedTask}
-                          client={client}
-                          connectionStatus={connectionStatus}
-                          events={events}
-                          onOpenFile={openFileTab}
-                          onOpenFileToSide={openFileTabToSide}
-                          onActivate={(key) => activate(selectedTask.ID, key)}
-                          onClose={(key) => closeTab(selectedTask.ID, key)}
-                          onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
-                          onRevealInDiff={revealInDiff}
-                          onNewTerminal={openTerminalTab}
-                        />
-                      </ResizablePanel>
-                    </>
-                  )}
-                </ResizablePanelGroup>              ) : (
-                <div
-                  data-testid="app-empty-state"
-                  className="flex h-full items-center justify-center text-sm text-muted-foreground"
-                >
-                  Select a task to get started.
-                </div>
-              )}
-            </div>
+      {isMobile ? (
+        // Item 21: below the breakpoint, the sidebar-vs-content split
+        // stops being a resizable panel -- shadcn's Sidebar primitive
+        // already renders itself as a Sheet overlay once useIsMobile()
+        // (which it reads internally too) flips, so `sidebarElement` here
+        // contributes zero layout width of its own; wrapping it in a
+        // ResizablePanel (as the desktop branch does) would reserve
+        // SIDEBAR_MIN_WIDTH of empty space for a component that's actually
+        // rendering into a portal. The content area gets the full width
+        // instead of splitting it with an invisible panel.
+        <div className="flex h-svh w-full flex-col">
+          {sidebarElement}
+          <SidebarInset className="min-h-0 flex-1">
+            {headerElement}
+            {mainContentElement}
           </SidebarInset>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+        </div>
+      ) : (
+        <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
+          {/*
+           * The sidebar-vs-content split itself -- the whole point of Item 6.
+           * defaultSize/minSize/maxSize take plain numbers as pixels
+           * directly (react-resizable-panels only treats unitless *strings*
+           * as percentages), so SIDEBAR_MIN_WIDTH/SIDEBAR_MAX_WIDTH (12rem/
+           * 32rem) apply as-is -- dragging past either bound still can't
+           * collapse the sidebar to 0 or push it off-screen.
+           */}
+          <ResizablePanel
+            defaultSize={sidebarWidth}
+            minSize={SIDEBAR_MIN_WIDTH}
+            maxSize={SIDEBAR_MAX_WIDTH}
+            onResize={(size) => setSidebarWidth(size.inPixels)}
+            className="min-w-0"
+          >
+            {sidebarElement}
+          </ResizablePanel>
+          {/*
+           * react-resizable-panels' Separator always sets its own
+           * `data-testid` (and `id`) to its resolved `id` prop, clobbering
+           * any `data-testid` passed directly -- so the only way to control
+           * the rendered data-testid here is via `id`, not `data-testid`.
+           */}
+          <ResizableHandle withHandle id="sidebar-resize-handle" />
+          <ResizablePanel minSize={30} className="min-w-0">
+            {/*
+             * Panel's own box gets its height from the group's flex-stretch,
+             * not from content -- SidebarInset's <main> needs an explicit
+             * h-full to actually fill it (it's a plain block child of Panel
+             * now, not a flex sibling of the sidebar the way it was before
+             * Item 6's restructuring), which is what every pane under it
+             * (TaskDetailPane's own "flex h-full flex-col" root, etc.) relies
+             * on to size its scrollable region correctly.
+             */}
+            <SidebarInset className="h-full">
+              {headerElement}
+              {mainContentElement}
+            </SidebarInset>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      )}
       <QuickOpen
         client={client}
         task={selectedTask}
@@ -712,6 +785,7 @@ function PaneTabStrip({
   onMove,
   onRevealInDiff,
   onNewTerminal,
+  showMoveAffordance = true,
 }: {
   paneId: PaneId;
   tabs: TabEntry[];
@@ -727,6 +801,8 @@ function PaneTabStrip({
   onMove: (key: string) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
+  /** Item 21: the side dock (Item 6) is a desktop-only concept -- compact has nowhere for "open to side" to move a tab to, so it's hidden rather than left to open a split that never renders. */
+  showMoveAffordance?: boolean;
 }) {
   return (
     <Tabs
@@ -746,7 +822,7 @@ function PaneTabStrip({
               className="max-w-48 gap-1.5"
             >
               <TabLabel entry={entry} />
-              {isMovableKind(entry.kind) && (
+              {isMovableKind(entry.kind) && showMoveAffordance && (
                 <span
                   role="button"
                   tabIndex={0}
