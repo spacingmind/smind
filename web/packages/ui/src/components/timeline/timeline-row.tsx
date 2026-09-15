@@ -1,9 +1,11 @@
 import { memo } from "react";
-import { CircleHelp } from "lucide-react";
+import { CircleHelp, ShieldCheck } from "lucide-react";
 
+import { PERMISSION_REASON_LABEL } from "@/components/timeline/permission-reason";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
 import { ToolCall } from "@/components/timeline/tool-call";
-import type { TimelineItem } from "@/hooks/use-run-timeline";
+import { StatusBadge } from "@/components/ui/status-badge";
+import type { TimelineItem, TimelinePermissionItem } from "@/hooks/use-run-timeline";
 
 /**
  * The file-opening context a tool-call card needs. Both must be stable
@@ -70,6 +72,13 @@ export const TimelineRow = memo(function TimelineRow({
         </li>
       );
 
+    case "permission":
+      return (
+        <li data-testid="timeline-permission" data-item-kind="permission">
+          <PermissionRow item={item} />
+        </li>
+      );
+
     default:
       // An event type this build has never heard of. The daemon's enum is
       // append-only (ADR 0008), so this is a supported state: say what
@@ -84,3 +93,23 @@ export const TimelineRow = memo(function TimelineRow({
       );
   }
 });
+
+/**
+ * A resolved permission's inline trace: unobtrusive text plus a
+ * `StatusBadge` for the reason, not a new card -- a dogfood run's trust
+ * question is "how was this decided", answered in one line, not a whole
+ * component of its own weight (ui-redesign-parity.md's Validation note).
+ * No badge at all when `reason` is absent or unrecognised, rather than a
+ * misleading default -- an older server's payload (or a future reason
+ * this build has never heard of) still renders, just without that detail.
+ */
+function PermissionRow({ item }: { item: TimelinePermissionItem }) {
+  const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
+  return (
+    <p className="flex items-center gap-1.5 px-0.5 text-xs text-foreground-muted">
+      <ShieldCheck className="size-3 shrink-0" />
+      Permission resolved
+      {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}
+    </p>
+  );
+}

@@ -1050,6 +1050,39 @@ acceptance criterion, plus `task test` / `task lint` / `task build` results
 and any manual check performed. Follow the per-item format used in
 `docs/plans/completed/task-permission-ux.md`'s Validation section.
 
+**Item 11 follow-up (permission resolution reason, gap fix)** —
+2026-09-15, `web/` only:
+
+- **Gap**: `permission_resolved`'s `reason` field (`human` | `auto_safe` |
+  `timeout`, `task-permission-ux.md` Item 2) was already decoded correctly
+  by the wire layer (`lib/types.ts`'s `PermissionResolvedEventParams`) but
+  never rendered anywhere. Worse, once resolved the request left the
+  timeline with **no trace at all**: `permission_resolved` was in
+  `use-run-timeline.ts`'s `NON_ITEM_EVENTS`, so it only cleared the
+  pending-permission dock (Item 11) and produced no row of its own — a
+  finished run's transcript showed nothing where a permission had been
+  asked and answered.
+- **Fix**: `permission_resolved` now also becomes its own
+  `TimelinePermissionItem` row (`use-run-timeline.ts`), rendered by
+  `timeline-row.tsx`'s new `PermissionRow` as one line of muted text plus
+  a `StatusBadge` for the reason (`components/timeline/permission-reason.ts`
+  maps `human` → "You approved" / `success`, `auto_safe` → "Auto-approved" /
+  `running`, `timeout` → "Timed out" / `warning`) — the first consumer of
+  `StatusBadge`, which `docs/design.md` had shipped with none. No new card;
+  `permission_request` is unchanged (still dock-only, per Item 11).
+- **Missing/unrecognised reason** (an older server payload, or a future
+  value this build hasn't seen): renders the plain "Permission resolved"
+  line with no badge, not a crash — asserted directly, plus exercised
+  transitively by every pre-existing `permission_resolved` fixture in
+  `task-detail.test.tsx` that never set `reason`.
+  `timeline-model.test.ts` and `run-timeline.test.tsx` cover all three
+  reasons plus the missing-reason case, and that earlier items keep their
+  object identity when a permission item is appended.
+- `task test` (Go + web, 623 web tests), `task lint`, `bunx tsc -b` clean.
+  (`internal/terminal`'s `TestRegistry_CreateWriteSubscribe_RealShell`
+  fails in this sandbox — `fork/exec /bin/bash: operation not permitted`
+  — pre-existing and unrelated, untouched by this fix.)
+
 **Item 1 — design tokens, dark mode, theme switching:**
 
 - Two-layer token set landed in `web/packages/ui/src/index.css`:
