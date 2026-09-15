@@ -44,6 +44,54 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
   });
 
+  it.each([
+    ["human", "You approved"],
+    ["auto_safe", "Auto-approved"],
+    ["timeout", "Timed out"],
+  ] as const)("renders a resolved permission's reason %s as %s", (reason, label) => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason }])} />
+      </ul>,
+    );
+
+    expect(screen.getByTestId("timeline-permission")).toHaveTextContent(label);
+  });
+
+  it("renders a resolved permission with no reason (an older server payload) without crashing, and no reason label", () => {
+    expect(() =>
+      render(
+        <ul>
+          <RunTimeline run={run([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1" }])} />
+        </ul>,
+      ),
+    ).not.toThrow();
+
+    const row = screen.getByTestId("timeline-permission");
+    expect(row).toHaveTextContent("Permission resolved");
+    expect(row).not.toHaveTextContent("You approved");
+    expect(row).not.toHaveTextContent("Auto-approved");
+    expect(row).not.toHaveTextContent("Timed out");
+  });
+
+  it("renders a resolved permission with a reason this build has never heard of without crashing, and no reason label", () => {
+    expect(() =>
+      render(
+        <ul>
+          <RunTimeline
+            run={run([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "some_future_reason" }])}
+          />
+        </ul>,
+      ),
+    ).not.toThrow();
+
+    const row = screen.getByTestId("timeline-permission");
+    expect(row).toHaveTextContent("Permission resolved");
+    expect(row).not.toHaveTextContent("You approved");
+    expect(row).not.toHaveTextContent("Auto-approved");
+    expect(row).not.toHaveTextContent("Timed out");
+  });
+
   it("renders assistant markdown as HTML, with a fenced block becoming pre > code", () => {
     render(
       <ul>

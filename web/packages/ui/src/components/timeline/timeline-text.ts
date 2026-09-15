@@ -1,3 +1,4 @@
+import { PERMISSION_REASON_LABEL } from "@/components/timeline/permission-reason";
 import type { TimelineItem } from "@/hooks/use-run-timeline";
 
 /** How each row kind is prefixed when a whole turn is copied as plain text. */
@@ -22,6 +23,11 @@ export function timelineToText(prompt: string, items: TimelineItem[]): string {
     }
     if (item.kind === "unknown") {
       lines.push(`[unrecognised event: ${item.eventType}]`);
+      continue;
+    }
+    if (item.kind === "permission") {
+      const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
+      lines.push(`[permission resolved]${resolution ? ` (${resolution.label})` : ""}`);
       continue;
     }
     const prefix = COPY_PREFIX[item.kind] ?? "";
