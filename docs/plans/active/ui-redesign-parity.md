@@ -996,7 +996,10 @@ Phase 2 (implementation) — not started:
 - [x] Item 8: timeline renderer *(Track B)*
 - [x] Item 9: tool-call cards *(Track B)*
 - [x] Item 10: composer v2 *(Track B)*
-- [x] Item 11: permission UX v2 *(Track B)*
+- [x] Item 11: permission UX v2 *(Track B)* — kind-styled options and
+  keyboard focus shipped; question-form/plan-review variants render from
+  synthetic fixtures only, no wire producer for either and none added
+  this pass — investigated and intentionally not built (see Validation)
 - [x] Item 12: sidebar signal *(Track D)*
 - [x] Item 13: settings screen *(Track D)*
 - [x] Item 14: accounts v2 *(Track D)* — OAuth cancel shipped; disable/
@@ -1158,6 +1161,98 @@ and any manual check performed. Follow the per-item format used in
   Tailwind's CSS generation). Fixed by rewording the comment; worth
   remembering that any future doc comment in this file must avoid a bare
   `*/` substring.
+
+### Item 11 — permission UX v2
+
+**2026-09-15 audit follow-up.** An independent audit found that this item's
+question-form and plan-review variants shipped real, tested UI
+(`components/permission/{question-form-card,plan-review-card}.tsx`,
+`permission-card.tsx`'s shape-dispatch, `permission-card.test.tsx`) but no
+wire path on either provider ever produces a request shaped that way —
+those tests exercise only synthetic `PendingPermission` fixtures the test
+itself constructs. Investigated whether to close that gap this pass;
+concluded neither variant is a bounded fix, for two different reasons, and
+built neither. What *is* genuinely shipped vs. not, in full:
+
+**Shipped and wired end-to-end:**
+- Kind-styled option buttons — destructive/deny reads as deny, the
+  recommended (first allow-kind) option reads as primary
+  (`permission-option-button.tsx`, `options-card.tsx`), driven by the real
+  `kind` ACP already carries and Claude/Codex's adapters already
+  synthesize (`internal/taskrunner/permission.go`).
+- Keyboard: the pending card is a focusable, labelled group that grabs
+  focus on a new request unless a text field is mid-keystroke, and options
+  are real `<button>`s in tab order (`permission-card.tsx`).
+- The pre-existing cross-connection resolution guarantee (cleared by
+  `permission_resolved`, never local-click-only) — unchanged, still
+  covered by `permission-card.test.tsx`.
+
+**Not shipped, not attempted this pass:**
+- **"What is being requested" (command line / diff).** The item's own
+  first bullet. `PermissionDecider.Decide` already receives a `command`
+  string (`internal/taskrunner/permission.go`), but it is dropped before
+  reaching `taskrunner.Event` (`event.go`'s `Permission*` fields have no
+  command/diff field) or `internal/wsapi`'s `permissionRequestParams`
+  (`handlers.go:652-656`, `options`/`summary` only) — so the UI has never
+  had this data to render. Bounded (thread one more string through three
+  layers, no external unknowns) but out of scope for this pass, which
+  focused on the audit's specific finding below.
+- **Question-form variant — real source is Claude Code's `AskUserQuestion`
+  tool.** Confirmed reachable without any new run-mode concept: it's a
+  fully generic tool call through the same `can_use_tool` hook every other
+  tool already uses (vendored SDK's `engine.go:327-339` builds
+  `CanUseToolRequest{ToolName, Input}` with zero name-based filtering), and
+  its *request* shape is documented
+  (`refs/claude-code/plugins/plugin-dev/skills/command-development/references/interactive-commands.md:34-59`):
+  `Input.questions[]`, each `{question, header, multiSelect, options[]}`.
+  The blocker is the *answer* side: Claude Code's changelog says a
+  PreToolUse hook can satisfy `AskUserQuestion` "by returning `updatedInput`
+  alongside `permissionDecision: allow`" (`refs/claude-code/CHANGELOG.md:3345`),
+  but the exact shape `updatedInput` must take for the real CLI to treat it
+  as the human's actual answers (vs. running the tool with empty ones — a
+  failure mode the same changelog documents happening silently,
+  `CHANGELOG.md:3915`) is not documented anywhere available in this
+  environment: not in the vendored `claude-agent-sdk-go@v0.3.2` (grepped
+  `client.go`/`permission.go`/`messages.go`/every test — zero
+  `AskUserQuestion` special-casing, it's treated as an opaque tool name
+  like `Bash`), not in `refs/claude-code`'s docs, not in
+  `refs/claude-agent-sdk-python`/`typescript`. This environment has no live
+  CLI to empirically verify it against. Shipping a guessed `updatedInput`
+  shape would be worse than shipping nothing — it would silently run the
+  model's own question tool with wrong or empty answers rather than fail
+  loudly, exactly the class of bug the vendor's own changelog flags as a
+  real, previously-shipped incident. This is an external protocol fact to
+  verify against a real CLI, not an internal architecture choice — no ADR
+  to write until that's known.
+- **Plan-review variant — real source is Claude Code's `ExitPlanMode`
+  tool.** Also reachable through the same generic `can_use_tool` hook in
+  principle, but only when the CLI is launched with
+  `--permission-mode plan` (`claude-agent-sdk-go@v0.3.2/client.go:181-186`
+  documents `"plan"` as a valid `WithPermissionMode` value). smind's
+  claude-native runner never does this — `runClaudeNative`
+  (`internal/taskrunner/runner.go:354-374`) hardcodes `"default"` or
+  `"acceptEdits"`, and there is no concept anywhere in smind (no
+  `task.prompt`/`run.start` param, no composer toggle, no third
+  `ApprovalPolicy`-like axis) for a caller to request a plan-mode run at
+  all. Wiring this for real means inventing that concept from scratch end
+  to end (composer UI → wire param → `RunPrompt` →
+  `WithPermissionMode("plan")`), plus deciding two behaviors nothing in
+  this repo or the audits resolves: what happens to the turn after
+  Approve/Refuse, and what "Chat about it" does server-side — today's
+  `PlanReviewCard.onChat` doesn't call `onRespond` at all
+  (`plan-review-card.tsx`), so the agent's blocked `Decide()` call would
+  simply hang forever with nothing to unblock it. That is a new run-mode
+  and public wire-API shape — exactly what AGENTS.md rule (d) reserves for
+  a maintainer decision, not something to decide unilaterally inside a
+  "fix the permission UX gap" pass. Flagged here rather than half-built;
+  the natural next step is scoping plan-mode support as its own item once
+  a maintainer decides it's wanted.
+- No ADR was written for this pass: nothing was decided or added to the
+  wire contract, so there is nothing to record — the same reasoning
+  `docs/plans/active/ui-redesign-parity.md`'s own Item 14 Validation note
+  already uses for its punted RPC work.
+- `task test`, `task lint`, `bunx tsc -b` all still pass (no code changed
+  by this investigation besides this doc).
 
 ### Item 12 — sidebar signal
 
