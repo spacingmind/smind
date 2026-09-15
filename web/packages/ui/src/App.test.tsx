@@ -1,12 +1,12 @@
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
 import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
-import type { RunSummary, Task, Workspace } from "@/lib/types";
+import type { RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -964,5 +964,167 @@ describe("App quick-open (Item 18)", () => {
     expect(screen.queryByTestId("quick-open")).not.toBeInTheDocument();
 
     vi.unstubAllGlobals();
+  });
+});
+
+describe("App splits (Item 6)", () => {
+  it("the file explorer's \"Open to side\" action opens directly into a new side pane -- a genuinely different placement than the row's own \"prefer\" click", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // No side pane yet -- proves this isn't just "prefer" collapsing to
+    // primary because none exists.
+    expect(screen.queryByTestId("side-pane")).not.toBeInTheDocument();
+
+    const filesTab = screen.getByRole("tab", { name: "Files" });
+    filesTab.focus();
+    fireEvent.click(filesTab);
+    await flush();
+    respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
+    await flush();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-open-to-side"));
+    await flush();
+    respondAll(socket, "file.read", { content: "# A" });
+    await flush();
+
+    const sidePane = screen.getByTestId("side-pane");
+    expect(within(sidePane).getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
+    expect(screen.getByTestId("file-editor-path")).toHaveTextContent("README.md");
+
+    // Primary keeps its own tabs -- the file did not also land there.
+    const primaryPane = screen.getByTestId("primary-pane");
+    expect(within(primaryPane).queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
+  });
+
+  it("a tool-call's file click-through prefers an already-open side pane over primary", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    // TaskDetailPane mounts for "Chat" (the default active tab) and fires
+    // its own run.list here; left unanswered on purpose -- switching to
+    // Files below unmounts it before it resolves, which use-run-timeline's
+    // own cancellation guard already covers, and a fresh one is fetched
+    // once Chat is reactivated below.
+
+    const filesTab = screen.getByRole("tab", { name: "Files" });
+    filesTab.focus();
+    fireEvent.click(filesTab);
+    await flush();
+    respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
+    await flush();
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-open-to-side"));
+    await flush();
+    respondAll(socket, "file.read", { content: "# A" });
+    await flush();
+
+    // Back to Chat -- a fresh TaskDetailPane mount, with a run carrying a
+    // file-naming tool call.
+    const chatTab = screen.getByRole("tab", { name: "Chat" });
+    chatTab.focus();
+    fireEvent.click(chatTab);
+    await flush();
+
+    const doneRun: RunSummary = {
+      ID: "run-1",
+      TaskID: TASK_A.ID,
+      Provider: "claude-native",
+      Prompt: "read the file",
+      Status: "done",
+      StartedAt: "2024-01-01T00:00:00Z",
+      FinishedAt: "2024-01-01T00:00:05Z",
+      StopReason: "end_turn",
+      Err: "",
+    };
+    // run.list #0 is useTaskAttention's (on connect); #1 is the first,
+    // abandoned "Chat" mount; #2 is this remount's.
+    respond(socket, "run.list", [doneRun], 2);
+    await flush();
+
+    const logs: RunLogsResult = {
+      runId: "run-1",
+      status: "done",
+      stopReason: "end_turn",
+      events: [
+        {
+          type: "tool_call",
+          toolCallId: "t1",
+          toolName: "Read",
+          status: "success",
+          input: { file_path: "/tmp/a/internal/a.go" },
+        },
+      ],
+    };
+    respond(socket, "run.logs", logs);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("tool-call-open-path"));
+    await flush();
+    respondAll(socket, "file.read", { content: "package internal" });
+    await flush();
+
+    const sidePane = screen.getByTestId("side-pane");
+    expect(within(sidePane).getByRole("tab", { name: /a\.go/ })).toBeInTheDocument();
+    expect(within(sidePane).getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    expect(within(primaryPane).queryByRole("tab", { name: /a\.go/ })).not.toBeInTheDocument();
+  });
+
+  it("moving a terminal tab to the side pane detaches without stopping it -- no terminal.close, no second terminal.create -- the App-level scenario Item 6's side-dock commit (59617f8) promised in a follow-up commit that was never written", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // The terminal tab force-mounts (Item 20) as soon as the task is
+    // selected, independent of which tab is active.
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+
+    expect(socket.sent.filter((e) => e.method === "terminal.create")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal to the side" }));
+    await flush();
+
+    // The pane remounts fresh in the side dock's own <Tabs> root, which
+    // re-runs TerminalPane's list-then-attach effect exactly like a
+    // reconnect: it must find its own still-running session and reattach
+    // to it, never spawn a fresh one.
+    const relistedSessions: TerminalSessionStatus[] = [
+      { ID: "term-1", TaskID: TASK_A.ID, StartedAt: "2024-01-01T00:00:00Z", Status: "running", ClosedAt: null },
+    ];
+    respond(socket, "terminal.list", relistedSessions, 1);
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" }, 1);
+    await flush();
+
+    expect(socket.sent.some((e) => e.method === "terminal.close")).toBe(false);
+    expect(socket.sent.filter((e) => e.method === "terminal.create")).toHaveLength(1);
+
+    const sidePane = screen.getByTestId("side-pane");
+    expect(within(sidePane).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
   });
 });

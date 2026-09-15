@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2 } from "lucide-react";
+import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2, PanelRight } from "lucide-react";
 
 import { FileStatusMarker } from "@/components/file-status-marker";
 import {
@@ -29,14 +29,15 @@ import type { Task, TaskFile } from "@/lib/types";
  * per-extension file icons, a git decoration per changed path (sourced
  * from the same `task.files` the diff pane fetches -- see
  * hooks/use-task-file-status.ts), and a right-click context menu with
- * "Reveal in diff" and "Copy path". A directory carries a decoration too,
- * rolled up from its descendants, so a change several levels down is
- * visible without expanding to find it.
+ * "Reveal in diff", "Open to side" and "Copy path". A directory carries a
+ * decoration too, rolled up from its descendants, so a change several
+ * levels down is visible without expanding to find it.
  */
 export function FileExplorerPane({
   client,
   task,
   onOpenFile,
+  onOpenFileToSide,
   onRevealInDiff,
   events,
 }: {
@@ -44,6 +45,13 @@ export function FileExplorerPane({
   task: Task;
   /** Called with the clicked file's worktree-relative path; App.tsx opens/activates its file tab. */
   onOpenFile?: (path: string) => void;
+  /**
+   * The row menu's "Open to side" action (Item 6): explicit placement,
+   * always into the side pane (creating one if the task doesn't have one
+   * yet) -- unlike `onOpenFile`'s row click, which only prefers an
+   * existing side pane and otherwise opens in primary.
+   */
+  onOpenFileToSide?: (path: string) => void;
   /**
    * Called after the tree has latched a reveal request (lib/diff-reveal.ts)
    * so the shell can bring the diff tab forward. Optional: without it the
@@ -78,6 +86,7 @@ export function FileExplorerPane({
           onOpenFile?.(path);
         }}
         onRevealInDiff={revealInDiff}
+        onOpenToSide={onOpenFileToSide}
       />
     </div>
   );
@@ -114,6 +123,7 @@ function DirChildren({
   onToggleDir,
   onSelectFile,
   onRevealInDiff,
+  onOpenToSide,
 }: {
   path: string;
   depth: number;
@@ -124,6 +134,7 @@ function DirChildren({
   onToggleDir: (path: string) => void;
   onSelectFile: (path: string) => void;
   onRevealInDiff: (path: string) => void;
+  onOpenToSide?: (path: string) => void;
 }) {
   const node = dirs.get(path);
   if (!node) return null;
@@ -155,6 +166,7 @@ function DirChildren({
               key={childPath}
               path={childPath}
               onRevealInDiff={onRevealInDiff}
+              onOpenToSide={onOpenToSide}
               changed={statusByPath.has(childPath)}
             >
               <TreeRow
@@ -200,6 +212,7 @@ function DirChildren({
                 onToggleDir={onToggleDir}
                 onSelectFile={onSelectFile}
                 onRevealInDiff={onRevealInDiff}
+                onOpenToSide={onOpenToSide}
               />
             )}
           </div>
@@ -212,9 +225,11 @@ function DirChildren({
 /**
  * The right-click menu on a file row. "Reveal in diff" is disabled for a
  * path with no changes rather than hidden, so the menu's shape doesn't
- * shift between rows. "Open to side" is deliberately absent until Item 6
- * lands the side dock -- a menu item that can't do anything is worse than
- * one that isn't there yet (see the plan's Item 17 notes).
+ * shift between rows. "Open to side" (Item 6's side dock, landed) always
+ * opens directly into the side pane -- creating one if the task doesn't
+ * have one yet -- which is what distinguishes it from a plain row click
+ * (`onSelectFile`'s "prefer" placement, which only uses an existing side
+ * pane and never creates one).
  *
  * Clipboard writes go through navigator.clipboard when it exists and are
  * a silent no-op when it doesn't (jsdom, and any non-secure-context
@@ -224,11 +239,13 @@ function RowContextMenu({
   path,
   changed,
   onRevealInDiff,
+  onOpenToSide,
   children,
 }: {
   path: string;
   changed: boolean;
   onRevealInDiff: (path: string) => void;
+  onOpenToSide?: (path: string) => void;
   children: ReactNode;
 }) {
   return (
@@ -242,6 +259,14 @@ function RowContextMenu({
         >
           <GitCompare />
           Reveal in diff
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!onOpenToSide}
+          onSelect={() => onOpenToSide?.(path)}
+          data-testid="file-menu-open-to-side"
+        >
+          <PanelRight />
+          Open to side
         </ContextMenuItem>
         <ContextMenuItem
           onSelect={() => {
