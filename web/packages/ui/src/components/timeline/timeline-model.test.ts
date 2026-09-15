@@ -74,14 +74,59 @@ describe("appendTimelineEvent", () => {
       { type: "tool_call" }, // no toolCallId
       { type: "done", stopReason: "end_turn" },
       { type: "permission_request", requestId: "r1", summary: "s", options: [] },
-      { type: "permission_resolved", requestId: "r1", optionId: "o1" },
       { type: "todo_list", text: "future event kind" },
     ];
 
     const items = buildTimeline(malformed);
-    // Only the unrecognised type becomes a row; the rest are ignored or
-    // handled elsewhere.
+    // Only the unrecognised type becomes a row; the rest are ignored (or,
+    // for "permission_request", handled elsewhere -- see RunEntry.pendingPermission).
     expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "todo_list" }]);
+  });
+
+  it("does not throw on a malformed permission_resolved event, and still records it", () => {
+    const items = buildTimeline([{ type: "permission_resolved" }]);
+
+    expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "", optionId: "", reason: undefined }]);
+  });
+
+  it("renders a 'raw' event (docs/decisions/0010-preserve-unknown-acp-event-kinds.md) as a fallback row, not silently", () => {
+    // The daemon now forwards an ACP session-update kind it doesn't
+    // recognize (e.g. "plan") as a "raw" wire event instead of dropping
+    // it. This client has no dedicated case for "raw" -- it's expected to
+    // fall into the same generic-unknown-event path as any other name
+    // this build has never heard of, per the "does not throw on
+    // malformed or unknown events" test above.
+    const items = buildTimeline([{ type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent]);
+    expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "raw" }]);
+  });
+
+  describe("permission_resolved", () => {
+    it.each(["human", "auto_safe", "timeout"] as const)("records reason %s as its own permission item", (reason) => {
+      const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason }]);
+
+      expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason }]);
+    });
+
+    it("records no reason at all for an older server payload that never sent one", () => {
+      const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1" }]);
+
+      expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason: undefined }]);
+    });
+
+    it("records a reason this build has never heard of as-is, rather than dropping it", () => {
+      const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "some_future_reason" }]);
+
+      expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason: "some_future_reason" }]);
+    });
+
+    it("does not disturb earlier items' identity", () => {
+      const before = buildTimeline([{ type: "chunk", text: "hello" }]);
+      const after = appendTimelineEvent(before, { type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "human" });
+
+      expect(after[0]).toBe(before[0]);
+      expect(after).toHaveLength(2);
+      expect(after[1]).toMatchObject({ kind: "permission", reason: "human" });
+    });
   });
 
   it("folds 2000 chunk events into one item in linear time", () => {
