@@ -89,6 +89,17 @@ describe("appendTimelineEvent", () => {
     expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "", optionId: "", reason: undefined }]);
   });
 
+  it("renders a 'raw' event (docs/decisions/0010-preserve-unknown-acp-event-kinds.md) as a fallback row, not silently", () => {
+    // The daemon now forwards an ACP session-update kind it doesn't
+    // recognize (e.g. "plan") as a "raw" wire event instead of dropping
+    // it. This client has no dedicated case for "raw" -- it's expected to
+    // fall into the same generic-unknown-event path as any other name
+    // this build has never heard of, per the "does not throw on
+    // malformed or unknown events" test above.
+    const items = buildTimeline([{ type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent]);
+    expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "raw" }]);
+  });
+
   describe("permission_resolved", () => {
     it.each(["human", "auto_safe", "timeout"] as const)("records reason %s as its own permission item", (reason) => {
       const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason }]);

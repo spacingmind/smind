@@ -59,12 +59,39 @@ type toolCallEventParams struct {
 	Result     json.RawMessage `json:"result,omitempty"`
 }
 
+// rawEventParams is the params payload of a "raw" event task.prompt/
+// run.attach emit -- an ACP session-update kind the daemon's normalizer
+// doesn't recognize (e.g. "plan"), forwarded instead of dropped. See
+// docs/decisions/0010-preserve-unknown-acp-event-kinds.md. Like
+// tool_call/user_message/thinking, an older CLI build simply doesn't have
+// this type or the "raw" case below and ignores the event name entirely.
+type rawEventParams struct {
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// renderRaw formats one "raw" event as a single readable line: the
+// unrecognized kind, and its raw payload's compact JSON -- there is no
+// typed shape to render more richly than that.
+//
+// Kind is quoted (strconv.Quote) rather than printed verbatim: unlike
+// Payload -- raw wire bytes that can never contain a literal newline,
+// since ACP's transport is itself newline-delimited JSON -- Kind is a
+// JSON-decoded Go string, so a provider whose sessionUpdate value embeds
+// "\n"/control characters would otherwise let a single event smear across
+// multiple physical lines, breaking any line-oriented consumer of `task
+// logs`/`task attach` output.
+func renderRaw(p rawEventParams) string {
+	return fmt.Sprintf("[raw] %s: %s\n", strconv.Quote(p.Kind), p.Payload)
+}
+
 // runLogEvent is one event in a run.logs response.
 type runLogEvent struct {
 	Type       string `json:"type"`
 	Text       string `json:"text,omitempty"`
 	StopReason string `json:"stopReason,omitempty"`
 	toolCallEventParams
+	rawEventParams
 }
 
 // runLogsResult is run.logs's terminal result.
@@ -349,6 +376,12 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 				return
 			}
 			fmt.Print(names.render(p))
+		case "raw":
+			var p rawEventParams
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			fmt.Print(renderRaw(p))
 		}
 	}, &result)
 	fmt.Println()
@@ -502,6 +535,8 @@ func printRunLogs(result runLogsResult) {
 			fmt.Print(e.Text)
 		case "tool_call":
 			fmt.Print(names.render(e.toolCallEventParams))
+		case "raw":
+			fmt.Print(renderRaw(e.rawEventParams))
 		}
 	}
 	fmt.Println()

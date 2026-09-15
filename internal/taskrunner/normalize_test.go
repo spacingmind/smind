@@ -215,8 +215,22 @@ func TestACPEvent(t *testing.T) {
 			wantOK: true,
 		},
 		{
-			name:   "plan updates are not forwarded",
-			update: acp.SessionUpdate{Type: acp.SessionUpdatePlan},
+			// Regression for docs/decisions/0010-preserve-unknown-acp-event-kinds.md:
+			// plan was the concrete example of a session-update kind
+			// acpEvent doesn't otherwise recognize; it must now surface as
+			// a raw event rather than disappear.
+			name:   "plan updates surface as a raw event",
+			update: acp.SessionUpdate{Type: acp.SessionUpdatePlan, Raw: json.RawMessage(`{"sessionUpdate":"plan"}`)},
+			want:   Event{Type: EventTypeRaw, RawKind: "plan", RawPayload: json.RawMessage(`{"sessionUpdate":"plan"}`)},
+			wantOK: true,
+		},
+		{
+			// Any other kind this package has never heard of -- not just
+			// "plan" -- takes the same fallback path.
+			name:   "a kind this package has never heard of surfaces as a raw event",
+			update: acp.SessionUpdate{Type: "available_commands_update", Raw: json.RawMessage(`{"sessionUpdate":"available_commands_update"}`)},
+			want:   Event{Type: EventTypeRaw, RawKind: "available_commands_update", RawPayload: json.RawMessage(`{"sessionUpdate":"available_commands_update"}`)},
+			wantOK: true,
 		},
 		{
 			name:   "a non-text content block on a chunk is not forwarded",
@@ -251,7 +265,8 @@ func assertEvents(t *testing.T, got, want []Event) {
 		if g.Type != w.Type || g.Text != w.Text || g.StopReason != w.StopReason ||
 			g.ToolCallID != w.ToolCallID || g.ToolName != w.ToolName ||
 			g.ToolTitle != w.ToolTitle || g.ToolStatus != w.ToolStatus ||
-			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) {
+			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) ||
+			g.RawKind != w.RawKind || string(g.RawPayload) != string(w.RawPayload) {
 			t.Errorf("event[%d]:\n got %+v\nwant %+v", i, g, w)
 		}
 	}

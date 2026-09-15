@@ -446,16 +446,25 @@ func TestServer_RunLogs_StructuredEvents(t *testing.T) {
 	for _, e := range logs.Events {
 		types = append(types, e.Type)
 	}
-	want := []string{"thinking", "user_message", "tool_call", "tool_call", "chunk", "done"}
+	want := []string{"raw", "thinking", "user_message", "tool_call", "tool_call", "chunk", "done"}
 	if !reflect.DeepEqual(types, want) {
 		t.Fatalf("run.logs event types = %v, want %v", types, want)
 	}
 
-	toolStart := logs.Events[2]
+	// The fakeagent's "structured" scenario leads with a "plan" update, a
+	// kind acpEvent doesn't recognize -- proving it surfaces as a "raw"
+	// entry instead of being dropped
+	// (docs/decisions/0010-preserve-unknown-acp-event-kinds.md).
+	rawEvent := logs.Events[0]
+	if rawEvent.Kind != "plan" || len(rawEvent.Payload) == 0 {
+		t.Fatalf("raw entry = %+v, want kind %q with a non-empty payload", rawEvent, "plan")
+	}
+
+	toolStart := logs.Events[3]
 	if toolStart.ToolCallID != "tc-1" || toolStart.ToolName != "execute" || toolStart.Title != "Run tests" || toolStart.Status != "running" {
 		t.Fatalf("first tool_call entry = %+v, want a running tc-1/execute call titled %q", toolStart, "Run tests")
 	}
-	toolDone := logs.Events[3]
+	toolDone := logs.Events[4]
 	if toolDone.ToolCallID != "tc-1" || toolDone.Status != "success" || len(toolDone.Result) == 0 {
 		t.Fatalf("second tool_call entry = %+v, want tc-1 completed as success with a result", toolDone)
 	}
@@ -471,21 +480,26 @@ func TestServer_RunLogs_StructuredEvents(t *testing.T) {
 	if err := json.Unmarshal(logsResp.Result, &untyped); err != nil {
 		t.Fatalf("re-decode run.logs result untyped: %v", err)
 	}
+	for _, key := range []string{"type", "kind", "payload"} {
+		if _, ok := untyped.Events[0][key]; !ok {
+			t.Errorf("raw entry has no %q key: %v", key, untyped.Events[0])
+		}
+	}
 	for _, key := range []string{"type", "toolCallId", "toolName", "title", "status", "input"} {
-		if _, ok := untyped.Events[2][key]; !ok {
-			t.Errorf("tool_call start entry has no %q key: %v", key, untyped.Events[2])
+		if _, ok := untyped.Events[3][key]; !ok {
+			t.Errorf("tool_call start entry has no %q key: %v", key, untyped.Events[3])
 		}
 	}
 	for _, key := range []string{"type", "toolCallId", "status", "result"} {
-		if _, ok := untyped.Events[3][key]; !ok {
-			t.Errorf("tool_call completion entry has no %q key: %v", key, untyped.Events[3])
+		if _, ok := untyped.Events[4][key]; !ok {
+			t.Errorf("tool_call completion entry has no %q key: %v", key, untyped.Events[4])
 		}
 	}
 	// A partial update must not restate fields it didn't change --
 	// omitting them is what tells a merging client "unchanged".
 	for _, key := range []string{"toolName", "title", "input"} {
-		if _, ok := untyped.Events[3][key]; ok {
-			t.Errorf("tool_call completion entry unexpectedly restates %q: %v", key, untyped.Events[3])
+		if _, ok := untyped.Events[4][key]; ok {
+			t.Errorf("tool_call completion entry unexpectedly restates %q: %v", key, untyped.Events[4])
 		}
 	}
 }

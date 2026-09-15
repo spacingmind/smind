@@ -283,7 +283,10 @@ func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
 // TestRunner_RunPrompt_GLM_StructuredEvents proves the ACP path produces
 // equivalent structured events for GLM: a thought chunk, a user-message
 // chunk, and a tool call reported first as running then completed as
-// success -- using the fake ACP agent's "structured" scenario.
+// success -- using the fake ACP agent's "structured" scenario. Also
+// covers a "plan" update, a kind acpEvent doesn't recognize, surfacing as
+// EventTypeRaw instead of being dropped
+// (docs/decisions/0010-preserve-unknown-acp-event-kinds.md).
 func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "structured")
@@ -300,32 +303,35 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
 
-	if len(got) != 6 {
-		t.Fatalf("got %d events, want 6: %+v", len(got), got)
+	if len(got) != 7 {
+		t.Fatalf("got %d events, want 7: %+v", len(got), got)
 	}
-	if got[0].Type != EventTypeThinking || got[0].Text != "thinking it over" {
-		t.Fatalf("event[0] = %+v, want thinking %q", got[0], "thinking it over")
+	if got[0].Type != EventTypeRaw || got[0].RawKind != "plan" || len(got[0].RawPayload) == 0 {
+		t.Fatalf("event[0] = %+v, want a raw %q event carrying its payload", got[0], "plan")
 	}
-	if got[1].Type != EventTypeUserMessage || got[1].Text != "a synthesized user turn" {
-		t.Fatalf("event[1] = %+v, want user message %q", got[1], "a synthesized user turn")
+	if got[1].Type != EventTypeThinking || got[1].Text != "thinking it over" {
+		t.Fatalf("event[1] = %+v, want thinking %q", got[1], "thinking it over")
 	}
-	if got[2].Type != EventTypeToolCall || got[2].ToolCallID != "tc-1" || got[2].ToolName != "execute" || got[2].ToolTitle != "Run tests" || got[2].ToolStatus != ToolStatusRunning {
-		t.Fatalf("event[2] = %+v, want a running tc-1/execute call titled %q", got[2], "Run tests")
+	if got[2].Type != EventTypeUserMessage || got[2].Text != "a synthesized user turn" {
+		t.Fatalf("event[2] = %+v, want user message %q", got[2], "a synthesized user turn")
 	}
-	if !strings.Contains(string(got[2].ToolInput), "go test") {
-		t.Fatalf("event[2].ToolInput = %s, want it to carry the command", got[2].ToolInput)
+	if got[3].Type != EventTypeToolCall || got[3].ToolCallID != "tc-1" || got[3].ToolName != "execute" || got[3].ToolTitle != "Run tests" || got[3].ToolStatus != ToolStatusRunning {
+		t.Fatalf("event[3] = %+v, want a running tc-1/execute call titled %q", got[3], "Run tests")
 	}
-	if got[3].Type != EventTypeToolCall || got[3].ToolCallID != "tc-1" || got[3].ToolStatus != ToolStatusSuccess {
-		t.Fatalf("event[3] = %+v, want tc-1 to complete as success", got[3])
+	if !strings.Contains(string(got[3].ToolInput), "go test") {
+		t.Fatalf("event[3].ToolInput = %s, want it to carry the command", got[3].ToolInput)
 	}
-	if len(got[3].ToolResult) == 0 {
-		t.Fatalf("event[3].ToolResult is empty, want the completed call's content")
+	if got[4].Type != EventTypeToolCall || got[4].ToolCallID != "tc-1" || got[4].ToolStatus != ToolStatusSuccess {
+		t.Fatalf("event[4] = %+v, want tc-1 to complete as success", got[4])
 	}
-	if got[4].Type != EventTypeText || got[4].Text != "done" {
-		t.Fatalf("event[4] = %+v, want text %q", got[4], "done")
+	if len(got[4].ToolResult) == 0 {
+		t.Fatalf("event[4].ToolResult is empty, want the completed call's content")
 	}
-	if got[5].Type != EventTypeDone || got[5].StopReason != "end_turn" {
-		t.Fatalf("event[5] = %+v, want EventTypeDone/end_turn", got[5])
+	if got[5].Type != EventTypeText || got[5].Text != "done" {
+		t.Fatalf("event[5] = %+v, want text %q", got[5], "done")
+	}
+	if got[6].Type != EventTypeDone || got[6].StopReason != "end_turn" {
+		t.Fatalf("event[6] = %+v, want EventTypeDone/end_turn", got[6])
 	}
 }
 
