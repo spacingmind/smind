@@ -616,6 +616,20 @@ func toRunToolCallParams(e taskrunner.Event) runToolCallParams {
 	}
 }
 
+// runRawParams is the params payload of a "raw" event task.prompt/
+// run.attach emit for taskrunner.EventTypeRaw, and (via toRunLogEvent) the
+// shape of a "raw" run.logs entry -- an ACP session-update kind the
+// normalizer doesn't otherwise recognize, forwarded instead of dropped.
+// See docs/decisions/0010-preserve-unknown-acp-event-kinds.md.
+type runRawParams struct {
+	Kind    string          `json:"kind"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+func toRunRawParams(e taskrunner.Event) runRawParams {
+	return runRawParams{Kind: e.RawKind, Payload: e.RawPayload}
+}
+
 // permissionOptionParams is one choice offered by a "permission_request"
 // event or a run.logs "permission_request" entry -- the wire shape of
 // taskrunner.PermissionOption.
@@ -791,6 +805,8 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 				rc.Emit("thinking", taskChunkParams{Text: e.Text})
 			case taskrunner.EventTypeToolCall:
 				rc.Emit("tool_call", toRunToolCallParams(e))
+			case taskrunner.EventTypeRaw:
+				rc.Emit("raw", toRunRawParams(e))
 			case taskrunner.EventTypePermissionRequest:
 				rc.Emit("permission_request", permissionRequestParams{
 					RequestID: e.PermissionRequestID,
@@ -860,6 +876,10 @@ type runLogEvent struct {
 	Status     string          `json:"status,omitempty"`
 	Input      json.RawMessage `json:"input,omitempty"`
 	Result     json.RawMessage `json:"result,omitempty"`
+	// Kind and Payload are populated for a "raw" entry -- see
+	// runRawParams for the shared shape this mirrors.
+	Kind    string          `json:"kind,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -887,6 +907,9 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			Input:      p.Input,
 			Result:     p.Result,
 		}
+	case taskrunner.EventTypeRaw:
+		p := toRunRawParams(e)
+		return runLogEvent{Type: "raw", Kind: p.Kind, Payload: p.Payload}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
 	case taskrunner.EventTypePermissionRequest:

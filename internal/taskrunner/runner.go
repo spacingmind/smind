@@ -279,11 +279,16 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	return nil
 }
 
-// acpEvent translates one ACP SessionUpdate into its taskrunner.Event, or
-// (Event{}, false) for an update Type this package doesn't forward (ACP
-// also streams plan updates -- out of scope for RunPrompt's callers today,
-// same reasoning as Event's own doc comment on not chasing every variant
-// speculatively).
+// acpEvent translates one ACP SessionUpdate into its taskrunner.Event.
+// Every update is forwarded: a recognized text-chunk or tool-call kind
+// becomes its typed event; a recognized text-chunk kind whose content
+// isn't a text block (e.g. an image/audio/resource chunk -- see
+// acp.SessionUpdate's doc comment) is still dropped, since that's a
+// narrower, out-of-scope gap this package's scope doesn't cover; anything
+// else -- an update kind acpEvent doesn't recognize at all, such as ACP's
+// "plan" updates or a kind a future ACP revision adds -- becomes
+// EventTypeRaw rather than being silently dropped. See
+// docs/decisions/0010-preserve-unknown-acp-event-kinds.md.
 func acpEvent(u acp.SessionUpdate) (Event, bool) {
 	if text, ok := u.Text(); ok {
 		switch u.Type {
@@ -317,7 +322,15 @@ func acpEvent(u acp.SessionUpdate) (Event, bool) {
 			ToolResult: u.Content,
 		}, true
 	}
-	return Event{}, false
+	switch u.Type {
+	case acp.SessionUpdateUserMessageChunk, acp.SessionUpdateAgentMessageChunk, acp.SessionUpdateAgentThoughtChunk:
+		// A recognized text-chunk kind, but Text() couldn't extract a text
+		// block -- a non-text content block, not an unrecognized kind. Out
+		// of scope for this ADR (see the doc comment above); still dropped.
+		return Event{}, false
+	default:
+		return Event{Type: EventTypeRaw, Raw: u, RawKind: u.Type, RawPayload: u.Raw}, true
+	}
 }
 
 // acpToolStatus maps ACP's four-value ToolCallStatus to taskrunner's
