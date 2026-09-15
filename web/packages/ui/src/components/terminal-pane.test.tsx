@@ -4,7 +4,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { TerminalPane, type TerminalHandle } from "@/components/terminal-pane";
+import { resetTerminalSessions, useTerminalActivity } from "@/lib/terminal-sessions";
+import { DEFAULT_TERMINAL_SCROLLBACK, TERMINAL_SCROLLBACK_STORAGE_KEY } from "@/lib/terminal-prefs";
 import type { Task, TerminalSessionStatus } from "@/lib/types";
+
+// The session<->tab binding this component now consults
+// (lib/terminal-sessions.ts, Item 20) lives outside React, so it survives
+// across this file's many render() calls unless cleared -- otherwise a
+// later test's "first mount for this task" would spuriously see the
+// previous test's tab as already bound to a session.
+afterEach(() => {
+  resetTerminalSessions();
+});
 
 const TASK_A: Task = {
   ID: 1,
@@ -530,5 +541,281 @@ describe("TerminalPane", () => {
       expect(client2.nth("terminal.attach", 0).params).toEqual({ terminalId: "term-2" });
       expect(screen.getByTestId("terminal-status")).toHaveTextContent("term-2");
     });
+  });
+});
+
+describe("TerminalPane copy/paste (Item 20)", () => {
+  it("disables Copy until something is selected, and enables it once it is", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    expect(screen.getByTestId("terminal-copy")).toBeDisabled();
+
+    fake.setSelection("selected text");
+    await flush();
+    expect(screen.getByTestId("terminal-copy")).toBeEnabled();
+  });
+
+  it("copies the current selection to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+
+      fake.setSelection("hello world");
+      await flush();
+      fireEvent.click(screen.getByTestId("terminal-copy"));
+      await flush();
+
+      expect(writeText).toHaveBeenCalledWith("hello world");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("pastes clipboard text via terminal.write, not into the local buffer", async () => {
+    const readText = vi.fn().mockResolvedValue("pasted!");
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { readText } });
+    try {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+
+      fireEvent.click(screen.getByTestId("terminal-paste"));
+      await flush();
+
+      const writeCall = client.nth("terminal.write", 0);
+      expect(writeCall.params).toEqual({ terminalId: "term-1", data: "pasted!" });
+      // Never written straight into the emulator's own buffer -- the PTY
+      // echoes, so a local write would double it.
+      expect(fake.writes).toEqual([]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("surfaces a paste failure without touching the terminal content", async () => {
+    const readText = vi.fn().mockRejectedValue(new Error("clipboard denied"));
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { readText } });
+    try {
+      const client = new FakeWsClient();
+      const fake = new FakeTerminalHandle();
+      render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+      await flush();
+      client.nth("terminal.list", 0).resolve([]);
+      await flush();
+      client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+      await flush();
+
+      fireEvent.click(screen.getByTestId("terminal-paste"));
+      await flush();
+
+      expect(screen.getByTestId("terminal-paste-error")).toHaveTextContent("clipboard denied");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
+describe("TerminalPane scrollback (Item 20)", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("creates the terminal with the persisted scrollback size, defaulting when nothing is stored", async () => {
+    const client = new FakeWsClient();
+    let capturedOptions: { scrollback: number } | undefined;
+    const fake = new FakeTerminalHandle();
+    render(
+      <TerminalPane
+        client={client}
+        task={TASK_A}
+        createTerminal={(options) => {
+          capturedOptions = options;
+          return fake;
+        }}
+      />,
+    );
+    await flush();
+
+    expect(capturedOptions).toEqual({ scrollback: DEFAULT_TERMINAL_SCROLLBACK });
+  });
+
+  it("honors a scrollback size persisted by the settings screen (Item 13's eventual home for this)", async () => {
+    window.localStorage.setItem(TERMINAL_SCROLLBACK_STORAGE_KEY, "5000");
+
+    const client = new FakeWsClient();
+    let capturedOptions: { scrollback: number } | undefined;
+    const fake = new FakeTerminalHandle();
+    render(
+      <TerminalPane
+        client={client}
+        task={TASK_A}
+        createTerminal={(options) => {
+          capturedOptions = options;
+          return fake;
+        }}
+      />,
+    );
+    await flush();
+
+    expect(capturedOptions).toEqual({ scrollback: 5000 });
+  });
+});
+
+describe("TerminalPane multiple terminals per task (Item 20)", () => {
+  it("two terminal tabs create two distinct sessions, not the same one", async () => {
+    const clientA = new FakeWsClient();
+    const fakeA = new FakeTerminalHandle();
+    render(
+      <TerminalPane client={clientA} task={TASK_A} tabKey={`${TASK_A.ID}:terminal`} createTerminal={() => fakeA} />,
+    );
+    await flush();
+    clientA.nth("terminal.list", 0).resolve([]);
+    await flush();
+    clientA.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    const clientB = new FakeWsClient();
+    const fakeB = new FakeTerminalHandle();
+    render(
+      <TerminalPane client={clientB} task={TASK_A} tabKey={`${TASK_A.ID}:terminal:2`} createTerminal={() => fakeB} />,
+    );
+    await flush();
+    // Both sessions are running server-side, term-1 already bound to the
+    // first tab -- the second tab must not adopt it.
+    clientB.nth("terminal.list", 0).resolve([sessionStatus({ ID: "term-1", Status: "running" })]);
+    await flush();
+
+    const createCall = clientB.nth("terminal.create", 0);
+    expect(createCall.params).toEqual({ taskId: TASK_A.ID });
+    createCall.resolve({ terminalId: "term-2" });
+    await flush();
+
+    expect(screen.getAllByTestId("terminal-status").map((el) => el.textContent)).toEqual([
+      "terminal term-1",
+      "terminal term-2",
+    ]);
+  });
+
+  it("switching between two terminal tabs detaches rather than closes either session", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    const { unmount } = render(
+      <TerminalPane client={client} task={TASK_A} tabKey={`${TASK_A.ID}:terminal`} createTerminal={() => fake} />,
+    );
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    // Switching tabs unmounts this pane (App.tsx's Tabs) -- the same
+    // detach path an ordinary task switch takes.
+    unmount();
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "terminal.close")).toHaveLength(0);
+    expect(fake.disposed).toBe(true);
+  });
+});
+
+describe("useTerminalActivity (Item 20)", () => {
+  it("marks a tab whose pane received data while inactive, and clears it when the pane becomes active", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    const tabKey = `${TASK_A.ID}:terminal:2`;
+
+    function Marker() {
+      const busy = useTerminalActivity(tabKey);
+      return <span data-testid="marker">{busy ? "busy" : "idle"}</span>;
+    }
+
+    const { rerender } = render(
+      <>
+        <Marker />
+        <TerminalPane client={client} task={TASK_A} tabKey={tabKey} active={false} createTerminal={() => fake} />
+      </>,
+    );
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    expect(screen.getByTestId("marker")).toHaveTextContent("idle");
+
+    client.emit("terminal.attach", 0, "data", { data: base64Of("output") });
+    await flush();
+    expect(screen.getByTestId("marker")).toHaveTextContent("busy");
+
+    rerender(
+      <>
+        <Marker />
+        <TerminalPane client={client} task={TASK_A} tabKey={tabKey} active createTerminal={() => fake} />
+      </>,
+    );
+    await flush();
+
+    expect(screen.getByTestId("marker")).toHaveTextContent("idle");
+  });
+
+  it("does not mark the tab for data received while it's already active", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    const tabKey = `${TASK_A.ID}:terminal`;
+
+    function Marker() {
+      const busy = useTerminalActivity(tabKey);
+      return <span data-testid="marker">{busy ? "busy" : "idle"}</span>;
+    }
+
+    render(
+      <>
+        <Marker />
+        <TerminalPane client={client} task={TASK_A} tabKey={tabKey} active createTerminal={() => fake} />
+      </>,
+    );
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    client.emit("terminal.attach", 0, "data", { data: base64Of("output") });
+    await flush();
+
+    expect(screen.getByTestId("marker")).toHaveTextContent("idle");
+  });
+
+  it("New terminal control is absent without onNewTerminal, and calls it when present", async () => {
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    const onNewTerminal = vi.fn();
+    const { rerender } = render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    expect(screen.queryByTestId("terminal-new")).not.toBeInTheDocument();
+
+    rerender(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} onNewTerminal={onNewTerminal} />);
+    fireEvent.click(screen.getByTestId("terminal-new"));
+    expect(onNewTerminal).toHaveBeenCalledTimes(1);
   });
 });

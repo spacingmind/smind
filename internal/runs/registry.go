@@ -65,6 +65,34 @@ type Registry struct {
 	// (runPermissionDecider), so the wsapi server can push them as
 	// subscription events from the points the state actually changes.
 	notifier Notifier
+
+	// permissionTimeout overrides defaultPermissionTimeout when non-zero --
+	// see SetPermissionTimeout.
+	permissionTimeout time.Duration
+}
+
+// SetPermissionTimeout overrides how long a pending permission request
+// waits for a human response (or an ApprovalPolicyAutoSafe auto-allow)
+// before runPermissionDecider.Decide auto-resolves it to deny instead of
+// blocking the run forever (see defaultPermissionTimeout). d <= 0 restores
+// the default. Exists so a test can shrink the timeout to something it can
+// actually wait out in a few milliseconds; production code (cmd/smind)
+// never calls this today, since defaultPermissionTimeout is the right
+// value for real use.
+func (reg *Registry) SetPermissionTimeout(d time.Duration) {
+	reg.mu.Lock()
+	reg.permissionTimeout = d
+	reg.mu.Unlock()
+}
+
+func (reg *Registry) getPermissionTimeout() time.Duration {
+	reg.mu.Lock()
+	d := reg.permissionTimeout
+	reg.mu.Unlock()
+	if d <= 0 {
+		return defaultPermissionTimeout
+	}
+	return d
 }
 
 // Notifier receives run lifecycle and permission notifications, for
@@ -195,6 +223,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		taskID:             row.TaskID,
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
+		approvalPolicy:     taskrunner.ApprovalPolicy(row.ApprovalPolicy),
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -340,7 +369,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// silently, from inside the drive goroutine.
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: id, TaskID: taskID, Provider: string(provider), Prompt: prompt,
-		Status: string(StatusRunning), StartedAt: r.startedAt,
+		Status: string(StatusRunning), StartedAt: r.startedAt, ApprovalPolicy: string(approvalPolicy),
 	}); err != nil {
 		cancel()
 		return "", fmt.Errorf("runs: start: persist run: %w", err)

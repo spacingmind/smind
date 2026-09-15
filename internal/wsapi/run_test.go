@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -982,5 +983,72 @@ func TestServer_RunStart_CodexNativeProvider(t *testing.T) {
 	}
 	if len(logs.Events) != 3 {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
+	}
+}
+
+// TestServer_RunStart_ApprovalPolicy_AutoSafe proves run.start accepts an
+// explicit approvalPolicy of "auto-safe" and threads it through to
+// runs.Registry.Start (rather than only ever defaulting to "manual") --
+// the wire half of task-permission-ux.md Item 1's "settable per task"
+// requirement. It's a plain-text-turn smoke test (no permission request
+// involved): the point is only that the param is accepted and the run
+// still completes normally, not the auto-allow decision logic itself,
+// which internal/runs/runs_test.go already covers directly.
+func TestServer_RunStart_ApprovalPolicy_AutoSafe(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi", "approvalPolicy": "auto-safe",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+
+	sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	deadline := time.Now().Add(5 * time.Second)
+	var logs runLogsResult
+	for {
+		env := readEnvelopeFor(t, ws, "2", time.Until(deadline))
+		if err := json.Unmarshal(env.Result, &logs); err != nil {
+			t.Fatalf("decode run.logs result: %v", err)
+		}
+		if logs.Status == string(runs.StatusDone) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for auto-safe-policy run to finish, last status %q", logs.Status)
+		}
+		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+	}
+}
+
+// TestServer_RunStart_InvalidApprovalPolicy_IsAClearError proves an
+// unrecognized approvalPolicy string is rejected with a clear error at the
+// wire boundary, rather than silently defaulting to "manual" (which would
+// hide a caller's typo behind seemingly-normal manual behavior) or panicking.
+func TestServer_RunStart_InvalidApprovalPolicy_IsAClearError(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi", "approvalPolicy": "yolo",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("run.start with an invalid approvalPolicy: error = nil, want a clear error")
 	}
 }

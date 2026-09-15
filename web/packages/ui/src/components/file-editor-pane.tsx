@@ -3,6 +3,12 @@ import { Eye, PenLine } from "lucide-react";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
 import { FilePreview, previewKind } from "@/components/file-preview";
+import { Alert } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { InlineSpinner } from "@/components/ui/inline-spinner";
+import { PaneHeader } from "@/components/ui/pane-header";
+import { fileTabKey } from "@/components/tab-registry";
+import { forgetBuffer, setBufferDirty } from "@/lib/dirty-buffers";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import { RpcError } from "@/lib/ws-client";
@@ -73,6 +79,23 @@ export function FileEditorPane({
   const dirty = content !== savedContent;
   dirtyRef.current = dirty;
 
+  // Publish the dirty flag to the tab strip (Item 17). The strip is a
+  // sibling of this pane's subtree, not an ancestor, so this goes through
+  // lib/dirty-buffers.ts's store rather than a prop -- see that module's
+  // doc comment. Effect, not render-time: setBufferDirty notifies
+  // subscribers, and notifying another component mid-render is exactly
+  // what React forbids.
+  const tabKey = fileTabKey(task.ID, path);
+  useEffect(() => {
+    setBufferDirty(tabKey, dirty);
+  }, [tabKey, dirty]);
+  useEffect(() => {
+    // Unmounting (tab closed, task switched) or moving to a different
+    // path drops the entry entirely -- a stale `true` would mark a tab
+    // whose editor no longer exists.
+    return () => forgetBuffer(tabKey);
+  }, [tabKey]);
+
   const applyRead = useCallback((result: FileReadResult) => {
     setContentState(result.content);
     setSavedContent(result.content);
@@ -117,6 +140,16 @@ export function FileEditorPane({
     setContentState(next);
   }, []);
 
+  // Guards against two overlapping file.write calls. `saving` state alone
+  // isn't enough: the Save button's `disabled` attribute only stops a
+  // second *click*, but CodeMirror's Mod-s keybinding (see
+  // code-mirror-editor.tsx) calls onSave directly, bypassing the DOM
+  // entirely -- a second Ctrl-S while a save is still in flight would
+  // otherwise fire a second concurrent write with the same stale
+  // expectedMtime. A ref (not state) is what makes the check synchronous
+  // with the very first line of this function, before any render.
+  const savingRef = useRef(false);
+
   // One file.write against the buffer. `expected` false is the Overwrite
   // action's unconditional force save (and last-write-wins legacy
   // behavior); a rejected conditional save maps the typed error's code to
@@ -124,7 +157,9 @@ export function FileEditorPane({
   const save = useCallback(
     async (expected: boolean) => {
       if (!client) throw new Error("not connected");
+      if (savingRef.current) return;
 
+      savingRef.current = true;
       setSaving(true);
       setSaveError(null);
       try {
@@ -142,6 +177,7 @@ export function FileEditorPane({
         }
         throw err;
       } finally {
+        savingRef.current = false;
         setSaving(false);
       }
       // `content` must be read fresh at call time, so it's a real dependency.
@@ -216,82 +252,74 @@ export function FileEditorPane({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <span className="truncate text-sm font-medium" data-testid="file-editor-path">
-          {path}
-          {dirty && <span aria-label="unsaved changes"> *</span>}
-        </span>
-        <div className="flex shrink-0 items-center gap-2">
-          {kind && (
-            <div className="flex h-7 items-center rounded-lg border border-input p-0.5" data-testid="preview-toggle">
-              <button
-                type="button"
-                onClick={() => setMode("edit")}
-                disabled={mode === "edit"}
-                aria-pressed={mode === "edit"}
-                className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
-              >
-                <PenLine className="size-3" />
-                Edit
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("preview")}
-                disabled={mode === "preview"}
-                aria-pressed={mode === "preview"}
-                className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
-              >
-                <Eye className="size-3" />
-                Preview
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={saving || !dirty}
-            className="h-7 shrink-0 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save"}
-          </button>
-        </div>
-      </div>
-      {conflict && (
-        <div
-          className="flex flex-wrap items-center justify-between gap-2 border-b bg-amber-500/10 px-3 py-2 text-sm"
-          data-testid="file-conflict-banner"
-          data-conflict={conflict}
-          role="alert"
-        >
-          <span className="text-amber-900">
-            {conflict === "deleted"
-              ? "This file was deleted on disk (unsaved edits are still in the editor)."
-              : "This file changed on disk while you had unsaved edits."}
+      <PaneHeader
+        testId="file-editor-header"
+        title={
+          <span data-testid="file-editor-path">
+            {path}
+            {dirty && <span aria-label="unsaved changes"> *</span>}
           </span>
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              type="button"
-              onClick={handleReload}
-              className="h-7 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted"
-              data-testid="conflict-reload"
-            >
-              Reload
-            </button>
-            <button
-              type="button"
-              onClick={handleOverwrite}
-              className="h-7 rounded-lg border border-input bg-background px-2.5 text-xs font-medium hover:bg-muted"
-              data-testid="conflict-overwrite"
-            >
-              Overwrite
-            </button>
-          </div>
-        </div>
+        }
+        actions={
+          <>
+            {kind && (
+              <div className="flex h-7 items-center rounded-lg border border-input p-0.5" data-testid="preview-toggle">
+                <button
+                  type="button"
+                  onClick={() => setMode("edit")}
+                  disabled={mode === "edit"}
+                  aria-pressed={mode === "edit"}
+                  className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+                >
+                  <PenLine className="size-3" />
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode("preview")}
+                  disabled={mode === "preview"}
+                  aria-pressed={mode === "preview"}
+                  className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+                >
+                  <Eye className="size-3" />
+                  Preview
+                </button>
+              </div>
+            )}
+            <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving || !dirty}>
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </>
+        }
+      />
+      {conflict && (
+        <Alert
+          testId="file-conflict-banner"
+          data-conflict={conflict}
+          variant="warning"
+          className="rounded-none border-x-0 border-t-0"
+          description={
+            conflict === "deleted"
+              ? "This file was deleted on disk (unsaved edits are still in the editor)"
+              : "This file changed on disk while you had unsaved edits"
+          }
+        >
+          <Button type="button" variant="outline" size="sm" onClick={handleReload} disabled={loading} data-testid="conflict-reload">
+            {loading ? "Reloading…" : "Reload"}
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={handleOverwrite} disabled={saving} data-testid="conflict-overwrite">
+            {saving ? "Overwriting…" : "Overwrite"}
+          </Button>
+        </Alert>
       )}
-      {error && <p className="px-3 py-2 text-sm text-destructive">{error}</p>}
-      {saveError && <p className="px-3 py-2 text-sm text-destructive">save failed: {saveError}</p>}
+      {error && <Alert variant="error" description={error} className="rounded-none border-x-0 border-t-0" />}
+      {saveError && (
+        <Alert variant="error" description={`save failed: ${saveError}`} className="rounded-none border-x-0 border-t-0" />
+      )}
       {loading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Loading…</div>
+        <div className="flex flex-1 items-center justify-center">
+          <InlineSpinner label="Loading…" />
+        </div>
       ) : (
         !error && (
           <>

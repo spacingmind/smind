@@ -49,6 +49,18 @@ smind task new <workspaceId> "fix the failing test"
 smind task send <taskId> glm "fix the failing test"   # or open the web UI and use the Chat tab
 ```
 
+### Unattended runs
+
+```sh
+smind task send <id> <provider> <prompt> --approval-policy auto-safe
+```
+
+`auto-safe` lets a run self-approve known-safe verification commands (`gofmt
+-l`, `go vet`, `go test`, `task test`/`lint`/`build`, including a leading `cd
+<dir> &&`) without waiting on a human; everything else still needs approval.
+The same choice is available in the web UI's prompt form (Approval policy
+dropdown). Default remains `manual`.
+
 ## Dev quickstart
 
 ```sh

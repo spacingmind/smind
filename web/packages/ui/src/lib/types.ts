@@ -44,16 +44,61 @@ export interface Space {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
+// internal/taskrunner.ApprovalPolicy's two values, carried over the wire as
+// their underlying string -- run.start/task.prompt's optional
+// `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
+// default when omitted (today's always-ask-a-human behavior); "auto-safe"
+// lets a small, conservative allowlist of read-only verification commands
+// (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
+export type ApprovalPolicy = "manual" | "auto-safe";
+
+// internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
+// spawned as an external CLI subprocess managing its own authentication out
+// of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no
+// credential for it, so accounts-dialog renders it as "managed externally"
+// instead of offering a credential form or flagging a missing key. Absent
+// means "handled through the separate account-credential system instead"
+// (today: everything else provider.list returns).
+export type ProviderKind = "cli";
+
+// internal/taskrunner.ProviderCredentialKind's two values, present only on
+// providers with a credential row in accounts-dialog (i.e. kind is unset).
+// "oauth" gets a Connect button (account.oauthStart) with manual-paste as a
+// fallback; "api-key" gets only the manual-paste form (account.add).
+export type ProviderCredentialKind = "oauth" | "api-key";
+
 // One entry in a provider.list response (internal/taskrunner.ProviderInfo):
-// the provider id itself plus an optional human-facing label.
+// the provider id itself plus an optional human-facing label, Kind, and (for
+// providers with a credential row) CredentialKind/accountProvider.
+//
+// accountProvider is the id accounts-dialog must actually send to
+// account.add/account.oauthStart -- it's internal/accounts' own provider
+// vocabulary (anthropic/openai/kimi/xai/antigravity), which predates and
+// differs from this Provider union (claude-native/glm/kimi/codex-native).
+// The two aren't fully unified: xai and antigravity are accounts-only
+// providers with no taskrunner counterpart, so provider.list can't (and
+// doesn't try to) describe them -- see accounts-dialog.tsx's doc comment and
+// docs/plans/active/task-permission-ux.md's Item 7d note for that gap.
 export interface ProviderInfo {
   id: Provider;
   label?: string;
+  kind?: ProviderKind;
+  credentialKind?: ProviderCredentialKind;
+  accountProvider?: string;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
 export interface ProviderListResult {
   providers: ProviderInfo[];
+}
+
+// Result of provider.test (internal/wsapi/handlers.go's providerTestResult):
+// a lightweight "can this provider actually start?" diagnostic -- ok plus a
+// short human-readable detail either way (which account/credential it used,
+// or why it isn't ready). Never mutates anything (no refresh, no run).
+export interface ProviderTestResult {
+  ok: boolean;
+  detail: string;
 }
 
 // internal/runs.Status's four values (internal/runs/runs.go) -- carried
@@ -297,6 +342,15 @@ export interface TaskDiffResult {
   diff: string;
 }
 
+// Result of task.searchIndex (internal/wsapi/handlers.go's
+// taskSearchIndexResult): every worktree-relative path eligible for
+// quick-open (Item 18) -- git's own notion of the worktree's contents,
+// fuzzy-matched client-side (lib/fuzzy-match.ts) rather than server-side,
+// so ranking/highlighting stay in the UI's own testable code.
+export interface TaskSearchIndexResult {
+  paths: string[];
+}
+
 // One entry in a task.files response (internal/workspace.TaskFile): a path
 // in the task's base→worktree diff, its change kind, and whether it's
 // currently staged in the worktree's real index.
@@ -311,11 +365,38 @@ export interface TaskFilesResult {
   files: TaskFile[];
 }
 
+// One entry in a task.stats response (internal/workspace.TaskStat): a
+// task's branch and the size of the same base->worktree diff task.diff
+// renders. Tasks with no worktree, and tasks whose stat could not be
+// computed, are absent from the list -- zero changed files is a real and
+// different statement from "not known", so the sidebar must be able to
+// tell them apart.
+export interface TaskStat {
+  taskId: number;
+  branch: string;
+  filesChanged: number;
+  insertions: number;
+  deletions: number;
+}
+
+// Result of task.stats (internal/wsapi/handlers.go's taskStatsResult).
+export interface TaskStatsResult {
+  stats: TaskStat[];
+}
+
 // Result of task.fileDiff (internal/wsapi/handlers.go's
 // taskFileDiffResult): one file's slice of the task's unified diff, or ""
 // for a path with no changes.
 export interface TaskFileDiffResult {
   diff: string;
+}
+
+// Result of workspace.delete/space.delete (internal/wsapi/handlers.go's
+// deleteSummaryResult): how many tasks/spaces were actually removed, so the
+// UI can show an accurate confirmation without a second round trip.
+export interface DeleteSummaryResult {
+  tasksRemoved: number;
+  spacesRemoved: number;
 }
 
 // Result of task.commit (internal/wsapi/handlers.go's taskCommitResult):
@@ -325,6 +406,14 @@ export interface TaskCommitResult {
   commit: string;
   subject: string;
   files: number;
+}
+
+// Result of task.createPr (internal/wsapi/handlers.go's
+// taskCreatePRResult): the URL of the pull request opened for the task's
+// branch (directly, or from a clean smind/pr-<id> branch if the task
+// branch's base had diverged -- see internal/workspace.Manager.CreatePR).
+export interface TaskCreatePrResult {
+  url: string;
 }
 
 // Payloads of ADR 0005 notifications (internal/wsapi/events.go) -- see
@@ -355,4 +444,34 @@ export interface PermissionPendingEventPayload {
   requestId: string;
   summary: string;
   options: PermissionOption[];
+}
+
+// One entry in an account.list response (internal/wsapi/handlers.go's
+// accountResult): lowercase json tags, unlike the PascalCase no-tag store
+// structs above. Credential material itself is never returned over RPC.
+export interface Account {
+  id: number;
+  provider: string;
+  label: string;
+  credentialType: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// One entry in an fs.listDir response (internal/wsapi/hostfs.go's
+// fsListDirEntry, mirroring internal/hostfs.Entry): a subdirectory of the
+// listed directory, and whether it's itself a git repository.
+export interface FsListDirEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+}
+
+// Result of fs.listDir (internal/wsapi/hostfs.go's fsListDirResult): the
+// resolved directory that was listed, its parent (empty string at the
+// filesystem root), and its subdirectories.
+export interface FsListDirResult {
+  path: string;
+  parent: string;
+  entries: FsListDirEntry[];
 }

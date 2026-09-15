@@ -1066,7 +1066,7 @@ func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
 	runIDs := make([]string, n)
 	for i := 0; i < n; i++ {
 		task := newTestTask(t, wm, "hang")
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1108,7 +1108,7 @@ func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
 	reg := newTestRegistry(t, st)
 
 	task := newTestTask(t, wm, "")
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1140,7 +1140,7 @@ func TestRegistry_Start_PersistsRunRowImmediately(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1168,7 +1168,7 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1203,6 +1203,70 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 	}
 }
 
+// TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen proves the new
+// structured event types (docs/decisions/0008-structured-run-events.md) --
+// EventTypeThinking, EventTypeUserMessage, and EventTypeToolCall with its
+// tool-identity/input/status/result fields -- survive exactly like the
+// pre-existing event types already did: a rehydrated Registry built
+// against the same store (simulating a daemon restart, same pattern as
+// TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries) sees the
+// identical history a fresh run produced. Also covers EventTypeRaw
+// (docs/decisions/0010-preserve-unknown-acp-event-kinds.md), produced by
+// the fakeagent's "structured" scenario sending a "plan" update.
+func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "structured")
+	runner := newTestRunner(wm)
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg1, runID, StatusDone, 5*time.Second)
+
+	wantHist, _, err := reg1.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg1 error = %v", err)
+	}
+
+	var wantToolCalls, wantRaw int
+	for _, e := range wantHist {
+		if e.Type == taskrunner.EventTypeToolCall {
+			wantToolCalls++
+		}
+		if e.Type == taskrunner.EventTypeRaw {
+			wantRaw++
+		}
+	}
+	if wantToolCalls == 0 {
+		t.Fatal("in-memory history has no tool-call events, nothing to prove round-trips")
+	}
+	if wantRaw == 0 {
+		t.Fatal("in-memory history has no raw events, nothing to prove round-trips")
+	}
+
+	reg2 := newTestRegistry(t, st)
+	gotHist, _, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 (rehydrated) error = %v", err)
+	}
+	if len(gotHist) != len(wantHist) {
+		t.Fatalf("rehydrated History len = %d, want %d", len(gotHist), len(wantHist))
+	}
+	for i := range wantHist {
+		w, g := wantHist[i], gotHist[i]
+		if g.Type != w.Type || g.Text != w.Text ||
+			g.ToolCallID != w.ToolCallID || g.ToolName != w.ToolName ||
+			g.ToolTitle != w.ToolTitle || g.ToolStatus != w.ToolStatus ||
+			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) ||
+			g.RawKind != w.RawKind || string(g.RawPayload) != string(w.RawPayload) {
+			t.Fatalf("rehydrated History[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+}
+
 // TestRegistry_Finish_PersistsTerminalStatus proves both a normal
 // completion and a deliberate Stop persist their terminal status/
 // finished_at/stop_reason, not just the in-memory RunStatus.
@@ -1216,7 +1280,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1244,7 +1308,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1280,7 +1344,7 @@ func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1348,7 +1412,7 @@ func TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted(t *
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi")
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

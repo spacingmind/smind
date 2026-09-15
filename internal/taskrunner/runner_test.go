@@ -116,7 +116,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -171,7 +171,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, "", events)
 	}()
 
 	got := drainEvents(events)

@@ -3,6 +3,7 @@ package workspace
 import (
 	"fmt"
 	"strings"
+	"sync"
 )
 
 // TaskFile is one entry in a task's changed-files list: a path that differs
@@ -125,4 +126,82 @@ func (m *Manager) taskWorktree(id int64) (worktreePath, branch string, err error
 		return "", "", fmt.Errorf("task %d: task has no worktree", id)
 	}
 	return *t.WorktreePath, *t.Branch, nil
+}
+
+// TaskStat is the sidebar's per-task git signal: the task's branch and the
+// size of the same base→worktree diff task.diff/task.files compute,
+// reduced to counts. It exists so the sidebar can show every task's diff
+// size without fetching every task's file list.
+type TaskStat struct {
+	TaskID       int64  `json:"taskId"`
+	Branch       string `json:"branch"`
+	FilesChanged int    `json:"filesChanged"`
+	Insertions   int    `json:"insertions"`
+	Deletions    int    `json:"deletions"`
+}
+
+// taskStatWorkers bounds how many worktrees TaskStats scans at once. Each
+// one runs `git add -A` into a throwaway index (snapshotIndex), so this is
+// disk-bound work that neither benefits from unbounded fan-out nor should
+// be allowed to occupy every core on a workspace with many tasks.
+const taskStatWorkers = 4
+
+// TaskStats returns one entry per non-archived task in the workspace that
+// has a worktree to diff, for the sidebar's branch and diff-stat signal.
+//
+// Deliberately partial: a task with no worktree yet (created but never
+// run) has nothing to diff and is omitted, and a task whose stat *fails*
+// -- a worktree deleted out from under the daemon, a branch with no
+// reflog -- is also omitted rather than failing the whole call. One
+// broken worktree must not blank every other row's signal, and the UI's
+// rule for this surface is that a number it cannot compute is absent, not
+// zero (a zeroed stat would read as "no changes", which is a different
+// and wrong statement).
+func (m *Manager) TaskStats(workspaceID int64) ([]TaskStat, error) {
+	tasks, err := m.ListTasks(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Index-aligned results, so the output keeps ListTasks' id order
+	// regardless of which worker finishes first.
+	stats := make([]*TaskStat, len(tasks))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for range taskStatWorkers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				t := tasks[i]
+				if t.WorktreePath == nil || t.Branch == nil {
+					continue
+				}
+				files, ins, del, err := taskDiffStat(*t.WorktreePath, *t.Branch)
+				if err != nil {
+					continue
+				}
+				stats[i] = &TaskStat{
+					TaskID:       t.ID,
+					Branch:       *t.Branch,
+					FilesChanged: files,
+					Insertions:   ins,
+					Deletions:    del,
+				}
+			}
+		}()
+	}
+	for i := range tasks {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	out := make([]TaskStat, 0, len(tasks))
+	for _, s := range stats {
+		if s != nil {
+			out = append(out, *s)
+		}
+	}
+	return out, nil
 }

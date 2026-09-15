@@ -13,7 +13,16 @@ import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { fileTab, type TabEntry, type TabKind } from "@/components/tab-registry";
+import {
+  TAB_KINDS,
+  defaultTabsForTask,
+  fileTab,
+  filePathFromTabKey,
+  nextTerminalTab,
+  TabLabel,
+  type TabEntry,
+  type TabKind,
+} from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
@@ -26,7 +35,9 @@ import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/u
 import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
-import type { Task } from "@/lib/types";
+import { formatRoute, parseRoute, type Route } from "@/lib/route";
+import type { ThemePreference } from "@/lib/theme";
+import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -117,10 +128,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // and ignores writes.
   const [sidePaneWidth, setSidePaneWidth] = useSidePaneWidth(selectedTask?.ID ?? null);
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate } = useTaskTabs();
-  const events = useDaemonEvents(client);
-  const attention = useTaskAttention(client, selectedTask?.ID ?? null, events);
-
   useEffect(() => {
     let cancelled = false;
     let reconnectHandle: ReconnectHandle | null = null;
@@ -165,10 +172,13 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     };
   }, [connect]);
 
-  function selectTask(task: Task) {
-    setSelectedTask(task);
-    ensureTask(task.ID);
-  }
+  const selectTask = useCallback(
+    (task: Task) => {
+      setSelectedTask(task);
+      ensureTask(task.ID);
+    },
+    [ensureTask],
+  );
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
@@ -477,10 +487,33 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
 
   return (
-    <SidebarProvider>
-      <AppSidebar
+    // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
+    // definite height), which used to be fine when its child just flowed
+    // in document order -- ResizablePanelGroup's inner Panels need a
+    // *definite* ancestor height to resolve their percentage-based
+    // stretch, so an explicit h-svh here (additive with min-h-svh, not
+    // conflicting -- different CSS properties) is what actually gives the
+    // resize handle its full-height drag area instead of collapsing to
+    // the height of the header row.
+    <SidebarProvider
+      className="h-svh"
+      style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
+      {/*
+       * `sidebar.toggle` is claimed by a child of SidebarProvider rather
+       * than by AppShell, because `useSidebar()` throws outside it. A
+       * zero-render component is the cheapest way to be inside a provider
+       * its own parent mounts.
+       */}
+      <SidebarToggleAction />
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <CommandPalette />
+      <ShellCommands
         client={client}
-        selectedTaskId={selectedTask?.ID ?? null}
+        tasks={allTasks}
+        workspaces={allWorkspaces}
+        selectedTask={selectedTask}
+        tabs={taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : null}
         onSelectTask={selectTask}
         onOpenTab={openTab}
         onActivateTab={activate}
@@ -553,60 +586,179 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         onOpenFile={openFileTab}
         events={events}
       />
-      <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-          <SidebarTrigger />
-          <Separator orientation="vertical" className="h-4" />
-          <span className="text-sm text-muted-foreground">
-            {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
-          </span>
-        </header>
-        <ResizablePanelGroup orientation="horizontal" className="flex-1">
-          <ResizablePanel defaultSize={100} minSize={20}>
-            {selectedTask && taskState ? (
-              <Tabs
-                key={selectedTask.ID}
-                value={taskState.activeKey ?? undefined}
-                onValueChange={(key) => activate(selectedTask.ID, key)}
-                className="h-full gap-0"
-              >
-                <TabsList className="mx-3 mt-2 w-fit">
-                  {taskState.tabs.map((entry) => (
-                    <TabsTrigger key={entry.key} value={entry.key} className="gap-1.5">
-                      {entry.title}
-                      {entry.closable && (
-                        <span
-                          role="button"
-                          aria-label={`Close ${entry.title}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            closeTab(selectedTask.ID, entry.key);
-                          }}
-                          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground"
-                        >
-                          ×
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                {taskState.tabs.map((entry) => (
-                  <TabsContent key={entry.key} value={entry.key} className="min-h-0">
-                    <TabContent entry={entry} client={client} task={selectedTask} connectionStatus={connectionStatus} onOpenFile={openFileTab} events={events} />
-                  </TabsContent>
-                ))}
-              </Tabs>
-            ) : (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                Select a task to get started.
-              </div>
-            )}
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </SidebarInset>
     </SidebarProvider>
   );
+}
+
+/**
+ * The shell's own command-palette contributions: tasks, workspaces, the
+ * selected task's tabs and changed files, and the theme action.
+ *
+ * It is a component rather than a block inside AppShell so each source's
+ * `useMemo` sits next to the data it derives from, and so nothing here
+ * re-renders the shell. Other surfaces contribute their own sources the
+ * same way -- `app-sidebar.tsx` registers its create/accounts dialogs
+ * without this file knowing about them (see `docs/design.md` §9).
+ */
+function ShellCommands({
+  client,
+  tasks,
+  workspaces,
+  selectedTask,
+  tabs,
+  onSelectTask,
+  onOpenTab,
+  onActivateTab,
+}: {
+  client: WsClient | null;
+  tasks: Task[];
+  workspaces: Workspace[];
+  selectedTask: Task | null;
+  tabs: TabEntry[] | null;
+  onSelectTask: (task: Task) => void;
+  onOpenTab: (taskId: number, entry: TabEntry, placement?: TabPlacement) => void;
+  onActivateTab: (taskId: number, key: string) => void;
+}) {
+  const { preference, setPreference } = useTheme();
+
+  const taskCommands = useMemo<Command[]>(
+    () =>
+      tasks.map((task) => ({
+        id: `task-${task.ID}`,
+        group: "Tasks",
+        title: task.Title,
+        subtitle: task.Branch ?? undefined,
+        keywords: [task.Status],
+        run: () => onSelectTask(task),
+      })),
+    [tasks, onSelectTask],
+  );
+  useCommands("shell:tasks", 0, taskCommands);
+
+  const workspaceCommands = useMemo<Command[]>(
+    () =>
+      workspaces
+        .map((workspace): Command | null => {
+          // smind has no "selected workspace" in the shell -- selection is
+          // per task (ADR 0004) -- so a workspace entry lands on its first
+          // task. A workspace with no tasks has nothing to land on, so it
+          // contributes no entry rather than a row that does nothing.
+          const first = tasks.find((t) => t.WorkspaceID === workspace.ID);
+          if (!first) return null;
+          return {
+            id: `workspace-${workspace.ID}`,
+            group: "Workspaces",
+            title: workspace.Title || workspace.Path,
+            subtitle: workspace.Path,
+            run: () => onSelectTask(first),
+          };
+        })
+        .filter((c): c is Command => c !== null),
+    [workspaces, tasks, onSelectTask],
+  );
+  useCommands("shell:workspaces", 1, workspaceCommands);
+
+  const tabCommands = useMemo<Command[]>(() => {
+    if (!selectedTask) return [];
+    // Every base tab kind, whether or not it's currently open: "Open
+    // Terminal" should work after the tab was closed, which is the case a
+    // list built from `tabs` alone would miss.
+    const base = defaultTabsForTask(selectedTask.ID);
+    const open = new Map((tabs ?? []).map((t) => [t.key, t]));
+    return base.map((entry) => ({
+      id: `tab-${entry.kind}`,
+      group: "Open",
+      title: `Open ${TAB_KINDS[entry.kind].defaultTitle}`,
+      subtitle: selectedTask.Title,
+      keywords: [entry.kind],
+      run: () => {
+        if (open.has(entry.key)) onActivateTab(selectedTask.ID, entry.key);
+        else onOpenTab(selectedTask.ID, entry, "prefer");
+      },
+    }));
+  }, [selectedTask, tabs, onOpenTab, onActivateTab]);
+  useCommands("shell:tabs", 2, tabCommands);
+
+  const files = useTaskChangedFiles(client, selectedTask);
+  const fileCommands = useMemo<Command[]>(() => {
+    if (!selectedTask) return [];
+    return files.map((path) => ({
+      id: `file-${path}`,
+      group: "Files",
+      title: path.split("/").pop() || path,
+      subtitle: path,
+      keywords: [path],
+      run: () => onOpenTab(selectedTask.ID, fileTab(selectedTask.ID, path), "prefer"),
+    }));
+  }, [files, selectedTask, onOpenTab]);
+  useCommands("shell:files", 3, fileCommands);
+
+  const actionCommands = useMemo<Command[]>(
+    () => [
+      {
+        id: "cycle-theme",
+        group: "Actions",
+        title: "Cycle theme",
+        subtitle: `Currently ${preference}`,
+        keywords: ["dark mode", "light mode", "appearance"],
+        action: "theme.cycle",
+        run: () => {
+          const order: ThemePreference[] = ["light", "dark", "system"];
+          setPreference(order[(order.indexOf(preference) + 1) % order.length]!);
+        },
+      },
+    ],
+    [preference, setPreference],
+  );
+  useCommands("shell:actions", 4, actionCommands);
+
+  return null;
+}
+
+/**
+ * The selected task's changed file paths, for the palette's Files group.
+ *
+ * `task.files` is the task's *diff* -- the files it has touched -- not an
+ * index of the worktree. That is the whole of what the wire offers today
+ * (there is no recursive list or search RPC; `file.list` is one directory
+ * per call), and it is also the more useful set for a palette: the files
+ * of the task you're in. A full worktree index needs a daemon change and
+ * belongs to Item 18, which is where the plan already puts the
+ * measure-before-adding-an-RPC decision.
+ *
+ * Failures are swallowed to an empty list: the palette must still open
+ * and show its other groups when a task's diff can't be read.
+ */
+function useTaskChangedFiles(client: WsClient | null, task: Task | null): string[] {
+  const [files, setFiles] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!client || !task) {
+      setFiles([]);
+      return;
+    }
+    let cancelled = false;
+    client
+      .call<TaskFilesResult>("task.files", { taskId: task.ID })
+      .then((result) => {
+        if (!cancelled) setFiles((result?.files ?? []).map((f) => f.path));
+      })
+      .catch(() => {
+        if (!cancelled) setFiles([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, task]);
+
+  return files;
+}
+
+/** Claims `sidebar.toggle` from inside SidebarProvider (where `useSidebar()` is legal) and renders nothing. */
+function SidebarToggleAction() {
+  const { toggleSidebar } = useSidebar();
+  useActionHandler("sidebar.toggle", toggleSidebar);
+  return null;
 }
 
 /** The kind→renderer lookup: adding a new tab kind means adding an entry here plus a TAB_KINDS descriptor, never editing the strip's layout logic. */
@@ -772,6 +924,7 @@ function TabContent({
   entry,
   client,
   task,
+  active,
   connectionStatus,
   onOpenFile,
   onOpenFileToSide,
@@ -782,6 +935,8 @@ function TabContent({
   entry: TabEntry;
   client: WsClient | null;
   task: Task;
+  /** Whether this tab is the one in front -- only the force-mounted terminal panes can be rendered while false. */
+  active: boolean;
   connectionStatus: ConnectionStatus;
   onOpenFile: (path: string) => void;
   onOpenFileToSide: (path: string) => void;
@@ -803,12 +958,16 @@ function TabContent({
     ),
     file: <FileEditorPane client={client} task={task} path={filePathFromTabKey(entry.key)} events={events} />,
     diff: <DiffViewerPane client={client} task={task} events={events} />,
-    terminal: <TerminalPane client={client} task={task} connectionStatus={connectionStatus} />,
+    terminal: (
+      <TerminalPane
+        client={client}
+        task={task}
+        tabKey={entry.key}
+        active={active}
+        connectionStatus={connectionStatus}
+        onNewTerminal={onNewTerminal}
+      />
+    ),
   };
   return renderers[entry.kind];
-}
-
-/** Extracts the file path from a file tab's `${taskId}:file:${path}` key. */
-function filePathFromKey(entry: TabEntry): string {
-  return entry.key.slice(entry.key.indexOf(":file:") + ":file:".length);
 }

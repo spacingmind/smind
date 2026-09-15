@@ -24,7 +24,7 @@ Goal: proxy Anthropic/OpenAI-compatible requests across multiple accounts.
 - [x] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`
 - [x] Proxy endpoints: Anthropic `/v1/messages`, OpenAI `/v1/chat/completions` — wires `internal/routing` + `internal/accounts` + `internal/transport` into `internal/server`. Also added real OAuth token refresh (`internal/accounts`) for Anthropic, OpenAI, Kimi, xAI, and Antigravity (Google Vertex/Gemini skipped — needs a service-account JWT-bearer flow, not a refresh-token flow, tracked as a separate future task)
 
-Phase 1 is functionally complete but not yet exercised with a real provider account: `smind account add` and `smind account ls` now manage local accounts through the daemon, but real two-account failover still needs provider credentials to validate end-to-end.
+Phase 1 is functionally complete but not yet exercised with a real provider account: `smind account add`/`smind account ls` (paste a credential blob) and, as of `docs/plans/active/oauth-account-login.md`, `smind account login <provider> <label>` plus the accounts dialog's "Connect" button (real browser-based OAuth for `anthropic`/`openai`, the two providers `proxy.go` actually routes) now manage local accounts through the daemon, but real two-account failover still needs real provider credentials to validate end-to-end -- untested against a live Anthropic/OpenAI account in this environment (no vendor accounts, no browser available here; see that plan's Validation section).
 
 Definition of done: Claude Code pointed at `ANTHROPIC_BASE_URL=localhost:4648` works across 2 accounts with real failover.
 
@@ -39,12 +39,8 @@ Goal: replace Paseo as daily driver.
 - [x] Extract Claude Code client into its own Go module/repo: [spacingmind/claude-agent-sdk-go](https://github.com/spacingmind/claude-agent-sdk-go) (public, MIT) — no official Go SDK for Claude Code exists yet. `internal/taskrunner` now depends on it externally.
 - [x] WebSocket RPC API (`internal/wsapi`, `GET /ws`) exposing workspace/space/task CRUD and streaming `task.prompt` — the transport the web UI (and later the terminal feature) will drive. REST+SSE was tried first and discarded in favor of RPC-over-WebSocket (bidirectional need); gRPC ruled out for this layer (no browser support) but planned for daemon↔relay in Phase 3.
 - [x] Web UI: split panes + tabs; workspace/space/task tree sidebar; agent timeline (streaming chat); file explorer with git status; CodeMirror 6 editor; custom per-hunk diff viewer; xterm terminal (PTY in task cwd); permission prompts UI
-- [ ] Web UI: preview pane (rendered output alongside the CodeMirror editor) — the one piece of the original Web UI item not yet built
+- [x] Web UI: preview pane (markdown, svg, sandboxed html alongside the CodeMirror editor) — built in #51, e2e-verified in the crud-ui Playwright pass
 - [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
-
-Remaining for Phase 2: editor preview pane; Codex spawning (app-server
-JSON-RPC follow-up); the real scopedocs dogfood that is the definition of
-done.
 
 Remaining for Phase 2: the dogfood that is the definition of done.
 

@@ -11,6 +11,11 @@ import (
 // debug-only data (an acp.SessionUpdate, a claudecode.Message, ...) -- not
 // meaningful to persist, and not guaranteed to survive a JSON round-trip for
 // every provider.
+//
+// New fields (added by docs/decisions/0008-structured-run-events.md) are
+// additive: a row persisted before that change decodes with them absent
+// (hence zero-valued), and this shape needs no store schema migration --
+// event_data is already a free-form JSON column.
 type persistedEvent struct {
 	Type                taskrunner.EventType          `json:"type"`
 	Text                string                        `json:"text,omitempty"`
@@ -19,6 +24,14 @@ type persistedEvent struct {
 	PermissionSummary   string                        `json:"permissionSummary,omitempty"`
 	PermissionOptions   []taskrunner.PermissionOption `json:"permissionOptions,omitempty"`
 	PermissionOptionID  string                        `json:"permissionOptionId,omitempty"`
+	ToolCallID          string                        `json:"toolCallId,omitempty"`
+	ToolName            string                        `json:"toolName,omitempty"`
+	ToolTitle           string                        `json:"toolTitle,omitempty"`
+	ToolStatus          string                        `json:"toolStatus,omitempty"`
+	ToolInput           json.RawMessage               `json:"toolInput,omitempty"`
+	ToolResult          json.RawMessage               `json:"toolResult,omitempty"`
+	RawKind             string                        `json:"rawKind,omitempty"`
+	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
@@ -30,6 +43,14 @@ func encodeEvent(e Event) (string, error) {
 		PermissionSummary:   e.PermissionSummary,
 		PermissionOptions:   e.PermissionOptions,
 		PermissionOptionID:  e.PermissionOptionID,
+		ToolCallID:          e.ToolCallID,
+		ToolName:            e.ToolName,
+		ToolTitle:           e.ToolTitle,
+		ToolStatus:          e.ToolStatus,
+		ToolInput:           e.ToolInput,
+		ToolResult:          e.ToolResult,
+		RawKind:             e.RawKind,
+		RawPayload:          e.RawPayload,
 	})
 	if err != nil {
 		return "", err
@@ -50,5 +71,13 @@ func decodeEvent(data string) (Event, error) {
 		PermissionSummary:   p.PermissionSummary,
 		PermissionOptions:   p.PermissionOptions,
 		PermissionOptionID:  p.PermissionOptionID,
+		ToolCallID:          p.ToolCallID,
+		ToolName:            p.ToolName,
+		ToolTitle:           p.ToolTitle,
+		ToolStatus:          p.ToolStatus,
+		ToolInput:           p.ToolInput,
+		ToolResult:          p.ToolResult,
+		RawKind:             p.RawKind,
+		RawPayload:          p.RawPayload,
 	}, nil
 }
