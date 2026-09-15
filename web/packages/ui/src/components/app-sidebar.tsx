@@ -1,12 +1,64 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+import { useCommands } from "@/palette/palette-provider";
+import type { Command } from "@/palette/commands";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import { AlertCircle, ChevronRight, FolderGit2, Layers, Loader2 } from "lucide-react";
+import {
+  AlertCircle,
+  Archive,
+  ChevronRight,
+  FolderGit2,
+  GitBranch,
+  Layers,
+  Loader2,
+  MoreHorizontal,
+  Plus,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Trash2,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, TaskStatusEventPayload, Workspace } from "@/lib/types";
-import type { TaskAttention } from "@/hooks/use-task-attention";
+import type { Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import {
+  applyLifecycleEvent,
+  buildWorkspaceTree,
+  LIFECYCLE_TOPICS,
+  searchTasks,
+  type SpaceWithTasks,
+  type TaskSearchResult,
+  type WorkspaceWithTree,
+} from "@/lib/workspace-tree";
+import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
+import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
+import { useNotificationPermission } from "@/hooks/use-notification-permission";
+import { useSettingsOpen } from "@/hooks/use-settings-open";
+import { AccountsDialog } from "@/components/accounts-dialog";
+import { SettingsScreen } from "@/components/settings/settings-screen";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
+import {
+  ArchiveTaskDialog,
+  CreateSpaceDialog,
+  CreateTaskDialog,
+  CreateWorkspaceDialog,
+  DeleteSpaceDialog,
+  DeleteWorkspaceDialog,
+} from "@/components/crud-dialogs";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Sidebar,
@@ -194,45 +246,24 @@ function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null
   return overrides;
 }
 
-/**
- * Live task.Status patching over the fetched tree: task.status
- * notifications (ADR 0005) update an override map in-memory; the tree
- * itself is only refetched on client change (reconnect), exactly as
- * before. Overrides are cleared whenever the client changes so a
- * reconnect never shows stale statuses alongside the fresh fetch.
- */
-function useStatusOverrides(client: WsClient | null, events: DaemonEvents | null): Map<number, string> {
-  const [overrides, setOverrides] = useState<Map<number, string>>(new Map());
-
-  useEffect(() => {
-    setOverrides(new Map());
-  }, [client]);
-
-  useEffect(() => {
-    if (!events) return;
-    return events.subscribe("task.status", (payload) => {
-      const p = payload as Partial<TaskStatusEventPayload>;
-      const taskId = p.taskId;
-      const status = p.status;
-      if (typeof taskId !== "number" || typeof status !== "string") return;
-      setOverrides((prev) => {
-        if (prev.get(taskId) === status) return prev;
-        const next = new Map(prev);
-        next.set(taskId, status);
-        return next;
-      });
-    });
-  }, [events]);
-
-  return overrides;
-}
+/** Which create/archive dialog a sidebar row has opened, if any. */
+type CrudTarget =
+  | { kind: "workspace" }
+  | { kind: "space"; workspace: WorkspaceWithTree }
+  | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
+  | { kind: "archive"; task: Task }
+  | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
+  | { kind: "deleteSpace"; space: SpaceWithTasks };
 
 export function AppSidebar({
   client,
   selectedTaskId = null,
   onSelectTask,
   attention,
+  runStatus,
   events,
+  onTasksChange,
+  onWorkspacesChange,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -241,11 +272,134 @@ export function AppSidebar({
   onSelectTask?: (task: Task) => void;
   /** Per-task attention badges (App.tsx's useTaskAttention) -- renders a dot on each row that has any reason. */
   attention?: TaskAttention;
+  /** Per-task latest-run status (App.tsx's useTaskAttention, same hook) -- renders the row's leading run dot and feeds the container rows' aggregate. */
+  runStatus?: TaskRunStatus;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
+  /**
+   * Called with every task across the whole tree whenever the tree
+   * changes. The shell needs a flat task list for things the sidebar
+   * itself doesn't do -- `task.prev`/`task.next` shortcuts, the command
+   * palette's task entries, restoring a task id from the URL -- and this
+   * component is the one place that already fetches it. Optional: mounts
+   * that don't care (every existing test) behave exactly as before.
+   */
+  onTasksChange?: (tasks: Task[]) => void;
+  /** Called with the workspace list whenever the tree changes -- same rationale as onTasksChange, for the palette's workspace entries. */
+  onWorkspacesChange?: (workspaces: Workspace[]) => void;
 }) {
-  const { workspaces, error } = useWorkspaceTree(client);
+  const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
+  const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
+  const stats = useTaskStats(client, events ?? null, workspaceIds);
+  const rowSignal = useMemo<RowSignal>(
+    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS, stats }),
+    [attention, statusOverrides, runStatus, stats],
+  );
+
+  // Out-of-tab attention notifications (Item 4): every task across the
+  // whole tree, flattened just far enough to label a Notification by
+  // title -- this list changing (workspace/space/task fetch completing)
+  // never itself fires anything; only a *new* attention reason while the
+  // tab is hidden does, in the hook itself.
+  const allTasks = useMemo(
+    () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
+    [workspaces],
+  );
+  const { permission: notificationPermission } = useNotificationPermission();
+  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
+
+  useEffect(() => {
+    onTasksChange?.(allTasks);
+  }, [allTasks, onTasksChange]);
+
+  useEffect(() => {
+    if (workspaces) onWorkspacesChange?.(workspaces);
+  }, [workspaces, onWorkspacesChange]);
+
+  const [crud, setCrud] = useState<CrudTarget | null>(null);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const { open: settingsOpen, openSettings, setOpen: setSettingsOpen } = useSettingsOpen();
+
+  // Command-palette contributions for the dialogs this component owns.
+  // Registered here rather than in App.tsx on purpose: the surface that
+  // owns a dialog is the one that can open it, and `useCommands` is the
+  // API that lets it contribute without either file importing the other
+  // (docs/design.md §8).
+  const paletteCommands = useMemo<Command[]>(() => {
+    const commands: Command[] = [
+      {
+        id: "new-workspace",
+        group: "Actions",
+        title: "New workspace",
+        keywords: ["create", "add", "project", "repo"],
+        run: () => setCrud({ kind: "workspace" }),
+      },
+      {
+        id: "accounts",
+        group: "Actions",
+        title: "Open accounts",
+        keywords: ["providers", "credentials", "login", "oauth"],
+        run: () => setAccountsOpen(true),
+      },
+    ];
+    // "New task" needs a workspace to create the task in. With exactly one
+    // workspace the choice is unambiguous; with several, picking one for
+    // the user would be a guess, so the entry is per workspace instead.
+    for (const ws of workspaces ?? []) {
+      commands.push({
+        id: `new-task-${ws.ID}`,
+        group: "Actions",
+        title:
+          (workspaces ?? []).length === 1
+            ? "New task"
+            : `New task in ${ws.Title || ws.Path}`,
+        keywords: ["create", "add", ws.Title, ws.Path],
+        run: () => setCrud({ kind: "task", workspace: ws, spaceId: null }),
+      });
+    }
+    return commands;
+  }, [workspaces]);
+  useCommands("sidebar:actions", 5, paletteCommands);
+  // The just-created workspace is expanded on landing; existing ones start
+  // collapsed until first refresh happens (empty state -> created).
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const didInitialLoad = useRef(false);
+  useEffect(() => {
+    if (workspaces === null) return;
+    if (!didInitialLoad.current) {
+      didInitialLoad.current = true;
+      setExpanded(new Set(workspaces.map((ws) => ws.ID)));
+    }
+  }, [workspaces]);
+
+  // Collapsed search (audit-deepseek-harness.md §3): a header action that
+  // expands into a field. An outside click collapses it only while the
+  // query is empty -- a typed query survives clicking away, because
+  // dismissing someone's search by accident is worse than leaving a field
+  // open. The tree's `expanded` set is never touched while searching, so
+  // clearing the query restores exactly the expansion state it had.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLDivElement | null>(null);
+  const searching = query.trim() !== "";
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const onPointerDown = (e: MouseEvent) => {
+      if (searchRef.current?.contains(e.target as Node)) return;
+      setQuery((current) => {
+        if (current.trim() === "") setSearchOpen(false);
+        return current;
+      });
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [searchOpen]);
+
+  const results = useMemo(() => searchTasks(workspaces ?? [], query), [workspaces, query]);
+
+  const empty = !error && workspaces !== null && workspaces.length === 0;
 
   return (
     <Sidebar collapsible="icon">
@@ -326,23 +480,68 @@ export function AppSidebar({
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <ScrollArea className="h-full">
-              <SidebarMenu>
-                {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
-                {!error && workspaces === null && (
-                  <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
-                )}
-                {!error && workspaces?.length === 0 && <StatusRow text="No workspaces yet." />}
-                {workspaces?.map((ws) => (
-                  <WorkspaceItem
-                    key={ws.ID}
-                    workspace={ws}
-                    selectedTaskId={selectedTaskId}
-                    onSelectTask={onSelectTask}
-                    attention={attention}
-                    statusOverrides={statusOverrides}
-                  />
-                ))}
-              </SidebarMenu>
+              <RowSignalContext.Provider value={rowSignal}>
+                <SidebarMenu>
+                  {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
+                  {!error && workspaces === null && (
+                    <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
+                  )}
+                  {empty && !searching && (
+                    <SidebarMenuItem>
+                      <div className="flex flex-col gap-3 px-2 py-4">
+                        <div className="text-xs text-muted-foreground">
+                          <p className="font-medium text-foreground">Welcome to smind</p>
+                          <p className="mt-1">
+                            A workspace is an existing git repo. Tasks are its isolated
+                            worktrees; group them into spaces if you want. Create a
+                            workspace to start.
+                          </p>
+                        </div>
+                        <Button
+                          size="sm"
+                          className="w-fit"
+                          data-testid="sidebar-empty-new-workspace-button"
+                          onClick={() => setCrud({ kind: "workspace" })}
+                        >
+                          <Plus /> New workspace
+                        </Button>
+                      </div>
+                    </SidebarMenuItem>
+                  )}
+                  {searching && (
+                    <SearchResults
+                      results={results}
+                      query={query}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
+                  {!searching &&
+                    workspaces?.map((ws) => (
+                    <WorkspaceItem
+                      key={ws.ID}
+                      workspace={ws}
+                      expanded={expanded.has(ws.ID)}
+                      onToggleExpanded={() =>
+                        setExpanded((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(ws.ID)) next.delete(ws.ID);
+                          else next.add(ws.ID);
+                          return next;
+                        })
+                      }
+                      onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
+                      onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
+                      onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                    />
+                  ))}
+                </SidebarMenu>
+              </RowSignalContext.Provider>
             </ScrollArea>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -522,8 +721,6 @@ function WorkspaceItem({
   onDeleteSpace,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
 }: {
   workspace: WorkspaceWithTree;
   expanded: boolean;
@@ -535,8 +732,6 @@ function WorkspaceItem({
   onDeleteSpace: (space: SpaceWithTasks) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
 }) {
   // A workspace with no spaces (today's common/default case, and every
   // workspace that existed before Space wiring) renders exactly as it did
@@ -579,13 +774,20 @@ function WorkspaceItem({
               selectedTaskId={selectedTaskId}
               onSelectTask={onSelectTask}
               emptyText="No tasks"
-              attention={attention}
-              statusOverrides={statusOverrides}
+              onArchiveTask={onArchiveTask}
             />
           ) : (
             <>
               {workspace.spaces.map((space) => (
-                <SpaceItem key={space.ID} space={space} selectedTaskId={selectedTaskId} onSelectTask={onSelectTask} attention={attention} statusOverrides={statusOverrides} />
+                <SpaceItem
+                  key={space.ID}
+                  space={space}
+                  selectedTaskId={selectedTaskId}
+                  onSelectTask={onSelectTask}
+                  onAddTask={onAddTask}
+                  onArchiveTask={onArchiveTask}
+                  onDeleteSpace={onDeleteSpace}
+                />
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
@@ -593,8 +795,7 @@ function WorkspaceItem({
                   tasks={workspace.ungroupedTasks}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
-                  attention={attention}
-                  statusOverrides={statusOverrides}
+                  onArchiveTask={onArchiveTask}
                 />
               )}
             </>
@@ -609,14 +810,16 @@ function SpaceItem({
   space,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
+  onAddTask,
+  onArchiveTask,
+  onDeleteSpace,
 }: {
   space: SpaceWithTasks;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
+  onAddTask: (spaceId: number | null) => void;
+  onArchiveTask: (task: Task) => void;
+  onDeleteSpace: (space: SpaceWithTasks) => void;
 }) {
   return (
     <SpaceLikeItem
@@ -624,9 +827,23 @@ function SpaceItem({
       tasks={space.tasks}
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
-      attention={attention}
-      statusOverrides={statusOverrides}
-    />
+      onArchiveTask={onArchiveTask}
+      testId="sidebar-space-row"
+      spaceId={space.ID}
+    >
+      <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
+        <RowMenu
+          items={[
+            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
+            { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
+          ]}
+          triggerProps={{
+            "data-testid": "sidebar-space-actions-trigger",
+            "data-space-id": space.ID,
+          }}
+        />
+      </SidebarMenuSubItem>
+    </SpaceLikeItem>
   );
 }
 
@@ -643,15 +860,20 @@ function SpaceLikeItem({
   tasks,
   selectedTaskId,
   onSelectTask,
-  attention,
-  statusOverrides,
+  onArchiveTask,
+  children,
+  testId,
+  spaceId,
 }: {
   title: string;
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
+  onArchiveTask: (task: Task) => void;
+  children?: ReactNode;
+  /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
+  testId?: string;
+  spaceId?: number;
 }) {
   const [open, setOpen] = useState(true);
   const { attention, runStatus } = useRowSignal();
@@ -677,8 +899,7 @@ function SpaceLikeItem({
             selectedTaskId={selectedTaskId}
             onSelectTask={onSelectTask}
             emptyText="No tasks"
-            attention={attention}
-            statusOverrides={statusOverrides}
+            onArchiveTask={onArchiveTask}
           />
         </SidebarMenuSub>
       )}
@@ -751,15 +972,13 @@ function TaskRows({
   selectedTaskId,
   onSelectTask,
   emptyText,
-  attention,
-  statusOverrides,
+  onArchiveTask,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
-  attention?: TaskAttention;
-  statusOverrides: Map<number, string>;
+  onArchiveTask: (task: Task) => void;
 }) {
   const { attention, statusOverrides, runStatus, stats } = useRowSignal();
 
@@ -774,23 +993,92 @@ function TaskRows({
   return (
     <>
       {tasks.map((task) => {
-        const reasons = attention?.get(task.ID);
-        const hasAttention = reasons !== undefined && reasons.size > 0;
+        const reason = primaryAttentionReason(attention?.get(task.ID));
+        const runState = runStatus.get(task.ID);
+        const runDot = runDotStatus(runState);
+        const stat = stats.get(task.ID);
         return (
           <SidebarMenuSubItem key={task.ID}>
-            <SidebarMenuSubButton isActive={task.ID === selectedTaskId} onClick={() => onSelectTask?.(task)}>
-              <span className="truncate">{task.Title}</span>
-              {hasAttention && (
-                <span
-                  data-testid="task-attention"
-                  aria-label="task needs attention"
-                  className="ml-auto size-2 shrink-0 rounded-full bg-primary"
-                />
-              )}
-              <span className={cn("shrink-0 text-[10px] uppercase text-muted-foreground", hasAttention && "ml-auto")}>
-                {statusOverrides.get(task.ID) ?? task.Status}
+            <SidebarMenuSubButton
+              className="h-auto flex-col items-stretch gap-0.5 py-1"
+              isActive={task.ID === selectedTaskId}
+              onClick={() => onSelectTask?.(task)}
+              data-testid="sidebar-task-row"
+              data-task-id={task.ID}
+            >
+              <span className="flex w-full items-center gap-2">
+              {/*
+               * Leading run-status dot -- the task's latest run, live off
+               * run.status (Item 12). In its own reserved slot for the
+               * same reason the attention slot below is reserved: a task's
+               * first run must not shove the title sideways. Task.Status
+               * is not the source: internal/workspace moves a task
+               * created -> running on its first run and never back, so it
+               * means "has ever run", not "is running now".
+               */}
+              <span data-testid="task-run-status-slot" className="flex w-2.5 shrink-0 items-center justify-center">
+                {runDot && (
+                  <StatusDot
+                    status={runDot}
+                    data-testid="task-run-status"
+                    data-run-status={runState}
+                    aria-label={`latest run ${runState}`}
+                  />
+                )}
               </span>
+              <span className="min-w-0 truncate">{task.Title}</span>
+              {/*
+               * The attention-dot slot is always in the DOM at a fixed
+               * width, whether or not there's anything to show -- only
+               * the dot *inside* it is conditional (queried by testid
+               * elsewhere, so it must stay absent-when-none). Without the
+               * reserved slot, the status text below shifts left/right by
+               * the dot's width whenever attention arrives or clears --
+               * exactly the "changing state must not move the layout"
+               * rule from refs/paseo/docs/design.md §11 that Item 2 calls
+               * out for this row specifically.
+               *
+               * The dot's variant now names *why* the task wants
+               * attention (Item 12): error, permission and finished each
+               * get their own, where all three used to render the same
+               * warning dot. The reason is on data-attention-reason and
+               * in the accessible name, so neither a test nor a screen
+               * reader has to tell them apart by colour.
+               */}
+              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+                {reason && (
+                  <StatusDot
+                    status={attentionDotStatus(reason)}
+                    data-testid="task-attention"
+                    data-attention-reason={reason}
+                    aria-label={`task needs attention: ${ATTENTION_LABEL[reason]}`}
+                  />
+                )}
+              </span>
+              </span>
+              <TaskMetaRow stat={stat} status={statusOverrides.get(task.ID) ?? task.Status} />
             </SidebarMenuSubButton>
+            <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Actions for ${task.Title}`}
+                    data-testid="sidebar-task-actions-trigger"
+                    data-task-id={task.ID}
+                    className="size-5 p-0"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
+                    <Archive /> Archive task
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
           </SidebarMenuSubItem>
         );
       })}

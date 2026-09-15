@@ -207,9 +207,9 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, provider, worktreePath, prompt, decider, events)
+		return r.runACP(ctx, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, worktreePath, prompt, decider, events)
 	default:
@@ -222,7 +222,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -409,6 +409,93 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// claudeEvents translates one claudecode.Message into zero or more
+// taskrunner.Events. Both AssistantMessage and UserMessage are walked the
+// same way -- the CLI decodes both with the same block decoder, and a
+// tool_result block can arrive on either one (see claudecode's
+// ToolResultBlock doc comment) -- differing only in that a UserMessage's
+// text blocks are dropped rather than becoming EventTypeText: a user turn
+// is either an echo of the human's own prompt (which the UI already has,
+// see EventTypeUserMessage's doc comment) or the envelope carrying tool
+// results back to the model, never new assistant prose. SystemMessage,
+// ResultMessage (handled separately by runClaudeNative itself), and every
+// other message type yield nothing.
+func claudeEvents(msg claudecode.Message) []Event {
+	var (
+		blocks    []claudecode.ContentBlock
+		assistant bool
+	)
+	switch m := msg.(type) {
+	case claudecode.AssistantMessage:
+		blocks, assistant = m.Content, true
+	case claudecode.UserMessage:
+		blocks = m.Content
+	default:
+		return nil
+	}
+
+	var out []Event
+	for _, block := range blocks {
+		switch b := block.(type) {
+		case claudecode.TextBlock:
+			if !assistant {
+				continue
+			}
+			out = append(out, Event{Type: EventTypeText, Text: b.Text, Raw: msg})
+		case claudecode.ThinkingBlock:
+			out = append(out, Event{Type: EventTypeThinking, Text: b.Thinking, Raw: msg})
+		case claudecode.ToolUseBlock:
+			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
+		case claudecode.ServerToolUseBlock:
+			// A server-side tool (WebSearch/WebFetch) is still a tool call
+			// as far as a timeline card is concerned -- same id/name/input
+			// shape, just executed by the CLI rather than locally.
+			out = append(out, claudeToolUseEvent(msg, b.ID, b.Name, b.Input))
+		case claudecode.ToolResultBlock:
+			status := ToolStatusSuccess
+			if b.IsError {
+				status = ToolStatusFailure
+			}
+			out = append(out, Event{
+				Type:       EventTypeToolCall,
+				Raw:        msg,
+				ToolCallID: b.ToolUseID,
+				ToolStatus: status,
+				ToolResult: b.Content,
+			})
+		case claudecode.ServerToolResultBlock:
+			// No IsError equivalent on the wire for these -- an errored
+			// server tool reports the failure inside Content instead.
+			out = append(out, Event{
+				Type:       EventTypeToolCall,
+				Raw:        msg,
+				ToolCallID: b.ToolUseID,
+				ToolStatus: ToolStatusSuccess,
+				ToolResult: b.Content,
+			})
+		}
+	}
+	return out
+}
+
+// claudeToolUseEvent builds the "call started" event shared by
+// ToolUseBlock and ServerToolUseBlock.
+func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[string]any) Event {
+	// json.Marshal on a map[string]any built by decoding the CLI's own
+	// NDJSON never fails, so the error is ignored -- same reasoning as
+	// every other json.Marshal call in this package that round-trips
+	// already-decoded provider data.
+	raw, _ := json.Marshal(input)
+	return Event{
+		Type:       EventTypeToolCall,
+		Raw:        msg,
+		ToolCallID: id,
+		ToolName:   name,
+		ToolStatus: ToolStatusRunning,
+		ToolInput:  raw,
+	}
 }
 
 // runCodexNative drives one turn against a Codex-native agent (internal/codex).

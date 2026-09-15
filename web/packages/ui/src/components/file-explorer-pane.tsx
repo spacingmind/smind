@@ -9,6 +9,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
+import { FileIcon } from "@/lib/file-icons";
+import { requestDiffReveal } from "@/lib/diff-reveal";
 import { useFileExplorer, type DirNode } from "@/hooks/use-file-explorer";
 import { useTaskFileStatus } from "@/hooks/use-task-file-status";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
@@ -76,6 +78,8 @@ export function FileExplorerPane({
         depth={0}
         dirs={explorer.dirs}
         selectedPath={explorer.selectedPath}
+        statusByPath={statusByPath}
+        dirStatus={dirStatus}
         onToggleDir={explorer.toggleDir}
         onSelectFile={(path) => {
           explorer.selectFile(path);
@@ -330,8 +334,9 @@ function TreeRow({
       style={{ paddingLeft: `${depth * 14 + 8}px` }}
       {...props}
     >
-      {icon}
-      <span className="truncate">{label}</span>
+      <span className="flex shrink-0 items-center gap-1.5">{icon}</span>
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {status && <FileStatusMarker status={status} />}
     </div>
   );
 }

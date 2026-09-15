@@ -1,6 +1,7 @@
 package wsapi
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -183,6 +184,38 @@ func TestEvents_TaskStatusSubscribeAndReceive(t *testing.T) {
 	decodePayload(t, ev, &p)
 	if p.TaskID != task.ID || p.Status != "archived" {
 		t.Fatalf("task.status payload = %+v, want taskId %d status archived", p, task.ID)
+	}
+}
+
+// TestSubscriber_NextReturnsNotOKAfterCloseAndDrain pins next()'s own
+// documented contract ("ok=false once closed and drained"): a regression
+// here previously had next() return ok=s.closed instead, so pumpEvents
+// never took its !ok branch and never called wait(ctx), spinning at 100%
+// CPU per closed connection instead of exiting (2026-09-12 dogfood
+// finding -- no prior test exercised next() past close()).
+func TestSubscriber_NextReturnsNotOKAfterCloseAndDrain(t *testing.T) {
+	t.Parallel()
+	sub := newSubscriber()
+	sub.subscribe([]string{"t"})
+
+	sub.offer(Event{Topic: "t", Payload: "a"})
+	if _, _, ok := sub.next(); !ok {
+		t.Fatalf("next() ok = false before close, want true (queued event)")
+	}
+
+	sub.close()
+	if _, _, ok := sub.next(); ok {
+		t.Fatalf("next() ok = true after close and drain, want false")
+	}
+
+	// A fresh subscriber (never offered/closed, so its cap-1 signal
+	// channel holds no stale nudge) isolates wait()'s ctx.Done() case
+	// from wait()'s other, non-deterministic-under-select case.
+	idle := newSubscriber()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if idle.wait(ctx) {
+		t.Fatalf("wait() = true on an already-canceled ctx with no pending nudge, want false (pump should exit, not spin)")
 	}
 }
 

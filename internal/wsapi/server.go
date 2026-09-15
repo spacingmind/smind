@@ -51,12 +51,11 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
 	bus := newEventBus()
-	wm.SetTaskNotifier(func(taskID int64, status string) {
-		bus.Publish(Event{Topic: TopicTaskStatus, Payload: taskStatusPayload{TaskID: taskID, Status: status}})
-	})
+	wm.SetNotifier(busWorkspaceNotifier{bus: bus})
 	reg.SetNotifier(busRunNotifier{bus: bus})
 
-	hs := methodHandlers(wm, acctReg, runner, reg, treg)
+	coord := accounts.NewDefaultLoginCoordinator(acctReg)
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, coord)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
@@ -76,6 +75,49 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		c.serve(r.Context())
 	})
 	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
+}
+
+// busWorkspaceNotifier adapts the shared event bus to workspace.Notifier,
+// translating each Manager lifecycle notification into its ADR-0005/0009
+// wire payload.
+type busWorkspaceNotifier struct {
+	bus *eventBus
+}
+
+func (b busWorkspaceNotifier) NotifyTaskStatus(taskID int64, status string) {
+	b.bus.Publish(Event{Topic: TopicTaskStatus, Payload: taskStatusPayload{TaskID: taskID, Status: status}})
+}
+
+func (b busWorkspaceNotifier) NotifyWorkspaceCreated(w store.Workspace) {
+	b.bus.Publish(Event{Topic: TopicWorkspaceCreated, Payload: workspaceCreatedPayload{Workspace: w}})
+}
+
+func (b busWorkspaceNotifier) NotifyWorkspaceDeleted(id int64) {
+	b.bus.Publish(Event{Topic: TopicWorkspaceDeleted, Payload: workspaceDeletedPayload{ID: id}})
+}
+
+func (b busWorkspaceNotifier) NotifySpaceCreated(sp store.Space) {
+	b.bus.Publish(Event{Topic: TopicSpaceCreated, Payload: spaceCreatedPayload{Space: sp}})
+}
+
+func (b busWorkspaceNotifier) NotifySpaceDeleted(id, workspaceID int64) {
+	b.bus.Publish(Event{Topic: TopicSpaceDeleted, Payload: spaceDeletedPayload{ID: id, WorkspaceID: workspaceID}})
+}
+
+func (b busWorkspaceNotifier) NotifyTaskCreated(t store.Task) {
+	b.bus.Publish(Event{Topic: TopicTaskCreated, Payload: taskCreatedPayload{Task: t}})
+}
+
+func (b busWorkspaceNotifier) NotifyTaskUpdated(t store.Task) {
+	b.bus.Publish(Event{Topic: TopicTaskUpdated, Payload: taskUpdatedPayload{Task: t}})
+}
+
+func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
+	b.bus.Publish(Event{Topic: TopicTaskArchived, Payload: taskArchivedPayload{Task: t}})
+}
+
+func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
+	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
 }
 
 // busRunNotifier adapts the shared event bus to runs.Notifier, translating

@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -15,11 +18,13 @@ import (
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, reg, and treg.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry) map[string]handlerFunc {
+// bound to wm, runner, reg, treg, and coord.
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
+		"account.oauthStart":    handleAccountOAuthStart(coord),
 		"provider.list":         handleProviderList(),
+		"provider.test":         handleProviderTest(acctReg),
 		"account.list":          handleAccountList(acctReg),
 		"workspace.create":      handleWorkspaceCreate(wm),
 		"workspace.list":        handleWorkspaceList(wm),
@@ -36,8 +41,10 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.diff":             handleTaskDiff(wm),
 		"task.files":            handleTaskFiles(wm),
 		"task.fileDiff":         handleTaskFileDiff(wm),
+		"task.searchIndex":      handleTaskSearchIndex(wm),
 		"task.stage":            handleTaskStage(wm),
 		"task.commit":           handleTaskCommit(wm),
+		"task.createPr":         handleTaskCreatePR(wm),
 		"task.prompt":           handleTaskPrompt(wm, runner, reg),
 		"run.start":             handleRunStart(wm, runner, reg),
 		"run.list":              handleRunList(reg),
@@ -150,84 +157,6 @@ func handleAccountOAuthStart(coord *accounts.LoginCoordinator) handlerFunc {
 		})
 		if err != nil {
 			return nil, fmt.Errorf("account.oauthStart: %w", err)
-		}
-		return accountResultFrom(account), nil
-	}
-}
-
-func handleAccountList(registry *accounts.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		if registry == nil {
-			return nil, fmt.Errorf("account.list: accounts registry is unavailable")
-		}
-		stored, err := registry.List()
-		if err != nil {
-			return nil, fmt.Errorf("account.list: %w", err)
-		}
-		result := make([]accountResult, len(stored))
-		for i, account := range stored {
-			result[i] = accountResultFrom(account)
-		}
-		return result, nil
-	}
-}
-
-// accountResult is the deliberately credential-free account shape exposed by
-// the WebSocket API. Account metadata is useful to clients; credential
-// material must stay in the registry/store and never be returned over RPC.
-type accountResult struct {
-	ID             int64  `json:"id"`
-	Provider       string `json:"provider"`
-	Label          string `json:"label"`
-	CredentialType string `json:"credentialType"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
-}
-
-func accountResultFrom(a accounts.Account) accountResult {
-	return accountResult{
-		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType,
-		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
-	}
-}
-
-func handleAccountAdd(registry *accounts.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
-		if registry == nil {
-			return nil, fmt.Errorf("account.add: accounts registry is unavailable")
-		}
-		var p struct {
-			Provider   string `json:"provider"`
-			Label      string `json:"label"`
-			Credential string `json:"credential"`
-		}
-		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("account.add: invalid params: %w", err)
-		}
-		if p.Provider == "" || p.Label == "" || p.Credential == "" {
-			return nil, fmt.Errorf("account.add: provider, label, and credential are required")
-		}
-
-		var oauth accounts.OAuthCredential
-		if err := json.Unmarshal([]byte(p.Credential), &oauth); err == nil && oauth.RefreshToken != "" {
-			created, err := registry.AddOAuth(p.Provider, p.Label, oauth)
-			if err != nil {
-				return nil, fmt.Errorf("account.add: %w", err)
-			}
-			account, err := registry.Get(created.ID)
-			if err != nil {
-				return nil, fmt.Errorf("account.add: %w", err)
-			}
-			return accountResultFrom(account), nil
-		}
-
-		created, err := registry.AddAPIKey(p.Provider, p.Label, strings.TrimSpace(p.Credential))
-		if err != nil {
-			return nil, fmt.Errorf("account.add: %w", err)
-		}
-		account, err := registry.Get(created.ID)
-		if err != nil {
-			return nil, fmt.Errorf("account.add: %w", err)
 		}
 		return accountResultFrom(account), nil
 	}
@@ -476,6 +405,35 @@ func handleTaskFiles(wm *workspace.Manager) handlerFunc {
 	}
 }
 
+// taskStatsResult is the result of task.stats: one entry per task in the
+// workspace that has a worktree to diff (see workspace.TaskStat). Tasks
+// with no worktree, and tasks whose stat could not be computed, are absent
+// from the list rather than present with zeroes -- zero changed files is a
+// real and different statement from "not known".
+type taskStatsResult struct {
+	Stats []workspace.TaskStat `json:"stats"`
+}
+
+// handleTaskStats returns every task's branch and diff size for one
+// workspace in a single call -- the sidebar's per-row git signal, which
+// would otherwise be one task.files round trip (and one worktree scan) per
+// row. The counts are of exactly the diff task.diff renders.
+func handleTaskStats(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			WorkspaceID int64 `json:"workspaceId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.stats: invalid params: %w", err)
+		}
+		stats, err := wm.TaskStats(p.WorkspaceID)
+		if err != nil {
+			return nil, fmt.Errorf("task.stats: %w", err)
+		}
+		return taskStatsResult{Stats: stats}, nil
+	}
+}
+
 // taskFileDiffResult is the result of task.fileDiff: the unified diff for
 // exactly one file of the task's base→worktree diff, or an empty string
 // for a path with no changes.
@@ -502,6 +460,33 @@ func handleTaskFileDiff(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.fileDiff: %w", err)
 		}
 		return taskFileDiffResult{Diff: diff}, nil
+	}
+}
+
+// taskSearchIndexResult is the result of task.searchIndex: every path in
+// the task's worktree eligible for the web UI's quick-open (Item 18),
+// git's own notion of the worktree's contents (tracked plus
+// untracked-but-not-ignored) rather than a client-side directory walk.
+type taskSearchIndexResult struct {
+	Paths []string `json:"paths"`
+}
+
+// handleTaskSearchIndex returns the whole-worktree path list quick-open
+// fuzzy-matches against client-side; see workspace.Manager.TaskSearchIndex
+// for why this is one RPC rather than a client-side file.list walk.
+func handleTaskSearchIndex(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64 `json:"taskId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.searchIndex: invalid params: %w", err)
+		}
+		paths, err := wm.TaskSearchIndex(p.TaskID)
+		if err != nil {
+			return nil, fmt.Errorf("task.searchIndex: %w", err)
+		}
+		return taskSearchIndexResult{Paths: paths}, nil
 	}
 }
 
@@ -557,6 +542,36 @@ func handleTaskCommit(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.commit: %w", err)
 		}
 		return taskCommitResult(result), nil
+	}
+}
+
+// taskCreatePRResult is the result of task.createPr: the URL of the pull
+// request gh created.
+type taskCreatePRResult struct {
+	URL string `json:"url"`
+}
+
+// handleTaskCreatePR opens a pull request for a task's branch against
+// baseBranch (or workspace.defaultBaseBranch if empty) -- see
+// workspace.Manager.CreatePR for the push-directly-vs-cherry-pick-onto-a-
+// clean-branch decision (task-permission-ux.md Item 5). Every failure mode
+// (no worktree, fetch/push/gh failure, a diverged base with no commits to
+// PR) comes back as a wrapped, descriptive error -- never swallowed -- so
+// the web UI has something concrete to show inline.
+func handleTaskCreatePR(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID     int64  `json:"taskId"`
+			BaseBranch string `json:"baseBranch"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.createPr: invalid params: %w", err)
+		}
+		result, err := wm.CreatePR(p.TaskID, p.BaseBranch)
+		if err != nil {
+			return nil, fmt.Errorf("task.createPr: %w", err)
+		}
+		return taskCreatePRResult{URL: result.URL}, nil
 	}
 }
 
@@ -1014,4 +1029,127 @@ func handleProviderList() handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
 		return providerListResult{Providers: taskrunner.SupportedProviders()}, nil
 	}
+}
+
+// providerCLICommand maps a taskrunner.Provider to the command whose first
+// argument (the executable name) internal/taskrunner.Runner actually spawns
+// for it, for provider.test's cli-kind diagnostic path below -- mirroring
+// acp.GLMCommand/codex.DefaultCommand and, for ProviderClaudeNative,
+// github.com/spacingmind/claude-agent-sdk-go's own hardcoded "claude"
+// binary (that package exposes no command override, unlike the ACP/Codex
+// backends, so there's nothing to import here). Only the three providers
+// this diagnostic is scoped to are listed; ProviderKimi's CLI needs an
+// out-of-band `kimi -> /login` first (see acp.KimiCommand's doc comment) so
+// "is kimi on PATH" wouldn't actually signal readiness the way it does for
+// the other three -- it's left to fall through to the credential-based
+// check below, same as the account-management "kimi" provider id.
+var providerCLICommand = map[taskrunner.Provider][]string{
+	taskrunner.ProviderGLM:          acp.GLMCommand(),
+	taskrunner.ProviderCodexNative:  codex.DefaultCommand(),
+	taskrunner.ProviderClaudeNative: {"claude"},
+}
+
+// providerTestTimeout bounds how long provider.test's PATH lookup is
+// allowed to take before it's reported as a failure rather than left to
+// hang the request -- exec.LookPath only stats directories on $PATH so it
+// should return near-instantly, but this keeps the RPC's "never hang"
+// contract even against a pathological filesystem (e.g. a stuck network
+// mount on $PATH).
+const providerTestTimeout = 3 * time.Second
+
+// providerTestResult is the result of provider.test: whether the provider
+// looks ready to actually start a turn, plus a short human-readable detail
+// string for either case (accounts-dialog.tsx shows it inline next to the
+// row's status dot).
+type providerTestResult struct {
+	OK     bool   `json:"ok"`
+	Detail string `json:"detail"`
+}
+
+// handleProviderTest is a lightweight "test this provider now" diagnostic:
+// it never actually starts a run, it just checks whether the provider
+// *could* start one. For a cli-kind provider (providerCLICommand above) it
+// checks the underlying agent binary is resolvable on $PATH; otherwise it
+// treats provider as an account-credential provider id (internal/accounts,
+// the anthropic/openai/kimi/xai/antigravity vocabulary) and checks a
+// stored, unexpired credential exists for it. Never hits the network and
+// never refreshes a credential (accounts.Registry.EnsureFresh does that,
+// with real side effects); this only reports what's already there.
+func handleProviderTest(acctReg *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			Provider string `json:"provider"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("provider.test: invalid params: %w", err)
+		}
+		if p.Provider == "" {
+			return nil, fmt.Errorf("provider.test: provider is required")
+		}
+		if cmd, ok := providerCLICommand[taskrunner.Provider(p.Provider)]; ok {
+			return testProviderCLI(cmd), nil
+		}
+		return testProviderCredential(acctReg, p.Provider), nil
+	}
+}
+
+// testProviderCLI checks that cmd's executable (cmd[0]) resolves on $PATH,
+// bounded by providerTestTimeout so a pathological PATH lookup can't hang
+// the request.
+func testProviderCLI(cmd []string) providerTestResult {
+	if len(cmd) == 0 {
+		return providerTestResult{Detail: "no command configured for this provider"}
+	}
+	type lookupResult struct {
+		path string
+		err  error
+	}
+	done := make(chan lookupResult, 1)
+	go func() {
+		path, err := exec.LookPath(cmd[0])
+		done <- lookupResult{path: path, err: err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			return providerTestResult{Detail: fmt.Sprintf("%q not found on PATH: %v", cmd[0], r.err)}
+		}
+		return providerTestResult{OK: true, Detail: fmt.Sprintf("found %s", r.path)}
+	case <-time.After(providerTestTimeout):
+		return providerTestResult{Detail: fmt.Sprintf("timed out looking for %q on PATH", cmd[0])}
+	}
+}
+
+// testProviderCredential checks whether provider (an internal/accounts
+// provider id) has at least one stored account whose credential looks
+// usable right now: an API key (which doesn't expire) or an OAuth
+// credential not already past its ExpiresAt. It reports the first usable
+// account found, or -- if provider has accounts but none are usable -- says
+// so, distinct from having no account at all.
+func testProviderCredential(acctReg *accounts.Registry, provider string) providerTestResult {
+	if acctReg == nil {
+		return providerTestResult{Detail: "accounts registry is unavailable"}
+	}
+	all, err := acctReg.List()
+	if err != nil {
+		return providerTestResult{Detail: fmt.Sprintf("failed to list accounts: %v", err)}
+	}
+
+	found := 0
+	for _, a := range all {
+		if a.Provider != provider {
+			continue
+		}
+		found++
+		switch {
+		case a.APIKey != nil && a.APIKey.Key != "":
+			return providerTestResult{OK: true, Detail: fmt.Sprintf("using %q (api key)", a.Label)}
+		case a.OAuth != nil && time.Now().Before(a.OAuth.ExpiresAt):
+			return providerTestResult{OK: true, Detail: fmt.Sprintf("using %q (oauth, expires %s)", a.Label, a.OAuth.ExpiresAt.Format(time.RFC3339))}
+		}
+	}
+	if found == 0 {
+		return providerTestResult{Detail: fmt.Sprintf("no account configured for %q", provider)}
+	}
+	return providerTestResult{Detail: fmt.Sprintf("found %d account(s) for %q, but all credentials are expired", found, provider)}
 }

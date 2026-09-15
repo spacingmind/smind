@@ -311,6 +311,24 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
 }
 
+// bashCommand extracts the literal shell command from req, if req is a
+// Bash tool-use request -- Claude Code's built-in Bash tool's Input schema
+// is {"command": "...", ...}, confirmed against the fake CLI's own
+// "streaming_and_permission"-style scenarios in taskrunner_test.go. Any
+// other ToolName (Read, Edit, Write, a custom MCP tool, ...), or a Bash
+// request whose Input for some reason doesn't carry a string "command"
+// (shouldn't happen for a real Claude Code turn, but this is user-influenced
+// wire data, not something to trust blindly), returns "" -- see
+// PermissionDecider's doc comment on why an empty command is always safe
+// (never auto-allowed).
+func bashCommand(req claudecode.CanUseToolRequest) string {
+	if req.ToolName != "Bash" {
+		return ""
+	}
+	cmd, _ := req.Input["command"].(string)
+	return cmd
+}
+
 // Synthesized PermissionOption IDs for Codex-native turns, whose wire
 // protocol (like Claude Code's) has no options list -- just a request to
 // accept or decline (see codex.PermissionPolicy's doc comment).
@@ -330,7 +348,10 @@ type codexDeciderAdapter struct {
 
 func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
 	summary := fmt.Sprintf("run %s", req.Command)
-	return a.decide(ctx, summary)
+	// req.Command is Codex's own decoded field for exactly this request
+	// kind (unlike Claude Code's Input, there's no tool-name check needed
+	// here -- a CommandExecutionApprovalRequest is always a shell command).
+	return a.decide(ctx, summary, req.Command)
 }
 
 func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.FileChangeApprovalRequest) (bool, error) {
@@ -338,15 +359,19 @@ func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.Fil
 	if req.Reason != "" {
 		summary = req.Reason
 	}
-	return a.decide(ctx, summary)
+	// A file-change approval carries no shell command at all -- "" here
+	// means ApprovalPolicyAutoSafe can never auto-allow one, which is
+	// correct: this pass's allowlist only ever covers read-only shell
+	// verification commands, never a file modification.
+	return a.decide(ctx, summary, "")
 }
 
-func (a codexDeciderAdapter) decide(ctx context.Context, summary string) (bool, error) {
+func (a codexDeciderAdapter) decide(ctx context.Context, summary, command string) (bool, error) {
 	opts := []PermissionOption{
 		{ID: codexOptionAccept, Label: "Accept", Kind: "allow_once"},
 		{ID: codexOptionDecline, Label: "Decline", Kind: "reject_once"},
 	}
-	optionID, err := a.decider.Decide(ctx, summary, opts)
+	optionID, err := a.decider.Decide(ctx, summary, command, opts)
 	if err != nil {
 		return false, err
 	}
