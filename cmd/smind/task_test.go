@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,7 @@ func TestRunLogsResult_DecodesStructuredEvents(t *testing.T) {
 		"status": "done",
 		"stopReason": "end_turn",
 		"events": [
+			{"type": "raw", "kind": "plan", "payload": {"sessionUpdate": "plan"}},
 			{"type": "thinking", "text": "let me check"},
 			{"type": "user_message", "text": "a synthesized turn"},
 			{"type": "tool_call", "toolCallId": "tc-1", "toolName": "execute", "title": "Run tests", "status": "running", "input": {"command": "go test ./..."}},
@@ -35,19 +37,59 @@ func TestRunLogsResult_DecodesStructuredEvents(t *testing.T) {
 	if err := json.Unmarshal([]byte(payload), &got); err != nil {
 		t.Fatalf("decode run.logs result: %v", err)
 	}
-	if len(got.Events) != 6 {
-		t.Fatalf("got %d events, want 6", len(got.Events))
+	if len(got.Events) != 7 {
+		t.Fatalf("got %d events, want 7", len(got.Events))
 	}
 
-	start := got.Events[2]
+	// docs/decisions/0010-preserve-unknown-acp-event-kinds.md: the CLI's
+	// runLogEvent must decode a "raw" entry's kind/payload -- same
+	// embedded-unexported-struct promotion caveat this test's own doc
+	// comment describes for toolCallEventParams.
+	if raw := got.Events[0]; raw.Kind != "plan" || string(raw.Payload) != `{"sessionUpdate": "plan"}` {
+		t.Fatalf("raw entry = %+v, want kind %q carrying its payload", raw, "plan")
+	}
+
+	start := got.Events[3]
 	if start.ToolCallID != "tc-1" || start.ToolName != "execute" || start.Title != "Run tests" || start.Status != "running" {
 		t.Fatalf("tool_call start = %+v, want tc-1/execute/%q/running", start, "Run tests")
 	}
 	if string(start.Input) != `{"command": "go test ./..."}` {
 		t.Fatalf("tool_call start input = %s, want the raw arguments object", start.Input)
 	}
-	if done := got.Events[3]; done.Status != "success" || string(done.Result) != `[{"type": "content"}]` {
+	if done := got.Events[4]; done.Status != "success" || string(done.Result) != `[{"type": "content"}]` {
 		t.Fatalf("tool_call completion = %+v, want success carrying the raw result", done)
+	}
+}
+
+// TestRenderRaw proves a "raw" event -- an ACP session-update kind the
+// daemon's normalizer doesn't recognize -- prints its kind and payload
+// rather than being silently skipped by `task attach`/`task logs`. See
+// docs/decisions/0010-preserve-unknown-acp-event-kinds.md.
+func TestRenderRaw(t *testing.T) {
+	t.Parallel()
+
+	got := renderRaw(rawEventParams{Kind: "plan", Payload: json.RawMessage(`{"sessionUpdate":"plan"}`)})
+	want := "[raw] \"plan\": {\"sessionUpdate\":\"plan\"}\n"
+	if got != want {
+		t.Fatalf("renderRaw() = %q, want %q", got, want)
+	}
+}
+
+// TestRenderRaw_KindWithControlCharacters proves a Kind carrying an
+// embedded newline or other control character (a JSON-decoded Go string,
+// unlike Payload's raw wire bytes -- see renderRaw's doc comment) can't
+// smear its "raw" line across multiple physical lines and corrupt a
+// line-oriented consumer of `task logs`/`task attach` output.
+func TestRenderRaw_KindWithControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	got := renderRaw(rawEventParams{Kind: "plan\nINJECTED", Payload: json.RawMessage(`{}`)})
+	if strings.Count(got, "\n") != 1 {
+		t.Fatalf("renderRaw() = %q, want exactly one newline (the trailing one)", got)
+	}
+	want := "[raw] \"plan\\nINJECTED\": {}\n"
+	if got != want {
+		t.Fatalf("renderRaw() = %q, want %q", got, want)
 	}
 }
 

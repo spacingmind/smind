@@ -84,6 +84,17 @@ describe("appendTimelineEvent", () => {
     expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "todo_list" }]);
   });
 
+  it("renders a 'raw' event (docs/decisions/0010-preserve-unknown-acp-event-kinds.md) as a fallback row, not silently", () => {
+    // The daemon now forwards an ACP session-update kind it doesn't
+    // recognize (e.g. "plan") as a "raw" wire event instead of dropping
+    // it. This client has no dedicated case for "raw" -- it's expected to
+    // fall into the same generic-unknown-event path as any other name
+    // this build has never heard of, per the "does not throw on
+    // malformed or unknown events" test above.
+    const items = buildTimeline([{ type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent]);
+    expect(items).toEqual([{ kind: "unknown", id: "unknown-0", eventType: "raw" }]);
+  });
+
   it("folds 2000 chunk events into one item in linear time", () => {
     const events: RunLogEvent[] = Array.from({ length: 2000 }, (_, i) => ({ type: "chunk", text: `line ${i}\n` }));
 

@@ -30,6 +30,8 @@ type persistedEvent struct {
 	ToolStatus          string                        `json:"toolStatus,omitempty"`
 	ToolInput           json.RawMessage               `json:"toolInput,omitempty"`
 	ToolResult          json.RawMessage               `json:"toolResult,omitempty"`
+	RawKind             string                        `json:"rawKind,omitempty"`
+	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
@@ -47,6 +49,8 @@ func encodeEvent(e Event) (string, error) {
 		ToolStatus:          e.ToolStatus,
 		ToolInput:           e.ToolInput,
 		ToolResult:          e.ToolResult,
+		RawKind:             e.RawKind,
+		RawPayload:          e.RawPayload,
 	})
 	if err != nil {
 		return "", err
@@ -73,5 +77,7 @@ func decodeEvent(data string) (Event, error) {
 		ToolStatus:          p.ToolStatus,
 		ToolInput:           p.ToolInput,
 		ToolResult:          p.ToolResult,
+		RawKind:             p.RawKind,
+		RawPayload:          p.RawPayload,
 	}, nil
 }
