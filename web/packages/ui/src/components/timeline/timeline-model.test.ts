@@ -102,6 +102,12 @@ describe("appendTimelineEvent", () => {
       expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason: undefined }]);
     });
 
+    it("records a reason this build has never heard of as-is, rather than dropping it", () => {
+      const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "some_future_reason" }]);
+
+      expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason: "some_future_reason" }]);
+    });
+
     it("does not disturb earlier items' identity", () => {
       const before = buildTimeline([{ type: "chunk", text: "hello" }]);
       const after = appendTimelineEvent(before, { type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "human" });
