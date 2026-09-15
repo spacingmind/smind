@@ -226,7 +226,17 @@ func runPromptScript(promptMsg message, cwd string) {
 		// a thought chunk, a user-message chunk, and a tool call reported
 		// first as "tool_call" (running) then completed via a
 		// "tool_call_update" -- proving Runner's acpEvent translates each
-		// into its own taskrunner.EventType.
+		// into its own taskrunner.EventType. Also sends a "plan" update, a
+		// kind acpEvent doesn't otherwise recognize, proving it surfaces as
+		// EventTypeRaw rather than being dropped
+		// (docs/decisions/0010-preserve-unknown-acp-event-kinds.md).
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update": map[string]any{
+				"sessionUpdate": "plan",
+				"entries":       []any{map[string]any{"content": "write the tests", "status": "pending"}},
+			},
+		})
 		notify("session/update", map[string]any{
 			"sessionId": sessionID,
 			"update": map[string]any{

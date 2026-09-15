@@ -1552,10 +1552,21 @@ schema is Item 8/9, Track B, separate PR):
 
 - **Known gaps left open for Items 8/9 / a follow-up**, none of them
   regressions:
-  - An ACP update kind neither `Text()` nor `IsToolCall()` accepts
+  - ~~An ACP update kind neither `Text()` nor `IsToolCall()` accepts
     (`plan` today, anything ACP adds tomorrow) is silently dropped
     rather than surfaced as a generic/raw event. Preserving unknown
-    kinds would mean a new wire event name, i.e. its own ADR.
+    kinds would mean a new wire event name, i.e. its own ADR.~~
+    **Closed** — `docs/decisions/0010-preserve-unknown-acp-event-kinds.md`:
+    `acpEvent` now surfaces any unrecognized session-update kind as a new
+    `EventTypeRaw`/`"raw"` wire event (`RawKind` + `RawPayload`) instead of
+    dropping it. `internal/wsapi`, `internal/runs` persistence, and
+    `cmd/smind/task.go` (`[raw] <kind>: <payload>`) all forward/render it;
+    the web timeline needed **no code change** — `use-run-timeline.ts`'s
+    existing generic-unknown-event fallback (built during this same Item 7
+    pass, see the Adversarial review note above) already renders any
+    unrecognized wire `type` as a labelled placeholder row, confirmed by a
+    new test asserting a `"raw"` event specifically
+    (`timeline-model.test.ts`).
   - ACP's `rawOutput` is not carried: `ToolResult` is fed from the
     tool call's display `content` array.
   - Every event, now including full tool inputs and results, is written

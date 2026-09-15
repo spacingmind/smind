@@ -67,6 +67,14 @@ const (
 	// docs/decisions/0008-structured-run-events.md's Decision for why that
 	// gap is deliberate.
 	EventTypeToolCall
+
+	// EventTypeRaw preserves an ACP session-update kind acpEvent doesn't
+	// otherwise recognize (e.g. "plan", or any kind a future ACP revision
+	// or provider adds) instead of silently dropping it -- see
+	// docs/decisions/0010-preserve-unknown-acp-event-kinds.md. RawKind and
+	// RawPayload carry the original wire kind and payload; no other field
+	// is populated.
+	EventTypeRaw
 )
 
 // Unified ToolStatus values for Event.ToolStatus, spanning both providers'
@@ -183,6 +191,16 @@ type Event struct {
 	// ToolStatusFailure (there is no separate error-message field) --
 	// same "provider-native, not normalized" reasoning as ToolInput.
 	ToolResult json.RawMessage
+
+	// RawKind is populated for EventTypeRaw: the original ACP
+	// sessionUpdate discriminator value the normalizer didn't recognize
+	// (e.g. "plan"). See docs/decisions/0010-preserve-unknown-acp-event-kinds.md.
+	RawKind string
+
+	// RawPayload is populated for EventTypeRaw: the original update's
+	// full wire JSON (acp.SessionUpdate.Raw), forwarded unparsed since
+	// there is no typed shape for a kind this package doesn't recognize.
+	RawPayload json.RawMessage
 }
 
 // PermissionResolution categorizes how an EventTypePermissionResolved

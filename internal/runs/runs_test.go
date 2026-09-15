@@ -1210,7 +1210,9 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 // pre-existing event types already did: a rehydrated Registry built
 // against the same store (simulating a daemon restart, same pattern as
 // TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries) sees the
-// identical history a fresh run produced.
+// identical history a fresh run produced. Also covers EventTypeRaw
+// (docs/decisions/0010-preserve-unknown-acp-event-kinds.md), produced by
+// the fakeagent's "structured" scenario sending a "plan" update.
 func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 	t.Parallel()
 	wm, st := newTestWorkspaceManager(t)
@@ -1229,14 +1231,20 @@ func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 		t.Fatalf("History() on reg1 error = %v", err)
 	}
 
-	var wantToolCalls int
+	var wantToolCalls, wantRaw int
 	for _, e := range wantHist {
 		if e.Type == taskrunner.EventTypeToolCall {
 			wantToolCalls++
 		}
+		if e.Type == taskrunner.EventTypeRaw {
+			wantRaw++
+		}
 	}
 	if wantToolCalls == 0 {
 		t.Fatal("in-memory history has no tool-call events, nothing to prove round-trips")
+	}
+	if wantRaw == 0 {
+		t.Fatal("in-memory history has no raw events, nothing to prove round-trips")
 	}
 
 	reg2 := newTestRegistry(t, st)
@@ -1252,7 +1260,8 @@ func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 		if g.Type != w.Type || g.Text != w.Text ||
 			g.ToolCallID != w.ToolCallID || g.ToolName != w.ToolName ||
 			g.ToolTitle != w.ToolTitle || g.ToolStatus != w.ToolStatus ||
-			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) {
+			string(g.ToolInput) != string(w.ToolInput) || string(g.ToolResult) != string(w.ToolResult) ||
+			g.RawKind != w.RawKind || string(g.RawPayload) != string(w.RawPayload) {
 			t.Fatalf("rehydrated History[%d] = %+v, want %+v", i, g, w)
 		}
 	}
