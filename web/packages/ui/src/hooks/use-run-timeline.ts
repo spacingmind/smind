@@ -5,6 +5,7 @@ import type {
   ApprovalPolicy,
   PermissionQuestion,
   PermissionRequestEventParams,
+  PermissionResolutionReason,
   PermissionResolvedEventParams,
   Provider,
   RunAttachResult,
@@ -39,7 +40,7 @@ export interface PendingPermission {
  * item at its original object identity, so React re-renders exactly one
  * row instead of the whole transcript.
  */
-export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelineUnknownItem;
+export type TimelineItem = TimelineTextItem | TimelineToolCallItem | TimelinePermissionItem | TimelineUnknownItem;
 
 /** Assistant output, the human's own turn, or the model's reasoning -- three roles, one shape. */
 export interface TimelineTextItem {
@@ -61,6 +62,25 @@ export interface TimelineToolCallItem {
 }
 
 /**
+ * A resolved permission request, rendered as a small marker row so the
+ * transcript keeps a visible trace of *how* it was resolved -- a person
+ * clicking an option, an auto-safe policy deciding for them, or the
+ * request timing out unanswered (ui-redesign-parity.md's Validation
+ * note). There is deliberately no "pending" counterpart item: while a
+ * request is unanswered it lives only in `RunEntry.pendingPermission`
+ * (the dock), and this item is created once, at the moment
+ * "permission_resolved" arrives.
+ */
+export interface TimelinePermissionItem {
+  kind: "permission";
+  id: string;
+  requestId: string;
+  optionId: string;
+  /** Absent for an older server payload with no reason field -- renders with no reason badge, not a crash. */
+  reason?: PermissionResolutionReason;
+}
+
+/**
  * An event whose `type` this client does not know. The daemon's event
  * enum is append-only (ADR 0008), so a newer daemon talking to an older
  * tab is a supported state, not a bug -- it renders as a labelled
@@ -79,8 +99,14 @@ const TEXT_EVENT_KINDS: Record<string, TimelineTextItem["kind"]> = {
   thinking: "thinking",
 };
 
-/** Event names that are not transcript rows at all -- they drive run status and the permission dock instead. */
-const NON_ITEM_EVENTS = new Set(["done", "permission_request", "permission_resolved"]);
+/**
+ * Event names that are not transcript rows at all. "done" only drives run
+ * status, and "permission_request" only drives the pending-permission
+ * dock (RunEntry.pendingPermission) -- neither ever becomes an item.
+ * "permission_resolved" is deliberately *not* in this set: it becomes a
+ * TimelinePermissionItem, handled by its own branch below.
+ */
+const NON_ITEM_EVENTS = new Set(["done", "permission_request"]);
 
 /**
  * Appends one wire event to a run's item list, returning a new array.
@@ -146,6 +172,19 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
     const next = items.slice();
     next[index] = merged;
     return next;
+  }
+
+  if (type === "permission_resolved") {
+    return [
+      ...items,
+      {
+        kind: "permission",
+        id: `permission-${items.length}`,
+        requestId: event.requestId ?? "",
+        optionId: event.optionId ?? "",
+        reason: event.reason,
+      },
+    ];
   }
 
   return [...items, { kind: "unknown", id: `unknown-${items.length}`, eventType: type }];
@@ -302,7 +341,10 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         }
         if (event === "permission_resolved") {
           clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
-          return;
+          // Also falls through to appendEvent below, so the resolution
+          // still lands its own TimelinePermissionItem -- clearing the
+          // dock and recording the trace are two separate effects of the
+          // same event, not a fork in how it's handled.
         }
         // Everything else goes through the same reducer the backfill
         // does, so a live event and a replayed one can't diverge. The

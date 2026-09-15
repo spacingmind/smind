@@ -181,15 +181,21 @@ export interface PermissionRequestEventParams {
   plan?: string;
 }
 
+// Wire form of taskrunner.PermissionResolution (internal/taskrunner/event.go).
+// Widened past the three known values (rather than a strict union) so a
+// reason this client has never heard of still decodes and renders as
+// "no badge" instead of a type error -- the same append-only-enum
+// tolerance RunEventType documents below.
+export type PermissionResolutionReason = "human" | "auto_safe" | "timeout" | (string & {});
+
 // Params of a "permission_resolved" event task.prompt/run.attach emit
-// (internal/wsapi/handlers.go's permissionResolvedParams). `reason` is the
-// wire form of taskrunner.PermissionResolution ("human" | "auto_safe" |
-// "timeout") -- optional here (rather than a strict union) so an older
-// server payload with no reason field still decodes fine.
+// (internal/wsapi/handlers.go's permissionResolvedParams). `reason` is
+// optional (rather than required) so an older server payload with no
+// reason field still decodes fine.
 export interface PermissionResolvedEventParams {
   requestId: string;
   optionId: string;
-  reason?: string;
+  reason?: PermissionResolutionReason;
 }
 
 // A tool call's lifecycle status (internal/taskrunner.Event's ToolStatus,
@@ -253,7 +259,7 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   summary?: string;
   options?: PermissionOption[];
   optionId?: string;
-  reason?: string;
+  reason?: PermissionResolutionReason;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).
