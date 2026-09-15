@@ -141,4 +141,27 @@ describe("useTaskAttention runStatus", () => {
     stub.fire("run.status", null);
     expect(result.current.runStatus.size).toBe(0);
   });
+
+  it("event.dropped re-derives run status from a fresh run.list, the same as a reconnect would", async () => {
+    // ADR 0005: the event queue is per-connection, so a drop can just as
+    // well have swallowed a run.status this hook would otherwise never
+    // correct on its own.
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    const { result } = renderHook(() => useTaskAttention(client, null, stub.events));
+    client.nth("run.list", 0).resolve([run("r1", 1, "running", "2024-01-01T00:00:00Z")]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ events: [] });
+    await flush();
+    expect(result.current.runStatus.get(1)).toBe("running");
+
+    stub.fire("event.dropped", { count: 1 });
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "run.list")).toHaveLength(2);
+    client.nth("run.list", 1).resolve([run("r1", 1, "error", "2024-01-01T00:00:00Z")]);
+    await flush();
+
+    expect(result.current.runStatus.get(1)).toBe("error");
+  });
 });
