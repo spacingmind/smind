@@ -213,6 +213,28 @@ describe("FileExplorerPane git decoration and row actions (Item 17)", () => {
     expect(takeDiffReveal(TASK.ID)).toBeNull();
   });
 
+  it("\"Open to side\" calls onOpenFileToSide with the row's path, regardless of git status", async () => {
+    const onOpenFileToSide = vi.fn();
+    const client = new FakeWsClient();
+    render(<FileExplorerPane client={client} task={TASK} onOpenFileToSide={onOpenFileToSide} />);
+    client.nth("file.list", 0).resolve(ROOT_ENTRIES);
+    client.nth("task.files", 0).resolve({ files: [] });
+    await flush();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    fireEvent.click(screen.getByTestId("file-menu-open-to-side"));
+    await flush();
+
+    expect(onOpenFileToSide).toHaveBeenCalledWith("README.md");
+  });
+
+  it("disables \"Open to side\" when the caller supplies no handler, rather than rendering a dead entry", async () => {
+    await renderTree();
+
+    fireEvent.contextMenu(screen.getByTestId("file-row"));
+    expect(screen.getByTestId("file-menu-open-to-side")).toHaveAttribute("data-disabled");
+  });
+
   it("copies a row's path to the clipboard", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
