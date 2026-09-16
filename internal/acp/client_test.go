@@ -2,8 +2,10 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -238,5 +240,99 @@ func TestGLMCommand(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("GLMCommand() = %v, want %v", got, want)
 		}
+	}
+}
+
+// TestClient_SetSessionConfigOptionRequestShape proves the client sends a
+// well-formed session/set_config_option request: the fake agent decodes the
+// request with ACP's real wire field names (sessionId, configId, and the
+// flattened type/value of SessionConfigOptionValue) and echoes them back,
+// so the assertions below fail if the client marshals any field under a
+// different name or nests the value instead of flattening it.
+func TestClient_SetSessionConfigOptionRequestShape(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionID, _, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	opts, err := c.SetSessionConfigOption(ctx, sessionID, "thinking-level", "low")
+	if err != nil {
+		t.Fatalf("SetSessionConfigOption() error = %v", err)
+	}
+
+	if len(opts) != 1 {
+		t.Fatalf("echoed configOptions = %+v, want exactly 1 entry", opts)
+	}
+	got := opts[0]
+	if got.ConfigID != "thinking-level" {
+		t.Errorf("echoed configId = %q, want %q (client sent the wrong wire field name?)", got.ConfigID, "thinking-level")
+	}
+	// The fake agent packs the echoed sessionId and value type into the
+	// option's description; empty means the client didn't send them.
+	if got.Description != sessionID+" id" {
+		t.Errorf("echoed sessionId/type = %q, want %q (client sent the wrong wire field names?)", got.Description, sessionID+" id")
+	}
+	if string(got.CurrentValue) != `{"type":"id","value":"low"}` {
+		t.Errorf("echoed currentValue = %s, want the value %q under type %q", got.CurrentValue, "low", "id")
+	}
+}
+
+// TestClient_SetSessionConfigOptionSuccess proves a success
+// acknowledgement surfaces correctly: the agent's post-change
+// SetSessionConfigOptionResponse (the full configOptions list with current
+// values) round-trips through the method's return value.
+func TestClient_SetSessionConfigOptionSuccess(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionID, _, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	opts, err := c.SetSessionConfigOption(ctx, sessionID, "thinking-level", "low")
+	if err != nil {
+		t.Fatalf("SetSessionConfigOption() error = %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("configOptions = %+v, want 1 entry", opts)
+	}
+	if opts[0].ConfigID != "thinking-level" || string(opts[0].CurrentValue) != `{"type":"id","value":"low"}` {
+		t.Fatalf("configOptions[0] = %+v, want configId %q with currentValue {\"type\":\"id\",\"value\":\"low\"}", opts[0], "thinking-level")
+	}
+}
+
+// TestClient_SetSessionConfigOptionAgentError proves an agent-side
+// JSON-RPC error response (the fake agent rejects the sentinel config id
+// with invalid params) becomes a Go error rather than being swallowed
+// into a silent no-op.
+func TestClient_SetSessionConfigOptionAgentError(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionID, _, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	opts, err := c.SetSessionConfigOption(ctx, sessionID, "no-such-option", "low")
+	if err == nil {
+		t.Fatalf("SetSessionConfigOption() error = nil, want the agent's rejection as a Go error (opts = %+v)", opts)
+	}
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) || rpcErr.Code != ErrCodeInvalidParams {
+		t.Fatalf("SetSessionConfigOption() error = %v, want an *RPCError with code %d", err, ErrCodeInvalidParams)
+	}
+	if !strings.Contains(err.Error(), "unknown config option") {
+		t.Fatalf("SetSessionConfigOption() error = %v, want it to carry the agent's message", err)
 	}
 }

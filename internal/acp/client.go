@@ -133,6 +133,22 @@ type ConfigOption struct {
 	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
 }
 
+// setConfigOptionParams is the wire shape of ACP v2's
+// SetSessionConfigOptionRequest: sessionId, configId, and a flattened
+// SessionConfigOptionValue (type discriminator + value). This package
+// only sends type "id" values -- the option kind every config option
+// smind surfaces so far (e.g. GLM's thinking level) uses.
+type setConfigOptionParams struct {
+	SessionID string `json:"sessionId"`
+	ConfigID  string `json:"configId"`
+	Type      string `json:"type"`
+	Value     string `json:"value"`
+}
+
+type setConfigOptionResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
 type promptParams struct {
 	SessionID string         `json:"sessionId"`
 	Prompt    []ContentBlock `json:"prompt"`
@@ -247,6 +263,29 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOp
 	c.mu.Unlock()
 
 	return res.SessionID, res.ConfigOptions, nil
+}
+
+// SetSessionConfigOption sets one config option on a live session via ACP
+// v2's session/set_config_option, returning the full list of the session's
+// config options with their current values as the agent reports them after
+// the change. Both a transport failure and an agent-side JSON-RPC error
+// response (e.g. an unknown configId) come back as a non-nil error.
+func (c *Client) SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/set_config_option", setConfigOptionParams{
+		SessionID: sessionID,
+		ConfigID:  configID,
+		Type:      "id",
+		Value:     value,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acp: session/set_config_option: %w", err)
+	}
+
+	var res setConfigOptionResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("acp: session/set_config_option: decode response: %w", err)
+	}
+	return res.ConfigOptions, nil
 }
 
 // updateSub tracks one session's subscriber channel plus a WaitGroup of

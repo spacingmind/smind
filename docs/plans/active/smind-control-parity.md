@@ -118,7 +118,7 @@ implementation judgment as long as it's consistent with the
 
 - [ ] `internal/acp.Client.NewSession` captures `config_options` from
       the response
-- [ ] `internal/acp.Client` gains a `session/set_config_option` method
+- [x] `internal/acp.Client` gains a `session/set_config_option` method
 - [ ] `internal/taskrunner.Runner` + `internal/runs.Registry` wiring
       (list + set, ACP-only, clear "not supported" for other providers)
 - [ ] wsapi: `run.listConfigOptions`, `run.setConfigOption`
@@ -134,4 +134,12 @@ implementation judgment as long as it's consistent with the
 
 ## Validation
 
-(empty — fill in as work completes)
+- Step 2 (`SetSessionConfigOption`): wire field names taken from
+  `SetSessionConfigOptionRequest` in
+  `refs/agent-client-protocol/agent-client-protocol-schema/src/v2/agent.rs`
+  (`session/set_config_option`, params `sessionId`/`configId` + flattened
+  `type`/`value`; the method sends `type: "id"` values). Verified with
+  fakeagent tests: `TestClient_SetSessionConfigOptionRequestShape` (echo
+  proves the request's wire field names), `...Success` (ack round-trips),
+  `...AgentError` (JSON-RPC error becomes a Go `*RPCError`). `go build
+  ./...`, `go vet ./...`, gofmt, and `go test ./internal/acp/...` all clean.
