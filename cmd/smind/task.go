@@ -85,11 +85,50 @@ func renderRaw(p rawEventParams) string {
 	return fmt.Sprintf("[raw] %s: %s\n", strconv.Quote(p.Kind), p.Payload)
 }
 
+// permissionOptionParams is one choice offered by a "permission_request"
+// run.logs entry -- mirrors internal/wsapi's permissionOptionParams.
+type permissionOptionParams struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+	Kind  string `json:"kind"`
+}
+
+// renderPermissionRequest formats a pending permission request so a human
+// watching `task attach`/`task logs -f` can actually see it needs a
+// decision -- unlike tool_call/raw, this previously had no case in
+// printRunLogs/streamRun at all, so a run would sit waiting for
+// runs.defaultPermissionTimeout (5 minutes) with nothing on screen
+// explaining why. Each option's ID is shown explicitly so it can be pasted
+// straight into `task approve <runId> <requestId> <optionId>`.
+func renderPermissionRequest(requestID, summary string, options []permissionOptionParams) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
+	for _, o := range options {
+		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
+	}
+	fmt.Fprintf(&b, "  -> smind task approve %s\n", requestID)
+	return b.String()
+}
+
+// renderPermissionResolved formats how a permission request was resolved --
+// distinguishing a real human decision from an auto-safe allow or a
+// timeout deny (runs.PermissionResolution) matters because a silent
+// timeout-deny is exactly the failure mode a human watching the run needs
+// to notice, not mistake for the agent giving up on its own.
+func renderPermissionResolved(requestID, optionID, reason string) string {
+	return fmt.Sprintf("[permission] %s -> %s (%s)\n", requestID, optionID, reason)
+}
+
 // runLogEvent is one event in a run.logs response.
 type runLogEvent struct {
-	Type       string `json:"type"`
-	Text       string `json:"text,omitempty"`
-	StopReason string `json:"stopReason,omitempty"`
+	Type       string                   `json:"type"`
+	Text       string                   `json:"text,omitempty"`
+	StopReason string                   `json:"stopReason,omitempty"`
+	RequestID  string                   `json:"requestId,omitempty"`
+	Summary    string                   `json:"summary,omitempty"`
+	Options    []permissionOptionParams `json:"options,omitempty"`
+	OptionID   string                   `json:"optionId,omitempty"`
+	Reason     string                   `json:"reason,omitempty"`
 	toolCallEventParams
 	rawEventParams
 }
@@ -105,7 +144,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|attach|logs|stop|options|set-option> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|attach|logs|stop|permissions|approve|options|set-option> ...")
 		return 2
 	}
 	switch args[0] {
@@ -121,6 +160,10 @@ func cmdTask(args []string) int {
 		return cmdTaskLogs(args[1:])
 	case "stop":
 		return cmdTaskStop(args[1:])
+	case "permissions":
+		return cmdTaskPermissions(args[1:])
+	case "approve":
+		return cmdTaskApprove(args[1:])
 	case "options":
 		return cmdTaskOptions(args[1:])
 	case "set-option":
@@ -386,6 +429,26 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 				return
 			}
 			fmt.Print(renderRaw(p))
+		case "permission_request":
+			var p struct {
+				RequestID string                   `json:"requestId"`
+				Summary   string                   `json:"summary"`
+				Options   []permissionOptionParams `json:"options"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+		case "permission_resolved":
+			var p struct {
+				RequestID string `json:"requestId"`
+				OptionID  string `json:"optionId"`
+				Reason    string `json:"reason"`
+			}
+			if err := json.Unmarshal(params, &p); err != nil {
+				return
+			}
+			fmt.Print(renderPermissionResolved(p.RequestID, p.OptionID, p.Reason))
 		}
 	}, &result)
 	fmt.Println()
@@ -522,6 +585,9 @@ func (n toolCallNames) render(p toolCallEventParams) string {
 	case "success":
 		return fmt.Sprintf("[tool] %s: done\n", name)
 	case "failure":
+		if len(p.Result) > 0 {
+			return fmt.Sprintf("[tool] %s: failed: %s\n", name, p.Result)
+		}
 		return fmt.Sprintf("[tool] %s: failed\n", name)
 	default:
 		if len(p.Input) > 0 {
@@ -541,6 +607,10 @@ func printRunLogs(result runLogsResult) {
 			fmt.Print(names.render(e.toolCallEventParams))
 		case "raw":
 			fmt.Print(renderRaw(e.rawEventParams))
+		case "permission_request":
+			fmt.Print(renderPermissionRequest(e.RequestID, e.Summary, e.Options))
+		case "permission_resolved":
+			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 		}
 	}
 	fmt.Println()
@@ -578,6 +648,156 @@ func cmdTaskStop(args []string) int {
 	fmt.Printf("run %s stopped\n", runID)
 	return 0
 }
+
+// pendingPermission is one still-unresolved permission_request entry found
+// by scanning a run.logs response -- run.logs has no dedicated "list
+// pending" call of its own (a permission_request is just one more event
+// type in the same history everything else comes through), so both
+// cmdTaskPermissions and cmdTaskApprove derive "pending" the same way:
+// every permission_request whose requestId never shows up on a later
+// permission_resolved entry.
+type pendingPermission struct {
+	RequestID string
+	Summary   string
+	Options   []permissionOptionParams
+}
+
+// fetchPendingPermissions calls run.logs for runID and returns every
+// permission_request entry not yet matched by a permission_resolved entry,
+// oldest first.
+func fetchPendingPermissions(ctx context.Context, client *wsclient.Client, runID string) ([]pendingPermission, error) {
+	var result runLogsResult
+	if err := client.Call(ctx, "run.logs", map[string]any{"runId": runID}, &result); err != nil {
+		return nil, err
+	}
+	resolved := map[string]bool{}
+	for _, e := range result.Events {
+		if e.Type == "permission_resolved" {
+			resolved[e.RequestID] = true
+		}
+	}
+	var pending []pendingPermission
+	for _, e := range result.Events {
+		if e.Type == "permission_request" && !resolved[e.RequestID] {
+			pending = append(pending, pendingPermission{RequestID: e.RequestID, Summary: e.Summary, Options: e.Options})
+		}
+	}
+	return pending, nil
+}
+
+// cmdTaskPermissions lists a run's still-pending permission requests --
+// the read half of the same gap task approve closes: without this, seeing
+// that a run needs a decision means either watching `task attach` live
+// (easy to miss the one line among a long agent transcript) or reading
+// run.logs's raw JSON by hand.
+func cmdTaskPermissions(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: smind task permissions <runId>")
+		return 2
+	}
+	runID := args[0]
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	pending, err := fetchPendingPermissions(context.Background(), client, runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task permissions: %v\n", err)
+		return 1
+	}
+	if len(pending) == 0 {
+		fmt.Println("no pending permission requests")
+		return 0
+	}
+	for _, p := range pending {
+		fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+	}
+	return 0
+}
+
+// cmdTaskApproveUsage is printed on any argument error in cmdTaskApprove.
+const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]"
+
+// cmdTaskApprove answers a run's pending permission request via
+// run.respondPermission -- closing the gap where a run with
+// --approval-policy manual (the default) or an auto-safe run hitting a
+// command outside its allowlist has no CLI-side way to be unblocked at
+// all short of the 5-minute timeout-deny (runs.defaultPermissionTimeout).
+//
+// requestId defaults to the oldest still-pending request (there is
+// normally only one at a time -- a run blocks on Decide before issuing
+// another tool call). optionId defaults to the first option whose Kind is
+// "allow_once"/"allow_always", mirroring
+// internal/runs.firstOptionByKind's own selection so `task approve
+// <runId>` with no further arguments does the obvious thing.
+func cmdTaskApprove(args []string) int {
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, cmdTaskApproveUsage)
+		return 2
+	}
+	runID := args[0]
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	pending, err := fetchPendingPermissions(context.Background(), client, runID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		return 1
+	}
+	if len(pending) == 0 {
+		fmt.Fprintln(os.Stderr, "task approve: no pending permission request")
+		return 1
+	}
+
+	var target *pendingPermission
+	if len(args) == 2 {
+		requestID := args[1]
+		for i := range pending {
+			if pending[i].RequestID == requestID {
+				target = &pending[i]
+				break
+			}
+		}
+		if target == nil {
+			fmt.Fprintf(os.Stderr, "task approve: request %q is not pending\n", requestID)
+			return 1
+		}
+	} else {
+		target = &pending[0]
+	}
+
+	optionID := ""
+	for _, o := range target.Options {
+		if o.Kind == "allow_once" || o.Kind == "allow_always" {
+			optionID = o.ID
+			break
+		}
+	}
+	if optionID == "" {
+		fmt.Fprintf(os.Stderr, "task approve: request %q has no allow option: %+v\n", target.RequestID, target.Options)
+		return 1
+	}
+
+	err = client.Call(context.Background(), "run.respondPermission", map[string]any{
+		"runId": runID, "requestId": target.RequestID, "optionId": optionID,
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		return 1
+	}
+	fmt.Printf("request %s -> %s\n", target.RequestID, optionID)
+	return 0
+}
+
 
 // configOption is the CLI-side mirror of internal/wsapi's
 // configOptionParams, field for field -- same wire-shape duplication

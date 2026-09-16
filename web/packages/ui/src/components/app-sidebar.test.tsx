@@ -740,3 +740,58 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     expect(screen.getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
   });
 });
+
+/**
+ * Live screenshots showed sidebar rows rendering the *tail* of a task title
+ * ("e verify commands)") instead of a truncation, at both desktop and
+ * tablet widths. The title span had carried `min-w-0 truncate` the whole
+ * time: the defect was an ancestor that could not be narrower than its own
+ * content, so the clip never had a width to happen against and the row
+ * overflowed the scroll viewport horizontally instead.
+ *
+ * jsdom implements no layout and loads no Tailwind, so `scrollWidth` and
+ * `getComputedStyle` are uniformly zero/empty here -- measuring the
+ * truncation itself is not possible in this suite. What *is* checkable, and
+ * what actually regressed, is the constraint chain: assert it structurally,
+ * one link at a time, from the title up to the viewport.
+ */
+describe("AppSidebar long-title truncation", () => {
+  const LONG_TITLE =
+    "Item 7a: make the sidebar and side-pane layout resizable, then live-test it at four widths (include verify commands)";
+
+  const LONG_TITLE_TASK: Task = { ...TASK, ID: 77, Title: LONG_TITLE };
+
+  it("leaves no shrink-to-fit box between a task title and the scroll viewport", async () => {
+    const client = new FakeWsClient();
+    const { container } = render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [LONG_TITLE_TASK]);
+
+    const title = await screen.findByText(LONG_TITLE);
+    expect(title.className).toContain("truncate");
+    expect(title.className).toContain("min-w-0");
+
+    const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
+    expect(viewport).not.toBeNull();
+
+    // The root cause: Radix's Viewport hardcodes `display: table` on the
+    // wrapper it puts around its children -- a shrink-to-fit box that grows
+    // to the widest row instead of taking the viewport's width. It is an
+    // inline style, so only an `!important` rule displaces it; see
+    // components/ui/scroll-area.tsx.
+    expect(viewport?.className).toContain("[&>div]:block!");
+
+    // ...and every flex box between the two has to be allowed to shrink
+    // below its content, or one of them silently re-breaks the chain.
+    for (let el = title.parentElement; el && el !== viewport; el = el.parentElement) {
+      if (!/(^|\s)flex(\s|$)/.test(el.className)) continue;
+      expect(
+        /(^|\s)(min-w-0|overflow-hidden)(\s|$)/.test(el.className),
+        `<${el.tagName.toLowerCase()} class="${el.className}"> sits between the task title and the scroll viewport, so it needs min-w-0 (or overflow-hidden) for the title's truncate to have a width to clip against`,
+      ).toBe(true);
+    }
+  });
+});
