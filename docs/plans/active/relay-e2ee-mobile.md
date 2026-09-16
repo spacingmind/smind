@@ -7,7 +7,11 @@ ever seeing plaintext. Based on `docs/research/relay-design-status.md`
 (read-only audit: zero relay code exists today) and
 `docs/decisions/0007-relay-architecture.md` — **Accepted 2026-09-11**:
 crypto is X25519 + ChaCha20-Poly1305 (counter-based nonces); all other
-choices per the ADR's recommendations.
+choices per the ADR's recommendations. Daemon↔relay admission (who may
+use the relay at all, separate from the E2EE handshake) is
+`docs/decisions/0011-relay-admission-auth.md` — **Accepted
+2026-09-17**: per-workspace secret + HMAC challenge-response over
+pinned TLS, optional Ed25519 upgrade.
 
 **This plan does not cover** the Expo mobile app UI (pairing screen,
 workspace/task list, timeline, push notifications) — that is a
@@ -52,12 +56,22 @@ reconnect/rotation machinery, and the wire protocol between them.
   (or equivalent) rejects replayed/out-of-order-beyond-window frames
   within a live session (ADR-0007 (d) — an explicit divergence from
   paseo, which ships without this).
+- **Relay admission (daemon↔relay auth, ADR-0011)**: independent of the
+  E2EE handshake — a workspace has a random 256-bit secret; the relay
+  persists only its hash. The daemon authenticates via a nonce-based
+  HMAC challenge-response over the transcript (protocol version,
+  workspace ID, both nonces, daemon key ID); the raw secret is never
+  sent after pairing. TLS uses a relay-generated self-signed
+  certificate; the daemon pins its fingerprint at pairing time. A
+  connection is bound to exactly one workspace ID; a frame whose
+  workspace/session ID doesn't match the authenticated binding is
+  rejected. E2EE handshake success is never treated as relay
+  authorization, and vice versa.
 - Out of scope this pass: the Expo mobile app itself; multi-tenant
   relay deployment/scaling; the actual `relay.spacingmind.sh` deploy
   (Cloudflare TLS) — self-hostability is the acceptance bar, not a live
-  deployment; auth between daemon and relay beyond what the E2EE
-  handshake and connection identity require (no separate API-key layer
-  unless ADR-0007 or a follow-up decision adds one); mobile↔relay
+  deployment; the optional Ed25519 daemon-identity upgrade path from
+  ADR-0011 (v1 ships the HMAC challenge-response only); mobile↔relay
   transport framing beyond what's needed to prove the handshake and
   forwarding work (ADR-0007 (f) leaves this open).
 
@@ -96,6 +110,17 @@ reconnect/rotation machinery, and the wire protocol between them.
 - Go: `smind relay` subcommand starts, binds its listen address, and
   shuts down cleanly (context cancellation / signal), matching the
   daemon's existing subcommand lifecycle conventions.
+- Go: relay admission — a daemon connection presenting a valid
+  workspace-secret HMAC over the challenge transcript is admitted and
+  bound to that workspace; a wrong secret, a replayed transcript
+  (reused nonce), or a workspace-ID mismatch on a subsequent frame is
+  rejected. A connection admitted for workspace A cannot forward or
+  receive frames tagged for workspace B.
+- Go: relay admission is independent of the E2EE handshake — a test
+  double that completes relay admission but sends a malformed/no E2EE
+  hello is still rejected at the E2EE layer (and vice versa: a valid
+  E2EE hello over a connection that never completed relay admission is
+  never forwarded).
 - Integration: real daemon process + real relay process (both
   in-process test harnesses or subprocesses) — full pairing flow from
   QR-offer generation through handshake completion through a forwarded
@@ -109,45 +134,41 @@ reconnect/rotation machinery, and the wire protocol between them.
 
 ## Decisions
 
-**Draft — chờ user duyệt ADR-0007, đặc biệt mục crypto (X25519 +
-ChaCha20-Poly1305 vs XSalsa20-Poly1305/NaCl `box`).** No implementation
-in this plan should begin until `docs/decisions/0007-relay-architecture.md`
-moves from `DRAFT` to `Accepted`. In particular:
+**Unblocked.** ADR-0007 (Accepted 2026-09-11) and ADR-0011 (Accepted
+2026-09-17) together cover every crypto, state-model, fanout, replay,
+rotation, transport, QR-pairing, and admission-auth choice this plan's
+Acceptance Criteria depend on. Implementation may proceed.
 
-- The handshake's AEAD choice (ADR-0007 (c)) has no default and blocks
-  any crypto code from being written at all, including tests that
-  assert specific ciphertext framing.
-- The relay state model (a), fanout shape (b), replay protection (d),
-  key rotation model (e), gRPC service/message design (f), and QR
-  pairing format (g) all carry a recommendation in ADR-0007 but are
-  still formally unapproved — this plan's Acceptance Criteria already
-  assume those recommendations will be accepted as written; if the
-  user amends any of them, this plan's Acceptance Criteria and Test
-  Scenarios need a corresponding update before implementation starts
-  against the changed decision.
-- Repo split/license (h) is explicitly out of scope for this plan (see
-  ADR-0007 (h) and `docs/decisions/0003-agpl-license-no-repo-split.md`)
-  — this plan builds relay code in this repo regardless of any future
-  split decision.
+- Repo split/license (ADR-0007 (h)) is explicitly out of scope for this
+  plan (see `docs/decisions/0003-agpl-license-no-repo-split.md`) — this
+  plan builds relay code in this repo regardless of any future split
+  decision.
+- gRPC service/message definition (ADR-0007 (f)) and the control/data
+  socket mapping (ADR-0007 (b)) have no `.proto` yet — that concrete
+  design is this plan's own work, not a blocked-on-ADR item.
 
 ## Progress
 
 - [x] ADR-0007 approved (2026-09-11, user: ChaCha20-Poly1305; rest as
       recommended)
+- [x] ADR-0011 approved (2026-09-17, relay admission auth)
 - [ ] Daemon X25519 keypair generation + persistence
 - [ ] Pairing offer encoding (URL fragment) + QR rendering
 - [ ] E2EE handshake (daemon + mobile sides)
 - [ ] Replay protection (per-direction counter)
 - [ ] Key rotation behavior (new-session-only; reject re-hello with
       different key on live session)
+- [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
+- [ ] Relay: admission auth (workspace secret + HMAC challenge-response,
+      TLS cert pinning) (ADR-0011)
 - [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
 - [ ] Relay: reconnect-grace buffer (bounded, per-connection)
 - [ ] Relay: multi-device fanout (control + data socket shape per
       ADR-0007 (b))
 - [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
-- [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
-- [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer;
-      integration: daemon+relay end-to-end, multi-device fanout)
+- [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
+      admission; integration: daemon+relay end-to-end, multi-device
+      fanout)
 - [ ] ROADMAP update
 - [ ] Verification
 
