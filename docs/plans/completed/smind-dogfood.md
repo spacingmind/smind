@@ -48,7 +48,7 @@ commits that came out of the session.
 - [x] Session 2
 - [x] Session 3
 - [x] Session 4
-- [ ] Session 5 — gate reached
+- [x] Session 5 — gate reached
 
 ## Validation
 
@@ -134,3 +134,37 @@ gaps hit.)
     merging #101/#102 is still unresolved; (3) xai/antigravity still
     can't be added through the accounts dialog; (4) no per-workspace
     base-branch config yet (every PR path assumes `develop`).
+
+
+- **Session 5** (2026-09-16) — Perplexity Pro as a smind provider; Phase 2
+  gate reached:
+  - Built `perplexity-proxy-go` (spacingmind/perplexity-proxy-go v0.1.0,
+    MIT): Go client for Perplexity's unofficial web API — login/OTP,
+    Chrome-fingerprinted TLS+H2 transport, MCP server, and an
+    Anthropic-compatible `/v1/messages` server with a curl_cffi bridge
+    fallback for the server's bot scoring.
+  - Dogfooded the full chain through smind itself: `smind /v1/messages`
+    → per-account base_url (#140) → `pplx serve` → Perplexity Pro —
+    live query "what is 2+2" returned "4". This session's orchestration
+    (multi-agent Paseo spawns debugging the fingerprint regression) was
+    itself the "real work" this plan's gate asks for, ending in landed
+    commits.
+  - PRs landed this session: smind #140 (per-account base_url routing)
+    and #142 (wire base_url through CLI/wsapi/UI); upstream
+    perplexity-proxy-go released v0.1.0.
+  - **Gaps carried forward** (unchanged from Session 4 except as noted):
+    (1) live GLM dispatch still unproven prompt-to-commit (Z.ai quota);
+    (2) two-vocabulary provider id issue; (3) xai/antigravity not
+    addable via accounts dialog; (4) no per-workspace base-branch
+    config. New: (5) pplx accounts currently need the CLI/boot DB seed
+    for base_url — UI covers it since #142.
+
+
+---
+
+## Closure (2026-09-16)
+
+All 5 sessions logged, zero abandoned. Final session closed the loop the
+plan was built for: real provider integration (Perplexity Pro via
+perplexity-proxy-go) routed through smind's own proxy, with commits landed
+in both repos. Moved to docs/plans/completed/.
