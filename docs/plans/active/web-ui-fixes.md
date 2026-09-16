@@ -124,16 +124,94 @@ implementation detail of one component).
 
 ## Progress
 
-- [ ] Composer dropdowns ported to shadcn `Select`
-- [ ] Composer tests updated for the new interaction model
+- [x] Composer dropdowns ported to shadcn `Select`
+- [x] Composer tests updated for the new interaction model
 - [ ] Resizable-panel drag fixed (root cause confirmed first, then
-      patched or replaced per Acceptance Criteria)
+      patched or replaced per Acceptance Criteria) — **not started**, see
+      Validation: the plan requires confirming the root cause with a real
+      interaction test *first*, and no test runner can be started in this
+      environment
 - [ ] Resizable-panel interaction test added
-- [ ] Sidebar text-truncation root cause found and fixed
-- [ ] Sidebar truncation regression test added
-- [ ] Live smoke test (four viewport widths) confirming all three
-- [ ] Verification
+- [x] Sidebar text-truncation root cause found and fixed
+- [x] Sidebar truncation regression test added
+- [ ] Live smoke test (four viewport widths) confirming all three —
+      **blocked**, no daemon/dev server/browser can be started here
+- [ ] Verification — **blocked**, `task test` / `task lint` cannot run here
 
 ## Validation
 
-(empty — fill in as work completes)
+**Written, not yet run.** The implementing session had no usable
+toolchain: `web/node_modules` was absent in the worktree and `bun`,
+`npm`, `npx`, `task`, `go`, and `gh` were all refused by the sandbox
+(only read-only shell builtins and `git` were permitted). So nothing
+below has been executed, and the live smoke test at 1440/1024/768/390px
+has not happened. Re-run `task test` + `task lint` and the manual smoke
+test before this is considered done.
+
+### Composer dropdowns — done (unrun)
+
+`composer.tsx` now renders `Select`/`SelectTrigger`/`SelectContent`/
+`SelectItem`/`SelectValue`. `SELECT_CLASS` shrank to
+`SELECT_TRIGGER_CLASS` (sizing only) because the trigger supplies the
+border/background/focus-ring/disabled styling it used to approximate by
+hand; `cn`'s tailwind-merge drops the trigger's conflicting `h-8`,
+`px-2.5` and `text-base md:text-sm` in favour of the Item 21 rule.
+Acceptance criteria are covered by tests: label association
+(`getByLabelText("Provider")` resolves the trigger — `<button>` is a
+labelable element, so `htmlFor`/`id` still works, the same pattern
+`accounts-dialog.test.tsx` already relies on), `disabled` while
+inactive, the `title` tooltip on the policy trigger, and the
+44px/`md:h-7` split on both triggers. The provider-list test now opens
+the select before reading `role="option"`, and a new test drives
+open → pick GLM → send to prove the selection reaches `onSubmit`.
+
+### Sidebar truncation — root cause found, fixed (unrun)
+
+Not a flex ancestor after all. `AppSidebar` wraps the task tree in
+`<ScrollArea>`, and Radix's `ScrollArea.Viewport` always wraps *its*
+children in a div styled inline `{ minWidth: "100%", display: "table" }`.
+A table box is shrink-to-fit, so that wrapper takes the width of the
+widest row instead of the viewport's: `min-w-0 truncate` on the title
+span never had a width to clip against, rows overflowed the viewport
+horizontally, and titles rendered as fragments. Fixed in
+`components/ui/scroll-area.tsx` by pinning the wrapper back to `block`
+with an `!important` rule (Radix's is an inline style, so nothing less
+displaces it) — which also fixes `folder-picker-dialog.tsx`'s entry
+names, same `truncate`, same defeated ancestor. The task row's own flex
+wrapper also gained `min-w-0` so the chain is explicit.
+
+The regression test is structural, not dimensional: jsdom has no layout
+and no Tailwind, so `scrollWidth`/`getComputedStyle` are uniformly
+0/empty and the plan's suggested `scrollWidth <= clientWidth` assertion
+cannot work there. It instead asserts the override is present on the
+viewport and that every flex box between the title and the viewport
+carries `min-w-0` (or `overflow-hidden`). A real measurement belongs in
+the manual smoke test.
+
+### Resizable panel drag — not attempted
+
+The plan (and the task) require confirming the root cause with a real
+pointer-down/move/up interaction test *before* deciding between
+patching `resizable.tsx` and replacing `react-resizable-panels` with a
+paseo-style pointer-capture implementation. No test can be run here, and
+`refs/paseo` is a symlink outside the worktree that the sandbox refuses
+to read, so the paseo sources named in the Acceptance Criteria were not
+readable either. Guessing at a fix for an interaction bug and shipping
+it unverified is exactly the failure mode this plan exists to avoid, so
+this item was left untouched.
+
+Two concrete suspects for whoever picks it up, both smind-side and both
+cheap to check first:
+
+1. `App.tsx` feeds live state back into `defaultSize`
+   (`defaultSize={sidebarWidth}` with `onResize` calling
+   `setSidebarWidth`). `defaultSize` should be the *initial* size; if v4
+   re-applies it when the prop changes, the group is re-defaulted on
+   every drag frame and fights the drag.
+2. The shadcn `Sidebar` renders a `position: fixed`, `z-10` container of
+   width `--sidebar-width`, which abuts — and with `ResizableHandle`'s
+   `after:w-1` (~4px, half of it to the left of the 1px line) partly
+   overlaps — the handle's hit area, while the handle itself has no
+   stacking context of its own. That alone would read as a dead zone.
+   Paseo's remedy (a ~10px pointer / 24-88px touch hit area above its
+   siblings, pointer capture on drag start) addresses this directly.
