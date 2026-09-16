@@ -152,11 +152,21 @@ Acceptance Criteria depend on. Implementation may proceed.
 - [x] ADR-0007 approved (2026-09-11, user: ChaCha20-Poly1305; rest as
       recommended)
 - [x] ADR-0011 approved (2026-09-17, relay admission auth)
-- [ ] Daemon X25519 keypair generation + persistence
-- [ ] Pairing offer encoding (URL fragment) + QR rendering
-- [ ] E2EE handshake (daemon + mobile sides)
-- [ ] Replay protection (per-direction counter)
-- [ ] Key rotation behavior (new-session-only; reject re-hello with
+- [x] Daemon X25519 keypair generation + persistence
+      (`internal/relay/e2ee/keypair.go`; 0600, survives restart, corrupt
+      file regenerates)
+- [x] Pairing offer encoding (URL fragment) + QR rendering
+      (`internal/relay/pairing/`; `Offer.URL` puts the payload in the
+      fragment only, `Offer.QRCode`/`QRPNG`/`QRText` render it with an
+      in-tree pure-stdlib QR encoder)
+- [x] E2EE handshake (daemon + mobile sides)
+      (`internal/relay/e2ee/handshake.go`; X25519 + HKDF, malformed and
+      truncated hellos rejected, no hang on a silent peer)
+- [x] Replay protection (per-direction counter)
+      (`internal/relay/e2ee/session.go`; replayed and
+      out-of-order-beyond-window frames rejected, counter exhaustion
+      handled)
+- [x] Key rotation behavior (new-session-only; reject re-hello with
       different key on live session)
 - [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
 - [ ] Relay: admission auth (workspace secret + HMAC challenge-response,
