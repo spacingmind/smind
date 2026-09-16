@@ -47,10 +47,19 @@ smind (dogfood path: agent → smind :4648 → pplx serve :8080 → Perplexity).
 
 ## Progress
 
-- [ ] Registry + credential field
-- [ ] Proxy per-account URL resolution
-- [ ] Tests
+- [x] Registry + credential field
+- [x] Proxy per-account URL resolution
+- [x] Tests
 
 ## Validation
 
-(to fill on completion)
+All 5 acceptance criteria met (commit fee8d9d):
+1. AddAPIKeyWithBaseURL round-trips base_url through Registry.Get.
+2. Proxy forwards /v1/messages to the account base_url (httptest asserted);
+   default provider URL preserved when unset.
+3. http:// non-loopback rejected; https + loopback http accepted.
+4. Existing tests unchanged beyond the new-field flow-through.
+5. task test + task lint green (one flaky UI test on first run, clean on rerun).
+
+Dogfood verified end-to-end: smind :4664 → pplx serve :8080 (perplexity-proxy-go,
+Anthropic-compat) → Perplexity Pro — request "what is 2+2" returned "4".
