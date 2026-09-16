@@ -233,12 +233,63 @@ describe("Composer", () => {
     });
     await flush();
 
-    const select = screen.getByLabelText("Provider");
-    expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Claude Code", "GLM"]);
+    // The dropdown is the shadcn/Radix Select, not a native <select>: the
+    // trigger is a combobox button and the options live in a portal that
+    // only exists while it is open, so they are read after opening it
+    // rather than out of a closed element's subtree.
+    const trigger = screen.getByLabelText("Provider");
+    expect(trigger).toHaveAttribute("role", "combobox");
+    expect(trigger.tagName).toBe("BUTTON");
+
+    fireEvent.click(trigger);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM"]);
+    // The trigger shows the current selection, so the closed state still
+    // says which provider a prompt would go to.
+    expect(trigger).toHaveTextContent("Claude Code");
+
     // "not unlabelled native selects" (Item 10): the label is real markup,
-    // not an aria-label, so it is on screen as well as in the a11y tree.
+    // not an aria-label, so it is on screen as well as in the a11y tree --
+    // and `htmlFor`/`id` still associates it with the Radix trigger, which
+    // is what getByLabelText above resolved through.
     expect(screen.getByText("Provider").tagName).toBe("LABEL");
     expect(screen.getByText("Approval policy").tagName).toBe("LABEL");
+  });
+
+  it("selecting a provider from the open dropdown is what the next prompt is sent with", async () => {
+    const client = new FakeWsClient();
+    const { submissions } = renderComposer({ client });
+
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", approvalPolicy: "manual" }]);
+  });
+
+  it("keeps the approval-policy help tooltip and disables both selects while the composer is inactive", () => {
+    const { rerender } = renderComposer();
+
+    const policy = screen.getByLabelText("Approval policy");
+    expect(policy).toHaveAttribute("title", expect.stringContaining("Auto-safe"));
+    expect(policy).not.toBeDisabled();
+    expect(screen.getByLabelText("Provider")).not.toBeDisabled();
+
+    rerender({ connected: false });
+    expect(screen.getByLabelText("Provider")).toBeDisabled();
+    expect(screen.getByLabelText("Approval policy")).toBeDisabled();
   });
 
   // Item 21: touch targets need a stated minimum below the compact
@@ -252,8 +303,13 @@ describe("Composer", () => {
     expect(send.className).toContain("h-11");
     expect(send.className).toContain("md:h-7");
 
-    const provider = screen.getByLabelText("Provider");
-    expect(provider.className).toContain("h-11");
-    expect(provider.className).toContain("md:h-7");
+    // The trigger element is what the finger lands on, so the rule has to
+    // survive on it and not be merged away by SelectTrigger's own h-8.
+    for (const label of ["Provider", "Approval policy"]) {
+      const trigger = screen.getByLabelText(label);
+      expect(trigger.className).toContain("h-11");
+      expect(trigger.className).toContain("md:h-7");
+      expect(trigger.className).not.toContain("h-8");
+    }
   });
 });
