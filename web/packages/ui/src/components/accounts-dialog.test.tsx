@@ -219,6 +219,53 @@ describe("AccountsDialog", () => {
     expect(await screen.findByText("main")).toBeInTheDocument();
   });
 
+  it("shows a collapsed Base URL field for an api-key provider and sends it in account.add", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+    await openManualForm();
+
+    // PROVIDERS' default selection is the first credential-bearing entry
+    // (Claude Code / oauth) -- switch to Kimi (api-key) before the Base URL
+    // disclosure is expected to appear.
+    fireEvent.click(await screen.findByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Kimi" }));
+
+    const toggle = await screen.findByRole("button", { name: /Base URL \(optional\)/ });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    fireEvent.change(await screen.findByLabelText("Label", { selector: "#account-label" }), { target: { value: "local" } });
+    fireEvent.change(screen.getByLabelText("Credential"), { target: { value: "sk-test" } });
+    fireEvent.change(screen.getByLabelText("Base URL (optional)"), { target: { value: "http://127.0.0.1:8080" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+
+    const add = await waitFor(() => client.nth("account.add"));
+    expect(add.params).toEqual({
+      provider: "kimi",
+      label: "local",
+      credential: "sk-test",
+      baseUrl: "http://127.0.0.1:8080",
+    });
+  });
+
+  it("hides the Base URL field for an oauth-kind provider", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    client.nth("account.list", 0).resolve([]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+    await openManualForm();
+
+    // Default selection is Claude Code (oauth) -- no Base URL disclosure at all.
+    await screen.findByLabelText("Provider");
+    expect(screen.queryByRole("button", { name: /Base URL \(optional\)/ })).not.toBeInTheDocument();
+  });
+
   it("surfaces a daemon error from account.add inline", async () => {
     const client = new FakeWsClient();
     renderDialog(client);
