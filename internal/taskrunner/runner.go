@@ -17,7 +17,7 @@ import (
 // code always gets it from acp.New, whose real *acp.Client satisfies it.
 type acpBackend interface {
 	Initialize(ctx context.Context) error
-	NewSession(ctx context.Context, cwd string) (string, error)
+	NewSession(ctx context.Context, cwd string) (string, []acp.ConfigOption, error)
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	Close() error
 }
@@ -245,7 +245,7 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, err := client.NewSession(ctx, worktreePath)
+	sessionID, _, err := client.NewSession(ctx, worktreePath)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}

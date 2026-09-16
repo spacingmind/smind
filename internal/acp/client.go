@@ -116,7 +116,21 @@ type newSessionParams struct {
 }
 
 type newSessionResult struct {
-	SessionID string `json:"sessionId"`
+	SessionID     string         `json:"sessionId"`
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
+// ConfigOption mirrors ACP v2's SessionConfigOption: one entry of the
+// configOptions list a session/new response may carry. CurrentValue holds
+// the flattened kind's currentValue (a value id for select options, a bool
+// for boolean options) keyed by Type; other kind fields are not captured.
+type ConfigOption struct {
+	ConfigID     string          `json:"configId"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	Category     string          `json:"category,omitempty"`
+	Type         string          `json:"type"`
+	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
 }
 
 type promptParams struct {
@@ -215,22 +229,24 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession creates a new ACP session rooted at cwd (the task's worktree
 // path), which also becomes the filesystem boundary that fs/read_text_file
 // and fs/write_text_file requests for this session are validated against.
-func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
+// It also returns the session's initial config options, if the agent sent
+// any.
+func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOption, error) {
 	raw, err := c.conn.call(ctx, "session/new", newSessionParams{Cwd: cwd, McpServers: []any{}})
 	if err != nil {
-		return "", fmt.Errorf("acp: session/new: %w", err)
+		return "", nil, fmt.Errorf("acp: session/new: %w", err)
 	}
 
 	var res newSessionResult
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return "", fmt.Errorf("acp: session/new: decode response: %w", err)
+		return "", nil, fmt.Errorf("acp: session/new: decode response: %w", err)
 	}
 
 	c.mu.Lock()
 	c.sessionCwd[res.SessionID] = cwd
 	c.mu.Unlock()
 
-	return res.SessionID, nil
+	return res.SessionID, res.ConfigOptions, nil
 }
 
 // updateSub tracks one session's subscriber channel plus a WaitGroup of

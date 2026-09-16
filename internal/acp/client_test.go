@@ -49,7 +49,7 @@ func TestClient_HandshakeAndStreamingPrompt(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -131,7 +131,7 @@ func TestClient_RequestPermissionAutoDeny(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -191,7 +191,7 @@ func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sessionID, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
