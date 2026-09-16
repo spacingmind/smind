@@ -116,21 +116,22 @@ implementation judgment as long as it's consistent with the
 
 ## Progress
 
-- [ ] `internal/acp.Client.NewSession` captures `config_options` from
+- [x] `internal/acp.Client.NewSession` captures `config_options` from
       the response
 - [x] `internal/acp.Client` gains a `session/set_config_option` method
-- [ ] `internal/taskrunner.Runner` + `internal/runs.Registry` wiring
+- [x] `internal/taskrunner.Runner` + `internal/runs.Registry` wiring
       (list + set, ACP-only, clear "not supported" for other providers)
-- [ ] wsapi: `run.listConfigOptions`, `run.setConfigOption`
-- [ ] CLI: `smind task options <runId>`, `smind task set-option <runId>
+- [x] wsapi: `run.listConfigOptions`, `run.setConfigOption`
+- [x] CLI: `smind task options <runId>`, `smind task set-option <runId>
       <optionId> <value>`
 - [ ] `store.Task.ParentTaskID` + validation (same-workspace, exists)
 - [ ] `task.create`/`smind task new` accept an optional parent task id
 - [ ] `task.list`/`smind task ls` accept an optional parent-id filter
-- [ ] Tests (fakeagent round-trip, runs "not supported" path, store
-      parent validation, CLI option/set-option)
+- [x] Tests (fakeagent round-trip, runs "not supported" path, CLI
+      option/set-option; store parent validation still pending with the
+      task-hierarchy items below)
 - [ ] Manual smoke test against a real GLM task (see Test Scenarios)
-- [ ] Verification
+- [x] Verification (config-option work; task-hierarchy items pending)
 
 ## Validation
 
