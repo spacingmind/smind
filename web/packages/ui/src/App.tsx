@@ -24,6 +24,7 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
@@ -127,6 +128,15 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // task is selected, in which case the hook just returns the default
   // and ignores writes.
   const [sidePaneWidth, setSidePaneWidth] = useSidePaneWidth(selectedTask?.ID ?? null);
+  // `sidebarWidth`/`sidePaneWidth` update on every drag frame (via
+  // `onResize` below) so the live value can drive the sidebar's CSS var
+  // and get persisted -- but react-resizable-panels' `defaultSize` is
+  // documented as the panel's *initial* size only, and re-registers the
+  // panel (fighting the in-progress drag) whenever that prop's value
+  // changes. Freezing it here breaks that feedback loop; the side pane's
+  // freeze resets per task since its persisted width is per-task.
+  const initialSidebarWidth = useInitialValue(sidebarWidth, "sidebar");
+  const initialSidePaneWidth = useInitialValue(sidePaneWidth, selectedTask?.ID ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -453,7 +463,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               <>
                 <ResizableHandle withHandle id="side-pane-resize-handle" />
                 <ResizablePanel
-                  defaultSize={sidePaneWidth}
+                  defaultSize={initialSidePaneWidth}
                   minSize={SIDE_PANE_MIN_WIDTH}
                   maxSize={SIDE_PANE_MAX_WIDTH}
                   onResize={(size) => setSidePaneWidth(size.inPixels)}
@@ -546,7 +556,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
            * collapse the sidebar to 0 or push it off-screen.
            */}
           <ResizablePanel
-            defaultSize={sidebarWidth}
+            defaultSize={initialSidebarWidth}
             minSize={SIDEBAR_MIN_WIDTH}
             maxSize={SIDEBAR_MAX_WIDTH}
             onResize={(size) => setSidebarWidth(size.inPixels)}
