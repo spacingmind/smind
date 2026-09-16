@@ -106,6 +106,12 @@ export function AccountsDialog({
   const [provider, setProvider] = useState<string>("");
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  // The base_url field is an advanced, api-key-only knob (self-hosted/local
+  // proxy endpoints) -- collapsed behind its own disclosure, nested inside
+  // the manual form, so it doesn't compete with the credential field for
+  // attention in the common case.
+  const [showBaseUrl, setShowBaseUrl] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -155,6 +161,8 @@ export function AccountsDialog({
   const externalProviders = providers.filter((p) => p.kind === "cli");
   const manualProviders = credentialProviders(providers);
   const oauthProviders = manualProviders.filter((p) => p.credentialKind === "oauth");
+  const isAPIKeyProvider =
+    manualProviders.find((p) => p.accountProvider === provider)?.credentialKind === "api-key";
 
   async function refresh() {
     if (!client) return;
@@ -215,9 +223,11 @@ export function AccountsDialog({
         provider,
         label: label.trim(),
         credential: credential.trim(),
+        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
       });
       setLabel("");
       setCredential("");
+      setBaseUrl("");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -497,6 +507,37 @@ export function AccountsDialog({
                   onChange={(e) => setCredential(e.target.value)}
                 />
               </div>
+
+              {isAPIKeyProvider && (
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={showBaseUrl}
+                    data-testid="accounts-base-url-toggle"
+                    onClick={() => setShowBaseUrl((v) => !v)}
+                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                  >
+                    {showBaseUrl ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                    Base URL (optional)
+                  </button>
+                  {showBaseUrl && (
+                    <div className="mt-2 grid gap-1 pl-4.5">
+                      <Input
+                        id="account-base-url"
+                        aria-label="Base URL (optional)"
+                        placeholder="e.g. http://localhost:8080"
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Override the upstream endpoint for this account — advanced, for
+                        self-hosted or local proxy endpoints only.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-end">
                 <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
                   {pending ? "Adding…" : "Add account"}
