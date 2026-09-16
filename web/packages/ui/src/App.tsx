@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -854,12 +855,16 @@ function PaneTabStrip({
                     e.preventDefault();
                     onMove(entry.key);
                   }}
-                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                  className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
                 >
                   {/* aria-hidden: this span's own aria-label already names it; without
-                      hiding the glyph too, its text content leaks into the *ancestor*
-                      TabsTrigger's computed accessible name ("Diff" -> "Diff⇥"). */}
-                  <span aria-hidden="true">{paneId === "primary" ? "⇥" : "⇤"}</span>
+                      hiding the icon too, it would be announced a second time as
+                      part of the *ancestor* TabsTrigger's accessible name. */}
+                  {paneId === "primary" ? (
+                    <ArrowRightToLine aria-hidden="true" className="size-3" />
+                  ) : (
+                    <ArrowLeftToLine aria-hidden="true" className="size-3" />
+                  )}
                 </span>
               )}
               {entry.closable && (
