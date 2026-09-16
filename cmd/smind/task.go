@@ -581,6 +581,9 @@ func (n toolCallNames) render(p toolCallEventParams) string {
 	case "success":
 		return fmt.Sprintf("[tool] %s: done\n", name)
 	case "failure":
+		if len(p.Result) > 0 {
+			return fmt.Sprintf("[tool] %s: failed: %s\n", name, p.Result)
+		}
 		return fmt.Sprintf("[tool] %s: failed\n", name)
 	default:
 		if len(p.Input) > 0 {
