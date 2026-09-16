@@ -1006,7 +1006,14 @@ function TaskRows({
               data-testid="sidebar-task-row"
               data-task-id={task.ID}
             >
-              <span className="flex w-full items-center gap-2">
+              {/*
+               * min-w-0 on the row itself, not just on the title span
+               * inside it: a truncating label only clips if *every* box
+               * between it and the scrolling viewport can shrink below its
+               * content's width (see components/ui/scroll-area.tsx for the
+               * ancestor that used to break this chain).
+               */}
+              <span className="flex w-full min-w-0 items-center gap-2">
               {/*
                * Leading run-status dot -- the task's latest run, live off
                * run.status (Item 12). In its own reserved slot for the
