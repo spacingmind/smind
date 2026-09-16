@@ -540,10 +540,9 @@ describe("TaskDetailPane", () => {
     } satisfies ProviderListResult);
     await flush();
 
-    const select = screen.getByLabelText("Provider");
-    const options = within(select).getAllByRole("option");
+    fireEvent.click(screen.getByLabelText("Provider"));
+    const options = await screen.findAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM", "Codex"]);
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm", "codex-native"]);
   });
 
   it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
@@ -554,9 +553,10 @@ describe("TaskDetailPane", () => {
     client.nth("provider.list", 0).reject(new Error("boom"));
     await flush();
 
-    const select = screen.getByLabelText("Provider");
-    const options = within(select).getAllByRole("option");
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(["claude-native", "glm"]);
+    fireEvent.click(screen.getByLabelText("Provider"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["claude-native", "glm"]);
+    fireEvent.click(options[0]);
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -573,7 +573,7 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([]);
     await flush();
 
-    expect(screen.getByLabelText("Approval policy")).toHaveValue("manual");
+    expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Manual approval");
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -590,7 +590,8 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([]);
     await flush();
 
-    fireEvent.change(screen.getByLabelText("Approval policy"), { target: { value: "auto-safe" } });
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    fireEvent.click(await screen.findByRole("option", { name: "Auto-safe" }));
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
