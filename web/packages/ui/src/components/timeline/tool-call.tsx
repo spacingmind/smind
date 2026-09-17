@@ -1,5 +1,5 @@
 import { ToolCallCard } from "@/components/timeline/tool-call-card";
-import { ToolCallDetail } from "@/components/timeline/tool-call-detail";
+import { countHits, toolResultText, ToolCallDetail } from "@/components/timeline/tool-call-detail";
 import { resolveToolRenderer, toolInput } from "@/components/timeline/tool-renderers";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
 
@@ -39,7 +39,14 @@ export function ToolCall({
 }) {
   const renderer = resolveToolRenderer(item);
   const input = toolInput(item);
-  const summary = renderer.summary?.(input) || undefined;
+  let summary = renderer.summary?.(input) || undefined;
+  // A search's card reads as a raw query otherwise -- the hit count folded
+  // into the same summary line (not just the expanded detail) is what
+  // makes it a semantic "N hits" title rather than an opaque pattern.
+  if (renderer.intent === "search" && summary) {
+    const hits = countHits(toolResultText(item));
+    if (hits !== null) summary = `${summary} — ${hits} ${hits === 1 ? "hit" : "hits"}`;
+  }
 
   const absolute = renderer.filePath?.(input);
   const relative = absolute && worktreePath ? worktreeRelativePath(absolute, worktreePath) : null;

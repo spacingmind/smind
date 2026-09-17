@@ -63,7 +63,7 @@ function str(input: Record<string, unknown>, ...names: string[]): string | undef
   return undefined;
 }
 
-function num(input: Record<string, unknown>, ...names: string[]): number | undefined {
+export function num(input: Record<string, unknown>, ...names: string[]): number | undefined {
   for (const name of names) {
     const value = input[name];
     if (typeof value === "number" && Number.isFinite(value)) return value;

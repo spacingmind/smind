@@ -301,7 +301,7 @@ replace it.*
 - [x] Item 3 — Elevation/shadow/motion vocabulary
 - [ ] Item 4 — Semantic CVA component variants
 - [x] Item 5 — Status/diff color-family extension
-- [ ] Item 6 — Tool-call card visual upgrade
+- [x] Item 6 — Tool-call card visual upgrade
 - [ ] Item 7 — Permission card visual polish
 - [x] Item 8 — Suggested commit message affordance
 - [ ] Live smoke test (combined with web-ui-fixes.md's pending one)
@@ -385,3 +385,89 @@ single-add, single-modify, and mixed multi-file cases, plus
 `task lint` (go vet + gofmt; this repo has no separate web lint task)
 both pass. Manual smoke test not run this pass (no dev server
 exercised) — flag if a live check is wanted before merge.
+
+**Item 6 — Tool-call card visual upgrade** (2026-09-17, on
+`feat/tool-call-cards-track-c`): extends `tool-renderers.tsx`'s existing
+registry per-intent, per the Decisions note — no registry replacement, no
+central-switch reintroduction.
+
+- **terminal**: command and output blocks now use `bg-background`/
+  `text-foreground` (the same tokens `lib/terminal-theme.ts` reads for
+  xterm's own chrome) instead of the generic `surface-2` well every other
+  payload uses, so a terminal card visually matches the terminal pane.
+  Output over 12 lines/800 chars collapses behind a "Show output" toggle
+  (`tool-output-toggle`); a failed call's output is never collapsed and
+  scrolls its own bounded region to the bottom on mount so the actionable
+  last line needs no manual scrolling. Short/successful output is shown
+  in full with no toggle.
+- **read**: `tool-read-preview.tsx` is a new small component reusing
+  CodeMirror's own read-only mode and gutter (`lineNumbers`,
+  `EditorState.readOnly`, `EditorView.editable.of(false)`) plus the app's
+  existing chrome theme (`code-mirror-editor.tsx`'s `appChromeTheme`,
+  exported for this reuse) — confirmed CodeMirror was already the app's
+  only syntax/code-view dependency before adding this, so no second
+  highlighter was introduced. The gutter is offset by the call's
+  `offset`/`start_line` input so a sliced read shows the file's real line
+  numbers, not a 1-based restart.
+- **search**: the hit count (via the existing `countHits` helper) is now
+  folded into the always-visible summary line (`tool-call-summary`), not
+  just the expanded detail — a search card now reads "query in scope — N
+  hits" at a glance. The match list is bounded to 20 lines by default with
+  a "Show all N matches" expand toggle (`tool-detail-matches-toggle`),
+  matching the terminal output's never-unbounded rule.
+- **generic/fallback**: `GenericBody` now renders a labeled IN/OUT
+  two-section layout (small uppercase gutter label, `divide-y` border
+  between sections) instead of two unlabeled JSON dumps — the dsh
+  reference at `refs/deepseek-harness` was not present in this worktree
+  (not checked out here), so the shape was built from the plan's own
+  description (labeled gutter + divider) rather than copied; documented
+  here as a deviation worth a follow-up diff against the actual reference
+  if one is available in a future session.
+- **stable row height while streaming**: a collapsed card's detail body
+  was already conditionally unmounted (`ToolCallCard`'s existing `open`
+  state), so this was already true; added the regression test the plan
+  asked for regardless — `RunTimeline` rerendered ~20 times with a
+  growing `result` string, asserting the same `timeline-tool-call` DOM
+  node persists (no remount) and, while collapsed, `tool-call-detail`
+  never mounts at all. A second test covers the opened case: the output
+  region caps its own height (`max-h-*` + `overflow-auto`) so growth
+  scrolls inside the block rather than growing the row.
+- **semantic titles, audited across all six intents**: terminal (command
+  text), read (path[:range]), edit (file path), search (query in scope,
+  now with hit count), and fetch (URL) already synthesize their summary
+  from the call's own input, not the raw wire tool name — confirmed by
+  reading `tool-renderers.tsx` before changing anything, per this task's
+  brief. `generic` has no synthesizable semantic content for an arbitrary
+  unclassified tool, so it falls back to the daemon-supplied `item.title`
+  where present (pre-existing `ToolCallCard` behavior) and only the raw
+  tool name when even that's absent — a deliberate judgment call, not a
+  gap, since there is no better signal available for a truly unknown
+  tool.
+- Elevation: no change needed — `docs/design.md` §13 already classifies
+  the tool-call card frame as "raised" (`surface-1`/border, no shadow)
+  and payload wells as "embedded" (`surface-2`), and every new block
+  added here (terminal command/output, IN/OUT sections, search matches)
+  follows one of those two existing recipes rather than inventing a
+  third.
+- Also fixed, incidentally, while touching these files: `ToolPayload`'s
+  label (`tool-call-card.tsx`) used an arbitrary `text-[0.7rem]` value;
+  now uses Track A's `text-metadata-label` role token, matching the same
+  label style already used by `command-palette.tsx`/`shortcuts-dialog.tsx`
+  (a Forbidden-list item from Item 1, caught because this file was
+  already open for the terminal/generic work, not a separate sweep).
+- `task test`: 731/731 web tests green (712 base + 19 new: 11 in
+  `tool-call.test.tsx` for this item, others already landed from
+  concurrent Track work on this branch), full Go suite green (one
+  `internal/taskrunner` test flaked once under full-suite load and
+  passed cleanly on an isolated rerun — confirmed pre-existing/unrelated,
+  not caused by this change, since no Go files were touched). `task
+  lint` green (go vet + gofmt; no web lint task exists in this repo).
+- **Not done this pass, left honestly open**: Item 6's `edit` intent was
+  left as-is (already reasonably distinct — inline colored diff — and not
+  named in the plan's per-intent upgrade list); the `fetch` intent
+  likewise untouched (not named in the plan's list either, still uses the
+  plain `ToolPayload` well). The dsh `ui-tool` reference for the IN/OUT
+  shape could not be read directly (not present in this worktree) — worth
+  a follow-up comparison if the reference becomes available. No live
+  browser smoke test run this pass (per the plan's combined-smoke-test
+  note, deferred to the same session as Items 4/7/`web-ui-fixes.md`).

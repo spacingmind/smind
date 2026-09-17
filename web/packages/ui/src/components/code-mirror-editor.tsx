@@ -29,7 +29,7 @@ export const editorViewRegistry = new WeakMap<HTMLElement, EditorView>();
  * always-visible white-box-in-dark-mode bug, not full per-language syntax
  * theming.
  */
-const appChromeTheme = EditorView.theme({
+export const appChromeTheme = EditorView.theme({
   "&": {
     color: "var(--foreground)",
     backgroundColor: "var(--background)",
