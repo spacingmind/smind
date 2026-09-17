@@ -80,6 +80,50 @@ func TestRunAccountAddDispatchesCredentialFromStdin(t *testing.T) {
 	}
 }
 
+func TestRunAccountAddForwardsBaseURLFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	registry := accounts.New(s)
+	token, err := auth.LoadOrCreateToken(home)
+	if err != nil {
+		t.Fatalf("LoadOrCreateToken() error = %v", err)
+	}
+	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	if err != nil {
+		t.Fatalf("wsapi.Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("server:\n  port: "+u.Port()+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdin := withStdin(t, "sk-test-local\n")
+	defer stdin()
+
+	if code := run([]string{"account", "add", "--base-url", "http://127.0.0.1:8080", "anthropic", "local"}); code != 0 {
+		t.Fatalf("run(account add --base-url) = %d, want 0", code)
+	}
+
+	list, err := registry.List()
+	if err != nil {
+		t.Fatalf("registry.List() error = %v", err)
+	}
+	if len(list) != 1 || list[0].APIKey == nil || list[0].APIKey.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("stored accounts = %+v, want base_url http://127.0.0.1:8080", list)
+	}
+}
+
 func withStdin(t *testing.T, value string) func() {
 	t.Helper()
 	read, write, err := os.Pipe()

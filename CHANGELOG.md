@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.7.0](https://github.com/spacingmind/smind/compare/v0.6.0...v0.7.0) (2026-09-15)
+
+
+### Features
+
+* add Codex (OpenAI) as a native third-party provider ([#40](https://github.com/spacingmind/smind/issues/40)) ([03fd0aa](https://github.com/spacingmind/smind/commit/03fd0aa0a96ae57193b7a3511166f523f915c604))
+* add Kimi as a second ACP-speaking provider ([#39](https://github.com/spacingmind/smind/issues/39)) ([118419d](https://github.com/spacingmind/smind/commit/118419ddb2c75aa43fe98c7753fc88543680e5ff))
+* merge account CLI and unified task dev hot reload ([#49](https://github.com/spacingmind/smind/issues/49)) ([0335bf4](https://github.com/spacingmind/smind/commit/0335bf41a08867bd1761f0584e7a532786796b08))
+* persist run/conversation history so it survives a daemon restart ([#38](https://github.com/spacingmind/smind/issues/38)) ([e8ee22a](https://github.com/spacingmind/smind/commit/e8ee22a3cb86ccbdf90f9da397cab7f8c6e13f67))
+* **store:** add terminal_sessions persistence ([0e3e59a](https://github.com/spacingmind/smind/commit/0e3e59acd2c9abe220fc908fed221b6ceddb11fc))
+* **terminal:** survive a daemon restart, mirroring internal/runs ([640d80e](https://github.com/spacingmind/smind/commit/640d80e78e3d3b9a76dcefa648fac80d61e5ab06))
+* **ui:** Item 21 — real responsive/compact shell layout ([#134](https://github.com/spacingmind/smind/issues/134)) ([4565837](https://github.com/spacingmind/smind/commit/45658376418eb39fa6a6b76a3d6f533143d3d6e2))
+* **web:** add WsClient onClose hook and a browser reconnect wrapper ([7a638e4](https://github.com/spacingmind/smind/commit/7a638e4baf20114d2952d6abe9e32de02528ec2c))
+* **web:** drive App.tsx's connection status from real socket events ([97fa3ab](https://github.com/spacingmind/smind/commit/97fa3abee4f3b9393963cc09840a045b43a72d7c))
+* **web:** editor preview pane (markdown, svg, sandboxed html) ([#51](https://github.com/spacingmind/smind/issues/51)) ([b98d26f](https://github.com/spacingmind/smind/commit/b98d26ffcdc5edbbcfe9cd83b777d7253a654b6e))
+* **web:** file conflict detection with reload/overwrite ([#62](https://github.com/spacingmind/smind/issues/62)) ([114800c](https://github.com/spacingmind/smind/commit/114800ca562bbb6fcbe143308588db4ef59963e4))
+* **web:** live UI on event subscriptions ([#59](https://github.com/spacingmind/smind/issues/59)) ([7c4e881](https://github.com/spacingmind/smind/commit/7c4e8815fe021f5882e543a06a4d1072e808427e))
+* **web:** per-file staging and commit flow ([#61](https://github.com/spacingmind/smind/issues/61)) ([43adcb3](https://github.com/spacingmind/smind/commit/43adcb33f9dad05b45763ed5f075dade0c65651f))
+* **web:** provider dropdown from provider.list ([#60](https://github.com/spacingmind/smind/issues/60)) ([d5a2e2d](https://github.com/spacingmind/smind/commit/d5a2e2d2e2fd33fcea19313dfaf12785d2d41fb1))
+* **web:** resync TaskDetailPane/TerminalPane after a reconnect ([cf8550c](https://github.com/spacingmind/smind/commit/cf8550c571d2547488a747445d6aaadf4325b5f0))
+* **web:** tab registry with per-task scoping and attention badges ([#53](https://github.com/spacingmind/smind/issues/53)) ([e1141ad](https://github.com/spacingmind/smind/commit/e1141adfb7b632c5ce2939693e08810c953eb182))
+* **wsapi:** event subscription RPC ([#54](https://github.com/spacingmind/smind/issues/54)) ([6947ba8](https://github.com/spacingmind/smind/commit/6947ba840b8e89dce62b9ec4a5ddf2f3a213086f))
+* **wsapi:** thread store persistence into terminal.Registry construction ([bc0a893](https://github.com/spacingmind/smind/commit/bc0a89374c8be63686fe92cc1694d517710a8316))
+
+
+### Bug Fixes
+
+* kill in-flight run.start subprocesses on daemon shutdown ([#37](https://github.com/spacingmind/smind/issues/37)) ([93e8633](https://github.com/spacingmind/smind/commit/93e8633828c7fad0b803f56e6b6ae1cabafcbd14))
+* persist a run's terminal status before it becomes visible in memory ([#42](https://github.com/spacingmind/smind/issues/42)) ([7933bd6](https://github.com/spacingmind/smind/commit/7933bd6275182df72fef98066e816e3ec3d89a7c))
+* restore release metadata (manifest + changelog) accidentally reverted by the master rebase promotion ([8be6722](https://github.com/spacingmind/smind/commit/8be67227617e78649c608943d12205d505c558cc))
+* **terminal:** close checkpoint/finish write race and reap zombies on Create failure ([6d9ff5b](https://github.com/spacingmind/smind/commit/6d9ff5b5539fa88da84d075920ac8af94ad87fd2))
+* **ui:** wire the two missing Item 6 side-dock entry points, add the promised terminal detach-not-stop test ([#133](https://github.com/spacingmind/smind/issues/133)) ([cc79922](https://github.com/spacingmind/smind/commit/cc79922793ef3504173667c25f7203c8940f90c6))
+* **web:** handleClose must reset lastTerminalIdRef, not just terminalId ([59079b9](https://github.com/spacingmind/smind/commit/59079b9496f922a4dbb8f5927ed689f5ec460cbf))
+* **web:** isolate one throwing onClose callback from its siblings ([bc60060](https://github.com/spacingmind/smind/commit/bc60060de4b3805f0980626f47c2b4c189c67731))
+* **workspace:** checkpoint task work before archiving ([#52](https://github.com/spacingmind/smind/issues/52)) ([f5233a1](https://github.com/spacingmind/smind/commit/f5233a180a29a526f91fabc5e0a697e4d3f84dba))
+
 ## [0.6.0](https://github.com/spacingmind/smind/compare/v0.5.0...v0.6.0) (2026-09-15)
 
 

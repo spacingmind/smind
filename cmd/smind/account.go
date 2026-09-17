@@ -47,8 +47,22 @@ func cmdAccount(args []string) int {
 }
 
 func cmdAccountAdd(args []string) int {
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: smind account add <provider> <label> < credential")
+	var baseURL string
+	positional := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--base-url" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] <provider> <label> < credential")
+				return 2
+			}
+			baseURL = args[i+1]
+			i++
+			continue
+		}
+		positional = append(positional, args[i])
+	}
+	if len(positional) != 2 {
+		fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] <provider> <label> < credential")
 		return 2
 	}
 	credential, err := io.ReadAll(os.Stdin)
@@ -68,10 +82,14 @@ func cmdAccountAdd(args []string) int {
 	}
 	defer client.Close()
 
+	params := map[string]any{
+		"provider": positional[0], "label": positional[1], "credential": string(credential),
+	}
+	if baseURL != "" {
+		params["baseUrl"] = baseURL
+	}
 	var account accountResult
-	err = client.Call(context.Background(), "account.add", map[string]any{
-		"provider": args[0], "label": args[1], "credential": string(credential),
-	}, &account)
+	err = client.Call(context.Background(), "account.add", params, &account)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "account add: %v\n", err)
 		return 1

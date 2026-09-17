@@ -5,6 +5,7 @@ package accounts
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -14,9 +15,12 @@ const (
 	CredentialTypeOAuth  = "oauth"
 )
 
-// APIKeyCredential is a static bearer credential.
+// APIKeyCredential is a static bearer credential. BaseURL optionally
+// overrides the provider's default upstream URL for this account (empty =
+// provider default); see ValidateBaseURL for the accepted forms.
 type APIKeyCredential struct {
-	Key string `json:"key"`
+	Key     string `json:"key"`
+	BaseURL string `json:"base_url,omitempty"`
 }
 
 // OAuthCredential is a refreshable OAuth2 credential.
@@ -79,4 +83,34 @@ func (c *OAuthCredential) UnmarshalJSON(data []byte) error {
 	}
 
 	return fmt.Errorf("expires_at must be an RFC3339 string or a Unix epoch number, got %s", raw.ExpiresAt)
+}
+
+// ValidateBaseURL checks a per-account upstream override. Empty means
+// "provider default" and is always valid. Otherwise https is always
+// allowed; http is allowed only for loopback hosts (localhost, 127.0.0.1,
+// ::1) so arbitrary LAN URLs cannot turn the proxy into an SSRF relay.
+func ValidateBaseURL(baseURL string) error {
+	if baseURL == "" {
+		return nil
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return fmt.Errorf("parse base_url: %w", err)
+	}
+	host := u.Hostname()
+	switch u.Scheme {
+	case "https":
+		if host == "" {
+			return fmt.Errorf("base_url %q: https requires a host", baseURL)
+		}
+		return nil
+	case "http":
+		switch host {
+		case "localhost", "127.0.0.1", "::1":
+			return nil
+		}
+		return fmt.Errorf("base_url %q: http is only allowed for loopback hosts (localhost, 127.0.0.1, ::1); use https for %q", baseURL, host)
+	default:
+		return fmt.Errorf("base_url %q: scheme must be https (or http for loopback)", baseURL)
+	}
 }

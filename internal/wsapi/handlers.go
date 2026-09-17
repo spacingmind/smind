@@ -94,6 +94,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			Provider   string `json:"provider"`
 			Label      string `json:"label"`
 			Credential string `json:"credential"`
+			BaseURL    string `json:"baseUrl,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.add: invalid params: %w", err)
@@ -115,7 +116,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			return accountResultFrom(account), nil
 		}
 
-		created, err := registry.AddAPIKey(p.Provider, p.Label, strings.TrimSpace(p.Credential))
+		created, err := registry.AddAPIKeyWithBaseURL(p.Provider, p.Label, strings.TrimSpace(p.Credential), strings.TrimSpace(p.BaseURL))
 		if err != nil {
 			return nil, fmt.Errorf("account.add: %w", err)
 		}
