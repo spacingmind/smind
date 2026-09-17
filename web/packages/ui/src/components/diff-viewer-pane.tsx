@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useTaskDiff } from "@/hooks/use-task-diff";
+import { suggestCommitMessage } from "@/lib/commit-suggestion";
 import { formatDiffStat } from "@/lib/diff-stat";
 import { subscribeDiffReveal, takeDiffReveal } from "@/lib/diff-reveal";
 import { filePathForElement, type DiffLineRef } from "@/lib/diff-lines";
@@ -317,6 +318,12 @@ export function DiffViewerPane({
   };
 
   const stagedCount = files?.filter((f) => f.staged).length ?? 0;
+  // Item 8: a suggested message derived from the staged set itself
+  // (lib/commit-suggestion.ts). Offered as a one-click fill rather than
+  // placeholder text -- a placeholder vanishes on focus and can't be
+  // acted on -- and only while the message is still empty, so it can
+  // never overwrite something the user typed.
+  const suggestion = suggestCommitMessage(files ?? []);
   const canCommit = stagedCount > 0 && message.trim() !== "" && !committing;
   const isEmpty = files !== null && files.length === 0;
 
@@ -512,9 +519,22 @@ export function DiffViewerPane({
           onChange={(e) => setMessage(e.target.value)}
           data-testid="commit-message"
         />
-        <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
-          {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" size="sm" disabled={!canCommit} onClick={commit} data-testid="commit-button">
+            {committing ? "Committing…" : `Commit (${stagedCount} staged)`}
+          </Button>
+          {suggestion && message.trim() === "" && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setMessage(suggestion)}
+              data-testid="commit-suggestion"
+            >
+              Use “{suggestion}”
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );

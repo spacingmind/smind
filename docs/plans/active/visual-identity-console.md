@@ -96,6 +96,13 @@ render-intent registry rather than replacing it).
   timeline-row.tsx`, `permission-reason.ts`), no longer dead primitives.
   Only genuinely-open item from that audit folded in here: P2.12,
   "Suggested commit message" (Item 8 below).
+- **Item 8 uses a one-click affordance, not placeholder text**
+  (`diff-viewer-pane.tsx`) — a ghost "Use "<message>"" button next to the
+  Commit button, shown only while the message box is empty and a
+  suggestion exists, and it fills-and-retires on click. Placeholder text
+  was rejected: a placeholder vanishes the moment the field is focused,
+  so there'd be nothing left to click or read back once the user starts
+  typing, and it can't be "accepted" without being retyped verbatim.
 
 ## Acceptance Criteria
 
@@ -296,7 +303,7 @@ replace it.*
 - [ ] Item 5 — Status/diff color-family extension
 - [ ] Item 6 — Tool-call card visual upgrade
 - [ ] Item 7 — Permission card visual polish
-- [ ] Item 8 — Suggested commit message affordance
+- [x] Item 8 — Suggested commit message affordance
 - [ ] Live smoke test (combined with web-ui-fixes.md's pending one)
 
 ## Tracks and dependencies
@@ -320,3 +327,12 @@ instead of Opus):
 ## Validation
 
 Not started.
+
+- **Item 8 — Suggested commit message affordance** (2026-09-17): `task
+  test` (677/677 web tests green, including `commit-suggestion.test.ts`'s
+  heuristic coverage for single-add, single-modify, and mixed multi-file
+  cases, plus `diff-viewer-pane.test.tsx`'s two new commit-bar
+  interaction tests) and `task lint` (go vet + gofmt; this repo has no
+  separate web lint task) both pass. Manual smoke test not run this pass
+  (no dev server exercised) — flag if a live check is wanted before
+  merge.
