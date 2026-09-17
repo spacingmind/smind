@@ -144,7 +144,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|attach|logs|stop|permissions|approve> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|attach|logs|stop|permissions|approve|options|set-option> ...")
 		return 2
 	}
 	switch args[0] {
@@ -164,6 +164,10 @@ func cmdTask(args []string) int {
 		return cmdTaskPermissions(args[1:])
 	case "approve":
 		return cmdTaskApprove(args[1:])
+	case "options":
+		return cmdTaskOptions(args[1:])
+	case "set-option":
+		return cmdTaskSetOption(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2
@@ -792,6 +796,112 @@ func cmdTaskApprove(args []string) int {
 	}
 	fmt.Printf("request %s -> %s\n", target.RequestID, optionID)
 	return 0
+}
+
+// configOption is the CLI-side mirror of internal/wsapi's
+// configOptionParams, field for field -- same wire-shape duplication
+// convention as runLogsResult and the other result types above (the JSON
+// wire contract is the interface between CLI and daemon, not a shared Go
+// struct). CurrentValue's shape varies by option type ({"type":"id",
+// "value":...} for select options, a bool for boolean options), so it's
+// carried as raw JSON and printed compact.
+type configOption struct {
+	ConfigID     string          `json:"configId"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	Category     string          `json:"category,omitempty"`
+	Type         string          `json:"type"`
+	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
+}
+
+// runConfigOptions is the result of run.listConfigOptions and
+// run.setConfigOption.
+type runConfigOptions struct {
+	Options []configOption `json:"options"`
+}
+
+// cmdTaskOptionsUsage is printed on any argument error in cmdTaskOptions.
+const cmdTaskOptionsUsage = "usage: smind task options <runId>"
+
+// cmdTaskOptions lists a run's ACP session config options. An empty list
+// prints an explanatory note rather than nothing: it means either the
+// provider doesn't support config options at all (claude-native,
+// codex-native) or the run has no live session to have discovered any.
+func cmdTaskOptions(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, cmdTaskOptionsUsage)
+		return 2
+	}
+	runID := args[0]
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var result runConfigOptions
+	if err := client.Call(context.Background(), "run.listConfigOptions", map[string]any{"runId": runID}, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "task options: %v\n", err)
+		return 1
+	}
+	printConfigOptions(runID, result.Options)
+	return 0
+}
+
+// cmdTaskSetOptionUsage is printed on any argument error in cmdTaskSetOption.
+const cmdTaskSetOptionUsage = "usage: smind task set-option <runId> <configId> <value>"
+
+// cmdTaskSetOption sets one config option on a run's live ACP session and
+// prints the refreshed option list the daemon sends back. Failures print
+// the daemon's rejection reason (unknown option id, non-ACP provider, no
+// live session) before the non-zero exit.
+func cmdTaskSetOption(args []string) int {
+	if len(args) != 3 {
+		fmt.Fprintln(os.Stderr, cmdTaskSetOptionUsage)
+		return 2
+	}
+	runID, configID, value := args[0], args[1], args[2]
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var result runConfigOptions
+	if err := client.Call(context.Background(), "run.setConfigOption", map[string]any{"runId": runID, "configId": configID, "value": value}, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "task set-option: %v\n", err)
+		return 1
+	}
+	fmt.Printf("set %s = %s on run %s\n", configID, value, runID)
+	printConfigOptions(runID, result.Options)
+	return 0
+}
+
+// printConfigOptions renders an option list as id/name/category/value
+// rows (tab-separated, same convention as `task new`/`task ls` output),
+// or the explanatory note when there's nothing to show.
+func printConfigOptions(runID string, options []configOption) {
+	if len(options) == 0 {
+		fmt.Printf("run %s: no config options (provider does not support this, or no live session)\n", runID)
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	for _, o := range options {
+		value := "-"
+		if len(o.CurrentValue) > 0 {
+			value = string(o.CurrentValue)
+		}
+		category := "-"
+		if o.Category != "" {
+			category = o.Category
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", o.ConfigID, o.Name, category, value)
+	}
+	w.Flush()
 }
 
 func parseInt64(s string) (int64, error) {
