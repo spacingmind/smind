@@ -798,7 +798,6 @@ func cmdTaskApprove(args []string) int {
 	return 0
 }
 
-
 // configOption is the CLI-side mirror of internal/wsapi's
 // configOptionParams, field for field -- same wire-shape duplication
 // convention as runLogsResult and the other result types above (the JSON
