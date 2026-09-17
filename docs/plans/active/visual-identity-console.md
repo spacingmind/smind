@@ -304,7 +304,8 @@ replace it.*
 - [x] Item 6 — Tool-call card visual upgrade
 - [x] Item 7 — Permission card visual polish
 - [x] Item 8 — Suggested commit message affordance
-- [ ] Live smoke test (combined with web-ui-fixes.md's pending one)
+- [x] Live smoke test (combined with web-ui-fixes.md's pending one) —
+      partial: see Validation for exactly what was and wasn't covered
 
 ## Tracks and dependencies
 
@@ -512,3 +513,41 @@ central-switch reintroduction.
   a follow-up comparison if the reference becomes available. No live
   browser smoke test run this pass (per the plan's combined-smoke-test
   note, deferred to the same session as Items 4/7/`web-ui-fixes.md`).
+
+**Live smoke test** (2026-09-17, after all four tracks merged to this
+branch): real daemon (`bin/smind serve`, isolated `$SMIND_HOME`) + a real
+git repo/workspace/space/two tasks via the CLI, driven with Playwright +
+Chromium (freshly installed this session — none was available in any
+earlier session, including `web-ui-fixes.md`'s). Confirmed by direct
+screenshot inspection at all four widths (1440/1024/768/390), light +
+dark:
+
+- Composer's provider/approval-policy dropdowns open as proper shadcn
+  `Select` popovers (rounded, bordered, checkmark on the selected item,
+  theme-correct background/text in both light and dark) — no native
+  `<select>` chrome, confirming `web-ui-fixes.md`'s dropdown fix holds.
+- Sidebar task/branch titles truncate cleanly with a trailing ellipsis at
+  every width tested, both before and after a live resize — no fragment
+  rendering, confirming that fix holds too.
+- Resize handle: a real `mouse.down` → `mouse.move` (150px, 10 steps) →
+  `mouse.up` sequence on the sidebar handle produced a smooth, immediate
+  width change with no dead zone or "lost" drag — confirms the
+  `resizable.tsx`/`App.tsx` pointer-capture and z-index fixes from
+  `web-ui-fixes.md` hold under an actual pointer sequence, not just unit
+  tests.
+- Light/dark mode: clean, fully-themed at every width — no unstyled
+  flashes, no light-only colors bleeding into dark (the app shell,
+  sidebar, tabs, composer, and dropdown popover all repainted correctly
+  on `colorScheme: dark`).
+- Responsive: sidebar renders as a normal panel at 1440/1024/768px and
+  correctly collapses to an icon-only/hidden state at 390px with no
+  layout overflow.
+- **Not covered by this pass**: no live agent run was started (would
+  need a configured provider account/credentials not available in this
+  sandbox), so the Item 6 tool-call cards and Item 7 permission card
+  were not visually exercised with real streaming content — only their
+  static/empty states were seen (task detail's "No runs yet" empty
+  state, rendered correctly). A follow-up smoke pass with an actual
+  provider run would be needed to visually confirm those two items
+  end-to-end; their unit/interaction tests (Track B/C's Validation
+  entries above) are the coverage that exists today.
