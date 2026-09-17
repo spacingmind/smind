@@ -248,6 +248,14 @@ type run struct {
 	prompt    string
 	startedAt time.Time
 
+	// runner is the Runner Start drove (will drive) this run with,
+	// captured so ListConfigOptions/SetConfigOption can reach the run's
+	// ACP session state after Start returns. Immutable after Start; nil
+	// on a rehydrated run (nothing drove it in this process), which the
+	// config-option methods treat as no session info rather than
+	// dereferencing.
+	runner *taskrunner.Runner
+
 	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
 	// and immutable thereafter -- see runPermissionDecider.Decide, the only
 	// reader.
@@ -353,6 +361,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		taskID:             taskID,
 		provider:           provider,
 		prompt:             prompt,
+		runner:             runner,
 		approvalPolicy:     approvalPolicy,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
