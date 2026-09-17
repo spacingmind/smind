@@ -23,6 +23,19 @@ before opening a PR.
   PRs directly against `master`.
 - **`develop` is the integration branch.** Base your feature/fix branch on
   `develop` and open your PR against `develop`.
+- **After every release, `master`'s release-please commit (version bump +
+  `CHANGELOG.md`) gets synced back into `develop` automatically**
+  (`.github/workflows/sync-develop.yml`, triggered on push to `master`) —
+  it opens a `chore: sync develop with master after vX.Y.Z release` PR
+  against `develop` for a maintainer to merge (a real merge commit, not
+  squash/rebase, so the two branches keep verifiable shared history).
+  **Merge that PR before doing the next `develop -> master` promotion.**
+  Skipping it is exactly what caused a real incident (v0.6.0 -> v0.7.0:
+  the promotion silently reverted the previous release's manifest/
+  changelog, see PR #135/#136/#137) — `ci.yml`'s
+  `check-release-metadata.sh` step now fails a `develop -> master` PR
+  outright if its manifest version or changelog would regress master's,
+  as a second line of defense.
 
 ## Conventional Commits
 

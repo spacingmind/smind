@@ -116,7 +116,7 @@ export function ToolCallCard({
 export function ToolPayload({ label, body, testId }: { label: string; body: string; testId?: string }) {
   return (
     <div className="mt-1 first:mt-0">
-      <p className="text-[0.7rem] uppercase text-foreground-muted">{label}</p>
+      <p className="text-metadata-label tracking-wide uppercase text-foreground-muted">{label}</p>
       <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded bg-surface-2 p-2 whitespace-pre-wrap">
         {body}
       </pre>

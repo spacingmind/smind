@@ -52,6 +52,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"run.logs":              handleRunLogs(reg),
 		"run.stop":              handleRunStop(reg),
 		"run.respondPermission": handleRunRespondPermission(reg),
+		"run.listConfigOptions": handleRunListConfigOptions(reg),
+		"run.setConfigOption":   handleRunSetConfigOption(reg),
 		"terminal.create":       handleTerminalCreate(wm, treg),
 		"terminal.attach":       handleTerminalAttach(treg),
 		"terminal.write":        handleTerminalWrite(treg),
@@ -94,6 +96,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			Provider   string `json:"provider"`
 			Label      string `json:"label"`
 			Credential string `json:"credential"`
+			BaseURL    string `json:"baseUrl,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.add: invalid params: %w", err)
@@ -115,7 +118,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			return accountResultFrom(account), nil
 		}
 
-		created, err := registry.AddAPIKey(p.Provider, p.Label, strings.TrimSpace(p.Credential))
+		created, err := registry.AddAPIKeyWithBaseURL(p.Provider, p.Label, strings.TrimSpace(p.Credential), strings.TrimSpace(p.BaseURL))
 		if err != nil {
 			return nil, fmt.Errorf("account.add: %w", err)
 		}
@@ -1014,6 +1017,85 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
 		return struct{}{}, nil
+	}
+}
+
+// configOptionParams is the wire shape of one ACP session config option,
+// mirroring acp.ConfigOption the same way permissionOptionParams mirrors
+// taskrunner.PermissionOption -- a small dedicated struct so the JSON wire
+// contract stays explicit in this package. CurrentValue is passed through
+// as raw JSON (its shape varies by option type: {"type":"id","value":...}
+// for select options, a bool for boolean options).
+type configOptionParams struct {
+	ConfigID     string          `json:"configId"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description,omitempty"`
+	Category     string          `json:"category,omitempty"`
+	Type         string          `json:"type"`
+	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
+}
+
+func toConfigOptionParams(opts []acp.ConfigOption) []configOptionParams {
+	out := make([]configOptionParams, len(opts))
+	for i, o := range opts {
+		out[i] = configOptionParams{
+			ConfigID:     o.ConfigID,
+			Name:         o.Name,
+			Description:  o.Description,
+			Category:     o.Category,
+			Type:         o.Type,
+			CurrentValue: o.CurrentValue,
+		}
+	}
+	return out
+}
+
+// runConfigOptionsResult is the result of run.listConfigOptions and
+// run.setConfigOption: the session's full config option list (after any
+// change, for set).
+type runConfigOptionsResult struct {
+	Options []configOptionParams `json:"options"`
+}
+
+// handleRunListConfigOptions returns the config options the agent
+// advertised for a run's ACP session, from any connection -- an empty list
+// (not an error) for a non-ACP provider, mirroring
+// taskrunner.Runner.ConfigOptions.
+func handleRunListConfigOptions(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID string `json:"runId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.listConfigOptions: invalid params: %w", err)
+		}
+		opts, err := reg.ListConfigOptions(p.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("run.listConfigOptions: %w", err)
+		}
+		return runConfigOptionsResult{Options: toConfigOptionParams(opts)}, nil
+	}
+}
+
+// handleRunSetConfigOption sets one config option on a run's live ACP
+// session, returning the refreshed option list. A non-ACP provider or a
+// run with no live session fails with the underlying error rather than
+// silently no-op'ing (see runs.Registry.SetConfigOption).
+func handleRunSetConfigOption(reg *runs.Registry) handlerFunc {
+	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID    string `json:"runId"`
+			ConfigID string `json:"configId"`
+			Value    string `json:"value"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.setConfigOption: invalid params: %w", err)
+		}
+		opts, err := reg.SetConfigOption(ctx, p.RunID, p.ConfigID, p.Value)
+		if err != nil {
+			return nil, fmt.Errorf("run.setConfigOption: %w", err)
+		}
+		return runConfigOptionsResult{Options: toConfigOptionParams(opts)}, nil
 	}
 }
 

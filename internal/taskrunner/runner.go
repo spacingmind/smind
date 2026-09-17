@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"sync"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
@@ -17,7 +19,8 @@ import (
 // code always gets it from acp.New, whose real *acp.Client satisfies it.
 type acpBackend interface {
 	Initialize(ctx context.Context) error
-	NewSession(ctx context.Context, cwd string) (string, error)
+	NewSession(ctx context.Context, cwd string) (string, []acp.ConfigOption, error)
+	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	Close() error
 }
@@ -129,6 +132,14 @@ type Runner struct {
 	// map.
 	codexCommand []string
 
+	// acpSessions tracks each task's most recent ACP session (see
+	// acpSessionState in config_options.go), keyed by task ID, so
+	// ConfigOptions/SetSessionConfigOption can reach a task's live session
+	// without RunPrompt handing its per-turn client to anyone. Guarded by
+	// sessionMu.
+	acpSessions map[int64]*acpSessionState
+	sessionMu   sync.Mutex
+
 	// newACPClient, newClaudeClient, and newCodexClient default to wrapping
 	// acp.New, claudecode.New, and codex.New. Overridable only from within
 	// this package's tests, to point at a fake agent binary / fake CLI
@@ -143,7 +154,8 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm: wm,
+		wm:          wm,
+		acpSessions: map[int64]*acpSessionState{},
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
@@ -207,7 +219,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, provider, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderCodexNative:
@@ -222,7 +234,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -245,10 +257,12 @@ func (r *Runner) runACP(ctx context.Context, provider Provider, worktreePath, pr
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, err := client.NewSession(ctx, worktreePath)
+	sessionID, configOptions, err := client.NewSession(ctx, worktreePath)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
+	r.trackACPSession(taskID, sessionID, client, configOptions)
+	defer r.endACPTurn(taskID)
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
@@ -351,6 +365,22 @@ func acpToolStatus(status string) string {
 	}
 }
 
+// claudeDialogTimeoutEnv is the env var the real `claude` CLI reads for its
+// own internal auto-deny deadline on an unanswered permission dialog
+// (can_use_tool control request). When the CLI's deadline fires it sends
+// control_cancel_request, cancelling the per-request ctx inside
+// runPermissionDecider.Decide out from under smind -- see
+// docs/plans/active/claude-native-permission-cancellation.md.
+const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
+
+// claudeDialogTimeoutMS is the value wired into the CLI when a human
+// decider is attached: 60 minutes, comfortably above internal/runs'
+// 5-minute defaultPermissionTimeout (registry.go) so smind's own timeout
+// is always the one that fires first and gets its distinguishable
+// PermissionResolvedByTimeout event. Defined locally, not imported from
+// internal/runs, because runs imports taskrunner (import cycle).
+const claudeDialogTimeoutMS = "3600000"
+
 func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch {
@@ -373,6 +403,19 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 		// backends, whose permission flow starts at the decider.
 		if approvalPolicy == ApprovalPolicyAutoSafe {
 			opts = append(opts, claudecode.WithAllowedTools(SafeBashRules()...))
+		}
+		// Hold the CLI's own permission-dialog deadline open well past
+		// smind's 5-minute manual-approval window, so the CLI's internal
+		// auto-deny fallback can't silently cancel a pending request
+		// before a human answers (see claudeDialogTimeoutEnv). Only in the
+		// decider branch: the Runner-level policy defaults answer
+		// programmatically and never wait on a dialog. An explicit value
+		// already in the environment is forwarded as-is instead -- a
+		// deployment-wide escape hatch.
+		if v := os.Getenv(claudeDialogTimeoutEnv); v != "" {
+			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+v))
+		} else {
+			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+claudeDialogTimeoutMS))
 		}
 	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))

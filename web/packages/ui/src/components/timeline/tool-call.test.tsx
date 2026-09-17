@@ -2,6 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { Hammer } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { editorViewRegistry } from "@/components/code-mirror-editor";
 import { groupTimeline } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { ToolCall, worktreeRelativePath } from "@/components/timeline/tool-call";
@@ -262,5 +263,161 @@ describe("result and diff helpers", () => {
       { sign: "+", text: "line two" },
     ]);
     expect(inlineDiff({ whatsit: 1 })).toEqual([]);
+  });
+});
+
+describe("terminal output collapse (Track C, Item 6)", () => {
+  const longOutput = Array.from({ length: 20 }, (_, i) => `line ${i}`).join("\n");
+
+  it("collapses long successful output behind a Show output toggle", () => {
+    render(<ToolCall item={call({ toolName: "Bash", input: { command: "build" }, result: longOutput, status: "success" })} />);
+    expand();
+    expect(screen.getByTestId("tool-output-toggle")).toHaveTextContent("Show output");
+    expect(screen.getByTestId("tool-detail-output")).not.toHaveTextContent("line 19");
+
+    fireEvent.click(screen.getByTestId("tool-output-toggle"));
+    expect(screen.getByTestId("tool-detail-output")).toHaveTextContent("line 19");
+    expect(screen.getByTestId("tool-output-toggle")).toHaveTextContent("Hide output");
+  });
+
+  it("expands failed output by default with no collapse toggle, actionable line included", () => {
+    render(<ToolCall item={call({ toolName: "Bash", input: { command: "build" }, result: longOutput, status: "failure" })} />);
+    expand();
+    expect(screen.queryByTestId("tool-output-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-detail-output")).toHaveTextContent("line 19");
+  });
+
+  it("shows short output directly with no toggle either way", () => {
+    render(<ToolCall item={call({ toolName: "Bash", input: { command: "echo hi" }, result: "hi", status: "success" })} />);
+    expand();
+    expect(screen.queryByTestId("tool-output-toggle")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-detail-output")).toHaveTextContent("hi");
+  });
+});
+
+describe("read line-numbered preview (Track C, Item 6)", () => {
+  it("renders a read-only, line-numbered CodeMirror view of the file content, reusing the app editor's chrome", () => {
+    render(
+      <ToolCall
+        item={call({ toolName: "Read", input: { file_path: "/wt/a.go" }, result: "package main\n\nfunc main() {}\n" })}
+      />,
+    );
+    expand();
+
+    const container = screen.getByTestId("tool-detail-output");
+    const view = editorViewRegistry.get(container);
+    expect(view).toBeDefined();
+    expect(view?.state.doc.toString()).toBe("package main\n\nfunc main() {}\n");
+    expect(view?.state.readOnly).toBe(true);
+  });
+
+  it("offsets the gutter's line numbers to the file's real range when the call only read a slice", () => {
+    render(<ToolCall item={call({ toolName: "Read", input: { file_path: "/wt/a.go", offset: 10 }, result: "a\nb\nc" })} />);
+    expand();
+    const container = screen.getByTestId("tool-detail-output");
+    // Line 1 of the read slice is really the file's line 10 -- the gutter
+    // must say so, not restart from 1.
+    const numbers = Array.from(container.querySelectorAll(".cm-gutterElement")).map((el) => el.textContent);
+    expect(numbers).toContain("10");
+    expect(numbers).not.toContain("1");
+  });
+});
+
+describe("search bounded match list (Track C, Item 6)", () => {
+  const manyMatches = Array.from({ length: 30 }, (_, i) => `file${i}.go`).join("\n");
+
+  it("shows the match count in the always-visible summary line, not just the expanded detail", () => {
+    render(<ToolCall item={call({ toolName: "Grep", input: { pattern: "TODO", path: "internal" }, result: manyMatches })} />);
+    expect(screen.getByTestId("tool-call-summary")).toHaveTextContent("TODO in internal");
+    expect(screen.getByTestId("tool-call-summary")).toHaveTextContent("30 hits");
+  });
+
+  it("bounds the match list by default and expands it on demand, never an unbounded dump", () => {
+    render(<ToolCall item={call({ toolName: "Grep", input: { pattern: "TODO", path: "internal" }, result: manyMatches })} />);
+    expand();
+    expect(screen.getByTestId("tool-detail-output")).not.toHaveTextContent("file29.go");
+
+    fireEvent.click(screen.getByTestId("tool-detail-matches-toggle"));
+    expect(screen.getByTestId("tool-detail-output")).toHaveTextContent("file29.go");
+  });
+});
+
+describe("generic IN/OUT layout (Track C, Item 6)", () => {
+  it("labels a mystery tool's plain-text input/output as IN/OUT instead of a raw JSON dump", () => {
+    render(<ToolCall item={call({ toolName: "Mystery", input: "plain text in", result: "plain text out" })} />);
+    expand();
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.getByText("OUT")).toBeInTheDocument();
+    expect(screen.getByTestId("tool-call-input")).toHaveTextContent("plain text in");
+    expect(screen.getByTestId("tool-call-result")).toHaveTextContent("plain text out");
+  });
+
+  it("still shows the IN section alone when there is no result yet", () => {
+    render(<ToolCall item={call({ toolName: "Mystery", input: { whatsit: 3 } })} />);
+    expand();
+    expect(screen.getByText("IN")).toBeInTheDocument();
+    expect(screen.queryByText("OUT")).not.toBeInTheDocument();
+    expect(screen.getByTestId("tool-call-input")).toHaveTextContent('"whatsit": 3');
+  });
+});
+
+describe("stable row height while streaming (Track C, Item 6)", () => {
+  const eventsAt = (partialResult: string): RunLogEvent[] => [
+    { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "go test", input: { command: "go test ./..." }, status: "running" },
+    { type: "tool_call", toolCallId: "t1", result: partialResult, status: "running" },
+  ];
+
+  it("keeps the collapsed card's own DOM node fixed, and its detail body unmounted, as streamed output grows", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run(eventsAt(""))} />
+      </ul>,
+    );
+    const card = screen.getByTestId("timeline-tool-call");
+    expect(screen.queryByTestId("tool-call-detail")).not.toBeInTheDocument();
+
+    let partial = "";
+    for (let i = 0; i < 20; i++) {
+      partial += `line ${i}\n`;
+      rerender(
+        <ul>
+          <RunTimeline run={run(eventsAt(partial))} />
+        </ul>,
+      );
+      // Same DOM node -- React updates it in place rather than
+      // unmounting/remounting the card as the (still-collapsed) result
+      // grows underneath it.
+      expect(screen.getByTestId("timeline-tool-call")).toBe(card);
+      // Collapsed by default: the detail body -- and therefore whatever
+      // size its content would need -- is never mounted while streaming,
+      // so a growing result can't reflow the row (or the timeline around
+      // it) token by token.
+      expect(screen.queryByTestId("tool-call-detail")).not.toBeInTheDocument();
+    }
+  });
+
+  it("keeps the same card node once opened, growing output inside its own bounded scroll region instead of the row", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run(eventsAt("start"))} />
+      </ul>,
+    );
+    expand();
+    const card = screen.getByTestId("timeline-tool-call");
+
+    let partial = "start\n";
+    for (let i = 0; i < 20; i++) {
+      partial += `line ${i}\n`;
+      rerender(
+        <ul>
+          <RunTimeline run={run(eventsAt(partial))} />
+        </ul>,
+      );
+      expect(screen.getByTestId("timeline-tool-call")).toBe(card);
+    }
+    // The output region caps its own height and scrolls internally -- it
+    // doesn't force the outer card (and therefore the timeline) to keep
+    // growing on every token.
+    expect(screen.getByTestId("tool-detail-output").className).toMatch(/max-h-/);
   });
 });

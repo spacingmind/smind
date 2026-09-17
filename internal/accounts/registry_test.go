@@ -161,3 +161,72 @@ func TestRegistry_GetUnknownCredentialType(t *testing.T) {
 		t.Fatal("Get() error = nil, want error for unknown credential type")
 	}
 }
+
+func TestRegistry_AddAPIKeyWithBaseURL(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+
+	created, err := r.AddAPIKeyWithBaseURL("anthropic", "local", "sk-ant-x", "http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("AddAPIKeyWithBaseURL() error = %v", err)
+	}
+
+	got, err := r.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.APIKey == nil {
+		t.Fatal("APIKey credential not decoded")
+	}
+	if got.APIKey.Key != "sk-ant-x" {
+		t.Errorf("Key = %q", got.APIKey.Key)
+	}
+	if got.APIKey.BaseURL != "http://127.0.0.1:8080" {
+		t.Errorf("BaseURL = %q, want round-trip", got.APIKey.BaseURL)
+	}
+
+	// empty base_url = provider default, and AddAPIKey keeps working
+	plain, err := r.AddAPIKey("anthropic", "plain", "sk-ant-y")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	got, err = r.Get(plain.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.APIKey.BaseURL != "" {
+		t.Errorf("plain AddAPIKey BaseURL = %q, want empty", got.APIKey.BaseURL)
+	}
+}
+
+func TestRegistry_AddAPIKeyWithBaseURL_Validation(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+
+	ok := []string{
+		"",                        // provider default
+		"https://api.example.com", // https anywhere
+		"http://127.0.0.1:8080",   // loopback with port
+		"http://localhost:3000",   // localhost
+		"http://[::1]:9000",       // ipv6 loopback
+	}
+	for _, u := range ok {
+		if _, err := r.AddAPIKeyWithBaseURL("anthropic", "t", "k", u); err != nil {
+			t.Errorf("AddAPIKeyWithBaseURL(%q) error = %v, want accepted", u, err)
+		}
+	}
+
+	bad := map[string]string{
+		"http://example.com":      "non-loopback http",
+		"http://192.168.1.5:8080": "LAN http",
+		"ftp://127.0.0.1":         "non-http scheme",
+		"https://":                "hostless",
+	}
+	for u := range bad {
+		if _, err := r.AddAPIKeyWithBaseURL("anthropic", "t", "k", u); err == nil {
+			t.Errorf("AddAPIKeyWithBaseURL(%q) succeeded, want rejected (%s)", u, bad[u])
+		}
+	}
+}

@@ -7,7 +7,11 @@ ever seeing plaintext. Based on `docs/research/relay-design-status.md`
 (read-only audit: zero relay code exists today) and
 `docs/decisions/0007-relay-architecture.md` — **Accepted 2026-09-11**:
 crypto is X25519 + ChaCha20-Poly1305 (counter-based nonces); all other
-choices per the ADR's recommendations.
+choices per the ADR's recommendations. Daemon↔relay admission (who may
+use the relay at all, separate from the E2EE handshake) is
+`docs/decisions/0011-relay-admission-auth.md` — **Accepted
+2026-09-17**: per-workspace secret + HMAC challenge-response over
+pinned TLS, optional Ed25519 upgrade.
 
 **This plan does not cover** the Expo mobile app UI (pairing screen,
 workspace/task list, timeline, push notifications) — that is a
@@ -52,12 +56,22 @@ reconnect/rotation machinery, and the wire protocol between them.
   (or equivalent) rejects replayed/out-of-order-beyond-window frames
   within a live session (ADR-0007 (d) — an explicit divergence from
   paseo, which ships without this).
+- **Relay admission (daemon↔relay auth, ADR-0011)**: independent of the
+  E2EE handshake — a workspace has a random 256-bit secret; the relay
+  persists only its hash. The daemon authenticates via a nonce-based
+  HMAC challenge-response over the transcript (protocol version,
+  workspace ID, both nonces, daemon key ID); the raw secret is never
+  sent after pairing. TLS uses a relay-generated self-signed
+  certificate; the daemon pins its fingerprint at pairing time. A
+  connection is bound to exactly one workspace ID; a frame whose
+  workspace/session ID doesn't match the authenticated binding is
+  rejected. E2EE handshake success is never treated as relay
+  authorization, and vice versa.
 - Out of scope this pass: the Expo mobile app itself; multi-tenant
   relay deployment/scaling; the actual `relay.spacingmind.sh` deploy
   (Cloudflare TLS) — self-hostability is the acceptance bar, not a live
-  deployment; auth between daemon and relay beyond what the E2EE
-  handshake and connection identity require (no separate API-key layer
-  unless ADR-0007 or a follow-up decision adds one); mobile↔relay
+  deployment; the optional Ed25519 daemon-identity upgrade path from
+  ADR-0011 (v1 ships the HMAC challenge-response only); mobile↔relay
   transport framing beyond what's needed to prove the handshake and
   forwarding work (ADR-0007 (f) leaves this open).
 
@@ -96,6 +110,17 @@ reconnect/rotation machinery, and the wire protocol between them.
 - Go: `smind relay` subcommand starts, binds its listen address, and
   shuts down cleanly (context cancellation / signal), matching the
   daemon's existing subcommand lifecycle conventions.
+- Go: relay admission — a daemon connection presenting a valid
+  workspace-secret HMAC over the challenge transcript is admitted and
+  bound to that workspace; a wrong secret, a replayed transcript
+  (reused nonce), or a workspace-ID mismatch on a subsequent frame is
+  rejected. A connection admitted for workspace A cannot forward or
+  receive frames tagged for workspace B.
+- Go: relay admission is independent of the E2EE handshake — a test
+  double that completes relay admission but sends a malformed/no E2EE
+  hello is still rejected at the E2EE layer (and vice versa: a valid
+  E2EE hello over a connection that never completed relay admission is
+  never forwarded).
 - Integration: real daemon process + real relay process (both
   in-process test harnesses or subprocesses) — full pairing flow from
   QR-offer generation through handshake completion through a forwarded
@@ -109,48 +134,154 @@ reconnect/rotation machinery, and the wire protocol between them.
 
 ## Decisions
 
-**Draft — chờ user duyệt ADR-0007, đặc biệt mục crypto (X25519 +
-ChaCha20-Poly1305 vs XSalsa20-Poly1305/NaCl `box`).** No implementation
-in this plan should begin until `docs/decisions/0007-relay-architecture.md`
-moves from `DRAFT` to `Accepted`. In particular:
+**Unblocked.** ADR-0007 (Accepted 2026-09-11) and ADR-0011 (Accepted
+2026-09-17) together cover every crypto, state-model, fanout, replay,
+rotation, transport, QR-pairing, and admission-auth choice this plan's
+Acceptance Criteria depend on. Implementation may proceed.
 
-- The handshake's AEAD choice (ADR-0007 (c)) has no default and blocks
-  any crypto code from being written at all, including tests that
-  assert specific ciphertext framing.
-- The relay state model (a), fanout shape (b), replay protection (d),
-  key rotation model (e), gRPC service/message design (f), and QR
-  pairing format (g) all carry a recommendation in ADR-0007 but are
-  still formally unapproved — this plan's Acceptance Criteria already
-  assume those recommendations will be accepted as written; if the
-  user amends any of them, this plan's Acceptance Criteria and Test
-  Scenarios need a corresponding update before implementation starts
-  against the changed decision.
-- Repo split/license (h) is explicitly out of scope for this plan (see
-  ADR-0007 (h) and `docs/decisions/0003-agpl-license-no-repo-split.md`)
-  — this plan builds relay code in this repo regardless of any future
-  split decision.
+- Repo split/license (ADR-0007 (h)) is explicitly out of scope for this
+  plan (see `docs/decisions/0003-agpl-license-no-repo-split.md`) — this
+  plan builds relay code in this repo regardless of any future split
+  decision.
+- gRPC service/message definition (ADR-0007 (f)) and the control/data
+  socket mapping (ADR-0007 (b)) have no `.proto` yet — that concrete
+  design is this plan's own work, not a blocked-on-ADR item.
 
 ## Progress
 
 - [x] ADR-0007 approved (2026-09-11, user: ChaCha20-Poly1305; rest as
       recommended)
-- [ ] Daemon X25519 keypair generation + persistence
-- [ ] Pairing offer encoding (URL fragment) + QR rendering
-- [ ] E2EE handshake (daemon + mobile sides)
-- [ ] Replay protection (per-direction counter)
-- [ ] Key rotation behavior (new-session-only; reject re-hello with
+- [x] ADR-0011 approved (2026-09-17, relay admission auth)
+- [x] Daemon X25519 keypair generation + persistence
+      (`internal/relay/e2ee/keypair.go`; 0600, survives restart, corrupt
+      file regenerates)
+- [x] Pairing offer encoding (URL fragment) + QR rendering
+      (`internal/relay/pairing/`; `Offer.URL` puts the payload in the
+      fragment only, `Offer.QRCode`/`QRPNG`/`QRText` render it with an
+      in-tree pure-stdlib QR encoder)
+- [x] E2EE handshake (daemon + mobile sides)
+      (`internal/relay/e2ee/handshake.go`; X25519 + HKDF, malformed and
+      truncated hellos rejected, no hang on a silent peer)
+- [x] Replay protection (per-direction counter)
+      (`internal/relay/e2ee/session.go`; replayed and
+      out-of-order-beyond-window frames rejected, counter exhaustion
+      handled)
+- [x] Key rotation behavior (new-session-only; reject re-hello with
       different key on live session)
-- [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
-- [ ] Relay: reconnect-grace buffer (bounded, per-connection)
-- [ ] Relay: multi-device fanout (control + data socket shape per
-      ADR-0007 (b))
-- [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
-- [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
-- [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer;
-      integration: daemon+relay end-to-end, multi-device fanout)
-- [ ] ROADMAP update
-- [ ] Verification
+- [x] daemon↔relay gRPC service/message definition (ADR-0007 (f))
+      (`internal/relay/relaypb/relay.proto`; control/data split mapped as
+      `OpenControl` (one bidi stream per daemon, lifecycle only) +
+      `OpenData` (one bidi stream per device, Frame envelopes with opaque
+      ciphertext), admission as unary `AdmitChallenge`/`Admit`;
+      generated Go committed alongside; reasoning documented in the
+      .proto header comment)
+- [x] Relay: admission auth — workspace secret + HMAC challenge-response
+      (`internal/relay/admission/`; SHA-256 of the 256-bit secret is both
+      the stored form and the HMAC key so the relay verifies possession
+      without ever holding the raw secret; single-use expiring server
+      nonces; constant-time compare; one generic `ErrRejected` for every
+      cause so unknown-workspace/wrong-secret/reused-nonce are
+      indistinguishable. TLS cert pinning deferred to the transport step,
+      per ADR-0011's layering)
+- [x] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
+      (`internal/relay/server/`; bufconn-tested: byte-identical both
+      directions, admission gating on data+control, wrong-workspace and
+      direction violations rejected, never-has-plaintext assertions)
+- [x] Relay: reconnect-grace buffer (bounded per side, default cap 200;
+      in-order flush on reconnect, oldest evicted past cap; per-route
+      queues persist across disconnects)
+- [x] Relay: multi-device fanout (control + data socket shape per
+      ADR-0007 (b)) — per-(workspace, session, device) routes, each
+      device with its own OpenData stream and reconnect buffer; daemon
+      "broadcast" = separately-encrypted per-device sends; no
+      device-to-device forwarding (conservative reading; also the only
+      coherent one given per-session keys). Documented in server.go.
+- [x] `smind relay` subcommand (self-hostable, standalone lifecycle)
+      (`cmd/smind/relay.go` + `internal/relay/server/run.go`: real TLS
+      gRPC listener with serve-style signal/cancel lifecycle; self-signed
+      cert generated once and persisted under $SMIND_HOME/relay with
+      fingerprint printed at startup; workspace enrollment via
+      `smind relay workspace new/ls`, raw secret printed exactly once)
+- [x] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
+      admission; integration: daemon+relay end-to-end, multi-device
+      fanout) — unit coverage accumulated with each step above;
+      integration scenarios now in `internal/relay/client` against a
+      real TLS gRPC relay (server.Run): full pairing flow (offer URL
+      round-trip incl. fingerprint pin -> admission -> E2EE handshake
+      -> forwarded message both directions), mobile disconnect/
+      reconnect (relay buffers, new-session reconnect flows), and
+      two-device fanout (same event, separately encrypted per session)
+- [x] ROADMAP update (Phase 3 relay items ticked with build references;
+      mobile app + relay.spacingmind.sh deploy left unticked — out of
+      scope for this plan by its own text)
+- [x] Verification (this section below; full-suite green)
 
 ## Validation
 
-(empty — fill in as work completes)
+- 2026-09-17 — gRPC wire contract step: `go build ./...`, `go vet ./...`,
+  `go test ./internal/relay/...` (incl. new `relaypb` marshal/unmarshal
+  round-trip tests), and `gofmt -l $(git ls-files '*.go')` all clean after
+  committing the generated files (verified gofmt-clean directly too, since
+  the lint step only sees tracked files).
+- 2026-09-17 — admission auth step: `internal/relay/admission` tests cover
+  valid-admission-binds-workspace, wrong-secret, replayed
+  transcript/reused nonce, expired nonce, cross-workspace transcript
+  mismatch, unknown workspace, uniform rejection shape (no oracle), HMAC
+  canonical-form ambiguity checks, and challenge input validation.
+  `go build ./...`, `go vet ./...`, `go test ./internal/relay/...`,
+  gofmt all clean.
+- 2026-09-17 — fanout step: two devices per workspace both receive
+  daemon-originated sends; a device's frames never reach the other device
+  or the other route's daemon stream; reconnect buffers are independent
+  per (workspace, session, device). All relay tests green under -race.
+- 2026-09-17 — subcommand step: `smind relay` binds a real TLS gRPC
+  listener, serves an enrolled workspace's admission exchange to a
+  cert-pinning client, and exits cleanly on cancellation (lifecycle test,
+  3 consecutive green runs); cert persistence + enrollment CLI verified.
+  Full `go test ./...` green.
+- 2026-09-17 — resume amendment (ADR-0007 (e), 2026-09-17): transport
+  reconnect now resumes the same session (key + counters kept,
+  `DataConn.Resume`) so relay-buffered frames decrypt — verified by the
+  reconnect integration test (3 buffered frames decrypt in order, live
+  traffic continues both directions). New-session Handshake remains for
+  pairing/re-pair/compromise/lost state. Relay server needed no change:
+  re-presenting the same session id already re-attaches to the existing
+  route and its buffers.
+- 2026-09-17 — client step: `internal/relay/client` (Dial with
+  fingerprint pinning, Admit, OpenControl, OpenData wrapping e2ee.Channel
+  over framed ciphertext) + the two integration scenarios over a real
+  in-process TLS relay. server.Config gained an optional pre-bound
+  Listener for race-free ephemeral-port tests. Full suite green
+  (client tests x2 runs).
+- 2026-09-17 — live smoke test, closing the "no independent process"
+  gap this section previously flagged: built the real `smind` binary,
+  ran `smind relay workspace new` then `smind relay --listen
+  127.0.0.1:PORT` as a genuinely separate OS process (not a test
+  harness/bufconn), then a standalone client program dialed it over a
+  real TCP socket, pinned the fingerprint printed at startup, completed
+  Admit, ran the daemon/mobile handshake, and exchanged messages both
+  directions — all through the real gRPC server binary. Confirms the
+  subcommand, TLS cert generation/persistence, workspace enrollment, and
+  the full client flow work outside any test process, not just inside
+  `go test`. No Cloudflare Tunnel / public-internet test done (would
+  need a real Cloudflare account for a TCP-preserving tunnel — a quick
+  `--url` tunnel terminates TLS at Cloudflare's edge and would defeat
+  ADR-0011's fingerprint pinning, so it wasn't attempted); user decided
+  this is out of scope for now, localhost-as-separate-process is enough.
+- 2026-09-17 (later same day) — user logged into `cloudflared` and
+  asked for the public-internet variant after all. Created a throwaway
+  named tunnel (`cloudflared tunnel create` + `tunnel route dns`) with a
+  `tcp://127.0.0.1:PORT` ingress rule (not the HTTP `--url` quick-tunnel
+  mode, which would terminate TLS at Cloudflare's edge) pointed at a
+  real `smind relay` process; a client dialed the tunnel's local
+  `cloudflared access tcp` proxy port, which round-trips through
+  Cloudflare's real edge network, and completed the exact same
+  admission → handshake → bidirectional message flow as the localhost
+  test — with `smind relay`'s own self-signed cert fingerprint pinned
+  the whole way, i.e. ADR-0011's actual security model, not a weakened
+  stand-in for it. Confirms the relay works over a real Cloudflare
+  Tunnel with fingerprint pinning intact, end to end. The throwaway
+  tunnel and DNS record were deleted afterward (test-only, not meant to
+  persist) — this validates the *mechanism* `relay.spacingmind.sh`
+  deploy would use, not a live deployment itself (still out of scope
+  for this plan).

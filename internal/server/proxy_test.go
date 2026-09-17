@@ -379,3 +379,81 @@ func TestProxy_StreamingPassthrough(t *testing.T) {
 		t.Fatal("timed out waiting for second chunk")
 	}
 }
+
+func TestProxy_ForwardsToAccountBaseURL(t *testing.T) {
+	t.Parallel()
+
+	// Upstream the account points at. The proxy client is a plain
+	// http.Client (no rewrite transport): the request must arrive at the
+	// account's base_url host, not at the constant provider URL.
+	var gotPath, gotKey string
+	custom := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotKey = r.Header.Get("x-api-key")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"from":"custom-upstream"}`))
+	}))
+	defer custom.Close()
+
+	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
+	if _, err := reg.AddAPIKeyWithBaseURL(providerAnthropic, "local", "sk-ant-local", custom.URL+"/v1/messages"); err != nil {
+		t.Fatalf("AddAPIKeyWithBaseURL() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude"}`))
+	w := httptest.NewRecorder()
+	p.handleAnthropic(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if got := w.Body.String(); got != `{"from":"custom-upstream"}` {
+		t.Errorf("body = %q, want custom upstream response", got)
+	}
+	if gotPath != "/v1/messages" {
+		t.Errorf("upstream path = %q, want /v1/messages", gotPath)
+	}
+	if gotKey != "sk-ant-local" {
+		t.Errorf("upstream x-api-key = %q", gotKey)
+	}
+}
+
+func TestProxy_DefaultURLWhenNoBaseURL(t *testing.T) {
+	t.Parallel()
+
+	// rewriteTransport (the established pattern) asserts the proxy still
+	// dials the provider default when the account carries no base_url.
+	var hit bool
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer upstream.Close()
+
+	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-plain")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
+	w := httptest.NewRecorder()
+	p.handleAnthropic(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", w.Code, w.Body.String())
+	}
+	if !hit {
+		t.Error("provider-default upstream not reached")
+	}
+}
+
+func TestProxy_RejectsNonLoopbackHTTP(t *testing.T) {
+	t.Parallel()
+
+	_, reg, _ := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
+	_, err := reg.AddAPIKeyWithBaseURL(providerAnthropic, "bad", "k", "http://example.com")
+	if err == nil {
+		t.Fatal("AddAPIKeyWithBaseURL(http://example.com) succeeded, want rejection")
+	}
+	if !strings.Contains(err.Error(), "loopback") {
+		t.Errorf("error = %v, want loopback guidance", err)
+	}
+}

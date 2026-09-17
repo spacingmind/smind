@@ -43,7 +43,7 @@ function FormActions({
 }) {
   return (
     <DialogFooter>
-      <Button type="button" variant="outline" onClick={onCancel} data-testid={cancelTestId}>
+      <Button type="button" variant="quiet" onClick={onCancel} data-testid={cancelTestId}>
         Cancel
       </Button>
       <Button type="submit" disabled={pending} data-testid={submitTestId}>
