@@ -175,8 +175,14 @@ Acceptance Criteria depend on. Implementation may proceed.
       ciphertext), admission as unary `AdmitChallenge`/`Admit`;
       generated Go committed alongside; reasoning documented in the
       .proto header comment)
-- [ ] Relay: admission auth (workspace secret + HMAC challenge-response,
-      TLS cert pinning) (ADR-0011)
+- [x] Relay: admission auth — workspace secret + HMAC challenge-response
+      (`internal/relay/admission/`; SHA-256 of the 256-bit secret is both
+      the stored form and the HMAC key so the relay verifies possession
+      without ever holding the raw secret; single-use expiring server
+      nonces; constant-time compare; one generic `ErrRejected` for every
+      cause so unknown-workspace/wrong-secret/reused-nonce are
+      indistinguishable. TLS cert pinning deferred to the transport step,
+      per ADR-0011's layering)
 - [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
 - [ ] Relay: reconnect-grace buffer (bounded, per-connection)
 - [ ] Relay: multi-device fanout (control + data socket shape per
@@ -195,3 +201,10 @@ Acceptance Criteria depend on. Implementation may proceed.
   round-trip tests), and `gofmt -l $(git ls-files '*.go')` all clean after
   committing the generated files (verified gofmt-clean directly too, since
   the lint step only sees tracked files).
+- 2026-09-17 — admission auth step: `internal/relay/admission` tests cover
+  valid-admission-binds-workspace, wrong-secret, replayed
+  transcript/reused nonce, expired nonce, cross-workspace transcript
+  mismatch, unknown workspace, uniform rejection shape (no oracle), HMAC
+  canonical-form ambiguity checks, and challenge input validation.
+  `go build ./...`, `go vet ./...`, `go test ./internal/relay/...`,
+  gofmt all clean.
