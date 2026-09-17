@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
@@ -364,6 +365,22 @@ func acpToolStatus(status string) string {
 	}
 }
 
+// claudeDialogTimeoutEnv is the env var the real `claude` CLI reads for its
+// own internal auto-deny deadline on an unanswered permission dialog
+// (can_use_tool control request). When the CLI's deadline fires it sends
+// control_cancel_request, cancelling the per-request ctx inside
+// runPermissionDecider.Decide out from under smind -- see
+// docs/plans/active/claude-native-permission-cancellation.md.
+const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
+
+// claudeDialogTimeoutMS is the value wired into the CLI when a human
+// decider is attached: 60 minutes, comfortably above internal/runs'
+// 5-minute defaultPermissionTimeout (registry.go) so smind's own timeout
+// is always the one that fires first and gets its distinguishable
+// PermissionResolvedByTimeout event. Defined locally, not imported from
+// internal/runs, because runs imports taskrunner (import cycle).
+const claudeDialogTimeoutMS = "3600000"
+
 func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch {
@@ -386,6 +403,19 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 		// backends, whose permission flow starts at the decider.
 		if approvalPolicy == ApprovalPolicyAutoSafe {
 			opts = append(opts, claudecode.WithAllowedTools(SafeBashRules()...))
+		}
+		// Hold the CLI's own permission-dialog deadline open well past
+		// smind's 5-minute manual-approval window, so the CLI's internal
+		// auto-deny fallback can't silently cancel a pending request
+		// before a human answers (see claudeDialogTimeoutEnv). Only in the
+		// decider branch: the Runner-level policy defaults answer
+		// programmatically and never wait on a dialog. An explicit value
+		// already in the environment is forwarded as-is instead -- a
+		// deployment-wide escape hatch.
+		if v := os.Getenv(claudeDialogTimeoutEnv); v != "" {
+			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+v))
+		} else {
+			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+claudeDialogTimeoutMS))
 		}
 	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))

@@ -144,23 +144,41 @@ ADR.
 
 ## Decisions
 
-Not yet decided: whether Item 2 lands as a real fix or a documented
-limitation — depends entirely on what the research finds. No other
-material scope decisions; Item 1 is a small, mechanical, low-risk
-addition following an existing pattern exactly (the timeout branch
-immediately above it in the same function).
+Item 2 landed as a real fix, not a documented limitation: the research
+found the knob. The `claude` CLI (confirmed in binary 2.1.263) reads env
+var `CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS` (milliseconds, clamped to a
+300000 minimum when set; default 300000) as its internal auto-deny
+deadline for unanswered permission dialogs; the SDK exposes it on the
+subprocess via `claudecode.WithEnv`. smind wires it to 3600000 (60
+minutes) — comfortably above `defaultPermissionTimeout` (5 minutes,
+`internal/runs/registry.go`) so smind's own timeout always fires first
+and records its distinguishable `PermissionResolvedByTimeout` event,
+mirroring how ACP providers already behave. Scoped to `runClaudeNative`'s
+decider branch only (Runner-level policy defaults answer
+programmatically and never wait on a dialog). A value already present in
+the environment is forwarded as-is — a deployment-wide escape hatch.
+Unlike paseo (refs/paseo), which only handles the abort signal, smind
+extends the CLI's deadline so its own 5-minute window is the real
+deadline. The constant lives in taskrunner (not imported from
+internal/runs) because runs imports taskrunner.
 
 ## Progress
 
-- [ ] Item 1 — record `PermissionResolvedByProviderCancellation` on the
-      `ctx.Done()` branch (Go) + frontend label entry
-- [ ] Item 2 — research: does the SDK/CLI expose a way to disable/extend
-      its internal auto-deny fallback?
-- [ ] Item 2 outcome — either wired fix + test, or ADR documenting the
-      limitation
-- [ ] `internal/runs` ctx-cancellation race regression test
+- [x] Item 1 — record `PermissionResolvedByProviderCancellation` on the
+      `ctx.Done()` branch (Go) + frontend label entry (commit eb42d75)
+- [x] Item 2 — research: the CLI reads
+      `CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS`; the SDK exposes `WithEnv`
+- [x] Item 2 outcome — wired fix + regression test (fake CLI dumps the
+      env var; a decider-wired run sets it, a pre-set user value wins)
+- [x] `internal/runs` ctx-cancellation race regression test (Item 1,
+      commit eb42d75)
 - [ ] `task test` / `task lint` green
 
 ## Validation
 
-Not started.
+- `go test ./internal/taskrunner/ ./internal/runs/` — green (2026-09-17),
+  including the new
+  `TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv`.
+- `task lint` (`go vet ./...` + gofmt check) — green (2026-09-17).
+- Web tests unaffected: no web files touched by Item 2 (Item 1's label
+  test landed with eb42d75).

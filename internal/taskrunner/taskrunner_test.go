@@ -169,6 +169,14 @@ func runFakeClaudeCLI() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write args: %v\n", err)
 			os.Exit(1)
 		}
+		// Dumps the dialog-timeout env var the subprocess received, so a
+		// test can assert runClaudeNative wired CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
+		// onto the CLI's environment -- like argv, not observable through
+		// the wire protocol.
+		if err := os.WriteFile(filepath.Join(wd, "env"), []byte(os.Getenv(claudeDialogTimeoutEnv)), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
+			os.Exit(1)
+		}
 		stdin.Scan() // consume the prompt line
 		writeLine(map[string]any{
 			"type":       "assistant",
