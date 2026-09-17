@@ -110,19 +110,62 @@ func OpenControl(ctx context.Context, c relaypb.RelayClient, admissionID, worksp
 // DataConn is one end of an E2EE session carried over an OpenData stream.
 // It is a thin wrapper: plaintext in/out (Send/Receive from the underlying
 // e2ee.Channel), with the relay seeing only framed ciphertext.
+//
+// New session vs resume (ADR-0007 (e) + 2026-09-17 amendment) is an
+// explicit caller choice, never implicit:
+//
+//   - Handshake starts a FRESH session: fresh ephemeral key agreement,
+//     counters reset. For first pairing, explicit re-pair, suspected
+//     compromise, or lost session state.
+//   - Resume reopens the transport after a network drop and KEEPS the
+//     established session (same key, same counters), so the relay's
+//     buffered frames decrypt normally. For transport-level reconnects
+//     with no security event.
 type DataConn struct {
 	channel *e2ee.Channel
 	frames  *frameConn
 }
 
-// Handshake runs the E2EE handshake over the relay (see e2ee.Channel).
+// Handshake runs the E2EE handshake over the relay, starting a fresh
+// session (see the DataConn doc for when to choose this over Resume).
 func (d *DataConn) Handshake(ctx context.Context) error { return d.channel.Handshake(ctx) }
+
+// Resume reopens the OpenData stream over a newly dialled client after a
+// transport-level drop, resuming the previously established session: the
+// e2ee.Channel, its session key, and both direction counters are kept, so
+// frames the relay buffered during the gap decrypt in order (ADR-0007 (e)
+// amendment). It requires a completed Handshake and must not race a
+// blocked Receive on the dead stream (call it after the transport error
+// surfaces, not concurrently); it cannot be used after Close, which tears
+// down the session itself.
+func (d *DataConn) Resume(ctx context.Context, c relaypb.RelayClient, admissionID string) error {
+	if !d.channel.Established() {
+		return fmt.Errorf("relay client: resume: no established session to resume (call Handshake for a fresh one)")
+	}
+	if d.frames.isClosed() {
+		return fmt.Errorf("relay client: resume: transport already closed cleanly; start a new session instead")
+	}
+	sctx := metadata.AppendToOutgoingContext(ctx, metadataKeyAdmission, admissionID)
+	stream, err := c.OpenData(sctx)
+	if err != nil {
+		return fmt.Errorf("relay client: resume: open data: %w", err)
+	}
+	d.frames.reopen(stream)
+	return nil
+}
 
 // Send encrypts and forwards one application message.
 func (d *DataConn) Send(msg []byte) error { return d.channel.Send(msg) }
 
 // Receive blocks for and decrypts one application message.
 func (d *DataConn) Receive() ([]byte, error) { return d.channel.Receive() }
+
+// DropTransport kills the underlying OpenData stream WITHOUT tearing down
+// the e2ee session — the model of a network drop, after which Resume can
+// reopen the transport and keep the session (key + counters). A blocked
+// Receive on the dropped stream returns an error, like a real transport
+// failure would.
+func (d *DataConn) DropTransport() { d.frames.drop() }
 
 // Close tears down the stream and session.
 func (d *DataConn) Close() error { return d.channel.Close() }
@@ -236,6 +279,38 @@ func (f *frameConn) drain(p []byte) (int, error) {
 	n := copy(p, f.pending)
 	f.pending = f.pending[n:]
 	return n, nil
+}
+
+// reopen swaps the underlying stream after a transport drop, keeping the
+// adapter's sequence counter (relay buffer ordering) and clearing any
+// partial payload left over from the dead stream, then re-registers the
+// route (the relay derives a stream's route from its first frame).
+func (f *frameConn) reopen(stream relaypb.Relay_OpenDataClient) {
+	f.sendMu.Lock()
+	f.recvMu.Lock()
+	f.stream = stream
+	f.pending = nil
+	f.recvMu.Unlock()
+	f.sendMu.Unlock()
+	f.register()
+}
+
+// drop kills the stream (network-drop model): the adapter stays resumable
+// (not closed), unlike Close. CloseSend makes the server see EOF, so its
+// pump detaches and the route's queues start buffering.
+func (f *frameConn) drop() {
+	f.sendMu.Lock()
+	f.recvMu.Lock()
+	st := f.stream
+	f.recvMu.Unlock()
+	f.sendMu.Unlock()
+	_ = st.CloseSend()
+}
+
+func (f *frameConn) isClosed() bool {
+	f.sendMu.Lock()
+	defer f.sendMu.Unlock()
+	return f.closed
 }
 
 func (f *frameConn) Close() error {

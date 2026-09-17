@@ -237,6 +237,14 @@ Acceptance Criteria depend on. Implementation may proceed.
   cert-pinning client, and exits cleanly on cancellation (lifecycle test,
   3 consecutive green runs); cert persistence + enrollment CLI verified.
   Full `go test ./...` green.
+- 2026-09-17 — resume amendment (ADR-0007 (e), 2026-09-17): transport
+  reconnect now resumes the same session (key + counters kept,
+  `DataConn.Resume`) so relay-buffered frames decrypt — verified by the
+  reconnect integration test (3 buffered frames decrypt in order, live
+  traffic continues both directions). New-session Handshake remains for
+  pairing/re-pair/compromise/lost state. Relay server needed no change:
+  re-presenting the same session id already re-attaches to the existing
+  route and its buffers.
 - 2026-09-17 — client step: `internal/relay/client` (Dial with
   fingerprint pinning, Admit, OpenControl, OpenData wrapping e2ee.Channel
   over framed ciphertext) + the two integration scenarios over a real

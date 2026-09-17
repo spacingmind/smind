@@ -194,11 +194,18 @@ func TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames(t *testing.T
 	_, admissionID := dialAdmitted(t, rp)
 	daemon, device := pair(t, rp, admissionID, daemonKey, deviceKey, "sess-1", "dev-1")
 
-	// Mobile disconnects (device side closed). The daemon keeps sending;
-	// the relay buffers for the absent device side.
-	if err := device.Close(); err != nil {
-		t.Fatalf("device close: %v", err)
+	// Sanity traffic before the drop.
+	if err := daemon.Send([]byte("before")); err != nil {
+		t.Fatalf("pre-drop send: %v", err)
 	}
+	if got, err := device.Receive(); err != nil || !bytes.Equal(got, []byte("before")) {
+		t.Fatalf("pre-drop receive: %q %v", got, err)
+	}
+
+	// Mobile drops (transport dies; the DataConn and its session state
+	// survive on the device). The daemon keeps sending; the relay buffers
+	// for the absent device side.
+	device.DropTransport()
 	msgs := [][]byte{[]byte("buffered-1"), []byte("buffered-2"), []byte("buffered-3")}
 	for _, m := range msgs {
 		if err := daemon.Send(m); err != nil {
@@ -206,29 +213,39 @@ func TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames(t *testing.T
 		}
 	}
 
-	// Reconnect per ADR-0007 (e): rotation = a NEW session (fresh keys,
-	// new session id). The relay's reconnect grace applies within a
-	// session id; the new session handshakes fresh and traffic flows.
-	deviceKey2, _ := e2ee.GenerateKeyPair()
+	// Transport-level reconnect (ADR-0007 (e) amendment): same session id,
+	// SAME key material and counters — Resume, not a fresh Handshake — so
+	// the relay's buffered ciphertext decrypts normally.
 	vc2, _ := dialAdmitted(t, rp)
-	dc2, admD2 := dialAdmitted(t, rp)
-	daemon2, device2 := pairWithClients(t, rp, dc2, vc2, admD2, daemonKey, deviceKey2, "sess-1r", "dev-1")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := device.Resume(ctx, vc2, admissionID); err != nil {
+		t.Fatalf("device resume: %v", err)
+	}
 
-	if err := daemon2.Send([]byte("post-reconnect")); err != nil {
+	for i, want := range msgs {
+		got, err := device.Receive()
+		if err != nil {
+			t.Fatalf("buffered frame %d: %v", i+1, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("buffered frame %d: %q != %q", i+1, got, want)
+		}
+	}
+
+	// Live traffic continues on the resumed session, both directions.
+	if err := daemon.Send([]byte("post-reconnect")); err != nil {
 		t.Fatalf("post-reconnect send: %v", err)
 	}
-	got, err := device2.Receive()
-	if err != nil {
-		t.Fatalf("post-reconnect receive: %v", err)
+	if got, err := device.Receive(); err != nil || !bytes.Equal(got, []byte("post-reconnect")) {
+		t.Fatalf("post-reconnect receive: %q %v", got, err)
 	}
-	if !bytes.Equal(got, []byte("post-reconnect")) {
-		t.Fatalf("post-reconnect mismatch: %q", got)
+	if err := device.Send([]byte("device-reply")); err != nil {
+		t.Fatalf("device reply: %v", err)
 	}
-
-	// Relay-level buffered delivery (the plan's "receives all N in order")
-	// is byte-level: assert via the raw relay harness in the server
-	// package's own tests; here the e2ee-level guarantee (new session,
-	// traffic flows end to end after reconnect) is what applies.
+	if got, err := daemon.Receive(); err != nil || !bytes.Equal(got, []byte("device-reply")) {
+		t.Fatalf("daemon reply receive: %q %v", got, err)
+	}
 }
 
 // pairWithClients is pair() for already-dialled clients (reconnect).
