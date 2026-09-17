@@ -142,6 +142,7 @@ the app's theme:
 | `EmptyState` | Centered, muted, short noun-phrase title + optional description/action | "No runs yet", "No changes", sidebar's empty-workspace state |
 | `InlineSpinner` | Small spinner next to the thing it relates to (loading is inline by default, not a page takeover) | "Loading runs…", "Loading diff…", "Loading…" |
 | `Toast` (`toast()` + `<Toaster />`) | Fire-and-forget notification queue, mounted once (`main.tsx`) | infrastructure for later items (commit/PR success, composer errors) — no consumer yet, see Decisions |
+| `Button` (`buttonVariants`) | Six generic variants (`default`/`secondary`/`destructive`/`outline`/`ghost`/`link`) plus three additive semantic variants (visual-identity-console Item 4) with product meaning: `execute` — starts/stops a run; `approval` — the recommended/confirm action in a permission decision; `quiet` — a non-committal or structural action that shouldn't compete visually with the primary action nearby | `composer.tsx`'s Send/Stop pair (`execute`); `permission-option-button.tsx`'s recommended-allow option (`approval`); `crud-dialogs.tsx`'s shared `FormActions` Cancel button (`quiet`) |
 
 A new recurring surface reuses one of these before inventing a new pattern
 — that's the whole point of Item 2.
@@ -442,6 +443,34 @@ trace.
   web-ui-fixes branch did not ship one — the handle is pure CSS with no
   JS timer, so there is nothing to point at a token. Revisit if a timer
   ever lands there.
+- **(visual-identity Track B, Item 4) `execute`/`approval`/`quiet` reuse
+  the existing `destructive` variant's tinted-background idiom** (10%
+  alpha fill, saturated text, 20% on hover, doubled in dark mode) rather
+  than inventing a new solid-fill-plus-contrast-text shape — `destructive`
+  is the only precedent for a semantically colored button in this file,
+  and matching it keeps every colored variant answering to the same
+  recipe. `quiet` has no fill at all (`text-foreground-muted` only, no
+  hover background) — deliberately lower-emphasis than `ghost`, which
+  still gets a hover background.
+- **(visual-identity Track B, Item 4) The composer's Send button is
+  `execute` only while it would start a run; `default` once a run is
+  already live**, because at that point the same button reads "Queue" —
+  appending to the queue is not the run-control action, so it keeps the
+  generic variant. The Stop button is always `execute`.
+- **(visual-identity Track B, Item 7) The pending-permission card's
+  structure was confirmed adequate, not rebuilt.** `PermissionCard`
+  already dispatches to `OptionsCard`/`PlanReviewCard`/`QuestionFormCard`,
+  each built on the shared `Alert` primitive (title/description, an
+  optional detail block, an action row) — this matches dsh's
+  `ApprovalPanel` shape from the parity-plan research (Item 11 there
+  shipped it). This Item is a token/elevation pass only: the outer
+  wrapper in `permission-card.tsx` (already the one element common to all
+  three variants) gained `bg-surface-1 shadow-lg` for the "floating"
+  recipe (§13); no new structure was added. The `approval` variant was
+  adopted at `permission-option-button.tsx` (the default, most-common
+  variant's recommended-allow option) — `PlanReviewCard`'s and
+  `QuestionFormCard`'s own action buttons are unchanged, out of scope for
+  this pass.
 
 ## 12. Typography — type roles and the 3-tier weight rule
 
@@ -484,7 +513,7 @@ same thing everywhere:
 | --- | --- | --- | --- | --- |
 | **flat** | `surface-0` | none | none | the page background, pane content areas |
 | **raised** | `surface-1` | none | `border` | cards, inline blocks, toasts sit on surface-1 with a hairline |
-| **floating** | `surface-1`/popover | `shadow-lg` | `border` | dialogs, sheets, dropdown/select menus — anything detached over content |
+| **floating** | `surface-1`/popover | `shadow-lg` | `border` | dialogs, sheets, dropdown/select menus, the pending-permission card — anything detached over content |
 | **focused** | (any) | none | none — `ring` | focus-visible states (`focus-visible:ring-ring/50`), never a shadow |
 | **embedded** | `surface-2` | none | optional `border` | insets that recede: code blocks, wells, the composer input area |
 

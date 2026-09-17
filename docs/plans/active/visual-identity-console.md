@@ -299,10 +299,10 @@ replace it.*
 - [x] Item 1 — `docs/design.md` restructure (Character, Forbidden, canonical-surfaces table)
 - [x] Item 2 — Typography token layer
 - [x] Item 3 — Elevation/shadow/motion vocabulary
-- [ ] Item 4 — Semantic CVA component variants
+- [x] Item 4 — Semantic CVA component variants
 - [x] Item 5 — Status/diff color-family extension
 - [ ] Item 6 — Tool-call card visual upgrade
-- [ ] Item 7 — Permission card visual polish
+- [x] Item 7 — Permission card visual polish
 - [x] Item 8 — Suggested commit message affordance
 - [ ] Live smoke test (combined with web-ui-fixes.md's pending one)
 
@@ -374,8 +374,49 @@ all confirmed accurate, no gaps found in Items 1/2/3/5.
   `--color-diff-*` `@theme` re-exports. `no-hardcoded-colors.test.ts`
   still passes with zero exceptions (new color-bearing CSS lives only in
   index.css).
-- Items 4/6/7 remain open for Tracks B/C; the combined live smoke
-  test is still pending.
+- Item 6 remains open for Track C; the combined live smoke test is still
+  pending.
+
+**Track B (Items 4, 7) — complete on `feat/component-variants-track-b`**
+(2026-09-17). `task test` (729/729 web tests, 712 pre-existing + 17 new:
+`button.test.tsx`, `crud-dialogs.test.tsx`, plus additions to
+`composer.test.tsx`/`permission-card.test.tsx`; full Go suite green) and
+`task lint` (go vet + gofmt; no separate web lint task) both pass.
+`tsc -b && vite build` also run directly and confirmed clean (not part of
+`task test`/`task lint`, but touched three `.tsx` call sites so worth the
+extra check).
+
+- **Item 4**: `buttonVariants` (`components/ui/button.tsx`) gained
+  `execute`/`approval`/`quiet`, additive alongside the six existing
+  variants (all six still resolve unchanged — no rename). `execute` and
+  `approval` reuse `destructive`'s existing tinted-fill idiom (10%/20%
+  alpha, saturated text, doubled in dark mode) against `status-running`/
+  `status-success` respectively — the only precedent for a semantically
+  colored variant in this file, so every colored variant now answers to
+  the same recipe. `quiet` has no fill at all, only `text-foreground-
+  muted` — deliberately lower-emphasis than `ghost` (which still gets a
+  hover background). Three real call sites adopted, no others touched:
+  `composer.tsx`'s Stop button (always `execute`) and Send button
+  (`execute` while it would start a run, `default` once a run is live and
+  the same button reads "Queue" — queueing isn't a run-control action);
+  `permission-option-button.tsx`'s `optionVariant` (the recommended-allow
+  option is now `approval` instead of `default` — reject keeps
+  `destructive`, unchanged); `crud-dialogs.tsx`'s shared `FormActions`
+  Cancel button (`quiet` instead of `outline` — one component, every CRUD
+  dialog's Cancel). Documented in `docs/design.md`'s primitives table
+  (§3) with each variant's meaning and canonical consumer.
+- **Item 7**: pending-permission card's structure was confirmed adequate
+  (existing structure from the parity plan's Item 11 — `PermissionCard`
+  dispatching to `OptionsCard`/`PlanReviewCard`/`QuestionFormCard`, each
+  on the shared `Alert` primitive with title/description/optional detail/
+  action row), not rebuilt — recorded in `docs/design.md` §11 Decisions.
+  This was a token/elevation pass only: `permission-card.tsx`'s outer
+  wrapper (the one element common to all three variants) gained
+  `bg-surface-1 shadow-lg`, the "floating" recipe from Item 3's §13 table
+  (also added as that row's canonical consumer). Action buttons use
+  Item 4's `approval` variant via the `permission-option-button.tsx`
+  change above; `PlanReviewCard`/`QuestionFormCard`'s own action buttons
+  were left as-is, out of scope for this pass.
 
 **Item 8 — Suggested commit message affordance** (2026-09-17, on
 `feat/suggested-commit-message-track-d`): `task test` (677/677 web tests
