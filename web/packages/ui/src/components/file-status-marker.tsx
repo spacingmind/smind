@@ -33,7 +33,7 @@ export function FileStatusMarker({ status, className }: { status: TaskFile["stat
       data-status={status}
       title={style.label}
       aria-label={style.label}
-      className={cn("shrink-0 font-mono text-xs font-semibold tabular-nums", style.className, className)}
+      className={cn("shrink-0 font-mono text-code-annotation tabular-nums", style.className, className)}
     >
       {style.letter}
     </span>

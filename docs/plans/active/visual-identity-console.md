@@ -287,13 +287,13 @@ replace it.*
 
 ## Progress
 
-- [ ] Merge `smind/task-web-ui-fixes-dropdown-theme-resize-drag-sidebar-truncation-dlgyo422xbb0`
+- [x] Merge `smind/task-web-ui-fixes-dropdown-theme-resize-drag-sidebar-truncation-dlgyo422xbb0`
       into the working branch first (prerequisite — see Decisions)
 - [ ] Item 1 — `docs/design.md` restructure (Character, Forbidden, canonical-surfaces table)
-- [ ] Item 2 — Typography token layer
-- [ ] Item 3 — Elevation/shadow/motion vocabulary
+- [x] Item 2 — Typography token layer
+- [x] Item 3 — Elevation/shadow/motion vocabulary
 - [ ] Item 4 — Semantic CVA component variants
-- [ ] Item 5 — Status/diff color-family extension
+- [x] Item 5 — Status/diff color-family extension
 - [ ] Item 6 — Tool-call card visual upgrade
 - [ ] Item 7 — Permission card visual polish
 - [ ] Item 8 — Suggested commit message affordance
@@ -319,4 +319,43 @@ instead of Opus):
 
 ## Validation
 
-Not started.
+**Track A (Items 1, 2, 3, 5) — complete on `feat/visual-tokens-track-a`.**
+
+- `task test` green (669 pre-existing web tests + 43 new token-presence
+  tests + full Go suite), `task lint` green — run after all Track A edits.
+- **Item 1**: `docs/design.md` restructured — Character section,
+  Forbidden list (§14, citing `no-hardcoded-colors.test.ts`), canonical-
+  surfaces table (§15, all ten required patterns covered); existing
+  sections kept, §4 gained the spacing-scale statement, §6 the
+  state-transition rule. All new tokens documented with canonical
+  consumers (§1, §12, §13).
+- **Item 2**: seven `--text-*` role tokens in `:root` + `.dark` +
+  `@theme inline` (paired line-heights; paired weights where fixed);
+  five font-weight violations fixed (app-sidebar wordmark → the
+  workspace-title token itself, file-status-marker → text-code-annotation,
+  timeline-markdown h1-h3 → font-medium, quick-open match highlight →
+  font-medium, dialog title → text-section-title, which also unified
+  dialog 18/600 + sheet 16/500 to one 16/500 role); `text-content`
+  adopted by `timeline-markdown.tsx`. Token-presence test asserts both
+  themes carry every token.
+- **Item 3**: `--elevation-shadow-sm/md/lg` tiers with paseo's light/dark
+  asymmetry (light alpha 0.04/0.06/0.08, dark 0.24/0.32/0.40 — round
+  values in paseo's bands, inspired not copied); exposed via `@theme`
+  `--shadow-sm/md/lg` so existing `shadow-md/lg` call sites resolve to
+  the tiers with zero churn. `--duration-hover/menu/panel` (150/200/300ms)
+  consumed by dialog/sheet/dropdown-menu (`duration-(--duration-menu)`;
+  Radix's own transform-origin mechanism confirmed untouched — no second
+  mechanism added). State-transition animation: `StatusBadge` gains
+  `transition-colors duration-(--duration-hover)` (queued→running).
+  Elevation vocabulary table (flat/raised/floating/focused/embedded) in
+  `docs/design.md` §13. Note: `resizable.tsx`'s 150ms hover-highlight
+  timer does not exist post-merge (handle is pure CSS) — nothing to
+  repoint, recorded in design.md Decisions.
+- **Item 5**: `--diff-addition`/`--diff-deletion` third color family in
+  both themes (paseo's light/dark diff tables); diff2html's ins/del
+  overrides now reference the named tokens as the source of truth;
+  `--color-diff-*` `@theme` re-exports. `no-hardcoded-colors.test.ts`
+  still passes with zero exceptions (new color-bearing CSS lives only in
+  index.css).
+- Items 4/6/7/8 remain open for Tracks B/C/D; the combined live smoke
+  test is still pending.

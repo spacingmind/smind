@@ -3,9 +3,23 @@
 This is the living reference for `web/packages/ui`'s token vocabulary,
 density, primitives, copy rules, the keyboard/palette registration APIs,
 and routing/persistence — written from what actually landed
-(`docs/plans/active/ui-redesign-parity.md`'s Items 1-5), not aspirational. It follows Paseo's own `refs/paseo/docs/design.md` where the
-two overlap (Paseo is the parity plan's north star), scoped down to what
-smind's surface actually needs.
+(`docs/plans/active/ui-redesign-parity.md`'s Items 1-5, then the
+visual-identity-console plan's Track A), not aspirational. It follows
+Paseo's own `refs/paseo/docs/design.md` where the two overlap (Paseo is
+the parity plan's north star), scoped down to what smind's surface
+actually needs.
+
+## Character
+
+smind is a calm technical console: quiet, spacious, unhurried. Every
+visual decision serves either *act on this* or *understand this* — never
+*look at this*. Decoration is not a goal; the interface stays out of the
+way while the user reads state and makes decisions.
+
+Consistency comes from component reuse, not from hand-matching styles
+across surfaces. When two surfaces do the same semantic thing in two
+different ways, one of them is wrong — the shared primitive (§3) wins,
+and the canonical-surfaces table (§15) says which file is the reference.
 
 ## 1. Token layers
 
@@ -17,7 +31,8 @@ smind's surface actually needs.
    `sidebar*`). One value per name per theme (`:root` / `.dark`). Every
    primitive already composed from these correctly before Item 1 — this
    layer wasn't rewritten.
-2. **Semantic layer** — named-by-purpose tokens added by Item 1:
+2. **Semantic layer** — named-by-purpose tokens added by Item 1, then
+   extended by the visual-identity-console plan:
    - `surface-0..3`: an elevation scale, **aliased onto the static
      scale** (`surface-0` = `background`, `surface-1` = `card`,
      `surface-2` = `muted`, `surface-3` = `accent`) rather than a second
@@ -32,17 +47,35 @@ smind's surface actually needs.
      chroma than the text tier — a 6px dot with no shape or label reads
      dimmer than the text beside it at the text tier's chroma, which is
      backwards for something signaling the row's own state.
+   - `diff-{addition,deletion}`: the diff tier — the +/- inside a diff
+     view, deliberately separate from `status-success`/`status-danger`
+     because line-scannable diff chrome wants more saturation than a
+     status pill (Item 5; paseo's three-family model). diff2html's
+     overrides read these; any future non-diff2html diff surface reuses
+     them too.
+   - **Type-role scale** (`--text-workspace-title`,
+     `--text-section-title`, `--text-panel-title`,
+     `--text-metadata-label`, `--text-code-annotation`,
+     `--text-interface`, `--text-content`): the one legal spelling for
+     each typographic job, with paired line-height (and, where the role
+     fixes it, paired font-weight). See §12.
+   - `--elevation-shadow-sm/md/lg` + `--duration-hover/menu/panel`:
+     shadow tiers and motion durations, per §13.
 
-`@theme inline` re-exports every semantic token as `--color-*`, which is
-what makes `bg-status-warning`, `text-foreground-muted`,
-`border-status-dot-success/40`, etc. exist as Tailwind utilities — Tailwind
-v4 is CSS-first here (no `tailwind.config.js`), so anything named
-`--color-X` in `@theme` becomes `bg-X`/`text-X`/`border-X`/... for free.
+`@theme inline` re-exports every semantic token as `--color-*` (and the
+type-role/shadow entries as `--text-*`/`--shadow-*`), which is what
+makes `bg-status-warning`, `text-foreground-muted`, `text-panel-title`,
+`shadow-md` (tiered), `duration-(--duration-menu)`, etc. exist as
+Tailwind utilities — Tailwind v4 is CSS-first here (no
+`tailwind.config.js`), so anything named `--color-X`/`--text-X`/
+`--shadow-X` in `@theme` becomes a utility for free.
 
 **Rule:** no component hardcodes a hex, oklch, or Tailwind palette color
 (`bg-amber-500`, `text-emerald-600`, etc.) — every color comes from a
 token, so light/dark/future-theme all stay correct without touching
-component code. `src/test/no-hardcoded-colors.test.ts` greps for this.
+component code. `src/test/no-hardcoded-colors.test.ts` greps for this;
+`src/test/token-presence.test.ts` asserts every semantic token exists in
+both `:root` and `.dark`.
 
 ## 2. Theming
 
@@ -50,8 +83,8 @@ component code. `src/test/no-hardcoded-colors.test.ts` greps for this.
 `light | dark | system` preference:
 
 - Persisted to `localStorage` (`lib/theme.ts`'s `THEME_STORAGE_KEY`).
-- `system` resolves via `prefers-color-scheme` and re-resolves live if the
-  OS setting changes while `system` is still selected (pinning to
+- `system` resolves via `prefers-color-scheme` and re-resolves live if
+  the OS setting changes while `system` is still selected (pinning to
   light/dark stops listening — a user who picked light shouldn't have the
   OS silently steer them back).
 - Applies by toggling the `dark` class on `<html>` — the only place any
@@ -86,8 +119,9 @@ the app's theme:
   variable pairs gated behind a `.d2h-dark-color-scheme` class or
   `prefers-color-scheme`, neither of which lines up with this app's own
   theme state. Overriding diff2html's *base* variable names
-  (`--d2h-bg-color` etc.) to reference smind's own tokens means
-  `diff-viewer-pane.tsx` needs no dark-mode-specific class at all.
+  (`--d2h-bg-color` etc.) to reference smind's own tokens (including the
+  `diff-*` family for the +/- pairs) means `diff-viewer-pane.tsx` needs
+  no dark-mode-specific class at all.
 - **xterm** (`components/terminal-pane.tsx`, `lib/terminal-theme.ts`):
   xterm's `ITheme` needs literal color strings, not live `var()`
   references. `resolveTerminalTheme()` resolves each token via a
@@ -119,6 +153,15 @@ Item 2, headers drifted between `px-3 py-2` (file-editor, terminal) and
 `px-4 py-3` (task-detail, diff-viewer) with no reason for the split
 (`docs/research/uiux-audit.md` §2.4) — adopting the shared component fixes
 this as a side effect, not a separate pass over each pane.
+
+**The spacing scale is Tailwind's default numeric scale — and nothing
+else.** `1`=4px through `16`=64px (`1 2 3 4 6 8 12 16`, plus the
+half-steps `0.5/1.5/2.5/3.5` Tailwind itself provides) is the one legal
+spacing vocabulary; it is numerically identical to paseo's own `SPACING`
+table, so this is a naming-and-enforcement statement, not a migration. An
+arbitrary value (`p-[13px]`, `gap-[10px]`) is a Forbidden-list item
+(§14): if the nearest scale step doesn't work, the layout is fighting the
+rhythm, not missing a step.
 
 **Layout stability**: a surface whose state changes (a badge arriving, a
 skeleton resolving to content) must not move its neighbours. The sidebar's
@@ -152,6 +195,10 @@ wrong").
   checkbox doesn't freeze every other row.
 - **Alerts**: one `Alert` per region. `error` variant gets `role="alert"`
   (interrupts); every other variant gets `role="status"` (polite).
+- **State changes transition, they don't teleport.** A `StatusBadge`
+  whose status flips (queued→running) transitions its colors over
+  `--duration-hover` — state-change motion is for agent moments like
+  this, never decorative entrance animation on every mount (§13).
 
 ## 7. Keyboard actions — the API other surfaces call
 
@@ -190,9 +237,9 @@ useActionHandler("run.interrupt", () => stopRun(), { enabled: runIsLive });
   browser's own `Cmd+W` still works rather than being swallowed into a
   no-op.
 
-`useTheme()`-style, `useActionHandler` is a no-op outside a provider, so a
-component that claims an action still mounts in its own unit test with no
-wrapper.
+`useTheme()`-style, `useActionHandler` is a no-op outside a provider, so
+a component that claims an action still mounts in its own unit test with
+no wrapper.
 
 ### Adding a new action
 
@@ -211,7 +258,7 @@ exactly, so `Mod+K` never fires for `Mod+Shift+K`.
 ### Focus scoping
 
 By default a binding does **not** fire while focus is in an `<input>`,
-`<textarea>`, a `contenteditable`, CodeMirror (`.cm-editor`) or xterm
+a `<textarea>`, a `contenteditable`, CodeMirror (`.cm-editor`) or xterm
 (`.xterm`). Set `when: { global: true }` for one that should — `Mod+K`,
 `Escape`-to-interrupt and the navigation shortcuts are global; `Shift+?`
 is not (typing `?` must insert a `?`).
@@ -366,3 +413,143 @@ trace.
   "xterm takes its chrome from app tokens instead of always defaulting to
   light," not a full 16-color ANSI palette, which is a design decision of
   its own.
+- **(visual-identity Track A) Type-role and shadow values are
+  round-number pragmatic picks, not derived.** The `--text-*` roles
+  tokenize what the components already rendered where possible
+  (workspace-title keeps the wordmark's existing 14/600; panel-title
+  tokenizes PaneHeader's existing 14/500); section-title unifies dialog
+  (was 18/600) and sheet (16/500) titles at 16/500. Shadow alphas
+  (light 0.04/0.06/0.08, dark 0.24/0.32/0.40) and durations
+  (150/200/300ms) are paseo-asymmetry-inspired round values, not copied
+  verbatim from paseo's tables.
+- **(visual-identity Track A) `--text-interface` is a name, not a new
+  ramp.** It documents the existing dense-UI base size (14px/20px); the
+  sizes above and below it remain the stock Tailwind
+  `text-xs`/`text-sm`/`text-base` utilities rather than a parallel set
+  of invented token names. `--text-content` is the exception that earns
+  its own token because it must *not* move when the interface-density
+  setting rescales rem-based utilities (paseo's content-vs-interface
+  split) — it is `calc(15px * var(--font-scale-content, 1))`,
+  px-anchored on purpose.
+- **(visual-identity Track A) Shadow tiers live in `@theme` as
+  `--shadow-sm/md/lg`, overriding Tailwind's stock values.** Existing
+  `shadow-md`/`shadow-lg` classes (dropdowns, dialogs, sheets, toasts)
+  therefore resolve to the tiered tokens automatically with zero
+  call-site churn; components must not hand-roll `shadow-[...]` literals
+  (§14).
+- **(visual-identity Track A) `resizable.tsx`'s hover-highlight timer
+  was not repointed at `--duration-hover`** because the merged
+  web-ui-fixes branch did not ship one — the handle is pure CSS with no
+  JS timer, so there is nothing to point at a token. Revisit if a timer
+  ever lands there.
+
+## 12. Typography — type roles and the 3-tier weight rule
+
+Type roles (`index.css`'s `--text-*` entries; visual-identity-console
+Item 2). Each row is the ONE legal spelling for that job, with its
+canonical consumer:
+
+| Role token | Size / line-height | Weight | Canonical consumer |
+| --- | --- | --- | --- |
+| `text-workspace-title` | 14px / 20px | 600 | `app-sidebar.tsx`'s wordmark — the **only** legal semibold in the app |
+| `text-section-title` | 16px / 24px | 500 | `ui/dialog.tsx` + `ui/sheet.tsx` titles (modal/sheet headers) |
+| `text-panel-title` | 14px / 20px | 500 | `ui/pane-header.tsx` |
+| `text-metadata-label` | 12px / 16px | 500 | group headings (`command-palette.tsx`, `shortcuts-dialog.tsx`); form-field labels (`crud-dialogs.tsx`, `accounts-dialog.tsx`) |
+| `text-code-annotation` | 12px / 16px | 500 | `file-status-marker.tsx` (pairs with `font-mono`) — dense git/terminal-style single-glyph annotations |
+| `text-interface` | 14px / 20px | (inherits) | the dense-UI base size; the ramp above/below stays stock `text-xs`/`text-sm`/`text-base` |
+| `text-content` | `calc(15px × --font-scale-content)` / 1.6 | (inherits) | `timeline/timeline-markdown.tsx` (message prose) — fixed 15px base so prose doesn't rescale with interface density |
+
+**Weight has exactly three legal tiers** (paseo §3's rule):
+
+1. **Workspace title** — `text-workspace-title` (600), nothing else.
+2. **Structural labels** — `font-medium` (500): section/group headings,
+   modal and dialog titles, form-field labels, dense metadata emphasis
+   (the code-annotation glyph, a quick-open match highlight), toast/alert
+   titles.
+3. **Everything else** — `font-normal` (400): body text, row titles,
+   button labels, badge text, sidebar list-item titles.
+
+The condensed rule: text that *names* a surface or a group is medium;
+text that *lives inside* one is normal. Markdown headings inside prose
+(`timeline-markdown.tsx`'s h1-h3) are medium, not semibold — prose
+emphasis comes from size and color, never a heavier hand.
+
+## 13. Elevation, shadow, and motion
+
+**Elevation vocabulary** (visual-identity-console Item 3) — five named
+recipes on top of the raw `surface-N` tokens, so "floating" means the
+same thing everywhere:
+
+| Elevation | Surface | Shadow | Border | Canonical consumers |
+| --- | --- | --- | --- | --- |
+| **flat** | `surface-0` | none | none | the page background, pane content areas |
+| **raised** | `surface-1` | none | `border` | cards, inline blocks, toasts sit on surface-1 with a hairline |
+| **floating** | `surface-1`/popover | `shadow-lg` | `border` | dialogs, sheets, dropdown/select menus — anything detached over content |
+| **focused** | (any) | none | none — `ring` | focus-visible states (`focus-visible:ring-ring/50`), never a shadow |
+| **embedded** | `surface-2` | none | optional `border` | insets that recede: code blocks, wells, the composer input area |
+
+A component uses the recipe's shadow tier or none — `shadow-sm` (the
+remaining tier, the lightest hover lift on an already-raised surface) is
+the only step between "no shadow" and "floating," and stacking more than
+one shadow tier on a surface is a Forbidden-list item.
+
+**Shadow tiers are theme-asymmetric on purpose** (paseo's model): light
+mode uses very soft shadows (alpha 0.04/0.06/0.08) because a light
+surface needs only a whisper of depth; dark mode uses harder ones (alpha
+0.24/0.32/0.40) because a near-black surface doesn't read a soft shadow
+at all. Never "fix" a dark shadow by copying the light value — the
+asymmetry *is* the design.
+
+**Motion** has three durations: `--duration-hover` 150ms (hover/active
+feedback, `StatusBadge`'s color transitions), `--duration-menu` 200ms
+(Radix popover/dropdown/dialog open-close — `dialog.tsx`, `sheet.tsx`,
+`dropdown-menu.tsx` read it via `duration-(--duration-menu)`; Radix's own
+transform-origin machinery is untouched, no second mechanism added), and
+`--duration-panel` 300ms (panel-level transitions). A transition outside
+these three durations is a review flag. State-change animation is for
+agent moments (queued→running badge color, a permission card entering
+the foreground) — not decorative entrance animation on every mount.
+
+## 14. Forbidden
+
+- **Hardcoded colors** — hex, oklch, or Tailwind palette utilities
+  (`bg-amber-500` etc.) outside `index.css`.
+  `src/test/no-hardcoded-colors.test.ts` fails the build on this.
+- **More than one elevation tier of shadow per surface** (§13) — no
+  stacked shadows, no hand-rolled `shadow-[...]` literals; use the
+  tiered `shadow-sm/md/lg` utilities the `@theme` entries provide.
+- **Color-only disabled state.** Disabled is `disabled:opacity-50` on the
+  outer element (paseo §11) — a disabled control is the same control,
+  dimmer, not a recolored one.
+- **Ad-hoc pane-header padding outside `PaneHeader`.** The header bar's
+  `px-4 py-2.5` lives in one component; a pane hand-rolling its own
+  header div is a regression (uiux-audit §2.4's original finding).
+- **Arbitrary Tailwind spacing values** outside the documented scale
+  (§4) — `p-[13px]`, `gap-[10px]` are review flags; the numeric scale is
+  the vocabulary.
+- **`font-medium`/`font-semibold` on body text, row titles, button
+  labels, or badge text.** Weight's three legal tiers are §12's; the
+  wordmark is the only semibold in the app, and medium is reserved for
+  structural labels. `font-bold` does not exist in this codebase.
+- **A second font family.** One interface stack, one mono stack,
+  differentiated by weight role and the content/interface split — no
+  display or brand typeface (visual-identity Decisions).
+
+## 15. Canonical surfaces by pattern
+
+| Pattern | Reference |
+| --- | --- |
+| List + detail (sidebar tasks → task pane) | `components/app-sidebar.tsx`, `components/task-detail.tsx` |
+| Form dialog (label + input fields, primary + cancel) | `components/crud-dialogs.tsx`, `components/accounts-dialog.tsx` |
+| Destructive confirmation | `components/crud-dialogs.tsx`'s archive-task confirm |
+| Sidebar list row | `components/app-sidebar.tsx` |
+| Pane header | `components/ui/pane-header.tsx` |
+| Composer / message input | `components/composer/composer.tsx` |
+| Alert / banner | `components/ui/alert.tsx` |
+| Empty state | `components/ui/empty-state.tsx` |
+| Tool-call card | `components/timeline/tool-call-card.tsx` (registry: `components/timeline/tool-renderers.tsx`) |
+| Permission card | `components/permission/permission-card.tsx` |
+| Dialog / modal | `components/ui/dialog.tsx` |
+| Toast | `components/ui/toast.tsx` |
+| Status pill | `components/ui/status-badge.tsx` |
+| Status dot | `components/ui/status-dot.tsx` |

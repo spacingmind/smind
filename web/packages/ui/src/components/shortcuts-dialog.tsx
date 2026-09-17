@@ -154,7 +154,7 @@ export function ShortcutRows() {
     <div className="flex flex-col gap-4" data-testid="shortcut-sections">
       {sections.map((section) => (
         <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
-          <h3 className="mb-1 text-xs font-medium tracking-wide text-foreground-muted uppercase">
+          <h3 className="mb-1 text-metadata-label tracking-wide text-foreground-muted uppercase">
             {section.title}
           </h3>
           <div className="divide-y divide-border">
