@@ -542,12 +542,34 @@ dark:
 - Responsive: sidebar renders as a normal panel at 1440/1024/768px and
   correctly collapses to an icon-only/hidden state at 390px with no
   layout overflow.
-- **Not covered by this pass**: no live agent run was started (would
-  need a configured provider account/credentials not available in this
-  sandbox), so the Item 6 tool-call cards and Item 7 permission card
-  were not visually exercised with real streaming content — only their
-  static/empty states were seen (task detail's "No runs yet" empty
-  state, rendered correctly). A follow-up smoke pass with an actual
-  provider run would be needed to visually confirm those two items
-  end-to-end; their unit/interaction tests (Track B/C's Validation
-  entries above) are the coverage that exists today.
+- **Follow-up pass (2026-09-17, same day): real provider run.** The gap
+  above (no live tool-call/permission data) was closed using the actual
+  local daemon's real Anthropic account (`claude-native` provider) — a
+  throwaway workspace/task, not touching any real project. Confirmed via
+  screenshot:
+  - **Item 6 tool-call cards**: a real `claude-native` run rendering
+    `Bash ls` and `Read <path>` as distinct typed rows, each with a green
+    "success" status dot and an expand chevron, under a run header
+    showing provider name + a green "DONE" badge + duration ("9.2s
+    end_turn") + a Copy action — matches the plan's per-intent,
+    typed-row, semantic-title design intent. A second run's failed `Bash
+    curl ...` call rendered with a red "failure" badge and the model's
+    own explanation text below it, confirming the failed-tool-call path
+    reads clearly, not just the happy path. A third run's unsupported
+    "claude-code" provider ID surfaced as a distinct red "ERROR" run
+    header with the raw daemon error text — a different, correctly
+    distinguished failure class from a failed tool call.
+  - **Item 7 permission card**: not captured live. Sending a
+    manual-approval-gated command produced a run that resolved to
+    "failure" within ~5-8s with the model reporting *"The command
+    requires approval and wasn't run"* — the pending-permission UI never
+    appeared in either a fresh page load or the same browser session
+    that sent the prompt, well inside `internal/runs`'
+    `defaultPermissionTimeout` (5 minutes), which is long enough that a
+    real interactive prompt should have stayed visible for this
+    screenshot pass to catch. This reads as the permission request
+    resolving (denying) before or without ever reaching an interactive
+    pending state in this flow, rather than a timing miss on the
+    screenshot's part — worth its own investigation (separate from this
+    plan; flagging here since it's exactly the gap this pass tried to
+    close), not a re-run of this same attempt.
