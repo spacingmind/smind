@@ -75,9 +75,19 @@ specifically because its primary client is a browser (gRPC has no native
 browser support without a grpc-web proxy layer). Not implemented yet;
 noted here so Phase 3 design starts from this rather than re-litigating it.
 
-- [ ] Relay server (Go, dumb pipe), self-hostable as `smind relay`
-- [ ] E2EE handshake: X25519 + ChaCha20-Poly1305, QR pairing
-- [ ] Reconnect grace, correct key rotation
+- [x] Relay server (Go, dumb pipe), self-hostable as `smind relay`
+      (gRPC wire contract + admission auth per ADR-0011 + forwarding with
+      bounded reconnect buffer + multi-device fanout; TLS cert + workspace
+      enrollment CLI; daemon-side client with fingerprint pinning and
+      session-resume semantics — see `docs/plans/active/relay-e2ee-mobile.md`)
+- [x] E2EE handshake: X25519 + ChaCha20-Poly1305, QR pairing
+      (daemon↔mobile ends incl. URL-fragment QR offer with relay
+      fingerprint pin; verified end-to-end through a real in-process TLS
+      relay in the integration tests)
+- [x] Reconnect grace, correct key rotation (bounded 200-frame buffer,
+      in-order flush, oldest-evicted past cap; transport reconnect
+      resumes the same session so buffered frames decrypt — ADR-0007 (e)
+      amendment — while rotation starts a fresh session)
 - [ ] Mobile app (Expo + @expo/ui): pairing + workspace/task list, realtime
       agent timeline + follow-up, push notifications, mobile permission approval
 - [ ] Deploy relay at `relay.spacingmind.sh` (Cloudflare TLS)

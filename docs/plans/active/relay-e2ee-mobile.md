@@ -211,8 +211,10 @@ Acceptance Criteria depend on. Implementation may proceed.
       -> forwarded message both directions), mobile disconnect/
       reconnect (relay buffers, new-session reconnect flows), and
       two-device fanout (same event, separately encrypted per session)
-- [ ] ROADMAP update
-- [ ] Verification
+- [x] ROADMAP update (Phase 3 relay items ticked with build references;
+      mobile app + relay.spacingmind.sh deploy left unticked — out of
+      scope for this plan by its own text)
+- [x] Verification (this section below; full-suite green)
 
 ## Validation
 
