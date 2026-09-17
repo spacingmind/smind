@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -905,6 +906,106 @@ func TestRegistry_PermissionRequest_TimesOutAutoResolvesToDenyDistinguishableFro
 	}
 	if resolved.PermissionResolution != taskrunner.PermissionResolvedByTimeout {
 		t.Fatalf("PermissionResolution = %q, want %q -- must be distinguishable from a human answering", resolved.PermissionResolution, taskrunner.PermissionResolvedByTimeout)
+	}
+}
+
+// TestRegistry_PermissionRequest_ProviderCtxCancelledRecordsDistinguishableEvent
+// models claude-native's real failure mode (see
+// docs/plans/active/claude-native-permission-cancellation.md): the
+// provider's own per-request ctx -- not d.r.ctx (a run-level Stop) and not
+// the timeout timer -- gets cancelled out from under runPermissionDecider
+// .Decide while it's still blocked waiting, exactly as happens when the
+// real `claude` CLI subprocess's own internal auto-deny fallback fires and
+// sends a control_cancel_request for the still-pending request. This is a
+// direct unit test against the decider itself: it builds and registers a
+// *run by hand and calls Decide with a context it controls, rather than
+// driving a whole run end to end, since nothing about this race depends on
+// a real provider actually being connected.
+func TestRegistry_PermissionRequest_ProviderCtxCancelledRecordsDistinguishableEvent(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	reg := newTestRegistry(t, st)
+
+	runID, err := newRunID()
+	if err != nil {
+		t.Fatalf("newRunID() error = %v", err)
+	}
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+	r := &run{
+		id:                 runID,
+		taskID:             task.ID,
+		provider:           taskrunner.ProviderClaudeNative,
+		prompt:             "hi",
+		approvalPolicy:     taskrunner.ApprovalPolicyManual,
+		startedAt:          time.Now(),
+		ctx:                runCtx,
+		cancel:             runCancel,
+		closedCh:           make(chan struct{}),
+		status:             StatusRunning,
+		subscribers:        make(map[int]*subQueue),
+		pendingPermissions: make(map[string]chan string),
+	}
+	reg.mu.Lock()
+	reg.runs[runID] = r
+	reg.mu.Unlock()
+
+	decider := runPermissionDecider{reg: reg, r: r}
+	providerCtx, providerCancel := context.WithCancel(context.Background())
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := decider.Decide(providerCtx, "Run a risky command", "curl", []taskrunner.PermissionOption{
+			{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
+			{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
+		})
+		done <- err
+	}()
+
+	// Wait until the request is genuinely pending (recorded, blocked in
+	// Decide's select) before cancelling, so this actually exercises the
+	// race rather than a ctx cancelled before Decide ever got there.
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+	providerCancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Decide() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Decide() did not return after its own ctx was cancelled")
+	}
+
+	hist, _, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	var resolved *taskrunner.Event
+	for i := range hist {
+		if hist[i].Type == taskrunner.EventTypePermissionResolved {
+			resolved = &hist[i]
+		}
+	}
+	if resolved == nil {
+		t.Fatal("no EventTypePermissionResolved recorded after the provider's own ctx was cancelled")
+	}
+	if resolved.PermissionRequestID != req.PermissionRequestID {
+		t.Fatalf("resolved event's PermissionRequestID = %q, want %q", resolved.PermissionRequestID, req.PermissionRequestID)
+	}
+	if resolved.PermissionResolution != taskrunner.PermissionResolvedByProviderCancellation {
+		t.Fatalf("PermissionResolution = %q, want %q -- must be distinguishable from human/auto_safe/timeout", resolved.PermissionResolution, taskrunner.PermissionResolvedByProviderCancellation)
+	}
+	if resolved.PermissionOptionID != "" {
+		t.Fatalf("PermissionOptionID = %q, want empty -- no option was actually chosen, the request was just cancelled out from under the decider", resolved.PermissionOptionID)
+	}
+
+	// Answering the now-abandoned request must be a clear error, not a
+	// silent success into a channel nobody will ever read again -- same
+	// abandon() contract the timeout and Stop branches already have.
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err == nil {
+		t.Fatal("RespondPermission() on a request abandoned by provider ctx cancellation: error = nil, want a clear error")
 	}
 }
 
