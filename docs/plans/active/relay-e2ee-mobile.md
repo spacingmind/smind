@@ -202,9 +202,15 @@ Acceptance Criteria depend on. Implementation may proceed.
       cert generated once and persisted under $SMIND_HOME/relay with
       fingerprint printed at startup; workspace enrollment via
       `smind relay workspace new/ls`, raw secret printed exactly once)
-- [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
+- [x] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
       admission; integration: daemon+relay end-to-end, multi-device
-      fanout)
+      fanout) — unit coverage accumulated with each step above;
+      integration scenarios now in `internal/relay/client` against a
+      real TLS gRPC relay (server.Run): full pairing flow (offer URL
+      round-trip incl. fingerprint pin -> admission -> E2EE handshake
+      -> forwarded message both directions), mobile disconnect/
+      reconnect (relay buffers, new-session reconnect flows), and
+      two-device fanout (same event, separately encrypted per session)
 - [ ] ROADMAP update
 - [ ] Verification
 
@@ -231,3 +237,9 @@ Acceptance Criteria depend on. Implementation may proceed.
   cert-pinning client, and exits cleanly on cancellation (lifecycle test,
   3 consecutive green runs); cert persistence + enrollment CLI verified.
   Full `go test ./...` green.
+- 2026-09-17 — client step: `internal/relay/client` (Dial with
+  fingerprint pinning, Admit, OpenControl, OpenData wrapping e2ee.Channel
+  over framed ciphertext) + the two integration scenarios over a real
+  in-process TLS relay. server.Config gained an optional pre-bound
+  Listener for race-free ephemeral-port tests. Full suite green
+  (client tests x2 runs).

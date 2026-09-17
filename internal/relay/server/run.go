@@ -26,6 +26,10 @@ type Config struct {
 	DataDir string
 	// BufferCap is the per-side reconnect buffer size (0 = default).
 	BufferCap int
+	// Listener, when non-nil, is served instead of binding ListenAddr —
+	// lets tests hand Run a kernel-assigned ephemeral listener with no
+	// bind race. Run takes ownership (closes it on stop).
+	Listener net.Listener
 }
 
 // DefaultListenAddr is the relay's default bind address.
@@ -67,9 +71,12 @@ func Run(ctx context.Context, cfg Config) error {
 	})))
 	srv.Register(gs)
 
-	lis, err := net.Listen("tcp", cfg.ListenAddr)
-	if err != nil {
-		return fmt.Errorf("relay: listen %s: %w", cfg.ListenAddr, err)
+	lis := cfg.Listener
+	if lis == nil {
+		lis, err = net.Listen("tcp", cfg.ListenAddr)
+		if err != nil {
+			return fmt.Errorf("relay: listen %s: %w", cfg.ListenAddr, err)
+		}
 	}
 
 	// Signals cancel ctx the same way an external context would, so tests
