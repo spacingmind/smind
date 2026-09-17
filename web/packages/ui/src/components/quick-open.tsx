@@ -165,7 +165,7 @@ function HighlightedPath({ match }: { match: FuzzyMatch }) {
     <span className="min-w-0 truncate">
       {parts.map((part, i) =>
         part.matched ? (
-          <strong key={i} className="font-semibold text-foreground">
+          <strong key={i} className="font-medium text-foreground">
             {part.text}
           </strong>
         ) : (
