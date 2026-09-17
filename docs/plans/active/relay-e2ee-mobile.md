@@ -168,7 +168,13 @@ Acceptance Criteria depend on. Implementation may proceed.
       handled)
 - [x] Key rotation behavior (new-session-only; reject re-hello with
       different key on live session)
-- [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
+- [x] daemon↔relay gRPC service/message definition (ADR-0007 (f))
+      (`internal/relay/relaypb/relay.proto`; control/data split mapped as
+      `OpenControl` (one bidi stream per daemon, lifecycle only) +
+      `OpenData` (one bidi stream per device, Frame envelopes with opaque
+      ciphertext), admission as unary `AdmitChallenge`/`Admit`;
+      generated Go committed alongside; reasoning documented in the
+      .proto header comment)
 - [ ] Relay: admission auth (workspace secret + HMAC challenge-response,
       TLS cert pinning) (ADR-0011)
 - [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
@@ -184,4 +190,8 @@ Acceptance Criteria depend on. Implementation may proceed.
 
 ## Validation
 
-(empty — fill in as work completes)
+- 2026-09-17 — gRPC wire contract step: `go build ./...`, `go vet ./...`,
+  `go test ./internal/relay/...` (incl. new `relaypb` marshal/unmarshal
+  round-trip tests), and `gofmt -l $(git ls-files '*.go')` all clean after
+  committing the generated files (verified gofmt-clean directly too, since
+  the lint step only sees tracked files).
