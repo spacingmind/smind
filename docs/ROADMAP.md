@@ -9,7 +9,7 @@ Goal: repo lives, binary runs.
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
 - [x] CI: GitHub Actions — go test + bun build + lint
-- [ ] npm reserve `smind` stub
+- [x] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
 
@@ -42,7 +42,12 @@ Goal: replace Paseo as daily driver.
 - [x] Web UI: preview pane (markdown, svg, sandboxed html alongside the CodeMirror editor) — built in #51, e2e-verified in the crud-ui Playwright pass
 - [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
 
-Remaining for Phase 2: the dogfood that is the definition of done.
+**Phase 2 complete (2026-09-16).** The dogfood gate was reached: five real
+sessions logged through smind's UI (`docs/plans/completed/smind-dogfood.md`),
+including the closing one that routed a Perplexity Pro subscription through
+smind's own proxy as a provider (via
+[perplexity-proxy-go](https://github.com/spacingmind/perplexity-proxy-go)
+and per-account base_url, #140/#142).
 
 Codex spawning status (2026-09-11): live-verified up to the real turn.
 `codex app-server` v0.149.1 speaks stdio JSON-RPC directly (bare spawn
