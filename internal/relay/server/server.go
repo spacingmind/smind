@@ -5,10 +5,19 @@
 // buffer (ADR-0007 (a)). The relay never sees an E2EE session key or
 // plaintext: Frame payload bytes are copied through, never inspected.
 //
-// Scope for this step: one daemon connection and one paired device per
-// workspace/session. Routing state is keyed by (workspace, session,
-// device) with one bounded queue per side, so multi-device fanout later
-// means "more routes share the daemon side", not a redesign.
+// Fanout (ADR-0007 (b)): a workspace may have multiple paired devices,
+// each with its own OpenData stream and its own E2EE session (and hence
+// its own route, keyed (workspace, session, device), with one bounded
+// queue per side). There is deliberately NO device-to-device forwarding:
+// the daemon reaches each device over its own route, and a device's
+// frames go only to the daemon. That is the conservative reading of the
+// ADR/plan (which specify daemon↔device pipes and never name
+// device-to-device traffic), and it is also the only cryptographically
+// coherent one — each session has its own key (ADR-0007 (e)), so a
+// ciphertext sealed for device 1 could not be opened by device 2 anyway;
+// a daemon "broadcast" is the same event separately encrypted and sent
+// on each per-device stream, which the relay sees as ordinary
+// independent routes.
 package server
 
 import (

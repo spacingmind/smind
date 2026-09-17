@@ -190,8 +190,12 @@ Acceptance Criteria depend on. Implementation may proceed.
 - [x] Relay: reconnect-grace buffer (bounded per side, default cap 200;
       in-order flush on reconnect, oldest evicted past cap; per-route
       queues persist across disconnects)
-- [ ] Relay: multi-device fanout (control + data socket shape per
-      ADR-0007 (b))
+- [x] Relay: multi-device fanout (control + data socket shape per
+      ADR-0007 (b)) — per-(workspace, session, device) routes, each
+      device with its own OpenData stream and reconnect buffer; daemon
+      "broadcast" = separately-encrypted per-device sends; no
+      device-to-device forwarding (conservative reading; also the only
+      coherent one given per-session keys). Documented in server.go.
 - [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
 - [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
       admission; integration: daemon+relay end-to-end, multi-device
@@ -213,3 +217,7 @@ Acceptance Criteria depend on. Implementation may proceed.
   canonical-form ambiguity checks, and challenge input validation.
   `go build ./...`, `go vet ./...`, `go test ./internal/relay/...`,
   gofmt all clean.
+- 2026-09-17 — fanout step: two devices per workspace both receive
+  daemon-originated sends; a device's frames never reach the other device
+  or the other route's daemon stream; reconnect buffers are independent
+  per (workspace, session, device). All relay tests green under -race.
