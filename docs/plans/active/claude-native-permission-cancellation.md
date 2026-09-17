@@ -162,6 +162,12 @@ extends the CLI's deadline so its own 5-minute window is the real
 deadline. The constant lives in taskrunner (not imported from
 internal/runs) because runs imports taskrunner.
 
+The Item 2 regression test asserts the env wiring itself (fake CLI dumps
+the subprocess env var; decider-wired run sets it, pre-set user value
+wins) rather than waiting out a 5+ minute dialog deadline — the wiring
+is the fixable part; the cancellation race itself is what Item 1's
+runs-level test covers.
+
 ## Progress
 
 - [x] Item 1 — record `PermissionResolvedByProviderCancellation` on the
@@ -172,13 +178,14 @@ internal/runs) because runs imports taskrunner.
       env var; a decider-wired run sets it, a pre-set user value wins)
 - [x] `internal/runs` ctx-cancellation race regression test (Item 1,
       commit eb42d75)
-- [ ] `task test` / `task lint` green
+- [x] `task test` / `task lint` green
 
 ## Validation
 
-- `go test ./internal/taskrunner/ ./internal/runs/` — green (2026-09-17),
-  including the new
-  `TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv`.
-- `task lint` (`go vet ./...` + gofmt check) — green (2026-09-17).
+- `go test ./internal/taskrunner/ ./internal/runs/` — green (2026-09-17,
+  re-verified independently by the orchestrating session), including the
+  new `TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv`.
+- `task lint` (`go vet ./...` + gofmt check) — green (2026-09-17,
+  re-verified independently by the orchestrating session).
 - Web tests unaffected: no web files touched by Item 2 (Item 1's label
   test landed with eb42d75).
