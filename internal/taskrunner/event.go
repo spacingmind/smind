@@ -223,4 +223,18 @@ const (
 	// was auto-resolved to a deny option instead of blocking the run
 	// forever -- never an allow, regardless of ApprovalPolicy.
 	PermissionResolvedByTimeout PermissionResolution = "timeout"
+
+	// PermissionResolvedByProviderCancellation is the provider's own
+	// per-request context being cancelled out from under the decider
+	// before either a human or the timeout resolved it -- notably,
+	// claude-native's real `claude` CLI subprocess has its own internal,
+	// much-shorter-than-5-minutes auto-deny fallback for an unanswered
+	// permission dialog, independent of and invisible to smind's own
+	// timeout, and cancels this per-request ctx when it fires. No option
+	// was actually chosen here (PermissionOptionID is empty); this
+	// resolution exists so the timeline can tell "the request vanished
+	// out from under us" apart from a real answer, an auto-safe allow, or
+	// smind's own timeout. See
+	// docs/plans/active/claude-native-permission-cancellation.md.
+	PermissionResolvedByProviderCancellation PermissionResolution = "provider_cancellation"
 )
