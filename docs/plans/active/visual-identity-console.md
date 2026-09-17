@@ -289,7 +289,7 @@ replace it.*
 
 - [x] Merge `smind/task-web-ui-fixes-dropdown-theme-resize-drag-sidebar-truncation-dlgyo422xbb0`
       into the working branch first (prerequisite — see Decisions)
-- [ ] Item 1 — `docs/design.md` restructure (Character, Forbidden, canonical-surfaces table)
+- [x] Item 1 — `docs/design.md` restructure (Character, Forbidden, canonical-surfaces table)
 - [x] Item 2 — Typography token layer
 - [x] Item 3 — Elevation/shadow/motion vocabulary
 - [ ] Item 4 — Semantic CVA component variants
@@ -320,9 +320,19 @@ instead of Opus):
 ## Validation
 
 **Track A (Items 1, 2, 3, 5) — complete on `feat/visual-tokens-track-a`.**
+Independently re-verified in a follow-up session (2026-09-17) after the
+implementing agent hit a rate limit before confirming green: `task test`
+and `task lint` re-run from a clean worktree, `index.css`'s `:root`/
+`.dark`/`@theme inline` blocks read directly, `docs/design.md` §§1,
+4, 6, 11-15 read directly (not just the commit message), and the diff
+for all 11 touched component files re-read against the claims below —
+all confirmed accurate, no gaps found in Items 1/2/3/5.
 
-- `task test` green (669 pre-existing web tests + 43 new token-presence
-  tests + full Go suite), `task lint` green — run after all Track A edits.
+- `task test` green (712 web tests total = 669 pre-existing + 43 new
+  token-presence tests, confirmed by direct count in
+  `token-presence.test.ts`; full Go suite green), `task lint` green
+  (this repo's `task lint` is Go-only — `go vet` + `gofmt` check; there
+  is no web lint task in `Taskfile.yml`).
 - **Item 1**: `docs/design.md` restructured — Character section,
   Forbidden list (§14, citing `no-hardcoded-colors.test.ts`), canonical-
   surfaces table (§15, all ten required patterns covered); existing
