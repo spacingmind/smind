@@ -405,7 +405,7 @@ export function AppSidebar({
     <Sidebar collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="text-sm font-semibold tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
+          <span className="text-workspace-title tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
           <div className="ml-auto flex items-center gap-1 group-data-[collapsible=icon]:hidden">
             <ThemeToggle />
             <Button

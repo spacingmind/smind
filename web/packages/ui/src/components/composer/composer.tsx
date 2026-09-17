@@ -326,7 +326,7 @@ export function Composer({
           {running && (
             <Button
               type="button"
-              variant="outline"
+              variant="execute"
               size="sm"
               className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
               disabled={stopping}
@@ -338,6 +338,7 @@ export function Composer({
           )}
           <Button
             type="submit"
+            variant={running ? "default" : "execute"}
             size="sm"
             className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
             disabled={inactive || !draft.value.trim()}

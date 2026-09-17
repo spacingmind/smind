@@ -194,6 +194,42 @@ describe("DiffViewerPane commit bar", () => {
     expect(button).toBeEnabled();
   });
 
+  it("offers a one-click suggested message once a file is staged, filling the composer without typing", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    // Nothing staged yet: no suggestion to offer.
+    expect(screen.queryByTestId("commit-suggestion")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("stage-file.txt"));
+    client.nth("task.stage", 0).resolve({});
+    await flush();
+
+    const suggestion = screen.getByTestId("commit-suggestion");
+    expect(suggestion).toHaveTextContent("Update file.txt");
+    // Filling is a click, and the click both fills and retires the
+    // offer -- otherwise it would sit beside an already-filled box
+    // offering to duplicate what's there.
+    fireEvent.click(suggestion);
+    expect(screen.getByTestId("commit-message")).toHaveValue("Update file.txt");
+    expect(screen.queryByTestId("commit-suggestion")).not.toBeInTheDocument();
+    expect(screen.getByTestId("commit-button")).toBeEnabled();
+  });
+
+  it("keeps the suggestion out of the way once the user has typed a message", async () => {
+    const client = new FakeWsClient();
+    render(<DiffViewerPane client={client} task={TASK} />);
+    await resolveFilesAndDiffs(client);
+
+    fireEvent.click(screen.getByTestId("stage-file.txt"));
+    client.nth("task.stage", 0).resolve({});
+    await flush();
+
+    fireEvent.change(screen.getByTestId("commit-message"), { target: { value: "my own words" } });
+    expect(screen.queryByTestId("commit-suggestion")).not.toBeInTheDocument();
+  });
+
   it("a successful commit shows sha+subject and refreshes the files list", async () => {
     const client = new FakeWsClient();
     render(<DiffViewerPane client={client} task={TASK} />);

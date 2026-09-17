@@ -24,11 +24,15 @@ export const COMPACT_TOUCH_BUTTON_CLASS = "h-11 px-3 text-sm md:h-6 md:px-2 md:t
  * list -- is what makes the primary action visually obvious rather than
  * every option looking equally weighted; ACP/agent conventions put the
  * suggested choice first, so "first allow" is a reasonable default absent
- * an explicit "recommended" flag on the wire.
+ * an explicit "recommended" flag on the wire. It renders with the
+ * `approval` variant (visual-identity-console Item 4) rather than
+ * `default` -- a recommended allow is a confirm action with its own
+ * meaning, not a generic primary button. Reject keeps `destructive`,
+ * unchanged: that meaning was already correct.
  */
 export function optionVariant(kind: string, isRecommended: boolean): ButtonVariant {
   if (kind.startsWith("reject")) return "destructive";
-  if (isRecommended) return "default";
+  if (isRecommended) return "approval";
   return "outline";
 }
 

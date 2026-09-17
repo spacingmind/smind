@@ -312,4 +312,17 @@ describe("Composer", () => {
       expect(trigger.className).not.toContain("h-8");
     }
   });
+
+  // visual-identity-console Item 4: the Run/Stop control is the "execute"
+  // call site -- Send is "execute" while it would start a run, but reverts
+  // to the generic "default" once a run is live (the same button now reads
+  // "Queue", which isn't a run-control action). Stop is always "execute".
+  it("Send is the execute variant when idle, default when it reads Queue; Stop is always execute", () => {
+    const { rerender } = renderComposer({ runningRunId: null });
+    expect(screen.getByTestId("chat-send-button")).toHaveAttribute("data-variant", "execute");
+
+    rerender({ runningRunId: "run-7" });
+    expect(screen.getByTestId("chat-send-button")).toHaveAttribute("data-variant", "default");
+    expect(screen.getByTestId("chat-stop-button")).toHaveAttribute("data-variant", "execute");
+  });
 });

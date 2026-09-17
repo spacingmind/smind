@@ -86,6 +86,44 @@
     --color-status-dot-danger: var(--status-dot-danger);
     --color-status-dot-warning: var(--status-dot-warning);
     --color-status-dot-running: var(--status-dot-running);
+    --color-diff-addition: var(--diff-addition);
+    --color-diff-deletion: var(--diff-deletion);
+
+    /*
+     * Type-role scale (visual-identity-console plan, Item 2). Roles, not
+     * raw sizes: each `--text-*` name is the ONE legal spelling for that
+     * typographic job, with paired line-height (`--*--line-height`) and,
+     * where the role fixes its weight, a paired font-weight -- both per
+     * Tailwind v4's @theme conventions (deepseek-harness's
+     * font-size/line-height token pairing is the same shape). Values are
+     * defined once in `:root` below and re-declared identically in
+     * `.dark` so both themes carry the token (token-presence test
+     * enforces this; sizes don't vary by theme).
+     */
+    --text-workspace-title: var(--workspace-title-size);
+    --text-workspace-title--line-height: var(--workspace-title-line-height);
+    --text-workspace-title--font-weight: var(--workspace-title-weight);
+    --text-section-title: var(--section-title-size);
+    --text-section-title--line-height: var(--section-title-line-height);
+    --text-section-title--font-weight: var(--section-title-weight);
+    --text-panel-title: var(--panel-title-size);
+    --text-panel-title--line-height: var(--panel-title-line-height);
+    --text-panel-title--font-weight: var(--panel-title-weight);
+    --text-metadata-label: var(--metadata-label-size);
+    --text-metadata-label--line-height: var(--metadata-label-line-height);
+    --text-metadata-label--font-weight: var(--metadata-label-weight);
+    --text-code-annotation: var(--code-annotation-size);
+    --text-code-annotation--line-height: var(--code-annotation-line-height);
+    --text-code-annotation--font-weight: var(--code-annotation-weight);
+    --text-interface: var(--interface-size);
+    --text-interface--line-height: var(--interface-line-height);
+    --text-content: var(--content-size);
+    --text-content--line-height: var(--content-line-height);
+
+    /* Shadow tiers (Item 3) -- see :root below. */
+    --shadow-sm: var(--elevation-shadow-sm);
+    --shadow-md: var(--elevation-shadow-md);
+    --shadow-lg: var(--elevation-shadow-lg);
 }
 
 :root {
@@ -159,6 +197,17 @@
     --status-running: oklch(0.50 0.09 250);
 
     /*
+     * Diff family -- the third color family (visual-identity-console
+     * plan, Item 5), deliberately separate from status-success/danger:
+     * the +/- inside a diff view is the signal itself and has to survive
+     * being scanned line by line, so it stays more saturated than the
+     * status text tier. Values are Paseo's own light-band diff table
+     * (refs/paseo/packages/app/src/styles/theme.ts lightDiffColors).
+     */
+    --diff-addition: #15803d;
+    --diff-deletion: #b91c1c;
+
+    /*
      * Status dot family -- refs/paseo/docs/design.md §13: a dot is 6px
      * of solid color with no shape or label, so it needs to read louder
      * than the status-family text tier or it goes backwards (a state dot
@@ -173,6 +222,65 @@
     --status-dot-danger: #f12e2f;
     --status-dot-warning: #b37824;
     --status-dot-running: #268ae0;
+
+    /*
+     * Type-role scale (visual-identity-console plan, Item 2) -- sizes,
+     * paired line-heights, and fixed weights per role. Canonical
+     * consumers live in docs/design.md's type-role table.
+     *
+     * workspace-title tokenizes the sidebar wordmark's existing
+     * 14px/600 look as-is (the one legal semibold in the app);
+     * section-title unifies dialog + sheet titles at 16/500;
+     * panel-title tokenizes PaneHeader's existing 14/500; metadata-label
+     * and code-annotation are the 12/500 structural-label tier
+     * (code-annotation pairs with `font-mono`, e.g. git status letters);
+     * interface names the dense-UI base size (the ramp above it stays
+     * the existing Tailwind text-xs/sm/base utilities); content is the
+     * fixed prose size that ignores the interface-density scale (paseo's
+     * content-vs-interface split) -- 15px scaled only by the
+     * content-specific font-scale setting.
+     */
+    --workspace-title-size: 14px;
+    --workspace-title-line-height: 20px;
+    --workspace-title-weight: 600;
+    --section-title-size: 16px;
+    --section-title-line-height: 24px;
+    --section-title-weight: 500;
+    --panel-title-size: 14px;
+    --panel-title-line-height: 20px;
+    --panel-title-weight: 500;
+    --metadata-label-size: 12px;
+    --metadata-label-line-height: 16px;
+    --metadata-label-weight: 500;
+    --code-annotation-size: 12px;
+    --code-annotation-line-height: 16px;
+    --code-annotation-weight: 500;
+    --interface-size: 14px;
+    --interface-line-height: 20px;
+    --content-size: calc(15px * var(--font-scale-content, 1));
+    --content-line-height: 1.6;
+
+    /*
+     * Shadow tiers (visual-identity-console plan, Item 3). Light-mode
+     * shadows are very soft, dark-mode shadows harder -- paseo's
+     * asymmetry (its light tier runs alpha 0.02-0.08, its dark tier
+     * 0.20-0.40); the exact numbers here are round values in those
+     * bands, inspired by paseo rather than copied from it.
+     */
+    --elevation-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 4%);
+    --elevation-shadow-md: 0 2px 8px 0 rgb(0 0 0 / 6%);
+    --elevation-shadow-lg: 0 8px 24px 0 rgb(0 0 0 / 8%);
+
+    /*
+     * Motion durations (visual-identity-console plan, Item 3): hover
+     * 150ms, menus/popovers/dialogs 200ms, panels/resizes 300ms. CSS
+     * consumers read these vars directly (Tailwind `duration-*` utilities
+     * take a var() argument fine); no second timing mechanism is
+     * introduced alongside them.
+     */
+    --duration-hover: 150ms;
+    --duration-menu: 200ms;
+    --duration-panel: 300ms;
 }
 
 .dark {
@@ -232,11 +340,50 @@
     --status-warning: #c09664;
     --status-running: oklch(0.70 0.08 250);
 
+    /* Dark-band diff family: Paseo's darkDiffColors -- brighter palette values than the light band, same rationale as :root's. */
+    --diff-addition: #4ade80;
+    --diff-deletion: #ef4444;
+
     /* Dark-band status dots: Paseo's own generated table (L=0.72, chroma 90% of gamut max -- see refs/paseo/packages/app/src/styles/theme.ts's darkStatusDotColors). */
     --status-dot-success: #35c264;
     --status-dot-danger: #f7796d;
     --status-dot-warning: #db932e;
     --status-dot-running: #5caaf6;
+
+    /*
+     * Type-role scale: identical values in both themes (sizes don't vary
+     * by theme) -- re-declared so the token exists in `.dark` too and
+     * nothing silently falls back to a browser default if a future theme
+     * layer forgets to inherit :root (token-presence test enforces).
+     */
+    --workspace-title-size: 14px;
+    --workspace-title-line-height: 20px;
+    --workspace-title-weight: 600;
+    --section-title-size: 16px;
+    --section-title-line-height: 24px;
+    --section-title-weight: 500;
+    --panel-title-size: 14px;
+    --panel-title-line-height: 20px;
+    --panel-title-weight: 500;
+    --metadata-label-size: 12px;
+    --metadata-label-line-height: 16px;
+    --metadata-label-weight: 500;
+    --code-annotation-size: 12px;
+    --code-annotation-line-height: 16px;
+    --code-annotation-weight: 500;
+    --interface-size: 14px;
+    --interface-line-height: 20px;
+    --content-size: calc(15px * var(--font-scale-content, 1));
+    --content-line-height: 1.6;
+
+    /* Dark-band shadows: harder than light (alpha 0.20-0.40) -- paseo's asymmetry, round values in its bands. */
+    --elevation-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 24%);
+    --elevation-shadow-md: 0 4px 8px 0 rgb(0 0 0 / 32%);
+    --elevation-shadow-lg: 0 12px 24px 0 rgb(0 0 0 / 40%);
+
+    --duration-hover: 150ms;
+    --duration-menu: 200ms;
+    --duration-panel: 300ms;
 }
 
 @layer base {
@@ -262,6 +409,12 @@
  * means diff-viewer-pane.tsx needs no `d2h-dark-color-scheme` class
  * juggling at all -- the library's own selectors already read these var
  * names, so this is the whole integration.
+ *
+ * The +/- pairs read the diff family (`--diff-addition/--deletion`,
+ * Item 5's third color family), not status-success/danger -- the diff
+ * tier is more saturated by design (line-scannable), so a future
+ * non-diff2html diff surface reuses the same named tokens and gets the
+ * same look for free.
  */
 :root {
   --d2h-bg-color: var(--surface-1);
@@ -273,16 +426,16 @@
   --d2h-empty-placeholder-bg-color: var(--surface-2);
   --d2h-empty-placeholder-border-color: var(--border);
   --d2h-selected-color: color-mix(in oklch, var(--status-running) 15%, transparent);
-  --d2h-ins-bg-color: color-mix(in oklch, var(--status-success) 15%, transparent);
-  --d2h-ins-border-color: color-mix(in oklch, var(--status-success) 40%, transparent);
-  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--status-success) 30%, transparent);
-  --d2h-ins-label-color: var(--status-success);
-  --d2h-del-bg-color: color-mix(in oklch, var(--status-danger) 12%, transparent);
-  --d2h-del-border-color: color-mix(in oklch, var(--status-danger) 40%, transparent);
-  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--status-danger) 30%, transparent);
-  --d2h-del-label-color: var(--status-danger);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-addition) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--diff-addition) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-addition) 30%, transparent);
+  --d2h-ins-label-color: var(--diff-addition);
+  --d2h-del-bg-color: color-mix(in oklch, var(--diff-deletion) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--diff-deletion) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-deletion) 30%, transparent);
+  --d2h-del-label-color: var(--diff-deletion);
   --d2h-change-del-color: color-mix(in oklch, var(--status-warning) 20%, transparent);
-  --d2h-change-ins-color: color-mix(in oklch, var(--status-success) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--diff-addition) 20%, transparent);
   --d2h-info-bg-color: var(--surface-2);
   --d2h-info-border-color: var(--border);
   --d2h-change-label-color: var(--status-warning);
@@ -300,6 +453,8 @@
  * plumbed as variables only; wiring them into the chat prose and code
  * surfaces they name is Track B and Track C's own CSS to adopt (those
  * files are outside this track), not a placeholder left unfinished here.
+ * (`--font-scale-content` also feeds the Item-2 `--text-content` type
+ * role above, so prose already rescales with it.)
  */
 :root {
   --font-scale-interface: 1;
