@@ -268,3 +268,20 @@ Acceptance Criteria depend on. Implementation may proceed.
   `--url` tunnel terminates TLS at Cloudflare's edge and would defeat
   ADR-0011's fingerprint pinning, so it wasn't attempted); user decided
   this is out of scope for now, localhost-as-separate-process is enough.
+- 2026-09-17 (later same day) — user logged into `cloudflared` and
+  asked for the public-internet variant after all. Created a throwaway
+  named tunnel (`cloudflared tunnel create` + `tunnel route dns`) with a
+  `tcp://127.0.0.1:PORT` ingress rule (not the HTTP `--url` quick-tunnel
+  mode, which would terminate TLS at Cloudflare's edge) pointed at a
+  real `smind relay` process; a client dialed the tunnel's local
+  `cloudflared access tcp` proxy port, which round-trips through
+  Cloudflare's real edge network, and completed the exact same
+  admission → handshake → bidirectional message flow as the localhost
+  test — with `smind relay`'s own self-signed cert fingerprint pinned
+  the whole way, i.e. ADR-0011's actual security model, not a weakened
+  stand-in for it. Confirms the relay works over a real Cloudflare
+  Tunnel with fingerprint pinning intact, end to end. The throwaway
+  tunnel and DNS record were deleted afterward (test-only, not meant to
+  persist) — this validates the *mechanism* `relay.spacingmind.sh`
+  deploy would use, not a live deployment itself (still out of scope
+  for this plan).
