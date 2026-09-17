@@ -196,7 +196,12 @@ Acceptance Criteria depend on. Implementation may proceed.
       "broadcast" = separately-encrypted per-device sends; no
       device-to-device forwarding (conservative reading; also the only
       coherent one given per-session keys). Documented in server.go.
-- [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
+- [x] `smind relay` subcommand (self-hostable, standalone lifecycle)
+      (`cmd/smind/relay.go` + `internal/relay/server/run.go`: real TLS
+      gRPC listener with serve-style signal/cancel lifecycle; self-signed
+      cert generated once and persisted under $SMIND_HOME/relay with
+      fingerprint printed at startup; workspace enrollment via
+      `smind relay workspace new/ls`, raw secret printed exactly once)
 - [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
       admission; integration: daemon+relay end-to-end, multi-device
       fanout)
@@ -221,3 +226,8 @@ Acceptance Criteria depend on. Implementation may proceed.
   daemon-originated sends; a device's frames never reach the other device
   or the other route's daemon stream; reconnect buffers are independent
   per (workspace, session, device). All relay tests green under -race.
+- 2026-09-17 — subcommand step: `smind relay` binds a real TLS gRPC
+  listener, serves an enrolled workspace's admission exchange to a
+  cert-pinning client, and exits cleanly on cancellation (lifecycle test,
+  3 consecutive green runs); cert persistence + enrollment CLI verified.
+  Full `go test ./...` green.
