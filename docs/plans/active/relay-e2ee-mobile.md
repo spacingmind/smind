@@ -168,20 +168,88 @@ Acceptance Criteria depend on. Implementation may proceed.
       handled)
 - [x] Key rotation behavior (new-session-only; reject re-hello with
       different key on live session)
-- [ ] daemon↔relay gRPC service/message definition (ADR-0007 (f))
-- [ ] Relay: admission auth (workspace secret + HMAC challenge-response,
-      TLS cert pinning) (ADR-0011)
-- [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
-- [ ] Relay: reconnect-grace buffer (bounded, per-connection)
-- [ ] Relay: multi-device fanout (control + data socket shape per
-      ADR-0007 (b))
-- [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
-- [ ] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
+- [x] daemon↔relay gRPC service/message definition (ADR-0007 (f))
+      (`internal/relay/relaypb/relay.proto`; control/data split mapped as
+      `OpenControl` (one bidi stream per daemon, lifecycle only) +
+      `OpenData` (one bidi stream per device, Frame envelopes with opaque
+      ciphertext), admission as unary `AdmitChallenge`/`Admit`;
+      generated Go committed alongside; reasoning documented in the
+      .proto header comment)
+- [x] Relay: admission auth — workspace secret + HMAC challenge-response
+      (`internal/relay/admission/`; SHA-256 of the 256-bit secret is both
+      the stored form and the HMAC key so the relay verifies possession
+      without ever holding the raw secret; single-use expiring server
+      nonces; constant-time compare; one generic `ErrRejected` for every
+      cause so unknown-workspace/wrong-secret/reused-nonce are
+      indistinguishable. TLS cert pinning deferred to the transport step,
+      per ADR-0011's layering)
+- [x] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
+      (`internal/relay/server/`; bufconn-tested: byte-identical both
+      directions, admission gating on data+control, wrong-workspace and
+      direction violations rejected, never-has-plaintext assertions)
+- [x] Relay: reconnect-grace buffer (bounded per side, default cap 200;
+      in-order flush on reconnect, oldest evicted past cap; per-route
+      queues persist across disconnects)
+- [x] Relay: multi-device fanout (control + data socket shape per
+      ADR-0007 (b)) — per-(workspace, session, device) routes, each
+      device with its own OpenData stream and reconnect buffer; daemon
+      "broadcast" = separately-encrypted per-device sends; no
+      device-to-device forwarding (conservative reading; also the only
+      coherent one given per-session keys). Documented in server.go.
+- [x] `smind relay` subcommand (self-hostable, standalone lifecycle)
+      (`cmd/smind/relay.go` + `internal/relay/server/run.go`: real TLS
+      gRPC listener with serve-style signal/cancel lifecycle; self-signed
+      cert generated once and persisted under $SMIND_HOME/relay with
+      fingerprint printed at startup; workspace enrollment via
+      `smind relay workspace new/ls`, raw secret printed exactly once)
+- [x] Tests (unit: keypair/offer/handshake/replay/rotation/buffer/
       admission; integration: daemon+relay end-to-end, multi-device
-      fanout)
-- [ ] ROADMAP update
-- [ ] Verification
+      fanout) — unit coverage accumulated with each step above;
+      integration scenarios now in `internal/relay/client` against a
+      real TLS gRPC relay (server.Run): full pairing flow (offer URL
+      round-trip incl. fingerprint pin -> admission -> E2EE handshake
+      -> forwarded message both directions), mobile disconnect/
+      reconnect (relay buffers, new-session reconnect flows), and
+      two-device fanout (same event, separately encrypted per session)
+- [x] ROADMAP update (Phase 3 relay items ticked with build references;
+      mobile app + relay.spacingmind.sh deploy left unticked — out of
+      scope for this plan by its own text)
+- [x] Verification (this section below; full-suite green)
 
 ## Validation
 
-(empty — fill in as work completes)
+- 2026-09-17 — gRPC wire contract step: `go build ./...`, `go vet ./...`,
+  `go test ./internal/relay/...` (incl. new `relaypb` marshal/unmarshal
+  round-trip tests), and `gofmt -l $(git ls-files '*.go')` all clean after
+  committing the generated files (verified gofmt-clean directly too, since
+  the lint step only sees tracked files).
+- 2026-09-17 — admission auth step: `internal/relay/admission` tests cover
+  valid-admission-binds-workspace, wrong-secret, replayed
+  transcript/reused nonce, expired nonce, cross-workspace transcript
+  mismatch, unknown workspace, uniform rejection shape (no oracle), HMAC
+  canonical-form ambiguity checks, and challenge input validation.
+  `go build ./...`, `go vet ./...`, `go test ./internal/relay/...`,
+  gofmt all clean.
+- 2026-09-17 — fanout step: two devices per workspace both receive
+  daemon-originated sends; a device's frames never reach the other device
+  or the other route's daemon stream; reconnect buffers are independent
+  per (workspace, session, device). All relay tests green under -race.
+- 2026-09-17 — subcommand step: `smind relay` binds a real TLS gRPC
+  listener, serves an enrolled workspace's admission exchange to a
+  cert-pinning client, and exits cleanly on cancellation (lifecycle test,
+  3 consecutive green runs); cert persistence + enrollment CLI verified.
+  Full `go test ./...` green.
+- 2026-09-17 — resume amendment (ADR-0007 (e), 2026-09-17): transport
+  reconnect now resumes the same session (key + counters kept,
+  `DataConn.Resume`) so relay-buffered frames decrypt — verified by the
+  reconnect integration test (3 buffered frames decrypt in order, live
+  traffic continues both directions). New-session Handshake remains for
+  pairing/re-pair/compromise/lost state. Relay server needed no change:
+  re-presenting the same session id already re-attaches to the existing
+  route and its buffers.
+- 2026-09-17 — client step: `internal/relay/client` (Dial with
+  fingerprint pinning, Admit, OpenControl, OpenData wrapping e2ee.Channel
+  over framed ciphertext) + the two integration scenarios over a real
+  in-process TLS relay. server.Config gained an optional pre-bound
+  Listener for race-free ephemeral-port tests. Full suite green
+  (client tests x2 runs).

@@ -201,6 +201,34 @@ limitation given no current requirement forces otherwise, but it should
 be written down as a known limitation in the relay's docs when built,
 not discovered later.
 
+**Amendment 2026-09-17 — "reconnect" is not "rotation":** implementation
+of the reconnect-grace buffer (a) surfaced a real tension this item's
+original text left implicit: if every transport-level reconnect (a
+phone moving WiFi→cellular, a brief network drop) performed a fresh
+handshake with a fresh ephemeral key, the buffered ciphertext frames
+from before the drop would be undecryptable under the new key — the
+reconnect-grace buffer would never actually deliver anything. That is
+not what this item intended, and it is not what paseo's own referenced
+behavior does: paseo explicitly treats a duplicate `e2ee_hello` with the
+*same* key as "a harmless retry (peer didn't observe `e2ee_ready` yet)",
+not a rotation.
+
+Clarified: a **transport-level reconnect** (the gRPC stream/connection
+dropped and reopened, no security event) resumes the **same** session
+if the client still holds that session's key material and counter
+state — no new handshake, same key, same in-flight counters, so the
+relay's buffered frames decrypt normally. A **new session** (fresh
+ephemeral keypair, fresh handshake, ADR-0007 (e) as originally written)
+is for an actual rotation: first pairing, explicit re-pair, suspected
+compromise, or the client having lost its session state entirely (e.g.
+process restart with nothing persisted). The daemon-side client
+(`internal/relay/client`) should default to resuming on a transport
+reconnect when it still has valid session state, and only fall back to
+a fresh handshake when it doesn't — this is a client-side policy
+decision, not a relay-side one; the relay's admission/session-id model
+already supports either (a reconnecting device presents the same
+session id to resume).
+
 ### (f) Transport — gRPC for daemon↔relay (carrying forward the roadmap's pre-decision)
 
 **Recommendation: confirm gRPC daemon↔relay as already written in
