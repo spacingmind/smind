@@ -183,8 +183,13 @@ Acceptance Criteria depend on. Implementation may proceed.
       cause so unknown-workspace/wrong-secret/reused-nonce are
       indistinguishable. TLS cert pinning deferred to the transport step,
       per ADR-0011's layering)
-- [ ] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
-- [ ] Relay: reconnect-grace buffer (bounded, per-connection)
+- [x] Relay: dumb-pipe forwarding (daemon ↔ mobile, ciphertext only)
+      (`internal/relay/server/`; bufconn-tested: byte-identical both
+      directions, admission gating on data+control, wrong-workspace and
+      direction violations rejected, never-has-plaintext assertions)
+- [x] Relay: reconnect-grace buffer (bounded per side, default cap 200;
+      in-order flush on reconnect, oldest evicted past cap; per-route
+      queues persist across disconnects)
 - [ ] Relay: multi-device fanout (control + data socket shape per
       ADR-0007 (b))
 - [ ] `smind relay` subcommand (self-hostable, standalone lifecycle)
