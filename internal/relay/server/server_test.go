@@ -241,3 +241,44 @@ func (e *endpoint) expectSeq(t *testing.T, timeout time.Duration, seq uint64) {
 		t.Fatalf("got sequence %d, want %d", f.GetSequence(), seq)
 	}
 }
+
+// TestFrameWrongWorkspaceMidStreamRejected: a stream that registered and
+// is routing fine must still be rejected when a LATER frame claims a
+// different workspace ID — the binding is enforced per frame, not just at
+// registration.
+func TestFrameWrongWorkspaceMidStreamRejected(t *testing.T) {
+	h := newHarness(t, 0)
+	daemon, _ := openPair(t, h)
+
+	bad := daemon.frame(2, []byte("x"))
+	bad.WorkspaceId = "ws-other"
+	daemon.sendFrame(bad)
+	if _, ok := <-daemon.recvCh; ok {
+		t.Fatal("stream should have errored, not delivered a frame")
+	}
+}
+
+// TestControlWrongWorkspaceRejected: OpenControl enforces the same
+// workspace binding — a control frame claiming a workspace other than the
+// connection's admitted one is rejected.
+func TestControlWrongWorkspaceRejected(t *testing.T) {
+	h := newHarness(t, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	adm := h.admit(ctx, testWorkspace, "daemon-key-1")
+	cctx := admittedContext(ctx, adm)
+
+	cs, err := h.client.OpenControl(cctx)
+	if err != nil {
+		t.Fatalf("OpenControl: %v", err)
+	}
+	if err := cs.Send(&relaypb.ControlFrame{
+		WorkspaceId: "ws-other",
+		Body:        &relaypb.ControlFrame_Ping_{Ping: &relaypb.ControlFrame_Ping{Sequence: 1}},
+	}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if _, err := cs.Recv(); status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("Recv err = %v, want PermissionDenied", err)
+	}
+}
