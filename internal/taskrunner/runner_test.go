@@ -736,3 +736,48 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
 		t.Fatalf("got texts %v, want [%q]", texts, "chose:deny")
 	}
 }
+
+// TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv proves
+// runClaudeNative's decider branch wires CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS
+// onto the CLI subprocess (raising the CLI's own auto-deny deadline above
+// smind's 5-minute permission window, see runClaudeNative) and that a value
+// already present in the environment wins -- the deployment-wide escape
+// hatch. Not parallel: it manipulates the process environment via t.Setenv.
+func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		preset  string
+		wantEnv string
+	}{
+		{name: "decider-wired run raises the CLI dialog deadline", preset: "", wantEnv: claudeDialogTimeoutMS},
+		{name: "preset user value wins", preset: "1200000", wantEnv: "1200000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(claudeDialogTimeoutEnv, tc.preset)
+			wm, task := newTestTask(t, "echo-args")
+			r := claudeNativeRunner(t, wm)
+
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, ApprovalPolicyManual, events)
+			}()
+
+			got := drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			if len(got) == 0 || got[len(got)-1].Type != EventTypeDone {
+				t.Fatalf("expected a Done event, got %+v", got)
+			}
+
+			data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "env"))
+			if err != nil {
+				t.Fatalf("read env file: %v", err)
+			}
+			if string(data) != tc.wantEnv {
+				t.Fatalf("CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS = %q, want %q", data, tc.wantEnv)
+			}
+		})
+	}
+}

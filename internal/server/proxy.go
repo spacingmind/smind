@@ -87,8 +87,10 @@ func (p *proxy) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 	p.serve(w, r, providerOpenAI, openaiChatCompletionsURL, p.openaiClient, p.openaiRefresher)
 }
 
-// serve routes r to an account for provider and forwards it to upstreamURL
-// over client, injecting that account's credentials.
+// serve routes r to an account for provider and forwards it over client,
+// injecting that account's credentials. The upstream is
+// providerDefaultURL unless the routed account's api_key credential
+// carries a base_url override (see accounts.ValidateBaseURL).
 //
 // Errors that mean smind itself can't route the request (no accounts, all
 // exhausted, refresh failure) are reported as 503: they're a temporary
@@ -96,7 +98,7 @@ func (p *proxy) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 // upstream provider itself is reported as 502 (bad gateway), the standard
 // distinction between "the proxy has no one to ask" and "the proxy asked and
 // the answer didn't come back".
-func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, upstreamURL string, client *http.Client, refresher accounts.OAuthRefresher) {
+func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, providerDefaultURL string, client *http.Client, refresher accounts.OAuthRefresher) {
 	ctx := r.Context()
 
 	all, err := p.registry.List()
@@ -124,6 +126,11 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, upstream
 	if err != nil {
 		writeProviderError(w, provider, http.StatusServiceUnavailable, fmt.Sprintf("route request: %v", err))
 		return
+	}
+
+	upstreamURL := providerDefaultURL
+	if account.APIKey != nil && account.APIKey.BaseURL != "" {
+		upstreamURL = account.APIKey.BaseURL
 	}
 
 	outReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, r.Body)

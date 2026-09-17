@@ -127,6 +127,8 @@ func handle(msg message, sessionCwd *string) {
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
 		respond(msg.ID, map[string]any{"sessionId": sessionID})
+	case msg.Method == "session/set_config_option":
+		handleSetConfigOption(msg)
 	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
 	case msg.Method == "" && len(msg.ID) > 0:

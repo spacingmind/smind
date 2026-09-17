@@ -9,7 +9,7 @@ Goal: repo lives, binary runs.
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
 - [x] CI: GitHub Actions — go test + bun build + lint
-- [ ] npm reserve `smind` stub
+- [x] npm reserve `smind` stub
 
 Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
 
@@ -42,7 +42,12 @@ Goal: replace Paseo as daily driver.
 - [x] Web UI: preview pane (markdown, svg, sandboxed html alongside the CodeMirror editor) — built in #51, e2e-verified in the crud-ui Playwright pass
 - [x] `smind` CLI: `task new`, `ls`, `attach`, `send`, `logs`, `stop` — run registry + streaming CLI over `internal/wsapi`
 
-Remaining for Phase 2: the dogfood that is the definition of done.
+**Phase 2 complete (2026-09-16).** The dogfood gate was reached: five real
+sessions logged through smind's UI (`docs/plans/completed/smind-dogfood.md`),
+including the closing one that routed a Perplexity Pro subscription through
+smind's own proxy as a provider (via
+[perplexity-proxy-go](https://github.com/spacingmind/perplexity-proxy-go)
+and per-account base_url, #140/#142).
 
 Codex spawning status (2026-09-11): live-verified up to the real turn.
 `codex app-server` v0.149.1 speaks stdio JSON-RPC directly (bare spawn
@@ -70,9 +75,19 @@ specifically because its primary client is a browser (gRPC has no native
 browser support without a grpc-web proxy layer). Not implemented yet;
 noted here so Phase 3 design starts from this rather than re-litigating it.
 
-- [ ] Relay server (Go, dumb pipe), self-hostable as `smind relay`
-- [ ] E2EE handshake: X25519 + ChaCha20-Poly1305, QR pairing
-- [ ] Reconnect grace, correct key rotation
+- [x] Relay server (Go, dumb pipe), self-hostable as `smind relay`
+      (gRPC wire contract + admission auth per ADR-0011 + forwarding with
+      bounded reconnect buffer + multi-device fanout; TLS cert + workspace
+      enrollment CLI; daemon-side client with fingerprint pinning and
+      session-resume semantics — see `docs/plans/active/relay-e2ee-mobile.md`)
+- [x] E2EE handshake: X25519 + ChaCha20-Poly1305, QR pairing
+      (daemon↔mobile ends incl. URL-fragment QR offer with relay
+      fingerprint pin; verified end-to-end through a real in-process TLS
+      relay in the integration tests)
+- [x] Reconnect grace, correct key rotation (bounded 200-frame buffer,
+      in-order flush, oldest-evicted past cap; transport reconnect
+      resumes the same session so buffered frames decrypt — ADR-0007 (e)
+      amendment — while rotation starts a fresh session)
 - [ ] Mobile app (Expo + @expo/ui): pairing + workspace/task list, realtime
       agent timeline + follow-up, push notifications, mobile permission approval
 - [ ] Deploy relay at `relay.spacingmind.sh` (Cloudflare TLS)

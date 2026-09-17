@@ -3,6 +3,13 @@ import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type K
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
@@ -23,8 +30,13 @@ const APPROVAL_POLICY_HELP =
 // the original dense sizing at `md:` and above -- see
 // COMPACT_TOUCH_BUTTON_CLASS's doc comment for why this is plain
 // responsive Tailwind rather than a threaded `isMobile` prop.
-const SELECT_CLASS =
-  "h-11 shrink-0 rounded-md border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:h-7 md:px-1.5 md:text-xs";
+//
+// Only the sizing lives here now. Everything these selects used to
+// hand-roll to *approximate* a shadcn trigger (border, background, focus
+// ring, disabled dimming) comes from SelectTrigger itself, and cn()'s
+// tailwind-merge drops the conflicting halves of its defaults (h-8,
+// px-2.5, text-base/md:text-sm) in favour of these.
+const SELECT_TRIGGER_CLASS = "h-11 shrink-0 px-2 text-sm md:h-7 md:px-1.5 md:text-xs";
 
 const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
 
@@ -254,39 +266,59 @@ export function Composer({
           <label htmlFor={providerFieldId} className="text-xs text-foreground-muted">
             Provider
           </label>
-          <select
-            id={providerFieldId}
+          {/*
+           * shadcn/Radix rather than a native <select>: the closed state
+           * was already styled to match, but the *open* list was OS chrome
+           * -- square, light-mode-only, ignoring bg-popover/text-popover-
+           * foreground like every other menu in the app. The visible
+           * <label htmlFor> still works because SelectTrigger takes a real
+           * `id` and renders a real button (Item 10's "not unlabelled
+           * native selects" holds either way).
+           */}
+          <Select
             value={provider}
-            onChange={(e) => setProvider(e.target.value as Provider)}
+            onValueChange={(value) => setProvider(value as Provider)}
             disabled={inactive}
-            className={SELECT_CLASS}
           >
-            {providers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label ?? p.id}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger id={providerFieldId} className={SELECT_TRIGGER_CLASS}>
+              <SelectValue placeholder="Select provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label ?? p.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="flex items-center gap-1.5">
           <label htmlFor={policyFieldId} className="text-xs text-foreground-muted">
             Approval policy
           </label>
-          <select
-            id={policyFieldId}
-            title={APPROVAL_POLICY_HELP}
+          <Select
             value={approvalPolicy}
-            onChange={(e) => setApprovalPolicy(e.target.value as ApprovalPolicy)}
+            onValueChange={(value) => setApprovalPolicy(value as ApprovalPolicy)}
             disabled={inactive}
-            className={SELECT_CLASS}
           >
-            {APPROVAL_POLICIES.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.label}
-              </option>
-            ))}
-          </select>
+            {/* The help text stays a plain `title` -- a hover tooltip on the
+                trigger, exactly where it was on the native select. */}
+            <SelectTrigger
+              id={policyFieldId}
+              title={APPROVAL_POLICY_HELP}
+              className={SELECT_TRIGGER_CLASS}
+            >
+              <SelectValue placeholder="Select policy" />
+            </SelectTrigger>
+            <SelectContent>
+              {APPROVAL_POLICIES.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         <div className="ml-auto flex items-center gap-2">
@@ -294,7 +326,7 @@ export function Composer({
           {running && (
             <Button
               type="button"
-              variant="outline"
+              variant="execute"
               size="sm"
               className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
               disabled={stopping}
@@ -306,6 +338,7 @@ export function Composer({
           )}
           <Button
             type="submit"
+            variant={running ? "default" : "execute"}
             size="sm"
             className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
             disabled={inactive || !draft.value.trim()}

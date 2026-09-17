@@ -2557,3 +2557,23 @@ it was confirmed:
 Go packages unchanged) and `task lint` green. `task build` also
 succeeded end to end (`internal/server/dist/.gitkeep` restored
 afterward, per this file's own recurring-step note).
+
+
+---
+
+## Closure (2026-09-16)
+
+All 21 items shipped. Final phase-2-closing evidence:
+
+- **Dogfood through the real chain**: a Perplexity Pro subscription is now
+  a working provider end-to-end — `smind /v1/messages` (auth + routing +
+  per-account base_url, #140/#142) → `pplx serve` (perplexity-proxy-go,
+  Anthropic-compatible) → Perplexity. Verified live: "what is 2+2" through
+  smind returned "4".
+- Two gated wire changes landed through their ADRs (0008 structured run
+  events, 0009 lifecycle topics); remaining intentionally-unbuilt variants
+  (question-form/plan-review wire producers, accounts v2 wire, quota data
+  source) are recorded above as scoped-out, not outstanding work.
+- Test suites: Go packages + 664 web tests green; `task build` verified.
+
+This plan is complete; moved to docs/plans/completed/.

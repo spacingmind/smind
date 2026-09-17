@@ -164,3 +164,126 @@ fanout?) và cơ chế key rotation thật sự; (2) chốt xem có kế thừa 
 refs/paseo (đặc biệt là cấu trúc control-socket + data-socket, và cách daemon
 giữ keypair bền) hay tự thiết kế lại cho gRPC; (3) quyết định rõ ràng
 ChaCha20-Poly1305 vs XSalsa20-Poly1305 và lý do khác với Paseo.
+
+---
+
+## 6. Cập nhật 2026-09-17 — research qua `pplx` (Perplexity Pro), dogfood qua smind
+
+Từ audit ở trên (2026-09-11), **ADR-0007** đã chốt kiến trúc relay (blind
+forwarder, X25519 + ChaCha20-Poly1305 counter-nonce 12-byte, QR pairing qua
+URL-fragment offer, bounded store-and-forward buffer — tiền lệ paseo 200
+frame/side). Phần "reconnect grace + key rotation" từng là "the one open
+question" giờ có dữ kiện cụ thể từ 3 câu hỏi research bên ngoài, chạy qua
+`pplx ask -m best` (Perplexity Pro, dogfood qua smind task runner):
+
+**Durable Objects vs self-hosted Go relay**: DO chỉ thắng khi có rất nhiều
+kết nối gần-như-idle (nhờ WebSocket Hibernation billing 20:1); với một
+region/daemon↔relay đơn lẻ như ADR-0007 mô tả, Go tự host rẻ hơn bằng tiền
+mặt VÀ đơn giản hơn về cold-start (DO Hibernation xoá state trong RAM, buộc
+buffer phải sống trong DO SQLite storage để đúng — Go giữ buffer RAM, không
+cold-start, đổi lại phải tự lo persist qua crash/deploy). Xác nhận lựa chọn
+"Go, self-hostable" của ADR-0007 là đúng hướng, không cần Cloudflare.
+
+**Push notifications**: nên dùng kiểu "wake-up-only" như Signal/Delta Chat
+(ping rỗng/token đã mã hoá, không nội dung/kích thước/sender) thay vì
+encrypted-content-push kiểu Session — khớp triết lý "dumb pipe" của relay.
+Chấp nhận rò rỉ: push provider (FCM/APNs) biết device token + thời điểm.
+Web Push/VAPID không thay thế được FCM/APNs cho mobile timely delivery.
+
+**X25519 + ChaCha20-Poly1305 rekey/nonce**: quyết định (e) "session mới =
+key mới, không rekey khi đang sống" của ADR-0007 an toàn với 4 điều kiện:
+(1) reconnect luôn tạo ephemeral handshake mới, không bao giờ resume counter
+dưới key cũ; (2) counter theo hướng (d) phải monotonic và persist-hoặc-bỏ —
+mất state thì bỏ key, không đoán; (3) nhãn hướng (c2s/s2c) phải bind vào KDF
+key riêng; (4) soft limit về số message/key thấp hơn nhiều 2^64 (WireGuard
+dùng ngưỡng 2^60 message HOẶC 120s — smind sẽ chạm mốc thời gian trước).
+
+Findings đầy đủ (3 query, kèm URL nguồn): xem lịch sử dogfood run
+`f157f84c04d59b16faa75718a15906d4` hoặc bản lưu cục bộ lúc chạy tại
+`/tmp/relay-research/findings.md` (không nằm trong repo).
+
+**Phát hiện phụ, về chính smind (không phải relay)**: `task send --approval-policy
+auto-safe` không cover việc gọi một binary ngoài (như `pplx`) hay các lệnh
+đọc đơn giản như `ls`/`mkdir` — safeCommandPrefixes chỉ allowlist
+gofmt/go vet/go test/task test|lint|build/git add|commit
+(`internal/taskrunner/policy.go`). Một dogfood run headless (không ai theo
+dõi permission card) sẽ bị timeout-deny sau 5 phút cho mỗi lệnh ngoài
+allowlist rồi tự thử lại — có thể tốn rất nhiều thời gian chờ nếu không có
+người chủ động trả lời qua `run.respondPermission`. Không phải bug (đúng
+thiết kế an toàn), nhưng là giới hạn thật của "dogfood tự động hoá task
+research" cần biết trước khi giao việc tương tự cho agent không giám sát.
+
+---
+
+## 7. Cập nhật 2026-09-17 (tiếp) — 3 câu hỏi còn lại: pairing, fanout, auth daemon↔relay
+
+Đào tiếp 3 gap "chỉ-ý-tưởng" còn lại trong mục 5 (QR pairing cơ chế, relay state
+model multi-device/overflow, auth daemon↔relay tách biệt E2EE) bằng 3 query
+`pplx ask -m best` còn lại (6/6 quota tuần đã dùng hết cho research relay).
+
+**QR pairing — cơ chế cụ thể (Signal/WhatsApp/Session đều cùng một khuôn
+mẫu):** QR chỉ chứa một **ephemeral public key + rendezvous id** (không bao
+giờ chứa long-term secret); thiết bị đã tin cậy scan QR rồi mã hoá bundle
+(identity key, credential, linking token) bằng khoá ephemeral đó trước khi
+gửi qua relay — relay chỉ thấy ciphertext + UUID phiên, không bao giờ thấy
+private key hay nội dung giải mã. Signal dùng đúng kỹ thuật ADR-0007 đã chọn:
+key nằm trong **URL fragment** (`#...`) vì fragment không bao giờ được gửi
+lên server theo RFC 3986 §3.5 — server chỉ thấy `https://.../` trần, không
+thấy phần sau `#`. WhatsApp thay vào đó dùng payload opaque (không phải URL)
+nên không cần kỹ thuật fragment. Rủi ro còn lại không giải quyết được bằng
+crypto: **QR-substitution** (kẻ tấn công tráo QR hiển thị) và **screenshot/
+chia sẻ màn hình** — hai lớp phòng thủ bổ sung là (a) hết hạn QR rất nhanh
+(20-60s, theo WhatsApp) và (b) hiện device-fingerprint/safety-number để
+người dùng verify thủ công sau khi pair.
+
+**Relay state model — multi-device fanout + overflow:** kết luận đồng nhất
+qua cả Signal, Matrix, Session: **mỗi device một queue riêng, không gộp theo
+user** — vì relay không giải mã được nên không thể demux theo user sau khi
+mã hoá; sender phải mã hoá riêng cho từng device (client-side fanout).
+Ack/delivery là **at-least-once ở tầng transport dựa trên message-id opaque**
+(không phải nội dung) — "delivered"/"read" receipt là dữ liệu E2EE riêng gửi
+ngược lại, relay chỉ biết "ciphertext X đã được 1 device ack", không biết
+user có đọc hay chưa. Ordering dựa vào **id/timestamp đơn điệu do relay gán**
+(nằm ngoài phần mã hoá) để client tự sort khi merge sau reconnect — khớp
+đúng ADR-0007 (đếm hướng qua counter, không suy luận thứ tự từ nội dung).
+Overflow: mọi hệ thống tham chiếu đều **drop-oldest trong buffer bounded**
+(Signal ~30-46 ngày TTL, Matrix theo config retention) rồi bắt client
+**force full resync** khi phát hiện gap — không hệ thống nào cố "vá" gap
+bằng cách relay tự suy luận lại. Đây xác nhận chính xác lựa chọn "bounded
+buffer, drop-oldest" của ADR-0007 (tiền lệ paseo 200 frame/side) là đúng
+kiểu thiết kế chuẩn ngành, không phải giản lược tạm.
+
+**Auth daemon↔relay (tách biệt khỏi E2EE handshake daemon↔mobile):**
+khuyến nghị rõ ràng — **KHÔNG dùng thành công E2EE handshake làm bằng chứng
+daemon được phép nói chuyện với relay**; đây phải là 2 state machine độc
+lập. Thiết kế đề xuất, phù hợp nhất cho 1 Go binary self-host, không cần CA
+ngoài:
+- **TLS transport**: relay tự ký cert, daemon **pin fingerprint lúc pairing**
+  (không cần CA ngoài, giống cách chisel pin server key fingerprint).
+- **Admission theo workspace**: mỗi workspace có secret ngẫu nhiên
+  256-bit, relay chỉ lưu **hash** của secret (không lưu plaintext); daemon
+  xác thực qua **challenge-response HMAC** (nonce + transcript), không gửi
+  lại token trần mỗi lần — chống replay.
+- **Nâng cấp tuỳ chọn**: daemon tạo cặp khoá Ed25519, đăng ký public key khi
+  pairing; sau đó ký transcript thay vì gửi lại secret — bearer token chỉ
+  còn dùng để bootstrap/re-pair, không dùng cho mọi kết nối thường.
+- **So sánh 3 lựa chọn**: bearer token (đơn giản nhất, đủ dùng nếu có
+  challenge-response + hash-at-rest + TLS pinning), mTLS pinned tại pairing
+  (định danh thiết bị mạnh hơn, không cần CA ngoài — vẫn khả thi bằng
+  `crypto/tls`+`crypto/x509` chuẩn của Go), macaroons/biscuits (chỉ đáng
+  dùng nếu cần delegation/scope/expiry thật — thừa cho 1 relay tự host đơn
+  giản, relay đã là authority duy nhất).
+- **Tiền lệ công cụ tương tự**: Tailscale DERP (relay mù nhưng vẫn verify
+  client thuộc domain định danh), ntfy (bearer token per-identity + ACL,
+  revoke/expire được), rathole (shared token per-service), chisel (auth
+  file + server-fingerprint pin) — tất cả đều tách rõ "ai được nói chuyện
+  với relay" khỏi "nội dung được mã hoá ra sao".
+
+**Kết luận cho ADR-0007 / plan tiếp theo**: cả 3 mảng "chỉ-ý-tưởng" còn lại
+trong mục 5 giờ có thiết kế cụ thể, khớp hướng đã chọn (blind forwarder,
+bounded buffer, per-direction counter). Việc còn thiếu trước khi code: viết
+rõ **admission handshake** (workspace secret + HMAC challenge-response +
+cert pinning) thành một phần của ADR-0007 hoặc một ADR con riêng, vì đây là
+quyết định kiến trúc (auth layer tách biệt E2EE) chưa được ghi ở đâu trước
+đó.
+

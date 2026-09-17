@@ -248,6 +248,14 @@ type run struct {
 	prompt    string
 	startedAt time.Time
 
+	// runner is the Runner Start drove (will drive) this run with,
+	// captured so ListConfigOptions/SetConfigOption can reach the run's
+	// ACP session state after Start returns. Immutable after Start; nil
+	// on a rehydrated run (nothing drove it in this process), which the
+	// config-option methods treat as no session info rather than
+	// dereferencing.
+	runner *taskrunner.Runner
+
 	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
 	// and immutable thereafter -- see runPermissionDecider.Decide, the only
 	// reader.
@@ -353,6 +361,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		taskID:             taskID,
 		provider:           provider,
 		prompt:             prompt,
+		runner:             runner,
 		approvalPolicy:     approvalPolicy,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -510,7 +519,22 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 		return optionID, nil
 
 	case <-ctx.Done():
+		// The provider's own per-request ctx was cancelled out from under
+		// us -- for claude-native, this is the real `claude` CLI
+		// subprocess's own internal auto-deny fallback firing (see
+		// PermissionResolvedByProviderCancellation and
+		// docs/plans/active/claude-native-permission-cancellation.md), well
+		// before either a human or smind's own timeout got a chance to
+		// resolve it. No option was actually chosen -- there may not even
+		// be a relevant one to synthesize -- so this only records *that*
+		// it was cancelled, distinguishably from the other three
+		// resolution reasons.
 		d.abandon(requestID)
+		d.reg.record(d.r, taskrunner.Event{
+			Type:                 taskrunner.EventTypePermissionResolved,
+			PermissionRequestID:  requestID,
+			PermissionResolution: taskrunner.PermissionResolvedByProviderCancellation,
+		})
 		return "", ctx.Err()
 
 	case <-d.r.ctx.Done():

@@ -14,9 +14,24 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/*
+       * `[&>div]:block!` is load-bearing, not cosmetic. Radix's Viewport
+       * always wraps its children in a div it styles inline with
+       * `{ minWidth: "100%", display: "table" }` -- and a table box is
+       * shrink-to-*fit*: it grows to its widest content instead of taking
+       * the viewport's width. Anything inside relying on `truncate` (the
+       * sidebar's task/branch labels, the folder picker's entry names)
+       * therefore never gets a width to clip against; the row grows, the
+       * viewport overflows horizontally, and the label renders as a
+       * fragment rather than an ellipsis. Only an `!important` rule can
+       * beat Radix's inline style, and `block` restores the normal
+       * fill-the-parent width (the inline `min-width: 100%` is then a
+       * no-op, so scrolling behaviour is unchanged for content that is
+       * genuinely wider, e.g. a <pre>).
+       */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1"
+        className="size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 [&>div]:block!"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

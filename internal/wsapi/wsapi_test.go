@@ -340,6 +340,61 @@ func TestServer_AccountAddListRoundTrip(t *testing.T) {
 	}
 }
 
+func TestServer_AccountAddWithBaseURL(t *testing.T) {
+	t.Parallel()
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	wm := workspace.New(s)
+	registry := accounts.New(s)
+	srv := newTestWSServerWithAccounts(t, wm, registry, nil, s, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "account.add", map[string]any{
+		"provider": "anthropic", "label": "local",
+		"credential": "sk-ant-test", "baseUrl": "http://127.0.0.1:8080",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.add error = %v", resp.Error.Message)
+	}
+	var created accountResult
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("decode account.add result: %v", err)
+	}
+	stored, err := registry.Get(created.ID)
+	if err != nil {
+		t.Fatalf("registry.Get() error = %v", err)
+	}
+	if stored.APIKey == nil || stored.APIKey.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("stored APIKey = %+v, want base_url http://127.0.0.1:8080", stored.APIKey)
+	}
+}
+
+func TestServer_AccountAddRejectsInvalidBaseURL(t *testing.T) {
+	t.Parallel()
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	wm := workspace.New(s)
+	registry := accounts.New(s)
+	srv := newTestWSServerWithAccounts(t, wm, registry, nil, s, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "account.add", map[string]any{
+		"provider": "anthropic", "label": "local",
+		"credential": "sk-ant-test", "baseUrl": "http://example.com",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatalf("account.add with non-loopback http base_url succeeded, want error")
+	}
+}
+
 func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)

@@ -37,7 +37,7 @@ describe("optionVariant / recommendedOptionId", () => {
       { id: "c", label: "Allow always", kind: "allow_always" },
     ];
     expect(recommendedOptionId(options)).toBe("b");
-    expect(optionVariant("allow_once", true)).toBe("default");
+    expect(optionVariant("allow_once", true)).toBe("approval");
     expect(optionVariant("allow_always", false)).toBe("outline");
   });
 });
@@ -52,6 +52,23 @@ describe("PermissionCard: options variant", () => {
     expect(allow).toHaveAttribute("data-option-kind", "allow_once");
     expect(deny).toHaveAttribute("data-option-kind", "reject_once");
     expect(allow.className).not.toBe(deny.className);
+  });
+
+  // visual-identity-console Item 7: the recommended-allow option adopts
+  // the "approval" variant (Item 4) instead of the generic "default".
+  it("the recommended allow option renders with the approval variant", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Allow" })).toHaveAttribute("data-variant", "approval");
+  });
+
+  // visual-identity-console Item 7: the card itself is the "floating"
+  // elevation tier (§13) -- surface-1 background plus shadow-lg -- not an
+  // ad hoc shadow/border of its own.
+  it("the outer card carries the floating elevation recipe", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const outer = screen.getByTestId("permission-card");
+    expect(outer.className).toContain("bg-surface-1");
+    expect(outer.className).toContain("shadow-lg");
   });
 
   // Item 21: touch targets need a stated minimum below the compact

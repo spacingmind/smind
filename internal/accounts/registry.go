@@ -33,7 +33,17 @@ func New(s *store.Store) *Registry {
 
 // AddAPIKey creates a new api_key account.
 func (r *Registry) AddAPIKey(provider, label, key string) (store.Account, error) {
-	data, err := json.Marshal(APIKeyCredential{Key: key})
+	return r.AddAPIKeyWithBaseURL(provider, label, key, "")
+}
+
+// AddAPIKeyWithBaseURL creates a new api_key account whose credential
+// carries an upstream base_url override ("" = provider default). The URL
+// is validated by ValidateBaseURL (https anywhere, http loopback only).
+func (r *Registry) AddAPIKeyWithBaseURL(provider, label, key, baseURL string) (store.Account, error) {
+	if err := ValidateBaseURL(baseURL); err != nil {
+		return store.Account{}, err
+	}
+	data, err := json.Marshal(APIKeyCredential{Key: key, BaseURL: baseURL})
 	if err != nil {
 		return store.Account{}, fmt.Errorf("marshal api key credential: %w", err)
 	}

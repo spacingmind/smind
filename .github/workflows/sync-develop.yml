@@ -1,0 +1,72 @@
+# Keeps `develop` from drifting behind `master` after a release lands.
+#
+# release-please's version-bump + CHANGELOG.md commit only ever lands on
+# `master` (master's ruleset requires linear history via rebase-merge
+# only, so it can't receive a real merge commit). The `develop -> master`
+# release promotion is therefore done by making master's tree match
+# develop's exactly (see CONTRIBUTING.md) -- which silently discards that
+# release commit's content on the *next* promotion if `develop` never
+# absorbed it first. This already happened for real (v0.6.0 -> v0.7.0:
+# PR #135 clobbered the release metadata PR #135 itself hadn't seen,
+# release-please then proposed re-releasing everything in PR #136, fixed
+# by PR #137). This workflow removes the manual "remember to sync
+# develop back after every release" step that caused it.
+#
+# Runs on every push to `master`. If `develop` already contains that
+# commit there's nothing to do. Otherwise it opens a real merge (not
+# squash/rebase -- develop's ruleset allows a real "merge", and a true
+# merge commit is what keeps this workflow's own ancestor check correct
+# next time) of `master` into `develop` as a PR. Auto-merge isn't enabled
+# repo-wide, so the PR still needs a human click once CI passes -- a
+# small, always-clean, hard-to-get-wrong action, instead of the previous
+# fully-manual, error-prone one.
+name: sync-develop
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Check whether develop already has master's latest commit
+        id: check
+        run: |
+          set -euo pipefail
+          git fetch origin develop master
+          if git merge-base --is-ancestor origin/master origin/develop; then
+            echo "up_to_date=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "up_to_date=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge master into develop and open a PR
+        if: steps.check.outputs.up_to_date == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          version="$(jq -r '.["."]' .release-please-manifest.json)"
+          branch="sync/master-into-develop-${{ github.sha }}"
+
+          git checkout -b "$branch" origin/develop
+          git merge origin/master --no-edit -m "chore: sync develop with master after v${version} release"
+          git push origin "$branch"
+
+          gh pr create \
+            --base develop \
+            --head "$branch" \
+            --title "chore: sync develop with master after v${version} release" \
+            --body "Automated (\`.github/workflows/sync-develop.yml\`): brings master's v${version} release-please commit (version bump + CHANGELOG.md) into develop so the next develop -> master promotion doesn't overwrite it. Should be a clean merge with no conflicts -- if it isn't, that's worth investigating by hand rather than force-resolving."

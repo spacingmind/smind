@@ -166,7 +166,7 @@ export function CommandPalette() {
                 <div key={row.command.key}>
                   {row.groupStart !== null && (
                     <div
-                      className="px-3 pt-3 pb-1 text-xs font-medium tracking-wide text-foreground-muted uppercase"
+                      className="px-3 pt-3 pb-1 text-metadata-label tracking-wide text-foreground-muted uppercase"
                       data-testid="command-palette-group"
                     >
                       {row.groupStart}
