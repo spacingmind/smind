@@ -253,3 +253,18 @@ Acceptance Criteria depend on. Implementation may proceed.
   in-process TLS relay. server.Config gained an optional pre-bound
   Listener for race-free ephemeral-port tests. Full suite green
   (client tests x2 runs).
+- 2026-09-17 — live smoke test, closing the "no independent process"
+  gap this section previously flagged: built the real `smind` binary,
+  ran `smind relay workspace new` then `smind relay --listen
+  127.0.0.1:PORT` as a genuinely separate OS process (not a test
+  harness/bufconn), then a standalone client program dialed it over a
+  real TCP socket, pinned the fingerprint printed at startup, completed
+  Admit, ran the daemon/mobile handshake, and exchanged messages both
+  directions — all through the real gRPC server binary. Confirms the
+  subcommand, TLS cert generation/persistence, workspace enrollment, and
+  the full client flow work outside any test process, not just inside
+  `go test`. No Cloudflare Tunnel / public-internet test done (would
+  need a real Cloudflare account for a TCP-preserving tunnel — a quick
+  `--url` tunnel terminates TLS at Cloudflare's edge and would defeat
+  ADR-0011's fingerprint pinning, so it wasn't attempted); user decided
+  this is out of scope for now, localhost-as-separate-process is enough.
