@@ -74,6 +74,21 @@ function clickTaskRow(task: Task): void {
 }
 
 /**
+ * Opens Diff's tab via the pane's "+" menu -- only Chat is seeded on first
+ * visit now (dogfood default-tabs fix), same helper App.test.tsx defines.
+ * Enter, not pointerdown -- see that file's comment on why pointerdown
+ * never flips the trigger's data-state under this file's fake timers too.
+ */
+async function openDiffTab(): Promise<void> {
+  const trigger = screen.getByTestId("tabs-new-tab");
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Open Diff" }));
+  await flush();
+}
+
+/**
  * A controllable `window.innerWidth` + `matchMedia` stub so a test can
  * simulate crossing `hooks/use-mobile.ts`'s 768px breakpoint after mount
  * -- the same "stub matchMedia, then fire its change listener" shape
@@ -182,7 +197,9 @@ describe("App compact layout (Item 21)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // Move the Diff tab (a movable kind) to the side pane, at desktop width.
+    // Diff isn't seeded any more (dogfood default-tabs fix) -- open it,
+    // then move it (a movable kind) to the side pane, at desktop width.
+    await openDiffTab();
     const moveButton = screen.getByLabelText("Open Diff to the side");
     fireEvent.click(moveButton);
     await flush();
