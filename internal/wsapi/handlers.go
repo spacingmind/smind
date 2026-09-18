@@ -38,6 +38,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.list":             handleTaskList(wm),
 		"task.get":              handleTaskGet(wm),
 		"task.archive":          handleTaskArchive(wm),
+		"task.move":             handleTaskMove(wm),
 		"task.diff":             handleTaskDiff(wm),
 		"task.files":            handleTaskFiles(wm),
 		"task.fileDiff":         handleTaskFileDiff(wm),
@@ -338,6 +339,23 @@ func handleTaskGet(wm *workspace.Manager) handlerFunc {
 			return nil, fmt.Errorf("task.get: invalid params: %w", err)
 		}
 		return wm.GetTask(p.ID)
+	}
+}
+
+// handleTaskMove reassigns a task to a different space within the same
+// workspace, or ungroups it (spaceId omitted/null) -- the sidebar's "Move
+// to space" action. spaceId belonging to a different workspace than the
+// task's own is rejected by workspace.Manager.MoveTask, not here.
+func handleTaskMove(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID      int64  `json:"id"`
+			SpaceID *int64 `json:"spaceId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.move: invalid params: %w", err)
+		}
+		return wm.MoveTask(p.ID, p.SpaceID)
 	}
 }
 

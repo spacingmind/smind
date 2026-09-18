@@ -98,6 +98,38 @@ func (m *Manager) RunTask(id int64) (store.Task, error) {
 	return t, nil
 }
 
+// MoveTask reassigns task id to spaceID (nil ungroups it back to the
+// workspace's own ungrouped list). spaceID, when non-nil, must belong to
+// the same workspace as the task -- a task's workspace is fixed by its
+// worktree, so moving it across workspaces isn't a thing this reassigns;
+// only which space *within* that workspace groups it can change.
+func (m *Manager) MoveTask(id int64, spaceID *int64) (store.Task, error) {
+	t, err := m.store.GetTask(id)
+	if err != nil {
+		return store.Task{}, fmt.Errorf("move task: %w", err)
+	}
+
+	if spaceID != nil {
+		sp, err := m.store.GetSpace(*spaceID)
+		if err != nil {
+			return store.Task{}, fmt.Errorf("move task %d: %w", id, err)
+		}
+		if sp.WorkspaceID != t.WorkspaceID {
+			return store.Task{}, fmt.Errorf("move task %d: space %d belongs to a different workspace", id, *spaceID)
+		}
+	}
+
+	t, err = m.store.UpdateTaskSpace(id, spaceID)
+	if err != nil {
+		return store.Task{}, fmt.Errorf("move task %d: %w", id, err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyTaskUpdated(t)
+	}
+	m.notifyTask(t)
+	return t, nil
+}
+
 // ArchiveTask checkpoints the task's git worktree (if any) onto its branch,
 // removes the worktree, and marks the task archived.
 //

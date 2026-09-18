@@ -125,6 +125,22 @@ func (s *Store) UpdateTaskStatus(id int64, status string) (Task, error) {
 	return s.GetTask(id)
 }
 
+// UpdateTaskSpace moves a task to spaceID (nil ungroups it back to the
+// workspace's own ungrouped list) and returns the updated task. Callers are
+// responsible for checking spaceID belongs to the same workspace as the
+// task before calling -- this is a plain column write, not a validated move.
+func (s *Store) UpdateTaskSpace(id int64, spaceID *int64) (Task, error) {
+	now := time.Now().UTC()
+	_, err := s.db.Exec(
+		`UPDATE tasks SET space_id = ?, updated_at = ? WHERE id = ?`,
+		int64PtrToNull(spaceID), now, id,
+	)
+	if err != nil {
+		return Task{}, fmt.Errorf("update task %d space: %w", id, err)
+	}
+	return s.GetTask(id)
+}
+
 // ArchiveTask sets a task's status to "archived" and stamps archived_at, then
 // returns the updated task. Calling it again on an already-archived task is a
 // no-op: the WHERE clause matches no rows, so archived_at is left as the

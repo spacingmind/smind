@@ -507,6 +507,19 @@ func TestServer_WorkspaceSpaceTaskCRUDRoundTrip(t *testing.T) {
 		t.Fatalf("task.get error = %v", resp.Error.Message)
 	}
 
+	sendRequest(t, ws, "9b", "task.move", map[string]any{"id": createdTask.ID, "spaceId": createdSpace.ID})
+	resp = readEnvelopeFor(t, ws, "9b", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("task.move error = %v", resp.Error.Message)
+	}
+	var movedTask store.Task
+	if err := json.Unmarshal(resp.Result, &movedTask); err != nil {
+		t.Fatalf("decode task.move result: %v", err)
+	}
+	if movedTask.SpaceID == nil || *movedTask.SpaceID != createdSpace.ID {
+		t.Fatalf("task.move: SpaceID = %v, want %d", movedTask.SpaceID, createdSpace.ID)
+	}
+
 	sendRequest(t, ws, "10", "task.archive", map[string]any{"id": createdTask.ID})
 	resp = readEnvelopeFor(t, ws, "10", 5*time.Second)
 	if resp.Error != nil {
