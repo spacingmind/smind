@@ -1,30 +1,34 @@
 import { useEffect, useState } from "react";
+import { ArrowLeft } from "lucide-react";
 
 import "@/components/settings/appearance-section";
 import "@/components/settings/general-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { PaneHeader } from "@/components/ui/pane-header";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 
 /**
- * The settings shell (ui-redesign-parity plan, Item 13): a section list
- * down the left, the active section's content on the right
+ * The settings screen (ui-redesign-parity Item 13, reshaped from a Dialog
+ * to a full-pane view by web-ui-dogfood-polish Item 4): a section nav
+ * rail on the left, the active section's content on the right
  * (audit-paseo.md §4's list+detail shape). The section list itself comes
- * entirely from `settings-registry.ts` -- this component has no
- * knowledge of Appearance/General/Accounts/Quota beyond importing the two
- * built-in section files for their registration side effect, so Items
- * 14/15 add themselves the same way without editing this file.
+ * entirely from `settings-registry.ts` -- this component has no knowledge
+ * of Appearance/General/Accounts/Quota beyond importing the two built-in
+ * section files for their registration side effect, so later sections add
+ * themselves the same way without editing this file.
  *
- * Rendered from a dialog for now (Item 13's own entry point, from
- * app-sidebar.tsx's settings button) rather than a route: this track owns
- * app-sidebar.tsx and components/settings/*, not App.tsx's routing, so
- * wiring a `/settings` URL and a keyboard shortcut to the same
- * `useSettingsOpen` state this dialog already takes is left to Track A
- * (see the plan's Item 13 note and its Tracks section on `App.tsx`
- * coordination).
+ * Rendered by the shell (App.tsx) as a sibling of the task pane, not by
+ * the sidebar: the sidebar's settings button just flips the shell's view
+ * state. `onNavigateBack` returns to the previous view (back button, or
+ * Escape, which is wired here rather than via a keyboard-registry action
+ * because it must not fire while a dialog sits on top of the screen).
+ * Paseo's pattern is an expo-router push of `[section].tsx`; here the
+ * same root -> section drill-down is one screen with internal state --
+ * the plan's "no router library introduction" decision.
  *
  * "Preferences persist client-side (localStorage) unless and until a
  * daemon-side settings API exists" (Item 13's Decisions) is said here,
@@ -33,65 +37,88 @@ import type { WsClient } from "@/lib/ws-client";
  */
 export function SettingsScreen({
   client,
-  open,
-  onOpenChange,
+  onNavigateBack,
 }: {
   client: WsClient | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  /** Returns to the view the settings screen was opened from (back button / Escape). */
+  onNavigateBack: () => void;
 }) {
   const sections = listSettingsSections();
   const [activeId, setActiveId] = useState<string | null>(sections[0]?.id ?? null);
 
-  // Re-derive the active section whenever the dialog opens (a section
-  // could have been registered/unregistered while it was closed) or the
-  // registry itself changes shape, but only snap to the first section
-  // when the current selection no longer exists -- so re-opening on the
-  // same section you left doesn't reset your place.
+  // Re-derive the active section whenever the registry changes shape, but
+  // only snap to the first section when the current selection no longer
+  // exists -- so re-opening on the same section you left doesn't reset
+  // your place. (Unlike the Dialog this used to be, there is no
+  // `open` prop: the screen only mounts while it is the active view.)
   useEffect(() => {
-    if (!open) return;
     setActiveId((current) => (current && sections.some((s) => s.id === current) ? current : (sections[0]?.id ?? null)));
     // sections is a fresh array every render (listSettingsSections()), so
     // the dependency below is the ids joined into a string, not the array
     // reference -- otherwise this effect would re-run (and could reset
     // activeId) on every render regardless of whether anything changed.
-  }, [open, sections.map((s) => s.id).join(",")]);
+  }, [sections.map((s) => s.id).join(",")]);
+
+  // Escape closes the whole screen (not just deselects a section) --
+  // matching the Dialog Radix used to give this surface for free. Stops
+  // propagation so it can't also reach a dialog that happens to be open
+  // on top (e.g. a section's own popover).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onNavigateBack();
+    }
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [onNavigateBack]);
 
   const active = sections.find((s) => s.id === activeId) ?? null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[32rem] max-w-3xl flex-col gap-0 p-0 sm:max-w-3xl" data-testid="settings-screen">
-        <DialogHeader className="border-b px-6 py-4">
-          <DialogTitle>Settings</DialogTitle>
-        </DialogHeader>
-        <div className="flex min-h-0 flex-1">
-          <nav aria-label="Settings sections" className="w-44 shrink-0 overflow-y-auto border-r p-2">
-            <ul className="flex flex-col gap-0.5">
-              {sections.map((section) => (
-                <li key={section.id}>
-                  <button
-                    type="button"
-                    aria-current={section.id === activeId}
-                    data-testid={`settings-nav-${section.id}`}
-                    onClick={() => setActiveId(section.id)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent",
-                      section.id === activeId && "bg-accent font-medium",
-                    )}
-                  >
-                    {section.icon}
-                    {section.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </nav>
-          <div className="min-h-0 flex-1 overflow-y-auto p-6">
-            {active ? active.render({ client }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
-          </div>
+    <div className="flex h-full min-h-0 flex-col" data-testid="settings-screen">
+      <PaneHeader
+        title="Settings"
+        testId="settings-screen-header"
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Back"
+            data-testid="settings-back-button"
+            onClick={onNavigateBack}
+          >
+            <ArrowLeft className="size-3.5" />
+            Back
+          </Button>
+        }
+      />
+      <div className="flex min-h-0 flex-1">
+        <nav aria-label="Settings sections" className="w-44 shrink-0 overflow-y-auto border-r p-2">
+          <ul className="flex flex-col gap-0.5">
+            {sections.map((section) => (
+              <li key={section.id}>
+                <button
+                  type="button"
+                  aria-current={section.id === activeId}
+                  data-testid={`settings-nav-${section.id}`}
+                  onClick={() => setActiveId(section.id)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent",
+                    section.id === activeId && "bg-accent font-medium",
+                  )}
+                >
+                  {section.icon}
+                  {section.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          {active ? active.render({ client }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }

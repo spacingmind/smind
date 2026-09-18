@@ -23,7 +23,7 @@ async function flush(): Promise<void> {
 }
 
 function renderScreen(client = new FakeWsClient()) {
-  render(<SettingsScreen client={client as never} open onOpenChange={() => {}} />);
+  render(<SettingsScreen client={client as never} onNavigateBack={() => {}} />);
   return client;
 }
 
@@ -51,6 +51,24 @@ describe("SettingsScreen shell", () => {
 
     expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
+  });
+
+  it("is a full-pane screen, not a Dialog -- nothing is portalled and there is no dialog role", () => {
+    renderScreen();
+
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("Escape and the Back button both navigate back to the previous view", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onNavigateBack).toHaveBeenCalledTimes(2);
   });
 
   it("registering a new section in the test makes it appear without editing the shell", () => {
@@ -94,7 +112,7 @@ describe("SettingsScreen Appearance section", () => {
 
     // Persisted across a remount.
     const client2 = new FakeWsClient();
-    render(<SettingsScreen client={client2 as never} open onOpenChange={() => {}} />);
+    render(<SettingsScreen client={client2 as never} onNavigateBack={() => {}} />);
     expect(screen.getAllByTestId("settings-font-size-interface-large")[1]).toHaveAttribute("aria-pressed", "true");
   });
 

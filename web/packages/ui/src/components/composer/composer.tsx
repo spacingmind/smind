@@ -263,7 +263,7 @@ export function Composer({
   const inactive = !canSend || submitting;
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="flex shrink-0 flex-col gap-2 border-t px-4 py-3">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto w-full max-w-3xl shrink-0 flex-col gap-2 border-t px-4 py-3 flex">
       {queued.length > 0 && (
         <ul data-testid="composer-queue" className="flex flex-col gap-1">
           {queued.map((text, index) => (
