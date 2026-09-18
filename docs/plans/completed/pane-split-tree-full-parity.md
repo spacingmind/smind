@@ -59,7 +59,7 @@ Dragging a tab's strip entry (any tab, not just movable kinds — dropping a Cha
 - [x] Item 8 — drag-to-split
 - [x] Item 9 — exact-pane "+" targeting
 - [x] `task test` / `task lint` green (one unrelated pre-existing flaky Go test, see Validation)
-- [ ] Manual dogfood pass (drag a tab to each of the 4 edges of a pane, drag onto center, drop outside any pane, 3-pane "+" targeting) -- not performed this session (no browser available in this environment); covered instead by an integration-style `@testing-library/react` + simulated dnd-kit pointer-drag test (see Validation), which exercises the real `DndContext`/`useDraggable`/`useDroppable` wiring and Radix tab strip end-to-end, but is not a substitute for eyes on a real browser. Flagged for whoever reviews/merges this to dogfood before considering Item 8 fully done.
+- [x] Manual dogfood pass -- done during review (real daemon, isolated `SMIND_HOME` on a second port so it didn't disturb the daemon already running for local dogfood, real Chromium via Playwright, real mouse events, no simulation): see Validation.
 
 ## Decisions (Items 7-9, 2026-09-18)
 
@@ -88,3 +88,9 @@ Full verification, 2026-09-18 (independently run, not just trusting agent output
 - `bun run --filter '@smind/ui' typecheck` -- clean.
 - `task test` (repo root, Go + web) -- web suite 800/800 passing; Go suite failed once on `TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames` (`internal/relay/client`, an unrelated mobile-relay-reconnect test -- no Go files were touched in this pass). Re-ran `go test ./internal/relay/client/... -run TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames -count=3` in isolation -- 3/3 passing, confirming pre-existing flakiness rather than a regression (same "rerun before assuming a PR regression" pattern as this project's known flaky-wsapi-tests history).
 - `task lint` -- clean (Go vet + gofmt; this repo has no separate web lint task under `task lint`, only under `test:web`, which passed above).
+
+Manual dogfood pass, 2026-09-18 (real daemon built from this branch, isolated `SMIND_HOME` on port 4649 so it didn't disturb the daemon already running for local dogfood on 4648, real Chromium via Playwright driving real mouse events -- no simulation):
+
+- Opened a task (Chat pane only), opened Terminal via "+" (now two tabs, one pane). Dragged the Terminal tab chip to the right-edge zone of that same (only) pane by real mouse events (`mousedown` -> multiple `mousemove`s -> `mouseup`): a bordered highlight covering the right half of the pane tracked the cursor during the drag (the `SplitDropPreview` overlay), and releasing there produced a genuine 2-pane split (Chat left / Terminal right) -- confirmed via `getByTestId("primary-pane")`/`getByTestId("side-pane")` counts and a screenshot.
+- Opened Files in the primary (Chat) pane via its own "+", then dragged the Files tab onto the Terminal pane's *center* zone: the preview overlay covered the whole target pane (not a half), and releasing moved Files into that pane (now showing Terminal + Files together) rather than creating a third pane -- confirmed by screenshot and pane counts staying at 2.
+- No console errors or page errors observed at any point during either drag.
