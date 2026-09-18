@@ -27,6 +27,7 @@ import {
   applyLifecycleEvent,
   buildWorkspaceTree,
   LIFECYCLE_TOPICS,
+  recentWorkspaceParentDirs,
   searchTasks,
   type SpaceWithTasks,
   type TaskSearchResult,
@@ -599,6 +600,7 @@ export function AppSidebar({
               setExpanded((prev) => new Set(prev).add(ws.ID));
               refresh();
             }}
+            recentPaths={recentWorkspaceParentDirs(workspaces ?? [])}
           />
           {crud?.kind === "space" && (
             <CreateSpaceDialog

@@ -34,12 +34,15 @@ export function FolderPickerDialog({
   open,
   onOpenChange,
   onSelect,
+  recentPaths = [],
 }: {
   client: WsClientLike | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the currently displayed absolute path when "Use this folder" is clicked. */
   onSelect: (path: string) => void;
+  /** Quick-jump shortcuts shown above the browser -- typically parent directories of already-registered workspaces, since another repo worth adding is usually a sibling of one already known. Empty (the default) renders no row at all. */
+  recentPaths?: string[];
 }) {
   const [result, setResult] = useState<FsListDirResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,6 +105,27 @@ export function FolderPickerDialog({
             {result?.path ?? "…"}
           </p>
         </div>
+
+        {recentPaths.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-muted-foreground">Recent:</span>
+            {recentPaths.map((path) => (
+              <Button
+                key={path}
+                type="button"
+                variant="outline"
+                size="sm"
+                data-testid="folder-picker-recent-path"
+                data-path={path}
+                className="h-6 max-w-48 truncate px-2 text-xs"
+                title={path}
+                onClick={() => void navigate(path)}
+              >
+                {path.slice(path.lastIndexOf("/") + 1) || path}
+              </Button>
+            ))}
+          </div>
+        )}
 
         {error && (
           <p className="flex items-center gap-1.5 text-sm text-destructive">

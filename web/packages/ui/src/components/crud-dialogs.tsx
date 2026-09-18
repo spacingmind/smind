@@ -109,12 +109,15 @@ export function CreateWorkspaceDialog({
   open,
   onOpenChange,
   onCreated,
+  recentPaths = [],
 }: {
   client: WsClient | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Called with the created workspace so the sidebar can refresh the tree (and expand the newcomer). */
   onCreated: (workspace: Workspace) => void;
+  /** Parent directories of already-registered workspaces, for the folder picker's quick-jump row -- see `recentWorkspaceParentDirs`. */
+  recentPaths?: string[];
 }) {
   const [path, setPath] = useState("");
   const [title, setTitle] = useState("");
@@ -197,6 +200,7 @@ export function CreateWorkspaceDialog({
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         onSelect={(selected) => setPath(selected)}
+        recentPaths={recentPaths}
       />
     </>
   );

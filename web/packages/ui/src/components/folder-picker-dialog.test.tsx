@@ -22,8 +22,21 @@ async function flush(): Promise<void> {
   });
 }
 
-function renderDialog(client: FakeWsClient, onSelect = vi.fn(), onOpenChange = vi.fn()) {
-  render(<FolderPickerDialog client={client as never} open onOpenChange={onOpenChange} onSelect={onSelect} />);
+function renderDialog(
+  client: FakeWsClient,
+  onSelect = vi.fn(),
+  onOpenChange = vi.fn(),
+  recentPaths: string[] = [],
+) {
+  render(
+    <FolderPickerDialog
+      client={client as never}
+      open
+      onOpenChange={onOpenChange}
+      onSelect={onSelect}
+      recentPaths={recentPaths}
+    />,
+  );
   return { onSelect, onOpenChange };
 }
 
@@ -153,5 +166,40 @@ describe("FolderPickerDialog", () => {
     // The previous listing (home dir's entries) is still visible, not blanked.
     expect(screen.getByText("plain")).toBeInTheDocument();
     expect(screen.getByText("repo")).toBeInTheDocument();
+  });
+
+  it("renders no recent-paths row when none are given", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client);
+
+    const call = await waitFor(() => client.nth("fs.listDir"));
+    await act(async () => {
+      call.resolve(HOME_RESULT);
+    });
+    await flush();
+
+    expect(screen.queryByTestId("folder-picker-recent-path")).not.toBeInTheDocument();
+  });
+
+  it("clicking a recent-paths shortcut re-queries fs.listDir with that exact path", async () => {
+    const client = new FakeWsClient();
+    renderDialog(client, vi.fn(), vi.fn(), ["/home/user/code", "/home/user/other"]);
+
+    const first = await waitFor(() => client.nth("fs.listDir", 0));
+    await act(async () => {
+      first.resolve(HOME_RESULT);
+    });
+    await flush();
+
+    const shortcuts = screen.getAllByTestId("folder-picker-recent-path");
+    expect(shortcuts.map((el) => el.getAttribute("data-path"))).toEqual([
+      "/home/user/code",
+      "/home/user/other",
+    ]);
+
+    fireEvent.click(shortcuts[0]!);
+
+    const second = await waitFor(() => client.nth("fs.listDir", 1));
+    expect(second.params).toEqual({ path: "/home/user/code" });
   });
 });
