@@ -107,7 +107,7 @@ Each group's `sizes` array persists through the same localStorage mechanism as t
 
 ## Progress
 
-- [ ] Item 1 — pure split-tree module + unit tests
+- [x] Item 1 — pure split-tree module + unit tests
 - [ ] Item 2 — `use-task-tabs.ts` on the tree
 - [ ] Item 3 — split affordance (right/down)
 - [ ] Item 4 — recursive `App.tsx` renderer
@@ -118,4 +118,8 @@ Each group's `sizes` array persists through the same localStorage mechanism as t
 
 ## Validation
 
-To be filled in as each item lands — map back to the Acceptance Criteria above (which test/manual check confirmed which criterion), not just "tests pass."
+Item 1, 2026-09-18:
+
+- `web/packages/ui/src/lib/split-tree.ts` — pure port (no React, no imports from `use-task-tabs.ts`/`App.tsx`), types renamed per plan (`TaskLayout`, `SplitPane` holds `TabEntry[]` + `activeKey` directly). `removePaneByPath`'s root case and `createDefaultLayout` both confirmed to leave/seed an empty pane rather than paseo's fake-draft-tab fallback, matching the smind-specific pane-removal rule.
+- `web/packages/ui/src/lib/split-tree.test.ts` — all 9 Item 1 Test Scenarios present and passing: split-right creates a 2-child horizontal group with correct sizes/focus; splitting twice same-direction reuses the group (3-way, not nested); split rejected past `maxTreeDepth=5`; closing a split-created pane's last tab collapses it into its sibling; closing the sole root pane's last tab leaves it in place, empty; `moveTabToPaneInLayout` across two arbitrary pane ids; `clampNormalizedSizes` sums to 1 and respects `MIN_SPLIT_SIZE`; `normalizeLayout` repairs a dangling `focusedPaneId`, collapses a single-child group, and falls back to `createDefaultLayout()` for a garbage root; `getTreeDepth` on a 5-level fixture returns 5.
+- Verified independently (not just trusting the implementing agent's report): `cd web && bun run --filter '@smind/ui' test -- split-tree.test.ts` — 13/13 passing. `bun run --filter '@smind/ui' typecheck` — clean.
