@@ -37,9 +37,7 @@ import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStat
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
-import { useSettingsOpen } from "@/hooks/use-settings-open";
 import { AccountsDialog } from "@/components/accounts-dialog";
-import { SettingsScreen } from "@/components/settings/settings-screen";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -264,6 +262,7 @@ export function AppSidebar({
   events,
   onTasksChange,
   onWorkspacesChange,
+  onOpenSettings,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -287,6 +286,13 @@ export function AppSidebar({
   onTasksChange?: (tasks: Task[]) => void;
   /** Called with the workspace list whenever the tree changes -- same rationale as onTasksChange, for the palette's workspace entries. */
   onWorkspacesChange?: (workspaces: Workspace[]) => void;
+  /**
+   * Opens the settings screen. Settings is a full-pane view owned by the
+   * shell (App.tsx), so the sidebar just forwards the click -- see
+   * SettingsScreen's doc comment for why the screen lives above this
+   * component.
+   */
+  onOpenSettings?: () => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -319,7 +325,6 @@ export function AppSidebar({
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
-  const { open: settingsOpen, openSettings, setOpen: setSettingsOpen } = useSettingsOpen();
 
   // Command-palette contributions for the dialogs this component owns.
   // Registered here rather than in App.tsx on purpose: the surface that
@@ -403,17 +408,30 @@ export function AppSidebar({
 
   return (
     <Sidebar collapsible="icon">
+      {/*
+       * Item 1 (collapsed dead space): the header renders two variants.
+       * Expanded: wordmark left, theme/settings/accounts buttons right.
+       * Icon-collapsed: a single centered stack of the same buttons --
+       * previously the row merely hid its children
+       * (`group-data-[collapsible=icon]:hidden`) while the row and its
+       * padding kept occupying vertical space, leaving a phantom gap
+       * under the rail. Rendering the buttons (rather than removing the
+       * header) keeps every affordance reachable in collapsed mode.
+       */}
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-1.5">
-          <span className="text-workspace-title tracking-tight group-data-[collapsible=icon]:hidden">smind</span>
-          <div className="ml-auto flex items-center gap-1 group-data-[collapsible=icon]:hidden">
+        <div
+          data-testid="sidebar-expanded-header"
+          className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden"
+        >
+          <span className="text-workspace-title tracking-tight">smind</span>
+          <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
             <Button
               variant="ghost"
               size="icon-sm"
               aria-label="Settings"
               data-testid="sidebar-settings-button"
-              onClick={openSettings}
+              onClick={onOpenSettings}
             >
               <SlidersHorizontal />
             </Button>
@@ -426,6 +444,29 @@ export function AppSidebar({
               <Settings />
             </Button>
           </div>
+        </div>
+        <div
+          data-testid="sidebar-collapsed-header-actions"
+          className="hidden flex-col items-center gap-0.5 px-0 py-1.5 group-data-[collapsible=icon]:flex"
+        >
+          <ThemeToggle />
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Settings"
+            data-testid="sidebar-settings-button-collapsed"
+            onClick={onOpenSettings}
+          >
+            <SlidersHorizontal />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Accounts settings"
+            onClick={() => setAccountsOpen(true)}
+          >
+            <Settings />
+          </Button>
         </div>
       </SidebarHeader>
       <SidebarContent>
@@ -616,7 +657,6 @@ export function AppSidebar({
             />
           )}
           <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
-          <SettingsScreen client={client} open={settingsOpen} onOpenChange={setSettingsOpen} />
         </>
       )}
     </Sidebar>

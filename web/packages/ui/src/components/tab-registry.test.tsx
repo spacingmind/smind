@@ -6,12 +6,17 @@ import { editorViewRegistry } from "@/components/code-mirror-editor";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import {
   TabLabel,
+  TabsEmptyState,
+  NewTabButton,
+  BASE_TAB_KINDS,
+  baseTabForKind,
   defaultTabsForTask,
   fileTab,
   fileTabKey,
   filePathFromTabKey,
   nextTerminalTab,
   terminalTab,
+  type BaseTabKind,
 } from "@/components/tab-registry";
 import { resetDirtyBuffers } from "@/lib/dirty-buffers";
 import { clearTerminalActivity, markTerminalActivity, resetTerminalSessions } from "@/lib/terminal-sessions";
@@ -166,7 +171,9 @@ describe("terminal tabs (Item 20)", () => {
   it("assigns increasing indices starting at 2, the base terminal tab being index 1 implicitly", () => {
     const base = defaultTabsForTask(TASK.ID).find((t) => t.kind === "terminal")!;
     expect(base.key).toBe(`${TASK.ID}:terminal`);
-    expect(base.closable).toBe(false);
+    // Item 3: tabs are user-owned -- the base terminal tab is closable
+    // like every other tab; only *additional* terminals need an index.
+    expect(base.closable).toBe(true);
 
     const second = nextTerminalTab(TASK.ID, [base]);
     expect(second).toEqual(terminalTab(TASK.ID, 2));
@@ -197,5 +204,48 @@ describe("terminal tabs (Item 20)", () => {
     expect(screen.queryByTestId("tab-dirty-marker")).not.toBeInTheDocument();
 
     clearTerminalActivity(entry.key);
+  });
+});
+
+describe("flexible tabs (Item 3)", () => {
+  it("seeds every default tab closable, so nothing is pinned anymore", () => {
+    for (const entry of defaultTabsForTask(TASK.ID)) {
+      expect(entry.closable).toBe(true);
+    }
+  });
+
+  it("baseTabForKind builds the strip key for each reopenable kind", () => {
+    for (const kind of BASE_TAB_KINDS) {
+      expect(baseTabForKind(TASK.ID, kind)).toMatchObject({
+        kind,
+        key: `${TASK.ID}:${kind}`,
+        taskId: TASK.ID,
+        closable: true,
+      });
+    }
+  });
+
+  it("the empty state offers one reopen button per base kind", () => {
+    const opened: BaseTabKind[] = [];
+    render(<TabsEmptyState onOpen={(kind) => opened.push(kind)} />);
+
+    const buttons = screen.getAllByTestId("tabs-empty-open");
+    expect(buttons.map((b) => b.dataset.kind)).toEqual([...BASE_TAB_KINDS]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
+    expect(opened).toEqual(["task"]);
+  });
+
+  it("the + menu offers the same kinds as the empty state", async () => {
+    const opened: BaseTabKind[] = [];
+    render(<NewTabButton onOpen={(kind) => opened.push(kind)} />);
+
+    // Radix's DropdownMenuTrigger opens on pointerdown (so touch
+    // press-and-hold works), not click -- same as theme-toggle.test.tsx.
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    const items = await screen.findAllByTestId("tabs-new-tab-item");
+    expect(items.map((i) => i.dataset.kind)).toEqual([...BASE_TAB_KINDS]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    expect(opened).toEqual(["terminal"]);
   });
 });

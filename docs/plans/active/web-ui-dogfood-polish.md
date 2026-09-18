@@ -55,14 +55,28 @@ Reshape `composer.tsx` into the reference card anatomy:
 
 ## Progress
 
-- [ ] Item 1 — collapsed sidebar header dead space
-- [ ] Item 2 — chat column max-width + center
-- [ ] Item 3 — user-owned flexible tabs
-- [ ] Item 4 — settings screen
-- [ ] Item 5 — composer input card redesign
+- [x] Item 1 — collapsed sidebar header dead space
+- [x] Item 2 — chat column max-width + center
+- [x] Item 3 — user-owned flexible tabs
+- [x] Item 4 — settings screen
+- [x] Item 5 — composer input card redesign
 - [ ] `task test` / `task lint` green
 - [ ] Manual dogfood pass
 
 ## Validation
 
-Not started.
+Track 1 (Items 1, 2, 4), 2026-09-18:
+
+- `cd web && bun run --filter '@smind/ui' test` — 764 tests / 70 files, all passing. New/updated coverage:
+  - Item 1: `app-sidebar.test.tsx` "AppSidebar collapsed header" — collapsed mode renders a `flex-col` icon stack (`sidebar-collapsed-header-actions`) with ThemeToggle/settings/accounts reachable; expanded mode asserts the CSS-variant swap.
+  - Item 2: `App.test.tsx` "App chat column" — chat tab's `run-log-column` has `mx-auto max-w-3xl`; Files pane root has no `max-w` class.
+  - Item 4: `settings-screen.test.tsx` rewritten for the screen (no dialog role, Esc + Back navigate back); `App.test.tsx` "App settings view" — sidebar button swaps main area to the screen, Back/Esc return to the task view.
+- `task lint` (go vet + gofmt) — clean.
+
+Track 2 (Items 3 + 5), validated 2026-09-18:
+
+- `cd web && bun run --filter '@smind/ui' test` — 70 files / 762 tests passed, including:
+  - tab-registry.test.tsx extended: all seeded tabs closable; empty state offers one reopen button per base kind; "+" dropdown menu offers the same kinds (opened via pointerDown, per Radix's trigger contract); use-task-tabs persistence suite unchanged and green (closing all tabs rehydrates as empty, not reseeded).
+  - composer.test.tsx updated for the card anatomy: label-less selects resolved via aria-label, visible label text gone; placeholder "Message the agent…"; diff-stat pill renders +N/−M only when there are changes *and* a Diff tab target, click fires `onOpenDiff`; card contains textarea + toolbar, no Stop while idle, no attachment "+" button. Draft persistence, queue-while-running, Escape-stops, provider.list fallback and disabled-with-reason assertions all unchanged and green.
+  - Full App.test.tsx / App.responsive.test.tsx pass — tab strip, routing, keyboard shortcuts unaffected.
+- `task lint` (go vet + gofmt) — green.

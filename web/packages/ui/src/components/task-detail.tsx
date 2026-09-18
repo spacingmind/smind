@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useTaskDiff } from "@/hooks/use-task-diff";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -29,6 +30,7 @@ export function TaskDetailPane({
   task,
   connectionStatus = "connected",
   onOpenFile,
+  onOpenDiffTab,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -36,8 +38,16 @@ export function TaskDetailPane({
   connectionStatus?: ConnectionStatus;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
   onOpenFile?: (path: string) => void;
+  /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
+  onOpenDiffTab?: () => void;
 }) {
   const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
+  // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
+  // same task.diff this is -- the same hook the diff pane itself uses, so
+  // the pill and the pane's header stat can't disagree and no extra RPC
+  // is introduced. It stays mounted even when the Diff tab isn't (the
+  // fetch is cheap and the refresh signal is identical).
+  const wholeDiff = useTaskDiff(client, task, undefined);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
@@ -111,24 +121,34 @@ export function TaskDetailPane({
           data-following={follow.following}
           className="h-full overflow-y-auto px-4 py-3"
         >
-          {error && <Alert variant="error" description={error} />}
-          {!error && runs === null && <InlineSpinner label="Loading runs…" />}
-          {!error && runs !== null && runs.length === 0 && (
-            <EmptyState title="No runs yet" description="Send a prompt to start one" />
-          )}
-          {runs !== null && runs.length > 0 && (
-            <ul className="space-y-4">
-              {runs.map((run) => (
-                <RunTimeline
-                  key={run.id}
-                  run={run}
-                  detailLevel={detailLevel}
-                  worktreePath={task.WorktreePath ?? undefined}
-                  onOpenFile={openFile}
-                />
-              ))}
-            </ul>
-          )}
+          {/*
+           * Dogfood Item 2: the chat timeline is a reading column, not a
+           * pane -- cap it (and center it) on wide screens instead of
+           * stretching line length edge-to-edge. The wrapper lives
+           * *inside* the scroll container (so it scrolls with the log)
+           * and only the chat tab gets it: files/diff/terminal render
+           * their own full-width roots.
+           */}
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+            {error && <Alert variant="error" description={error} />}
+            {!error && runs === null && <InlineSpinner label="Loading runs…" />}
+            {!error && runs !== null && runs.length === 0 && (
+              <EmptyState title="No runs yet" description="Send a prompt to start one" />
+            )}
+            {runs !== null && runs.length > 0 && (
+              <ul className="space-y-4">
+                {runs.map((run) => (
+                  <RunTimeline
+                    key={run.id}
+                    run={run}
+                    detailLevel={detailLevel}
+                    worktreePath={task.WorktreePath ?? undefined}
+                    onOpenFile={openFile}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {!follow.following && (
@@ -150,10 +170,14 @@ export function TaskDetailPane({
        * The pending-permission dock: a sibling of the scrolling log above,
        * not a descendant of it, so it stays pinned in place (like the
        * prompt form right below it) no matter how far the log has
-       * scrolled or how much new output streams in. See the plan's Item 3.
+       * scrolled or how much new output streams in (see the plan's Item 3)
+       * -- and aligned to the same reading column as that log (dogfood
+       * Item 2): mx-auto with the same max-w-3xl keeps a permission card
+       * sitting at the bottom of the log visually continuous with it on
+       * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="shrink-0 border-t bg-background px-4 py-2">
+        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 border-t bg-background px-4 py-2">
           {pendingRuns.map((run) => (
             <PermissionCard
               key={run.id}
@@ -171,6 +195,8 @@ export function TaskDetailPane({
         taskId={task.ID}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
+        diffStat={wholeDiff.stat}
+        onOpenDiff={onOpenDiffTab}
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}

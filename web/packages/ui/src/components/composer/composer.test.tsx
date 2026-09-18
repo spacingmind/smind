@@ -161,7 +161,8 @@ describe("Composer", () => {
     expect(textarea()).not.toBeDisabled();
 
     rerender({ connected: true, taskId: 1, runningRunId: null });
-    expect(textarea()).toHaveAttribute("placeholder", "Send a prompt…");
+    // Item 5: honest placeholder -- no @file/command claims.
+    expect(textarea()).toHaveAttribute("placeholder", "Message the agent…");
   });
 
   it("queues a prompt typed while a run is live and sends it when the run ends", async () => {
@@ -248,12 +249,11 @@ describe("Composer", () => {
     // says which provider a prompt would go to.
     expect(trigger).toHaveTextContent("Claude Code");
 
-    // "not unlabelled native selects" (Item 10): the label is real markup,
-    // not an aria-label, so it is on screen as well as in the a11y tree --
-    // and `htmlFor`/`id` still associates it with the Radix trigger, which
-    // is what getByLabelText above resolved through.
-    expect(screen.getByText("Provider").tagName).toBe("LABEL");
-    expect(screen.getByText("Approval policy").tagName).toBe("LABEL");
+    // Item 5: the visible <label> text moved out of the card's toolbar --
+    // the accessible name now comes from aria-label on the label-less
+    // trigger, which is still what getByLabelText resolved through.
+    expect(screen.queryByText("Provider")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval policy")).not.toBeInTheDocument();
   });
 
   it("selecting a provider from the open dropdown is what the next prompt is sent with", async () => {
@@ -309,7 +309,6 @@ describe("Composer", () => {
       const trigger = screen.getByLabelText(label);
       expect(trigger.className).toContain("h-11");
       expect(trigger.className).toContain("md:h-7");
-      expect(trigger.className).not.toContain("h-8");
     }
   });
 
@@ -324,5 +323,47 @@ describe("Composer", () => {
     rerender({ runningRunId: "run-7" });
     expect(screen.getByTestId("chat-send-button")).toHaveAttribute("data-variant", "default");
     expect(screen.getByTestId("chat-stop-button")).toHaveAttribute("data-variant", "execute");
+  });
+});
+
+describe("Composer diff-stat pill (Item 5)", () => {
+  it("renders the pill when the task has changes, and clicking it opens the diff tab", () => {
+    const onOpenDiff = vi.fn();
+    renderComposer({
+      diffStat: { files: 2, additions: 12, deletions: 3 },
+      onOpenDiff,
+    });
+
+    const pill = screen.getByTestId("composer-diff-stat");
+    expect(pill).toHaveTextContent("+12");
+    expect(pill).toHaveTextContent("\u22123"); // minus sign, not a hyphen
+
+    fireEvent.click(pill);
+    expect(onOpenDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the pill when the task has no changes, no stat, or no diff tab to open", () => {
+    const { rerender } = renderComposer({ diffStat: { files: 0, additions: 0, deletions: 0 }, onOpenDiff: vi.fn() });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+
+    // Changes exist but there is no Diff tab to jump to (no onOpenDiff).
+    rerender({ diffStat: { files: 1, additions: 5, deletions: 0 }, onOpenDiff: undefined });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+
+    rerender({ diffStat: null, onOpenDiff: vi.fn() });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+  });
+
+  it("wraps the textarea and toolbar in one input card with no placeholder + button", () => {
+    renderComposer({ diffStat: { files: 1, additions: 4, deletions: 1 }, onOpenDiff: vi.fn() });
+
+    const card = screen.getByTestId("composer-card");
+    expect(card).toContainElement(screen.getByLabelText("Prompt"));
+    expect(card).toContainElement(screen.getByLabelText("Provider"));
+    expect(card).toContainElement(screen.getByTestId("chat-send-button"));
+    // No dead affordances: Stop only exists while a run is live, and
+    // there is no attachment "+" until attachments exist.
+    expect(screen.queryByTestId("chat-stop-button")).not.toBeInTheDocument();
+    expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
 });

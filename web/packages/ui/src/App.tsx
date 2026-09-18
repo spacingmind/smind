@@ -3,6 +3,7 @@ import { ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
+import { SettingsScreen } from "@/components/settings/settings-screen";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -16,11 +17,15 @@ import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
+  baseTabForKind,
   defaultTabsForTask,
   fileTab,
   filePathFromTabKey,
+  NewTabButton,
   nextTerminalTab,
   TabLabel,
+  TabsEmptyState,
+  type BaseTabKind,
   type TabEntry,
   type TabKind,
 } from "@/components/tab-registry";
@@ -114,6 +119,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  // Which full-pane surface the main area shows: the task pane or the
+  // settings screen (dogfood Item 4). Plain view state, not a route --
+  // the plan's "no router library introduction" decision; settings is not
+  // deep-linkable and does not disturb the hash the task routing below
+  // owns.
+  const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -222,6 +233,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     activate(selectedTask.ID, `${selectedTask.ID}:diff`);
   }
 
+  /**
+   * Opens (or activates) one of the base tab kinds -- Item 3's "+"
+   * menu and the pane empty state both funnel through here. openTab
+   * itself already activates an open tab instead of duplicating it, and
+   * `prefer` keeps the existing "implicit opens land where a tab already
+   * is, else primary" rule; the strip's own "+" pins to its pane.
+   */
+  function openBaseTab(kind: BaseTabKind, placement?: TabPlacement) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, baseTabForKind(selectedTask.ID, kind), placement ?? "prefer");
+  }
+
   /** Opens another terminal tab for the selected task (Item 20). The pane picks its own session -- see lib/terminal-sessions.ts. */
   function openTerminalTab() {
     if (!selectedTask) return;
@@ -320,10 +343,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     () => {
       if (!selectedTask || !taskState?.primary.activeKey) return;
       const active = taskState.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
-      // A non-closable base tab (Chat/Files/Diff/Terminal) has no close
-      // affordance in the strip either -- the shortcut matches what
-      // clicking would do, rather than being a second, stronger way to
-      // remove a tab the UI says can't be removed.
+      // Every tab is closable (Item 3), but the shortcut still mirrors
+      // the strip: no active tab (everything closed) means nothing to do.
       if (!active?.closable) return;
       closeTab(selectedTask.ID, active.key);
     },
@@ -374,6 +395,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
+      onOpenSettings={() => setActiveView("settings")}
     />
   );
 
@@ -422,13 +444,21 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onMove={(key) => moveTab(selectedTask.ID, key, "side")}
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
+      onOpenBase={openBaseTab}
       showMoveAffordance={false}
     />
   );
 
+  // Dogfood Item 4: the settings screen replaces the task pane wholesale
+  // (same surface) while active. Unmounting the task pane on the way in
+  // is intentional and matches the detach-on-switch contract every pane
+  // already implements for tab/task switches -- terminal sessions detach,
+  // not close, and reattach when the view returns.
   const mainContentElement = (
     <div className="flex-1 min-h-0">
-      {selectedTask && taskState ? (
+      {activeView === "settings" ? (
+        <SettingsScreen client={client} onNavigateBack={() => setActiveView("workspace")} />
+      ) : selectedTask && taskState ? (
         isMobile ? (
           compactPrimaryStrip
         ) : (
@@ -458,6 +488,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                 onMove={(key) => moveTab(selectedTask.ID, key, "side")}
                 onRevealInDiff={revealInDiff}
                 onNewTerminal={openTerminalTab}
+                onOpenBase={openBaseTab}
               />
             </ResizablePanel>
             {taskState.side && (
@@ -485,6 +516,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                     onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
                     onRevealInDiff={revealInDiff}
                     onNewTerminal={openTerminalTab}
+                    onOpenBase={openBaseTab}
                   />
                 </ResizablePanel>
               </>
@@ -796,6 +828,7 @@ function PaneTabStrip({
   onMove,
   onRevealInDiff,
   onNewTerminal,
+  onOpenBase,
   showMoveAffordance = true,
 }: {
   paneId: PaneId;
@@ -812,6 +845,8 @@ function PaneTabStrip({
   onMove: (key: string) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
+  /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
+  onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** Item 21: the side dock (Item 6) is a desktop-only concept -- compact has nowhere for "open to side" to move a tab to, so it's hidden rather than left to open a split that never renders. */
   showMoveAffordance?: boolean;
 }) {
@@ -823,9 +858,10 @@ function PaneTabStrip({
       onValueChange={onActivate}
       className="h-full gap-0"
     >
-      <div className="mx-3 mt-2 overflow-x-auto">
-        <TabsList className="w-fit">
-          {tabs.map((entry) => (
+      <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
+        {tabs.length > 0 && (
+          <TabsList className="w-fit">
+            {tabs.map((entry) => (
             <TabsTrigger
               key={entry.key}
               value={entry.key}
@@ -898,9 +934,12 @@ function PaneTabStrip({
                 </span>
               )}
             </TabsTrigger>
-          ))}
-        </TabsList>
+            ))}
+          </TabsList>
+        )}
+        <NewTabButton onOpen={(kind) => onOpenBase(kind, paneId === "primary" ? "primary" : "side")} />
       </div>
+      {tabs.length === 0 && <TabsEmptyState onOpen={(kind) => onOpenBase(kind, paneId === "primary" ? "primary" : "side")} />}
       {tabs.map((entry) => (
         /*
          * Terminal tabs force-mount (and hide when inactive) so a
@@ -960,7 +999,15 @@ function TabContent({
   events: ReturnType<typeof useDaemonEvents>;
 }) {
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: <TaskDetailPane client={client} task={task} connectionStatus={connectionStatus} onOpenFile={onOpenFile} />,
+    task: (
+      <TaskDetailPane
+        client={client}
+        task={task}
+        connectionStatus={connectionStatus}
+        onOpenFile={onOpenFile}
+        onOpenDiffTab={onRevealInDiff}
+      />
+    ),
     files: (
       <FileExplorerPane
         client={client}
