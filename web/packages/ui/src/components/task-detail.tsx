@@ -111,24 +111,34 @@ export function TaskDetailPane({
           data-following={follow.following}
           className="h-full overflow-y-auto px-4 py-3"
         >
-          {error && <Alert variant="error" description={error} />}
-          {!error && runs === null && <InlineSpinner label="Loading runs…" />}
-          {!error && runs !== null && runs.length === 0 && (
-            <EmptyState title="No runs yet" description="Send a prompt to start one" />
-          )}
-          {runs !== null && runs.length > 0 && (
-            <ul className="space-y-4">
-              {runs.map((run) => (
-                <RunTimeline
-                  key={run.id}
-                  run={run}
-                  detailLevel={detailLevel}
-                  worktreePath={task.WorktreePath ?? undefined}
-                  onOpenFile={openFile}
-                />
-              ))}
-            </ul>
-          )}
+          {/*
+           * Dogfood Item 2: the chat timeline is a reading column, not a
+           * pane -- cap it (and center it) on wide screens instead of
+           * stretching line length edge-to-edge. The wrapper lives
+           * *inside* the scroll container (so it scrolls with the log)
+           * and only the chat tab gets it: files/diff/terminal render
+           * their own full-width roots.
+           */}
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+            {error && <Alert variant="error" description={error} />}
+            {!error && runs === null && <InlineSpinner label="Loading runs…" />}
+            {!error && runs !== null && runs.length === 0 && (
+              <EmptyState title="No runs yet" description="Send a prompt to start one" />
+            )}
+            {runs !== null && runs.length > 0 && (
+              <ul className="space-y-4">
+                {runs.map((run) => (
+                  <RunTimeline
+                    key={run.id}
+                    run={run}
+                    detailLevel={detailLevel}
+                    worktreePath={task.WorktreePath ?? undefined}
+                    onOpenFile={openFile}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {!follow.following && (
@@ -150,10 +160,14 @@ export function TaskDetailPane({
        * The pending-permission dock: a sibling of the scrolling log above,
        * not a descendant of it, so it stays pinned in place (like the
        * prompt form right below it) no matter how far the log has
-       * scrolled or how much new output streams in. See the plan's Item 3.
+       * scrolled or how much new output streams in (see the plan's Item 3)
+       * -- and aligned to the same reading column as that log (dogfood
+       * Item 2): mx-auto with the same max-w-3xl keeps a permission card
+       * sitting at the bottom of the log visually continuous with it on
+       * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="shrink-0 border-t bg-background px-4 py-2">
+        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 border-t bg-background px-4 py-2">
           {pendingRuns.map((run) => (
             <PermissionCard
               key={run.id}

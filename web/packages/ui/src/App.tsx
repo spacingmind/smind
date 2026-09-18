@@ -3,6 +3,7 @@ import { ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
+import { SettingsScreen } from "@/components/settings/settings-screen";
 import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -114,6 +115,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     typeof window === "undefined" ? null : parseRoute(window.location.hash),
   );
   const [quickOpenOpen, setQuickOpenOpen] = useState(false);
+  // Which full-pane surface the main area shows: the task pane or the
+  // settings screen (dogfood Item 4). Plain view state, not a route --
+  // the plan's "no router library introduction" decision; settings is not
+  // deep-linkable and does not disturb the hash the task routing below
+  // owns.
+  const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
   const events = useDaemonEvents(client);
@@ -374,6 +381,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
+      onOpenSettings={() => setActiveView("settings")}
     />
   );
 
@@ -426,9 +434,16 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     />
   );
 
+  // Dogfood Item 4: the settings screen replaces the task pane wholesale
+  // (same surface) while active. Unmounting the task pane on the way in
+  // is intentional and matches the detach-on-switch contract every pane
+  // already implements for tab/task switches -- terminal sessions detach,
+  // not close, and reattach when the view returns.
   const mainContentElement = (
     <div className="flex-1 min-h-0">
-      {selectedTask && taskState ? (
+      {activeView === "settings" ? (
+        <SettingsScreen client={client} onNavigateBack={() => setActiveView("workspace")} />
+      ) : selectedTask && taskState ? (
         isMobile ? (
           compactPrimaryStrip
         ) : (

@@ -1,5 +1,5 @@
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -713,18 +713,19 @@ describe("AppSidebar search (ui-redesign-parity Item 12)", () => {
 });
 
 describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
-  it("the settings button opens the settings screen", async () => {
+  it("the settings button asks the shell to open the settings view (Item 4 moved the screen out of the sidebar)", async () => {
+    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
       <SidebarProvider>
-        <AppSidebar client={client as never} selectedTaskId={null} />
+        <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
       </SidebarProvider>,
     );
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(onOpenSettings).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
-    expect(await screen.findByTestId("settings-screen")).toBeInTheDocument();
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
   it("is a distinct entry point from Accounts settings, not a replacement for it", async () => {
@@ -737,7 +738,73 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
+    // Both header variants stay in the DOM (Tailwind's group-data-*
+    // classes hide one of them in CSS; jsdom loads no stylesheets), so
+    // "the button is reachable" is asserted as "at least one instance"
+    // rather than uniqueness.
+    expect(screen.getAllByRole("button", { name: "Accounts settings" }).length).toBeGreaterThan(0);
+  });
+});
+
+describe("AppSidebar collapsed header (dogfood Item 1)", () => {
+  /** Renders with the sidebar icon-collapsed -- SidebarProvider's controlled `open=false` plus collapsible="icon" is exactly what the rail toggle produces. */
+  function renderCollapsed() {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider open={false}>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    return document.querySelector("[data-slot='sidebar']") as HTMLElement;
+  }
+
+  it("collapsed mode renders a compact icon stack of the header buttons instead of an empty padded row", () => {
+    renderCollapsed();
+
+    const stack = screen.getByTestId("sidebar-collapsed-header-actions");
+    // The collapsed stack is laid out as a vertical stack (flex-col), not
+    // the expanded header's horizontal row -- the structural assertion
+    // that there is no phantom horizontal dead-space row left behind.
+    expect(stack.className).toContain("flex-col");
+    // And the expanded row is the one Tailwind hides in this state
+    // (display:none via `hidden`); jsdom cannot compute that, so the class
+    // is asserted directly.
+    expect(screen.getByTestId("sidebar-expanded-header").className).toContain("group-data-[collapsible=icon]:hidden");
+    expect(within(stack).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
+    expect(within(stack).getByTestId("sidebar-settings-button-collapsed")).toBeInTheDocument();
+    expect(within(stack).getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
+  });
+
+  it("the collapsed stack's settings button still opens settings", () => {
+    const onOpenSettings = vi.fn();
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider open={false}>
+        <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
+      </SidebarProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button-collapsed"));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("expanded mode renders the horizontal header row and not the collapsed stack", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+
+    // Both variants live in the DOM and swap via CSS (see the collapsed
+    // test); expanded mode is asserted by which variant carries `hidden`.
+    expect(screen.getByTestId("sidebar-collapsed-header-actions").className).toContain("hidden");
+    // The expanded row's only "hidden" is the collapsed-state variant
+    // class itself (group-data-[collapsible=icon]:hidden), which is the
+    // expected content -- so it must NOT also carry the bare `hidden`
+    // (display:none) that the collapsed stack does in this state.
+    expect(screen.getByTestId("sidebar-expanded-header").className.split(" ")).not.toContain("hidden");
+    expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
   });
 });
 

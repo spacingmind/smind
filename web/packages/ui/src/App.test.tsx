@@ -1128,3 +1128,84 @@ describe("App splits (Item 6)", () => {
     expect(within(sidePane).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
   });
 });
+
+describe("App settings view (dogfood Item 4)", () => {
+  it("the sidebar's settings button swaps the main area to the settings screen, and Back returns to the previous view", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    clickTaskRow(TASK);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("primary-pane")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+  });
+
+  it("Escape from the settings screen returns to the task view", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await flush();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+  });
+
+  it("the settings view shows with no task selected too (from the empty state)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, []);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+  });
+});
+
+describe("App chat column (dogfood Item 2)", () => {
+  it("the chat tab's timeline scrolls inside a centered max-width column, while the Files pane stays full-width", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    clickTaskRow(TASK);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const column = screen.getByTestId("run-log-column");
+    expect(column.className).toContain("mx-auto");
+    expect(column.className).toContain("max-w-3xl");
+
+    const filesTab = screen.getByRole("tab", { name: "Files" });
+    filesTab.focus();
+    fireEvent.click(filesTab);
+    await flush();
+    respondAll(socket, "file.list", []);
+    await flush();
+
+    const explorer = screen.getByTestId("file-explorer-pane");
+    expect(explorer.className).not.toContain("max-w");
+  });
+});

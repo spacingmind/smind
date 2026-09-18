@@ -55,14 +55,21 @@ Reshape `composer.tsx` into the reference card anatomy:
 
 ## Progress
 
-- [ ] Item 1 — collapsed sidebar header dead space
-- [ ] Item 2 — chat column max-width + center
+- [x] Item 1 — collapsed sidebar header dead space
+- [x] Item 2 — chat column max-width + center
 - [ ] Item 3 — user-owned flexible tabs
-- [ ] Item 4 — settings screen
+- [x] Item 4 — settings screen
 - [ ] Item 5 — composer input card redesign
 - [ ] `task test` / `task lint` green
 - [ ] Manual dogfood pass
 
 ## Validation
 
-Not started.
+Track 1 (Items 1, 2, 4), 2026-09-18:
+
+- `cd web && bun run --filter '@smind/ui' test` — 764 tests / 70 files, all passing. New/updated coverage:
+  - Item 1: `app-sidebar.test.tsx` "AppSidebar collapsed header" — collapsed mode renders a `flex-col` icon stack (`sidebar-collapsed-header-actions`) with ThemeToggle/settings/accounts reachable; expanded mode asserts the CSS-variant swap (both variants live in the DOM, Tailwind `group-data-[collapsible=icon]:hidden` / `hidden` classes asserted since jsdom loads no stylesheets).
+  - Item 2: `App.test.tsx` "App chat column" — chat tab's `run-log-column` has `mx-auto max-w-3xl`; Files pane root has no `max-w` class.
+  - Item 4: `settings-screen.test.tsx` rewritten for the screen (no dialog role, Esc + Back navigate back); `app-sidebar.test.tsx` entry-point tests assert `onOpenSettings`; `App.test.tsx` "App settings view" — sidebar button swaps main area to the screen (with and without a selected task), Back/Esc return to the task view.
+- `task lint` (go vet + gofmt) — clean.
+- Not yet done: `task test` full Go suite (no Go files touched); manual dogfood pass (Track-wide, pending).
