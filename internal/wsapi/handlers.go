@@ -1062,19 +1062,37 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 // taskrunner.PermissionOption -- a small dedicated struct so the JSON wire
 // contract stays explicit in this package. CurrentValue is passed through
 // as raw JSON (its shape varies by option type: {"type":"id","value":...}
-// for select options, a bool for boolean options).
+// for select options, a bool for boolean options). Options carries a
+// "select"-type option's own enumerated choices (empty for every other
+// type) -- see acp.ConfigOption's doc comment.
 type configOptionParams struct {
-	ConfigID     string          `json:"configId"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description,omitempty"`
-	Category     string          `json:"category,omitempty"`
-	Type         string          `json:"type"`
-	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
+	ConfigID     string                     `json:"configId"`
+	Name         string                     `json:"name"`
+	Description  string                     `json:"description,omitempty"`
+	Category     string                     `json:"category,omitempty"`
+	Type         string                     `json:"type"`
+	CurrentValue json.RawMessage            `json:"currentValue,omitempty"`
+	Options      []configSelectOptionParams `json:"options,omitempty"`
+}
+
+// configSelectOptionParams is the wire shape of one configOptionParams'
+// selectable choices, mirroring acp.ConfigSelectOption.
+type configSelectOptionParams struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 func toConfigOptionParams(opts []acp.ConfigOption) []configOptionParams {
 	out := make([]configOptionParams, len(opts))
 	for i, o := range opts {
+		var options []configSelectOptionParams
+		if len(o.Options) > 0 {
+			options = make([]configSelectOptionParams, len(o.Options))
+			for j, so := range o.Options {
+				options[j] = configSelectOptionParams{Value: so.Value, Name: so.Name, Description: so.Description}
+			}
+		}
 		out[i] = configOptionParams{
 			ConfigID:     o.ConfigID,
 			Name:         o.Name,
@@ -1082,6 +1100,7 @@ func toConfigOptionParams(opts []acp.ConfigOption) []configOptionParams {
 			Category:     o.Category,
 			Type:         o.Type,
 			CurrentValue: o.CurrentValue,
+			Options:      options,
 		}
 	}
 	return out

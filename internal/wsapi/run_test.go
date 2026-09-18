@@ -1073,3 +1073,105 @@ func TestServer_RunStart_InvalidThinkingLevel_IsAClearError(t *testing.T) {
 		t.Fatal("run.start with an invalid thinkingLevel: error = nil, want a clear error")
 	}
 }
+
+// TestServer_RunConfigOptions_GLM_RealSelectRoundTrip proves
+// run.listConfigOptions/run.setConfigOption's wire response carries a real
+// ACP select option's enumerated choices (fakeagent's scripted
+// "thinking-level" option) under the "options" field -- what the
+// frontend's live-view control (task-move-approval-thinking.md's Item 3)
+// reads to render real named choices instead of a bare id field -- and
+// that setting an unrecognized configId surfaces the daemon's error rather
+// than silently no-op'ing. The "hang" scenario keeps the run's session
+// live (blocks after its first chunk) so set actually reaches it.
+func TestServer_RunConfigOptions_GLM_RealSelectRoundTrip(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+	t.Cleanup(func() {
+		sendRequest(t, ws, "stop", "run.stop", map[string]any{"runId": started.RunID})
+		_ = readEnvelopeFor(t, ws, "stop", 5*time.Second)
+	})
+
+	// Wait for the session to actually exist (at least one recorded event)
+	// before listing options -- same reasoning as the Registry-level test.
+	deadline := time.Now().Add(5 * time.Second)
+	var logs runLogsResult
+	for {
+		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
+		env := readEnvelopeFor(t, ws, "2", time.Until(deadline))
+		if err := json.Unmarshal(env.Result, &logs); err != nil {
+			t.Fatalf("decode run.logs result: %v", err)
+		}
+		if len(logs.Events) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for the run's first event")
+		}
+	}
+
+	sendRequest(t, ws, "3", "run.listConfigOptions", map[string]any{"runId": started.RunID})
+	resp = readEnvelopeFor(t, ws, "3", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.listConfigOptions error = %v", resp.Error.Message)
+	}
+	var list runConfigOptionsResult
+	if err := json.Unmarshal(resp.Result, &list); err != nil {
+		t.Fatalf("decode run.listConfigOptions result: %v", err)
+	}
+	if len(list.Options) != 1 || list.Options[0].ConfigID != "thinking-level" {
+		t.Fatalf("run.listConfigOptions options = %+v, want the thinking-level select option", list.Options)
+	}
+	wantChoices := []configSelectOptionParams{
+		{Value: "minimal", Name: "Minimal"},
+		{Value: "low", Name: "Low"},
+		{Value: "medium", Name: "Medium"},
+		{Value: "high", Name: "High"},
+	}
+	if len(list.Options[0].Options) != len(wantChoices) {
+		t.Fatalf("run.listConfigOptions options[0].options = %+v, want %+v", list.Options[0].Options, wantChoices)
+	}
+	for i, want := range wantChoices {
+		if list.Options[0].Options[i] != want {
+			t.Errorf("run.listConfigOptions options[0].options[%d] = %+v, want %+v", i, list.Options[0].Options[i], want)
+		}
+	}
+
+	sendRequest(t, ws, "4", "run.setConfigOption", map[string]any{
+		"runId": started.RunID, "configId": "thinking-level", "value": "high",
+	})
+	resp = readEnvelopeFor(t, ws, "4", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.setConfigOption error = %v", resp.Error.Message)
+	}
+	var set runConfigOptionsResult
+	if err := json.Unmarshal(resp.Result, &set); err != nil {
+		t.Fatalf("decode run.setConfigOption result: %v", err)
+	}
+	if len(set.Options) != 1 || string(set.Options[0].CurrentValue) != `{"type":"id","value":"high"}` {
+		t.Fatalf("run.setConfigOption options = %+v, want currentValue reflecting the new value %q", set.Options, "high")
+	}
+
+	sendRequest(t, ws, "5", "run.setConfigOption", map[string]any{
+		"runId": started.RunID, "configId": "no-such-option", "value": "high",
+	})
+	resp = readEnvelopeFor(t, ws, "5", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("run.setConfigOption with an unrecognized configId: error = nil, want the daemon's rejection surfaced, not a silent no-op")
+	}
+}

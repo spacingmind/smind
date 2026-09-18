@@ -114,7 +114,35 @@ func handle(msg message, sessionCwd *string) {
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
-		respond(msg.ID, map[string]any{"sessionId": sessionID})
+		// Scripts a select-kind option (with its own enumerated choices,
+		// like GLM's real thinking-level tiers) and a boolean-kind option
+		// (no choices at all) -- proving Client.NewSession decodes both
+		// shapes, including a select's Options list, intact and in order.
+		respond(msg.ID, map[string]any{
+			"sessionId": sessionID,
+			"configOptions": []map[string]any{
+				{
+					"configId":     "thinking-level",
+					"name":         "Thinking Level",
+					"description":  "How much the model reasons before responding",
+					"category":     "thought_level",
+					"type":         "select",
+					"currentValue": "medium",
+					"options": []map[string]any{
+						{"value": "minimal", "name": "Minimal"},
+						{"value": "low", "name": "Low"},
+						{"value": "medium", "name": "Medium"},
+						{"value": "high", "name": "High", "description": "Reasons the longest"},
+					},
+				},
+				{
+					"configId":     "web-search",
+					"name":         "Web Search",
+					"type":         "boolean",
+					"currentValue": true,
+				},
+			},
+		})
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)
 	case msg.Method == "session/prompt":
