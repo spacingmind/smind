@@ -24,7 +24,7 @@ import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -50,7 +50,7 @@ import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-prov
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
-import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
+import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
@@ -179,6 +179,25 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // in-progress drag) whenever that prop's value changes. Freezing it
   // here breaks that feedback loop.
   const initialSidebarWidth = useInitialValue(sidebarWidth, "sidebar");
+
+  // Icon-collapsed dead space: shadcn's Sidebar shrinks its own *visual*
+  // content to the icon rail via CSS (`--sidebar-width-icon`), but that's
+  // independent of the ResizablePanel wrapping it -- toggling collapse
+  // used to leave the panel at its last dragged/default width, an empty
+  // gap between the icon rail and the resize handle. Lifting `open` here
+  // (as SidebarProvider's controlled prop, rather than its own internal
+  // state) lets this same effect drive the panel's actual width via its
+  // imperative handle whenever collapse state changes, in either
+  // direction (Ctrl+B, the sidebar trigger button, or a future caller).
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const sidebarPanelRef = usePanelRef();
+  useEffect(() => {
+    if (sidebarOpen) {
+      sidebarPanelRef.current?.expand();
+    } else {
+      sidebarPanelRef.current?.collapse();
+    }
+  }, [sidebarOpen, sidebarPanelRef]);
 
   useEffect(() => {
     let cancelled = false;
@@ -659,6 +678,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     <SidebarProvider
       className="h-svh"
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+      open={sidebarOpen}
+      onOpenChange={setSidebarOpen}
     >
       {/*
        * `sidebar.toggle` is claimed by a child of SidebarProvider rather
@@ -707,10 +728,26 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
            * collapse the sidebar to 0 or push it off-screen.
            */}
           <ResizablePanel
+            panelRef={sidebarPanelRef}
             defaultSize={initialSidebarWidth}
             minSize={SIDEBAR_MIN_WIDTH}
             maxSize={SIDEBAR_MAX_WIDTH}
-            onResize={(size) => setSidebarWidth(size.inPixels)}
+            collapsible
+            collapsedSize={SIDEBAR_ICON_WIDTH}
+            onResize={(size) => {
+              // Dragging the handle below minSize snaps a collapsible
+              // panel straight to collapsedSize (react-resizable-panels'
+              // own behavior) without going through the `sidebarOpen`
+              // effect above -- reflect that back into shadcn's Sidebar
+              // context so its icon-rail CSS actually kicks in, instead of
+              // squeezing the full expanded layout into 48px.
+              if (sidebarPanelRef.current?.isCollapsed()) {
+                setSidebarOpen(false);
+                return;
+              }
+              setSidebarOpen(true);
+              setSidebarWidth(size.inPixels);
+            }}
             className="min-w-0"
           >
             {sidebarElement}
