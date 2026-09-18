@@ -127,6 +127,21 @@ async function openBaseTab(label: "Files" | "Diff" | "Terminal"): Promise<void> 
   await flush();
 }
 
+/**
+ * Splits `title`'s tab to the right via the tab strip's own "Split" menu --
+ * replaces the old single "Open to the side" button (Item 3's rewrite).
+ * Same focus+Enter dance as `openBaseTab` for opening the trigger reliably
+ * under this file's fake timers.
+ */
+async function splitTabRight(title: string): Promise<void> {
+  const trigger = screen.getByRole("button", { name: `Split ${title}` });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByTestId("workspace-tab-split-right"));
+  await flush();
+}
+
 /** Selects task's row, opens its Files tab, expands nothing, and clicks the README.md row -- the file-open flow the tab registry tests build on. */
 async function openFileInTask(socket: FakeSocket, task: Task, content: string): Promise<void> {
   clickTaskRow(task);
@@ -1146,8 +1161,7 @@ describe("App splits (Item 6)", () => {
 
     expect(socket.sent.filter((e) => e.method === "terminal.create")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Terminal to the side" }));
-    await flush();
+    await splitTabRight("Terminal");
 
     // The pane remounts fresh in the side dock's own <Tabs> root, which
     // re-runs TerminalPane's list-then-attach effect exactly like a
@@ -1166,6 +1180,76 @@ describe("App splits (Item 6)", () => {
 
     const sidePane = screen.getByTestId("side-pane");
     expect(within(sidePane).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+  });
+
+  it("splitting twice creates a third pane, each retaining its own independent tab state (Item 4)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    // TASK_B, not TASK_A -- this opens a fresh terminal tab and expects a
+    // genuine terminal.create, which a taskId=1 terminal tab (TASK_A's)
+    // wouldn't get if an earlier test in this file already bound
+    // "1:terminal" to a session id (lib/terminal-sessions.ts's bindings
+    // map isn't reset between tests in this file).
+    await resolveSidebar(socket, [TASK_B]);
+
+    clickTaskRow(TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // First split: Diff moves out of the default pane into a second pane.
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+
+    // Second split, from the default pane again: open Terminal there,
+    // then split it into its own (third) pane.
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+
+    const splitTerminalTrigger = within(primaryPane).getByRole("button", { name: "Split Terminal" });
+    splitTerminalTrigger.focus();
+    fireEvent.keyDown(splitTerminalTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByTestId("workspace-tab-split-down"));
+    await flush();
+
+    // The second split wraps the default pane's own tree position in a new
+    // group (a pane converting to a group at that spot), so its Tabs root
+    // remounts fresh -- re-query it rather than reuse the pre-split node.
+    const finalPrimaryPane = screen.getByTestId("primary-pane");
+
+    // Three independent panes now exist -- the fixed primary-pane/side-pane
+    // testids only tell the common 0-or-1-split case apart, so the third
+    // pane is targeted via data-pane-id instead.
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+
+    const diffPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Diff" }));
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }));
+    expect(diffPane).toBeDefined();
+    expect(terminalPane).toBeDefined();
+    expect(diffPane).not.toBe(terminalPane);
+    expect(diffPane).not.toBe(finalPrimaryPane);
+    expect(terminalPane).not.toBe(finalPrimaryPane);
+
+    // Each pane really is independent -- neither Diff nor Terminal leaked
+    // back into the default pane, which kept only Chat.
+    expect(within(finalPrimaryPane).getByRole("tab", { name: "Chat" })).toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
   });
 });
 

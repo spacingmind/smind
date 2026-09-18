@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { ArrowLeftToLine, ArrowRightToLine } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Columns2 } from "lucide-react";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -11,6 +11,7 @@ import { FileEditorPane } from "@/components/file-editor-pane";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -37,12 +38,19 @@ import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
-import { isMovableKind, useTaskTabs, type PaneId, type TabPlacement } from "@/hooks/use-task-tabs";
+import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
-import { SIDE_PANE_MAX_WIDTH, SIDE_PANE_MIN_WIDTH, useSidePaneWidth } from "@/hooks/use-side-pane-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
+import {
+  collectAllPanes,
+  collectAllTabs,
+  DEFAULT_PANE_ID,
+  findPaneById,
+  MIN_SPLIT_SIZE,
+  type SplitNode,
+} from "@/lib/split-tree";
 import type { ThemePreference } from "@/lib/theme";
 import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
@@ -126,7 +134,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // owns.
   const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab } = useTaskTabs();
+  const { tabsByTask, ensureTask, openTab, closeTab, activate, splitTab, resizeGroup } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
 
@@ -136,19 +144,13 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // strings are treated as percentages), so these pixel values pass
   // straight through with no percentage conversion needed.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
-  // Persisted per task (Item 6's criterion) -- taskId is null before any
-  // task is selected, in which case the hook just returns the default
-  // and ignores writes.
-  const [sidePaneWidth, setSidePaneWidth] = useSidePaneWidth(selectedTask?.ID ?? null);
-  // `sidebarWidth`/`sidePaneWidth` update on every drag frame (via
-  // `onResize` below) so the live value can drive the sidebar's CSS var
-  // and get persisted -- but react-resizable-panels' `defaultSize` is
-  // documented as the panel's *initial* size only, and re-registers the
-  // panel (fighting the in-progress drag) whenever that prop's value
-  // changes. Freezing it here breaks that feedback loop; the side pane's
-  // freeze resets per task since its persisted width is per-task.
+  // `sidebarWidth` updates on every drag frame (via `onResize` below) so
+  // the live value can drive the sidebar's CSS var and get persisted --
+  // but react-resizable-panels' `defaultSize` is documented as the
+  // panel's *initial* size only, and re-registers the panel (fighting the
+  // in-progress drag) whenever that prop's value changes. Freezing it
+  // here breaks that feedback loop.
   const initialSidebarWidth = useInitialValue(sidebarWidth, "sidebar");
-  const initialSidePaneWidth = useInitialValue(sidePaneWidth, selectedTask?.ID ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -249,13 +251,26 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   function openTerminalTab() {
     if (!selectedTask) return;
     const state = tabsByTask.get(selectedTask.ID);
-    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, [
-      ...(state?.primary.tabs ?? []),
-      ...(state?.side?.tabs ?? []),
-    ]));
+    const tabs = state ? collectAllTabs(state.root) : [];
+    openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, tabs));
+  }
+
+  /** Splits paneId's tab in `direction` -- the tab-strip's own affordance (Item 3), targeting whichever pane it was clicked from. */
+  function splitPaneTab(paneId: string, key: string, direction: SplitDirection) {
+    if (!selectedTask) return;
+    splitTab(selectedTask.ID, key, paneId, direction);
+  }
+
+  /** Persists a resize handle drag's new sizes for one group in the selected task's split tree. */
+  function resizePaneGroup(groupId: string, sizes: number[]) {
+    if (!selectedTask) return;
+    resizeGroup(selectedTask.ID, groupId, sizes);
   }
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
+  const defaultPane = taskState ? findPaneById(taskState.root, DEFAULT_PANE_ID) : null;
+  const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
+  const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
 
   // --- Routing (Item 3) ------------------------------------------------
   //
@@ -300,7 +315,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   useEffect(() => {
     if (!selectedTask) return;
-    const activeEntry = taskState?.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
+    // With an arbitrary tree of panes there's no single "primary" story to
+    // lean on any more -- whichever pane the user last focused is the only
+    // rule that generalizes (see the plan's Decisions).
+    const activeEntry = focusedPane?.tabs.find((t) => t.key === focusedPane.activeKey);
     const tab: Route["tab"] =
       activeEntry?.kind === "file"
         ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
@@ -314,7 +332,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     if (window.location.hash !== nextHash) {
       window.location.hash = nextHash;
     }
-  }, [selectedTask, taskState?.primary.activeKey, taskState?.primary.tabs]);
+  }, [selectedTask, focusedPane]);
 
   // --- Keyboard actions the shell itself performs ---------------------
   //
@@ -337,32 +355,32 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     setPreference(next);
   });
 
-  // Both bindings are scoped to the primary pane -- Item 6 adds no
+  // Both bindings are scoped to the default pane -- Item 6 adds no
   // "which pane has keyboard focus" concept (Paseo's pane.focus.*
   // actions were already out of scope for Item 4's binding table), so
-  // Ctrl+W/Ctrl+Alt+<digit> reach primary's tabs only. The side pane's
-  // tabs stay mouse/palette-operable.
+  // Ctrl+W/Ctrl+Alt+<digit> reach the default pane's tabs only. Every
+  // other pane's tabs stay mouse/palette-operable.
   useActionHandler(
     "tab.close",
     () => {
-      if (!selectedTask || !taskState?.primary.activeKey) return;
-      const active = taskState.primary.tabs.find((t) => t.key === taskState.primary.activeKey);
+      if (!selectedTask || !defaultPane?.activeKey) return;
+      const active = defaultPane.tabs.find((t) => t.key === defaultPane.activeKey);
       // Every tab is closable (Item 3), but the shortcut still mirrors
       // the strip: no active tab (everything closed) means nothing to do.
       if (!active?.closable) return;
       closeTab(selectedTask.ID, active.key);
     },
-    { enabled: Boolean(selectedTask && taskState?.primary.activeKey) },
+    { enabled: Boolean(selectedTask && defaultPane?.activeKey) },
   );
 
   useActionHandler(
     "tab.jump",
     (payload) => {
-      if (!selectedTask || !taskState || payload === null) return;
-      const entry = taskState.primary.tabs[payload.digit - 1];
+      if (!selectedTask || !defaultPane || payload === null) return;
+      const entry = defaultPane.tabs[payload.digit - 1];
       if (entry) activate(selectedTask.ID, entry.key);
     },
-    { enabled: Boolean(selectedTask && taskState) },
+    { enabled: Boolean(selectedTask && defaultPane) },
   );
 
   const stepTask = useCallback(
@@ -419,24 +437,25 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     </div>
   );
 
-  // Item 21: on compact, the side dock (Item 6) gracefully doesn't apply --
-  // primary and side merge into one strip (no "open to side" affordance,
-  // via PaneTabStrip's showMoveAffordance) rather than a split with
-  // nowhere for a moved tab to land or, worse, silently hiding whatever
-  // was in the side pane. `activate`/`closeTab` are already pane-agnostic
-  // (useTaskTabs.ts finds a key's pane by lookup), so both merged tabs
-  // keep working through the same handlers unmodified. The side pane's
-  // own activeKey wins the merged strip's initial focus over primary's --
-  // a side pane only exists because something was deliberately opened
-  // into it, so that's more likely to be what the user was just looking
-  // at than whichever base tab primary was last on.
-  const compactTabs = taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : [];
-  const compactActiveKey = taskState ? (taskState.side?.activeKey ?? taskState.primary.activeKey) : null;
+  // Item 21: on compact, the split tree gracefully doesn't apply -- every
+  // pane merges into one strip (no "split" affordance, via PaneTabStrip's
+  // showMoveAffordance) rather than a layout with nowhere to put a second
+  // (or third) pane on a phone. `activate`/`closeTab` are already
+  // pane-agnostic (useTaskTabs.ts finds a key's pane by lookup), so every
+  // merged tab keeps working through the same handlers unmodified. The
+  // currently-focused pane's activeKey wins the merged strip's initial
+  // focus -- a non-default pane only exists because something was
+  // deliberately opened or split into it, so that's more likely to be
+  // what the user was just looking at than whichever base tab the
+  // default pane was last on.
+  const compactTabs = taskState ? collectAllTabs(taskState.root) : [];
+  const compactActiveKey = focusedPane?.activeKey ?? null;
   const compactPrimaryStrip = selectedTask && taskState && (
     <PaneTabStrip
-      paneId="primary"
+      paneId={DEFAULT_PANE_ID}
       tabs={compactTabs}
       activeKey={compactActiveKey}
+      paneCount={paneCount}
       task={selectedTask}
       client={client}
       connectionStatus={connectionStatus}
@@ -445,7 +464,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onOpenFileToSide={openFileTabToSide}
       onActivate={(key) => activate(selectedTask.ID, key)}
       onClose={(key) => closeTab(selectedTask.ID, key)}
-      onMove={(key) => moveTab(selectedTask.ID, key, "side")}
+      onSplit={() => {}}
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
@@ -466,66 +485,32 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         isMobile ? (
           compactPrimaryStrip
         ) : (
-          // The side dock (Item 6): one optional split, primary + side,
-          // each its own Radix Tabs root. Moving a tab between them
-          // (PaneTabStrip's move button) is a plain data move in
-          // useTaskTabs -- the pane component underneath *does* fully
-          // unmount from one root and mount in the other, which is fine
-          // because every such component already tolerates ADR 0004's
-          // "switching tabs unmounts inactive content" and reattaches to
-          // its server-side session rather than recreating it (see
-          // use-task-tabs.ts's doc comment).
-          <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
-            <ResizablePanel minSize={30} className="min-w-0">
-              <PaneTabStrip
-                paneId="primary"
-                tabs={taskState.primary.tabs}
-                activeKey={taskState.primary.activeKey}
-                task={selectedTask}
-                client={client}
-                connectionStatus={connectionStatus}
-                events={events}
-                onOpenFile={openFileTab}
-                onOpenFileToSide={openFileTabToSide}
-                onActivate={(key) => activate(selectedTask.ID, key)}
-                onClose={(key) => closeTab(selectedTask.ID, key)}
-                onMove={(key) => moveTab(selectedTask.ID, key, "side")}
-                onRevealInDiff={revealInDiff}
-                onNewTerminal={openTerminalTab}
-                onOpenBase={openBaseTab}
-              />
-            </ResizablePanel>
-            {taskState.side && (
-              <>
-                <ResizableHandle withHandle id="side-pane-resize-handle" />
-                <ResizablePanel
-                  defaultSize={initialSidePaneWidth}
-                  minSize={SIDE_PANE_MIN_WIDTH}
-                  maxSize={SIDE_PANE_MAX_WIDTH}
-                  onResize={(size) => setSidePaneWidth(size.inPixels)}
-                  className="min-w-0 border-l"
-                >
-                  <PaneTabStrip
-                    paneId="side"
-                    tabs={taskState.side.tabs}
-                    activeKey={taskState.side.activeKey}
-                    task={selectedTask}
-                    client={client}
-                    connectionStatus={connectionStatus}
-                    events={events}
-                    onOpenFile={openFileTab}
-                    onOpenFileToSide={openFileTabToSide}
-                    onActivate={(key) => activate(selectedTask.ID, key)}
-                    onClose={(key) => closeTab(selectedTask.ID, key)}
-                    onMove={(key) => moveTab(selectedTask.ID, key, "primary")}
-                    onRevealInDiff={revealInDiff}
-                    onNewTerminal={openTerminalTab}
-                    onOpenBase={openBaseTab}
-                  />
-                </ResizablePanel>
-              </>
-            )}
-          </ResizablePanelGroup>
+          // The split tree (pane-split-tree plan): an arbitrary number of
+          // panes, each its own Radix Tabs root. Splitting or moving a
+          // tab between panes is a plain data move in useTaskTabs -- the
+          // pane component underneath *does* fully unmount from one root
+          // and mount in another, which is fine because every such
+          // component already tolerates ADR 0004's "switching tabs
+          // unmounts inactive content" and reattaches to its server-side
+          // session rather than recreating it (see use-task-tabs.ts's doc
+          // comment).
+          <SplitTreeView
+            node={taskState.root}
+            paneCount={paneCount}
+            task={selectedTask}
+            client={client}
+            connectionStatus={connectionStatus}
+            events={events}
+            onOpenFile={openFileTab}
+            onOpenFileToSide={openFileTabToSide}
+            onActivate={(key) => activate(selectedTask.ID, key)}
+            onClose={(key) => closeTab(selectedTask.ID, key)}
+            onSplitTab={splitPaneTab}
+            onResizeGroup={resizePaneGroup}
+            onRevealInDiff={revealInDiff}
+            onNewTerminal={openTerminalTab}
+            onOpenBase={openBaseTab}
+          />
         )
       ) : (
         emptyStateElement
@@ -560,7 +545,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         tasks={allTasks}
         workspaces={allWorkspaces}
         selectedTask={selectedTask}
-        tabs={taskState ? [...taskState.primary.tabs, ...(taskState.side?.tabs ?? [])] : null}
+        tabs={taskState ? collectAllTabs(taskState.root) : null}
         onSelectTask={selectTask}
         onOpenTab={openTab}
         onActivateTab={activate}
@@ -808,36 +793,12 @@ function SidebarToggleAction() {
   return null;
 }
 
-/** The kind→renderer lookup: adding a new tab kind means adding an entry here plus a TAB_KINDS descriptor, never editing the strip's layout logic. */
 /**
- * One pane's tab strip + content: title, an "Open to side"/"Move to
- * primary" affordance on movable kinds (file/diff/terminal -- Chat and
- * Files stay pinned, per Item 6), and the existing close affordance on
- * closable kinds. Shared between the primary and side panes rather than
- * written twice, parameterized by `paneId` only for the move button's
- * direction and label.
+ * Everything a leaf pane needs to render its tab strip + content, shared
+ * unchanged across every pane in the tree -- only `paneId`/`tabs`/
+ * `activeKey`/`paneCount` vary per pane (see {@link SplitTreeView}).
  */
-function PaneTabStrip({
-  paneId,
-  tabs,
-  activeKey,
-  task,
-  client,
-  connectionStatus,
-  events,
-  onOpenFile,
-  onOpenFileToSide,
-  onActivate,
-  onClose,
-  onMove,
-  onRevealInDiff,
-  onNewTerminal,
-  onOpenBase,
-  showMoveAffordance = true,
-}: {
-  paneId: PaneId;
-  tabs: TabEntry[];
-  activeKey: string | null;
+interface SplitPaneCallbacks {
   task: Task;
   client: WsClient | null;
   connectionStatus: ConnectionStatus;
@@ -846,18 +807,161 @@ function PaneTabStrip({
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
-  onMove: (key: string) => void;
+  /** Splits `key`'s tab off of `paneId` in `direction` -- Item 3's affordance, threaded down so each pane can bind its own id at the point it's rendered. */
+  onSplitTab: (paneId: string, key: string, direction: SplitDirection) => void;
+  /** Persists a resize handle drag's new sizes for the group with `groupId`. */
+  onResizeGroup: (groupId: string, sizes: number[]) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
-  /** Item 21: the side dock (Item 6) is a desktop-only concept -- compact has nowhere for "open to side" to move a tab to, so it's hidden rather than left to open a split that never renders. */
+}
+
+function splitNodeId(node: SplitNode): string {
+  return node.kind === "pane" ? node.pane.id : node.group.id;
+}
+
+/**
+ * The recursive renderer for a task's split tree (Item 4): a `"pane"` node
+ * is a leaf -- {@link PaneTabStrip} -- and a `"group"` node is a
+ * `ResizablePanelGroup` wrapping one `ResizablePanel` per child, recursing.
+ * `react-resizable-panels` nests `ResizablePanelGroup`s arbitrarily -- this
+ * is its own documented pattern, not new capability being added here.
+ *
+ * This component itself never calls a hook conditionally: the group-only
+ * `useInitialValue` call lives in {@link SplitGroupView}, a distinct
+ * component the "pane" branch never renders, so a pane converting to a
+ * group (a fresh split) is an ordinary "different component type at this
+ * position" remount, not a rules-of-hooks violation.
+ */
+function SplitTreeView({
+  node,
+  paneCount,
+  ...shared
+}: { node: SplitNode; paneCount: number } & SplitPaneCallbacks) {
+  if (node.kind === "pane") {
+    return (
+      <PaneTabStrip
+        paneId={node.pane.id}
+        tabs={node.pane.tabs}
+        activeKey={node.pane.activeKey}
+        paneCount={paneCount}
+        task={shared.task}
+        client={shared.client}
+        connectionStatus={shared.connectionStatus}
+        events={shared.events}
+        onOpenFile={shared.onOpenFile}
+        onOpenFileToSide={shared.onOpenFileToSide}
+        onActivate={shared.onActivate}
+        onClose={shared.onClose}
+        onSplit={(key, direction) => shared.onSplitTab(node.pane.id, key, direction)}
+        onRevealInDiff={shared.onRevealInDiff}
+        onNewTerminal={shared.onNewTerminal}
+        onOpenBase={shared.onOpenBase}
+      />
+    );
+  }
+  return <SplitGroupView node={node} paneCount={paneCount} {...shared} />;
+}
+
+function SplitGroupView({
+  node,
+  paneCount,
+  ...shared
+}: { node: Extract<SplitNode, { kind: "group" }>; paneCount: number } & SplitPaneCallbacks) {
+  // Frozen at mount (per group id) for the same reason `initialSidebarWidth`
+  // is frozen above: react-resizable-panels' `defaultLayout` is the
+  // group's *initial* layout only, and re-registers every panel (fighting
+  // an in-progress drag) if the prop's value changes on every resize
+  // frame. A resize's own live sizes still reach `resizeSplitInLayout`
+  // via `onLayoutChange` below -- this only stops that write-back from
+  // feeding back into the prop that seeded this render.
+  const initialLayout = useInitialValue(
+    Object.fromEntries(
+      node.group.children.map((child, index) => [splitNodeId(child), (node.group.sizes[index] ?? 0) * 100]),
+    ),
+    node.group.id,
+  );
+
+  return (
+    <ResizablePanelGroup
+      id={node.group.id}
+      orientation={node.group.direction === "horizontal" ? "horizontal" : "vertical"}
+      className="h-full w-full"
+      defaultLayout={initialLayout}
+      onLayoutChange={(layout) => {
+        const sizes = node.group.children.map((child) => (layout[splitNodeId(child)] ?? 0) / 100);
+        shared.onResizeGroup(node.group.id, sizes);
+      }}
+    >
+      {node.group.children.map((child, index) => (
+        <Fragment key={splitNodeId(child)}>
+          {index > 0 && <ResizableHandle withHandle />}
+          <ResizablePanel id={splitNodeId(child)} minSize={`${MIN_SPLIT_SIZE * 100}%`} className="min-w-0">
+            <SplitTreeView node={child} paneCount={paneCount} {...shared} />
+          </ResizablePanel>
+        </Fragment>
+      ))}
+    </ResizablePanelGroup>
+  );
+}
+
+/**
+ * One pane's tab strip + content: title, a "Split" affordance on movable
+ * kinds (file/diff/terminal -- Chat and Files stay pinned, per Item 6),
+ * and the existing close affordance on closable kinds. Shared across
+ * every pane in the tree rather than written per-pane, parameterized by
+ * `paneId` only for which pane a split/open-base action targets.
+ */
+function PaneTabStrip({
+  paneId,
+  tabs,
+  activeKey,
+  paneCount,
+  task,
+  client,
+  connectionStatus,
+  events,
+  onOpenFile,
+  onOpenFileToSide,
+  onActivate,
+  onClose,
+  onSplit,
+  onRevealInDiff,
+  onNewTerminal,
+  onOpenBase,
+  showMoveAffordance = true,
+}: {
+  paneId: PaneId;
+  tabs: TabEntry[];
+  activeKey: string | null;
+  /** How many panes exist in the tree right now -- only used to pick the outer root's `data-testid` (see below). */
+  paneCount: number;
+  task: Task;
+  client: WsClient | null;
+  connectionStatus: ConnectionStatus;
+  events: ReturnType<typeof useDaemonEvents>;
+  onOpenFile: (path: string) => void;
+  onOpenFileToSide: (path: string) => void;
+  onActivate: (key: string) => void;
+  onClose: (key: string) => void;
+  onSplit: (key: string, direction: SplitDirection) => void;
+  onRevealInDiff: () => void;
+  onNewTerminal: () => void;
+  /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
+  onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** Item 21: the split tree is a desktop-only concept -- compact has nowhere for "split" to open a second pane, so it's hidden rather than left to open a split that never renders. */
   showMoveAffordance?: boolean;
 }) {
   return (
     <Tabs
       key={`${task.ID}:${paneId}`}
-      data-testid={paneId === "primary" ? "primary-pane" : "side-pane"}
+      // The fixed `primary-pane`/`side-pane` testids only tell the two
+      // panes of today's common 0-or-1-split case apart; a 3rd+ pane has
+      // no fixed name, so `data-pane-id` below is what a test targeting
+      // it uses instead.
+      data-testid={paneId === DEFAULT_PANE_ID ? "primary-pane" : paneCount === 2 ? "side-pane" : undefined}
+      data-pane-id={paneId}
       value={activeKey ?? undefined}
       onValueChange={onActivate}
       className="h-full gap-0"
@@ -874,38 +978,35 @@ function PaneTabStrip({
             >
               <TabLabel entry={entry} />
               {isMovableKind(entry.kind) && showMoveAffordance && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={
-                    paneId === "primary"
-                      ? `Open ${entry.title} to the side`
-                      : `Move ${entry.title} to the primary pane`
-                  }
-                  data-testid="workspace-tab-move"
-                  data-tab-key={entry.key}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onMove(entry.key);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" && e.key !== " ") return;
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onMove(entry.key);
-                  }}
-                  className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
-                >
-                  {/* aria-hidden: this span's own aria-label already names it; without
-                      hiding the icon too, it would be announced a second time as
-                      part of the *ancestor* TabsTrigger's accessible name. */}
-                  {paneId === "primary" ? (
-                    <ArrowRightToLine aria-hidden="true" className="size-3" />
-                  ) : (
-                    <ArrowLeftToLine aria-hidden="true" className="size-3" />
-                  )}
-                </span>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Split ${entry.title}`}
+                      data-testid="workspace-tab-split"
+                      data-tab-key={entry.key}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                      }}
+                      className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+                    >
+                      {/* aria-hidden: this span's own aria-label already names it; without
+                          hiding the icon too, it would be announced a second time as
+                          part of the *ancestor* TabsTrigger's accessible name. */}
+                      <Columns2 aria-hidden="true" className="size-3" />
+                    </span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    <DropdownMenuItem data-testid="workspace-tab-split-right" onClick={() => onSplit(entry.key, "right")}>
+                      Split right
+                    </DropdownMenuItem>
+                    <DropdownMenuItem data-testid="workspace-tab-split-down" onClick={() => onSplit(entry.key, "down")}>
+                      Split down
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               {entry.closable && (
                 <span
@@ -941,9 +1042,11 @@ function PaneTabStrip({
             ))}
           </TabsList>
         )}
-        <NewTabButton onOpen={(kind) => onOpenBase(kind, paneId === "primary" ? "primary" : "side")} />
+        <NewTabButton onOpen={(kind) => onOpenBase(kind, paneId === DEFAULT_PANE_ID ? "primary" : "side")} />
       </div>
-      {tabs.length === 0 && <TabsEmptyState onOpen={(kind) => onOpenBase(kind, paneId === "primary" ? "primary" : "side")} />}
+      {tabs.length === 0 && (
+        <TabsEmptyState onOpen={(kind) => onOpenBase(kind, paneId === DEFAULT_PANE_ID ? "primary" : "side")} />
+      )}
       {tabs.map((entry) => (
         /*
          * Terminal tabs force-mount (and hide when inactive) so a

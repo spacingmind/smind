@@ -5,6 +5,7 @@ import {
   clampNormalizedSizes,
   collectAllPanes,
   createDefaultLayout,
+  detachTabFromTree,
   getTreeDepth,
   moveTabToPaneInLayout,
   normalizeLayout,
@@ -167,6 +168,39 @@ describe("pane removal (closing a pane's last tab)", () => {
     expect(nextRoot.pane.id).toBe("only-root");
     expect(nextRoot.pane.tabs).toEqual([]);
     expect(nextRoot.pane.activeKey).toBeNull();
+  });
+
+  it("collapses primary into its sibling on close, rather than keeping it alive-but-empty, when a sibling pane exists (detachTabFromTree with a dynamic preserveEmptyPaneId)", () => {
+    const primaryTab = tab("primary-tab");
+    const sideTab = tab("side-tab");
+    const layout: TaskLayout = { root: pane("primary", [primaryTab], primaryTab.key), focusedPaneId: "primary" };
+    const split = splitPaneInLayout({
+      layout,
+      tabKey: primaryTab.key,
+      targetPaneId: "primary",
+      position: "right",
+      createNodeId: makeCreateNodeId(),
+      maxTreeDepth: 5,
+    });
+    expect(split).not.toBeNull();
+
+    // Reconstruct: primary now empty, pane-1 holds primaryTab. Open a
+    // second tab in primary so both siblings are non-empty.
+    const rootWithBothNonEmpty: SplitNode = {
+      kind: "group",
+      group: {
+        id: (split!.layout.root as { group: { id: string } }).group.id,
+        direction: "horizontal",
+        children: [pane("primary", [sideTab], sideTab.key), pane(split!.paneId, [primaryTab], primaryTab.key)],
+        sizes: [0.5, 0.5],
+      },
+    };
+
+    const { root } = detachTabFromTree(rootWithBothNonEmpty, { tabKey: sideTab.key, preserveEmptyPaneId: null });
+    expect(root.kind).toBe("pane");
+    if (root.kind !== "pane") throw new Error("unreachable");
+    expect(root.pane.id).toBe(split!.paneId);
+    expect(root.pane.tabs.map((t) => t.key)).toEqual([primaryTab.key]);
   });
 });
 
