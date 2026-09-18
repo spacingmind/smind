@@ -424,6 +424,7 @@ export function AppSidebar({
           data-testid="sidebar-expanded-header"
           className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden"
         >
+          <img src="/logo.png" alt="" className="size-5 shrink-0" />
           <span className="text-workspace-title tracking-tight">smind</span>
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />

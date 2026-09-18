@@ -133,7 +133,7 @@
     --card-foreground: oklch(0.145 0 0);
     --popover: oklch(1 0 0);
     --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
+    --primary: oklch(0.489 0.08 194.8);
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.97 0 0);
     --secondary-foreground: oklch(0.205 0 0);
@@ -144,7 +144,7 @@
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --ring: oklch(0.75 0.11 194.8);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -153,12 +153,12 @@
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary: oklch(0.489 0.08 194.8);
     --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.97 0 0);
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar-ring: oklch(0.75 0.11 194.8);
 
     /*
      * Elevation scale (audit-paseo.md §6's surface0..3 vocabulary),
@@ -290,7 +290,7 @@
     --card-foreground: oklch(0.985 0 0);
     --popover: oklch(0.205 0 0);
     --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
+    --primary: oklch(0.904 0.136 196.2);
     --primary-foreground: oklch(0.205 0 0);
     --secondary: oklch(0.269 0 0);
     --secondary-foreground: oklch(0.985 0 0);
@@ -301,7 +301,7 @@
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --ring: oklch(0.904 0.136 196.2);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -310,23 +310,23 @@
     --sidebar: oklch(0.205 0 0);
     --sidebar-foreground: oklch(0.985 0 0);
     /*
-     * Was oklch(0.488 0.243 264.376) -- a saturated blue, the one
-     * chromatic token in an otherwise achromatic dark palette
-     * (docs/research/uiux-audit.md §2.5's flagged anomaly), and unused:
-     * `grep -rn "sidebar-primary" src` outside this file returns nothing,
-     * confirmed while landing this item. Resolved deliberately (Item 1's
-     * acceptance criterion) by making it achromatic like every other
-     * primary pair, matching the light theme's own polarity (near-black
-     * bg / near-white foreground, inverted here) rather than deleting the
-     * token outright -- a future shadcn component that reads it should
-     * get a sane grayscale value, not a random accent.
+     * Brand cyan (smind logo's core glow color, ~#51fbfd, sampled directly
+     * from the mark and converted to OKLCH -- see docs/design.md). This
+     * token was previously made deliberately achromatic (an earlier
+     * unrelated blue was flagged as an unused anomaly and reset to match
+     * the rest of the palette, docs/research/uiux-audit.md §2.5) -- that
+     * reasoning no longer applies now that the product has an actual brand
+     * mark to carry through. Matches --primary/--ring above: one hue, used
+     * only on primary actions/focus rings/active-sidebar-state, everywhere
+     * else in the app stays achromatic per the calm-technical-console
+     * thesis (docs/design.md).
      */
-    --sidebar-primary: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.904 0.136 196.2);
     --sidebar-primary-foreground: oklch(0.205 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar-ring: oklch(0.904 0.136 196.2);
 
     --surface-0: var(--background);
     --surface-1: var(--card);
