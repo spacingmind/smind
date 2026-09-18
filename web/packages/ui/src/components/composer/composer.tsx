@@ -19,15 +19,57 @@ import type { WsClientLike } from "@/lib/ws-client";
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
-// internal/taskrunner.ApprovalPolicy's two values. "manual" is first since
-// it's the daemon's default when run.start omits the field entirely.
-const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
-  { id: "manual", label: "Manual approval" },
-  { id: "auto-safe", label: "Auto-safe" },
-];
+/** One entry in the approval-policy Select, per provider -- see approvalPolicyOptions. */
+interface ApprovalPolicyOption {
+  id: ApprovalPolicy;
+  label: string;
+  /** Per-option tooltip (SelectItem's `title`), and -- for the current selection -- the trigger's own `title` too. */
+  help: string;
+}
 
-const APPROVAL_POLICY_HELP =
+const MANUAL_HELP = "Every action needs your approval before it runs.";
+const AUTO_SAFE_HELP =
   "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
+
+/**
+ * "manual" and "auto-safe" behave identically across every provider (a
+ * decider smind installs itself), but "full-access" doesn't -- it installs
+ * no decider at all and hands the provider its own native "auto-approve
+ * everything" mechanism instead, a different mechanism per provider (see
+ * internal/taskrunner/runner.go's runClaudeNative/runCodexNative/runACP).
+ * The user explicitly rejected one shared generic label for that tier (see
+ * docs/plans/active/task-move-approval-thinking.md's Context), so its
+ * label/help here is that provider's own real vocabulary, not smind's own
+ * words: Codex's and GLM's copied verbatim from Paseo's real provider
+ * metadata, Claude's from Claude Code's own CLI mode name.
+ */
+const FULL_ACCESS_BY_PROVIDER: Record<Provider, { label: string; help: string }> = {
+  "claude-native": {
+    label: "Bypass",
+    help: "Skip all permission prompts (use with caution).",
+  },
+  "codex-native": {
+    label: "Full Access",
+    help: "Edit files, run commands, and access the network without additional prompts.",
+  },
+  glm: {
+    label: "Bypass all permissions",
+    help: "Edits and commands run without prompting.",
+  },
+  kimi: {
+    label: "Bypass all permissions",
+    help: "Edits and commands run without prompting.",
+  },
+};
+
+function approvalPolicyOptions(provider: Provider): ApprovalPolicyOption[] {
+  const fullAccess = FULL_ACCESS_BY_PROVIDER[provider] ?? FULL_ACCESS_BY_PROVIDER["claude-native"];
+  return [
+    { id: "manual", label: "Manual approval", help: MANUAL_HELP },
+    { id: "auto-safe", label: "Auto-safe", help: AUTO_SAFE_HELP },
+    { id: "full-access", label: fullAccess.label, help: fullAccess.help },
+  ];
+}
 
 // Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
 // the original dense sizing at `md:` and above -- see
@@ -136,6 +178,7 @@ export function Composer({
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
   const [provider, setProvider] = useState<Provider>("claude-native");
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
+  const approvalPolicies = approvalPolicyOptions(provider);
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -352,13 +395,21 @@ export function Composer({
             disabled={inactive}
           >
             {/* The help text stays a plain `title` -- a hover tooltip on the
-                trigger, exactly where it was on the native select. */}
-            <SelectTrigger aria-label="Approval policy" title={APPROVAL_POLICY_HELP} className={SELECT_TRIGGER_CLASS}>
+                trigger, exactly where it was on the native select. Reflects
+                the *current* selection's own help (each option gets its own
+                too, in the open list below), since the three tiers no
+                longer share one description now that full-access differs
+                per provider. */}
+            <SelectTrigger
+              aria-label="Approval policy"
+              title={approvalPolicies.find((p) => p.id === approvalPolicy)?.help}
+              className={SELECT_TRIGGER_CLASS}
+            >
               <SelectValue placeholder="Select policy" />
             </SelectTrigger>
             <SelectContent>
-              {APPROVAL_POLICIES.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
+              {approvalPolicies.map((p) => (
+                <SelectItem key={p.id} value={p.id} title={p.help}>
                   {p.label}
                 </SelectItem>
               ))}

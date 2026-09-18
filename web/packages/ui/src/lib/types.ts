@@ -44,13 +44,18 @@ export interface Space {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
-// internal/taskrunner.ApprovalPolicy's two values, carried over the wire as
-// their underlying string -- run.start/task.prompt's optional
+// internal/taskrunner.ApprovalPolicy's three values, carried over the wire
+// as their underlying string -- run.start/task.prompt's optional
 // `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
 // default when omitted (today's always-ask-a-human behavior); "auto-safe"
 // lets a small, conservative allowlist of read-only verification commands
-// (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
-export type ApprovalPolicy = "manual" | "auto-safe";
+// (see internal/taskrunner.AllowlistedCommand) skip the human prompt;
+// "full-access" installs no decider at all and hands the provider its own
+// native "auto-approve everything" mechanism instead (Claude Code's
+// bypassPermissions mode, Codex's AutoApprovePolicy, ACP's
+// AutoApprovePolicy) -- each provider's own real ceiling, not one shared
+// generic tier (see docs/plans/active/task-move-approval-thinking.md).
+export type ApprovalPolicy = "manual" | "auto-safe" | "full-access";
 
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
 // spawned as an external CLI subprocess managing its own authentication out

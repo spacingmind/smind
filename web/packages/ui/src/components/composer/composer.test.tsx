@@ -279,11 +279,72 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", approvalPolicy: "manual" }]);
   });
 
+  it("approval-policy dropdown offers a third, provider-worded full-access tier, and submits it as approvalPolicy", async () => {
+    const { submissions } = renderComposer();
+
+    // Default provider is claude-native -- Claude's own vocabulary.
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Manual approval", "Auto-safe", "Bypass"]);
+    const claudeFullAccess = options[2];
+    expect(claudeFullAccess).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
+
+    fireEvent.click(claudeFullAccess);
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "go wild" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", approvalPolicy: "full-access" }]);
+  });
+
+  it("full-access is worded per provider, not one shared generic label", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "codex-native", label: "Codex" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    const codexFullAccess = options[options.length - 1];
+    expect(codexFullAccess).toHaveTextContent("Full Access");
+    expect(codexFullAccess).toHaveAttribute(
+      "title",
+      expect.stringContaining("Edit files, run commands, and access the network"),
+    );
+    fireEvent.click(codexFullAccess);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    options = await screen.findAllByRole("option");
+    const glmFullAccess = options[options.length - 1];
+    expect(glmFullAccess).toHaveTextContent("Bypass all permissions");
+    expect(glmFullAccess).toHaveAttribute("title", expect.stringContaining("without prompting"));
+  });
+
   it("keeps the approval-policy help tooltip and disables both selects while the composer is inactive", () => {
     const { rerender } = renderComposer();
 
+    // Manual is the default selection, so the trigger's tooltip is
+    // manual's own help text (each tier's tooltip reflects its own
+    // selection now that full-access's differs per provider).
     const policy = screen.getByLabelText("Approval policy");
-    expect(policy).toHaveAttribute("title", expect.stringContaining("Auto-safe"));
+    expect(policy).toHaveAttribute("title", expect.stringContaining("approval"));
     expect(policy).not.toBeDisabled();
     expect(screen.getByLabelText("Provider")).not.toBeDisabled();
 

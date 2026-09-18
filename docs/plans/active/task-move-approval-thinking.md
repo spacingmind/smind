@@ -286,7 +286,7 @@ already-shipped item (PR #169) — not part of this plan.
 - [x] Research: confirmed Claude/Codex/GLM's actual capabilities and
       constraints (this document's Context/Decisions sections).
 - [x] Item 1 — Move to space UI.
-- [ ] Item 2 — Per-provider approval levels (`full-access` tier x3).
+- [x] Item 2 — Per-provider approval levels (`full-access` tier x3).
 - [ ] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
       control).
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, Sonnet
@@ -334,9 +334,73 @@ To be filled in as each item lands:
   (vitest) 811/811 passing, including the 5 new cases. No manual
   browser dogfood performed in this pass (no running daemon in this
   worktree) -- recommend a follow-up click-through before merge.
-- Item 2: new Go unit tests per provider (see Test Scenarios) + manual
-  dogfood run of a `full-access` task per provider confirming zero
-  permission prompts.
+- Item 2: DONE. `ApprovalPolicyFullAccess` ("full-access") added to
+  `policy.go`'s enum + `IsValid()`; `internal/wsapi`'s `task.prompt`/
+  `run.start` validation needed no change (both already reject via the
+  generic `IsValid()` check, so the new value is accepted automatically).
+  Each of `runClaudeNative`/`runCodexNative`/`runACP` gained a
+  `case approvalPolicy == ApprovalPolicyFullAccess` ahead of the existing
+  `decider != nil` branch, so full-access wins even if RunPrompt is handed
+  a non-nil decider (it always is from `task.prompt` today) -- no decider
+  installed at all, each provider's own native mechanism used instead
+  (`claudecode.WithPermissionMode("bypassPermissions")`,
+  `codex.WithPermissionPolicy(codex.AutoApprovePolicy{})`,
+  `acp.WithPermissionPolicy(acp.AutoApprovePolicy{})`). `runCodexNative`
+  gained an `approvalPolicy` parameter it didn't have before (only `manual`/
+  `auto-safe` existed when it was written, and neither needed it).
+  New/changed Go tests in `internal/taskrunner` (all passing):
+  - `TestApprovalPolicy_IsValid` gained a `full-access` case.
+  - `TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools`'s table gained
+    a `full-access` case proving it spawns with no `--allowedTools` (same
+    as manual) -- full-access doesn't accidentally widen the CLI-gate
+    allowlist path meant for auto-safe.
+  - `TestRunner_RunPrompt_ClaudeNative_FullAccess_NeverAsksDecider`: a
+    deny-leaning `stubDecider` handed to a full-access run is never
+    consulted (`callCount() == 0`) even on the "permission" fake-CLI
+    scenario that would otherwise trigger it -- covers "no decider
+    installed" and, transitively, "never emits a permission-request event"
+    (that event is only ever raised by `internal/runs`' own decider
+    wrapper, which is what `callCount() == 0` proves is never reached).
+  - `TestRunner_RunPrompt_GLM_FullAccess_InstallsAutoApprove` /
+    `TestRunner_RunPrompt_CodexNative_FullAccess_InstallsAutoApprove`: same
+    shape, but additionally prove the *real* auto-approve policy is
+    installed (not just "no decider") by handing a deny-leaning
+    stubDecider and observing the fake agent's echoed decision is the
+    allow one anyway ("chose:allow-1" / "decision:accept") -- satisfies the
+    Test Scenarios' "AutoApprovePolicy{} is actually installed" bullet for
+    both ACP and Codex without needing to introspect unexported SDK option
+    state (which isn't reachable from this package for Codex's/Claude's
+    vendored SDKs).
+  - `manual`/`auto-safe` regression: untouched by this change structurally
+    (the new case sits ahead of, not inside, the existing `decider != nil`
+    branch in all three functions) and every pre-existing test for both
+    tiers (including the two-provider permission-request round-trip tests)
+    still passes unmodified.
+  Frontend: `ApprovalPolicy` type gained `"full-access"`; the composer's
+  approval-policy `Select` (`composer.tsx`) now derives its three options
+  from `approvalPolicyOptions(provider)` instead of a flat static list --
+  manual/auto-safe stay identical across providers, full-access's
+  label/tooltip come from a `FULL_ACCESS_BY_PROVIDER` lookup using each
+  provider's own real wording (Claude "Bypass" / Codex "Full Access" / GLM
+  &amp; Kimi "Bypass all permissions", per this session's Paseo-sourced
+  ground truth). Both the closed trigger's tooltip (now reflecting the
+  *current* selection, not a static auto-safe-only string) and each open
+  option's own `title` carry the per-tier help text. New composer tests
+  (3 added, all passing): the dropdown lists exactly
+  `["Manual approval", "Auto-safe", "Bypass"]` for the default
+  claude-native provider and submits `approvalPolicy: "full-access"` when
+  chosen; switching provider to Codex then GLM changes the third option's
+  label/tooltip each time, proving no single shared string leaks across
+  providers. One pre-existing test's assertion (trigger `title` always
+  containing "Auto-safe") was updated to match the now-selection-aware
+  tooltip (manual is the default selection, so it asserts on manual's own
+  help text instead).
+  Full suite: `go build ./... && go test ./...` all green (including
+  `internal/wsapi`, `internal/runs`); frontend `bun run typecheck` clean,
+  `bun run test` 813/813 passing. No manual dogfood run performed in this
+  pass (no running daemon in this worktree) -- recommend a follow-up
+  click-through per provider before merge, per this section's own
+  "manual dogfood run... confirming zero permission prompts" ask.
 - Item 3: new Go unit test for Claude's option mapping; new frontend test
   for the GLM live-view control; manual dogfood check that Claude's
   thinking-level selection visibly changes response latency/depth and that
