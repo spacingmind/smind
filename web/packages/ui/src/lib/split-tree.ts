@@ -334,7 +334,7 @@ interface DetachTabFromTreeResult {
   sourcePaneId: string | null;
 }
 
-function detachTabFromTree(
+export function detachTabFromTree(
   root: SplitNode,
   input: { tabKey: string; preserveEmptyPaneId?: string | null },
 ): DetachTabFromTreeResult {
