@@ -119,7 +119,7 @@ Each group's `sizes` array persists through the same localStorage mechanism as t
 - [x] Item 5 — responsive collapse for arbitrary tree (compact mode already generalized via `collectAllTabs`/`focusedPane`, covered by the existing `App.responsive.test.tsx` suite)
 - [x] Item 6 — resize persistence (`resizeGroup` -> `resizeSplitInLayout`, no separate storage key)
 - [x] `bun run test` / `bun run typecheck` green (see Validation)
-- [ ] Manual dogfood pass (split chat+terminal side by side, resize, reload, close panes down to one)
+- [x] Manual dogfood pass (split chat+terminal side by side, resize, reload, close panes down to one)
 
 ## Validation
 
@@ -137,4 +137,12 @@ Items 2-4, 2026-09-18:
 - Part D: `App.tsx`'s hardcoded 2-pane block replaced by `SplitTreeView`/`SplitGroupView` (recursive renderer over `SplitNode`, `ResizablePanelGroup`'s `defaultLayout`/`onLayoutChange` for group sizing, frozen via `useInitialValue` per group id the same way the sidebar's own width is). `PaneTabStrip`'s old single move button became a 2-item "Split" dropdown (`workspace-tab-split`/`-right`/`-down` testids); its root gained a `data-pane-id` attribute alongside the existing conditional `primary-pane`/`side-pane` testid. `openTerminalTab`, the URL-writing effect, `Ctrl+W`/`Ctrl+Alt+<digit>`, compact-mode's merged strip, and `ShellCommands`' tab list all regrepped off `.primary`/`.side` onto the tree (see Decisions for the URL-focus-pane generalization and the "+"-button pane-targeting limitation for 3+ panes).
 - Part E: `App.test.tsx`/`App.responsive.test.tsx` updated for the new split-menu interaction; added the Item 4 "two splits -> three independent panes" scenario to `App.test.tsx`'s `describe("App splits (Item 6)")` block.
 
-Verified independently: `cd web && bun run --filter '@smind/ui' test -- split-tree.test.ts use-task-tabs.test.ts` — 38/38 passing. `bun run --filter '@smind/ui' test` (whole suite) — 790/790 passing. `bun run --filter '@smind/ui' typecheck` — clean.
+Verified independently: `cd web && bun run --filter '@smind/ui' test -- split-tree.test.ts use-task-tabs.test.ts` — 38/38 passing. `bun run --filter '@smind/ui' test` (whole suite) — 790/790 passing. `bun run --filter '@smind/ui' typecheck` — clean. `task test`/`task lint` (Go + web) — green.
+
+Manual dogfood pass, 2026-09-18 (real daemon, isolated `SMIND_HOME`, a throwaway git repo, Playwright driving a real Chromium against it -- no fakes):
+
+- Selected a fresh task (single Chat pane) -> opened Terminal via "+" -> clicked its "Split" menu -> "Split right": rendered as Chat (left, `primary-pane`) and a real live shell (right, `side-pane`) side by side, exactly the user's "half chat, half terminal" example.
+- Dragged the resize handle: the split moved smoothly, no dead zone, no garbled terminal content.
+- Reloaded the page: both panes came back with the resized proportions intact (Item 6's persistence), and the terminal reattached to its still-running session with its prior output still visible (not a fresh spawn).
+- Closed the Terminal tab (the side pane's only tab): the split collapsed cleanly back to a single full-width Chat pane -- confirms Item 1's "non-root pane collapses on last-tab-close" rule end-to-end, not just in unit tests.
+- No console errors observed at any step.
