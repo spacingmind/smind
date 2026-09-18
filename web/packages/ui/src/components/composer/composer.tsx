@@ -306,7 +306,7 @@ export function Composer({
        */}
       <div
         data-testid="composer-card"
-        className="flex flex-col rounded-xl border border-input bg-surface-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+        className="flex flex-col rounded-xl border border-transparent bg-surface-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
       >
         <PromptTextarea
           ref={textareaRef}
