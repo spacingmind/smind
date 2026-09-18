@@ -13,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
@@ -70,6 +70,22 @@ function approvalPolicyOptions(provider: Provider): ApprovalPolicyOption[] {
     { id: "full-access", label: fullAccess.label, help: fullAccess.help },
   ];
 }
+
+/**
+ * Claude's own thinking-level tiers (internal/taskrunner.ThinkingLevel;
+ * "" is the unset default, deliberately not offered as its own option --
+ * choosing a tier is opt-in, and "Standard" already IS today's ordinary
+ * behavior in effect, just via the adaptive Option instead of no Option at
+ * all). Only ever shown when provider === "claude-native" (see the
+ * composer's provider !== "claude-native" && null guard below) -- GLM/
+ * Kimi's thinking-level control is a different, live-session-scoped
+ * mechanism (see the chat view, not this composer), and Codex has none.
+ */
+const THINKING_LEVELS: { id: ThinkingLevel; label: string; help: string }[] = [
+  { id: "off", label: "Off", help: "No extended thinking -- responds immediately." },
+  { id: "standard", label: "Standard", help: "The model adapts how much it thinks to the turn." },
+  { id: "extended", label: "Extended", help: "A large fixed thinking budget, for turns that need to reason at length before acting." },
+];
 
 // Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
 // the original dense sizing at `md:` and above -- see
@@ -169,7 +185,12 @@ export function Composer({
   diffStat?: DiffStat | null;
   /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
   onOpenDiff?: () => void;
-  onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
+  onSubmit: (
+    provider: Provider,
+    prompt: string,
+    approvalPolicy: ApprovalPolicy,
+    thinkingLevel?: ThinkingLevel,
+  ) => Promise<void>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
@@ -179,6 +200,18 @@ export function Composer({
   const [provider, setProvider] = useState<Provider>("claude-native");
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
   const approvalPolicies = approvalPolicyOptions(provider);
+  // Claude-only (see THINKING_LEVELS' doc comment) -- kept in state
+  // regardless of the current provider (switching away and back preserves
+  // the choice), but only ever sent on the wire when provider is actually
+  // claude-native, so a GLM/Codex run never carries a stray leftover value.
+  // "" (untouched) is never itself sent -- same omit-the-default-value
+  // convention approvalPolicy already uses (see submitPrompt's doc
+  // comment): a Claude run submitted without ever touching this selector
+  // sends the exact same run.start payload as before this selector
+  // existed. The Select's displayed value falls back to "standard" purely
+  // visually (see its `value` prop below) so the control never shows
+  // "nothing selected".
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("");
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -219,7 +252,7 @@ export function Composer({
       setSubmitting(true);
       setFormError(null);
       try {
-        await onSubmit(provider, text, approvalPolicy);
+        await onSubmit(provider, text, approvalPolicy, provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined);
         return true;
       } catch (err) {
         setFormError(err instanceof Error ? err.message : String(err));
@@ -228,7 +261,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, approvalPolicy],
+    [onSubmit, provider, approvalPolicy, thinkingLevel],
   );
 
   // draft is a fresh object every render (it closes over the current
@@ -415,6 +448,39 @@ export function Composer({
               ))}
             </SelectContent>
           </Select>
+
+          {/*
+           * Claude-only, pre-run control (see THINKING_LEVELS' doc
+           * comment) -- omitted entirely, not just disabled, for every
+           * other provider: no dead control sitting in the toolbar for a
+           * provider that can't act on it. GLM/Kimi's own thinking-level
+           * control lives in the chat view instead, once a live session
+           * exists (see run-config-options in task-detail), since that
+           * option list is only ever known after ACP's NewSession
+           * responds.
+           */}
+          {provider === "claude-native" && (
+            <Select
+              value={thinkingLevel || "standard"}
+              onValueChange={(value) => setThinkingLevel(value as ThinkingLevel)}
+              disabled={inactive}
+            >
+              <SelectTrigger
+                aria-label="Thinking level"
+                title={THINKING_LEVELS.find((t) => t.id === (thinkingLevel || "standard"))?.help}
+                className={SELECT_TRIGGER_CLASS}
+              >
+                <SelectValue placeholder="Select thinking level" />
+              </SelectTrigger>
+              <SelectContent>
+                {THINKING_LEVELS.map((t) => (
+                  <SelectItem key={t.id} value={t.id} title={t.help}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
 
           <div className="ml-auto flex items-center gap-2">
             {formError && <span className="text-xs text-destructive">{formError}</span>}

@@ -708,6 +708,11 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			Provider       taskrunner.Provider       `json:"provider"`
 			Prompt         string                    `json:"prompt"`
 			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
+			// doc comment); every other provider ignores it. Optional --
+			// an omitted field is taskrunner.ThinkingLevelUnspecified,
+			// preserving today's behavior exactly.
+			ThinkingLevel taskrunner.ThinkingLevel `json:"thinkingLevel"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
@@ -715,8 +720,11 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
 			return nil, fmt.Errorf("task.prompt: invalid approvalPolicy %q", p.ApprovalPolicy)
 		}
+		if !p.ThinkingLevel.IsValid() {
+			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
+		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -751,6 +759,14 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			Provider       taskrunner.Provider       `json:"provider"`
 			Prompt         string                    `json:"prompt"`
 			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
+			// doc comment); every other provider ignores it. Optional --
+			// an omitted field is taskrunner.ThinkingLevelUnspecified,
+			// preserving today's behavior exactly. This is the RPC the
+			// composer actually calls (see use-run-timeline.ts's
+			// submitPrompt), so this is where its thinking-level selector's
+			// choice lands on the wire.
+			ThinkingLevel taskrunner.ThinkingLevel `json:"thinkingLevel"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -758,8 +774,11 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid approvalPolicy %q", p.ApprovalPolicy)
 		}
+		if !p.ThinkingLevel.IsValid() {
+			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
+		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}

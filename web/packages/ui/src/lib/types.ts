@@ -57,6 +57,16 @@ export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 // generic tier (see docs/plans/active/task-move-approval-thinking.md).
 export type ApprovalPolicy = "manual" | "auto-safe" | "full-access";
 
+// internal/taskrunner.ThinkingLevel's values, carried over the wire as
+// their underlying string -- run.start/task.prompt's optional
+// `thinkingLevel` param. Claude-only (every other provider ignores it, and
+// the composer only ever renders this control when provider === "claude-native");
+// GLM/Kimi's own thinking-level control is a completely different,
+// live-session-scoped mechanism (ACP's ConfigOption, see run.listConfigOptions/
+// run.setConfigOption), and Codex has no reachable per-turn equivalent at
+// all. "" (omitted) preserves today's SDK default exactly.
+export type ThinkingLevel = "" | "off" | "standard" | "extended";
+
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
 // spawned as an external CLI subprocess managing its own authentication out
 // of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no

@@ -206,12 +206,17 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // everything" mechanism is used instead (see runClaudeNative/
 // runCodexNative/runACP).
 //
+// thinkingLevel is Claude-only (see ThinkingLevel's doc comment): every
+// other provider ignores it entirely, regardless of what it's set to.
+// ThinkingLevelUnspecified (the zero value) preserves today's behavior
+// exactly -- no thinking Option is added to the Claude Code session at all.
+//
 // The backend client spawned for this call is not reused: RunPrompt owns
 // its subprocess end to end and closes it before returning. ctx cancellation
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -227,7 +232,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	default:
@@ -394,8 +399,20 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
+	switch thinkingLevel {
+	case ThinkingLevelOff:
+		opts = append(opts, claudecode.WithDisabledThinking())
+	case ThinkingLevelStandard:
+		opts = append(opts, claudecode.WithAdaptiveThinking())
+	case ThinkingLevelExtended:
+		opts = append(opts, claudecode.WithThinkingBudget(extendedThinkingBudgetTokens))
+	case ThinkingLevelUnspecified:
+		// No thinking Option at all -- preserves today's SDK default
+		// exactly, for an older client or any request that never set the
+		// field.
+	}
 	switch {
 	case approvalPolicy == ApprovalPolicyFullAccess:
 		// No decider at all -- the CLI's own bypassPermissions mode is

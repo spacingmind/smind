@@ -14,6 +14,7 @@ import type {
   RunStartResult,
   RunStatusValue,
   RunSummary,
+  ThinkingLevel,
   ToolCallStatus,
 } from "@/lib/types";
 
@@ -230,9 +231,18 @@ interface TimelineState {
    * run.start payload entirely when it's "manual" -- the backend's default
    * when the field is absent (internal/wsapi/handlers.go) -- so a run
    * started without ever touching the approval-policy selector sends the
-   * exact same payload as before that selector existed.
+   * exact same payload as before that selector existed. thinkingLevel is
+   * the same story: omitted whenever it's "" (unset -- every non-Claude
+   * provider, and Claude before the selector is touched), so a run started
+   * without ever touching the thinking-level selector sends the exact same
+   * payload as before that selector existed either.
    */
-  submitPrompt: (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy) => Promise<void>;
+  submitPrompt: (
+    provider: Provider,
+    prompt: string,
+    approvalPolicy?: ApprovalPolicy,
+    thinkingLevel?: ThinkingLevel,
+  ) => Promise<void>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
    * unmount, which only ever detach. The run's own active run.attach
@@ -465,7 +475,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
   }, [client, taskId]);
 
   const submitPrompt = useCallback(
-    async (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy) => {
+    async (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy, thinkingLevel?: ThinkingLevel) => {
       const session = sessionRef.current;
       if (!client || taskId === null || !session) {
         throw new Error("no task selected");
@@ -476,6 +486,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         provider,
         prompt,
         ...(approvalPolicy && approvalPolicy !== "manual" ? { approvalPolicy } : {}),
+        ...(thinkingLevel ? { thinkingLevel } : {}),
       });
       if (session.cancelled) return;
 

@@ -1052,3 +1052,24 @@ func TestServer_RunStart_InvalidApprovalPolicy_IsAClearError(t *testing.T) {
 		t.Fatal("run.start with an invalid approvalPolicy: error = nil, want a clear error")
 	}
 }
+
+// TestServer_RunStart_InvalidThinkingLevel_IsAClearError is
+// thinkingLevel's counterpart to the approvalPolicy test above: an
+// unrecognized value is rejected with a clear error, not silently coerced
+// to taskrunner.ThinkingLevelUnspecified.
+func TestServer_RunStart_InvalidThinkingLevel_IsAClearError(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "claude-native", "prompt": "hi", "thinkingLevel": "maximum-overdrive",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("run.start with an invalid thinkingLevel: error = nil, want a clear error")
+	}
+}

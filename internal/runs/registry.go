@@ -261,6 +261,15 @@ type run struct {
 	// reader.
 	approvalPolicy taskrunner.ApprovalPolicy
 
+	// thinkingLevel is this run's taskrunner.ThinkingLevel, set at Start and
+	// immutable thereafter -- passed straight through to RunPrompt in
+	// drive; only ever meaningful for ProviderClaudeNative (see
+	// ThinkingLevel's doc comment). Not persisted to the store row (unlike
+	// approvalPolicy): it only matters for the live call drive makes, and a
+	// rehydrated run never re-drives, so there's nothing for a stored value
+	// to feed.
+	thinkingLevel taskrunner.ThinkingLevel
+
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
 	// it. runPermissionDecider selects on it directly (not just on
@@ -339,7 +348,12 @@ func (r *run) statusLocked() RunStatus {
 // Start returns an error rather than silently falling back to manual --
 // callers one layer up (internal/wsapi) are expected to have already
 // validated this against user input, but Start itself doesn't trust that.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy) (string, error) {
+//
+// thinkingLevel is this run's taskrunner.ThinkingLevel -- Claude-only (see
+// its doc comment), ignored entirely by every other provider. The empty
+// string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
+// exactly, the same way an empty approvalPolicy does.
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
 	if _, err := wm.GetTask(taskID); err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
 	}
@@ -348,6 +362,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		approvalPolicy = taskrunner.ApprovalPolicyManual
 	} else if !approvalPolicy.IsValid() {
 		return "", fmt.Errorf("runs: start: invalid approval policy %q", approvalPolicy)
+	}
+
+	if !thinkingLevel.IsValid() {
+		return "", fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
 	}
 
 	id, err := newRunID()
@@ -363,6 +381,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		prompt:             prompt,
 		runner:             runner,
 		approvalPolicy:     approvalPolicy,
+		thinkingLevel:      thinkingLevel,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -405,7 +424,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.approvalPolicy, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.approvalPolicy, r.thinkingLevel, events)
 	<-forwardDone
 	reg.finish(r, err)
 }

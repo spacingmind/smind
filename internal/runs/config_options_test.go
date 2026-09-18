@@ -27,7 +27,7 @@ func TestRegistry_ConfigOptions_NotSupportedForNonACPProvider(t *testing.T) {
 	reg := newTestRegistry(t, st)
 	runner := taskrunner.New(wm, taskrunner.WithCodexCommand([]string{"/nonexistent/smind-test-codex-agent"}))
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderCodexNative, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderCodexNative, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
