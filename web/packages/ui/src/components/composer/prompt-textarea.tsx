@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
  * and scrolls instead, so a pasted essay can't push the timeline off
  * screen (ui-redesign-parity Item 10: "capped in height then scrolling").
  */
-export const MAX_COMPOSER_HEIGHT = 200;
+export const MAX_COMPOSER_HEIGHT = 320;
 
 /**
  * Sizes `el` to its content up to MAX_COMPOSER_HEIGHT, then lets it
