@@ -283,7 +283,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       if (pendingRoute.tab.kind === "file") {
         openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
       } else if (pendingRoute.tab.kind !== "task") {
-        activate(match.ID, `${match.ID}:${pendingRoute.tab.kind}`);
+        // Not just activate(): only Chat is seeded on first visit now, so
+        // a deep link to e.g. .../diff must be able to open that tab, not
+        // just activate an entry that may not exist yet. openTab already
+        // no-ops to a plain activate when the tab is already open.
+        openTab(match.ID, baseTabForKind(match.ID, pendingRoute.tab.kind));
       }
       setPendingRoute(null);
     } else if (treeLoaded) {

@@ -105,6 +105,28 @@ function clickTaskRow(task: Task): void {
   fireEvent.click(screen.getAllByText(task.Title)[0]!);
 }
 
+/**
+ * Opens `label`'s tab via the pane's "+" menu -- the real flow now that
+ * only Chat is seeded on first visit (dogfood default-tabs fix; the other
+ * three base kinds are one click away instead of pre-opened clutter).
+ * Radix's DropdownMenuTrigger opens on pointerdown, same as
+ * theme-toggle.test.tsx. The newly opened tab is already active (openTab
+ * activates whatever it just opened), so callers don't need a separate
+ * focus+click to select it.
+ */
+async function openBaseTab(label: "Files" | "Diff" | "Terminal"): Promise<void> {
+  // Enter, not pointerdown -- Radix's DropdownMenuTrigger opens on either,
+  // but under this file's fake timers a bare fireEvent.pointerDown never
+  // flips data-state to "open" (unclear why; keyboard activation is
+  // reliable and just as real a user path).
+  const trigger = screen.getByTestId("tabs-new-tab");
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByRole("menuitem", { name: `Open ${label}` }));
+  await flush();
+}
+
 /** Selects task's row, opens its Files tab, expands nothing, and clicks the README.md row -- the file-open flow the tab registry tests build on. */
 async function openFileInTask(socket: FakeSocket, task: Task, content: string): Promise<void> {
   clickTaskRow(task);
@@ -112,13 +134,7 @@ async function openFileInTask(socket: FakeSocket, task: Task, content: string): 
   respondAll(socket, "run.list", []);
   await flush();
 
-  // Radix's tab trigger needs DOM focus before its click activates a tab
-  // (it activates on pointer-down-with-focus semantics); jsdom's
-  // fireEvent.click doesn't focus first like a real browser click does.
-  const filesTab = screen.getByRole("tab", { name: "Files" });
-  filesTab.focus();
-  fireEvent.click(filesTab);
-  await flush();
+  await openBaseTab("Files");
   respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
   await flush();
   fireEvent.click(screen.getByTestId("file-row"));
@@ -265,7 +281,7 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
   });
 
-  it("closing a file tab removes only that tab, leaving the base tabs intact", async () => {
+  it("closing a file tab removes only that tab, leaving the other open base tabs intact", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -279,8 +295,6 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Chat" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
   });
 
   it("a task with an errored run shows an attention dot, and selecting the task clears it", async () => {
@@ -453,7 +467,7 @@ describe("App keyboard shortcuts", () => {
       await flush();
 
       expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
-      for (const name of ["Chat", "Files", "Diff", "Terminal"]) {
+      for (const name of ["Chat", "Files"]) {
         expect(screen.getByRole("tab", { name })).toBeInTheDocument();
       }
       view.unmount();
@@ -494,9 +508,19 @@ describe("App keyboard shortcuts", () => {
     await flush();
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
 
-    // Default strip order is Chat, Files, Diff, Terminal.
+    // Strip order after opening Diff via "+" (only Chat is seeded now):
+    // Chat, Diff. Opening it also activates it, so switch back to Chat
+    // first -- otherwise the assertion below would pass even if the
+    // shortcut itself did nothing.
+    await openBaseTab("Diff");
+    const chatTab = screen.getByRole("tab", { name: "Chat" });
+    chatTab.focus();
+    fireEvent.click(chatTab);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
     await act(async () => {
-      pressCtrl("3", "Digit3", { altKey: true });
+      pressCtrl("2", "Digit2", { altKey: true });
     });
     await flush();
     expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
@@ -766,6 +790,19 @@ describe("App routing", () => {
     await flush();
     expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
 
+    // Diff isn't seeded any more (dogfood default-tabs fix); opening it
+    // via "+" already updates the URL once...
+    await openBaseTab("Diff");
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/diff`);
+
+    // ...switching back to Chat and forward to Diff again proves it's the
+    // click, not just the open, that drives the URL.
+    const chatTab = screen.getByRole("tab", { name: "Chat" });
+    chatTab.focus();
+    fireEvent.click(chatTab);
+    await flush();
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
+
     const diffTab = screen.getByRole("tab", { name: "Diff" });
     diffTab.focus();
     fireEvent.click(diffTab);
@@ -835,29 +872,36 @@ describe("App routing", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // Opening a file switches the active tab away from Files (Radix
-    // unmounts the inactive pane), so Files has to be reselected before
-    // each pick -- refetching file.list each time, same as a real remount.
-    for (const name of ["a.md", "b.md"]) {
-      const filesTab = screen.getByRole("tab", { name: "Files" });
-      // Radix activates a tab on mousedown (or on focus, in its default
-      // "automatic" mode) -- not on click. `.focus()` alone is a no-op
-      // the second time around here, since the Files trigger is already
-      // `document.activeElement` from the first iteration (nothing else
-      // in this flow steals it), so mousedown is the one that reliably
-      // reactivates it regardless of where focus currently sits.
-      fireEvent.mouseDown(filesTab, { button: 0 });
-      await flush();
-      respondAll(socket, "file.list", [
-        { name: "a.md", isDir: false, size: 1 },
-        { name: "b.md", isDir: false, size: 1 },
-      ]);
-      await flush();
-      fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="${name}"]`)!);
-      await flush();
-      respondAll(socket, "file.read", { content: `# ${name}` });
-      await flush();
-    }
+    // Files isn't seeded any more (dogfood default-tabs fix) -- open it
+    // once via "+"; picking a.md switches the active tab away from Files
+    // (Radix unmounts the inactive pane), so Files has to be reselected
+    // before the second pick -- refetching file.list each time, same as a
+    // real remount.
+    await openBaseTab("Files");
+    respondAll(socket, "file.list", [
+      { name: "a.md", isDir: false, size: 1 },
+      { name: "b.md", isDir: false, size: 1 },
+    ]);
+    await flush();
+    fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="a.md"]`)!);
+    await flush();
+    respondAll(socket, "file.read", { content: "# a.md" });
+    await flush();
+
+    // Radix activates a tab on mousedown (or on focus, in its default
+    // "automatic" mode) -- not on click.
+    const filesTab = screen.getByRole("tab", { name: "Files" });
+    fireEvent.mouseDown(filesTab, { button: 0 });
+    await flush();
+    respondAll(socket, "file.list", [
+      { name: "a.md", isDir: false, size: 1 },
+      { name: "b.md", isDir: false, size: 1 },
+    ]);
+    await flush();
+    fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="b.md"]`)!);
+    await flush();
+    respondAll(socket, "file.read", { content: "# b.md" });
+    await flush();
     expect(screen.getByRole("tab", { name: /b\.md/ })).toHaveAttribute("aria-selected", "true");
     first.unmount();
 
@@ -983,10 +1027,7 @@ describe("App splits (Item 6)", () => {
     // primary because none exists.
     expect(screen.queryByTestId("side-pane")).not.toBeInTheDocument();
 
-    const filesTab = screen.getByRole("tab", { name: "Files" });
-    filesTab.focus();
-    fireEvent.click(filesTab);
-    await flush();
+    await openBaseTab("Files");
     respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
 
@@ -1019,10 +1060,7 @@ describe("App splits (Item 6)", () => {
     // own cancellation guard already covers, and a fresh one is fetched
     // once Chat is reactivated below.
 
-    const filesTab = screen.getByRole("tab", { name: "Files" });
-    filesTab.focus();
-    fireEvent.click(filesTab);
-    await flush();
+    await openBaseTab("Files");
     respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
     fireEvent.contextMenu(screen.getByTestId("file-row"));
@@ -1095,8 +1133,10 @@ describe("App splits (Item 6)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // The terminal tab force-mounts (Item 20) as soon as the task is
-    // selected, independent of which tab is active.
+    // Terminal isn't seeded any more (dogfood default-tabs fix); opening
+    // it force-mounts (Item 20) independent of which tab ends up active.
+    await openBaseTab("Terminal");
+
     respond(socket, "terminal.list", []);
     await flush();
     respond(socket, "terminal.create", { terminalId: "term-1" });
@@ -1198,10 +1238,7 @@ describe("App chat column (dogfood Item 2)", () => {
     expect(column.className).toContain("mx-auto");
     expect(column.className).toContain("max-w-3xl");
 
-    const filesTab = screen.getByRole("tab", { name: "Files" });
-    filesTab.focus();
-    fireEvent.click(filesTab);
-    await flush();
+    await openBaseTab("Files");
     respondAll(socket, "file.list", []);
     await flush();
 

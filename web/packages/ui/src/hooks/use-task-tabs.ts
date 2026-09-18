@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 
-import { defaultTabsForTask, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { baseTabForKind, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
 
 /** The main content area's two positions (Item 6's "one split"). */
@@ -34,12 +34,14 @@ export function isMovableKind(kind: TabKind): boolean {
 }
 
 function seedState(taskId: number): TaskTabsState {
-  // First visit seeds the default set (web-ui-dogfood-polish Item 3);
-  // afterwards the strip is the user's -- a persisted empty primary pane
-  // (every seeded tab closed) rehydrates as empty, not re-seeded, which
-  // is why ensureTask keys off the map rather than off pane emptiness.
-  const tabs = defaultTabsForTask(taskId);
-  return { primary: { tabs, activeKey: tabs[0]!.key }, side: null };
+  // First visit seeds just Chat -- Files/Diff/Terminal are one "+" click
+  // or command-palette entry away (both read defaultTabsForTask/
+  // BASE_TAB_KINDS directly) rather than pre-opened clutter. Afterwards
+  // the strip is the user's -- a persisted empty primary pane (every
+  // seeded tab closed) rehydrates as empty, not re-seeded, which is why
+  // ensureTask keys off the map rather than off pane emptiness.
+  const tab = baseTabForKind(taskId, "task");
+  return { primary: { tabs: [tab], activeKey: tab.key }, side: null };
 }
 
 /** The pane holding `key`, or null if it's open nowhere. */

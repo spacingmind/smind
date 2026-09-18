@@ -28,6 +28,8 @@ The chat timeline content column gets a max-width (e.g. `max-w-3xl`/`max-w-4xl`,
 ### Item 3 — flexible tabs per task
 Tabs become user-owned: closing the last tab of a task shows an empty state (with quick "open Chat/Files/Diff/Terminal" buttons) instead of forcing 4 tabs; a "+" affordance (or the empty state's buttons, or both) lets the user (re)open any tab kind for the task. `defaultTabsForTask` may still seed the initial set on first visit, but nothing is non-closable anymore. Tab state persists per task like today (existing tab persistence mechanism carries over).
 
+**Follow-up, 2026-09-18 (dogfood feedback: "default 1 tab agent đang mở thôi")** -- the first-visit seed itself was still all 4 base kinds, defeating the "user decides which tabs exist" point of this item. Changed `use-task-tabs.ts`'s `seedState` to seed only Chat; Files/Diff/Terminal stay one "+"/empty-state/command-palette click away (all three already read `BASE_TAB_KINDS`/`defaultTabsForTask` directly, untouched). Fixed a real bug this surfaced: `App.tsx`'s route-restore effect used `activate()` for a non-file base-kind route tab (e.g. deep-linking to `.../diff`), which is a no-op if that tab isn't already open -- with only Chat seeded, a fresh deep link to `.../diff` would silently land on Chat instead. Switched it to `openTab(match.ID, baseTabForKind(match.ID, kind))`, which opens-or-activates.
+
 ### Item 4 — settings as a screen, not a popup
 `settings-screen.tsx` stops being a Dialog. It becomes a full-pane screen (same surface as the task pane area) with a section nav (Appearance / General today, extensible via `settings-registry.ts`), opened from the sidebar settings button and closable back to the previous view (Esc / back affordance). Follows paseo's root→section pattern but web-simple: one screen, section rail, no router library introduction.
 
@@ -80,3 +82,10 @@ Track 2 (Items 3 + 5), validated 2026-09-18:
   - composer.test.tsx updated for the card anatomy: label-less selects resolved via aria-label, visible label text gone; placeholder "Message the agent…"; diff-stat pill renders +N/−M only when there are changes *and* a Diff tab target, click fires `onOpenDiff`; card contains textarea + toolbar, no Stop while idle, no attachment "+" button. Draft persistence, queue-while-running, Escape-stops, provider.list fallback and disabled-with-reason assertions all unchanged and green.
   - Full App.test.tsx / App.responsive.test.tsx pass — tab strip, routing, keyboard shortcuts unaffected.
 - `task lint` (go vet + gofmt) — green.
+
+Item 3 follow-up (default-tabs-to-Chat-only), 2026-09-18:
+
+- `use-task-tabs.ts`'s `seedState` now seeds just `baseTabForKind(taskId, "task")`; `use-task-tabs.test.ts` updated throughout (tests that relied on Files/Diff/Terminal being pre-open now call `openTab`/`baseTabForKind` explicitly before exercising move/close/activate).
+- `App.tsx`'s route-restore effect switched from `activate()` (a no-op for a tab that isn't open yet) to `openTab(match.ID, baseTabForKind(match.ID, kind))` for non-file base-kind routes -- a real bug the reduced seed set would otherwise have exposed for deep links like `.../diff`.
+- `App.test.tsx`/`App.responsive.test.tsx` updated: every test that assumed Files/Diff/Terminal pre-existed now opens them via the "+" menu first (new `openBaseTab` helper). That menu's `DropdownMenuTrigger` opens on `fireEvent.pointerDown` in isolation (tab-registry.test.tsx, theme-toggle.test.tsx) but not inside the full `<App>` tree under this file's `vi.useFakeTimers()` -- reason unconfirmed, but focus + `Enter` keydown opens it reliably there and is an equally real user path, so the helper uses that instead.
+- `cd web && bun run --filter '@smind/ui' test` — 771/771 passing (70 files). `bun run --filter '@smind/ui' typecheck` clean. `task test` (Go + web) and `task lint` both green.

@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { fileTab } from "@/components/tab-registry";
+import { baseTabForKind, fileTab } from "@/components/tab-registry";
 import { STORAGE_KEYS } from "@/lib/storage";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
 
@@ -22,13 +22,7 @@ describe("useTaskTabs persistence", () => {
     const second = renderHook(() => useTaskTabs());
     const state = second.result.current.tabsByTask.get(1);
     expect(state?.primary.activeKey).toBe("1:file:src/app.ts");
-    expect(state?.primary.tabs.map((t) => t.key)).toEqual([
-      "1:task",
-      "1:files",
-      "1:diff",
-      "1:terminal",
-      "1:file:src/app.ts",
-    ]);
+    expect(state?.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:file:src/app.ts"]);
     expect(state?.side).toBeNull();
   });
 
@@ -36,6 +30,7 @@ describe("useTaskTabs persistence", () => {
     const first = renderHook(() => useTaskTabs());
     act(() => {
       first.result.current.ensureTask(1);
+      first.result.current.openTab(1, baseTabForKind(1, "diff"));
       first.result.current.openTab(1, fileTab(1, "a.ts"));
       first.result.current.activate(1, "1:diff");
       first.result.current.closeTab(1, "1:file:a.ts");
@@ -43,7 +38,7 @@ describe("useTaskTabs persistence", () => {
 
     const second = renderHook(() => useTaskTabs());
     const state = second.result.current.tabsByTask.get(1);
-    expect(state?.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:files", "1:diff", "1:terminal"]);
+    expect(state?.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:diff"]);
     expect(state?.primary.activeKey).toBe("1:diff");
   });
 
@@ -68,7 +63,7 @@ describe("useTaskTabs persistence", () => {
 
     const second = renderHook(() => useTaskTabs());
     const state = second.result.current.tabsByTask.get(1);
-    expect(state?.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:files", "1:diff", "1:terminal"]);
+    expect(state?.primary.tabs.map((t) => t.key)).toEqual(["1:task"]);
     expect(state?.side?.tabs.map((t) => t.key)).toEqual(["1:file:a.ts"]);
     expect(state?.side?.activeKey).toBe("1:file:a.ts");
   });
@@ -159,7 +154,7 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.ensureTask(1);
-      result.current.activate(1, "1:diff");
+      result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.openTab(1, fileTab(1, "a.ts"), "side");
     });
 
@@ -196,7 +191,7 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.openTab(1, fileTab(1, "a.ts"), "primary");
-      result.current.moveTab(1, "1:diff", "side"); // give the task a side pane
+      result.current.openTab(1, fileTab(1, "z.ts"), "side"); // give the task a side pane
       result.current.openTab(1, fileTab(1, "a.ts"), "prefer");
     });
 
@@ -211,11 +206,13 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "files"));
+      result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.moveTab(1, "1:diff", "side");
     });
 
     const state = result.current.tabsByTask.get(1)!;
-    expect(state.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:files", "1:terminal"]);
+    expect(state.primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:files"]);
     expect(state.side?.tabs.map((t) => t.key)).toEqual(["1:diff"]);
     expect(state.side?.activeKey).toBe("1:diff");
   });
@@ -224,6 +221,9 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "files"));
+      result.current.openTab(1, baseTabForKind(1, "diff"));
+      result.current.openTab(1, baseTabForKind(1, "terminal"));
       result.current.activate(1, "1:diff");
       result.current.moveTab(1, "1:diff", "side");
     });
@@ -235,6 +235,7 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.moveTab(1, "1:diff", "side");
       result.current.moveTab(1, "1:diff", "primary");
     });
@@ -271,6 +272,7 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "diff"));
     });
     const before = result.current.tabsByTask.get(1);
 
@@ -289,7 +291,7 @@ describe("useTaskTabs panes (Item 6)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       result.current.openTab(1, fileTab(1, "a.ts"), "side");
-      result.current.activate(1, "1:files"); // switch primary away from Chat first
+      result.current.openTab(1, baseTabForKind(1, "files")); // switch primary away from Chat first
       result.current.activate(1, "1:file:a.ts");
     });
 
