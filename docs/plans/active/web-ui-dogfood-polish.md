@@ -57,12 +57,18 @@ Reshape `composer.tsx` into the reference card anatomy:
 
 - [ ] Item 1 — collapsed sidebar header dead space
 - [ ] Item 2 — chat column max-width + center
-- [ ] Item 3 — user-owned flexible tabs
+- [x] Item 3 — user-owned flexible tabs
 - [ ] Item 4 — settings screen
-- [ ] Item 5 — composer input card redesign
+- [x] Item 5 — composer input card redesign
 - [ ] `task test` / `task lint` green
 - [ ] Manual dogfood pass
 
 ## Validation
 
-Not started.
+Track 2 (Items 3 + 5), validated 2026-09-18:
+
+- `cd web && bun run --filter '@smind/ui' test` — 70 files / 762 tests passed, including:
+  - tab-registry.test.tsx extended: all seeded tabs closable; `baseTabForKind` key shape; empty state offers one reopen button per base kind; "+" dropdown menu offers the same kinds (opened via pointerDown, per Radix's trigger contract); use-task-tabs persistence suite unchanged and green (closing all tabs rehydrates as empty, not reseeded).
+  - composer.test.tsx updated for the card anatomy: label-less selects resolved via aria-label (`getByLabelText("Provider")` still works), visible label text gone; placeholder now "Message the agent…"; diff-stat pill renders +N/−M only when there are changes *and* a Diff tab target, click fires `onOpenDiff`; card contains textarea + toolbar, no Stop while idle, no attachment "+" button. Draft persistence, queue-while-running, Escape-stops, provider.list fallback and disabled-with-reason assertions all unchanged and green.
+  - Full App.test.tsx / App.responsive.test.tsx pass — tab strip, routing, keyboard shortcuts unaffected.
+- `task lint` (go vet + gofmt) — green. `web/` has no lint script (none existed before this change).

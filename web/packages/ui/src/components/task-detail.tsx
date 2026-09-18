@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useTaskDiff } from "@/hooks/use-task-diff";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -29,6 +30,7 @@ export function TaskDetailPane({
   task,
   connectionStatus = "connected",
   onOpenFile,
+  onOpenDiffTab,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -36,8 +38,16 @@ export function TaskDetailPane({
   connectionStatus?: ConnectionStatus;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
   onOpenFile?: (path: string) => void;
+  /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
+  onOpenDiffTab?: () => void;
 }) {
   const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
+  // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
+  // same task.diff this is -- the same hook the diff pane itself uses, so
+  // the pill and the pane's header stat can't disagree and no extra RPC
+  // is introduced. It stays mounted even when the Diff tab isn't (the
+  // fetch is cheap and the refresh signal is identical).
+  const wholeDiff = useTaskDiff(client, task, undefined);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
@@ -171,6 +181,8 @@ export function TaskDetailPane({
         taskId={task.ID}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
+        diffStat={wholeDiff.stat}
+        onOpenDiff={onOpenDiffTab}
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}

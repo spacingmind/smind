@@ -1,14 +1,21 @@
 import type { LucideIcon } from "lucide-react";
-import { File, FolderTree, GitCompare, MessageSquare, SquareTerminal } from "lucide-react";
+import { File, FolderTree, GitCompare, MessageSquare, Plus, SquareTerminal } from "lucide-react";
 
 import { FileIcon } from "@/lib/file-icons";
 import { useBufferDirty } from "@/lib/dirty-buffers";
 import { useTerminalActivity } from "@/lib/terminal-sessions";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 /**
  * The tab registry: the vocabulary of tab kinds App.tsx's tab strip is
  * rendered from, per docs/plans/active/tab-registry-side-dock.md. A tab is
- * data ({kind, key, taskId, title, closable}), not hardcoded JSX -- the
+ * data ({kind, key, taskId, title, closable}), not hardcoded JSX--the
  * strip maps over a list of these, and adding a new kind later means
  * adding a descriptor here plus a renderer entry in App.tsx, never editing
  * the strip's layout logic.
@@ -20,6 +27,11 @@ import { useTerminalActivity } from "@/lib/terminal-sessions";
  * of the key structure naturally.
  */
 export type TabKind = "task" | "files" | "file" | "diff" | "terminal";
+
+/** The non-file kinds: the ones a task's strip is seeded with and the empty state / "+" menu can (re)open on demand. */
+export type BaseTabKind = Exclude<TabKind, "file">;
+
+export const BASE_TAB_KINDS: readonly BaseTabKind[] = ["task", "files", "diff", "terminal"];
 
 /** One entry in a task's tab strip. */
 export interface TabEntry {
@@ -34,7 +46,14 @@ export interface TabEntry {
   path?: string;
 }
 
-/** Per-kind defaults: whether tabs of this kind get a close affordance, their strip title when nothing better is known, and the strip icon that identifies the kind at a glance (Item 17). */
+/**
+ * Per-kind defaults: whether tabs of this kind get a close affordance,
+ * their strip title when nothing better is known, and the strip icon that
+ * identifies the kind at a glance (Item 17). Every kind is closable
+ * (web-ui-dogfood-polish Item 3): tabs are user-owned -- closing a task's
+ * last tab shows TabsEmptyState rather than being prevented, and
+ * defaultTabsForTask only *seeds* a first-visit set.
+ */
 export interface TabKindDescriptor {
   closable: boolean;
   defaultTitle: string;
@@ -42,19 +61,22 @@ export interface TabKindDescriptor {
 }
 
 export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
-  task: { closable: false, defaultTitle: "Chat", icon: MessageSquare },
-  files: { closable: false, defaultTitle: "Files", icon: FolderTree },
-  diff: { closable: false, defaultTitle: "Diff", icon: GitCompare },
-  terminal: { closable: false, defaultTitle: "Terminal", icon: SquareTerminal },
+  task: { closable: true, defaultTitle: "Chat", icon: MessageSquare },
+  files: { closable: true, defaultTitle: "Files", icon: FolderTree },
+  diff: { closable: true, defaultTitle: "Diff", icon: GitCompare },
+  terminal: { closable: true, defaultTitle: "Terminal", icon: SquareTerminal },
   file: { closable: true, defaultTitle: "File", icon: File },
 };
 
-/** The four always-present base tabs every task starts with (ADR 0004's per-task tab set), in strip order. */
+/** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Chat/Files/Diff/Terminal" affordance. */
+export function baseTabForKind(taskId: number, kind: BaseTabKind): TabEntry {
+  const descriptor = TAB_KINDS[kind];
+  return { kind, key: `${taskId}:${kind}`, taskId, title: descriptor.defaultTitle, closable: descriptor.closable };
+}
+
+/** The base tabs a task's strip is *seeded* with on first visit (ADR 0004's per-task tab set), in strip order. Nothing here is non-closable anymore (Item 3) -- the user can close all of it and reopen via the empty state or the strip's "+". */
 export function defaultTabsForTask(taskId: number): TabEntry[] {
-  return (["task", "files", "diff", "terminal"] as const).map((kind) => {
-    const descriptor = TAB_KINDS[kind];
-    return { kind, key: `${taskId}:${kind}`, taskId, title: descriptor.defaultTitle, closable: descriptor.closable };
-  });
+  return BASE_TAB_KINDS.map((kind) => baseTabForKind(taskId, kind));
 }
 
 /** The tab key a file path maps to, in one place -- lib/dirty-buffers.ts keys its store by exactly this string, from the editor side, without importing a TabEntry. */
@@ -78,9 +100,8 @@ export function fileTab(taskId: number, path: string): TabEntry {
 /**
  * An additional terminal tab for a task (Item 20: more than one terminal
  * per task, each its own tab). `index` starts at 2 -- index 1 is the base
- * `${taskId}:terminal` tab every task already gets from
- * defaultTabsForTask, which stays non-closable so a task always has at
- * least one terminal.
+ * `${taskId}:terminal` tab every task's seed set already includes, which
+ * is closable like every other tab (Item 3).
  */
 export function terminalTab(taskId: number, index: number): TabEntry {
   return {
@@ -152,5 +173,81 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
         />
       )}
     </>
+  );
+}
+
+/**
+ * What a pane shows once the user closes its last tab (Item 3: tabs are
+ * user-owned, so "empty" is a real state, not something to prevent). The
+ * buttons are the same four base kinds the "+" menu offers, so the way
+ * back in is identical from either surface.
+ */
+export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void }) {
+  return (
+    <div
+      data-testid="tabs-empty-state"
+      className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+    >
+      <p>No tabs open</p>
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {BASE_TAB_KINDS.map((kind) => {
+          const Icon = TAB_KINDS[kind].icon;
+          return (
+            <Button
+              key={kind}
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="tabs-empty-open"
+              data-kind={kind}
+              onClick={() => onOpen(kind)}
+            >
+              <Icon aria-hidden className="size-3.5" data-icon="inline-start" />
+              Open {TAB_KINDS[kind].defaultTitle}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The tab strip's "+" affordance (Item 3): opens any base tab kind. The
+ * parent decides open-vs-activate -- it owns the tab state, so a kind
+ * that's already open just comes forward rather than duplicating.
+ */
+export function NewTabButton({ onOpen }: { onOpen: (kind: BaseTabKind) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Open a tab"
+          data-testid="tabs-new-tab"
+          className="shrink-0 text-muted-foreground"
+        >
+          <Plus aria-hidden className="size-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        {BASE_TAB_KINDS.map((kind) => {
+          const Icon = TAB_KINDS[kind].icon;
+          return (
+            <DropdownMenuItem
+              key={kind}
+              data-testid="tabs-new-tab-item"
+              data-kind={kind}
+              onClick={() => onOpen(kind)}
+            >
+              <Icon aria-hidden className="size-3.5 opacity-70" />
+              Open {TAB_KINDS[kind].defaultTitle}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
