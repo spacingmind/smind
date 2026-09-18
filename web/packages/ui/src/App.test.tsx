@@ -978,6 +978,41 @@ describe("App sidebar resize", () => {
     expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
   });
 
+  it("icon-collapsing the sidebar shrinks its ResizablePanel instead of leaving its expanded width as dead space", async () => {
+    // jsdom never lays anything out, so react-resizable-panels can't report
+    // real pixel widths here (a real-browser check confirmed the panel
+    // actually goes 256px -> 48px -> 256px) -- what jsdom *can* prove is
+    // that toggling collapse drives the panel's own flex-grow via its
+    // imperative handle at all, which is the bug this guards: before this
+    // fix, nothing ever called collapse()/expand(), so the panel's style
+    // never changed no matter what the Sidebar's own data-state said.
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const { container } = render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const panel = container.querySelector('[data-slot="resizable-panel"]') as HTMLElement;
+    const sidebar = document.querySelector('[data-slot="sidebar"]');
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+    const expandedStyle = panel.getAttribute("style");
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    expect(panel.getAttribute("style")).not.toBe(expandedStyle);
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+    expect(panel.getAttribute("style")).toBe(expandedStyle);
+  });
+
   it("a fresh mount reads the sidebar width back from persistence (simulating a reload after a previous resize)", async () => {
     // Simulates "the user dragged the sidebar to 300px, then reloaded" --
     // useSidebarWidth (see its own dedicated test for the clamp/persist

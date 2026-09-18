@@ -7,6 +7,8 @@ export const SIDEBAR_MIN_WIDTH = 192;
 export const SIDEBAR_MAX_WIDTH = 512;
 /** Matches the prior fixed SIDEBAR_WIDTH ("16rem") in components/ui/sidebar.tsx, now just the initial value instead of a constant. */
 export const SIDEBAR_DEFAULT_WIDTH = 256;
+/** Matches `SIDEBAR_WIDTH_ICON` ("3rem") in components/ui/sidebar.tsx -- the icon-collapsed rail's width, at the usual 16px/rem. The sidebar's ResizablePanel collapses to exactly this many pixels rather than leaving its last dragged width as dead space beside the icon rail. */
+export const SIDEBAR_ICON_WIDTH = 48;
 
 /** Clamps to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] -- dragging past either bound settles at the bound, never collapses to 0 or grows off-screen. */
 function clamp(width: number): number {
