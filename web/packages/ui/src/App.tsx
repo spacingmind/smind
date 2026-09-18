@@ -1,5 +1,16 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Columns2 } from "lucide-react";
+import {
+  DndContext,
+  PointerSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragMoveEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
@@ -43,6 +54,8 @@ import { SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/u
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
+import { resolveSplitDropPosition, type SplitDropZonePosition } from "@/lib/split-drop-zone";
+import { cn } from "@/lib/utils";
 import {
   collectAllPanes,
   collectAllTabs,
@@ -54,6 +67,21 @@ import {
 import type { ThemePreference } from "@/lib/theme";
 import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
+
+/** `useDraggable`'s `data` for a tab strip entry (Item 8) -- carries what `onDragEnd` needs to decide move-vs-split without re-deriving it from the tree. */
+interface DraggedTabData {
+  tabKey: string;
+  sourcePaneId: string;
+  kind: TabKind;
+}
+
+/** Maps a drop's edge zone (`SplitDropZonePosition`, minus `"center"`) to `use-task-tabs.ts`'s own up/down `SplitDirection` naming. */
+const DROP_POSITION_TO_SPLIT_DIRECTION: Record<Exclude<SplitDropZonePosition, "center">, SplitDirection> = {
+  left: "left",
+  right: "right",
+  top: "up",
+  bottom: "down",
+};
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
   connecting: "Connecting…",
@@ -134,7 +162,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // owns.
   const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate, splitTab, resizeGroup } = useTaskTabs();
+  const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
 
@@ -266,6 +294,90 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     if (!selectedTask) return;
     resizeGroup(selectedTask.ID, groupId, sizes);
   }
+
+  // --- Drag-to-split (Item 8) -------------------------------------------
+  //
+  // Every tab in a pane's strip is draggable (PaneTabStrip's TabsTrigger,
+  // via useDraggable) and every pane is droppable (also PaneTabStrip, via
+  // useDroppable) -- see those below. The live drop target/zone is lifted
+  // here rather than kept local to any one pane, since it's a property of
+  // the whole split tree during a drag, not of the pane the drag started
+  // in.
+  const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
+  const [dropPosition, setDropPosition] = useState<SplitDropZonePosition | null>(null);
+  const [isDragActive, setIsDragActive] = useState(false);
+
+  const dndSensors = useSensors(
+    useSensor(PointerSensor, {
+      // 8px so a plain click-to-activate-tab isn't swallowed as a drag
+      // start -- same threshold paseo's own split-container uses.
+      activationConstraint: { distance: 8 },
+    }),
+  );
+
+  const handleDragStart = useCallback(() => {
+    setIsDragActive(true);
+  }, []);
+
+  const handleDragCancel = useCallback(() => {
+    setIsDragActive(false);
+    setDragOverPaneId(null);
+    setDropPosition(null);
+  }, []);
+
+  /**
+   * Recomputes the live drop target + zone from the dragged tab's
+   * translated rect and whichever pane it's currently over -- shared by
+   * onDragMove/onDragOver (matching paseo's own single-handler wiring).
+   * A translated center that's currently outside the hovered pane's
+   * bounds (can happen mid-frame) clears the preview instead of resolving
+   * a bogus position, mirroring paseo's own NaN/out-of-bounds guard.
+   */
+  const handleDragOver = useCallback((event: DragMoveEvent | DragOverEvent) => {
+    const overPaneId = event.over ? String(event.over.id) : null;
+    const overRect = event.over?.rect;
+    const translatedRect = event.active.rect.current.translated;
+    if (!overPaneId || !overRect || !translatedRect) {
+      setDragOverPaneId(null);
+      setDropPosition(null);
+      return;
+    }
+    const centerX = translatedRect.left + translatedRect.width / 2;
+    const centerY = translatedRect.top + translatedRect.height / 2;
+    const relativeX = centerX - overRect.left;
+    const relativeY = centerY - overRect.top;
+    if (relativeX < 0 || relativeX > overRect.width || relativeY < 0 || relativeY > overRect.height) {
+      setDragOverPaneId(null);
+      setDropPosition(null);
+      return;
+    }
+    setDragOverPaneId(overPaneId);
+    setDropPosition(
+      resolveSplitDropPosition({ width: overRect.width, height: overRect.height, x: relativeX, y: relativeY }),
+    );
+  }, []);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const data = event.active.data.current as DraggedTabData | undefined;
+      const targetPaneId = dragOverPaneId;
+      const position = dropPosition;
+      setIsDragActive(false);
+      setDragOverPaneId(null);
+      setDropPosition(null);
+      if (!data || !targetPaneId || !position || !selectedTask) return;
+      if (position === "center") {
+        moveTab(selectedTask.ID, data.tabKey, targetPaneId);
+        return;
+      }
+      // Only *splitting* (an edge drop) is gated to movable kinds -- a
+      // center drop of any tab (including Chat/Files) still just moves it,
+      // matching what clicking it there would do.
+      if (!isMovableKind(data.kind)) return;
+      splitTab(selectedTask.ID, data.tabKey, targetPaneId, DROP_POSITION_TO_SPLIT_DIRECTION[position]);
+    },
+    [dragOverPaneId, dropPosition, selectedTask, moveTab, splitTab],
+  );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
   const defaultPane = taskState ? findPaneById(taskState.root, DEFAULT_PANE_ID) : null;
@@ -494,23 +606,40 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           // unmounts inactive content" and reattaches to its server-side
           // session rather than recreating it (see use-task-tabs.ts's doc
           // comment).
-          <SplitTreeView
-            node={taskState.root}
-            paneCount={paneCount}
-            task={selectedTask}
-            client={client}
-            connectionStatus={connectionStatus}
-            events={events}
-            onOpenFile={openFileTab}
-            onOpenFileToSide={openFileTabToSide}
-            onActivate={(key) => activate(selectedTask.ID, key)}
-            onClose={(key) => closeTab(selectedTask.ID, key)}
-            onSplitTab={splitPaneTab}
-            onResizeGroup={resizePaneGroup}
-            onRevealInDiff={revealInDiff}
-            onNewTerminal={openTerminalTab}
-            onOpenBase={openBaseTab}
-          />
+          //
+          // DndContext (Item 8) only wraps this desktop/split branch, not
+          // compactPrimaryStrip above -- compact mode has nowhere to drop
+          // a split into, same reasoning as showMoveAffordance={false}
+          // already gating the Split menu off there.
+          <DndContext
+            sensors={dndSensors}
+            onDragStart={handleDragStart}
+            onDragMove={handleDragOver}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
+            <SplitTreeView
+              node={taskState.root}
+              paneCount={paneCount}
+              task={selectedTask}
+              client={client}
+              connectionStatus={connectionStatus}
+              events={events}
+              onOpenFile={openFileTab}
+              onOpenFileToSide={openFileTabToSide}
+              onActivate={(key) => activate(selectedTask.ID, key)}
+              onClose={(key) => closeTab(selectedTask.ID, key)}
+              onSplitTab={splitPaneTab}
+              onResizeGroup={resizePaneGroup}
+              onRevealInDiff={revealInDiff}
+              onNewTerminal={openTerminalTab}
+              onOpenBase={openBaseTab}
+              dragOverPaneId={dragOverPaneId}
+              dropPosition={dropPosition}
+              isDragActive={isDragActive}
+            />
+          </DndContext>
         )
       ) : (
         emptyStateElement
@@ -815,6 +944,12 @@ interface SplitPaneCallbacks {
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** The pane a drag is currently hovering over, if any (Item 8) -- drives which pane renders its drop-zone overlay. */
+  dragOverPaneId: string | null;
+  /** The zone within `dragOverPaneId` the drag is over -- `null` whenever `dragOverPaneId` is. */
+  dropPosition: SplitDropZonePosition | null;
+  /** Whether a tab drag is in progress at all -- panes stay droppable-but-invisible until one starts. */
+  isDragActive: boolean;
 }
 
 function splitNodeId(node: SplitNode): string {
@@ -858,6 +993,9 @@ function SplitTreeView({
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
+        dragOverPaneId={shared.dragOverPaneId}
+        dropPosition={shared.dropPosition}
+        isDragActive={shared.isDragActive}
       />
     );
   }
@@ -931,6 +1069,9 @@ function PaneTabStrip({
   onNewTerminal,
   onOpenBase,
   showMoveAffordance = true,
+  dragOverPaneId = null,
+  dropPosition = null,
+  isDragActive = false,
 }: {
   paneId: PaneId;
   tabs: TabEntry[];
@@ -952,132 +1093,226 @@ function PaneTabStrip({
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
   /** Item 21: the split tree is a desktop-only concept -- compact has nowhere for "split" to open a second pane, so it's hidden rather than left to open a split that never renders. */
   showMoveAffordance?: boolean;
+  /** Item 8: only set (by the DndContext-wrapped desktop branch) while a tab drag is over *this* pane. Compact mode never passes these -- it has no DndContext ancestor, so `useDraggable`/`useDroppable` below are inert there anyway. */
+  dragOverPaneId?: string | null;
+  dropPosition?: SplitDropZonePosition | null;
+  isDragActive?: boolean;
 }) {
+  // Item 8: the whole pane (tab strip + content) is one drop target --
+  // `data` carries just the pane id, which `App.tsx`'s onDragMove/onDragEnd
+  // read back off `event.over`.
+  const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
+  const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
+
   return (
-    <Tabs
-      key={`${task.ID}:${paneId}`}
-      // The fixed `primary-pane`/`side-pane` testids only tell the two
-      // panes of today's common 0-or-1-split case apart; a 3rd+ pane has
-      // no fixed name, so `data-pane-id` below is what a test targeting
-      // it uses instead.
-      data-testid={paneId === DEFAULT_PANE_ID ? "primary-pane" : paneCount === 2 ? "side-pane" : undefined}
-      data-pane-id={paneId}
-      value={activeKey ?? undefined}
-      onValueChange={onActivate}
-      className="h-full gap-0"
-    >
-      <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
-        {tabs.length > 0 && (
-          <TabsList className="w-fit">
-            {tabs.map((entry) => (
-            <TabsTrigger
-              key={entry.key}
-              value={entry.key}
-              data-testid={`workspace-tab-${entry.kind}`}
-              className="max-w-48 gap-1.5"
-            >
-              <TabLabel entry={entry} />
-              {isMovableKind(entry.kind) && showMoveAffordance && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      aria-label={`Split ${entry.title}`}
-                      data-testid="workspace-tab-split"
-                      data-tab-key={entry.key}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        e.preventDefault();
-                      }}
-                      className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      {/* aria-hidden: this span's own aria-label already names it; without
-                          hiding the icon too, it would be announced a second time as
-                          part of the *ancestor* TabsTrigger's accessible name. */}
-                      <Columns2 aria-hidden="true" className="size-3" />
-                    </span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem data-testid="workspace-tab-split-right" onClick={() => onSplit(entry.key, "right")}>
-                      Split right
-                    </DropdownMenuItem>
-                    <DropdownMenuItem data-testid="workspace-tab-split-down" onClick={() => onSplit(entry.key, "down")}>
-                      Split down
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              {entry.closable && (
-                <span
-                  role="button"
-                  tabIndex={0}
-                  aria-label={`Close ${entry.title}`}
-                  data-testid="workspace-tab-close"
-                  data-tab-key={entry.key}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onClose(entry.key);
-                  }}
-                  // A `role="button"` element gets none of a real
-                  // <button>'s key handling for free, so Enter and Space
-                  // are wired explicitly (uiux-audit.md §4 P1 item 9). It
-                  // stays a span rather than becoming a <button> because
-                  // it sits inside Radix's TabsTrigger, which is already
-                  // a button -- nesting one inside another is invalid
-                  // HTML and React warns about it.
-                  onKeyDown={(e) => {
-                    if (e.key !== "Enter" && e.key !== " ") return;
-                    e.stopPropagation();
-                    e.preventDefault();
-                    onClose(entry.key);
-                  }}
-                  className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
-                >
-                  <span aria-hidden="true">×</span>
-                </span>
-              )}
-            </TabsTrigger>
-            ))}
-          </TabsList>
+    <div ref={setDroppableRef} className="relative h-full">
+      <Tabs
+        key={`${task.ID}:${paneId}`}
+        // The fixed `primary-pane`/`side-pane` testids only tell the two
+        // panes of today's common 0-or-1-split case apart; a 3rd+ pane has
+        // no fixed name, so `data-pane-id` below is what a test targeting
+        // it uses instead.
+        data-testid={paneId === DEFAULT_PANE_ID ? "primary-pane" : paneCount === 2 ? "side-pane" : undefined}
+        data-pane-id={paneId}
+        value={activeKey ?? undefined}
+        onValueChange={onActivate}
+        className="h-full gap-0"
+      >
+        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
+          {tabs.length > 0 && (
+            <TabsList className="w-fit">
+              {tabs.map((entry) => (
+                <DraggableTabTrigger
+                  key={entry.key}
+                  entry={entry}
+                  paneId={paneId}
+                  showMoveAffordance={showMoveAffordance}
+                  onSplit={onSplit}
+                  onClose={onClose}
+                />
+              ))}
+            </TabsList>
+          )}
+          <NewTabButton onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
+        </div>
+        {tabs.length === 0 && (
+          <TabsEmptyState onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
         )}
-        <NewTabButton onOpen={(kind) => onOpenBase(kind, paneId === DEFAULT_PANE_ID ? "primary" : "side")} />
-      </div>
-      {tabs.length === 0 && (
-        <TabsEmptyState onOpen={(kind) => onOpenBase(kind, paneId === DEFAULT_PANE_ID ? "primary" : "side")} />
+        {tabs.map((entry) => (
+          /*
+           * Terminal tabs force-mount (and hide when inactive) so a
+           * backgrounded terminal keeps streaming into its buffer -- which
+           * is what lets its tab show an activity dot, and what stops
+           * switching panes or tabs from dropping output on the floor
+           * (Item 20). The detach-not-close contract is unchanged: the
+           * pane still aborts its attach, and never calls terminal.close,
+           * when it genuinely unmounts (tab closed, task switched).
+           */
+          <TabsContent
+            key={entry.key}
+            value={entry.key}
+            forceMount={entry.kind === "terminal" ? true : undefined}
+            className="min-h-0 data-[state=inactive]:hidden"
+          >
+            <TabContent
+              entry={entry}
+              client={client}
+              task={task}
+              active={activeKey === entry.key}
+              connectionStatus={connectionStatus}
+              onOpenFile={onOpenFile}
+              onOpenFileToSide={onOpenFileToSide}
+              onRevealInDiff={onRevealInDiff}
+              onNewTerminal={onNewTerminal}
+              events={events}
+            />
+          </TabsContent>
+        ))}
+      </Tabs>
+      {showDropPreview && <SplitDropPreview position={dropPosition!} />}
+    </div>
+  );
+}
+
+/**
+ * One tab strip entry: the tab trigger itself plus its "Split" and close
+ * affordances -- pulled out of {@link PaneTabStrip}'s tab list into its own
+ * component because `useDraggable` (Item 8) is a hook, and hooks can't be
+ * called once per array element inside another component's render body.
+ */
+function DraggableTabTrigger({
+  entry,
+  paneId,
+  showMoveAffordance,
+  onSplit,
+  onClose,
+}: {
+  entry: TabEntry;
+  paneId: string;
+  showMoveAffordance: boolean;
+  onSplit: (key: string, direction: SplitDirection) => void;
+  onClose: (key: string) => void;
+}) {
+  // Every tab is draggable, not just movable kinds -- dropping a Chat/Files
+  // tab onto another pane's center still moves it there (Item 8's scope);
+  // only *splitting* (an edge drop, handled in App.tsx's onDragEnd) is
+  // gated to isMovableKind, matching the "Split" menu below.
+  //
+  // `useDraggable`'s `attributes` (role="button", aria-roledescription,
+  // tabIndex, ...) are meant for making an otherwise-plain element
+  // accessible as a draggable widget -- TabsTrigger already has a proper,
+  // keyboard-operable `role="tab"` via Radix, and spreading `attributes`
+  // on top overwrites that role with dnd-kit's generic "button", breaking
+  // `getByRole("tab", ...)` lookups (verified: it did, in this file's own
+  // existing tests). Only `listeners` (the pointer handlers that actually
+  // start a drag) are spread here.
+  const { listeners, setNodeRef } = useDraggable({
+    id: entry.key,
+    data: { tabKey: entry.key, sourcePaneId: paneId, kind: entry.kind } satisfies DraggedTabData,
+  });
+
+  return (
+    <TabsTrigger
+      ref={setNodeRef}
+      value={entry.key}
+      data-testid={`workspace-tab-${entry.kind}`}
+      className="max-w-48 gap-1.5"
+      {...listeners}
+    >
+      <TabLabel entry={entry} />
+      {isMovableKind(entry.kind) && showMoveAffordance && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <span
+              role="button"
+              tabIndex={0}
+              aria-label={`Split ${entry.title}`}
+              data-testid="workspace-tab-split"
+              data-tab-key={entry.key}
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+              }}
+              className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+            >
+              {/* aria-hidden: this span's own aria-label already names it; without
+                  hiding the icon too, it would be announced a second time as
+                  part of the *ancestor* TabsTrigger's accessible name. */}
+              <Columns2 aria-hidden="true" className="size-3" />
+            </span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem data-testid="workspace-tab-split-left" onClick={() => onSplit(entry.key, "left")}>
+              Split left
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="workspace-tab-split-right" onClick={() => onSplit(entry.key, "right")}>
+              Split right
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="workspace-tab-split-up" onClick={() => onSplit(entry.key, "up")}>
+              Split up
+            </DropdownMenuItem>
+            <DropdownMenuItem data-testid="workspace-tab-split-down" onClick={() => onSplit(entry.key, "down")}>
+              Split down
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
-      {tabs.map((entry) => (
-        /*
-         * Terminal tabs force-mount (and hide when inactive) so a
-         * backgrounded terminal keeps streaming into its buffer -- which
-         * is what lets its tab show an activity dot, and what stops
-         * switching panes or tabs from dropping output on the floor
-         * (Item 20). The detach-not-close contract is unchanged: the
-         * pane still aborts its attach, and never calls terminal.close,
-         * when it genuinely unmounts (tab closed, task switched).
-         */
-        <TabsContent
-          key={entry.key}
-          value={entry.key}
-          forceMount={entry.kind === "terminal" ? true : undefined}
-          className="min-h-0 data-[state=inactive]:hidden"
+      {entry.closable && (
+        <span
+          role="button"
+          tabIndex={0}
+          aria-label={`Close ${entry.title}`}
+          data-testid="workspace-tab-close"
+          data-tab-key={entry.key}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onClose(entry.key);
+          }}
+          // A `role="button"` element gets none of a real
+          // <button>'s key handling for free, so Enter and Space
+          // are wired explicitly (uiux-audit.md §4 P1 item 9). It
+          // stays a span rather than becoming a <button> because
+          // it sits inside Radix's TabsTrigger, which is already
+          // a button -- nesting one inside another is invalid
+          // HTML and React warns about it.
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" && e.key !== " ") return;
+            e.stopPropagation();
+            e.preventDefault();
+            onClose(entry.key);
+          }}
+          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
         >
-          <TabContent
-            entry={entry}
-            client={client}
-            task={task}
-            active={activeKey === entry.key}
-            connectionStatus={connectionStatus}
-            onOpenFile={onOpenFile}
-            onOpenFileToSide={onOpenFileToSide}
-            onRevealInDiff={onRevealInDiff}
-            onNewTerminal={onNewTerminal}
-            events={events}
-          />
-        </TabsContent>
-      ))}
-    </Tabs>
+          <span aria-hidden="true">×</span>
+        </span>
+      )}
+    </TabsTrigger>
+  );
+}
+
+/**
+ * The drop-shape preview overlay for a pane currently under a tab drag
+ * (Item 8) -- a translucent highlight over the whole pane for a center
+ * drop, or over the half the resulting split would occupy for an edge
+ * drop. Reuses the same `primary` accent every other emphasis affordance
+ * in this codebase's button/ring styling already uses (docs/design.md's
+ * static token scale) rather than introducing a new color.
+ */
+function SplitDropPreview({ position }: { position: SplitDropZonePosition }) {
+  return (
+    <div
+      data-testid="split-drop-preview"
+      data-drop-position={position}
+      className={cn(
+        "pointer-events-none absolute z-40 rounded-md border-2 border-primary bg-primary/20",
+        position === "center" && "inset-2",
+        position === "left" && "inset-y-0 left-0 w-1/2",
+        position === "right" && "inset-y-0 right-0 w-1/2",
+        position === "top" && "inset-x-0 top-0 h-1/2",
+        position === "bottom" && "inset-x-0 bottom-0 h-1/2",
+      )}
+    />
   );
 }
 

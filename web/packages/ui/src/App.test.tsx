@@ -44,6 +44,34 @@ const TASK_B: Task = {
   Branch: "task-b",
 };
 
+const TASK_C: Task = {
+  ...TASK,
+  ID: 3,
+  Title: "Task C",
+  Branch: "task-c",
+};
+
+const TASK_D: Task = {
+  ...TASK,
+  ID: 4,
+  Title: "Task D",
+  Branch: "task-d",
+};
+
+const TASK_E: Task = {
+  ...TASK,
+  ID: 5,
+  Title: "Task E",
+  Branch: "task-e",
+};
+
+const TASK_F: Task = {
+  ...TASK,
+  ID: 6,
+  Title: "Task F",
+  Branch: "task-f",
+};
+
 /** Flushes pending microtasks, wrapped in `act` so React commits any resulting state updates before the caller asserts -- same helper other component test files use. */
 async function flush(): Promise<void> {
   await act(async () => {
@@ -1027,6 +1055,30 @@ describe("App quick-open (Item 18)", () => {
 });
 
 describe("App splits (Item 6)", () => {
+  it("the \"Split\" menu lists all 4 directions (Item 7)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openBaseTab("Diff");
+
+    const trigger = screen.getByRole("button", { name: "Split Diff" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    await flush();
+
+    expect(screen.getByTestId("workspace-tab-split-left")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-right")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-up")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-down")).toBeInTheDocument();
+  });
+
   it("the file explorer's \"Open to side\" action opens directly into a new side pane -- a genuinely different placement than the row's own \"prefer\" click", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
@@ -1250,6 +1302,266 @@ describe("App splits (Item 6)", () => {
     expect(within(finalPrimaryPane).getByRole("tab", { name: "Chat" })).toBeInTheDocument();
     expect(within(finalPrimaryPane).queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
     expect(within(finalPrimaryPane).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("with 3 panes open, each pane's own \"+\" -> \"Open Files\" lands the new tab in that exact pane, not whichever non-default pane the old \"side\" sentinel would have picked first (Item 9)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_C]);
+
+    clickTaskRow(TASK_C);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Same 2-splits-deep fixture shape as Item 4's 3-pane test: Diff moves
+    // into a second pane (splitRight), then Terminal moves into a third
+    // (splitDown from the default pane again).
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+
+    const splitTerminalTrigger = within(primaryPane).getByRole("button", { name: "Split Terminal" });
+    splitTerminalTrigger.focus();
+    fireEvent.keyDown(splitTerminalTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByTestId("workspace-tab-split-down"));
+    await flush();
+
+    const finalPrimaryPane = screen.getByTestId("primary-pane");
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+    const diffPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Diff" }))!;
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }))!;
+    expect(diffPane).toBeDefined();
+    expect(terminalPane).toBeDefined();
+
+    // Files hasn't been opened anywhere yet -- open it from the Diff
+    // pane's own "+", which under the old "side" sentinel would have
+    // landed in whichever non-default pane collectAllPanes lists first
+    // (the terminal pane, per this tree's DFS order), not necessarily the
+    // one whose "+" was actually clicked.
+    const diffPaneNewTabTrigger = within(diffPane as HTMLElement).getByTestId("tabs-new-tab");
+    diffPaneNewTabTrigger.focus();
+    fireEvent.keyDown(diffPaneNewTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Files" }));
+    await flush();
+    respondAll(socket, "file.list", []);
+    await flush();
+
+    expect(within(diffPane as HTMLElement).getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    expect(within(terminalPane as HTMLElement).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+  });
+});
+
+describe("App drag-to-split (Item 8)", () => {
+  interface StubRect {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }
+
+  // jsdom never lays anything out, so getBoundingClientRect is always a
+  // zero rect by default -- every drop would resolve to the same (0,0)-
+  // relative position without this. Keyed by element identity (a WeakMap,
+  // same idea as resizable.test.tsx's testid-keyed stub) since the Item 8
+  // droppable pane wrapper has no testid of its own -- callers grab the
+  // actual DOM node via `within(...).getByTestId(...)`.parentElement and
+  // register its rect directly.
+  const rectByElement = new WeakMap<Element, StubRect>();
+  let originalGetBoundingClientRect: typeof Element.prototype.getBoundingClientRect;
+
+  beforeEach(() => {
+    originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const r = rectByElement.get(this) ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        x: r.left,
+        y: r.top,
+        width: r.width,
+        height: r.height,
+        top: r.top,
+        left: r.left,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        toJSON: () => {},
+      } as DOMRect;
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
+  function stubRect(el: Element, rect: StubRect): void {
+    rectByElement.set(el, rect);
+  }
+
+  /**
+   * Simulates a dnd-kit PointerSensor drag from scratch: pointerdown on
+   * the draggable element (dnd-kit's activator handler requires
+   * `isPrimary`/`button: 0`), then two pointermoves dispatched on
+   * `document` -- PointerSensor attaches its move/end listeners there,
+   * not on the node itself, once a drag is pending. The first move
+   * crosses the 8px activation-distance threshold and only *starts* the
+   * drag (dnd-kit's own AbstractPointerSensor doesn't forward that
+   * event's coordinates as a position update, it just flips `activated`);
+   * the second move is what actually delivers `target` as the drag's
+   * live position, recomputing `active.rect.current.translated`. A final
+   * pointerup at `target` ends the drag. Choosing `tabCenter` to be the
+   * dragged element's own stubbed center means the translated rect's
+   * center lands exactly on `target` with no extra offset arithmetic at
+   * each call site (translated = initialRect shifted by target-tabCenter,
+   * and initialRect's own center is tabCenter).
+   */
+  async function dragTabTo(
+    tabElement: Element,
+    tabCenter: { x: number; y: number },
+    target: { x: number; y: number },
+  ): Promise<void> {
+    fireEvent.pointerDown(tabElement, {
+      pointerId: 1,
+      isPrimary: true,
+      button: 0,
+      clientX: tabCenter.x,
+      clientY: tabCenter.y,
+    });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: tabCenter.x + 20, clientY: tabCenter.y });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: target.x, clientY: target.y });
+    fireEvent.pointerUp(document, { pointerId: 1, clientX: target.x, clientY: target.y });
+    // dnd-kit's PointerSensor suppresses the stray "click" that would
+    // otherwise fire right after a drag (it adds a capture-phase
+    // document-level stopPropagation listener on drag start) and removes
+    // it via `setTimeout(..., 50)`, not synchronously on drag end --
+    // without advancing past that window here, the listener leaks into
+    // whatever runs next (the test's own later assertions' events, or the
+    // next test entirely) and silently swallows every click in the
+    // document until it expires. This file runs under fake timers (the
+    // top-level `beforeEach`'s `vi.useFakeTimers()`), so it's advanced
+    // explicitly rather than waited on in real wall-clock time -- same
+    // pattern as this file's own `advanceReconnectTimer`.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+  }
+
+  /**
+   * `task` with Diff split into its own side pane and Terminal left in
+   * primary -- two draggable, movable tabs in two distinct panes, the
+   * fixture every test below drags between. Each test passes its own
+   * task (TASK_D/E/F) rather than sharing one: `lib/terminal-sessions.ts`
+   * binds a session to `${taskId}:terminal` for the process lifetime of
+   * this test file, so a second test reusing the same task id would skip
+   * the `terminal.create` round-trip this setup waits on.
+   */
+  async function setUpTwoPanes(socket: FakeSocket, task: Task): Promise<void> {
+    await resolveSidebar(socket, [task]);
+    clickTaskRow(task);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+  }
+
+  /** Registers stubbed rects for both panes' droppable wrappers (side-by-side, 400x300 each) and for `terminalTab` (the tab every test drags), returning nothing -- callers then call `dragTabTo`. */
+  function stubTwoPaneRects(primaryPane: HTMLElement, sidePane: HTMLElement, terminalTab: HTMLElement): void {
+    stubRect(primaryPane.parentElement!, { left: 0, top: 0, width: 400, height: 300 });
+    stubRect(sidePane.parentElement!, { left: 400, top: 0, width: 400, height: 300 });
+    stubRect(terminalTab, { left: 50, top: 10, width: 60, height: 20 });
+  }
+
+  it("dropping a movable tab on another pane's left-edge zone splits it left", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_D);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    // x=430 is 30px (7.5%) into the side pane's left edge -- well inside
+    // its 15% (60px) edge threshold.
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 430, y: 150 });
+    await flush();
+
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }));
+    expect(terminalPane).toBeDefined();
+    expect(within(screen.getByTestId("primary-pane")).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("dropping on a pane's center zone moves the tab there instead of splitting", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_E);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    // (600, 150) is the side pane's own center -- well inside its 40% center band.
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 600, y: 150 });
+    await flush();
+
+    expect(document.querySelectorAll("[data-pane-id]")).toHaveLength(2);
+    expect(within(screen.getByTestId("side-pane")).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("primary-pane")).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("releasing outside every pane's droppable zone is a no-op", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_F);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 5000, y: 5000 });
+    await flush();
+
+    expect(document.querySelectorAll("[data-pane-id]")).toHaveLength(2);
+    expect(within(screen.getByTestId("primary-pane")).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
   });
 });
 

@@ -375,6 +375,50 @@ describe("useTaskTabs panes", () => {
     expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.some((t) => t.key === "1:diff")).toBe(false);
   });
 
+  it("splitTab in \"left\" creates a horizontal group with the new pane before the original (Item 7)", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => {
+      result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "diff"));
+      result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "left");
+    });
+
+    const layout = result.current.tabsByTask.get(1)!;
+    expect(layout.root.kind).toBe("group");
+    if (layout.root.kind !== "group") throw new Error("unreachable");
+    expect(layout.root.group.direction).toBe("horizontal");
+    // "left" inserts the new pane before the target -- the default pane is
+    // the second child, not the first.
+    expect(layout.root.group.children[1]).toMatchObject({ kind: "pane", pane: { id: DEFAULT_PANE_ID } });
+
+    const sidePaneId = otherPaneId(layout.root)!;
+    const side = findPaneById(layout.root, sidePaneId)!;
+    expect(side.tabs.map((t) => t.key)).toEqual(["1:diff"]);
+    expect(layout.focusedPaneId).toBe(sidePaneId);
+    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.some((t) => t.key === "1:diff")).toBe(false);
+  });
+
+  it("splitTab in \"up\" creates a vertical group with the new pane before the original (Item 7)", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => {
+      result.current.ensureTask(1);
+      result.current.openTab(1, baseTabForKind(1, "diff"));
+      result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "up");
+    });
+
+    const layout = result.current.tabsByTask.get(1)!;
+    expect(layout.root.kind).toBe("group");
+    if (layout.root.kind !== "group") throw new Error("unreachable");
+    expect(layout.root.group.direction).toBe("vertical");
+    expect(layout.root.group.children[1]).toMatchObject({ kind: "pane", pane: { id: DEFAULT_PANE_ID } });
+
+    const sidePaneId = otherPaneId(layout.root)!;
+    const side = findPaneById(layout.root, sidePaneId)!;
+    expect(side.tabs.map((t) => t.key)).toEqual(["1:diff"]);
+    expect(layout.focusedPaneId).toBe(sidePaneId);
+    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.some((t) => t.key === "1:diff")).toBe(false);
+  });
+
   it("splitTab is a silent no-op once it would exceed the tree's max depth", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
