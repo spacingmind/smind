@@ -1,0 +1,96 @@
+# Pane split-tree, full parity pass: 4-direction split, drag-to-split, exact-pane "+"
+
+## Context
+
+`docs/plans/completed/pane-split-tree.md` shipped the split-tree data model (Item 1) and its wiring into `use-task-tabs.ts`/`App.tsx` (Items 2-6): arbitrary N-pane layouts, resize persistence, a button-driven "Split right/down" menu. Three gaps were called out there as deliberately deferred, and the user has now asked for "đầy đủ" (the complete/full thing) rather than leaving them open:
+
+1. **Only 2 of 4 split directions.** `web/packages/ui/src/lib/split-tree.ts`'s `splitPaneInLayout`/`insertSplitInternal` already accept `"left" | "right" | "top" | "bottom"` (verified: `position` is typed as the full 4-value union at every call site in that file) — the restriction to right/down is purely in `use-task-tabs.ts`'s `SplitDirection` type and `App.tsx`'s `PaneTabStrip` menu, not the underlying model.
+2. **No drag-a-tab-to-an-edge-to-split.** Splitting only happens via the "Split" dropdown menu; paseo's own equivalent (`refs/paseo/packages/app/src/components/split-drop-zone.tsx` + `split-container.tsx`, read in full this session) drives it from `@dnd-kit/core` — a draggable per tab, a droppable overlay per pane classifying the drop position into center/left/right/top/bottom via `resolveSplitDropPosition` (pure geometry, ports directly), then `moveTabToPaneInLayout` (center) or `splitPaneInLayout` (an edge).
+3. **The "+" menu can't unambiguously target a 3rd+ pane.** `openTab`'s `placement` is still the 3-value `TabPlacement` (`"primary" | "side" | "prefer"`) from before the tree existed; `"side"` picks "the first non-default pane `collectAllPanes` finds," not necessarily the pane whose own "+" was clicked.
+
+`@dnd-kit/core` is not currently a smind dependency (checked `web/package.json`, `web/packages/ui/package.json`, `web/bun.lock` — no match).
+
+## Reference patterns (refs/paseo, read 2026-09-18)
+
+- `components/split-drop-zone.tsx`: `resolveSplitDropPosition({width, height, x, y})` — pure function, ports near-verbatim. `EDGE_RATIO = 0.15` (outer 15% of each axis is an edge zone), `CENTER_RATIO = 0.4` (inner 40% is the "move here, don't split" zone), whichever edge is closest wins for a point that's in neither. The component itself (`SplitDropZone`) is React Native/Unistyles — only the geometry function ports; the overlay visuals get rebuilt in Tailwind.
+- `components/split-container.tsx`: `DndContext` wraps the whole split tree, `useSensors(PointerSensor)` (an 8px `activationConstraint.distance` so a plain click doesn't register as a drag start). `handleDragStart`/`updateDropPreview` (on `onDragMove`/`onDragOver`)/`handleDragEnd` — the latter reads `event.over`'s droppable data to decide `applyPaneDropEnd` (center -> move, edge -> split) vs (paseo also has tab-onto-tab reordering, which smind doesn't have today and this pass doesn't add — out of scope, see Decisions).
+
+## Acceptance Criteria
+
+### Item 7 — 4-direction split
+`use-task-tabs.ts`'s `SplitDirection` widens from `"right" | "down"` to `"left" | "right" | "up" | "down"` (keep smind's existing up/down naming rather than paseo's top/bottom, mapping to the tree's `"top"`/`"bottom"` at the `splitPaneInLayout` call site only). `PaneTabStrip`'s "Split" dropdown offers all 4 as menu items. No other behavior changes — `splitPaneInLayout` already handles all 4 positions correctly (verified by Item 1's own tests covering the underlying function, just never exercised via right's siblings from the UI layer).
+
+### Item 8 — drag-a-tab-to-an-edge-to-split
+Dragging a tab's strip entry (any tab, not just movable kinds — dropping a Chat/Files tab onto another pane's center still just moves-or-focuses it there, matching what clicking it there would do; only *splitting* is gated to `isMovableKind`, same as today's button) and releasing it:
+- Over the **center 40%** of any pane (including its own, a no-op) moves the tab there via the existing `moveTab`, exactly like a click-driven move.
+- Over one of the four **outer 15% edges** of any pane splits that pane in the corresponding direction via `splitTab`, carrying the dragged tab into the new pane — same operation Item 3's menu already performs, now reachable by drag as well as by menu (the menu is not removed; both remain valid ways to split).
+- A visible preview (highlighted overlay + border matching the eventual split shape) tracks the pointer during the drag, so the user sees which zone they're about to drop into before releasing.
+- Dragging outside any pane (drop cancelled, or dropped somewhere with no droppable) is a no-op — nothing moves.
+
+### Item 9 — the "+" menu targets its own pane exactly, regardless of pane count
+`openTab`'s `placement` gains a 4th form that names an exact pane id (e.g. `{ paneId: string }` alongside the existing 3 string literals, or widen `TabPlacement` to `"primary" | "side" | "prefer" | string` — implementation's call, state which in Decisions). `PaneTabStrip`'s own "+" button and empty-state buttons pass their own `paneId` directly instead of guessing `"primary"` vs `"side"`. The 3 legacy string placements keep their exact existing meaning for every other caller (command palette, file-tree "open"/"open to side", route restore) — this item only changes what the tab strip's own local affordances pass.
+
+## Test Scenarios
+
+**Item 7 (`use-task-tabs.test.ts` / `App.test.tsx`):**
+- `splitTab(..., "left")` and `splitTab(..., "up")` each produce the correct group direction/child order (mirroring the existing right/down test shapes).
+- `PaneTabStrip`'s "Split" menu lists 4 items; each fires the correct `SplitDirection`.
+
+**Item 8 (new, e.g. `split-drop-zone.test.ts` for the pure geometry, `App.test.tsx` for the integrated flow):**
+- `resolveSplitDropPosition` unit tests ported from paseo's own coverage: a point in the exact center returns `"center"`; a point in the outer-left 15% returns `"left"` even if it's also within the vertical center band; a point in neither the center band nor within any edge threshold (the geometrically ambiguous ring in between) returns whichever edge is nearest by distance.
+- Dragging a movable tab and dropping on another pane's left-edge zone calls `splitTab(..., targetPaneId, "left")` with the dragged tab's key.
+- Dragging and dropping on a pane's center zone calls `moveTab`, not `splitTab`.
+- Dragging and releasing with no `over` droppable (dropped outside any pane) changes nothing.
+- The existing "Split" menu (Item 3/7) still works unmodified — drag-to-split is additive, not a replacement.
+
+**Item 9:**
+- With 3 panes open (two splits deep), each pane's own "+" -> "Open Diff" lands the new Diff tab in *that* pane specifically, not whichever non-default pane `collectAllPanes` happens to list first.
+- Existing placement tests (`"prefer"`/`"side"`/`"primary"` from file-tree opens, route restore, command palette) unaffected.
+
+## Decisions
+
+- **`@dnd-kit/core` is the new dependency** (not `@dnd-kit/sortable` — smind doesn't need paseo's tab-reordering-within-a-pane feature, which is the only thing that package's `sortableKeyboardCoordinates`/`arrayMove` helpers are for; a plain `PointerSensor` is enough for pane-to-pane drag). If keyboard-only drag accessibility turns out to matter, that's a follow-up, not blocking this pass — dropping a tab by mouse/touch plus the existing menu (unchanged, still keyboard-operable) together already cover both an accessible path and the requested drag interaction.
+- **Tab-onto-tab reordering within or across a strip is explicitly out of scope.** Paseo's `split-container.tsx` handles both "drop on a pane" (split/move) and "drop on another tab" (reorder/insert-at-position) via two different droppable "kind"s; smind has no tab-reordering feature today (tabs are appended in open order) and this pass doesn't add one — only the pane-level drop zone is built. Dropping a tab anywhere within a pane's strip (not specifically on another tab) still counts as "the center of that pane" for this pass's purposes.
+- **Visual preview styling**: reuse the codebase's existing accent/border tokens (whatever `docs/design.md` names for the "action" accent) rather than inventing new ones — this is a UI-polish detail for the implementer to match to the existing visual-identity pass (#152), not a new design decision.
+
+## Progress
+
+- [x] Item 7 — 4-direction split
+- [x] Item 8 — drag-to-split
+- [x] Item 9 — exact-pane "+" targeting
+- [x] `task test` / `task lint` green (one unrelated pre-existing flaky Go test, see Validation)
+- [x] Manual dogfood pass -- done during review (real daemon, isolated `SMIND_HOME` on a second port so it didn't disturb the daemon already running for local dogfood, real Chromium via Playwright, real mouse events, no simulation): see Validation.
+
+## Decisions (Items 7-9, 2026-09-18)
+
+- **Part A's port is verbatim** except doc comments -- `resolveSplitDropPosition`'s check order (center-band-both-axes, then per-axis edge thresholds in left/right/top/bottom order, then nearest-edge-by-distance) is unchanged from paseo. Confirmed by reading `refs/paseo/packages/app/src/components/split-drop-zone.tsx` directly rather than trusting the plan message's summary of it.
+- **`DraggedTabData`'s `kind` field is read from `TabsTrigger`'s own `entry.kind`, and the whole drag/drop wiring lives in `App.tsx`, not a new hook.** `useTaskTabs.ts` stays UI-framework-agnostic (no dnd-kit import); `App.tsx` already owns the split-tree rendering and is where `DndContext` naturally wraps `SplitTreeView`.
+- **`useDraggable`'s `attributes` are deliberately *not* spread onto `TabsTrigger`, only `listeners` is** (Part D). `attributes` includes `role="button"`, which overwrites Radix's own `role="tab"` on the same element and breaks every `getByRole("tab", ...)` lookup in the existing test suite (verified empirically -- the plan message's own suggestion of spreading both was wrong for this codebase's Tabs primitive). `listeners` (just the pointer handlers that start a drag) is sufficient and doesn't touch the element's accessible role.
+- **Per-tab draggable ref goes directly on `TabsTrigger` via `ref={setNodeRef}`, no wrapping span needed.** `TabsTrigger` in `components/ui/tabs.tsx` is a plain function component (not `forwardRef`) spreading `...props` onto Radix's own `Tabs.Trigger`; React 19's ref-as-a-prop support means this typechecks and works without any wrapper element, unlike the plan message's speculation that a wrapper might be required.
+- **A new pane's droppable ref lives on a wrapping `<div className="relative h-full">` around each `PaneTabStrip`'s existing `<Tabs>` root**, not on `<Tabs>` itself -- keeps the existing `data-testid="primary-pane"`/`data-pane-id` attributes exactly where existing tests already look for them, and gives the drop-preview overlay (`SplitDropPreview`) a positioned parent to render into as an absolutely-positioned sibling of `<Tabs>`.
+- **Drop-preview color reuses `primary`/`ring`, not the literal CSS variable named `accent`.** smind's `--accent` token (`docs/design.md` §1) is a near-white/gray hover-surface color (used for e.g. `hover:bg-accent` on tab close/split buttons), not an emphasis/brand color -- using it for a drag-drop preview would be nearly invisible. Paseo's own `theme.colors.accent` is functionally its brand/action color, which in smind's static token scale is `primary` (already used for the default `Button` variant). The preview is `border-primary bg-primary/20`.
+- **`DraggableTabTrigger` is a new subcomponent, not inline JSX in `PaneTabStrip`'s `.map()`.** `useDraggable` is a hook; calling it once per array element inside another component's render body violates the rules of hooks once the tab count changes across renders. Splitting each tab-strip entry into its own component (holding the split/close affordances too, unchanged) is the only way to call it once per tab safely.
+- **Testing a real dnd-kit `PointerSensor` drag under jsdom needs 3 things this repo didn't already have a pattern for, all worked out this session:** (1) `Element.prototype.getBoundingClientRect` stubbed per-element via a `WeakMap` (extends the existing testid-keyed pattern in `resizable.test.tsx` to arbitrary elements, since the Item 8 droppable pane wrapper has no testid of its own); (2) the exact pointer event sequence dnd-kit's `AbstractPointerSensor` expects -- `pointerdown` on the draggable node, then **two** `pointermove`s dispatched on `document` (not the node -- that's where dnd-kit's sensor attaches its move/end listeners once a drag is pending), since the first move that crosses the 8px activation threshold only starts the drag and does not itself deliver a position update, and `pointerup` on `document` to end it; (3) dnd-kit's post-drag click-suppression listener is removed via a real `setTimeout(..., 50)`, not synchronously on drag end -- under this file's fake timers (its own top-level `beforeEach` calls `vi.useFakeTimers()`), that has to be advanced explicitly (`vi.advanceTimersByTimeAsync(60)`) after every simulated drag, or the stray listener leaks into whatever runs next and silently swallows clicks. Each of the 3 new drag tests also uses its own task id (`TASK_D`/`E`/`F`) rather than sharing one, because `lib/terminal-sessions.ts` binds a session to `${taskId}:terminal` for the whole test-file process and a shared id would skip the `terminal.create` round-trip a later test's setup waits on -- the same gotcha the pre-existing Item 4 test already worked around with `TASK_B`.
+
+## Validation
+
+Items 7-9, 2026-09-18:
+
+- Part A: `web/packages/ui/src/lib/split-drop-zone.ts` (verbatim geometry port) + `split-drop-zone.test.ts` (3 tests: exact-center, left-edge-despite-vertical-center-band, nearest-edge-by-distance for the ambiguous ring). `@dnd-kit/core` added to `web/packages/ui/package.json`, resolved into `web/bun.lock` (`@dnd-kit/sortable` deliberately not added, per the plan's Decisions). Verified: `bun run --filter '@smind/ui' test -- split-drop-zone.test.ts` -- 3/3 passing.
+- Part B: `SplitDirection` widened to `"left" | "right" | "up" | "down"` in `use-task-tabs.ts`; `splitTab` maps to the tree's `position` vocabulary via a small `SPLIT_DIRECTION_TO_POSITION` table. `PaneTabStrip`'s "Split" menu gained "Split left"/"Split up" items (`workspace-tab-split-left`/`-up` testids). New tests: `splitTab(..., "left")`/`splitTab(..., "up")` in `use-task-tabs.test.ts` (mirroring the existing right/down shapes, asserting child order for the "insert before target" cases); an `App.test.tsx` assertion that the Split menu lists all 4 testids. Verified: `bun run --filter '@smind/ui' test -- use-task-tabs.test.ts` -- 26/26 passing; the new App.test.tsx case passing in isolation.
+- Part C: `TabPlacement` widened to `"primary" | "side" | "prefer" | { pane: string }`; `openTab` branches on `typeof placement === "object"` before the existing string checks. `PaneTabStrip`'s two `onOpenBase` call sites (`NewTabButton`, `TabsEmptyState`) now pass `{ pane: paneId }` instead of guessing `primary`/`side`. New `App.test.tsx` test: a 3-pane layout (Diff + Terminal split off, matching Item 4's fixture shape) opens Files from the Diff pane's own "+" and asserts it lands there specifically, not in the Terminal pane the old "side" sentinel's "first non-default pane" rule would have picked. All other `TabPlacement` callers (file-tree opens, route restore, command palette) unchanged, per the plan's explicit scope limit.
+- Part D: `App.tsx` wraps the desktop split-tree branch (not the mobile/compact branch) in a `DndContext` with `PointerSensor` (8px activation distance); `dragOverPaneId`/`dropPosition`/`isDragActive` are lifted state threaded through `SplitPaneCallbacks` down to each `PaneTabStrip`. Every tab is now draggable via a new `DraggableTabTrigger` subcomponent (`useDraggable`, `listeners` only -- see Decisions); every pane is droppable via `useDroppable` on a new wrapping `<div>` around `PaneTabStrip`'s existing `<Tabs>` root, which also hosts the new `SplitDropPreview` overlay (`border-primary bg-primary/20`, half/whole-pane highlight per zone). `onDragEnd` calls `moveTab` for a center drop or `splitTab` (gated to `isMovableKind`) for an edge drop, mapping `SplitDropZonePosition` to `SplitDirection` via a small table (`top`->`"up"`, `bottom`->`"down"`, left/right unchanged). New tests in a `describe("App drag-to-split (Item 8)")` block in `App.test.tsx`: dropping a movable tab on a pane's left-edge zone splits it left (pane count 2->3); dropping on a pane's center zone moves it there instead (pane count stays 2); releasing outside every droppable pane's zone is a no-op. The existing "Split" menu tests (Items 3/6/7) all still pass unmodified, confirming drag-to-split is additive. See Decisions for the 3 jsdom/dnd-kit testing gotchas worked out to make these pass reliably (rect stubbing, the 2-pointermove activation sequence, and the fake-timer-vs-real-`setTimeout` cleanup race).
+
+Full verification, 2026-09-18 (independently run, not just trusting agent output):
+
+- `cd web && bun run --filter '@smind/ui' test -- split-drop-zone.test.ts use-task-tabs.test.ts` -- 29/29 passing.
+- `bun run --filter '@smind/ui' test` (whole suite) -- 800/800 passing.
+- `bun run --filter '@smind/ui' typecheck` -- clean.
+- `task test` (repo root, Go + web) -- web suite 800/800 passing; Go suite failed once on `TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames` (`internal/relay/client`, an unrelated mobile-relay-reconnect test -- no Go files were touched in this pass). Re-ran `go test ./internal/relay/client/... -run TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames -count=3` in isolation -- 3/3 passing, confirming pre-existing flakiness rather than a regression (same "rerun before assuming a PR regression" pattern as this project's known flaky-wsapi-tests history).
+- `task lint` -- clean (Go vet + gofmt; this repo has no separate web lint task under `task lint`, only under `test:web`, which passed above).
+
+Manual dogfood pass, 2026-09-18 (real daemon built from this branch, isolated `SMIND_HOME` on port 4649 so it didn't disturb the daemon already running for local dogfood on 4648, real Chromium via Playwright driving real mouse events -- no simulation):
+
+- Opened a task (Chat pane only), opened Terminal via "+" (now two tabs, one pane). Dragged the Terminal tab chip to the right-edge zone of that same (only) pane by real mouse events (`mousedown` -> multiple `mousemove`s -> `mouseup`): a bordered highlight covering the right half of the pane tracked the cursor during the drag (the `SplitDropPreview` overlay), and releasing there produced a genuine 2-pane split (Chat left / Terminal right) -- confirmed via `getByTestId("primary-pane")`/`getByTestId("side-pane")` counts and a screenshot.
+- Opened Files in the primary (Chat) pane via its own "+", then dragged the Files tab onto the Terminal pane's *center* zone: the preview overlay covered the whole target pane (not a half), and releasing moved Files into that pane (now showing Terminal + Files together) rather than creating a third pane -- confirmed by screenshot and pane counts staying at 2.
+- No console errors or page errors observed at any point during either drag.

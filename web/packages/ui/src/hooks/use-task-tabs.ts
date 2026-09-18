@@ -23,11 +23,20 @@ import {
 /** Any live pane id in a task's split tree -- widened from the old 2-value union now that a task can have an arbitrary number of panes. */
 export type PaneId = string;
 
-/** Where an opened-or-moved tab is allowed to land. `prefer` is the implicit-open case (`audit-paseo.md` §1): use an existing non-default pane if one exists, else the default pane -- but never move a tab already placed somewhere. */
-export type TabPlacement = "primary" | "side" | "prefer";
+/**
+ * Where an opened-or-moved tab is allowed to land. `prefer` is the
+ * implicit-open case (`audit-paseo.md` §1): use an existing non-default
+ * pane if one exists, else the default pane -- but never move a tab
+ * already placed somewhere. `{ pane }` (Item 9) names an exact, already-
+ * existing pane id -- a discriminated object rather than a 4th bare string
+ * literal so it can never collide with the 3 sentinel meanings above, even
+ * though today's generated pane ids (`pane-N`/`group-N`) couldn't actually
+ * produce the string `"side"` or `"primary"` anyway.
+ */
+export type TabPlacement = "primary" | "side" | "prefer" | { pane: string };
 
-/** The two directions a movable tab's strip entry can be split in (Item 3). */
-export type SplitDirection = "right" | "down";
+/** The four directions a movable tab's strip entry can be split in (Item 3/7). */
+export type SplitDirection = "left" | "right" | "up" | "down";
 
 /** Kinds "Split" and cross-pane moves apply to -- Chat and Files stay pinned to the default pane (the plan's Item 6 explicitly excludes them). */
 const MOVABLE_KINDS: readonly TabKind[] = ["file", "diff", "terminal"];
@@ -35,6 +44,14 @@ const MOVABLE_KINDS: readonly TabKind[] = ["file", "diff", "terminal"];
 export function isMovableKind(kind: TabKind): boolean {
   return (MOVABLE_KINDS as readonly string[]).includes(kind);
 }
+
+/** Maps smind's own up/down `SplitDirection` naming to the tree's top/bottom vocabulary (`splitPaneInLayout`'s `position`). */
+const SPLIT_DIRECTION_TO_POSITION: Record<SplitDirection, "left" | "right" | "top" | "bottom"> = {
+  left: "left",
+  right: "right",
+  up: "top",
+  down: "bottom",
+};
 
 function seedState(taskId: number): TaskLayout {
   // First visit seeds just Chat -- Files/Diff/Terminal are one "+" click
@@ -193,7 +210,9 @@ export function useTaskTabs() {
         let targetLayout = layout;
         let targetPaneId = DEFAULT_PANE_ID;
 
-        if (placement === "side" || placement === "prefer") {
+        if (typeof placement === "object") {
+          targetPaneId = placement.pane;
+        } else if (placement === "side" || placement === "prefer") {
           const existingOtherPane = collectAllPanes(layout.root).find((pane) => pane.id !== DEFAULT_PANE_ID);
           if (existingOtherPane) {
             targetPaneId = existingOtherPane.id;
@@ -298,7 +317,7 @@ export function useTaskTabs() {
           layout,
           tabKey: key,
           targetPaneId,
-          position: direction === "right" ? "right" : "bottom",
+          position: SPLIT_DIRECTION_TO_POSITION[direction],
           createNodeId,
           maxTreeDepth: MAX_TREE_DEPTH,
         });
