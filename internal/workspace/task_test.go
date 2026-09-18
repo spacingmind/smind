@@ -340,6 +340,79 @@ func TestManager_ArchiveTask(t *testing.T) {
 	})
 }
 
+func TestManager_MoveTask(t *testing.T) {
+	t.Parallel()
+
+	t.Run("moves into a space, then back out to ungrouped", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+		repo := newTestRepo(t)
+
+		w, err := m.CreateWorkspace(repo, "W", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace() error = %v", err)
+		}
+		sp, err := m.CreateSpace(w.ID, "Sprint 1", "")
+		if err != nil {
+			t.Fatalf("CreateSpace() error = %v", err)
+		}
+		task, err := m.CreateTask(w.ID, nil, "Ungrouped at first")
+		if err != nil {
+			t.Fatalf("CreateTask() error = %v", err)
+		}
+
+		moved, err := m.MoveTask(task.ID, &sp.ID)
+		if err != nil {
+			t.Fatalf("MoveTask(into space) error = %v", err)
+		}
+		if moved.SpaceID == nil || *moved.SpaceID != sp.ID {
+			t.Fatalf("MoveTask(into space) SpaceID = %v, want %d", moved.SpaceID, sp.ID)
+		}
+
+		ungrouped, err := m.MoveTask(task.ID, nil)
+		if err != nil {
+			t.Fatalf("MoveTask(nil) error = %v", err)
+		}
+		if ungrouped.SpaceID != nil {
+			t.Fatalf("MoveTask(nil) SpaceID = %v, want nil", ungrouped.SpaceID)
+		}
+	})
+
+	t.Run("rejects a space belonging to a different workspace", func(t *testing.T) {
+		t.Parallel()
+		m := newTestManager(t)
+
+		w1, err := m.CreateWorkspace(newTestRepo(t), "W1", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace(w1) error = %v", err)
+		}
+		w2, err := m.CreateWorkspace(newTestRepo(t), "W2", "hard", nil)
+		if err != nil {
+			t.Fatalf("CreateWorkspace(w2) error = %v", err)
+		}
+		otherSpace, err := m.CreateSpace(w2.ID, "Other workspace's space", "")
+		if err != nil {
+			t.Fatalf("CreateSpace() error = %v", err)
+		}
+		task, err := m.CreateTask(w1.ID, nil, "Stays in w1")
+		if err != nil {
+			t.Fatalf("CreateTask() error = %v", err)
+		}
+
+		if _, err := m.MoveTask(task.ID, &otherSpace.ID); err == nil {
+			t.Fatalf("MoveTask(cross-workspace space) error = nil, want a rejection")
+		}
+
+		unchanged, err := m.GetTask(task.ID)
+		if err != nil {
+			t.Fatalf("GetTask() error = %v", err)
+		}
+		if unchanged.SpaceID != nil {
+			t.Fatalf("GetTask() after rejected move: SpaceID = %v, want still nil", unchanged.SpaceID)
+		}
+	})
+}
+
 // gitRevParse resolves a single rev to its full commit hash, failing the
 // test if the rev does not resolve.
 func gitRevParse(t *testing.T, dir, rev string) string {
