@@ -1,0 +1,121 @@
+# Pane split tree: arbitrary VSCode-style layouts (port from paseo, button-driven)
+
+## Context
+
+Today a task's content area supports exactly **one** split: `use-task-tabs.ts`'s `PaneId = "primary" | "side"`, `TaskTabsState { primary: PaneState; side: PaneState | null }`. `App.tsx` (lines 461-534) renders this as a single `ResizablePanelGroup` with up to 2 hardcoded `ResizablePanel`s, each its own `PaneTabStrip` (a Radix `<Tabs>` root). Moving a tab between the two panes is a button (`onMove`, "Open X to the side" / "Move X to the primary pane"), gated to `isMovableKind` (file/diff/terminal — Chat and Files stay pinned to primary). This is not a general layout: no arbitrary N-way splits, no choice of orientation beyond the one hardcoded horizontal split, no nesting.
+
+The user asked (2026-09-18) for VSCode-style custom layouts ("chia nửa là chat, nửa là terminal... giống chia layout window/layout vscode ấy"). A research pass this session found that **paseo has already built exactly this** — a general split-tree model with pure, well-tested tree-manipulation functions — and confirmed (after pulling `refs/paseo` from stale 2026-08-27 to current `origin/main` @ `3cc4ae2`, 2026-09-17) that this code is present and structurally unchanged at that commit. Per this project's standing preference to port working UI/data-model patterns from paseo rather than invent new ones, this plan ports paseo's tree model and pure functions, while deferring paseo's drag-to-split UI (see Decisions).
+
+## Reference patterns (refs/paseo @ 3cc4ae2, read 2026-09-18)
+
+All citations are `packages/app/src/stores/workspace-layout-actions.ts` unless noted.
+
+**Types (lines 15-35):**
+```ts
+export interface SplitPane { id: string; tabIds: string[]; focusedTabId: string | null; hidden?: boolean }
+export interface SplitGroup { id: string; direction: "horizontal" | "vertical"; children: SplitNode[]; sizes: number[] }
+export type SplitNode = { kind: "pane"; pane: SplitPane } | { kind: "group"; group: SplitGroup }
+export interface WorkspaceLayout { root: SplitNode; focusedPaneId: string | null; parentTabIdByTabId?: Record<string, string> }
+```
+
+**Pure tree functions worth porting almost verbatim** (verified read at this commit):
+- `normalizeSizes` / `clampNormalizedSizes` (413-485) — rebalances a group's `sizes` array to sum to 1 and respect `MIN_SPLIT_SIZE`, used both when a child is inserted/removed and when a resize handle reports a raw drag.
+- `findPanePathById` / `findPanePathContainingTab` / `findGroupPathById` / `findParentGroup` / `getNodeAtPath` / `replaceNodeAtPath` / `insertChildIntoGroup` / `listPaneIds` / `findNearestSiblingPaneId` (498-656) — the tree-navigation primitives everything else is built from.
+- `removePaneByPath` / `detachTabFromTree` / `insertTabIntoPane` / `focusTabInPane` (772-888) — tab-level mutation.
+- `updateGroupSizesInTree` / `updatePaneInTree` (923-960).
+- `insertSplitInternal` (962-1022) — the core "split" operation: detaches a tab, then either inserts a new sibling pane into an existing same-direction group (halving the target's size) or wraps the target pane in a brand-new group with the new pane as its sibling. This is the one function that makes "split right/down" work correctly regardless of existing tree shape, and is the highest-value single port.
+- `normalizeNode` / `normalizePaneNode` / `normalizeGroupNode` / `normalizeLayout` (674-741, 1024-1050) — persisted-layout validation/repair (drops dangling ids, collapses a group left with one child, falls back to a default layout if the root is unsalvageable). Directly analogous to `use-task-tabs.ts`'s existing `readPersisted`/`isTaskTabsState`, and replaces it.
+- `findPaneById` / `findPaneContainingTab` / `getTreeDepth` / `collectAllTabs` / `collectAllPanes` (1052-1105).
+- `insertSplit` / `removePaneFromTree` / `removeTabFromTree` (1276-1308) — the public wrappers around the internal versions above.
+- `closePaneInLayout` / `canDismissPaneInLayout` / `isLastVisibleOrdinaryPane` (1575-1641) — ported as pure functions for future use; no UI affordance calls them yet (see Decisions).
+- `splitPaneInLayout` / `splitPaneEmptyInLayout` (1915-2001) — the public "split with an existing tab" / "split with a fresh empty pane" entry points, each capping the result with `getTreeDepth(...) > maxTreeDepth` guard.
+- `moveTabToPaneInLayout` / `focusPaneInLayout` / `resizeSplitInLayout` (2026 onward) — generalize today's `moveTab`/`activate`/resize-persist to an arbitrary pane id instead of the hardcoded `"primary" | "side"` pair.
+
+**Explicitly not ported** (paseo-specific, no smind equivalent): `WorkspaceTabPlacement` modes (`pane`/`prefer`/`focused`/`ambient`) and `resolvePlacementPane`; the Explorer-sidebar pane concept (`EXPLORER_SIDEBAR_PANE_ID`, `createWorkspaceLayoutWithExplorerSidebar`); ephemeral-tab stripping (`stripEphemeralTabsFromLayout`, paseo's commit-diff/new-tab tabs don't exist in smind's model); draft/agent/PR tab reconciliation (`reconcileWorkspaceTabs` and everything under it); `parentTabIdByTabId` parent-tracking (subagent-tab parenting, not a smind concept); `createNewWorkspaceTab`/`ensureRetainedPaneHasTab`/`isSoleNewTabPane` (paseo always keeps a pane populated with an auto-created draft tab — smind's tabs are already user-owned/closable per the shipped "flexible tabs" item, so a genuinely empty pane is a valid state that already has a UI, `TabsEmptyState`).
+
+## Acceptance Criteria
+
+### Item 1 — pure split-tree module
+A new module (`web/packages/ui/src/lib/split-tree.ts` or similar) exports the smind-adapted tree types and pure functions: `SplitPane`, `SplitGroup`, `SplitNode`, `TaskLayout` (renamed from `WorkspaceLayout` — no `parentTabIdByTabId`), plus `createDefaultLayout`, `findPaneById`, `findPaneContainingTab`, `findPanePathById`, `getTreeDepth`, `collectAllTabs`, `collectAllPanes`, `insertSplit`/`splitPaneInLayout`, `splitPaneEmptyInLayout`, `moveTabToPaneInLayout`, `detachTabFromTree`/`removeTabFromTree`, `removePaneFromTree`, `closePaneInLayout`/`canDismissPaneInLayout` (ported, unused by UI yet), `focusTabInLayout`/`focusPaneInLayout`, `resizeSplitInLayout`/`clampNormalizedSizes`, `normalizeLayout`. No React, no App.tsx/use-task-tabs.ts imports — this module is pure data transformation, independently unit-testable exactly like paseo's own coverage of these functions.
+
+**The pane-removal rule (smind-specific, differs from paseo):** closing a leaf pane's last tab removes that pane from the tree, collapsing its parent group (single remaining sibling replaces the group) exactly as `detachTabFromTree`'s non-preserved branch + `removePaneByPath` already do — **unless** the pane is the tree's sole root pane (no parent group / `findPanePathById` returns `[]`), in which case it's left in place with zero tabs (renders `TabsEmptyState`, unchanged from today). This generalizes today's `withPane`'s `side: next.tabs.length === 0 ? null : next`.
+
+### Item 2 — `use-task-tabs.ts` runs on the tree
+`PaneId`/`TaskTabsState`/`PaneState` are replaced by `TaskLayout`/`SplitNode` under the hood. The hook's existing public API (`tabsByTask`, `ensureTask`, `openTab`, `closeTab`, `activate`, `moveTab`) keeps its current call signatures where possible; `moveTab`'s `target: PaneId` parameter widens from the 2-value union to `target: string` (any live pane id) — the only breaking signature change, and it's additive (existing "primary"/"side" callers still work since those remain valid pane ids for a task with one split). Persistence (`readPersisted`/`writePersisted`, localStorage key, `MAX_PERSISTED_TASKS` eviction) is unchanged in mechanism, just now round-trips a `TaskLayout` through `normalizeLayout` instead of the old ad hoc `isTaskTabsState` shape-check.
+
+### Item 3 — "Split" affordance per movable tab
+Today's binary "Open to side" / "Move to primary pane" button (file/diff/terminal only, per `isMovableKind`) becomes a **2-direction split** action: "Split right" and "Split down" (not the full 4-direction `left`/`right`/`top`/`bottom` paseo exposes — see Decisions for why 2 is enough for v1). Each movable tab's strip entry gets a small menu/pair of buttons wired to `splitPaneInLayout({ tabId, targetPaneId: thisPane.id, position: "right" | "bottom", maxTreeDepth })`. Splitting caps at a fixed `maxTreeDepth` (reuse paseo's judgment call — 5 — unless testing shows a tighter number reads better in a browser window); attempting to split past the cap is a no-op (button stays visible but does nothing harmful, or is disabled — implementation's call, state which in Progress).
+
+### Item 4 — recursive `App.tsx` renderer
+The hardcoded 2-pane JSX (lines 461-534) is replaced by a recursive `<SplitTree node={taskState.root} .../>` component: a `{ kind: "pane" }` node renders today's `PaneTabStrip` (generalized to take a real `paneId: string` and an `onSplit` callback instead of the old fixed `onMove`); a `{ kind: "group" }` node renders a `ResizablePanelGroup` (orientation from `group.direction`) wrapping one `ResizablePanel` per child (recursing) separated by `ResizableHandle`s, with `onResize`/`onLayout` writing back through `resizeSplitInLayout`. `react-resizable-panels` v4.12.3 (already a dependency) nests `ResizablePanelGroup`s arbitrarily — this is its own documented pattern, not new capability being added.
+
+Must not regress, and each has an existing test proving it today that must still pass:
+- Force-mounted terminal tabs (Item 20 — a backgrounded terminal keeps streaming; `forceMount={entry.kind === "terminal"}` logic in `PaneTabStrip`).
+- Per-pane "+"/empty-state (`NewTabButton`/`TabsEmptyState`).
+- Command-palette "Open `<tab>`" entries (`defaultTabsForTask`-driven, pane-agnostic already).
+- URL routing (routes encode `taskId` + active tab kind/path only, never pane layout — unaffected by this change).
+- Existing keyboard shortcuts: `Ctrl+Alt+<digit>` tab-position activation, `Ctrl+W` close active tab, `Ctrl+]`/`Ctrl+[` task stepping.
+
+### Item 5 — responsive/mobile collapse for an arbitrary tree
+Below the mobile breakpoint, today's compact mode flattens primary+side into one merged strip (`compactTabs`/`compactActiveKey`, lines 433-454) since there's nowhere to put a second pane on a phone. For an arbitrary-depth tree, compact mode collapses the **whole tree** into one strip: `collectAllTabs(root)` for the merged tab list, with the currently-focused pane's `activeKey` winning (falls back to root's, same "most recently interacted with" reasoning as today's side-wins-primary rule). No split UI (no "split" buttons) renders in compact mode, matching today's `showMoveAffordance={false}` pattern.
+
+### Item 6 — resize persistence
+Each group's `sizes` array persists through the same localStorage mechanism as the rest of `TaskLayout` (no separate storage key) — a resize handle drag calls `resizeSplitInLayout`, which the existing `setTabsByTask` write-through already covers once `use-task-tabs.ts` is on the tree (Item 2). No new acceptance criterion beyond "drag a handle, reload, sizes hold" — this is largely a consequence of Items 1+2+4 done correctly, not standalone work.
+
+## Test Scenarios
+
+**Item 1 (`split-tree.test.ts`, adapted from paseo's own test shapes for these functions):**
+- `splitPaneInLayout` on a single-pane tree with position `"right"` produces a 2-child horizontal group, `[0.5, 0.5]` sizes, the moved tab in the new pane, new pane focused.
+- `splitPaneInLayout` twice in the same direction against the same target inserts into the existing group (3-way split) rather than nesting a redundant group — mirrors paseo's `findParentGroup` same-direction-reuse doc comment.
+- `splitPaneInLayout` returns `null` when it would exceed `maxTreeDepth`.
+- Closing the only tab in a split-created (non-root) pane removes that pane and collapses its parent group back to the surviving sibling (single node, not a 1-child group).
+- Closing the only tab in the tree's sole root pane leaves the pane in place with an empty tab list (does *not* collapse to nothing).
+- `moveTabToPaneInLayout` moves a tab across two arbitrary (non-primary/side-named) pane ids, updates `focusedPaneId`, leaves everything else untouched.
+- `resizeSplitInLayout`/`clampNormalizedSizes`: sizes always sum to 1 after resize; no child can be driven below `MIN_SPLIT_SIZE` (reuse paseo's clamp algorithm, so its existing edge-case coverage — e.g. can't shrink 3 panes to 3× below-minimum — transfers).
+- `normalizeLayout` on a corrupted/hand-edited persisted blob: dangling pane id in `focusedPaneId` gets repaired to a real pane, not left dangling; a group with one child collapses to that child; a totally unsalvageable root falls back to `createDefaultLayout()`.
+- `getTreeDepth` on a 5-level nested fixture returns 5.
+
+**Item 2 (`use-task-tabs.test.ts`, extending the existing suite rather than rewriting it):**
+- Every existing test in the current file (seed-only-Chat, open/close/activate, `moveTab` to/from `"side"`, persistence round-trip, malformed-storage fallback, task-count eviction) still passes unmodified where it names `"primary"`/`"side"` literally — those remain valid pane ids for a not-yet-split task.
+- New: `moveTab` to a third pane id created via a split.
+- New: persisted `TaskLayout` from a previous (pre-tree) session — i.e. today's `{primary, side}` shape sitting in a real user's localStorage — degrades gracefully (either a one-time migration to the new shape, or `normalizeLayout` treats unrecognized shape as corrupt and reseeds; implementation picks one and states which in Decisions, but silent data loss without a stated reason is not acceptable).
+
+**Item 3 (`tab-registry.test.tsx` / `App.test.tsx`):**
+- "Split right"/"Split down" appears only for `isMovableKind` tabs, same gate as today's move button.
+- Clicking it creates a new pane rendering with the moved tab, in the correct orientation (right → horizontal group, down → vertical group).
+- At `maxTreeDepth`, the affordance's behavior (disabled vs silent no-op — per what Item 3's Acceptance Criteria settles on) is asserted.
+
+**Item 4 (`App.test.tsx`, extending `describe("App splits (Item 6)")`):**
+- Existing side-dock tests (file "Open to side", tool-call file click-through preferring an open side pane, terminal move-to-side without `terminal.close`/second `terminal.create`) still pass against the new recursive renderer — these are the regression backstop that the port didn't change pane-content mount/unmount semantics.
+- A 3-pane layout (two splits deep) renders three independent `PaneTabStrip`s, each retaining its own tab state.
+- `Ctrl+Alt+<digit>` still activates by strip position within whichever pane currently owns keyboard focus (or root pane if that's the existing scoping rule — verify against current behavior, don't silently change it).
+
+**Item 5 (`App.responsive.test.tsx`):**
+- A 3-pane desktop layout collapses to one merged strip below the breakpoint, containing every tab from every pane.
+- Resizing back up restores the full tree (same test shape as the existing "Item 21" resize-back-up assertion, generalized from 2 panes to N).
+
+**Item 6:**
+- Covered by Item 1's `resizeSplitInLayout` unit tests plus one `App.test.tsx`/`use-task-tabs.test.ts` integration case: resize a group, remount (simulating reload), sizes match.
+
+## Decisions
+
+- **2-direction split (right/down), not paseo's 4-direction, and no drag-to-split.** Today's UI already has exactly one binary move affordance; extending it to right/down covers "half chat, half terminal" (the user's literal example) and its vertical analogue without introducing left/top's redundant-with-right/down-plus-swap complexity or a drag-and-drop dependency (`@dnd-kit/core`, not currently in smind's `package.json`). Left/top and drag-to-split are explicitly the option-3 follow-up if this ships and more is wanted.
+- **No explicit "close this whole pane" affordance.** `closePaneInLayout`/`canDismissPaneInLayout` are ported as pure functions (cheap, and future UI can call them for free) but nothing wires them to a button in this pass — the auto-collapse-on-last-tab-close rule (Item 1) already gets you "close a split" via the existing per-tab close button, which is the more common path anyway.
+- **`splitPaneEmptyInLayout` ported but not wired to UI in v1** — splitting always carries an existing tab across (matches today's "Open to side" UX, where you're always moving *something*); a bare "split with nothing in it yet" affordance is deferred unless dogfooding surfaces a need for it.
+- **Pre-tree persisted state migration strategy** — decide during Item 2 implementation whether `normalizeLayout` treats a legacy `{primary, side}` blob as a recognizable input to upgrade, or as unrecognized/corrupt (reseed). State the choice and reasoning here once made; either is acceptable, silent unexplained data loss is not.
+- **`maxTreeDepth` value** — start at paseo's 5, revisit only if a manual pass in a real browser window shows panes becoming unusably thin before hitting it.
+
+## Progress
+
+- [ ] Item 1 — pure split-tree module + unit tests
+- [ ] Item 2 — `use-task-tabs.ts` on the tree
+- [ ] Item 3 — split affordance (right/down)
+- [ ] Item 4 — recursive `App.tsx` renderer
+- [ ] Item 5 — responsive collapse for arbitrary tree
+- [ ] Item 6 — resize persistence
+- [ ] `task test` / `task lint` green
+- [ ] Manual dogfood pass (split chat+terminal side by side, resize, reload, close panes down to one)
+
+## Validation
+
+To be filled in as each item lands — map back to the Acceptance Criteria above (which test/manual check confirmed which criterion), not just "tests pass."
