@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+
+import { GitCompare } from "lucide-react";
 
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { Button } from "@/components/ui/button";
+import { type DiffStat } from "@/lib/diff-stat";
 import {
   Select,
   SelectContent,
@@ -31,12 +34,12 @@ const APPROVAL_POLICY_HELP =
 // COMPACT_TOUCH_BUTTON_CLASS's doc comment for why this is plain
 // responsive Tailwind rather than a threaded `isMobile` prop.
 //
-// Only the sizing lives here now. Everything these selects used to
-// hand-roll to *approximate* a shadcn trigger (border, background, focus
-// ring, disabled dimming) comes from SelectTrigger itself, and cn()'s
-// tailwind-merge drops the conflicting halves of its defaults (h-8,
-// px-2.5, text-base/md:text-sm) in favour of these.
-const SELECT_TRIGGER_CLASS = "h-11 shrink-0 px-2 text-sm md:h-7 md:px-1.5 md:text-xs";
+// Label-less, per web-ui-dogfood-polish Item 5: the selects sit inside the
+// input card's bottom toolbar, so their visible chrome is nothing -- the
+// card is the border, and cn()'s tailwind-merge strips SelectTrigger's
+// own border/background halves in favour of these.
+const SELECT_TRIGGER_CLASS =
+  "h-11 shrink-0 border-0 bg-transparent px-2 text-sm hover:bg-accent md:h-7 md:px-1.5 md:text-xs";
 
 const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
 
@@ -59,13 +62,40 @@ export function composerPlaceholder({
   if (!connected) return "Not connected — reconnecting to the daemon…";
   if (!hasTask) return "Select a task to send a prompt";
   if (running) return "Queue a follow-up — it sends when this run finishes";
-  return "Send a prompt…";
+  return "Message the agent…";
 }
 
 /**
- * The task composer (ui-redesign-parity Item 10): an autogrowing multiline
- * prompt box, a labelled toolbar for provider and approval policy, a Stop
- * that interrupts the live run, and per-task draft persistence.
+ * The task's diff stat as a compact pill above the input card
+ * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
+ * click jumps to the task's Diff tab. The numbers are the same stat the
+ * diff pane renders (hooks/use-task-diff.ts), so nothing new is fetched
+ * here -- the parent hands the already-derived stat in.
+ */
+function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="composer-diff-stat"
+      aria-label={`Open diff: ${stat.additions} additions, ${stat.deletions} deletions`}
+      onClick={onOpenDiff}
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface-2 px-2.5 py-0.5 text-xs text-foreground-muted transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <GitCompare aria-hidden className="size-3 opacity-70" />
+      <span className="font-medium text-status-success">+{stat.additions}</span>
+      <span className="font-medium text-status-danger">−{stat.deletions}</span>
+    </button>
+  );
+}
+
+/**
+ * The task composer (ui-redesign-parity Item 10, reshaped to the input
+ * card anatomy by web-ui-dogfood-polish Item 5): one rounded card whose
+ * top is the autogrowing prompt textarea and whose bottom edge is the
+ * toolbar (compact provider/approval-policy selects, Stop/Send), with the
+ * task's diff-stat pill sitting above the card. The only affordances
+ * shown are ones that work -- no attachment "+" placeholder until
+ * attachments exist.
  *
  * **Queue, not steer.** The daemon exposes no "send more input to a run
  * already in flight" RPC (internal/wsapi/handlers.go's method table has
@@ -81,6 +111,8 @@ export function Composer({
   taskId,
   connected,
   runningRunId,
+  diffStat,
+  onOpenDiff,
   onSubmit,
   onStop,
   textareaRef,
@@ -91,6 +123,10 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop and the queue drain. */
   runningRunId: string | null;
+  /** The task's diff stat (use-task-diff) for the pill above the card -- pill omitted when null/unchanged. */
+  diffStat?: DiffStat | null;
+  /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
+  onOpenDiff?: () => void;
   onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
@@ -104,8 +140,6 @@ export function Composer({
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
-  const providerFieldId = useId();
-  const policyFieldId = useId();
 
   // A queued follow-up belongs to the task it was typed for; switching
   // tasks drops it rather than firing it at whatever is selected next.
@@ -132,6 +166,10 @@ export function Composer({
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
+  const hasChanges =
+    diffStat !== null &&
+    diffStat !== undefined &&
+    (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
 
   const send = useCallback(
     async (text: string) => {
@@ -250,37 +288,53 @@ export function Composer({
         </ul>
       )}
 
-      <PromptTextarea
-        ref={textareaRef}
-        label="Prompt"
-        value={draft.value}
-        onChange={draft.setValue}
-        onSubmit={submit}
-        onKeyDown={handleKeyDown}
-        placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
-        disabled={inactive}
-      />
+      {/* The pill row above the card (Item 5): only real data -- the diff
+          stat, only when there are changes and there's a Diff tab to jump
+          to. No invented run/subagent pills. */}
+      {hasChanges && onOpenDiff && (
+        <div className="flex items-center gap-2">
+          <DiffStatPill stat={diffStat} onOpenDiff={onOpenDiff} />
+        </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex items-center gap-1.5">
-          <label htmlFor={providerFieldId} className="text-xs text-foreground-muted">
-            Provider
-          </label>
+      {/*
+       * The input card (Item 5): one rounded surface whose top is the
+       * textarea and whose bottom edge is the toolbar. The card carries
+       * the border/focus ring; the textarea and toolbar controls inside
+       * are chrome-less, which is why the selects are aria-labelled
+       * rather than sitting under visible <label> text anymore.
+       */}
+      <div
+        data-testid="composer-card"
+        className="flex flex-col rounded-xl border border-input bg-surface-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+      >
+        <PromptTextarea
+          ref={textareaRef}
+          label="Prompt"
+          value={draft.value}
+          onChange={draft.setValue}
+          onSubmit={submit}
+          onKeyDown={handleKeyDown}
+          placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
+          disabled={inactive}
+          className="rounded-none border-0 bg-transparent px-3 py-2.5 focus-visible:border-transparent focus-visible:ring-0"
+        />
+
+        <div className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
           {/*
            * shadcn/Radix rather than a native <select>: the closed state
            * was already styled to match, but the *open* list was OS chrome
            * -- square, light-mode-only, ignoring bg-popover/text-popover-
-           * foreground like every other menu in the app. The visible
-           * <label htmlFor> still works because SelectTrigger takes a real
-           * `id` and renders a real button (Item 10's "not unlabelled
-           * native selects" holds either way).
+           * foreground like every other menu in the app. The accessible
+           * name survives the move into the toolbar via aria-label, since
+           * there is no visible <label> beside it anymore.
            */}
           <Select
             value={provider}
             onValueChange={(value) => setProvider(value as Provider)}
             disabled={inactive}
           >
-            <SelectTrigger id={providerFieldId} className={SELECT_TRIGGER_CLASS}>
+            <SelectTrigger aria-label="Provider" className={SELECT_TRIGGER_CLASS}>
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
             <SelectContent>
@@ -291,12 +345,7 @@ export function Composer({
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="flex items-center gap-1.5">
-          <label htmlFor={policyFieldId} className="text-xs text-foreground-muted">
-            Approval policy
-          </label>
           <Select
             value={approvalPolicy}
             onValueChange={(value) => setApprovalPolicy(value as ApprovalPolicy)}
@@ -304,11 +353,7 @@ export function Composer({
           >
             {/* The help text stays a plain `title` -- a hover tooltip on the
                 trigger, exactly where it was on the native select. */}
-            <SelectTrigger
-              id={policyFieldId}
-              title={APPROVAL_POLICY_HELP}
-              className={SELECT_TRIGGER_CLASS}
-            >
+            <SelectTrigger aria-label="Approval policy" title={APPROVAL_POLICY_HELP} className={SELECT_TRIGGER_CLASS}>
               <SelectValue placeholder="Select policy" />
             </SelectTrigger>
             <SelectContent>
@@ -319,33 +364,33 @@ export function Composer({
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {formError && <span className="text-xs text-destructive">{formError}</span>}
-          {running && (
+          <div className="ml-auto flex items-center gap-2">
+            {formError && <span className="text-xs text-destructive">{formError}</span>}
+            {running && (
+              <Button
+                type="button"
+                variant="execute"
+                size="sm"
+                className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
+                disabled={stopping}
+                data-testid="chat-stop-button"
+                onClick={handleStop}
+              >
+                {stopping ? "Stopping…" : "Stop"}
+              </Button>
+            )}
             <Button
-              type="button"
-              variant="execute"
+              type="submit"
+              variant={running ? "default" : "execute"}
               size="sm"
               className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-              disabled={stopping}
-              data-testid="chat-stop-button"
-              onClick={handleStop}
+              disabled={inactive || !draft.value.trim()}
+              data-testid="chat-send-button"
             >
-              {stopping ? "Stopping…" : "Stop"}
+              {running ? "Queue" : "Send"}
             </Button>
-          )}
-          <Button
-            type="submit"
-            variant={running ? "default" : "execute"}
-            size="sm"
-            className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-            disabled={inactive || !draft.value.trim()}
-            data-testid="chat-send-button"
-          >
-            {running ? "Queue" : "Send"}
-          </Button>
+          </div>
         </div>
       </div>
     </form>

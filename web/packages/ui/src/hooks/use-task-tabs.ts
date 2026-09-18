@@ -34,6 +34,10 @@ export function isMovableKind(kind: TabKind): boolean {
 }
 
 function seedState(taskId: number): TaskTabsState {
+  // First visit seeds the default set (web-ui-dogfood-polish Item 3);
+  // afterwards the strip is the user's -- a persisted empty primary pane
+  // (every seeded tab closed) rehydrates as empty, not re-seeded, which
+  // is why ensureTask keys off the map rather than off pane emptiness.
   const tabs = defaultTabsForTask(taskId);
   return { primary: { tabs, activeKey: tabs[0]!.key }, side: null };
 }
@@ -220,6 +224,11 @@ export function useTaskTabs() {
   const openTab = useCallback(
     (taskId: number, entry: TabEntry, placement: TabPlacement = "primary"): void => {
       setTabsByTask((prev) => {
+        // The seed fallback only applies when the task has *no* entry at
+        // all (never selected). A task whose tabs were all closed has an
+        // entry with an empty primary pane, which rehydrates as empty --
+        // reopening from the empty state must not resurrect the whole
+        // seed set around the reopened tab.
         const state = prev.get(taskId) ?? seedState(taskId);
         const existingPane = paneOf(state, entry.key);
         if (existingPane) {
