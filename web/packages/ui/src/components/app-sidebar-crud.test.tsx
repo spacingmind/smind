@@ -1,9 +1,10 @@
 import { act } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
+import { clearToasts, Toaster } from "@/components/ui/toast";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Space, Task, Workspace } from "@/lib/types";
 
@@ -84,6 +85,11 @@ function mount(client: FakeWsClient, onSelectTask = vi.fn()) {
 }
 
 describe("AppSidebar CRUD", () => {
+  afterEach(() => {
+    clearToasts();
+  });
+
+
   it("renders the first-run guide with a New workspace button when there are no workspaces", async () => {
     const client = new FakeWsClient();
     mount(client);
@@ -266,6 +272,92 @@ describe("AppSidebar CRUD", () => {
     await resolveRefresh(client, WORKSPACE, [], []);
 
     await waitFor(() => expect(screen.queryByText("Fix the bug")).not.toBeInTheDocument());
+  });
+
+  it("task row action offers Move to space, listing other spaces plus Ungrouped, excluding the task's own location", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    // Fix the bug (id 42) lives in Space A; Space B is the only other target,
+    // plus Ungrouped -- Space A itself must not appear (no self-move).
+    const taskInSpaceA: Task = { ...TASK, SpaceID: SPACE_A.ID };
+    const spaceB: Space = { ...SPACE_A, ID: 11, Title: "Space B" };
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A, spaceB], [taskInSpaceA]);
+
+    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+    await flush();
+    const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
+    fireEvent.pointerMove(moveTrigger, { pointerType: "mouse" });
+    fireEvent.keyDown(moveTrigger, { key: "ArrowRight" });
+    await flush();
+    const targetEls = await screen.findAllByTestId("sidebar-task-move-target");
+    expect(targetEls.map((el) => el.textContent)).toEqual(["Ungrouped", "Space B"]);
+  });
+
+  it("selecting a Move to space target calls task.move with the chosen spaceId and refreshes", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+    await flush();
+    const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
+    fireEvent.pointerMove(moveTrigger, { pointerType: "mouse" });
+    fireEvent.keyDown(moveTrigger, { key: "ArrowRight" });
+    await flush();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Space A" }));
+
+    const move = await waitFor(() => client.nth("task.move"));
+    expect(move.params).toEqual({ id: 42, spaceId: SPACE_A.ID });
+
+    await act(async () => {
+      move.resolve(undefined);
+    });
+    await resolveRefresh(client, WORKSPACE, [SPACE_A], [{ ...TASK, SpaceID: SPACE_A.ID }]);
+  });
+
+  it("a failed task.move surfaces a toast and leaves the task where it was", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <Toaster />
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
+
+    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+    await flush();
+    const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
+    fireEvent.pointerMove(moveTrigger, { pointerType: "mouse" });
+    fireEvent.keyDown(moveTrigger, { key: "ArrowRight" });
+    await flush();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Space A" }));
+
+    const move = await waitFor(() => client.nth("task.move"));
+    await act(async () => {
+      move.reject(new Error("space not found"));
+    });
+
+    expect(await screen.findByText("space not found")).toBeInTheDocument();
+    // Still shown as ungrouped -- no refresh call happened after the error.
+    expect(() => client.nth("task.move", 1)).toThrow();
+    expect(() => client.nth("workspace.list", 1)).toThrow();
+  });
+
+  it("Move to space is hidden entirely for an already-ungrouped task with no spaces to move into", async () => {
+    const client = new FakeWsClient();
+    mount(client);
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+    await flush();
+
+    expect(await screen.findByText("Archive task")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-task-move-action")).not.toBeInTheDocument();
   });
 
   it("workspace row menu offers Delete workspace; confirming shows counts, calls workspace.delete, and refreshes", async () => {

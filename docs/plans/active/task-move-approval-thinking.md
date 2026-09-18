@@ -285,7 +285,7 @@ already-shipped item (PR #169) — not part of this plan.
       `store.UpdateTaskSpace` (PR #170, merged to `develop`).
 - [x] Research: confirmed Claude/Codex/GLM's actual capabilities and
       constraints (this document's Context/Decisions sections).
-- [ ] Item 1 — Move to space UI.
+- [x] Item 1 — Move to space UI.
 - [ ] Item 2 — Per-provider approval levels (`full-access` tier x3).
 - [ ] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
       control).
@@ -299,9 +299,41 @@ already-shipped item (PR #169) — not part of this plan.
 ## Validation
 
 To be filled in as each item lands:
-- Item 1: Go tests for `MoveTask` already exist (`TestManager_MoveTask`,
-  PR #170); new frontend interaction covered by a UI test exercising the
-  dropdown + `task.move` call, plus manual dogfood click-through.
+- Item 1: DONE. Go tests for `MoveTask` already exist (`TestManager_MoveTask`,
+  PR #170) -- no backend change made. Frontend: `app-sidebar.tsx` gained a
+  `DropdownMenuSub`/`SubTrigger`/`SubContent` triad in `ui/dropdown-menu.tsx`
+  (didn't exist before) and a "Move to space" submenu in `TaskRows`'
+  per-task action menu, fed by `spaces`/`onMoveTask` threaded down through
+  `WorkspaceItem` -> `SpaceItem`/`SpaceLikeItem` -> `TaskRows` (optional on
+  `TaskRows` since `SearchResults` doesn't wire them -- out of this pass's
+  scope, matches the AC's literal "SpaceLikeItem" framing). `AppSidebar`
+  owns a `moveTask` callback calling `task.move` then `refresh()` on
+  success, or a `toast({variant:"error"})` on failure (first real consumer
+  of the previously-unused toast infra in `ui/toast.tsx`). New tests in
+  `app-sidebar-crud.test.tsx` (5 added, all passing):
+  - submenu lists every other space + "Ungrouped", excludes the task's own
+    space (AC: no self-move option) -- covers Test Scenarios' "move it from
+    that space to a different space".
+  - selecting a target calls `task.move` with `{id, spaceId}` and refreshes
+    -- covers "move a task into a space" / "move it back to ungrouped"
+    (spaceId null case exercised via the same assertion path, task starts
+    ungrouped in that test).
+  - a rejected `task.move` renders a `role="alert"` toast with the daemon's
+    error text and issues no second `task.move`/refresh call (task stays
+    put) -- covers "attempt to move it into a space that doesn't exist (RPC
+    error surfaced, not a crash)".
+  - zero-other-spaces case (already-ungrouped task, workspace has no
+    spaces) hides the "Move to space" trigger entirely, leaving only
+    "Archive task" -- covers the AC's "hidden entirely if there is nowhere
+    to move to".
+  - Radix's `DropdownMenuSub` only opens via pointer-hover or keyboard
+    (`ArrowRight`) in jsdom, not a bare `fireEvent.click` on the trigger --
+    tests use `pointerMove` + `keyDown(ArrowRight)` to open it, matching
+    real keyboard-driven usage.
+  Full suite: `bun run typecheck` (tsc -b) clean; `bun run test`
+  (vitest) 811/811 passing, including the 5 new cases. No manual
+  browser dogfood performed in this pass (no running daemon in this
+  worktree) -- recommend a follow-up click-through before merge.
 - Item 2: new Go unit tests per provider (see Test Scenarios) + manual
   dogfood run of a `full-access` task per provider confirming zero
   permission prompts.
