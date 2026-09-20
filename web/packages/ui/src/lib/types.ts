@@ -291,7 +291,7 @@ export interface RunToolCallEventParams {
 // Every event name run.attach/run.logs can carry today
 // (internal/wsapi/handlers.go's toRunLogEvent). The three structured ones
 // were added by ADR 0008 and are additive: a run recorded before it still
-// decodes as chunk/done/permission_* only.
+// decodes as chunk/done/permission_* only. "raw" was added by ADR 0010.
 export type RunEventType =
   | "chunk"
   | "user_message"
@@ -299,7 +299,8 @@ export type RunEventType =
   | "tool_call"
   | "done"
   | "permission_request"
-  | "permission_resolved";
+  | "permission_resolved"
+  | "raw";
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
 // runLogEvent) -- the same fields the streamed events and terminal
@@ -321,6 +322,10 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   options?: PermissionOption[];
   optionId?: string;
   reason?: PermissionResolutionReason;
+  /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */
+  kind?: string;
+  /** Populated for a "raw" entry (ADR 0010) -- the update's full original JSON, forwarded as-is. */
+  payload?: unknown;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).

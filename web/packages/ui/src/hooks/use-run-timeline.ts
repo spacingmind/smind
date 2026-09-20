@@ -87,11 +87,21 @@ export interface TimelinePermissionItem {
  * enum is append-only (ADR 0008), so a newer daemon talking to an older
  * tab is a supported state, not a bug -- it renders as a labelled
  * placeholder rather than throwing or silently vanishing.
+ *
+ * `rawKind`/`rawPayload` are populated only for a "raw" event (ADR 0010):
+ * the wire `type` for one of these is always the generic "raw", so
+ * showing just `eventType` would always say "raw" -- the actually
+ * informative value is the ACP session-update kind the normalizer didn't
+ * recognize (e.g. "plan"), carried here so the fallback row can show that
+ * instead. Absent for every other unrecognised event name, which has
+ * nothing more specific to show than `eventType` itself.
  */
 export interface TimelineUnknownItem {
   kind: "unknown";
   id: string;
   eventType: string;
+  rawKind?: string;
+  rawPayload?: unknown;
 }
 
 /** The wire event names that carry a text delta, and the row role each becomes. */
@@ -186,6 +196,13 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
         optionId: event.optionId ?? "",
         reason: event.reason,
       },
+    ];
+  }
+
+  if (type === "raw") {
+    return [
+      ...items,
+      { kind: "unknown", id: `unknown-${items.length}`, eventType: type, rawKind: event.kind, rawPayload: event.payload },
     ];
   }
 
