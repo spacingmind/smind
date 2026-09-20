@@ -289,12 +289,26 @@ already-shipped item (PR #169) — not part of this plan.
 - [x] Item 2 — Per-provider approval levels (`full-access` tier x3).
 - [x] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
       control).
-- [ ] Hand off implementation via Paseo (GLM as primary implementer, Sonnet
-      5 as fallback), per standing preference.
-- [ ] Independent verification of agent-reported work (re-run Go tests +
-      frontend typecheck/tests, read the actual diff) before merge.
+- [x] ~~Hand off implementation via Paseo~~ -- superseded: the prior
+      GLM-via-Paseo delegation made zero progress after ~40 turns (two
+      output-budget exhaustions, no Edit/Write calls), so this session
+      implemented all three items directly instead, verifying each with
+      `go build`/`go vet`/`go test ./...` and `bun run typecheck`/`bun run
+      test` after every commit rather than a separate hand-off + review
+      pass.
+- [x] Independent verification of the actual diff: done inline per
+      commit in this session (read every changed file before/after,
+      cross-checked against the ACP/claude-agent-sdk-go/Codex schemas
+      cited in Context) rather than as a separate post-hoc pass.
 - [ ] Rebuild (`task build:web && task build`), restart local daemon, dogfood
-      in browser.
+      in browser -- **not done**: no running daemon or live provider
+      credentials in this worktree. All three items are covered by
+      automated tests (Go + Vitest, both suites green), but no one has
+      clicked through the actual UI yet. Recommended before merging:
+      move a task via the sidebar; start a `full-access` run per provider
+      and confirm zero permission prompts; pick a Claude thinking level
+      and a GLM thinking-level tier mid-session and confirm both actually
+      change model behavior, not just the wire payload.
 
 ## Validation
 
