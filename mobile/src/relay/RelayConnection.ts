@@ -43,6 +43,11 @@ export interface CallOptions {
   onEvent?: (event: string, params: unknown) => void;
 }
 
+/** A call() promise with a detach path: cancel() sends the daemon's task.cancel for this request (conn.go's no-id cancellation envelope) and rejects the promise. */
+export interface CancellablePromise<T> extends Promise<T> {
+  cancel(): void;
+}
+
 interface WireError {
   message: string;
   code?: string;
@@ -212,17 +217,30 @@ export class RelayConnection {
    * connection dying) rejects this call's promise only -- other in-flight
    * calls are unaffected.
    */
-  call(method: string, params?: unknown, opts?: CallOptions): Promise<unknown> {
+  call(method: string, params?: unknown, opts?: CallOptions): CancellablePromise<unknown> {
     if (this.closed) {
-      return Promise.reject(new Error('relay: connection is closed'));
+      return Object.assign(Promise.reject(new Error('relay: connection is closed')), { cancel: () => {} });
     }
     const id = String(++this.nextId);
-    return new Promise<unknown>((resolve, reject) => {
+    const promise = new Promise<unknown>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, onEvent: opts?.onEvent });
       const envelope: Record<string, unknown> = { id, method };
       if (params !== undefined) envelope.params = params;
       this.channel.send(new TextEncoder().encode(JSON.stringify(envelope)));
-    });
+    }) as CancellablePromise<unknown>;
+    promise.cancel = () => {
+      const p = this.pending.get(id);
+      if (!p) return;
+      this.pending.delete(id);
+      // conn.go's cancellation shape: task.cancel with no envelope id,
+      // naming the target request's id in params. For run.attach this
+      // detaches without stopping the run.
+      if (!this.closed) {
+        this.channel.send(new TextEncoder().encode(JSON.stringify({ method: 'task.cancel', params: { id } })));
+      }
+      p.reject(new Error('relay: call cancelled'));
+    };
+    return promise;
   }
 
   /**

@@ -152,7 +152,7 @@ kept Milestone 1's GLM/Sonnet handoff tractable).
 
 - [x] Item 1 — persistent `RelayConnection` + event subscription.
 - [x] Item 2 — workspace/task list screens.
-- [ ] Item 3 — task detail with realtime timeline (read-only).
+- [x] Item 3 — task detail with realtime timeline (read-only).
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, per
       the user's standing preference — fall back to Sonnet immediately,
       without extended nudging, if GLM shows the "many turns, no commits"
@@ -218,6 +218,37 @@ Also verified: `npx tsc --noEmit` clean; `npm test` 27 passing (23 prior
 + 4 new). A Disconnect control closes the connection and returns to
 pairing, since the app (not the client library) now owns the connection
 lifetime per Item 1's design.
+
+### Item 3 — task detail with realtime timeline (read-only)
+
+- **Tapping a task shows its most recent run's transcript (text, tool
+  name+status, done/error)**: `mobile/src/screens/TaskDetailScreen.tsx`
+  resolves the latest run via `listRunsForTask` (run.list filtered to
+  the task), fetches history via `run.logs`, and renders through
+  `mobile/src/runTimeline.ts`. Unit test
+  `mobile/src/__tests__/runTimeline.test.ts` ("renders a completed run:
+  user message, chunks, tool call, done") pins the exact line rendering
+  for user/chunk/thinking/tool_call/done events.
+- **Active runs stream live without manual refresh**: when the latest
+  run's Status is "running", the screen issues `run.attach` and appends
+  each streamed event via call()'s request-scoped onEvent —
+  `runTimeline.test.ts`'s `lineFromAttachEvent` cases verify each live
+  event name maps to the same rendering as its logs twin.
+- **No runs yet shows an honest empty state**: the `run: null` branch
+  ("No runs yet for this task. Start one from the daemon or web UI.");
+  `runTimeline.test.ts` "an empty events list renders an empty timeline
+  (no crash)" covers the adjacent empty-transcript case.
+- **Navigating back leaks nothing**: unmount cancels the attach via the
+  new `CancellablePromise.cancel()` (sends conn.go's task.cancel wire
+  shape: no envelope id, target id in params — a detach for run.attach,
+  not a stop). `mobile/src/__tests__/attachLifecycle.test.ts` ("cancel()
+  sends task.cancel on the wire, rejects only that call, and stops event
+  delivery to its onEvent") proves the cancelled call's onEvent receives
+  nothing further and the connection stays usable for follow-up calls;
+  "cancel() after the call resolved is a no-op" covers remount safety.
+
+Also verified: `npx tsc --noEmit` clean; `npm test` 34 passing across 8
+files (27 prior + 7 new).
 
 Note surfaced during validation: the milestone-1 bridge serves exactly
 one E2EE data session per workspace (fixed DefaultSessionID/DeviceID),

@@ -48,7 +48,7 @@ export default function App() {
     <>
       <StatusBar style="auto" />
       {screen.kind === 'task' ? (
-        <TaskDetailScreen conn={conn} task={screen.task} onBack={handleBack} />
+        <TaskDetailScreen conn={conn} taskId={screen.task.ID} taskTitle={screen.task.Title} onBack={handleBack} />
       ) : (
         <TasksScreen conn={conn} onOpenTask={handleOpenTask} onDisconnect={handleDisconnect} />
       )}
