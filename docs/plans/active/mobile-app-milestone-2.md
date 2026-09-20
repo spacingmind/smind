@@ -151,7 +151,7 @@ kept Milestone 1's GLM/Sonnet handoff tractable).
 ## Progress
 
 - [x] Item 1 — persistent `RelayConnection` + event subscription.
-- [ ] Item 2 — workspace/task list screens.
+- [x] Item 2 — workspace/task list screens.
 - [ ] Item 3 — task detail with realtime timeline (read-only).
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, per
       the user's standing preference — fall back to Sonnet immediately,
@@ -191,6 +191,33 @@ Also verified: `npx tsc --noEmit` clean; Milestone 1's tests unchanged
 and passing (channel/e2ee/pairing/proto suites, plus
 integration.node.test.ts's one-shot workspace.list round trip via the
 reimplemented `connectAndFetchWorkspaceList`).
+
+### Item 2 — workspace/task list screens
+
+- **Navigate to a list screen after pairing (spaces+tasks, not a JSON
+  dump)**: `mobile/src/screens/TasksScreen.tsx` resolves the daemon's
+  workspace (workspace.list) and groups tasks by space
+  (space.list/task.list), with an Ungrouped section; `mobile/App.tsx`
+  switches to it on a successful connect. Rendering against a real
+  harness-backed connection is exercised by the Item 1 integration test's
+  workspace.create/space.list/task.create/task.list sequence.
+- **Refresh re-fetches over the same connection**: pull-to-refresh calls
+  the same `loadTasks(conn)` against the same `RelayConnection`
+  instance; unit test "refresh re-fetches over the same connection"
+  (`mobile/src/__tests__/api.test.ts`) asserts the RPC pattern
+  (workspace.list once, space.list/task.list per load) over one conn.
+- **Empty workspace renders an honest empty state**: TasksScreen's
+  ListEmptyComponent; unit test "an empty daemon yields empty lists, not
+  an error".
+- **Call failure surfaces a visible error with retry**: TasksScreen's
+  error state + Retry button; unit test "a failed call rejects with the
+  error the screen shows (error + retry state)" verifies retry after a
+  forced failure succeeds over the same connection.
+
+Also verified: `npx tsc --noEmit` clean; `npm test` 27 passing (23 prior
++ 4 new). A Disconnect control closes the connection and returns to
+pairing, since the app (not the client library) now owns the connection
+lifetime per Item 1's design.
 
 Note surfaced during validation: the milestone-1 bridge serves exactly
 one E2EE data session per workspace (fixed DefaultSessionID/DeviceID),
