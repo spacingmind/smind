@@ -205,6 +205,21 @@ func runControl(ctx context.Context, rc relaypb.RelayClient, admissionID, worksp
 		log.Printf("relay bridge: control stream: %v", err)
 		return
 	}
+
+	// Drain every reply (the initial ping's pong, and every later one) so
+	// the stream's receive buffer never grows unbounded over a long-lived
+	// smind serve process -- nothing here interprets replies yet, since
+	// this milestone's control stream is liveness-only (see
+	// DefaultSessionID/DefaultDeviceID's doc comment on device-attach
+	// announcements being a later milestone).
+	go func() {
+		for {
+			if _, err := stream.Recv(); err != nil {
+				return
+			}
+		}
+	}()
+
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	var seq uint64

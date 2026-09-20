@@ -236,7 +236,7 @@ proof-of-life rather than a polished app).
 ## Progress
 
 - [x] Item 1 — daemon↔relay bridging.
-- [ ] Item 2 — grpc-web on `smind relay`.
+- [x] Item 2 — grpc-web on `smind relay`.
 - [ ] Item 3 — Expo scaffold + TS E2EE client + pairing proof.
 - [x] Hand off implementation switched from a stalled GLM agent (hit its
       output-token budget on pure exploration, zero Edit/Write calls) to a
@@ -299,6 +299,83 @@ proof-of-life rather than a polished app).
   reruns -- consistent with this repo's known flaky-integration-test
   pattern, not a regression from this change.
 
-### Items 2-3
+### Item 2 — grpc-web on `smind relay`
 
-To be filled in as each lands.
+- **`smind relay`'s `*grpc.Server` is additionally reachable via grpc-web
+  framing, native gRPC unmodified.** Done: `internal/relay/server/grpcweb.go`
+  wraps the existing `gs` with `traefik/grpc-web`'s `grpcweb.WrapServer(gs,
+  WithWebsockets(true), ...)` and serves it on a *second* TLS listener
+  (`Config.GRPCWebListenAddr`/`GRPCWebListener`, mirroring the existing
+  `ListenAddr`/`Listener` pair) rather than multiplexing both protocols
+  behind one port -- chosen specifically so this change carries zero risk
+  to the native path, which is never touched. `smind relay`'s CLI gained a
+  `--grpc-web-listen` flag (default `:7401`, `DefaultGRPCWebListenAddr`);
+  callers that don't set it (every existing test) get an ephemeral port
+  instead of that fixed default, so no two concurrently-running test
+  processes can collide on one hardcoded port -- see `Config.GRPCWebListenAddr`'s
+  doc comment for why "" means something different here than for
+  `ListenAddr`. Verified: the full pre-existing `internal/relay/server`,
+  `internal/relay/client`, and `internal/relay/admission` test suites pass
+  completely unmodified (no test file edited).
+- **`WithWebsockets(true)` specifically, not just plain HTTP grpc-web.**
+  Plain HTTP/1.1 grpc-web framing only supports unary and server-streaming
+  RPCs (a browser/RN fetch can't stream a request body incrementally);
+  `OpenControl` and `OpenData` are both bidi-streaming, so without the
+  websocket transport mode neither RPC would be reachable from any
+  grpc-web client at all, including Item 3's. Documented in
+  `grpcweb.go`'s doc comment.
+- **grpc-web reaches the same admission/forwarding logic, not a parallel
+  path.** Verified by `internal/relay/server/grpcweb_test.go` (no existing
+  Go grpc-web client library exists, so this hand-rolls just enough of the
+  wire format against the real `WrappedGrpcServer.ServeHTTP`):
+  `TestGRPCWeb_UnaryAdmissionRoundTrip` completes `AdmitChallenge`+`Admit`
+  over real grpc-web+proto HTTP framing, exercising the exact same
+  `internal/relay/admission` verifier the native-gRPC tests cover.
+  `TestGRPCWeb_OpenControlPingPongOverWebsocket` completes a full
+  admission then a `OpenControl` ping/pong over the websocket transport,
+  proving the identical bidi-over-websocket bridge `OpenData` also rides
+  is real end-to-end (not just configured). `OpenData`'s own E2EE-layered
+  case is left to Item 3's real TypeScript client (the plan's own named
+  alternative for this scenario) rather than duplicated by hand in Go.
+- **A malformed grpc-web frame doesn't crash the server or affect
+  concurrent native gRPC.** Verified by
+  `TestGRPCWeb_MalformedFrameRejectedWithoutCrashing`: a frame header
+  claiming far more payload than the body carries is rejected (or the
+  connection is refused) without taking the process down, and both a
+  subsequent grpc-web admission AND a plain native-gRPC admission
+  immediately afterward both succeed.
+- **Bug found and fixed while writing Item 2's tests**:
+  `internal/relay/client.OpenControl` (pre-existing, from the already-
+  merged relay-e2ee-mobile plan) sent a bare, payload-less frame as its
+  "registration" frame, but `internal/relay/server.Server.OpenControl`'s
+  real contract (confirmed by its own existing `TestControlPingPongAndAdmissionGate`
+  test, which always sends a `Ping`-bodied frame first) treats any
+  non-`Ping` first frame as `Unimplemented` and immediately terminates the
+  stream -- so the daemon's control stream (Item 1) was silently dead on
+  arrival every time. Fixed by sending an initial `Ping` instead; also
+  added a drain goroutine in `internal/relay/bridge`'s `runControl` so a
+  long-lived control stream's receive buffer doesn't grow unbounded now
+  that replies actually arrive. No existing test changed; this only
+  touches `client.OpenControl`'s frame content, not its signature or the
+  server contract.
+- `go build ./... && go vet ./...` clean. `go test ./internal/relay/... ./cmd/smind/... ./internal/wsapi/... ./internal/server/...`
+  passes; the one failure seen across many runs was the same pre-existing
+  `internal/relay/client` flake noted under Item 1's Validation (unrelated
+  package, unrelated to this item's changes).
+- **Reconnect test flakiness investigated, not fully root-caused.**
+  `TestIntegration_BridgeReconnectsAfterDaemonTransportDrop` (Item 1) was
+  observed to fail intermittently after Item 2's `client.OpenControl` fix
+  landed (repeated "data session dropped, reconnecting" cycles instead of
+  settling). Ran it in isolation roughly 35 times across several batches
+  (single runs, `-count=15`, `-count=10 -race`, and combined with the rest
+  of `internal/relay/...`) and it failed only twice, both times without a
+  clear signal in added diagnostic logging (Resume itself never errored;
+  the resumed connection simply dropped again some seconds later) --
+  consistent with this repo's separately-known flaky-integration-test
+  pattern (the `internal/wsapi`/`internal/relay/client` CI flakes noted
+  above under Item 1) rather than a reproducible logic bug. Not chased
+  further; flagged here for anyone who sees it recur.
+
+### Item 3
+
+To be filled in as it lands.

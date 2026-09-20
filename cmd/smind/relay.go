@@ -46,7 +46,8 @@ func cmdRelay(args []string) int {
 
 	fs := flag.NewFlagSet("relay", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	listen := fs.String("listen", server.DefaultListenAddr, "listen address")
+	listen := fs.String("listen", server.DefaultListenAddr, "listen address (native gRPC)")
+	grpcWebListen := fs.String("grpc-web-listen", server.DefaultGRPCWebListenAddr, "listen address for the same RPCs over grpc-web")
 	dataDir := fs.String("data-dir", "", "relay data directory (default $SMIND_HOME/relay)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -61,8 +62,9 @@ func cmdRelay(args []string) int {
 	}
 
 	if err := server.Run(context.Background(), server.Config{
-		ListenAddr: *listen,
-		DataDir:    *dataDir,
+		ListenAddr:        *listen,
+		GRPCWebListenAddr: *grpcWebListen,
+		DataDir:           *dataDir,
 	}); err != nil {
 		log.Fatalf("relay: %v", err)
 	}
@@ -201,7 +203,8 @@ func printRelayUsage(w io.Writer) {
 	fmt.Fprint(w, `smind relay — self-hostable E2EE relay server
 
 Usage:
-  smind relay [--listen <addr>] [--data-dir <dir>]       start the relay server
+  smind relay [--listen <addr>] [--grpc-web-listen <addr>] [--data-dir <dir>]
+                                                           start the relay server
   smind relay workspace new <id>                          enroll a workspace (secret printed once)
   smind relay workspace ls                                list enrolled workspaces
   smind relay connect <address> <workspace-id> <secret>   configure this daemon to use a relay
