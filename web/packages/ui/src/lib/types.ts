@@ -154,6 +154,41 @@ export interface RunChunkEventParams {
   text: string;
 }
 
+// One selectable choice of a ConfigOption whose Type is "select"
+// (internal/wsapi/handlers.go's configSelectOptionParams, mirroring
+// internal/acp.ConfigSelectOption -- ACP's own SessionConfigSelectOption).
+export interface ConfigSelectOption {
+  value: string;
+  name: string;
+  description?: string;
+}
+
+// One ACP session config option, as run.listConfigOptions/run.setConfigOption
+// report it (internal/wsapi/handlers.go's configOptionParams, mirroring
+// internal/acp.ConfigOption). GLM/Kimi-only -- Claude/Codex runs always
+// report an empty list (see ThinkingLevel's own doc comment for why their
+// thinking-level knobs work completely differently). currentValue is raw
+// JSON since its shape varies by type: a bare string for "select", a bare
+// boolean for "boolean". options is only ever populated for type "select"
+// (an agent's own enumerated named choices, e.g. GLM's real thinking-level
+// tiers) -- read ids/labels from here, never hardcoded, since this
+// package has no fixed list of what any given agent will advertise.
+export interface ConfigOptionParams {
+  configId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  type: string;
+  currentValue?: unknown;
+  options?: ConfigSelectOption[];
+}
+
+// Result of run.listConfigOptions/run.setConfigOption
+// (internal/wsapi/handlers.go's runConfigOptionsResult).
+export interface RunConfigOptionsResult {
+  options: ConfigOptionParams[];
+}
+
 // One choice offered by a pending permission request (internal/wsapi/
 // handlers.go's permissionOptionParams -- the wire shape of
 // taskrunner.PermissionOption). `kind` is one of ACP's

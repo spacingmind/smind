@@ -3,6 +3,7 @@ import { ArrowDown } from "lucide-react";
 
 import { Composer } from "@/components/composer/composer";
 import { PermissionCard } from "@/components/permission/permission-card";
+import { RunConfigOptions } from "@/components/run-config-options";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -59,7 +61,17 @@ export function TaskDetailPane({
 
   // The task's live run, if any. A task has at most one at a time, so the
   // first match is the one the composer's Stop and queue drain act on.
-  const runningRunId = runs?.find((run) => run.status === "running")?.id ?? null;
+  const runningRun = runs?.find((run) => run.status === "running") ?? null;
+  const runningRunId = runningRun?.id ?? null;
+
+  // GLM/Kimi's own live-session-scoped config-option control (thinking
+  // level, etc, see use-run-config-options) -- Claude/Codex/no-live-run
+  // pass null, which the hook treats as "nothing to show". Keyed off the
+  // running run's own item count so a fresh option list is fetched as the
+  // session progresses (see the hook's own doc comment for why there's no
+  // dedicated push notification for this instead).
+  const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi") ? runningRun.id : null;
+  const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
 
   // Auto-follow keys off the total item count across every run: that is
   // the one number that changes whenever anything is appended anywhere in
@@ -189,6 +201,12 @@ export function TaskDetailPane({
           ))}
         </div>
       )}
+
+      <RunConfigOptions
+        options={configOptions.options}
+        error={configOptions.error}
+        onSetOption={configOptions.setOption}
+      />
 
       <Composer
         client={client}

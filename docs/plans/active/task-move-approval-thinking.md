@@ -287,7 +287,7 @@ already-shipped item (PR #169) — not part of this plan.
       constraints (this document's Context/Decisions sections).
 - [x] Item 1 — Move to space UI.
 - [x] Item 2 — Per-provider approval levels (`full-access` tier x3).
-- [ ] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
+- [x] Item 3 — Thinking level (Claude composer control + GLM/Kimi live-view
       control).
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, Sonnet
       5 as fallback), per standing preference.
@@ -401,7 +401,89 @@ To be filled in as each item lands:
   pass (no running daemon in this worktree) -- recommend a follow-up
   click-through per provider before merge, per this section's own
   "manual dogfood run... confirming zero permission prompts" ask.
-- Item 3: new Go unit test for Claude's option mapping; new frontend test
-  for the GLM live-view control; manual dogfood check that Claude's
-  thinking-level selection visibly changes response latency/depth and that
-  GLM's live control round-trips a real config change.
+- Item 3: DONE, both halves.
+  **Claude (composer, pre-run)**: `taskrunner.ThinkingLevel` added
+  (`off`/`standard`/`extended`, zero value `""` = unspecified/no Option
+  added at all) in a new `thinking.go`, with `extendedThinkingBudgetTokens
+  = 32000` for the "extended" tier (Decision: Off -> `WithDisabledThinking()`,
+  Standard -> `WithAdaptiveThinking()` -- lets the model size its own
+  budget, a reasonable middle tier -- Extended -> `WithThinkingBudget(32000)`,
+  a deliberately large fixed cap for turns that need to reason at length).
+  Threaded through `RunPrompt` -> `runClaudeNative` as a new parameter
+  (mechanical signature change touched ~48 existing call sites across
+  `runner_test.go`/`runs_test.go`/`config_options_test.go` -- all
+  bulk-edited to pass `""`, preserving today's behavior exactly). Wired
+  into both `task.prompt` and `run.start`'s wire params (`run.start` is
+  the one the composer actually calls per `use-run-timeline.ts`'s
+  `submitPrompt` -- the plan's Context section named `task.prompt`, but
+  the real frontend path is `run.start`, so both got the field for
+  consistency). Composer shows the selector only when
+  `provider === "claude-native"`, defaulting visually to Standard but
+  omitting the field from `run.start` until the user actually touches it
+  (same non-breaking-default convention `approvalPolicy` already uses).
+  New Go tests: `TestThinkingLevel_IsValid`;
+  `TestRunner_RunPrompt_ClaudeNative_ThinkingLevel` (table test asserting
+  the exact CLI flags each level produces via the existing "echo-args"
+  fake-CLI observability -- `--thinking disabled`/`--thinking adaptive`/
+  `--max-thinking-tokens 32000`/nothing for unspecified);
+  `TestServer_RunStart_InvalidThinkingLevel_IsAClearError` (wsapi
+  wire-boundary rejection, mirroring the existing approvalPolicy test).
+  New frontend tests (composer.test.tsx): selector hidden for GLM/Codex,
+  shown only for Claude; omitted-until-touched default; submits the
+  picked tier once touched.
+
+  **GLM/Kimi (live chat view, session-scoped)**: as planned, zero new RPCs
+  needed (`run.listConfigOptions`/`run.setConfigOption` already existed)
+  -- but implementing the frontend control surfaced a real backend gap the
+  plan's Context section didn't anticipate: `internal/acp.ConfigOption`
+  decoded a "select"-type option's `currentValue` but silently discarded
+  its own enumerated choices (ACP's `SessionConfigSelect.options` --
+  confirmed against `refs/agent-client-protocol`'s schema), so there was
+  no way to render a real dropdown of an agent's own named choices (e.g.
+  GLM's minimal/low/medium/high/xhigh/max) without hardcoding them, which
+  the plan explicitly said not to do. Fixed with a small, separately-
+  committed backend addition: `acp.ConfigOption.Options
+  ([]ConfigSelectOption)`, threaded through `configOptionParams.Options`
+  in wsapi's `run.listConfigOptions`/`run.setConfigOption` responses. This
+  is the one place this item touched Go code, despite the plan calling it
+  "100% frontend" -- noted here as a discovered-during-implementation
+  deviation, not a scope decision made up front.
+  New frontend: `use-run-config-options.ts` (fetches
+  `run.listConfigOptions` for the active run when it's GLM/Kimi, re-fetching
+  whenever the run's item count changes -- there's no dedicated push
+  notification for "config options are now ready", so this is what catches
+  the list going from empty to populated shortly after session creation;
+  `run.setConfigOption` on demand) and `run-config-options.tsx` (renders a
+  toggle for boolean options, a real `<Select>` of the agent's own choices
+  for a select option that has them, and a text-field fallback for a
+  select option with none -- honest given what's actually decodable,
+  never fabricating choices). Mounted in `task-detail.tsx` between the
+  permission dock and the composer, scoped to whichever run is currently
+  "running" and GLM/Kimi.
+  New Go tests: `TestClient_NewSessionConfigOptions` (internal/acp,
+  proves a select option's `Options` list round-trips intact, a boolean
+  option's doesn't exist at all); `TestRegistry_ConfigOptions_GLM_RealSelectRoundTrip`
+  (internal/runs, live GLM run via the "hang" scenario, `ListConfigOptions`
+  + `SetConfigOption` both carry the real choices/updated value);
+  `TestServer_RunConfigOptions_GLM_RealSelectRoundTrip` (internal/wsapi,
+  same round trip over the wire, plus an unrecognized configId surfacing
+  as a wire-level error rather than a silent no-op). Also discovered
+  `run.listConfigOptions`/`run.setConfigOption` had **no** wsapi-level
+  tests at all before this (the plan's claim that this was "already
+  covered by existing backend tests" didn't hold up under a `grep` --
+  only the non-ACP-provider "not supported" path was tested anywhere) --
+  the new wsapi test above is the first one.
+  New frontend tests (task-detail.test.tsx, 5 added): control fetches
+  and renders for GLM, never even asks for Claude; re-fetches as the run
+  streams more events (catches the empty-then-populated transition);
+  selecting a value calls `run.setConfigOption` and reflects the response;
+  a rejected `run.setConfigOption` renders a `role="alert"` error instead
+  of silently no-op'ing.
+
+  Full suite for this item: `go build ./... && go vet ./... && go test
+  ./...` all green; frontend `bun run typecheck` clean, `bun run test`
+  821/821 passing. No manual dogfood against a real GLM/Claude account
+  performed in this pass (no running daemon or live credentials in this
+  worktree) -- recommend a follow-up manual check per the original ask
+  (Claude's thinking-level selection visibly changing response depth;
+  GLM's live control round-tripping a real config change) before merge.
