@@ -7,7 +7,7 @@ import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
-import type { RunEntry } from "@/hooks/use-run-timeline";
+import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
 import type { RunStatusValue } from "@/lib/types";
 
 const RUN_STATUS_DOT: Record<RunStatusValue, StatusDotStatus> = {
@@ -36,7 +36,8 @@ export const RunTimeline = memo(function RunTimeline({
   detailLevel = "detailed",
   worktreePath,
   onOpenFile,
-}: { run: RunEntry; detailLevel?: DetailLevel } & TimelineRowContext) {
+  onRetry,
+}: { run: RunEntry; detailLevel?: DetailLevel; onRetry?: (run: RunEntry) => void } & TimelineRowContext) {
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
   const groups = groupTimeline(run.items, detailLevel);
 
@@ -70,9 +71,22 @@ export const RunTimeline = memo(function RunTimeline({
         )}
 
         {run.err && (
-          <p className="mt-2 text-xs text-status-danger" data-testid="run-error">
-            {run.err}
-          </p>
+          <div className="mt-2 flex items-center gap-2">
+            <p className="text-xs text-status-danger" data-testid="run-error">
+              {run.err}
+            </p>
+            {onRetry && canRetryWithHigherEffort(run) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="run-retry-higher-effort"
+                onClick={() => onRetry(run)}
+              >
+                Retry with higher effort
+              </Button>
+            )}
+          </div>
         )}
       </div>
 

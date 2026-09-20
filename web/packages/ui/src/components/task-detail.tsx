@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { ArrowDown } from "lucide-react";
 
+import { ApprovalPolicyControl } from "@/components/approval-policy-control";
 import { Composer } from "@/components/composer/composer";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { RunConfigOptions } from "@/components/run-config-options";
@@ -43,7 +44,10 @@ export function TaskDetailPane({
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
 }) {
-  const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
+  const { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort } = useRunTimeline(
+    client,
+    task.ID,
+  );
   // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
   // same task.diff this is -- the same hook the diff pane itself uses, so
   // the pill and the pane's header stat can't disagree and no extra RPC
@@ -156,6 +160,7 @@ export function TaskDetailPane({
                     detailLevel={detailLevel}
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
+                    onRetry={retryWithHigherEffort}
                   />
                 ))}
               </ul>
@@ -200,6 +205,13 @@ export function TaskDetailPane({
             />
           ))}
         </div>
+      )}
+
+      {runningRun && (runningRun.approvalPolicy === "manual" || runningRun.approvalPolicy === "auto-safe") && (
+        <ApprovalPolicyControl
+          policy={runningRun.approvalPolicy}
+          onChange={(policy) => setApprovalPolicy(runningRun.id, policy)}
+        />
       )}
 
       <RunConfigOptions

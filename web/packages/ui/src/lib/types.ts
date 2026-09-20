@@ -134,11 +134,22 @@ export interface RunSummary {
   FinishedAt: string | null;
   StopReason: string;
   Err: string;
+  /** The run's current policy -- live for a running run (see run.setApprovalPolicy), whatever it last was for a finished one. */
+  ApprovalPolicy: ApprovalPolicy;
+  /** Claude-only; "" (unset) for every other provider or a run started before the thinking-level selector was touched. Not persisted across a daemon restart -- a rehydrated run always reports "". */
+  ThinkingLevel: ThinkingLevel;
 }
 
 // Result of run.start (internal/wsapi/handlers.go's runStartResult).
 export interface RunStartResult {
   runId: string;
+}
+
+// Result of run.setApprovalPolicy (internal/wsapi/handlers.go's
+// runApprovalPolicyResult): the run's approvalPolicy after the change, so a
+// caller can confirm the switch took without a separate round trip.
+export interface RunSetApprovalPolicyResult {
+  approvalPolicy: ApprovalPolicy;
 }
 
 // Terminal result of a successful run.attach (internal/wsapi/handlers.go's

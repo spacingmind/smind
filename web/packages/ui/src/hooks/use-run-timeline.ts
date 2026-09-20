@@ -11,6 +11,7 @@ import type {
   RunAttachResult,
   RunLogEvent,
   RunLogsResult,
+  RunSetApprovalPolicyResult,
   RunStartResult,
   RunStatusValue,
   RunSummary,
@@ -210,6 +211,20 @@ export interface RunEntry {
   stopReason?: string;
   err?: string;
   /**
+   * The run's approval policy -- "manual" (the default) if the run was
+   * started without ever touching the composer's selector, or whatever it
+   * was live-switched to since (see setApprovalPolicy below and
+   * docs/plans/active/mid-run-approval-and-retry-effort.md's Item A).
+   */
+  approvalPolicy: ApprovalPolicy;
+  /**
+   * The run's Claude-only thinking level, "" (unset) for every other
+   * provider or an untouched selector -- immutable for the run's lifetime
+   * (unlike approvalPolicy, there is no live thinking-level switch; see
+   * retryWithHigherEffort below for how a *new* run gets a higher tier).
+   */
+  thinkingLevel: ThinkingLevel;
+  /**
    * The run's most recent still-unanswered permission request, or
    * undefined if none is currently pending. Set when a "permission_request"
    * event arrives (live, or replayed from run.attach's backfill for a
@@ -260,6 +275,47 @@ interface TimelineState {
    * cases are handled by the exact same code path.
    */
   respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
+  /**
+   * Switches runId's live approvalPolicy between "manual" and "auto-safe"
+   * (run.setApprovalPolicy) -- see Item A. Only meaningful while the run is
+   * still running; the caller is expected to have already gated the
+   * control that invokes this on that (see task-detail.tsx).
+   */
+  setApprovalPolicy: (runId: string, policy: ApprovalPolicy) => Promise<void>;
+  /**
+   * Starts a new run for the same task as `run`, one thinking tier above
+   * `run.thinkingLevel` (see nextThinkingTier), with the same prompt,
+   * provider, and approvalPolicy -- Item B's "Retry with higher effort". A
+   * no-op if there's no higher tier to try (the caller is expected to have
+   * already gated the button that invokes this on canRetryWithHigherEffort).
+   */
+  retryWithHigherEffort: (run: RunEntry) => Promise<void>;
+}
+
+/**
+ * Claude's thinking tiers in order, "" (unspecified) deliberately excluded:
+ * per the plan doc's Acceptance Criteria, "Retry with higher effort" only
+ * ever offers a *known* higher tier to try (off -> standard -> extended),
+ * not a guess at what an unset selector's "next" tier would even mean.
+ */
+const NEXT_THINKING_TIER: Partial<Record<ThinkingLevel, ThinkingLevel>> = {
+  off: "standard",
+  standard: "extended",
+};
+
+/** The next thinking tier up from level, or null if there isn't one (already "extended", or level is "" / unrecognized). */
+export function nextThinkingTier(level: ThinkingLevel): ThinkingLevel | null {
+  return NEXT_THINKING_TIER[level] ?? null;
+}
+
+/**
+ * Whether run's failure state should offer "Retry with higher effort"
+ * (Item B): a Claude-native run, ended in error, with a higher thinking
+ * tier left to try. A successful run, a non-Claude provider, or a run
+ * already at "extended" never qualifies.
+ */
+export function canRetryWithHigherEffort(run: RunEntry): boolean {
+  return run.status === "error" && run.provider === "claude-native" && nextThinkingTier(run.thinkingLevel) !== null;
 }
 
 /** Tracks one task-selection's lifetime: guards async continuations from a superseded selection, and lets an active run.attach be aborted (detached, not stopped) on task switch or unmount. */
@@ -439,6 +495,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
           items: [],
           stopReason: r.StopReason || undefined,
           err: r.Err || undefined,
+          approvalPolicy: r.ApprovalPolicy,
+          thinkingLevel: r.ThinkingLevel,
         }));
         setRuns(initial);
 
@@ -497,6 +555,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         status: "running",
         startedAt: new Date().toISOString(),
         items: [],
+        approvalPolicy: approvalPolicy ?? "manual",
+        thinkingLevel: thinkingLevel ?? "",
       };
       setRuns((prev) => (prev ? [...prev, entry] : [entry]));
 
@@ -521,5 +581,23 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     [client],
   );
 
-  return { runs, error, submitPrompt, stopRun, respondPermission };
+  const setApprovalPolicy = useCallback(
+    async (runId: string, policy: ApprovalPolicy) => {
+      if (!client) throw new Error("not connected");
+      const result = await client.call<RunSetApprovalPolicyResult>("run.setApprovalPolicy", { runId, policy });
+      patch(setRuns, runId, { approvalPolicy: result.approvalPolicy });
+    },
+    [client],
+  );
+
+  const retryWithHigherEffort = useCallback(
+    async (run: RunEntry) => {
+      const tier = nextThinkingTier(run.thinkingLevel);
+      if (!tier) return;
+      await submitPrompt(run.provider, run.prompt, run.approvalPolicy, tier);
+    },
+    [submitPrompt],
+  );
+
+  return { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort };
 }

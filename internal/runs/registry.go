@@ -256,11 +256,6 @@ type run struct {
 	// dereferencing.
 	runner *taskrunner.Runner
 
-	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
-	// and immutable thereafter -- see runPermissionDecider.Decide, the only
-	// reader.
-	approvalPolicy taskrunner.ApprovalPolicy
-
 	// thinkingLevel is this run's taskrunner.ThinkingLevel, set at Start and
 	// immutable thereafter -- passed straight through to RunPrompt in
 	// drive; only ever meaningful for ProviderClaudeNative (see
@@ -293,6 +288,18 @@ type run struct {
 	errMsg        string
 	stopRequested bool
 
+	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
+	// and live-switchable thereafter via Registry.SetApprovalPolicy between
+	// ApprovalPolicyManual and ApprovalPolicyAutoSafe (ApprovalPolicyFullAccess
+	// is rejected as a switch target -- see SetApprovalPolicy's doc comment).
+	// Guarded by mu because runPermissionDecider.Decide (the only reader)
+	// and SetApprovalPolicy (the only writer after Start) can race across
+	// goroutines exactly like every other mid-run-mutable field here. A
+	// switch takes effect for the next Decide call that checks it; a
+	// request already past that check (blocked in its own select, waiting
+	// on a human/timeout/cancellation) is never retroactively affected.
+	approvalPolicy taskrunner.ApprovalPolicy
+
 	history     []Event
 	subscribers map[int]*subQueue
 	nextSubID   int
@@ -313,17 +320,29 @@ type run struct {
 	pendingPermissions map[string]chan string
 }
 
+// getApprovalPolicy returns r's current approvalPolicy under its mutex --
+// the one place every reader of the live (possibly Registry.SetApprovalPolicy
+// -switched) value should go through, rather than each call site taking
+// r.mu by hand.
+func (r *run) getApprovalPolicy() taskrunner.ApprovalPolicy {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.approvalPolicy
+}
+
 func (r *run) statusLocked() RunStatus {
 	return RunStatus{
-		ID:         r.id,
-		TaskID:     r.taskID,
-		Provider:   r.provider,
-		Prompt:     r.prompt,
-		Status:     r.status,
-		StartedAt:  r.startedAt,
-		FinishedAt: r.finishedAt,
-		StopReason: r.stopReason,
-		Err:        r.errMsg,
+		ID:             r.id,
+		TaskID:         r.taskID,
+		Provider:       r.provider,
+		Prompt:         r.prompt,
+		Status:         r.status,
+		StartedAt:      r.startedAt,
+		FinishedAt:     r.finishedAt,
+		StopReason:     r.stopReason,
+		Err:            r.errMsg,
+		ApprovalPolicy: r.approvalPolicy,
+		ThinkingLevel:  r.thinkingLevel,
 	}
 }
 
@@ -424,7 +443,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.approvalPolicy, r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.getApprovalPolicy(), r.thinkingLevel, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
@@ -448,6 +467,20 @@ type runPermissionDecider struct {
 	r   *run
 }
 
+// CurrentApprovalPolicy implements taskrunner.LivePolicyDecider: it lets a
+// wrapping adapter that only captured this run's approvalPolicy once, at
+// RunPrompt's call (acpDeciderAdapter's own frozen field, needed for its
+// autoAllowACPFileEdit fast path -- see that type's doc comment), read the
+// live value instead, the same way Decide above already does for its own
+// AllowlistedCommand check. Without this, Registry.SetApprovalPolicy's
+// mid-run switch to auto-safe would correctly unlock the shell-command
+// allowlist for GLM/Kimi but silently leave every in-worktree file edit
+// still asking a human, since acpDeciderAdapter had no way to ever see the
+// switch.
+func (d runPermissionDecider) CurrentApprovalPolicy() taskrunner.ApprovalPolicy {
+	return d.r.getApprovalPolicy()
+}
+
 func (d runPermissionDecider) Decide(ctx context.Context, summary, command string, options []taskrunner.PermissionOption) (string, error) {
 	requestID, err := newRunID()
 	if err != nil {
@@ -463,7 +496,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 	// tell it apart from a real human answering. An unrecognized/ambiguous
 	// command (including "" -- see PermissionDecider's doc comment) always
 	// falls through to the manual flow below, never auto-allowed.
-	if d.r.approvalPolicy == taskrunner.ApprovalPolicyAutoSafe && taskrunner.AllowlistedCommand(command) {
+	if d.r.getApprovalPolicy() == taskrunner.ApprovalPolicyAutoSafe && taskrunner.AllowlistedCommand(command) {
 		if optionID, ok := firstOptionByKind(options, "allow_once", "allow_always"); ok {
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                taskrunner.EventTypePermissionRequest,
