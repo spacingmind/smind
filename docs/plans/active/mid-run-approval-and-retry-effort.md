@@ -161,15 +161,71 @@ against smind's current design:
       + `run.setApprovalPolicy` RPC in `internal/wsapi/handlers.go` +
       `ApprovalPolicy`/`ThinkingLevel` exposed on `RunStatus`/`RunSummary`
       so a client can read a run's current policy/tier back.
-- [ ] Item A frontend — live control in the task/chat view.
-- [ ] Item B — failure-state "Retry with higher effort" affordance for
-      Claude-native runs, resubmitting one thinking tier up.
-- [ ] Independent verification of agent-reported work (re-run Go tests +
-      frontend typecheck/tests, read the actual diff) before merge.
+- [x] Item A frontend — `ApprovalPolicyControl` (task-detail.tsx, mounted
+      between the pending-permission dock and `RunConfigOptions`, gated on
+      `runningRun.approvalPolicy` being `manual`/`auto-safe`), wired
+      through `useRunTimeline`'s new `setApprovalPolicy`.
+- [x] Item B — `run-timeline.tsx`'s "Retry with higher effort" button next
+      to `run.err`, gated by the new `canRetryWithHigherEffort`/
+      `nextThinkingTier` helpers in `use-run-timeline.ts`, wired through
+      `retryWithHigherEffort` (delegates to the existing `submitPrompt`
+      with the bumped `thinkingLevel`).
+- [x] Verification: Go tests (`internal/runs`, `internal/wsapi`, full
+      `go test ./...`, `-race` on `internal/runs`) + frontend
+      (`tsc -b`, full vitest suite) — see Validation below.
 - [ ] Rebuild, restart local daemon, dogfood in browser.
 
 ## Validation
 
-To be filled in as each item lands — map back to each Acceptance Criterion
-with the specific test or manual check that confirmed it, not just "tests
+Go: `go test ./...` is green except a pre-existing, unrelated flake in
+`internal/relay/client`'s `TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames`
+(reproduced failing 1/3 runs on a clean checkout of this branch's base,
+before either item's changes -- an E2EE frame-counter race in the mobile
+relay integration test, nothing touched by this plan). Frontend:
+`tsc -b` clean, full vitest suite green aside from 27 tests across 4 files
+(`App.test.tsx`'s split/drag-drop/settings-view cases,
+`app-sidebar-crud.test.tsx`, `file-explorer-pane.test.tsx`'s context-menu
+cases, `theme-toggle.test.tsx`) that fail identically on this branch's
+base commit with none of this plan's changes applied (confirmed via
+`git stash` + re-run) -- a pre-existing radix dropdown/context-menu
+portal-vs-jsdom issue, unrelated to either item.
+
+### Item A
+- Live control shown for manual/auto-safe, hidden for full-access/finished:
+  `internal/runs/approval_policy_test.go`'s
+  `TestRegistry_SetApprovalPolicy_RejectsFullAccessAsTarget`/
+  `_RejectsFinishedRun` (backend rejection) +
+  `task-detail.test.tsx`'s "shows the live approval-policy control...",
+  "hides the approval-policy control entirely for a full-access run", and
+  "hides the approval-policy control once the run has finished" (frontend
+  gating).
+- Switch takes effect for the next request only, not an already-pending
+  one: `internal/runs/approval_policy_test.go`'s
+  `TestRegistry_SetApprovalPolicy_TakesEffectForSubsequentDecideCalls` (both
+  directions) and
+  `TestRegistry_SetApprovalPolicy_SwitchDoesNotRetroactivelyAffectAlreadyPendingRequest`
+  (the already-blocked `Decide` call is proven to *not* resolve within
+  200ms of the switch, then still resolves correctly once actually
+  answered).
+- full-access rejected with a clear error, not silently ignored:
+  `TestRegistry_SetApprovalPolicy_RejectsFullAccessAsTarget` (Registry
+  level) + `TestServer_RunSetApprovalPolicy_RejectsFullAccess` (wsapi RPC
+  level, `internal/wsapi/run_approval_policy_test.go`).
+- No-op/error on a finished or unknown run:
+  `TestRegistry_SetApprovalPolicy_RejectsFinishedRun` /
+  `_UnknownRun_ReturnsErrNotFound` + their wsapi-level twins
+  `TestServer_RunSetApprovalPolicy_RejectsFinishedRun` / `_UnknownRun`.
+- Pre-run composer selection unchanged: `task-detail.test.tsx`'s existing
+  "defaults the approval-policy selector to manual..." and "sends
+  approvalPolicy=auto-safe..." tests still pass unmodified.
+
+### Item B
+- Retry shown/hidden per the exact matrix in the Acceptance Criteria:
+  `task-detail.test.tsx`'s "shows Retry with higher effort for a failed
+  Claude run below extended and resubmits at the next tier" (also proves
+  the resubmitted `run.start` call carries the same prompt/provider/
+  approvalPolicy plus the bumped `thinkingLevel`), "...already at
+  extended", "...failed non-Claude provider's run", and "...successful
+  Claude run" (all four assert `run-retry-higher-effort`'s presence/
+  absence).
 pass."
