@@ -39,6 +39,18 @@ const (
 // attempts, doubling from an initial 1s up to this cap.
 const maxReconnectBackoff = 30 * time.Second
 
+// minStableConnection is how long a data session must stay up before Run
+// treats it as a real success and resets backoff to its minimum. Without
+// this, a connection that keeps dropping within milliseconds of each
+// reconnect (a flapping network path, a relay that admits but then
+// immediately drops the stream) would reset backoff to 1s on every single
+// cycle -- since success only ever came from api.ServeTransport RETURNING
+// (which is exactly the failure signal), a rapid-flap connection can never
+// escalate its backoff and instead tight-loops, spending its whole retry
+// budget on back-to-back reconnect attempts with no pacing at all rather
+// than ever giving a struggling relay or network path time to settle.
+const minStableConnection = 2 * time.Second
+
 // DaemonKeyID derives a stable admission-time identifier for kp -- the
 // same public key material a mobile pairing offer carries, base64'd,
 // so a relay operator can recognize which daemon key an admission attempt
@@ -83,8 +95,17 @@ func Run(ctx context.Context, cfg Config, kp *e2ee.KeyPair, api *wsapi.API) erro
 		}
 	}()
 
+	// needConnect is true whenever dc doesn't currently name a usable data
+	// session: on the very first iteration, and after every drop. It is
+	// deliberately not simply "dc == nil" as a loop condition by itself --
+	// see the Resume-vs-fresh-handshake branch below, which needs to tell
+	// "no previous session at all" (dc == nil, first connect) apart from
+	// "there IS a previous session to try resuming" (dc != nil, a
+	// reconnect), while a failed Resume still needs to fall through to a
+	// fresh handshake in the same iteration.
+	needConnect := true
 	for ctx.Err() == nil {
-		if dc == nil {
+		if needConnect {
 			newConn, admissionID, err := dialAndAdmit(cfg, daemonKeyID, secret)
 			if err != nil {
 				log.Printf("relay bridge: connect: %v", err)
@@ -99,64 +120,63 @@ func Run(ctx context.Context, cfg Config, kp *e2ee.KeyPair, api *wsapi.API) erro
 			}
 			grpcConn = newConn
 			rc := relaypb.NewRelayClient(grpcConn)
-
 			go runControl(ctx, rc, admissionID, cfg.WorkspaceID)
 
-			dc, err = handshakeDataConn(ctx, rc, admissionID, cfg.WorkspaceID, kp)
-			if err != nil {
-				log.Printf("relay bridge: handshake: %v", err)
-				dc = nil
-				if !sleepCtx(ctx, backoff) {
-					return nil
+			resumed := false
+			if dc != nil {
+				// A reconnect (as opposed to the very first connect):
+				// resume the existing E2EE session in place before ever
+				// falling back to a brand new one.
+				if err := dc.Resume(ctx, rc, admissionID); err == nil {
+					resumed = true
+				} else {
+					log.Printf("relay bridge: resume failed, starting a fresh session: %v", err)
+					_ = dc.Close()
+					dc = nil
 				}
-				backoff = nextBackoff(backoff)
-				continue
 			}
-			backoff = time.Second
+			if !resumed {
+				dc, err = handshakeDataConn(ctx, rc, admissionID, cfg.WorkspaceID, kp)
+				if err != nil {
+					log.Printf("relay bridge: handshake: %v", err)
+					dc = nil
+					if !sleepCtx(ctx, backoff) {
+						return nil
+					}
+					backoff = nextBackoff(backoff)
+					continue
+				}
+			}
 			log.Printf("relay bridge: connected to %s (workspace %s)", cfg.RelayAddress, cfg.WorkspaceID)
+			needConnect = false
 		}
 
+		connectedAt := time.Now()
 		api.ServeTransport(ctx, dc)
 		if ctx.Err() != nil {
 			return nil
 		}
 
 		// The data session's transport dropped (network blip, relay
-		// restart, mobile device disconnect). Re-admit on a fresh gRPC
-		// connection and try to resume the existing E2EE session in place
-		// before ever falling back to a brand new one.
-		log.Printf("relay bridge: data session dropped, reconnecting")
-		newConn, admissionID, err := dialAndAdmit(cfg, daemonKeyID, secret)
-		if err != nil {
-			log.Printf("relay bridge: reconnect: %v", err)
+		// restart, mobile device disconnect, or -- if this connection
+		// never really stabilized -- the same flapping condition that
+		// caused the last drop). Only treat this as a fresh success once
+		// a connection has proven itself stable for a little while;
+		// otherwise keep escalating backoff and actually wait it out
+		// before the next attempt, rather than resetting to an instant
+		// retry that can never pace a rapidly-flapping connection (see
+		// minStableConnection's doc comment).
+		if time.Since(connectedAt) >= minStableConnection {
+			backoff = time.Second
+			log.Printf("relay bridge: data session dropped, reconnecting")
+		} else {
+			log.Printf("relay bridge: data session dropped %s after connecting (below the %s stability threshold), backing off %s before retrying", time.Since(connectedAt), minStableConnection, backoff)
 			if !sleepCtx(ctx, backoff) {
 				return nil
 			}
 			backoff = nextBackoff(backoff)
-			continue
 		}
-		if grpcConn != nil {
-			_ = grpcConn.Close()
-		}
-		grpcConn = newConn
-		rc := relaypb.NewRelayClient(grpcConn)
-		go runControl(ctx, rc, admissionID, cfg.WorkspaceID)
-
-		if err := dc.Resume(ctx, rc, admissionID); err != nil {
-			log.Printf("relay bridge: resume failed, starting a fresh session: %v", err)
-			_ = dc.Close()
-			dc, err = handshakeDataConn(ctx, rc, admissionID, cfg.WorkspaceID, kp)
-			if err != nil {
-				log.Printf("relay bridge: fresh handshake: %v", err)
-				dc = nil
-				if !sleepCtx(ctx, backoff) {
-					return nil
-				}
-				backoff = nextBackoff(backoff)
-				continue
-			}
-		}
-		backoff = time.Second
+		needConnect = true
 	}
 	return nil
 }

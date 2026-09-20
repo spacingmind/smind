@@ -325,36 +325,66 @@ func TestIntegration_BridgeReconnectsAfterDaemonTransportDrop(t *testing.T) {
 	// device's own connection are untouched.
 	proxy.killAll()
 
+	// Give the relay a moment to actually notice the daemon's old stream
+	// died before sending the next request: a message that lands in the
+	// exact instant a TCP connection dies can still be silently lost even
+	// with the relay's own reconnect-safety fixes in place (server.go's
+	// attachRoute/frameQueue changes close the *coordination* race between
+	// an old and a new stream, but grpc's Send can still report success
+	// into a connection whose death the transport layer hasn't detected
+	// yet -- a fundamental, ack-less-protocol characteristic, not
+	// something fixable by relay-side bookkeeping alone). This is well
+	// under bridge.go's own 1s minimum backoff before it even attempts to
+	// reconnect, so it still genuinely exercises "request arrives and is
+	// buffered while the daemon is still detached."
+	time.Sleep(200 * time.Millisecond)
+
 	// The daemon's bridge should reconnect (fresh dial+admit through the
 	// still-open proxy) and Resume the existing E2EE session on its own,
-	// with no restart of anything in this test process. Poll with the
-	// same request until it succeeds or the deadline passes, since the
-	// bridge's reconnect has its own internal backoff.
-	deadline := time.Now().Add(20 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		if err := tryWorkspaceList(device, "2"); err != nil {
-			lastErr = err
-			time.Sleep(250 * time.Millisecond)
-			continue
-		}
-		return // success
+	// with no restart of anything in this test process: send exactly one
+	// more request now (the relay buffers it for the currently-detached
+	// daemon side, per its own reconnect-grace design) and wait for the
+	// daemon to come back and answer it, however many backoff cycles that
+	// takes (bridge.go's minStableConnection/nextBackoff: 1s, 2s, 4s...
+	// up to 30s, applied whenever a just-reconnected session doesn't stay
+	// up for at least 2s) -- generous budget here so a slower/contended CI
+	// runner has real room for several such cycles' worth of backoff plus
+	// network round-trip time, not just a fast local machine's.
+	//
+	// This deliberately sends only ONE request rather than polling with
+	// retries: device's session (like any e2ee.Session) requires its
+	// receive counter to advance strictly in order, so a retry loop that
+	// sends a fresh request per attempt while leaving each prior attempt's
+	// own background Receive() call still running would race multiple
+	// goroutines against that single ordered stream -- an earlier,
+	// already-"timed out" attempt's leaked goroutine can win the race for
+	// a later attempt's actual response, making the still-waiting caller
+	// time out even though the daemon answered correctly. One request, one
+	// wait, sidesteps that whole class of bug.
+	if err := tryWorkspaceList(device, "2", 60*time.Second); err != nil {
+		t.Fatalf("bridge did not resume after daemon transport drop: %v", err)
 	}
-	t.Fatalf("bridge did not resume after daemon transport drop: %v", lastErr)
 }
 
 // requestWorkspaceList sends a workspace.list request over device and
 // fails the test unless it gets back an empty-array success response.
 func requestWorkspaceList(t *testing.T, device *client.DataConn, id string) {
 	t.Helper()
-	if err := tryWorkspaceList(device, id); err != nil {
+	if err := tryWorkspaceList(device, id, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 }
 
-// tryWorkspaceList sends and awaits one workspace.list round-trip, for use
-// both in the single-shot check and the post-reconnect poll loop above.
-func tryWorkspaceList(device *client.DataConn, id string) error {
+// tryWorkspaceList sends and awaits exactly one workspace.list round trip.
+// Callers must not call this again for the same device after a prior call
+// timed out: device.Receive() blocks on the connection's single ordered
+// counter stream, so a second call while the first's background receive
+// goroutine is still outstanding would race two goroutines against that
+// one stream (see the caller in
+// TestIntegration_BridgeReconnectsAfterDaemonTransportDrop for why this
+// matters) -- send once, wait once, with a timeout generous enough for
+// whatever the caller is waiting through.
+func tryWorkspaceList(device *client.DataConn, id string, timeout time.Duration) error {
 	req, err := json.Marshal(map[string]any{"id": id, "method": "workspace.list"})
 	if err != nil {
 		return err
@@ -396,7 +426,7 @@ func tryWorkspaceList(device *client.DataConn, id string) error {
 		return nil
 	case err := <-errCh:
 		return err
-	case <-time.After(5 * time.Second):
+	case <-time.After(timeout):
 		return fmt.Errorf("timed out waiting for workspace.list response")
 	}
 }

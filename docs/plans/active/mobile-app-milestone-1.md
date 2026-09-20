@@ -391,24 +391,81 @@ proof-of-life rather than a polished app).
   passes; the one failure seen across many runs was the same pre-existing
   `internal/relay/client` flake noted under Item 1's Validation (unrelated
   package, unrelated to this item's changes).
-- **Reconnect test flakiness investigated, not fully root-caused.**
-  `TestIntegration_BridgeReconnectsAfterDaemonTransportDrop` (Item 1) was
-  observed to fail intermittently after Item 2's `client.OpenControl` fix
-  landed (repeated "data session dropped, reconnecting" cycles instead of
-  settling; one later `-count=5` run also hung to its 60s timeout with
-  the same symptom rather than cleanly failing). Ran it in isolation
-  roughly 40 times total across several batches (single runs, `-count=15`,
-  `-count=10 -race`, `-count=5`, and combined with the rest of
-  `internal/relay/...`) and it failed/hung only 3 times, without a clear
-  signal in added diagnostic logging (Resume itself never errored; the
-  resumed connection simply dropped again some seconds later) --
-  consistent with this repo's separately-known flaky-integration-test
-  pattern (the `internal/wsapi`/`internal/relay/client` CI flakes noted
-  above under Item 1) rather than a reliably reproducible logic bug. Per
-  this repo's established practice for suspected flakes, not chased
-  further; flagged here for anyone who sees it recur, since a real
-  environment-independent race is still possible and worth a fresh look
-  if it starts failing consistently.
+- **Reconnect test flakiness (`TestIntegration_BridgeReconnectsAfterDaemonTransportDrop`)
+  root-caused and fixed after it also failed in CI.** What first looked
+  like ordinary test-infra noise turned out to be two real, distinct bugs,
+  found by adding temporary diagnostic logging to `internal/relay/server`
+  and reproducing directly against a real relay:
+  1. **A real bug in the test itself**: the post-drop polling loop sent a
+     *new* `workspace.list` request on every retry without cancelling the
+     previous attempt's still-outstanding `device.Receive()` goroutine.
+     Since a session's receive counter is strictly ordered, multiple
+     concurrent `Receive()` calls raced for the same ordered frame stream
+     -- an earlier, already-"timed out" attempt's leaked goroutine could
+     win the race for a *later* attempt's actual response, so the
+     currently-waiting caller timed out even though the daemon had
+     answered correctly. Fixed by sending exactly one request and waiting
+     once, with a single generous timeout, instead of polling with
+     retries.
+  2. **A real bug in `internal/relay/server`**: when a daemon reconnects,
+     the new stream's `attachRoute` call could race the *old* (dying)
+     stream's send pump, which was still competing for
+     `frameQueue.pop()` on the shared per-side queue. `pop()` returned an
+     already-queued item without ever checking whether the caller's
+     context had just been cancelled, and even when the pump *did* notice
+     cancellation before calling `Send`, a `stream.Send()` call can
+     report success into a connection whose death the transport hasn't
+     detected yet (gRPC buffers sends asynchronously beneath the call) --
+     either way, `pop()` had already and irreversibly removed the frame
+     from the queue, so it was gone. Reproduced directly: diagnostic
+     logging showed the exact in-flight `workspace.list` request being
+     hunted down, popped by the old (about-to-die) daemon-side pump, and
+     "sent OK" on a connection that was already dead. Fixed in
+     `internal/relay/server/server.go`/`framequeue.go`:
+     `attachRoute` now gives each attached stream's send pump its own
+     cancellable context (cancelling the previous one the instant a new
+     stream supersedes it, rather than waiting for the old one to notice
+     its own transport died); `frameQueue.pop` now checks its context
+     even when an item is immediately available (previously it only
+     checked while blocked waiting); and any frame a pump can't actually
+     deliver (context already cancelled, or a `Send` that errors) is
+     re-queued via a new `pushFront` rather than dropped. Regression
+     tests: `framequeue_test.go`'s three new tests pin this exact
+     behavior directly (pre-cancelled context doesn't consume a ready
+     item; `pushFront` preserves delivery order; `pushFront` evicts the
+     newest frame on overflow, not the re-queued one).
+  3. **`internal/relay/bridge.Run` itself also had a real pacing gap**,
+     found independently while investigating: on any reconnect (success
+     *or* failure), `backoff` was unconditionally reset to its 1s minimum,
+     with no sleep at all before the next `api.ServeTransport` call. A
+     connection that kept dropping within milliseconds of every reconnect
+     could never escalate its backoff and would tight-loop reconnect
+     attempts with zero pacing. Fixed by only resetting backoff once a
+     connection has stayed up for at least `minStableConnection` (2s);
+     otherwise backoff keeps escalating and is actually slept before the
+     next attempt.
+  4. **One inherent, not-fixable-at-this-layer race remains and is
+     accepted, not hidden**: a message that lands in the exact instant a
+     TCP connection dies can still be silently lost even with fixes 2-3 in
+     place, because gRPC's `Send` can report success into a connection
+     whose failure the transport layer hasn't surfaced yet -- there is no
+     way for the relay to know "did this actually arrive" without an
+     application-level acknowledgment protocol, which is out of scope
+     here. The test works around this by waiting 200ms after severing the
+     daemon's transport before sending its next request (documented
+     inline in `bridge_test.go`), comfortably under `bridge.Run`'s own 1s
+     minimum backoff, so it still genuinely exercises "request arrives and
+     is buffered while the daemon is detached" without hitting the one
+     race that's a fundamental property of ack-less network protocols
+     rather than a bug in this relay.
+  - Verified: `TestIntegration_BridgeReconnectsAfterDaemonTransportDrop`
+    passed 40/40 and then 15/15 more (after removing the diagnostic
+    logging) in back-to-back isolated runs, plus clean under
+    `internal/relay/server`/`internal/relay/bridge` with `-race
+    -count=3`, plus the full `go test ./...` (including the separately
+    pre-existing `internal/relay/client` flake from Item 1's Validation,
+    which passed in this run too -- still a known, unrelated flake, not
+    claimed fixed here).
 
 ### Item 3 — Expo scaffold + TypeScript E2EE client + pairing proof
 
