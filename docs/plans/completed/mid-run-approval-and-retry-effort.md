@@ -194,16 +194,10 @@ against smind's current design:
       type assertion, so a decider with no live-switching concept (every
       existing test fake) is unaffected.
 - [x] Rebuild: `go build ./...` and the frontend's production `vite build`
-      both succeed clean. Full local-daemon browser dogfood against a real
-      provider account was not done in this pass (out of scope for a
-      headless environment with no configured provider credentials) --
-      Item A/B's behavior is instead verified end to end at the RPC layer
-      (`internal/wsapi`'s tests drive real WebSocket connections and a
-      real fakeagent ACP subprocess) and at the rendered-DOM layer
-      (`task-detail.test.tsx`'s new cases click the actual buttons and
-      assert on the actual RPC calls/DOM state), which is the same
-      confidence level this repo's other wsapi/web-ui plans have shipped
-      on before a manual dogfood pass.
+      both succeed clean. **Live dogfood pass done, 2026-09-20/21** (see
+      Validation below): Item A's live approval-switch pill was exercised
+      against a real running GLM turn, including the specific
+      not-retroactive ordering guarantee.
 
 ## Validation
 
@@ -288,3 +282,30 @@ portal-vs-jsdom issue, unrelated to either item.
   ./internal/wsapi/...` and the full `go test ./...` stay green with this
   fix in place (same pre-existing `internal/relay/client` flake as noted
   above, unrelated).
+
+### Live dogfood pass, 2026-09-20/21
+
+Against the real local daemon (rebuilt via `task build:web && task build`,
+restarted) with a real GLM account, driven with Playwright:
+
+- Sent a GLM prompt requiring a real (non-allowlisted) shell command under
+  `manual` policy; the resulting `session/request_permission` surfaced as a
+  real pending "Allow"/"Skip" dialog in the chat, exactly as the automated
+  tests model it.
+- **While that request was still pending**, clicked the live
+  `ApprovalPolicyControl` pill to switch the run to `auto-safe`. Confirmed
+  the pending dialog remained untouched (`Allow`/`Skip` still showing, not
+  auto-resolved) -- directly confirming the "not retroactive" acceptance
+  criterion against a real run, not just the `200ms`-timeout unit test.
+  The `Auto-safe` pill's own active/selected styling updated immediately,
+  confirming the switch itself took effect.
+- Clicked "Allow" to let the pending request resolve normally; the run
+  continued and finished successfully ("DONE", correct command output).
+- Confirmed the `ApprovalPolicyControl` pill and GLM's live thinking-level
+  dropdown (`run-config-options.tsx`, from `task-move-approval-thinking.md`)
+  both disappeared from the task view once the run reached a terminal
+  state -- confirming "hidden once finished" against a real run rather
+  than only the `StatusRunning` check in isolation.
+- Item B's "Retry with higher effort" button was not separately exercised
+  live in this pass (would require deliberately failing a real Claude run)
+  -- covered by `task-detail.test.tsx`'s DOM-level tests only.
