@@ -89,6 +89,11 @@ type route struct {
 	mu struct {
 		sync.Mutex
 		streams map[side]relaypb.Relay_OpenDataServer
+		// pumpCancel stops the CURRENT send pump for a side (see
+		// attachRoute's doc comment for why a side's pump needs an
+		// independent, explicitly-cancellable context rather than reusing
+		// stream.Context() directly).
+		pumpCancel map[side]context.CancelFunc
 	}
 	daemonQ *frameQueue
 	deviceQ *frameQueue
@@ -229,7 +234,7 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 	}
 
 	sd := dataSide(first.GetDirection())
-	r := s.attachRoute(first, sd, stream)
+	r, pumpCtx := s.attachRoute(first, sd, stream)
 	defer s.detach(sd, r, stream)
 
 	if err := s.forward(r, sd, first); err != nil {
@@ -266,16 +271,34 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 	}()
 
 	// Send pump: drain this side's queue onto this stream. A stalled peer
-	// never blocks the relay — its queue absorbs and evicts.
+	// never blocks the relay — its queue absorbs and evicts. It pops using
+	// pumpCtx, not stream.Context() -- see attachRoute's doc comment for
+	// why those must be different contexts.
 	sendErr := make(chan error, 1)
 	go func() {
 		for {
-			f, err := r.queueFor(sd).pop(stream.Context())
+			f, err := r.queueFor(sd).pop(pumpCtx)
 			if err != nil {
 				sendErr <- err
 				return
 			}
+			// Re-check right before handing the frame to the network:
+			// pop() already re-checks pumpCtx itself, but a cancellation
+			// landing in the gap between pop() returning and this line
+			// is still possible, and grpc's Send can return success into
+			// a connection that's already dead (the actual failure can
+			// surface later, or never, since sends are buffered
+			// asynchronously beneath the call) -- silently handing a
+			// frame to a stream that's already been superseded is
+			// exactly how it gets lost. Either way out of this pump
+			// re-queues the frame instead of dropping it.
+			if pumpCtx.Err() != nil {
+				r.queueFor(sd).pushFront(f)
+				sendErr <- pumpCtx.Err()
+				return
+			}
 			if err := stream.Send(f); err != nil {
+				r.queueFor(sd).pushFront(f)
 				sendErr <- err
 				return
 			}
@@ -318,8 +341,27 @@ func (s *Server) checkFrame(f *relaypb.Frame) error {
 }
 
 // attachRoute finds or creates the route for the frame's key and attaches
-// this stream as its side (replacing any dead predecessor — reconnect).
-func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay_OpenDataServer) *route {
+// this stream as its side (replacing any dead predecessor — reconnect),
+// returning the context this stream's own send pump must use.
+//
+// A superseded stream's send pump must stop pulling from the side's queue
+// the instant it's replaced, not whenever it eventually notices its own
+// transport died. Reusing stream.Context() for the pump's pop() call was
+// the original approach, but a stream's context is only cancelled once its
+// underlying transport is confirmed broken -- there is a real, observed
+// window (a reconnect racing a not-yet-detected dead connection) where the
+// OLD stream's pump can still win frameQueue.pop() against the NEW
+// stream's pump. Because pop() removes the frame from the queue
+// unconditionally, that frame is then lost the moment the old pump's
+// stream.Send() fails on the dead connection, instead of ever reaching the
+// new one — this is exactly the daemon-transport-drop reconnect scenario
+// internal/relay/bridge's own integration test exercises, and was
+// reproduced directly by adding diagnostic logging around a real failure.
+// Deriving each pump's context from the route itself (cancelled here, the
+// moment a new stream attaches for the same side) closes that window
+// deterministically instead of relying on transport-failure detection
+// timing.
+func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay_OpenDataServer) (*route, context.Context) {
 	key := routeKey(first.GetWorkspaceId(), string(first.GetSessionId()), first.GetDeviceId())
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -333,12 +375,18 @@ func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay
 		r.daemonQ = newFrameQueue(s.bufferCap)
 		r.deviceQ = newFrameQueue(s.bufferCap)
 		r.mu.streams = make(map[side]relaypb.Relay_OpenDataServer)
+		r.mu.pumpCancel = make(map[side]context.CancelFunc)
 		s.mu.routes[key] = r
 	}
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if cancel, ok := r.mu.pumpCancel[sd]; ok {
+		cancel()
+	}
+	pumpCtx, cancel := context.WithCancel(stream.Context())
+	r.mu.pumpCancel[sd] = cancel
 	r.mu.streams[sd] = stream
-	r.mu.Unlock()
-	return r
+	return r, pumpCtx
 }
 
 // detach removes this stream from the route if a reconnect has not

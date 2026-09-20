@@ -7,7 +7,6 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -414,5 +413,5 @@ func (c *conn) writeEventNotification(n eventNotification) {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	_ = c.ws.WriteMessage(websocket.TextMessage, data)
+	_ = c.tr.Send(data)
 }

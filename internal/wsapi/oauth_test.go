@@ -92,7 +92,7 @@ func newTestWSServerWithCoordinator(t *testing.T, wm *workspace.Manager, acctReg
 			return
 		}
 		defer ws.Close()
-		c := newConn(ws, hs)
+		c := newConn(wsTransport{ws}, hs)
 		c.serve(r.Context())
 	})
 	srv := httptest.NewServer(handler)
