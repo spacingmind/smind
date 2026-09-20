@@ -123,14 +123,31 @@ type newSessionResult struct {
 // ConfigOption mirrors ACP v2's SessionConfigOption: one entry of the
 // configOptions list a session/new response may carry. CurrentValue holds
 // the flattened kind's currentValue (a value id for select options, a bool
-// for boolean options) keyed by Type; other kind fields are not captured.
+// for boolean options) keyed by Type. Options additionally captures a
+// "select"-kind option's own SessionConfigSelect.options -- its enumerated
+// list of choices (id + human-readable label), flattened onto this same
+// JSON object per ACP's schema (agent-client-protocol-schema's v2
+// SessionConfigOption/SessionConfigKind/SessionConfigSelect) -- so a
+// client can build a real dropdown of an agent's own named choices (e.g.
+// GLM's thinking-level tiers) instead of a bare text field. Always empty
+// for a "boolean"-kind option, which has no choice list at all.
 type ConfigOption struct {
-	ConfigID     string          `json:"configId"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description,omitempty"`
-	Category     string          `json:"category,omitempty"`
-	Type         string          `json:"type"`
-	CurrentValue json.RawMessage `json:"currentValue,omitempty"`
+	ConfigID     string               `json:"configId"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description,omitempty"`
+	Category     string               `json:"category,omitempty"`
+	Type         string               `json:"type"`
+	CurrentValue json.RawMessage      `json:"currentValue,omitempty"`
+	Options      []ConfigSelectOption `json:"options,omitempty"`
+}
+
+// ConfigSelectOption is one selectable choice of a "select"-kind
+// ConfigOption -- ACP's SessionConfigSelectOption (value/name/optional
+// description).
+type ConfigSelectOption struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // setConfigOptionParams is the wire shape of ACP v2's

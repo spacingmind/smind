@@ -243,6 +243,58 @@ func TestGLMCommand(t *testing.T) {
 	}
 }
 
+// TestClient_NewSessionConfigOptions proves session/new's scripted
+// configOptions (see fakeagent's own doc comment) round-trips through
+// Client.NewSession intact and in order: a "select"-kind option's own
+// enumerated Options list (id + label, e.g. GLM's real thinking-level
+// tiers) is decoded, not silently dropped the way it was before
+// ConfigOption gained the Options field, and a "boolean"-kind option
+// (no choice list at all) carries none.
+func TestClient_NewSessionConfigOptions(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, opts, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if len(opts) != 2 {
+		t.Fatalf("NewSession() configOptions = %+v, want 2 entries", opts)
+	}
+
+	thinking := opts[0]
+	if thinking.ConfigID != "thinking-level" || thinking.Type != "select" || thinking.Category != "thought_level" {
+		t.Fatalf("configOptions[0] = %+v, want the thinking-level select option", thinking)
+	}
+	if string(thinking.CurrentValue) != `"medium"` {
+		t.Fatalf("configOptions[0].CurrentValue = %s, want %q", thinking.CurrentValue, `"medium"`)
+	}
+	wantChoices := []ConfigSelectOption{
+		{Value: "minimal", Name: "Minimal"},
+		{Value: "low", Name: "Low"},
+		{Value: "medium", Name: "Medium"},
+		{Value: "high", Name: "High", Description: "Reasons the longest"},
+	}
+	if len(thinking.Options) != len(wantChoices) {
+		t.Fatalf("configOptions[0].Options = %+v, want %+v", thinking.Options, wantChoices)
+	}
+	for i, want := range wantChoices {
+		if thinking.Options[i] != want {
+			t.Errorf("configOptions[0].Options[%d] = %+v, want %+v", i, thinking.Options[i], want)
+		}
+	}
+
+	webSearch := opts[1]
+	if webSearch.ConfigID != "web-search" || webSearch.Type != "boolean" {
+		t.Fatalf("configOptions[1] = %+v, want the web-search boolean option", webSearch)
+	}
+	if len(webSearch.Options) != 0 {
+		t.Fatalf("configOptions[1].Options = %+v, want none for a boolean-kind option", webSearch.Options)
+	}
+}
+
 // TestClient_SetSessionConfigOptionRequestShape proves the client sends a
 // well-formed session/set_config_option request: the fake agent decodes the
 // request with ACP's real wire field names (sessionId, configId, and the

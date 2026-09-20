@@ -54,11 +54,15 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { toast } from "@/components/ui/toast";
 import {
   Sidebar,
   SidebarContent,
@@ -327,6 +331,32 @@ export function AppSidebar({
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
 
+  /**
+   * Moving a task has no confirmation dialog (unlike archive/delete -- it's
+   * reversible, just another move away), so it's a direct RPC call from the
+   * dropdown rather than a CrudTarget. `refresh()` on success mirrors every
+   * other mutation here (see useWorkspaceTree's doc comment): the daemon's
+   * own task.updated event already splices the task into its new location,
+   * but the acting client doesn't rely solely on its own events.subscribe
+   * having succeeded.
+   */
+  const moveTask = useCallback(
+    async (task: Task, spaceId: number | null) => {
+      if (!client) return;
+      try {
+        await client.call("task.move", { id: task.ID, spaceId });
+        refresh();
+      } catch (err) {
+        toast({
+          variant: "error",
+          title: `Couldn't move “${task.Title}”`,
+          description: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [client, refresh],
+  );
+
   // Command-palette contributions for the dialogs this component owns.
   // Registered here rather than in App.tsx on purpose: the surface that
   // owns a dialog is the one that can open it, and `useCommands` is the
@@ -577,6 +607,7 @@ export function AppSidebar({
                       onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                      onMoveTask={moveTask}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
                       onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
                       selectedTaskId={selectedTaskId}
@@ -760,6 +791,7 @@ function WorkspaceItem({
   onAddSpace,
   onAddTask,
   onArchiveTask,
+  onMoveTask,
   onDeleteWorkspace,
   onDeleteSpace,
   selectedTaskId,
@@ -771,6 +803,7 @@ function WorkspaceItem({
   onAddSpace: () => void;
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
+  onMoveTask: (task: Task, spaceId: number | null) => void;
   onDeleteWorkspace: () => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
   selectedTaskId: number | null;
@@ -818,6 +851,8 @@ function WorkspaceItem({
               onSelectTask={onSelectTask}
               emptyText="No tasks"
               onArchiveTask={onArchiveTask}
+              spaces={workspace.spaces}
+              onMoveTask={onMoveTask}
             />
           ) : (
             <>
@@ -825,10 +860,12 @@ function WorkspaceItem({
                 <SpaceItem
                   key={space.ID}
                   space={space}
+                  spaces={workspace.spaces}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   onAddTask={onAddTask}
                   onArchiveTask={onArchiveTask}
+                  onMoveTask={onMoveTask}
                   onDeleteSpace={onDeleteSpace}
                 />
               ))}
@@ -839,6 +876,8 @@ function WorkspaceItem({
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   onArchiveTask={onArchiveTask}
+                  spaces={workspace.spaces}
+                  onMoveTask={onMoveTask}
                 />
               )}
             </>
@@ -851,17 +890,22 @@ function WorkspaceItem({
 
 function SpaceItem({
   space,
+  spaces,
   selectedTaskId,
   onSelectTask,
   onAddTask,
   onArchiveTask,
+  onMoveTask,
   onDeleteSpace,
 }: {
   space: SpaceWithTasks;
+  /** Every space in the workspace (including this one), so its task rows can offer the others as move targets. */
+  spaces: SpaceWithTasks[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
+  onMoveTask: (task: Task, spaceId: number | null) => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
 }) {
   return (
@@ -871,6 +915,8 @@ function SpaceItem({
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
       onArchiveTask={onArchiveTask}
+      spaces={spaces}
+      onMoveTask={onMoveTask}
       testId="sidebar-space-row"
       spaceId={space.ID}
     >
@@ -904,6 +950,8 @@ function SpaceLikeItem({
   selectedTaskId,
   onSelectTask,
   onArchiveTask,
+  spaces,
+  onMoveTask,
   children,
   testId,
   spaceId,
@@ -913,6 +961,9 @@ function SpaceLikeItem({
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
+  /** Every space in the workspace, so each task row's "Move to space" submenu can list the others. */
+  spaces: SpaceWithTasks[];
+  onMoveTask: (task: Task, spaceId: number | null) => void;
   children?: ReactNode;
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
   testId?: string;
@@ -943,6 +994,8 @@ function SpaceLikeItem({
             onSelectTask={onSelectTask}
             emptyText="No tasks"
             onArchiveTask={onArchiveTask}
+            spaces={spaces}
+            onMoveTask={onMoveTask}
           />
         </SidebarMenuSub>
       )}
@@ -1016,12 +1069,24 @@ function TaskRows({
   onSelectTask,
   emptyText,
   onArchiveTask,
+  spaces,
+  onMoveTask,
 }: {
   tasks: Task[];
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   emptyText: string;
   onArchiveTask: (task: Task) => void;
+  /**
+   * Every space in the task's workspace, and the handler to reassign one --
+   * both optional because SearchResults' flat list spans more than one
+   * workspace and doesn't (yet) offer the move action. When present, each
+   * row's action menu gains a "Move to space" submenu listing every space
+   * here other than the task's own, plus "Ungrouped" unless the task is
+   * already there.
+   */
+  spaces?: SpaceWithTasks[];
+  onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
   const { attention, statusOverrides, runStatus, stats } = useRowSignal();
 
@@ -1123,6 +1188,7 @@ function TaskRows({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
                   <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
                     <Archive /> Archive task
                   </DropdownMenuItem>
@@ -1133,5 +1199,51 @@ function TaskRows({
         );
       })}
     </>
+  );
+}
+
+/**
+ * The task row action menu's "Move to space" submenu -- every other space
+ * in the task's workspace, plus "Ungrouped" unless the task is already
+ * there (no self-move option). Renders nothing if there's no `spaces`/
+ * `onMoveTask` pair (SearchResults) or nowhere to move to (an already-
+ * ungrouped task in a workspace with zero spaces).
+ */
+function MoveTaskSubmenu({
+  task,
+  spaces,
+  onMoveTask,
+}: {
+  task: Task;
+  spaces?: SpaceWithTasks[];
+  onMoveTask?: (task: Task, spaceId: number | null) => void;
+}) {
+  if (!spaces || !onMoveTask) return null;
+
+  const targets: { id: number | null; label: string }[] = [];
+  if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
+  for (const space of spaces) {
+    if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+  }
+  if (targets.length === 0) return null;
+
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger data-testid="sidebar-task-move-action">
+        <Layers /> Move to space
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent>
+        {targets.map((target) => (
+          <DropdownMenuItem
+            key={target.id ?? "ungrouped"}
+            data-testid="sidebar-task-move-target"
+            data-space-id={target.id ?? "ungrouped"}
+            onSelect={() => onMoveTask(task, target.id)}
+          >
+            {target.label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
   );
 }

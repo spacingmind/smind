@@ -31,6 +31,18 @@ const (
 	// command; see AllowlistedCommand's doc comment). It never denies a
 	// request itself; it only ever widens what's auto-*allowed*.
 	ApprovalPolicyAutoSafe ApprovalPolicy = "auto-safe"
+
+	// ApprovalPolicyFullAccess skips installing a PermissionDecider
+	// entirely and instead hands the run's native client each provider's
+	// own ready-made "auto-approve everything" mechanism: Claude Code's
+	// bypassPermissions mode, Codex's AutoApprovePolicy, and ACP's
+	// AutoApprovePolicy (see runClaudeNative/runCodexNative/runACP). Unlike
+	// ApprovalPolicyAutoSafe, which only ever widens what a *decider*
+	// auto-allows while still asking a human about everything else, this
+	// tier never surfaces a permission request to a human at all -- it's
+	// each provider's real ceiling, not a smind-invented generic tier (see
+	// docs/plans/active/task-move-approval-thinking.md's Decisions).
+	ApprovalPolicyFullAccess ApprovalPolicy = "full-access"
 )
 
 // IsValid reports whether p is one of the ApprovalPolicy values this
@@ -42,7 +54,7 @@ const (
 // caller setting this deliberately would want to know about.
 func (p ApprovalPolicy) IsValid() bool {
 	switch p {
-	case ApprovalPolicyManual, ApprovalPolicyAutoSafe:
+	case ApprovalPolicyManual, ApprovalPolicyAutoSafe, ApprovalPolicyFullAccess:
 		return true
 	default:
 		return false

@@ -222,7 +222,7 @@ func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -256,7 +256,7 @@ func TestRegistry_Start_UnknownTask_FailsSynchronously(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	_, err := reg.Start(context.Background(), wm, runner, 999999, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	_, err := reg.Start(context.Background(), wm, runner, 999999, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err == nil {
 		t.Fatal("Start() error = nil, want error for unknown task")
 	}
@@ -277,7 +277,7 @@ func TestRegistry_History_OnRunningRun_ReturnsWithoutBlocking(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -354,7 +354,7 @@ func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -383,7 +383,7 @@ func TestRegistry_Stop_FromAnyCaller_CancelsTheRun(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -409,7 +409,7 @@ func TestRegistry_Stop_AlreadyFinished_IsNotAnError(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -445,7 +445,7 @@ func TestRegistry_Unsubscribe_DoesNotStopTheRun(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -498,11 +498,11 @@ func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runA, err := reg.Start(context.Background(), wm, runner, taskA.ID, taskrunner.ProviderGLM, "hi a", taskrunner.ApprovalPolicyManual)
+	runA, err := reg.Start(context.Background(), wm, runner, taskA.ID, taskrunner.ProviderGLM, "hi a", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start(A) error = %v", err)
 	}
-	runB, err := reg.Start(context.Background(), wm, runner, taskB.ID, taskrunner.ProviderGLM, "hi b", taskrunner.ApprovalPolicyManual)
+	runB, err := reg.Start(context.Background(), wm, runner, taskB.ID, taskrunner.ProviderGLM, "hi b", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start(B) error = %v", err)
 	}
@@ -537,13 +537,13 @@ func TestRegistry_List_ReflectsCurrentStatus(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runDone, err := reg.Start(context.Background(), wm, runner, taskDone.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runDone, err := reg.Start(context.Background(), wm, runner, taskDone.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start(done) error = %v", err)
 	}
 	waitForStatus(t, reg, runDone, StatusDone, 5*time.Second)
 
-	runStopped, err := reg.Start(context.Background(), wm, runner, taskHang.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runStopped, err := reg.Start(context.Background(), wm, runner, taskHang.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start(hang) error = %v", err)
 	}
@@ -583,7 +583,7 @@ func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionU
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -678,7 +678,7 @@ func TestRunPermissionDecider_Decide_AutoSafe_AllowlistedCommand_AutoAllows(t *t
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -748,7 +748,7 @@ func TestRunPermissionDecider_Decide_AutoSafe_NonAllowlistedCommand_FallsBackToM
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -829,7 +829,7 @@ func TestRegistry_ApprovalPolicyAutoSafe_UnrecognizedACPCommandFallsBackToManual
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -869,7 +869,7 @@ func TestRegistry_PermissionRequest_TimesOutAutoResolvesToDenyDistinguishableFro
 	reg := newTestRegistry(t, st)
 	reg.SetPermissionTimeout(50 * time.Millisecond)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1020,7 +1020,7 @@ func TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError(t *test
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1056,7 +1056,7 @@ func TestRegistry_RespondPermission_UnknownRequestID_IsAClearError(t *testing.T)
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1104,7 +1104,7 @@ func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	baseline := runtime.NumGoroutine()
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1167,7 +1167,7 @@ func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
 	runIDs := make([]string, n)
 	for i := 0; i < n; i++ {
 		task := newTestTask(t, wm, "hang")
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1209,7 +1209,7 @@ func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
 	reg := newTestRegistry(t, st)
 
 	task := newTestTask(t, wm, "")
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1241,7 +1241,7 @@ func TestRegistry_Start_PersistsRunRowImmediately(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1269,7 +1269,7 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1321,7 +1321,7 @@ func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1381,7 +1381,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1409,7 +1409,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1445,7 +1445,7 @@ func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1513,7 +1513,7 @@ func TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted(t *
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual)
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

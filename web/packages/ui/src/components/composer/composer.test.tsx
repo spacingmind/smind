@@ -6,12 +6,13 @@ import { Composer } from "@/components/composer/composer";
 import { autoGrow, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { ApprovalPolicy, Provider } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ThinkingLevel } from "@/lib/types";
 
 interface Submission {
   provider: Provider;
   prompt: string;
   approvalPolicy: ApprovalPolicy;
+  thinkingLevel?: ThinkingLevel;
 }
 
 /** Flushes pending microtasks inside `act` so React commits before assertions. */
@@ -38,8 +39,8 @@ function renderComposer(
     taskId: 1,
     connected: true,
     runningRunId: null,
-    onSubmit: async (provider, prompt, approvalPolicy) => {
-      submissions.push({ provider, prompt, approvalPolicy });
+    onSubmit: async (provider, prompt, approvalPolicy, thinkingLevel) => {
+      submissions.push({ provider, prompt, approvalPolicy, thinkingLevel });
     },
     onStop: async (runId) => {
       stops.push(runId);
@@ -279,11 +280,131 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", approvalPolicy: "manual" }]);
   });
 
+  it("approval-policy dropdown offers a third, provider-worded full-access tier, and submits it as approvalPolicy", async () => {
+    const { submissions } = renderComposer();
+
+    // Default provider is claude-native -- Claude's own vocabulary.
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Manual approval", "Auto-safe", "Bypass"]);
+    const claudeFullAccess = options[2];
+    expect(claudeFullAccess).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
+
+    fireEvent.click(claudeFullAccess);
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "go wild" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", approvalPolicy: "full-access" }]);
+  });
+
+  it("full-access is worded per provider, not one shared generic label", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "codex-native", label: "Codex" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    const codexFullAccess = options[options.length - 1];
+    expect(codexFullAccess).toHaveTextContent("Full Access");
+    expect(codexFullAccess).toHaveAttribute(
+      "title",
+      expect.stringContaining("Edit files, run commands, and access the network"),
+    );
+    fireEvent.click(codexFullAccess);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    options = await screen.findAllByRole("option");
+    const glmFullAccess = options[options.length - 1];
+    expect(glmFullAccess).toHaveTextContent("Bypass all permissions");
+    expect(glmFullAccess).toHaveAttribute("title", expect.stringContaining("without prompting"));
+  });
+
+  it("shows a thinking-level selector only for claude-native, and omits the field entirely for every other provider", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    // Default provider is claude-native -- the control is present.
+    expect(screen.getByLabelText("Thinking level")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    // GLM has no pre-run thinking-level control at all (its own lives in
+    // the live chat view, once a session exists) -- not merely disabled.
+    expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
+  });
+
+  it("thinking level defaults to Standard visually but omits the field until the user actually picks one, same as approval-policy's own default", async () => {
+    const { submissions } = renderComposer();
+
+    // Untouched: the control shows "Standard" but the field is left off
+    // run.start's payload entirely -- an unmodified Claude submission
+    // sends exactly what it did before this selector existed.
+    expect(screen.getByLabelText("Thinking level")).toHaveTextContent("Standard");
+
+    fireEvent.change(textarea(), { target: { value: "think about it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([
+      { provider: "claude-native", prompt: "think about it", approvalPolicy: "manual" },
+    ]);
+    expect(submissions[0].thinkingLevel).toBeUndefined();
+  });
+
+  it("submits the picked thinking level once the selector is actually touched", async () => {
+    const { submissions } = renderComposer();
+
+    fireEvent.click(screen.getByLabelText("Thinking level"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Off", "Standard", "Extended"]);
+    fireEvent.click(options[2]);
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "reason hard" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([
+      { provider: "claude-native", prompt: "reason hard", approvalPolicy: "manual", thinkingLevel: "extended" },
+    ]);
+  });
+
   it("keeps the approval-policy help tooltip and disables both selects while the composer is inactive", () => {
     const { rerender } = renderComposer();
 
+    // Manual is the default selection, so the trigger's tooltip is
+    // manual's own help text (each tier's tooltip reflects its own
+    // selection now that full-access's differs per provider).
     const policy = screen.getByLabelText("Approval policy");
-    expect(policy).toHaveAttribute("title", expect.stringContaining("Auto-safe"));
+    expect(policy).toHaveAttribute("title", expect.stringContaining("approval"));
     expect(policy).not.toBeDisabled();
     expect(screen.getByLabelText("Provider")).not.toBeDisabled();
 

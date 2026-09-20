@@ -126,7 +126,25 @@ func handle(msg message, sessionCwd *string) {
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
-		respond(msg.ID, map[string]any{"sessionId": sessionID})
+		// A select-kind option with its own enumerated choices (mirrors
+		// GLM's real thinking-level tiers), so Runner/Registry/wsapi tests
+		// can drive a real config-option round trip end to end rather than
+		// asserting only against the non-ACP "not supported" path.
+		respond(msg.ID, map[string]any{
+			"sessionId": sessionID,
+			"configOptions": []map[string]any{{
+				"configId":     "thinking-level",
+				"name":         "Thinking Level",
+				"type":         "select",
+				"currentValue": "medium",
+				"options": []map[string]any{
+					{"value": "minimal", "name": "Minimal"},
+					{"value": "low", "name": "Low"},
+					{"value": "medium", "name": "Medium"},
+					{"value": "high", "name": "High"},
+				},
+			}},
+		})
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)
 	case msg.Method == "session/prompt":

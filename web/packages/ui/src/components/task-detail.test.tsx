@@ -604,4 +604,147 @@ describe("TaskDetailPane", () => {
       approvalPolicy: "auto-safe",
     });
   });
+
+  it("fetches and renders GLM's live config options, but never for a Claude run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+
+    const listCall = client.nth("run.listConfigOptions", 0);
+    expect(listCall.params).toEqual({ runId: "run-1" });
+    listCall.resolve({
+      options: [
+        {
+          configId: "thinking-level",
+          name: "Thinking Level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("Medium");
+    // A Claude/Codex run never even asks -- there's no live-session config
+    // surface for it at all (see ThinkingLevel's own doc comment).
+    expect(client.calls.some((c) => c.method === "run.listConfigOptions")).toBe(true);
+    expect(client.calls.filter((c) => c.method === "run.listConfigOptions")).toHaveLength(1);
+  });
+
+  it("omits the config-options control entirely for a Claude run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    await flush();
+    client.emit("run.attach", 0, "chunk", { text: "hi" });
+    await flush();
+
+    expect(client.calls.some((c) => c.method === "run.listConfigOptions")).toBe(false);
+    expect(screen.queryByTestId("run-config-options")).not.toBeInTheDocument();
+  });
+
+  it("re-fetches config options as the live run streams more events", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "kimi" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({ options: [] });
+    await flush();
+
+    // Nothing to show yet -- the session's option list wasn't ready on the
+    // first fetch (a plausible race between run.start and NewSession).
+    expect(screen.queryByTestId("run-config-options")).not.toBeInTheDocument();
+
+    client.emit("run.attach", 0, "chunk", { text: "hello" });
+    await flush();
+
+    const secondList = client.nth("run.listConfigOptions", 1);
+    expect(secondList.params).toEqual({ runId: "run-1" });
+    secondList.resolve({
+      options: [{ configId: "web-search", name: "Web Search", type: "boolean", currentValue: true }],
+    });
+    await flush();
+
+    expect(screen.getByTestId("run-config-option-toggle")).toHaveTextContent("On");
+  });
+
+  it("changing a config option calls run.setConfigOption and reflects the new value", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [
+        {
+          configId: "thinking-level",
+          name: "Thinking Level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Thinking Level"));
+    fireEvent.click(await screen.findByRole("option", { name: "High" }));
+    await flush();
+
+    const setCall = client.nth("run.setConfigOption", 0);
+    expect(setCall.params).toEqual({ runId: "run-1", configId: "thinking-level", value: "high" });
+
+    await act(async () => {
+      setCall.resolve({
+        options: [
+          {
+            configId: "thinking-level",
+            name: "Thinking Level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("High");
+  });
+
+  it("surfaces a failed run.setConfigOption as an error instead of silently no-op'ing", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [{ configId: "thinking-level", name: "Thinking Level", type: "select", currentValue: "medium" }],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+    await flush();
+
+    const setCall = client.nth("run.setConfigOption", 0);
+    await act(async () => {
+      setCall.reject(new Error("no such config option"));
+    });
+
+    expect(screen.getByTestId("run-config-options-error")).toHaveTextContent("no such config option");
+  });
 });
