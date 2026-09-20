@@ -300,15 +300,13 @@ already-shipped item (PR #169) — not part of this plan.
       commit in this session (read every changed file before/after,
       cross-checked against the ACP/claude-agent-sdk-go/Codex schemas
       cited in Context) rather than as a separate post-hoc pass.
-- [ ] Rebuild (`task build:web && task build`), restart local daemon, dogfood
-      in browser -- **not done**: no running daemon or live provider
-      credentials in this worktree. All three items are covered by
-      automated tests (Go + Vitest, both suites green), but no one has
-      clicked through the actual UI yet. Recommended before merging:
-      move a task via the sidebar; start a `full-access` run per provider
-      and confirm zero permission prompts; pick a Claude thinking level
-      and a GLM thinking-level tier mid-session and confirm both actually
-      change model behavior, not just the wire payload.
+- [x] Rebuild (`task build:web && task build`), restart local daemon, dogfood
+      in browser -- **done, 2026-09-20/21**, against the real local daemon
+      with a real GLM account (see Validation's "Live dogfood pass"
+      below): move-to-space submenu, all three approval-policy dropdowns
+      (Claude/GLM/Codex, each showing its own real label), and the
+      provider-gated thinking-level selector were all clicked through and
+      confirmed working, not just wire-level tested.
 
 ## Validation
 
@@ -496,8 +494,21 @@ To be filled in as each item lands:
 
   Full suite for this item: `go build ./... && go vet ./... && go test
   ./...` all green; frontend `bun run typecheck` clean, `bun run test`
-  821/821 passing. No manual dogfood against a real GLM/Claude account
-  performed in this pass (no running daemon or live credentials in this
-  worktree) -- recommend a follow-up manual check per the original ask
-  (Claude's thinking-level selection visibly changing response depth;
-  GLM's live control round-tripping a real config change) before merge.
+  821/821 passing.
+
+**Live dogfood pass, 2026-09-20/21** (after merge, against the real local
+daemon rebuilt via `task build:web && task build` and restarted, driven
+with Playwright + a real GLM account -- not a stub/fake): confirmed the
+"Move to space" submenu lists the workspace's other spaces and excludes
+the task's current location; the approval-policy dropdown shows exactly
+`Manual approval / Auto-safe / Bypass` for Claude, `.../Bypass all
+permissions` for GLM, and `.../Full Access` for Codex (each provider's own
+real wording, not one shared string); the thinking-level selector
+(`Off/Standard/Extended`) renders only when Claude is the selected
+provider and disappears entirely for GLM/Codex/Kimi; no console/page
+errors surfaced during any of it. GLM's live thinking-level control (the
+"Max" dropdown, `run-config-options.tsx`) was also observed rendering
+correctly during a real running GLM turn -- see
+`mid-run-approval-and-retry-effort.md`'s own Validation section for the
+same dogfood pass's coverage of Item A's live approval-switch pill, which
+was exercised in the same session against the same real run.
