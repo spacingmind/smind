@@ -53,6 +53,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"run.logs":              handleRunLogs(reg),
 		"run.stop":              handleRunStop(reg),
 		"run.respondPermission": handleRunRespondPermission(reg),
+		"run.setApprovalPolicy": handleRunSetApprovalPolicy(reg),
 		"run.listConfigOptions": handleRunListConfigOptions(reg),
 		"run.setConfigOption":   handleRunSetConfigOption(reg),
 		"terminal.create":       handleTerminalCreate(wm, treg),
@@ -1054,6 +1055,34 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("run.respondPermission: %w", err)
 		}
 		return struct{}{}, nil
+	}
+}
+
+// runApprovalPolicyResult is the result of run.setApprovalPolicy: the
+// run's approvalPolicy after the change, so a caller can confirm the
+// switch took without a separate round trip.
+type runApprovalPolicyResult struct {
+	ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+}
+
+// handleRunSetApprovalPolicy switches a live run's approvalPolicy between
+// "manual" and "auto-safe", from any connection regardless of which one (if
+// any) started the run -- mirroring run.setConfigOption's cross-connection
+// shape. "full-access" is rejected as a target (see
+// runs.Registry.SetApprovalPolicy), as is a run that has already finished.
+func handleRunSetApprovalPolicy(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			RunID  string                    `json:"runId"`
+			Policy taskrunner.ApprovalPolicy `json:"policy"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("run.setApprovalPolicy: invalid params: %w", err)
+		}
+		if err := reg.SetApprovalPolicy(p.RunID, p.Policy); err != nil {
+			return nil, fmt.Errorf("run.setApprovalPolicy: %w", err)
+		}
+		return runApprovalPolicyResult{ApprovalPolicy: p.Policy}, nil
 	}
 }
 
