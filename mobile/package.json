@@ -23,7 +23,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "vitest run --exclude \"**/*.node.test.ts\"",
-    "test:integration": "vitest run src/relay/__tests__/integration.node.test.ts",
+    "test:integration": "vitest run src/relay/__tests__/integration.node.test.ts src/relay/__tests__/integration.persistent.node.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "private": true

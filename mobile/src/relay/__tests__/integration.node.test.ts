@@ -1,11 +1,18 @@
 // integration.node.test.ts is the plan's manual-verification Test
 // Scenario, automated: it spawns a real relay + a real daemon bridge
 // (internal/relay/bridge/harness, a throwaway Go binary built just for
-// this test) and drives this package's real, unmodified
-// connectAndFetchWorkspaceList against it over a real network path --
-// proving the TypeScript grpc-web + E2EE client actually interoperates
-// with the real Go server, not just that each side's own unit tests pass
-// against hand-rolled doubles.
+// this test) and drives this package's real, unmodified client code
+// against it over a real network path -- proving the TypeScript grpc-web
+// + E2EE client actually interoperates with the real Go server, not just
+// that each side's own unit tests pass against hand-rolled doubles.
+//
+// Milestone 1 proved one workspace.list round trip per connection.
+// Milestone 2 (docs/plans/active/mobile-app-milestone-2.md) extends this
+// to the persistent-connection contract: many sequential calls over one
+// admit+handshake (workspace.create -> space.list -> task.create ->
+// task.list), and a real server-pushed eventNotification delivered over
+// the same connection after events.subscribe (the task.created topic
+// fired by workspace.create's own mutation).
 //
 // This runs under plain Node (not Hermes/React Native): Node 20+'s global
 // fetch/WebSocket are used by mobile/src/relay/grpcweb.ts exactly as React
@@ -87,4 +94,6 @@ describe('end-to-end against a real Go relay + daemon bridge', () => {
     expect(parsed.id).toBe('1');
     expect(parsed.result).toEqual([]);
   });
+
 });
+
