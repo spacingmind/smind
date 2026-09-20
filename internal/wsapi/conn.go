@@ -5,9 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-
-	"github.com/gorilla/websocket"
 )
+
+// Transport is the minimal duplex byte-message stream a conn serves RPC
+// dispatch over: receive one message, send one message, close. A real
+// gorilla WebSocket (wrapped by wsTransport, see server.go) and a relay
+// *client.DataConn (internal/relay/client, whose Send/Receive/Close already
+// match this shape exactly) both satisfy it, so the same conn/dispatch code
+// serves a browser tab and a relay-bridged mobile session identically.
+type Transport interface {
+	// Receive blocks for and returns the next message's raw bytes.
+	Receive() ([]byte, error)
+	// Send writes one message.
+	Send([]byte) error
+	// Close closes the underlying connection.
+	Close() error
+}
 
 // handlerFunc handles one client request's params, returning either a
 // result to marshal into the response or an error. ctx is cancelled when
@@ -56,7 +69,7 @@ type inflightRequest struct {
 // handler's own response can never produce a duplicate or out-of-order
 // message.
 type conn struct {
-	ws       *websocket.Conn
+	tr       Transport
 	handlers map[string]handlerFunc
 
 	writeMu sync.Mutex
@@ -73,9 +86,9 @@ type conn struct {
 	eventsBus *eventBus
 }
 
-func newConn(ws *websocket.Conn, handlers map[string]handlerFunc) *conn {
+func newConn(tr Transport, handlers map[string]handlerFunc) *conn {
 	return &conn{
-		ws:       ws,
+		tr:       tr,
 		handlers: handlers,
 		inflight: make(map[string]*inflightRequest),
 	}
@@ -108,7 +121,7 @@ func (c *conn) serve(ctx context.Context) {
 	}
 
 	for {
-		_, data, err := c.ws.ReadMessage()
+		data, err := c.tr.Receive()
 		if err != nil {
 			return
 		}
@@ -202,5 +215,5 @@ func (c *conn) writeEnvelope(env envelope) {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	_ = c.ws.WriteMessage(websocket.TextMessage, data)
+	_ = c.tr.Send(data)
 }

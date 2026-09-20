@@ -1,6 +1,7 @@
 package wsapi
 
 import (
+	"context"
 	"crypto/subtle"
 	"fmt"
 	"net/http"
@@ -19,19 +20,55 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 4096,
 }
 
+// wsTransport adapts a real gorilla *websocket.Conn to Transport: it always
+// sends text frames (the wire protocol is JSON text, per wsapi.go's doc
+// comment) and discards the message type gorilla's ReadMessage returns,
+// exactly as the pre-refactor conn.serve loop did.
+type wsTransport struct{ ws *websocket.Conn }
+
+func (t wsTransport) Receive() ([]byte, error) {
+	_, data, err := t.ws.ReadMessage()
+	return data, err
+}
+
+func (t wsTransport) Send(data []byte) error {
+	return t.ws.WriteMessage(websocket.TextMessage, data)
+}
+
+func (t wsTransport) Close() error { return t.ws.Close() }
+
 // API bundles the /ws http.Handler with the registries New constructs
-// internally, for the one caller (cmdServe, via internal/server.Server)
-// that needs to reach a registry directly rather than only through the
-// wire protocol -- specifically, Runs.CloseAll and Terminals.CloseAll on
-// graceful daemon shutdown, so no agent subprocess or PTY-backed shell
-// outlives the daemon itself (each Registry's own CloseAll doc comment
-// covers what "outlives" is verified to mean). Every other caller
-// (existing tests, wsclient) only needs the http.Handler and should keep
-// using Handler below.
+// internally, for callers that need to reach a registry directly rather
+// than only through the wire protocol -- specifically, Runs.CloseAll and
+// Terminals.CloseAll on graceful daemon shutdown, so no agent subprocess or
+// PTY-backed shell outlives the daemon itself (each Registry's own CloseAll
+// doc comment covers what "outlives" is verified to mean) -- and, via
+// ServeTransport, for a non-WebSocket connection (a relay-bridged mobile
+// session) to reach the exact same RPC dispatch table a browser tab's /ws
+// connection uses. Every other caller (existing tests, wsclient) only needs
+// the http.Handler and should keep using Handler below.
 type API struct {
 	Handler   http.Handler
 	Runs      *runs.Registry
 	Terminals *terminal.Registry
+
+	hs  map[string]handlerFunc
+	bus *eventBus
+}
+
+// ServeTransport serves one RPC connection to completion over tr -- same
+// handler dispatch table and event subscription as a WebSocket /ws
+// connection, just over a different Transport. It blocks until tr's
+// connection ends (a read error) or ctx is cancelled, exactly like a
+// WebSocket connection's conn.serve. Used both by New's own /ws handler
+// (via wsTransport) and by a relay bridge (cmd/smind) wrapping a
+// *client.DataConn, so a mobile-originated request gets the same answer a
+// browser tab's would.
+func (a *API) ServeTransport(ctx context.Context, tr Transport) {
+	c := newConn(tr, a.hs)
+	c.eventsSub = newSubscriber()
+	c.eventsBus = a.bus
+	c.serve(ctx)
 }
 
 // New builds the full /ws API: one shared *runs.Registry and one shared
@@ -56,7 +93,8 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, coord)
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
+	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -69,12 +107,9 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		}
 		defer ws.Close()
 
-		c := newConn(ws, hs)
-		c.eventsSub = newSubscriber()
-		c.eventsBus = bus
-		c.serve(r.Context())
+		api.ServeTransport(r.Context(), wsTransport{ws})
 	})
-	return &API{Handler: handler, Runs: reg, Terminals: treg}, nil
+	return api, nil
 }
 
 // busWorkspaceNotifier adapts the shared event bus to workspace.Notifier,

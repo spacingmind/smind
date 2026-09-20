@@ -25,6 +25,7 @@ type Server struct {
 	cfg       config.Config
 	proxy     *proxy
 	ws        http.Handler
+	api       *wsapi.API
 	runs      *runs.Registry
 	terminals *terminal.Registry
 	token     string
@@ -43,10 +44,19 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 		cfg:       cfg,
 		proxy:     newProxy(reg, router),
 		ws:        api.Handler,
+		api:       api,
 		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
 	}, nil
+}
+
+// API returns the underlying wsapi.API, for a caller that needs to bridge a
+// non-WebSocket connection (a relay-carried mobile session, see
+// internal/relay/bridge) into the exact same RPC dispatch table /ws serves
+// -- see wsapi.API.ServeTransport.
+func (s *Server) API() *wsapi.API {
+	return s.api
 }
 
 // Close releases daemon-owned resources that live outside the

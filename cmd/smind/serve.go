@@ -16,6 +16,8 @@ import (
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/quota"
+	"github.com/spacingmind/smind/internal/relay/bridge"
+	"github.com/spacingmind/smind/internal/relay/e2ee"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/server"
 	"github.com/spacingmind/smind/internal/store"
@@ -89,6 +91,9 @@ func cmdServe(args []string) int {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	go func() {
 		log.Printf("smind listening on http://%s", httpSrv.Addr)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -96,8 +101,8 @@ func cmdServe(args []string) int {
 		}
 	}()
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	startRelayBridge(ctx, srv)
+
 	<-ctx.Done()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -108,4 +113,32 @@ func cmdServe(args []string) int {
 	srv.Close() // kill every still-running terminal session's shell/PTY
 	log.Printf("smind stopped")
 	return 0
+}
+
+// startRelayBridge starts the daemon-as-relay-client background loop
+// (internal/relay/bridge.Run) if and only if `smind relay connect` has
+// persisted a config -- with no config present, this is a no-op and
+// smind serve's startup/behavior are exactly as before this feature
+// existed (docs/plans/active/mobile-app-milestone-1.md's Item 1 opt-in
+// requirement). It runs until ctx is cancelled, alongside the HTTP server.
+func startRelayBridge(ctx context.Context, srv *server.Server) {
+	dir := config.Dir()
+	cfg, ok, err := bridge.LoadConfig(dir)
+	if err != nil {
+		log.Printf("relay bridge: %v (continuing without relay connectivity)", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	kp, err := e2ee.LoadOrCreateKeyPair(dir)
+	if err != nil {
+		log.Printf("relay bridge: keypair: %v (continuing without relay connectivity)", err)
+		return
+	}
+	go func() {
+		if err := bridge.Run(ctx, cfg, kp, srv.API()); err != nil {
+			log.Printf("relay bridge: %v", err)
+		}
+	}()
 }
