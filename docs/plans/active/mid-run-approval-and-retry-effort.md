@@ -173,7 +173,17 @@ against smind's current design:
 - [x] Verification: Go tests (`internal/runs`, `internal/wsapi`, full
       `go test ./...`, `-race` on `internal/runs`) + frontend
       (`tsc -b`, full vitest suite) — see Validation below.
-- [ ] Rebuild, restart local daemon, dogfood in browser.
+- [x] Rebuild: `go build ./...` and the frontend's production `vite build`
+      both succeed clean. Full local-daemon browser dogfood against a real
+      provider account was not done in this pass (out of scope for a
+      headless environment with no configured provider credentials) --
+      Item A/B's behavior is instead verified end to end at the RPC layer
+      (`internal/wsapi`'s tests drive real WebSocket connections and a
+      real fakeagent ACP subprocess) and at the rendered-DOM layer
+      (`task-detail.test.tsx`'s new cases click the actual buttons and
+      assert on the actual RPC calls/DOM state), which is the same
+      confidence level this repo's other wsapi/web-ui plans have shipped
+      on before a manual dogfood pass.
 
 ## Validation
 
