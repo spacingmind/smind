@@ -139,6 +139,35 @@ proof-of-life rather than a polished app).
   presented certificate's SHA-256 fingerprint (`bridge.FetchFingerprint`)
   before persisting it alongside the other three values, the same
   trust-on-first-use tradeoff SSH host keys make.
+- **`internal/relay/pairing.Offer` needed two new optional fields
+  (`Secret`, `WorkspaceID`) to make pairing-offer-driven admission possible
+  at all.** Building Item 3 surfaced that the pre-existing offer (daemon
+  ID, public key, relay endpoint, fingerprint) had no way to convey which
+  relay workspace a scanned/pasted offer is for, nor any admission
+  credential -- without either, a mobile client parsing the offer has no
+  `workspace_id` to Admit under and no secret to compute the HMAC with.
+  Both fields are additive and `omitempty`/unenforced by `Validate()`, so
+  every existing `internal/relay/pairing` test keeps passing unmodified.
+  `Offer.Secret`'s doc comment covers the real tradeoff this creates (the
+  offer necessarily carries the same shared workspace secret the daemon
+  itself holds, not a narrower per-device credential) and why that's a
+  documented milestone-1 simplification, not the intended long-term
+  design -- see the Item 1 fixed-session-ID Decision above for the same
+  kind of tradeoff, made for the same reason (no per-device pairing
+  protocol exists yet).
+- **The pairing offer's relay address is the grpc-web listener, derived
+  from the native one by convention (native port + 1), not stored
+  separately.** A mobile client only speaks grpc-web, but `smind relay
+  connect`'s stored config is the *native* address (needed for the
+  daemon's own dial, Item 1). Since `smind relay connect`'s CLI signature
+  is fixed at three arguments per the plan, `smind relay offer` derives
+  the grpc-web address from the stored native one using the exact
+  convention `smind relay`'s own `--listen`/`--grpc-web-listen` flag
+  defaults already use (`:7400`/`:7401`). Correct for the common
+  default-ports case this milestone's own end-to-end verification
+  exercises; an operator running non-adjacent custom ports needs a real
+  fix (recording the grpc-web address explicitly), left as Milestone 2
+  scope.
 - **Not this plan's job**: the actual `relay.spacingmind.sh` deploy
   (ROADMAP.md's other open Phase 3 item — a hosting/ops task, not a
   code task); TLS cert-pinning UX for a mobile app pairing to a
@@ -237,7 +266,7 @@ proof-of-life rather than a polished app).
 
 - [x] Item 1 — daemon↔relay bridging.
 - [x] Item 2 — grpc-web on `smind relay`.
-- [ ] Item 3 — Expo scaffold + TS E2EE client + pairing proof.
+- [x] Item 3 — Expo scaffold + TS E2EE client + pairing proof.
 - [x] Hand off implementation switched from a stalled GLM agent (hit its
       output-token budget on pure exploration, zero Edit/Write calls) to a
       direct Claude session on this same branch/worktree.
@@ -366,16 +395,111 @@ proof-of-life rather than a polished app).
   `TestIntegration_BridgeReconnectsAfterDaemonTransportDrop` (Item 1) was
   observed to fail intermittently after Item 2's `client.OpenControl` fix
   landed (repeated "data session dropped, reconnecting" cycles instead of
-  settling). Ran it in isolation roughly 35 times across several batches
-  (single runs, `-count=15`, `-count=10 -race`, and combined with the rest
-  of `internal/relay/...`) and it failed only twice, both times without a
-  clear signal in added diagnostic logging (Resume itself never errored;
-  the resumed connection simply dropped again some seconds later) --
+  settling; one later `-count=5` run also hung to its 60s timeout with
+  the same symptom rather than cleanly failing). Ran it in isolation
+  roughly 40 times total across several batches (single runs, `-count=15`,
+  `-count=10 -race`, `-count=5`, and combined with the rest of
+  `internal/relay/...`) and it failed/hung only 3 times, without a clear
+  signal in added diagnostic logging (Resume itself never errored; the
+  resumed connection simply dropped again some seconds later) --
   consistent with this repo's separately-known flaky-integration-test
   pattern (the `internal/wsapi`/`internal/relay/client` CI flakes noted
-  above under Item 1) rather than a reproducible logic bug. Not chased
-  further; flagged here for anyone who sees it recur.
+  above under Item 1) rather than a reliably reproducible logic bug. Per
+  this repo's established practice for suspected flakes, not chased
+  further; flagged here for anyone who sees it recur, since a real
+  environment-independent race is still possible and worth a fresh look
+  if it starts failing consistently.
 
-### Item 3
+### Item 3 — Expo scaffold + TypeScript E2EE client + pairing proof
 
-To be filled in as it lands.
+- **A new `mobile/` Expo app exists, independent of `web/`'s bun
+  workspace, with exactly one screen.** Done: `npx create-expo-app` (SDK
+  57, TypeScript template) scaffolded `mobile/` at the repo root with its
+  own `package.json`/lockfile; `App.tsx` is one screen (pairing-URL text
+  field + Connect button + a result area rendering either the raw JSON
+  response or an error). Verified: `npx expo-doctor` (21/21 checks
+  passed) and `npx expo export --platform ios` / `--platform android`
+  both bundle the full app (including all the crypto/relay modules below)
+  via Metro into a Hermes bytecode bundle -- proving the whole dependency
+  chain is Metro/Hermes-compatible, which is the strongest build-level
+  check available without a physical device or simulator (neither was
+  available in this environment; see the gap noted at the end of this
+  section).
+- **A TypeScript module reproduces `internal/relay/e2ee`'s handshake,
+  key derivation, and AEAD framing byte-for-byte.** Done:
+  `mobile/src/relay/e2ee.ts` (X25519 via `@noble/curves`, HKDF via
+  `@noble/hashes`, ChaCha20-Poly1305 via `@noble/ciphers`, matching
+  `handshake.go`'s frame format and `session.go`'s key derivation/nonce
+  construction exactly). Verified against fixed cross-language test
+  vectors -- **the single most important test in this plan**, per its own
+  Test Scenario: `internal/relay/e2ee/fixture_test.go` calls the real,
+  unexported `newSession` (not a reimplementation) with fixed seed
+  keypairs and pins the exact derived public keys and sealed ciphertext
+  (both directions) as Go constants; `mobile/src/relay/__tests__/e2ee.test.ts`
+  hardcodes the identical literals and asserts the TypeScript port
+  produces byte-identical output, plus a from-scratch hello-frame
+  encoding check (`TestFixtureHelloFrameForTypeScriptPort` /
+  the matching TS test). All pass. `mobile/src/relay/__tests__/channel.test.ts`
+  additionally exercises the full `Channel` handshake+send/receive state
+  machine (not just the crypto) over an in-memory transport, including
+  the mobile-side pairing-offer public-key verification and its rejection
+  path.
+- **A grpc-web client reaches the relay's `Admit`/`OpenData` RPCs against
+  a real running `smind relay`.** Done: `mobile/src/relay/grpcweb.ts`
+  hand-rolls the grpc-web wire format (no `@improbable-eng/grpc-web` or
+  protoc-generated stubs -- the message set is small and fixed, same
+  reasoning as `internal/relay/server/grpcweb_test.go`'s Go-side test
+  client, and its published `WebsocketTransport()` source was read to
+  confirm this file's websocket framing is correct): unary calls over
+  plain `fetch` (`AdmitChallenge`/`Admit`), and the bidi `OpenData` stream
+  over React Native's global `WebSocket` with the `grpc-websockets`
+  subprotocol. `mobile/src/relay/proto.ts` hand-encodes the five relay.proto
+  messages actually needed (no OpenControl/ControlFrame -- Item 3's mobile
+  client never needs it; that stream is entirely the daemon's own
+  concern, wired up in Item 1). `mobile/src/relay/admission.ts` mirrors
+  `admission.go`'s `HashSecret`/`ComputeHMAC` transcript exactly.
+- **Tapping Connect after pasting a real pairing URL completes the full
+  chain -- admission, E2EE handshake, one `workspace.list` RPC -- and
+  renders the raw JSON response.** Verified two ways:
+  1. Every module above unit-tests cleanly in isolation
+     (`npm test` inside `mobile/`: 4 files, 14 tests, all passing) and the
+     whole app typechecks (`npx tsc --noEmit`, clean).
+  2. **A real, automated end-to-end run against a real Go relay and a
+     real daemon bridge**, not just unit tests against hand-rolled
+     doubles: `internal/relay/bridge/harness` is a small throwaway Go
+     binary (built only for this test, not part of `smind`'s own CLI)
+     that starts a real `server.Run` relay, a real `wsapi.API`, and a real
+     `bridge.Run` daemon connection between them, then prints a real
+     pairing URL. `mobile/src/relay/__tests__/integration.node.test.ts`
+     (opt-in via `npm run test:integration`, since it needs the Go
+     toolchain) spawns that binary and calls this package's real,
+     unmodified `connectAndFetchWorkspaceList` against it over actual
+     TCP/TLS sockets -- Node 20+'s global `fetch`/`WebSocket` stand in for
+     React Native's (same APIs, different JS engine underneath). It
+     completes admission, the E2EE handshake, and a `workspace.list`
+     round trip, asserting the exact `{"id":"1","result":[]}` shape.
+     Passed 4/4 runs.
+- **Known gap: no verification on an actual device, simulator, or Expo
+  Go.** This environment had no iOS/Android simulator or physical device
+  available, so the plan's own "manual verification: real device (or
+  simulator) pairing... through a real network path" Test Scenario is
+  unmet in the strictest sense. What *is* verified (byte-exact crypto
+  fixtures both ways, the full handshake state machine, Metro/Hermes
+  bundling, and a real network round trip against a real Go relay via
+  Node's spec-compliant `fetch`/`WebSocket`) covers every layer of the
+  stack except "does Hermes-on-a-real-device behave identically to
+  Node's V8 for these exact APIs" -- a real but comparatively narrow risk
+  (both are standard, spec-following JS engines/runtimes for the specific
+  primitives used here: `TextEncoder`/`TextDecoder`, `DataView`,
+  `Uint8Array`, `fetch`, `WebSocket`, `crypto.getRandomValues`). Running
+  `npx expo start` and connecting from Expo Go on a real device/simulator
+  is the remaining step to close this gap completely; flagged here rather
+  than claimed as done.
+- **Known gap: `crypto.getRandomValues` assumed present under Hermes/RN.**
+  `mobile/src/relay/admission.ts`'s `randomNonce` and `@noble/curves`'s own
+  `x25519.utils.randomSecretKey()` both depend on the global
+  `crypto.getRandomValues`. React Native 0.72+ is documented to provide
+  this natively (a JSI-backed implementation), and this project's RN
+  version (0.86.3) postdates that by a wide margin, so this is expected to
+  work without an extra polyfill -- but it's an assumption, not something
+  this environment could execute and confirm on-device.

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/spacingmind/smind/internal/config"
@@ -157,6 +159,19 @@ func cmdRelayConnect(args []string) int {
 // relay connect` configured, using this daemon's persisted long-lived E2EE
 // keypair (generated on first use, see internal/relay/e2ee.LoadOrCreateKeyPair)
 // as the offer's public key.
+//
+// The offer's Relay field carries the relay's grpc-web address, not the
+// native-gRPC one `relay connect`/bridge.Config store for the daemon's own
+// dial: a mobile client speaks grpc-web only (see Item 2's plan notes on
+// why), so it needs the other listener. Since `smind relay connect` takes
+// a single address (matching the plan's literal CLI signature) and has no
+// way to learn the operator's actual --grpc-web-listen choice, this
+// derives it by the same convention `smind relay`'s own flag defaults use
+// (native port + 1, i.e. :7400 native / :7401 grpc-web) -- correct for the
+// common default-ports case this milestone's own manual verification
+// exercises, and clearly not general: an operator running a customized,
+// non-adjacent pair of ports needs a real fix (recording the grpc-web
+// address explicitly), which is Milestone 2 scope, not this one's.
 func cmdRelayOffer(args []string) int {
 	if len(args) != 0 {
 		fmt.Fprintln(os.Stderr, "usage: smind relay offer")
@@ -175,11 +190,21 @@ func cmdRelayOffer(args []string) int {
 	if err != nil {
 		log.Fatalf("relay offer: %v", err)
 	}
+	grpcWebAddr, err := deriveGRPCWebAddress(cfg.RelayAddress)
+	if err != nil {
+		log.Fatalf("relay offer: %v", err)
+	}
+	secret, err := hex.DecodeString(cfg.SecretHex)
+	if err != nil {
+		log.Fatalf("relay offer: decode stored secret: %v", err)
+	}
 	offer := pairing.Offer{
 		DaemonID:         bridge.DaemonKeyID(kp),
 		PublicKey:        kp.Public(),
-		Relay:            "https://" + cfg.RelayAddress,
+		Relay:            "https://" + grpcWebAddr,
 		RelayFingerprint: cfg.Fingerprint,
+		Secret:           secret,
+		WorkspaceID:      cfg.WorkspaceID,
 	}
 	url, err := offer.URL("")
 	if err != nil {
@@ -187,6 +212,22 @@ func cmdRelayOffer(args []string) int {
 	}
 	fmt.Println(url)
 	return 0
+}
+
+// deriveGRPCWebAddress guesses the relay's grpc-web listen address from its
+// native one, by the convention `smind relay`'s own flag defaults use
+// (grpc-web = native port + 1). See cmdRelayOffer's doc comment for why
+// this is a documented milestone-1 simplification, not a general solution.
+func deriveGRPCWebAddress(nativeAddr string) (string, error) {
+	host, portStr, err := net.SplitHostPort(nativeAddr)
+	if err != nil {
+		return "", fmt.Errorf("relay address %q: %w", nativeAddr, err)
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", fmt.Errorf("relay address %q: non-numeric port: %w", nativeAddr, err)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port+1)), nil
 }
 
 func secretHex(secret []byte) string {
