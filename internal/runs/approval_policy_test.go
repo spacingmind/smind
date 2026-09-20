@@ -298,3 +298,89 @@ func TestRegistry_SetApprovalPolicy_UnknownRun_ReturnsErrNotFound(t *testing.T) 
 		t.Fatalf("SetApprovalPolicy() error = %v, want ErrNotFound", err)
 	}
 }
+
+// waitForTextChunk polls runID's history for a text event whose Text
+// equals want, failing the test if it never appears within timeout.
+func waitForTextChunk(t *testing.T, reg *Registry, runID, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		hist, _, err := reg.History(runID)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", runID, err)
+		}
+		for _, e := range hist {
+			if e.Type == taskrunner.EventTypeText && e.Text == want {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for run %q to record text chunk %q, history so far: %+v", runID, want, hist)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestRegistry_SetApprovalPolicy_MidRunSwitchEnablesACPFileEditAutoAllow
+// proves a real gap found in code review of this plan's Item A: ACP's
+// (GLM/Kimi's) file-edit auto-allow fast path
+// (taskrunner.acpDeciderAdapter.Decide's autoAllowACPFileEdit check) has
+// its own frozen approvalPolicy, captured once when runACP constructs the
+// adapter, entirely separate from the run struct's own live, mutex-guarded
+// approvalPolicy that SetApprovalPolicy updates and
+// runPermissionDecider.Decide already reads live for its own
+// AllowlistedCommand (shell-command) check. Without wiring
+// taskrunner.LivePolicyDecider through (see runPermissionDecider's
+// CurrentApprovalPolicy), a mid-run switch to auto-safe would correctly
+// unlock the shell-command allowlist but silently leave every in-worktree
+// file edit still asking a human -- this test drives a real ACP (GLM
+// fakeagent) subprocess through the "permission-edit" scenario to prove
+// the fix: starting manual, switching mid-run, then a subsequent
+// worktree-confined edit-kind request auto-allows without ever becoming a
+// pending permission request at all (see acpDeciderAdapter.Decide's fast
+// path, which never reaches runPermissionDecider on this route).
+func TestRegistry_SetApprovalPolicy_MidRunSwitchEnablesACPFileEditAutoAllow(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission-edit")
+	runner := newTestRunner(wm)
+	reg := newTestRegistry(t, st)
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	// The scenario's "ready" chunk is causally ordered before its
+	// session/request_permission call (see fakeagent's "permission-edit"
+	// doc comment, and the real delay between them) -- so switching right
+	// after observing it leaves comfortable headroom before the edit
+	// request actually goes out.
+	waitForTextChunk(t, reg, runID, "ready", 5*time.Second)
+
+	if err := reg.SetApprovalPolicy(runID, taskrunner.ApprovalPolicyAutoSafe); err != nil {
+		t.Fatalf("SetApprovalPolicy() error = %v", err)
+	}
+
+	status := waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	if status.StopReason != "end_turn" {
+		t.Fatalf("StopReason = %q, want %q", status.StopReason, "end_turn")
+	}
+
+	hist, _, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	var sawFinalChunk bool
+	for _, e := range hist {
+		if e.Type == taskrunner.EventTypePermissionRequest || e.Type == taskrunner.EventTypePermissionResolved {
+			t.Fatalf("history recorded a permission request/resolution event (%+v) -- acpDeciderAdapter's auto-allow fast path should short-circuit before the edit ever becomes a pending (or even auto-safe-resolved-by-the-decider) request", e)
+		}
+		if e.Type == taskrunner.EventTypeText && e.Text == "chose:allow-1" {
+			sawFinalChunk = true
+		}
+	}
+	if !sawFinalChunk {
+		t.Fatalf("history does not include the agent's post-decision chunk reflecting the auto-allowed edit (the run would otherwise have hung waiting on a human, as it did before this fix): %+v", hist)
+	}
+}

@@ -68,14 +68,38 @@ type PermissionDecider interface {
 	Decide(ctx context.Context, summary, command string, options []PermissionOption) (optionID string, err error)
 }
 
+// LivePolicyDecider is an optional capability a PermissionDecider may
+// implement to report its own current ApprovalPolicy, which -- unlike the
+// approvalPolicy RunPrompt is called with -- can change after RunPrompt
+// begins (see internal/runs.Registry.SetApprovalPolicy; internal/runs's
+// runPermissionDecider is today's only implementation). acpDeciderAdapter's
+// autoAllowACPFileEdit gate checks this instead of its own frozen
+// approvalPolicy field when the wrapped decider implements it, so a
+// mid-run switch to auto-safe takes effect for ACP's file-edit fast path
+// too -- not just the shell-command allowlist, which Decide's call into
+// the wrapped decider already resolves against the live value regardless
+// of this interface. A decider that doesn't implement it (every test
+// fake, and any future PermissionDecider with no live-switching concept)
+// leaves acpDeciderAdapter falling back to its own frozen field, exactly
+// as before this interface existed.
+type LivePolicyDecider interface {
+	CurrentApprovalPolicy() ApprovalPolicy
+}
+
 // acpDeciderAdapter adapts a PermissionDecider to acp.PermissionPolicy: ACP's
 // own request/response already is an options-list-in, optionId-out shape,
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
-	// worktreePath/approvalPolicy carry the run's auto-safe edit policy
-	// down to this adapter -- see autoAllowACPFileEdit.
-	worktreePath   string
+	// worktreePath carries the run's worktree down to this adapter -- see
+	// autoAllowACPFileEdit.
+	worktreePath string
+	// approvalPolicy is the run's auto-safe edit policy as of RunPrompt's
+	// call -- see autoAllowACPFileEdit. Frozen, and only ever consulted
+	// when decider doesn't implement LivePolicyDecider (see Decide): every
+	// real caller (internal/runs) does implement it, so this field mainly
+	// exists so a decider that doesn't need mid-run switching (test fakes)
+	// still gets the policy it was actually started with.
 	approvalPolicy ApprovalPolicy
 }
 
@@ -83,6 +107,11 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	opts := make([]PermissionOption, len(req.Options))
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
+	}
+
+	policy := a.approvalPolicy
+	if live, ok := a.decider.(LivePolicyDecider); ok {
+		policy = live.CurrentApprovalPolicy()
 	}
 
 	// ApprovalPolicyAutoSafe's file-edit analog for ACP: claude-native
@@ -94,7 +123,7 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	// acceptEdits failure. Scoped to edits (kind edit/move/delete) whose
 	// every reported location stays inside the task's own worktree --
 	// see autoAllowACPFileEdit for why that boundary is the safe one.
-	if a.approvalPolicy == ApprovalPolicyAutoSafe && autoAllowACPFileEdit(req.ToolCall, a.worktreePath) {
+	if policy == ApprovalPolicyAutoSafe && autoAllowACPFileEdit(req.ToolCall, a.worktreePath) {
 		if optionID, ok := firstOptionByKind(opts, "allow_once", "allow_always"); ok {
 			return optionID, nil
 		}

@@ -173,6 +173,26 @@ against smind's current design:
 - [x] Verification: Go tests (`internal/runs`, `internal/wsapi`, full
       `go test ./...`, `-race` on `internal/runs`) + frontend
       (`tsc -b`, full vitest suite) — see Validation below.
+- [x] Code-review fix (found before merge): `taskrunner.acpDeciderAdapter`'s
+      ACP-file-edit auto-allow fast path (`autoAllowACPFileEdit`, the ACP
+      twin of Claude's `acceptEdits` mode, and *the* reason `auto-safe` is
+      usable at all for GLM/Kimi) read its own frozen `approvalPolicy`
+      field, captured once when `runACP` constructed it -- a completely
+      separate value from the run's live, mutex-guarded `approvalPolicy`
+      that `SetApprovalPolicy` updates and `runPermissionDecider.Decide`
+      already read live for its shell-command allowlist check. A mid-run
+      switch to `auto-safe` therefore unlocked allowlisted *shell
+      commands* for GLM/Kimi but silently left every in-worktree *file
+      edit* still asking a human -- `claudeDeciderAdapter`/
+      `codexDeciderAdapter` don't have this problem (no frozen
+      policy field of their own). Fixed by adding
+      `taskrunner.LivePolicyDecider` (an optional
+      `CurrentApprovalPolicy() ApprovalPolicy` capability), implemented by
+      `internal/runs.runPermissionDecider` (backed by the same
+      `run.getApprovalPolicy()` helper `Decide` and `drive` now share);
+      `acpDeciderAdapter.Decide` prefers it over its frozen field via a
+      type assertion, so a decider with no live-switching concept (every
+      existing test fake) is unaffected.
 - [x] Rebuild: `go build ./...` and the frontend's production `vite build`
       both succeed clean. Full local-daemon browser dogfood against a real
       provider account was not done in this pass (out of scope for a
@@ -238,4 +258,33 @@ portal-vs-jsdom issue, unrelated to either item.
   extended", "...failed non-Claude provider's run", and "...successful
   Claude run" (all four assert `run-retry-higher-effort`'s presence/
   absence).
-pass."
+
+### Code-review fix — ACP file-edit auto-allow not seeing the live policy
+- The bug, reproduced: `internal/taskrunner/permission_test.go`'s
+  `TestACPDeciderAdapter_AutoAllowFileEdit_PrefersLiveApprovalPolicyOverFrozenField`
+  and `internal/runs/approval_policy_test.go`'s
+  `TestRegistry_SetApprovalPolicy_MidRunSwitchEnablesACPFileEditAutoAllow`
+  were both confirmed to *fail* against the pre-fix code (temporarily
+  reverting `acpDeciderAdapter.Decide`'s `LivePolicyDecider` check
+  reproduced exactly the reported symptom: the unit test gets the frozen
+  field's stale decision, and the integration test's run hangs waiting on
+  a human that never answers, timing out).
+- The fix: `TestACPDeciderAdapter_AutoAllowFileEdit_PrefersLiveApprovalPolicyOverFrozenField`
+  proves `acpDeciderAdapter` reads a wrapped `LivePolicyDecider`'s current
+  value instead of its own frozen field once the wrapped decider
+  implements it, with the frozen field deliberately left at `manual` to
+  rule out it being the source of the auto-allow.
+  `TestRegistry_SetApprovalPolicy_MidRunSwitchEnablesACPFileEditAutoAllow`
+  proves it end to end through a real ACP (GLM fakeagent) subprocess: a
+  run started `manual`, switched to `auto-safe` mid-run via
+  `SetApprovalPolicy` after observing the new `"permission-edit"`
+  fakeagent scenario's synchronization chunk, then a subsequent
+  worktree-confined edit-kind `session/request_permission` auto-allows
+  (no pending request, no `permission_request`/`permission_resolved`
+  history entries at all -- `acpDeciderAdapter`'s fast path short-circuits
+  before ever reaching `runPermissionDecider`) and the run completes
+  normally.
+- Regression: `go test -race ./internal/runs/... ./internal/taskrunner/...
+  ./internal/wsapi/...` and the full `go test ./...` stay green with this
+  fix in place (same pre-existing `internal/relay/client` flake as noted
+  above, unrelated).
