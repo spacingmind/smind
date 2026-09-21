@@ -14,8 +14,8 @@ describe('timelineFromLogs (run.logs history)', () => {
         { type: 'user_message', text: 'fix the flaky test' },
         { type: 'thinking', text: 'checking the retry loop' },
         { type: 'chunk', text: 'Looking at retry_test.go...' },
-        { type: 'tool_call', toolName: 'read_file', title: 'retry_test.go', status: 'pending' },
-        { type: 'tool_call', toolName: 'read_file', title: 'retry_test.go', status: 'completed' },
+        { type: 'tool_call', toolName: 'read_file', title: 'retry_test.go', status: 'running' },
+        { type: 'tool_call', toolName: 'read_file', title: 'retry_test.go', status: 'success' },
         { type: 'chunk', text: 'The backoff resets too early.' },
         { type: 'done', stopReason: 'end_turn' },
       ],
@@ -24,8 +24,18 @@ describe('timelineFromLogs (run.logs history)', () => {
       { key: 'e0', role: 'user', text: 'fix the flaky test' },
       { key: 'e1', role: 'assistant (thinking)', text: 'checking the retry loop' },
       { key: 'e2', role: 'assistant', text: 'Looking at retry_test.go...' },
-      { key: 'e3', role: '', text: 'tool: read_file — retry_test.go [pending]' },
-      { key: 'e4', role: '', text: 'tool: read_file — retry_test.go [completed]' },
+      {
+        key: 'e3',
+        role: '',
+        text: 'tool: read_file — retry_test.go [running]',
+        toolCall: { toolName: 'read_file', title: 'retry_test.go', status: 'running' },
+      },
+      {
+        key: 'e4',
+        role: '',
+        text: 'tool: read_file — retry_test.go [success]',
+        toolCall: { toolName: 'read_file', title: 'retry_test.go', status: 'success' },
+      },
       { key: 'e5', role: 'assistant', text: 'The backoff resets too early.' },
       { key: 'e6', role: '', text: 'done (end_turn)' },
     ]);
@@ -49,7 +59,7 @@ describe('lineFromAttachEvent (run.attach live stream)', () => {
       { key: 'e3', role: 'assistant (thinking)', text: 'hm' },
     ]);
     expect(lineFromAttachEvent('tool_call', { toolName: 'bash', status: 'running' }, 4)).toEqual([
-      { key: 'e4', role: '', text: 'tool: bash [running]' },
+      { key: 'e4', role: '', text: 'tool: bash [running]', toolCall: { toolName: 'bash', title: '', status: 'running' } },
     ]);
     expect(lineFromAttachEvent('done', { stopReason: 'end_turn' }, 5)).toEqual([
       { key: 'e5', role: '', text: 'done (end_turn)' },
