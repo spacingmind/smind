@@ -193,7 +193,7 @@ Decisions) and is explicitly deferred to a later Milestone 4.
 
 ## Progress
 
-- [ ] Item 1 — send a follow-up prompt.
+- [x] Item 1 — send a follow-up prompt.
 - [ ] Item 2 — approve/deny a live permission request.
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, per
       the user's standing preference — nudge with a direct, specific
@@ -209,5 +209,40 @@ Decisions) and is explicitly deferred to a later Milestone 4.
 
 ## Validation
 
-To be filled in as each item lands, mapping back to each Acceptance
-Criterion with the specific test or manual check that confirmed it.
+### Item 1 — send a follow-up prompt
+
+Confirmed by `mobile/src/__tests__/followUpPrompt.test.ts` (logic-layer
+tests in the codebase's established styles: scripted fake connection per
+api.test.ts, in-memory E2EE relay harness per attachLifecycle.test.ts,
+now shared via the extracted `mobile/src/relayHarness.ts`), plus
+`npx tsc --noEmit` and `npm test` clean (9 files, 38/38):
+
+- Compose affordance only with a prior run: `TaskDetailScreen` renders
+  the compose row inside its existing `state.run !== null` branch — a
+  zero-runs task keeps Milestone 2's empty state and shows no compose
+  box (component-level, verified by reading the diff; the send path
+  itself guards on `state.run === null` returning early).
+- `run.start` with the most recent run's provider + typed text, then
+  `run.attach` on the returned runId: "renders the user line
+  immediately, then calls run.start with the prior run's provider and
+  attach to the new runId" (fake connection; asserts both calls and
+  params: `run.start {taskId, provider, prompt}` then
+  `run.attach {runId}`) and the relay-harness twin asserting the same
+  two requests on a real RelayConnection.
+- User text renders immediately, before any server round trip: the same
+  fake-connection test asserts `rec.appended` contains the `user` line
+  synchronously while the `sendFollowUpPrompt` promise is still pending.
+- New run's events append live to the same timeline: relay-harness test
+  "streams the new run's events into the same appendLines timeline, not
+  a fresh one" (user line, then chunk, then done in one appended list).
+- Navigate-away detaches the new run's attach, no leaked handler:
+  relay-harness test "cancelling the tracked tail (navigate away) sends
+  task.cancel naming the attach's id and stops its event delivery"
+  (asserts the no-id task.cancel wire shape and that a post-cancel
+  chunk delivers nothing) — the same assertions
+  attachLifecycle.test.ts established, reused via relayHarness.ts.
+- `run.start` failure surfaces an error and preserves the typed text:
+  fake-connection test "a run.start failure rolls the optimistic user
+  line back and surfaces the error (draft preserved for retry)";
+  `TaskDetailScreen.handleSend` restores the draft and shows
+  "Couldn't send: …" inline above the compose row.

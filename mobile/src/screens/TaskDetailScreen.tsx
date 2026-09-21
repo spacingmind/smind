@@ -1,14 +1,23 @@
-// TaskDetailScreen.tsx is Milestone 2's Item 3 screen: the task's most
-// recent run's transcript, read-only. History comes from run.logs; if the
-// run is still active, run.attach streams live events over the same
-// persistent connection (via call()'s request-scoped onEvent). Navigating
-// back detaches cleanly (task.cancel per conn.go's cancellation shape)
-// with no leaked handlers. No prompt box, no permission approval, no push
-// notifications -- Milestone 3.
+// TaskDetailScreen.tsx is Milestone 2's Item 3 screen grown by
+// Milestone 3's Item 1: the task's most recent run's transcript,
+// read-only, PLUS a compose box for sending a follow-up prompt (only
+// when a prior run exists to infer a provider from -- a zero-runs task
+// keeps the empty state; see docs/plans/active/
+// mobile-app-milestone-3.md's Decisions). History comes from run.logs;
+// if the run is still active, run.attach streams live events over the
+// same persistent connection (via call()'s request-scoped onEvent).
+// Sending is run.start + a second run.attach on the new run (not
+// task.prompt, whose cancellation would stop the run); the sent text
+// renders immediately and the new run's events append to the same
+// timeline. Navigating back detaches both attaches cleanly
+// (task.cancel per conn.go's cancellation shape) with no leaked
+// handlers. No permission approval or push notifications yet --
+// permission approval is Item 2, push is Milestone 4.
 
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { listRunsForTask, RunSummary } from '../api';
+import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { RelayConnection } from '../relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 
@@ -27,7 +36,10 @@ interface Props {
 export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
+  const [draft, setDraft] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
   const liveSeq = useRef(0);
+  const followUpTails = useRef<RunTail[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -76,8 +88,44 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     return () => {
       cancelled = true;
       attach?.cancel(); // clean detach: run keeps going server-side
+      // Any follow-up run's attach detaches the same way (Item 1).
+      for (const tail of followUpTails.current) tail.cancel();
+      followUpTails.current = [];
     };
   }, [conn, taskId]);
+
+  const nextSeq = useCallback(() => {
+    liveSeq.current++;
+    return 1_000_000 + liveSeq.current;
+  }, []);
+
+  const appendLines = useCallback((newLines: TimelineLine[]) => {
+    setLines((prev) => [...prev, ...newLines]);
+  }, []);
+
+  const removeLines = useCallback((doomed: TimelineLine[]) => {
+    const keys = new Set(doomed.map((l) => l.key));
+    setLines((prev) => prev.filter((l) => !keys.has(l.key)));
+  }, []);
+
+  const trackTail = useCallback((tail: RunTail) => {
+    followUpTails.current.push(tail);
+  }, []);
+
+  const handleSend = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || state.kind !== 'ready' || state.run === null) return;
+    setDraft('');
+    setSendError(null);
+    try {
+      await sendFollowUpPrompt(conn, { appendLines, removeLines, trackTail }, taskId, state.run.Provider, text, nextSeq);
+    } catch (e) {
+      setDraft(text); // the typed text is never silently lost
+      setSendError(e instanceof Error ? e.message : String(e));
+    }
+  }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
+
+  const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
 
   return (
     <View style={styles.container}>
@@ -110,6 +158,24 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
               </Text>
             ))}
           </ScrollView>
+          {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
+          <View style={styles.composeRow}>
+            <TextInput
+              style={styles.composeInput}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Send a follow-up prompt…"
+              placeholderTextColor="#999"
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !canSend ? styles.sendButtonDisabled : null]}
+              onPress={handleSend}
+              disabled={!canSend}
+            >
+              <Text style={styles.sendButtonText}>Send</Text>
+            </TouchableOpacity>
+          </View>
         </>
       )}
     </View>
@@ -122,6 +188,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingTop: 64,
     paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   back: {
     alignSelf: 'flex-start',
@@ -178,5 +245,45 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12,
     color: '#666',
+  },
+  sendError: {
+    color: '#dc2626',
+    fontSize: 12,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  composeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e5e5',
+    paddingTop: 8,
+    marginTop: 8,
+  },
+  composeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#d4d4d8',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
+    fontSize: 14,
+    maxHeight: 120,
+    marginRight: 8,
+  },
+  sendButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#93c5fd',
+  },
+  sendButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
