@@ -241,7 +241,7 @@ against the real wire contracts before deciding scope, not assumed):
 
 ## Progress
 
-- [ ] Item 1 — token foundation + PairingScreen
+- [x] Item 1 — token foundation + PairingScreen
 - [ ] Item 2 — TasksScreen run-card list
 - [ ] Item 3 — TaskDetailScreen + permission cards visual polish
 - [ ] Hand off implementation via Paseo (GLM as primary implementer,
@@ -259,3 +259,56 @@ against the real wire contracts before deciding scope, not assumed):
 
 To be filled in as each item lands, mapping back to each Acceptance
 Criterion with the specific test or manual check that confirmed it.
+
+### Item 1
+
+- `mobile/src/theme.ts` exports `lightTheme`/`darkTheme` (surface-0..3,
+  status/statusDot/diff, the type-role scale, elevation shadow objects,
+  spacing/radius/duration) plus a pure `resolveAppTheme(scheme)`. Hex
+  values are hand-converted from the plan's oklch literals (grayscale
+  achromatic conversion + the full OKLab->linear-sRGB->gamma pipeline for
+  the chromatic ones); `foregroundMuted` isn't in the plan's port list
+  but is the standard shadcn `muted-foreground` companion
+  (`oklch(0.556 0 0)`/`oklch(0.708 0 0)`) to the exact background/
+  foreground/muted triad given, so it's derived the same way, not
+  invented — noted here since it's the one token value not directly
+  handed to this session.
+- **Split from the plan's suggested single-file layout:** this
+  codebase's vitest has no react-native/Metro transform (no
+  screen/component was ever unit-imported before this plan — only
+  logic-layer modules). Any file `theme.test.ts` imports transitively
+  that does `from 'react-native'` fails to parse (Flow syntax) under
+  vitest's plain SSR transform. So `AppThemeProvider`/`useAppTheme` live
+  in `mobile/src/theme/ThemeProvider.tsx` (the plan's explicitly-offered
+  alternative to colocating), importing `useColorScheme` from
+  `react-native`; `theme.ts` itself has zero react-native import and
+  stays directly testable.
+- `theme.test.ts`: recursive key-path comparison confirms `lightTheme`/
+  `darkTheme` define the identical key set (mirrors web's
+  `token-presence.test.ts`); `resolveAppTheme` resolves `'dark'` to
+  `darkTheme` and `'light'`/`null`/`undefined` to `lightTheme`.
+- `app.json`'s `userInterfaceStyle` is `"automatic"`. Confirmed (not
+  assumed) that `expo-system-ui` isn't required as an npm dependency for
+  this SDK version: `@expo/prebuild-config`'s `withDefaultPlugins.js`
+  bundles an *unversioned* copy of expo-system-ui's own
+  `withAndroidUserInterfaceStyle`/`withIosUserInterfaceStyle` config
+  plugins and applies them unconditionally regardless of whether the
+  `expo-system-ui` package itself is installed — so the native
+  light/dark switching this manifest key drives works without adding
+  the dependency. (The package would still be needed for *JS-side*
+  system-UI APIs like `setBackgroundColorAsync`, which this pass doesn't
+  use.)
+- `PairingScreen.tsx` rebuilt on `useAppTheme()`:
+  `noHardcodedColors.test.ts` (new, mirrors web's
+  `no-hardcoded-colors.test.ts`) greps the file for `#[0-9a-fA-F]{3,8}`
+  and asserts none — confirmed green, plus a manual `grep` during
+  development. Behavior unchanged (same idle/connecting/error states,
+  same `RelayConnection.connect` call) — this item touched only
+  `StyleSheet` values and added a `theme`/`styles` memo, not any
+  handler logic.
+- Dark mode: no automated visual check (none exists in this codebase);
+  deferred to a manual device/simulator pass alongside Item 3's manual
+  dark-mode check, per the plan's own "known gap, not a blocker" framing
+  for visual regression tooling.
+- `npx tsc --noEmit && npm test`: clean (55 tests passing, up from the
+  50-test baseline).

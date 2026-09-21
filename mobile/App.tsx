@@ -14,10 +14,11 @@ import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
 import { Task } from './src/api';
 import { RelayConnection } from './src/relay/RelayConnection';
+import { AppThemeProvider } from './src/theme/ThemeProvider';
 
 type Screen = { kind: 'pairing' } | { kind: 'tasks' } | { kind: 'task'; task: Task };
 
-export default function App() {
+function AppShell() {
   const [conn, setConn] = useState<RelayConnection | null>(null);
   const [screen, setScreen] = useState<Screen>({ kind: 'pairing' });
 
@@ -53,5 +54,13 @@ export default function App() {
         <TasksScreen conn={conn} onOpenTask={handleOpenTask} onDisconnect={handleDisconnect} />
       )}
     </>
+  );
+}
+
+export default function App() {
+  return (
+    <AppThemeProvider>
+      <AppShell />
+    </AppThemeProvider>
   );
 }

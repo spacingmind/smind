@@ -4,11 +4,16 @@
 // is that the connection is NOT one-shot anymore -- on success the live
 // RelayConnection is handed to the app's screen stack instead of closing
 // it after one workspace.list.
+//
+// Rebuilt on the token system (mobile-ui-polish plan Item 1): every
+// color comes from useAppTheme(), never a hardcoded hex literal.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { RelayConnection } from '../relay/RelayConnection';
+import { AppTheme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 
 type Status = { kind: 'idle' } | { kind: 'connecting' } | { kind: 'error'; message: string };
 
@@ -17,6 +22,8 @@ interface Props {
 }
 
 export function PairingScreen({ onConnected }: Props) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const [pairingUrl, setPairingUrl] = useState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
@@ -41,6 +48,7 @@ export function PairingScreen({ onConnected }: Props) {
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="https://spacingmind.sh/pair#offer=..."
+        placeholderTextColor={theme.foregroundMuted}
         value={pairingUrl}
         onChangeText={setPairingUrl}
       />
@@ -49,58 +57,68 @@ export function PairingScreen({ onConnected }: Props) {
         onPress={handleConnect}
         disabled={!pairingUrl.trim() || status.kind === 'connecting'}
       >
-        {status.kind === 'connecting' ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Connect</Text>}
+        {status.kind === 'connecting' ? (
+          <ActivityIndicator color={theme.surface[0]} />
+        ) : (
+          <Text style={styles.buttonText}>Connect</Text>
+        )}
       </TouchableOpacity>
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    paddingTop: 64,
-    paddingHorizontal: 16,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 14,
-    color: '#444',
-    marginBottom: 8,
-  },
-  input: {
-    borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    padding: 12,
-    minHeight: 80,
-    fontSize: 13,
-    fontFamily: 'monospace',
-    textAlignVertical: 'top',
-  },
-  button: {
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 16,
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  error: {
-    color: '#dc2626',
-    fontFamily: 'monospace',
-    marginTop: 16,
-  },
-});
+function makeStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.surface[0],
+      paddingTop: theme.spacing[16],
+      paddingHorizontal: theme.spacing[4],
+    },
+    title: {
+      fontSize: theme.type.sectionTitle.fontSize,
+      lineHeight: theme.type.sectionTitle.lineHeight,
+      fontWeight: theme.type.sectionTitle.fontWeight,
+      color: theme.foreground,
+      marginBottom: theme.spacing[4],
+    },
+    label: {
+      fontSize: theme.type.interface.fontSize,
+      lineHeight: theme.type.interface.lineHeight,
+      color: theme.foregroundMuted,
+      marginBottom: theme.spacing[2],
+    },
+    input: {
+      borderWidth: 1,
+      borderColor: theme.border,
+      borderRadius: theme.radius.md,
+      padding: theme.spacing[3],
+      minHeight: 80,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      color: theme.foreground,
+      textAlignVertical: 'top',
+    },
+    button: {
+      backgroundColor: theme.primary,
+      borderRadius: theme.radius.md,
+      paddingVertical: theme.spacing[3.5],
+      alignItems: 'center',
+      marginTop: theme.spacing[4],
+    },
+    buttonDisabled: {
+      opacity: 0.5,
+    },
+    buttonText: {
+      color: theme.surface[0],
+      fontSize: theme.type.interface.fontSize,
+      fontWeight: theme.type.interface.fontWeight,
+    },
+    error: {
+      color: theme.status.danger,
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      marginTop: theme.spacing[4],
+    },
+  });
+}
