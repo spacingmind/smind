@@ -11,16 +11,25 @@
 // renders immediately and the new run's events append to the same
 // timeline. Navigating back detaches both attaches cleanly
 // (task.cancel per conn.go's cancellation shape) with no leaked
-// handlers. No permission approval or push notifications yet --
-// permission approval is Item 2, push is Milestone 4.
+// handlers. No push notifications yet (Milestone 4).
+//
+// Rebuilt on the token system (mobile-ui-polish plan Item 3): text/
+// thinking lines, tool-call rows, permission cards, and the compose box
+// all render via useAppTheme(). Tool-call rows are collapsed by default
+// (name + title, one line, tap to expand a long title) with an icon for
+// the real 3-state status (running/success/failure -- runTimeline.ts's
+// toolCall field carries this; there is no "queued" state and no raw
+// output-line field on the wire, so no live-output capsule is rendered).
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
+import { AppTheme } from '../theme';
+import { useAppTheme } from '../theme/ThemeProvider';
 
 type LoadState =
   | { kind: 'loading' }
@@ -34,12 +43,35 @@ interface Props {
   onBack: () => void;
 }
 
+/** {icon, color} for a tool call's real 3-state status -- no "queued" state exists on the wire (internal/taskrunner/event.go). */
+function toolStatusIcon(theme: AppTheme, status: string): { icon: string; color: string } {
+  switch (status) {
+    case 'running':
+      return { icon: '●', color: theme.status.running };
+    case 'success':
+      return { icon: '✓', color: theme.status.success };
+    case 'failure':
+      return { icon: '✕', color: theme.status.danger };
+    default:
+      return { icon: '○', color: theme.foregroundMuted };
+  }
+}
+
+/** The permission card's tint: pending is warning-adjacent, resolved is success, an inline respond error is danger (Item 3's Acceptance Criteria). */
+function permissionTint(theme: AppTheme, req: PermissionRequestState): string {
+  if (req.error !== null) return theme.status.danger;
+  return req.status === 'resolved' ? theme.status.success : theme.status.warning;
+}
+
 export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
+  const theme = useAppTheme();
+  const styles = useMemo(() => makeStyles(theme), [theme]);
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
+  const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
   const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
@@ -155,6 +187,15 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     [conn, board],
   );
 
+  const toggleExpanded = useCallback((key: string) => {
+    setExpandedToolCalls((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
   const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
 
   return (
@@ -164,7 +205,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
       </TouchableOpacity>
       <Text style={styles.title}>{taskTitle}</Text>
 
-      {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" />}
+      {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
       {state.kind === 'error' && (
         <View>
           <Text style={styles.errorText}>Couldn't load this task's runs.</Text>
@@ -181,35 +222,54 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           </Text>
           <ScrollView style={styles.transcript}>
             {lines.length === 0 && <Text style={styles.empty}>(empty transcript)</Text>}
-            {lines.map((line) => (
-              <Text key={line.key} style={line.role === 'user' ? styles.userLine : line.role === '' ? styles.metaLine : styles.assistantLine}>
-                {line.role !== '' ? `${line.role}: ` : ''}
-                {line.text}
-              </Text>
-            ))}
-          </ScrollView>
-          {permissions.map((req) => (
-            <View key={req.requestId} style={styles.permissionCard}>
-              <Text style={styles.permissionSummary}>{req.summary}</Text>
-              {req.status === 'pending' ? (
-                req.options.map((opt) => (
-                  <TouchableOpacity
-                    key={opt.id}
-                    style={styles.permissionButton}
-                    onPress={() => handlePermissionTap(req.requestId, opt.id)}
-                  >
-                    <Text style={styles.permissionButtonText}>{opt.label}</Text>
-                  </TouchableOpacity>
-                ))
+            {lines.map((line) =>
+              line.toolCall ? (
+                <ToolCallRow
+                  key={line.key}
+                  theme={theme}
+                  styles={styles}
+                  toolCall={line.toolCall}
+                  expanded={expandedToolCalls.has(line.key)}
+                  onToggle={() => toggleExpanded(line.key)}
+                />
               ) : (
-                <Text style={styles.permissionResolved}>
-                  {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
-                  {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
+                <Text
+                  key={line.key}
+                  style={line.role === 'user' ? styles.userLine : line.role === '' ? styles.metaLine : styles.assistantLine}
+                >
+                  {line.role !== '' ? `${line.role}: ` : ''}
+                  {line.text}
                 </Text>
-              )}
-              {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
-            </View>
-          ))}
+              ),
+            )}
+          </ScrollView>
+          {permissions.map((req) => {
+            const tint = permissionTint(theme, req);
+            return (
+              <View key={req.requestId} style={[styles.permissionCard, { borderColor: tint }]}>
+                <Text style={styles.permissionSummary}>{req.summary}</Text>
+                {req.status === 'pending' ? (
+                  <View style={styles.permissionOptions}>
+                    {req.options.map((opt) => (
+                      <TouchableOpacity
+                        key={opt.id}
+                        style={styles.permissionButton}
+                        onPress={() => handlePermissionTap(req.requestId, opt.id)}
+                      >
+                        <Text style={styles.permissionButtonText}>{opt.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={[styles.permissionResolved, { color: tint }]}>
+                    {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
+                    {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
+                  </Text>
+                )}
+                {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
+              </View>
+            );
+          })}
           {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
           <View style={styles.composeRow}>
             <TextInput
@@ -217,7 +277,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
               value={draft}
               onChangeText={setDraft}
               placeholder="Send a follow-up prompt…"
-              placeholderTextColor="#999"
+              placeholderTextColor={theme.foregroundMuted}
               multiline
             />
             <TouchableOpacity
@@ -234,143 +294,204 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    paddingTop: 64,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
-  },
-  back: {
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  backText: {
-    color: '#2563eb',
-    fontSize: 15,
-  },
-  title: {
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  runMeta: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 12,
-  },
-  spinner: {
-    marginTop: 32,
-  },
-  transcript: {
-    flex: 1,
-  },
-  userLine: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    color: '#1e3a8a',
-    marginBottom: 8,
-  },
-  assistantLine: {
-    fontFamily: 'monospace',
-    fontSize: 13,
-    color: '#111',
-    marginBottom: 8,
-  },
-  metaLine: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 8,
-  },
-  empty: {
-    color: '#666',
-    marginTop: 16,
-  },
-  errorText: {
-    color: '#dc2626',
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  errorDetail: {
-    fontFamily: 'monospace',
-    fontSize: 12,
-    color: '#666',
-  },
-  permissionCard: {
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    borderRadius: 8,
-    padding: 12,
-    marginTop: 8,
-  },
-  permissionSummary: {
-    fontSize: 13,
-    color: '#111',
-    marginBottom: 8,
-  },
-  permissionButton: {
-    backgroundColor: '#2563eb',
-    borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    alignSelf: 'flex-start',
-    marginBottom: 4,
-    marginRight: 8,
-  },
-  permissionButtonText: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  permissionResolved: {
-    fontSize: 12,
-    color: '#16a34a',
-  },
-  permissionError: {
-    fontSize: 12,
-    color: '#dc2626',
-    marginTop: 4,
-  },
-  sendError: {
-    color: '#dc2626',
-    fontSize: 12,
-    marginTop: 8,
-    marginBottom: 4,
-  },
-  composeRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#e5e5e5',
-    paddingTop: 8,
-    marginTop: 8,
-  },
-  composeInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: '#d4d4d8',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 8,
-    fontSize: 14,
-    maxHeight: 120,
-    marginRight: 8,
-  },
-  sendButton: {
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  sendButtonDisabled: {
-    backgroundColor: '#93c5fd',
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-});
+/** One collapsed-by-default tool-call row: icon for the real status, name + title, tap to expand a long title. */
+function ToolCallRow({
+  theme,
+  styles,
+  toolCall,
+  expanded,
+  onToggle,
+}: {
+  theme: AppTheme;
+  styles: ReturnType<typeof makeStyles>;
+  toolCall: { toolName: string; title: string; status: string };
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const { icon, color } = toolStatusIcon(theme, toolCall.status);
+  return (
+    <TouchableOpacity style={styles.toolCallRow} onPress={onToggle} activeOpacity={0.7}>
+      <Text style={[styles.toolCallIcon, { color }]}>{icon}</Text>
+      <Text style={styles.toolCallName}>{toolCall.toolName}</Text>
+      {toolCall.title.length > 0 && (
+        <Text style={styles.toolCallTitle} numberOfLines={expanded ? undefined : 1}>
+          {toolCall.title}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+}
+
+function makeStyles(theme: AppTheme) {
+  return StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: theme.surface[0],
+      paddingTop: theme.spacing[16],
+      paddingHorizontal: theme.spacing[4],
+      paddingBottom: theme.spacing[4],
+    },
+    back: {
+      alignSelf: 'flex-start',
+      marginBottom: theme.spacing[2],
+    },
+    backText: {
+      color: theme.primary,
+      fontSize: theme.type.interface.fontSize,
+    },
+    title: {
+      fontSize: theme.type.sectionTitle.fontSize,
+      lineHeight: theme.type.sectionTitle.lineHeight,
+      fontWeight: theme.type.sectionTitle.fontWeight,
+      color: theme.foreground,
+      marginBottom: theme.spacing[1],
+    },
+    runMeta: {
+      fontSize: theme.type.metadataLabel.fontSize,
+      color: theme.foregroundMuted,
+      marginBottom: theme.spacing[3],
+    },
+    spinner: {
+      marginTop: theme.spacing[8],
+    },
+    transcript: {
+      flex: 1,
+    },
+    userLine: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      color: theme.primary,
+      marginBottom: theme.spacing[2],
+    },
+    assistantLine: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      color: theme.foreground,
+      marginBottom: theme.spacing[2],
+    },
+    metaLine: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.metadataLabel.fontSize,
+      color: theme.foregroundMuted,
+      marginBottom: theme.spacing[2],
+    },
+    toolCallRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: theme.surface[2],
+      borderRadius: theme.radius.sm,
+      paddingVertical: theme.spacing[1.5],
+      paddingHorizontal: theme.spacing[2],
+      marginBottom: theme.spacing[2],
+    },
+    toolCallIcon: {
+      fontSize: theme.type.metadataLabel.fontSize,
+      marginRight: theme.spacing[1.5],
+    },
+    toolCallName: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      fontWeight: theme.type.codeAnnotation.fontWeight,
+      color: theme.foreground,
+      marginRight: theme.spacing[1.5],
+    },
+    toolCallTitle: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      color: theme.foregroundMuted,
+      flex: 1,
+    },
+    empty: {
+      color: theme.foregroundMuted,
+      fontSize: theme.type.interface.fontSize,
+      marginTop: theme.spacing[4],
+    },
+    errorText: {
+      color: theme.status.danger,
+      fontWeight: theme.type.metadataLabel.fontWeight,
+      marginBottom: theme.spacing[1],
+    },
+    errorDetail: {
+      fontFamily: theme.type.codeAnnotation.fontFamily,
+      fontSize: theme.type.codeAnnotation.fontSize,
+      color: theme.foregroundMuted,
+    },
+    permissionCard: {
+      backgroundColor: theme.surface[1],
+      borderWidth: 1,
+      borderRadius: theme.radius.md,
+      padding: theme.spacing[3],
+      marginTop: theme.spacing[2],
+    },
+    permissionSummary: {
+      fontSize: theme.type.codeAnnotation.fontSize,
+      color: theme.foreground,
+      marginBottom: theme.spacing[2],
+    },
+    permissionOptions: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+    },
+    permissionButton: {
+      backgroundColor: theme.primary,
+      borderRadius: theme.radius.sm,
+      paddingVertical: theme.spacing[2],
+      paddingHorizontal: theme.spacing[3],
+      marginBottom: theme.spacing[1],
+      marginRight: theme.spacing[2],
+    },
+    permissionButtonText: {
+      color: theme.surface[0],
+      fontSize: theme.type.codeAnnotation.fontSize,
+      fontWeight: theme.type.interface.fontWeight,
+    },
+    permissionResolved: {
+      fontSize: theme.type.metadataLabel.fontSize,
+    },
+    permissionError: {
+      fontSize: theme.type.metadataLabel.fontSize,
+      color: theme.status.danger,
+      marginTop: theme.spacing[1],
+    },
+    sendError: {
+      color: theme.status.danger,
+      fontSize: theme.type.metadataLabel.fontSize,
+      marginTop: theme.spacing[2],
+      marginBottom: theme.spacing[1],
+    },
+    composeRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-end',
+      borderTopWidth: 1,
+      borderTopColor: theme.border,
+      paddingTop: theme.spacing[2],
+      marginTop: theme.spacing[2],
+    },
+    composeInput: {
+      flex: 1,
+      backgroundColor: theme.surface[2],
+      borderRadius: theme.radius.md,
+      paddingHorizontal: theme.spacing[2.5],
+      paddingTop: theme.spacing[2],
+      paddingBottom: theme.spacing[2],
+      fontSize: theme.type.interface.fontSize,
+      color: theme.foreground,
+      maxHeight: 120,
+      marginRight: theme.spacing[2],
+    },
+    sendButton: {
+      backgroundColor: theme.primary,
+      borderRadius: theme.radius.md,
+      paddingVertical: theme.spacing[2.5],
+      paddingHorizontal: theme.spacing[4],
+    },
+    sendButtonDisabled: {
+      opacity: 0.5,
+    },
+    sendButtonText: {
+      color: theme.surface[0],
+      fontSize: theme.type.interface.fontSize,
+      fontWeight: theme.type.interface.fontWeight,
+    },
+  });
+}

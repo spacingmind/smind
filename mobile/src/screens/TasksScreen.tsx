@@ -262,7 +262,7 @@ function makeStyles(theme: AppTheme) {
     },
     statusText: {
       fontSize: theme.type.metadataLabel.fontSize,
-      fontWeight: theme.type.metadataLabel.fontWeight,
+      fontWeight: theme.type.interface.fontWeight,
       textTransform: 'uppercase',
       letterSpacing: 0.5,
     },

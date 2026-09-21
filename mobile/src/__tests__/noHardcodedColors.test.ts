@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 const HEX_LITERAL = /#[0-9a-fA-F]{3,8}\b/g;
 
-const SCREENS_REBUILT_ON_TOKENS = ['src/screens/PairingScreen.tsx', 'src/screens/TasksScreen.tsx'];
+const SCREENS_REBUILT_ON_TOKENS = ['src/screens/PairingScreen.tsx', 'src/screens/TasksScreen.tsx', 'src/screens/TaskDetailScreen.tsx'];
 
 describe('screens rebuilt on the token system have no hardcoded hex literals', () => {
   for (const relativePath of SCREENS_REBUILT_ON_TOKENS) {

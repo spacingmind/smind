@@ -243,7 +243,7 @@ against the real wire contracts before deciding scope, not assumed):
 
 - [x] Item 1 — token foundation + PairingScreen
 - [x] Item 2 — TasksScreen run-card list
-- [ ] Item 3 — TaskDetailScreen + permission cards visual polish
+- [x] Item 3 — TaskDetailScreen + permission cards visual polish
 - [ ] Hand off implementation via Paseo (GLM as primary implementer,
       per the user's standing preference — direct `deny` + specific
       `send_agent_prompt` redirect if it shows the "many turns, no
@@ -349,3 +349,55 @@ Criterion with the specific test or manual check that confirmed it.
   grouped-by-space layout, tap-to-open-task. `loadTasks` itself is
   untouched.
 - `npx tsc --noEmit && npm test`: clean (60 tests passing).
+
+### Item 3
+
+- `runTimeline.ts` gains the one new renderable field the Test Scenario
+  anticipated: `TimelineLine.toolCall?: {toolName, title, status}`, set
+  only for `tool_call` lines (both `timelineFromLogs` and
+  `lineFromAttachEvent`), alongside the existing flattened `text` (kept
+  for back-compat/fallback). `runTimeline.test.ts` extended accordingly;
+  its tool-call fixtures now use the real 3-value wire vocabulary
+  (`running`/`success`/`failure` -- internal/taskrunner/event.go's
+  `ToolStatusRunning/Success/Failure`) instead of the placeholder
+  `pending`/`completed` strings the tests used before this session knew
+  the exact contract. No other inline-style concerns exist in
+  `runTimeline.ts` (it returns plain data, no RN styles) — noted here
+  per the plan's own "if it has none, say so" instruction.
+- `TaskDetailScreen.tsx` rebuilt on `useAppTheme()`:
+  - Tool-call rows: a `ToolCallRow` subcomponent renders one collapsed
+    line (icon + tool name + title, `numberOfLines={1}` unless
+    expanded) using `toolStatusIcon()` (running → ●/`status.running`,
+    success → ✓/`status.success`, failure → ✕/`status.danger`; a
+    defensive `○`/`foregroundMuted` default for any value outside the
+    3-value contract, never reached on real traffic). Tapping the row
+    toggles a per-line `expandedToolCalls` key set — no fabricated
+    output preview or progress bar, per the plan's Decisions.
+  - Permission cards: `permissionTint()` picks `status.warning` while
+    pending, `status.success` once resolved, `status.danger` if the
+    board recorded an inline respond error — same card, same place in
+    the timeline through all three states (unchanged functionally from
+    Milestone 3).
+  - Compose box: input uses `surface[2]` (docs/design.md §13's
+    "embedded" recipe — insets that recede, same tier as a code block or
+    well); send button uses `theme.primary`.
+  - Button/badge label weight follows docs/design.md §12's 3-tier rule
+    exactly (button labels and badge text are `interface`'s 400, not
+    `metadataLabel`'s 500) — caught and fixed during this item for both
+    `TaskDetailScreen.tsx` and `TasksScreen.tsx`'s status-badge text.
+- Zero hardcoded hex literals: `noHardcodedColors.test.ts` extended to
+  cover `src/screens/TaskDetailScreen.tsx` — green (manual grep
+  double-check also clean).
+- Dark mode: no automated visual-regression tooling exists in this
+  codebase (confirmed, not assumed — same gap noted for Items 1-2);
+  deferred to a manual device/simulator pass, per the plan's own
+  framing of this as a known gap, not a blocker.
+- `npx tsc --noEmit && npm test`: clean (61 tests passing).
+
+### Outstanding
+
+- Manual light/dark device or simulator pass across all three screens
+  hasn't been run yet in this session (no local iOS/Android
+  simulator/device available) — the one manual check the plan calls out
+  as a known gap rather than a blocker. Recommend running before/soon
+  after PR review.

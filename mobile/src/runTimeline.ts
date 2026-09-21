@@ -11,6 +11,14 @@ export interface TimelineLine {
   /** e.g. "user", "assistant", "assistant (thinking)" -- empty for tool/status lines. */
   role: string;
   text: string;
+  /**
+   * Present only for tool-call lines: the real 3-state status
+   * (internal/taskrunner/event.go's ToolStatusRunning/Success/Failure --
+   * no "queued" or "pending" state exists) plus name/title, so the UI
+   * can render a collapsed row with a status icon instead of parsing
+   * `text`. Item 3 (mobile-ui-polish plan)'s reason for this field.
+   */
+  toolCall?: { toolName: string; title: string; status: string };
 }
 
 interface RunLogEvent {
@@ -32,7 +40,14 @@ function renderLogEvent(ev: RunLogEvent, idx: number): TimelineLine[] {
     case 'thinking':
       return [{ key: `e${idx}`, role: 'assistant (thinking)', text: ev.text ?? '' }];
     case 'tool_call':
-      return [{ key: `e${idx}`, role: '', text: `tool: ${ev.toolName ?? '?'}${ev.title ? ` — ${ev.title}` : ''}${ev.status ? ` [${ev.status}]` : ''}` }];
+      return [
+        {
+          key: `e${idx}`,
+          role: '',
+          text: `tool: ${ev.toolName ?? '?'}${ev.title ? ` — ${ev.title}` : ''}${ev.status ? ` [${ev.status}]` : ''}`,
+          toolCall: { toolName: ev.toolName ?? '?', title: ev.title ?? '', status: ev.status ?? '' },
+        },
+      ];
     case 'done':
       return [{ key: `e${idx}`, role: '', text: `done (${ev.stopReason ?? ''})` }];
     // permission_request/permission_resolved render through
