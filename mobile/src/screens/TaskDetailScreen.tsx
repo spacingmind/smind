@@ -1,14 +1,24 @@
-// TaskDetailScreen.tsx is Milestone 2's Item 3 screen: the task's most
-// recent run's transcript, read-only. History comes from run.logs; if the
-// run is still active, run.attach streams live events over the same
-// persistent connection (via call()'s request-scoped onEvent). Navigating
-// back detaches cleanly (task.cancel per conn.go's cancellation shape)
-// with no leaked handlers. No prompt box, no permission approval, no push
-// notifications -- Milestone 3.
+// TaskDetailScreen.tsx is Milestone 2's Item 3 screen grown by
+// Milestone 3's Item 1: the task's most recent run's transcript,
+// read-only, PLUS a compose box for sending a follow-up prompt (only
+// when a prior run exists to infer a provider from -- a zero-runs task
+// keeps the empty state; see docs/plans/active/
+// mobile-app-milestone-3.md's Decisions). History comes from run.logs;
+// if the run is still active, run.attach streams live events over the
+// same persistent connection (via call()'s request-scoped onEvent).
+// Sending is run.start + a second run.attach on the new run (not
+// task.prompt, whose cancellation would stop the run); the sent text
+// renders immediately and the new run's events append to the same
+// timeline. Navigating back detaches both attaches cleanly
+// (task.cancel per conn.go's cancellation shape) with no leaked
+// handlers. No permission approval or push notifications yet --
+// permission approval is Item 2, push is Milestone 4.
 
-import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { listRunsForTask, RunSummary } from '../api';
+import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
+import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 
@@ -27,13 +37,20 @@ interface Props {
 export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
+  const [draft, setDraft] = useState('');
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
+  const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
+  const followUpTails = useRef<RunTail[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     let attach: { cancel(): void } | null = null;
     setState({ kind: 'loading' });
     setLines([]);
+    setPermissions([]);
+    board.onChange = () => setPermissions(board.list());
 
     (async () => {
       try {
@@ -43,19 +60,19 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         setState({ kind: 'ready', run: latest });
         if (!latest) return;
 
-        // History first: the full recorded transcript.
-        const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
-        if (cancelled) return;
-        setLines(timelineFromLogs(logs as { events?: never[] }));
-
-        // Then, only if still active, live tail via run.attach.
         if (latest.Status === 'running') {
+          // A live run: run.attach alone. It backfills the run's whole
+          // recorded history before the live tail (internal/runs
+          // Registry.Subscribe), so a separate run.logs fetch here would
+          // double-render every historical line -- the web UI's
+          // streamRun makes the same choice.
           const p = conn.call(
             'run.attach',
             { runId: latest.ID },
             {
               onEvent: (event, params) => {
                 if (cancelled) return;
+                if (feedPermissionEvent(board, latest.ID, event, params)) return;
                 liveSeq.current++;
                 const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
                 if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
@@ -67,6 +84,12 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             // Detach (navigate-away cancel) or the connection ending:
             // either way the screen state already says what it needs to.
           });
+        } else {
+          // A finished run: one run.logs fetch, the full transcript.
+          const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
+          if (cancelled) return;
+          board.applyLogEvents(latest.ID, logs.events ?? []);
+          setLines(timelineFromLogs(logs as { events?: never[] }));
         }
       } catch (e) {
         if (!cancelled) setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) });
@@ -76,8 +99,63 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     return () => {
       cancelled = true;
       attach?.cancel(); // clean detach: run keeps going server-side
+      // Any follow-up run's attach detaches the same way (Item 1).
+      for (const tail of followUpTails.current) tail.cancel();
+      followUpTails.current = [];
     };
   }, [conn, taskId]);
+
+  const nextSeq = useCallback(() => {
+    liveSeq.current++;
+    return 1_000_000 + liveSeq.current;
+  }, []);
+
+  const appendLines = useCallback((newLines: TimelineLine[]) => {
+    setLines((prev) => [...prev, ...newLines]);
+  }, []);
+
+  const removeLines = useCallback((doomed: TimelineLine[]) => {
+    const keys = new Set(doomed.map((l) => l.key));
+    setLines((prev) => prev.filter((l) => !keys.has(l.key)));
+  }, []);
+
+  const trackTail = useCallback((tail: RunTail) => {
+    followUpTails.current.push(tail);
+  }, []);
+
+  const handleSend = useCallback(async () => {
+    const text = draft.trim();
+    if (!text || state.kind !== 'ready' || state.run === null) return;
+    setDraft('');
+    setSendError(null);
+    try {
+      await sendFollowUpPrompt(
+        conn,
+        {
+          appendLines,
+          removeLines,
+          trackTail,
+          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+        },
+        taskId,
+        state.run.Provider,
+        text,
+        nextSeq,
+      );
+    } catch (e) {
+      setDraft(text); // the typed text is never silently lost
+      setSendError(e instanceof Error ? e.message : String(e));
+    }
+  }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
+
+  const handlePermissionTap = useCallback(
+    (requestId: string, optionId: string) => {
+      void respondToPermission(conn, board, requestId, optionId);
+    },
+    [conn, board],
+  );
+
+  const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
 
   return (
     <View style={styles.container}>
@@ -110,6 +188,46 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
               </Text>
             ))}
           </ScrollView>
+          {permissions.map((req) => (
+            <View key={req.requestId} style={styles.permissionCard}>
+              <Text style={styles.permissionSummary}>{req.summary}</Text>
+              {req.status === 'pending' ? (
+                req.options.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={styles.permissionButton}
+                    onPress={() => handlePermissionTap(req.requestId, opt.id)}
+                  >
+                    <Text style={styles.permissionButtonText}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.permissionResolved}>
+                  {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
+                  {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
+                </Text>
+              )}
+              {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
+            </View>
+          ))}
+          {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
+          <View style={styles.composeRow}>
+            <TextInput
+              style={styles.composeInput}
+              value={draft}
+              onChangeText={setDraft}
+              placeholder="Send a follow-up prompt…"
+              placeholderTextColor="#999"
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, !canSend ? styles.sendButtonDisabled : null]}
+              onPress={handleSend}
+              disabled={!canSend}
+            >
+              <Text style={styles.sendButtonText}>Send</Text>
+            </TouchableOpacity>
+          </View>
         </>
       )}
     </View>
@@ -122,6 +240,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingTop: 64,
     paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   back: {
     alignSelf: 'flex-start',
@@ -178,5 +297,80 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12,
     color: '#666',
+  },
+  permissionCard: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  permissionSummary: {
+    fontSize: 13,
+    color: '#111',
+    marginBottom: 8,
+  },
+  permissionButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+    marginRight: 8,
+  },
+  permissionButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  permissionResolved: {
+    fontSize: 12,
+    color: '#16a34a',
+  },
+  permissionError: {
+    fontSize: 12,
+    color: '#dc2626',
+    marginTop: 4,
+  },
+  sendError: {
+    color: '#dc2626',
+    fontSize: 12,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  composeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#e5e5e5',
+    paddingTop: 8,
+    marginTop: 8,
+  },
+  composeInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#d4d4d8',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 8,
+    fontSize: 14,
+    maxHeight: 120,
+    marginRight: 8,
+  },
+  sendButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
+  sendButtonDisabled: {
+    backgroundColor: '#93c5fd',
+  },
+  sendButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

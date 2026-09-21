@@ -20,8 +20,6 @@ interface RunLogEvent {
   toolName?: string;
   title?: string;
   status?: string;
-  requestId?: string;
-  summary?: string;
 }
 
 /** Render one run.logs entry into zero or more lines. */
@@ -37,10 +35,10 @@ function renderLogEvent(ev: RunLogEvent, idx: number): TimelineLine[] {
       return [{ key: `e${idx}`, role: '', text: `tool: ${ev.toolName ?? '?'}${ev.title ? ` — ${ev.title}` : ''}${ev.status ? ` [${ev.status}]` : ''}` }];
     case 'done':
       return [{ key: `e${idx}`, role: '', text: `done (${ev.stopReason ?? ''})` }];
-    case 'permission_request':
-      return [{ key: `e${idx}`, role: '', text: `permission requested: ${ev.summary ?? ''}` }];
-    case 'permission_resolved':
-      return [{ key: `e${idx}`, role: '', text: 'permission resolved' }];
+    // permission_request/permission_resolved render through
+    // PermissionBoard (Milestone 3 Item 2) -- summary plus tappable
+    // option buttons while pending, resolved state after -- not as text
+    // lines here, which would double-render them.
     default:
       return [];
   }
@@ -59,8 +57,6 @@ export function lineFromAttachEvent(event: string, params: unknown, seq: number)
     user_message: { type: 'user_message', text: p.text },
     thinking: { type: 'thinking', text: p.text },
     tool_call: { type: 'tool_call', toolName: p.toolName, title: p.title, status: p.status },
-    permission_request: { type: 'permission_request', summary: p.summary },
-    permission_resolved: { type: 'permission_resolved' },
   };
   const mapped = asLog[event];
   if (mapped) return renderLogEvent(mapped, seq);
