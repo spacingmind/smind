@@ -18,6 +18,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
+import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
 import { RelayConnection } from '../relay/RelayConnection';
 import { lineFromAttachEvent, TimelineLine, timelineFromLogs } from '../runTimeline';
 
@@ -38,6 +39,8 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [lines, setLines] = useState<TimelineLine[]>([]);
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState<string | null>(null);
+  const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
+  const board = useRef(new PermissionBoard()).current;
   const liveSeq = useRef(0);
   const followUpTails = useRef<RunTail[]>([]);
 
@@ -46,6 +49,8 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     let attach: { cancel(): void } | null = null;
     setState({ kind: 'loading' });
     setLines([]);
+    setPermissions([]);
+    board.onChange = () => setPermissions(board.list());
 
     (async () => {
       try {
@@ -67,6 +72,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             {
               onEvent: (event, params) => {
                 if (cancelled) return;
+                if (feedPermissionEvent(board, latest.ID, event, params)) return;
                 liveSeq.current++;
                 const newLines = lineFromAttachEvent(event, params, 1_000_000 + liveSeq.current);
                 if (newLines.length > 0) setLines((prev) => [...prev, ...newLines]);
@@ -82,6 +88,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           // A finished run: one run.logs fetch, the full transcript.
           const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
           if (cancelled) return;
+          board.applyLogEvents(latest.ID, logs.events ?? []);
           setLines(timelineFromLogs(logs as { events?: never[] }));
         }
       } catch (e) {
@@ -122,12 +129,31 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     setDraft('');
     setSendError(null);
     try {
-      await sendFollowUpPrompt(conn, { appendLines, removeLines, trackTail }, taskId, state.run.Provider, text, nextSeq);
+      await sendFollowUpPrompt(
+        conn,
+        {
+          appendLines,
+          removeLines,
+          trackTail,
+          onEvent: (event, params, runId) => feedPermissionEvent(board, runId, event, params),
+        },
+        taskId,
+        state.run.Provider,
+        text,
+        nextSeq,
+      );
     } catch (e) {
       setDraft(text); // the typed text is never silently lost
       setSendError(e instanceof Error ? e.message : String(e));
     }
   }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
+
+  const handlePermissionTap = useCallback(
+    (requestId: string, optionId: string) => {
+      void respondToPermission(conn, board, requestId, optionId);
+    },
+    [conn, board],
+  );
 
   const canSend = draft.trim().length > 0 && state.kind === 'ready' && state.run !== null;
 
@@ -162,6 +188,28 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
               </Text>
             ))}
           </ScrollView>
+          {permissions.map((req) => (
+            <View key={req.requestId} style={styles.permissionCard}>
+              <Text style={styles.permissionSummary}>{req.summary}</Text>
+              {req.status === 'pending' ? (
+                req.options.map((opt) => (
+                  <TouchableOpacity
+                    key={opt.id}
+                    style={styles.permissionButton}
+                    onPress={() => handlePermissionTap(req.requestId, opt.id)}
+                  >
+                    <Text style={styles.permissionButtonText}>{opt.label}</Text>
+                  </TouchableOpacity>
+                ))
+              ) : (
+                <Text style={styles.permissionResolved}>
+                  {req.resolvedWith?.by === 'tap' ? 'chosen: ' : 'resolved: '}
+                  {req.options.find((o) => o.id === req.resolvedWith?.optionId)?.label ?? req.resolvedWith?.optionId ?? '?'}
+                </Text>
+              )}
+              {req.error !== null && <Text style={styles.permissionError}>Couldn't respond: {req.error}</Text>}
+            </View>
+          ))}
           {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
           <View style={styles.composeRow}>
             <TextInput
@@ -249,6 +297,41 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     fontSize: 12,
     color: '#666',
+  },
+  permissionCard: {
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  permissionSummary: {
+    fontSize: 13,
+    color: '#111',
+    marginBottom: 8,
+  },
+  permissionButton: {
+    backgroundColor: '#2563eb',
+    borderRadius: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 4,
+    marginRight: 8,
+  },
+  permissionButtonText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  permissionResolved: {
+    fontSize: 12,
+    color: '#16a34a',
+  },
+  permissionError: {
+    fontSize: 12,
+    color: '#dc2626',
+    marginTop: 4,
   },
   sendError: {
     color: '#dc2626',

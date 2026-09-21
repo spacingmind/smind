@@ -25,6 +25,8 @@ export interface SendFollowUpDeps {
   removeLines: (lines: TimelineLine[]) => void;
   /** Registers the new run's attach so navigating away cancels it, exactly like the initial run's. */
   trackTail: (tail: RunTail) => void;
+  /** Sees every raw attach event, with the run's real id, before line rendering (permission events route to PermissionBoard here; they render as no lines). */
+  onEvent?: (event: string, params: unknown, runId: string) => void;
 }
 
 /**
@@ -66,6 +68,7 @@ export async function sendFollowUpPrompt(
         skippedPromptEcho = true;
         return;
       }
+      deps.onEvent?.(event, params, runId);
       const newLines = lineFromAttachEvent(event, params, nextSeq());
       if (newLines.length > 0) deps.appendLines(newLines);
     },

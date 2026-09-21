@@ -79,3 +79,17 @@ export async function startRun(conn: RelayConnection, taskId: number, provider: 
   const result = (await conn.call('run.start', { taskId, provider, prompt })) as { runId: string };
   return result.runId;
 }
+
+/**
+ * run.respondPermission (Milestone 3 Item 2): resolve runId's pending
+ * permission request requestId with optionId, from this connection --
+ * whatever connection answers first wins server-side.
+ */
+export async function respondPermission(
+  conn: RelayConnection,
+  runId: string,
+  requestId: string,
+  optionId: string,
+): Promise<void> {
+  await conn.call('run.respondPermission', { runId, requestId, optionId });
+}

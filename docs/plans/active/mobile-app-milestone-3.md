@@ -194,7 +194,7 @@ Decisions) and is explicitly deferred to a later Milestone 4.
 ## Progress
 
 - [x] Item 1 — send a follow-up prompt.
-- [ ] Item 2 — approve/deny a live permission request.
+- [x] Item 2 — approve/deny a live permission request.
 - [ ] Hand off implementation via Paseo (GLM as primary implementer, per
       the user's standing preference — nudge with a direct, specific
       `deny` + `send_agent_prompt` redirect if it shows the "many turns,
@@ -246,3 +246,53 @@ now shared via the extracted `mobile/src/relayHarness.ts`), plus
   line back and surfaces the error (draft preserved for retry)";
   `TaskDetailScreen.handleSend` restores the draft and shows
   "Couldn't send: …" inline above the compose row.
+
+### Item 2 — approve/deny a live permission request
+
+Confirmed by `mobile/src/__tests__/permissionRequests.test.ts` (logic-
+layer tests in the established styles: PermissionBoard's event/reducer
+behavior directly, and the tap flow against a scripted fake connection
+asserting exact `run.respondPermission` params), plus the screen wiring
+in `TaskDetailScreen.tsx` fed from all three delivery paths (run.logs
+history via `applyLogEvents`, the initial run's attach, and any
+follow-up run's attach via `sendFollowUpPrompt`'s `onEvent`, which now
+carries the real `runId`). `npx tsc --noEmit` and `npm test` clean
+(10 files, 50/50):
+
+- Unresolved request renders summary + one tappable button per option:
+  "a live permission_request tracks pending with one option per button,
+  labels intact" (3 options, labels preserved through the board's
+  state); the screen renders one TouchableOpacity per option with the
+  option's `label`, plus a duplicate-delivery no-op test (attach
+  backfill after the screen already saw the request changes nothing).
+- Tap resolves optimistically, disables buttons, calls
+  `run.respondPermission`: "tapping an option calls
+  run.respondPermission with {runId, requestId, optionId} and resolves
+  optimistically" and "the optimistic resolution lands before the RPC
+  resolves (buttons disable immediately)" (asserted resolved while the
+  RPC promise is still in flight).
+- RPC rejection re-enables buttons + inline error: "a
+  run.respondPermission rejection re-enables the request and shows an
+  inline error" (status rolled back to pending, error message stored);
+  the screen renders "Couldn't respond: <error>" under the card.
+- `permission_resolved` is authoritative regardless of origin:
+  "a permission_resolved event resolves an unanswered request
+  regardless of origin (concurrent auto-safe resolution)" and
+  "a resolved event is authoritative over an optimistic tap that chose
+  differently"; "a rejection after an authoritative event already
+  resolved the request does not roll it back" covers the
+  tap-races-auto-safe-timeout case.
+- History pair renders directly resolved, never interactive:
+  "a request+resolved pair from run.logs history renders directly
+  resolved, never interactive"; the companion
+  runTimeline permission text lines were removed so a permission event
+  renders exactly once (through the board).
+- Boundary: "a permission_resolved for an unknown requestId is ignored,
+  not crashed on" and "tapping an already-resolved request is a no-op
+  (no second RPC)".
+
+Also fixed en route (commit 6cc82d7, before Item 2): run.attach's
+history backfill double-rendered live runs' transcripts (the screen now
+attaches alone for running runs, matching the web UI's streamRun) and
+echoed Item 1's optimistic user line (sendFollowUpPrompt skips exactly
+the first backfilled echo of the prompt it sent).
