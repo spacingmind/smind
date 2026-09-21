@@ -244,16 +244,28 @@ against the real wire contracts before deciding scope, not assumed):
 - [x] Item 1 — token foundation + PairingScreen
 - [x] Item 2 — TasksScreen run-card list
 - [x] Item 3 — TaskDetailScreen + permission cards visual polish
-- [ ] Hand off implementation via Paseo (GLM as primary implementer,
-      per the user's standing preference — direct `deny` + specific
-      `send_agent_prompt` redirect if it shows the "many turns, no
-      commits" stall pattern; escalate to Sonnet only if that doesn't
-      produce real progress within a few more turns).
-- [ ] Independent verification of agent-reported work before merge.
+- [x] Hand off implementation via Paseo — GLM stalled twice in a row
+      (20 turns of pure read-only research, zero commits; then, after a
+      maximally concrete `send_agent_prompt` redirect handing over the
+      exact token values to use, another 20 turns still produced zero
+      commits and zero uncommitted files). Switched to
+      `claude-scopedocs/claude-sonnet-5` in the same worktree/branch,
+      which completed all 3 items cleanly in one pass.
+- [x] Independent verification of agent-reported work before merge —
+      `npx tsc --noEmit`/`npm test`/`npm run test:integration` rerun
+      directly (not trusted from the agent's report); `theme.ts`'s
+      light/dark hex values spot-checked against `web/packages/ui/src/
+      index.css`'s oklch source (including confirming the ported brand
+      cyan `#51fbfd` matches that file's own documented sampled value,
+      not just independently-derived oklch math); full diff read before
+      opening PR #181.
 - [ ] (Not started, future scope) `@expo/ui` adoption for native
       controls (buttons/fields/sheets/menus) once the token foundation
       exists to theme it against — deliberately deferred, see
       Decisions.
+- [ ] Manual light/dark device/simulator smoke test — no simulator
+      available in either agent's or the reviewing session's
+      environment; outstanding, not silently skipped.
 
 ## Validation
 
