@@ -55,13 +55,12 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
         setState({ kind: 'ready', run: latest });
         if (!latest) return;
 
-        // History first: the full recorded transcript.
-        const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
-        if (cancelled) return;
-        setLines(timelineFromLogs(logs as { events?: never[] }));
-
-        // Then, only if still active, live tail via run.attach.
         if (latest.Status === 'running') {
+          // A live run: run.attach alone. It backfills the run's whole
+          // recorded history before the live tail (internal/runs
+          // Registry.Subscribe), so a separate run.logs fetch here would
+          // double-render every historical line -- the web UI's
+          // streamRun makes the same choice.
           const p = conn.call(
             'run.attach',
             { runId: latest.ID },
@@ -79,6 +78,11 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
             // Detach (navigate-away cancel) or the connection ending:
             // either way the screen state already says what it needs to.
           });
+        } else {
+          // A finished run: one run.logs fetch, the full transcript.
+          const logs = (await conn.call('run.logs', { runId: latest.ID })) as { events?: unknown[] };
+          if (cancelled) return;
+          setLines(timelineFromLogs(logs as { events?: never[] }));
         }
       } catch (e) {
         if (!cancelled) setState({ kind: 'error', message: e instanceof Error ? e.message : String(e) });

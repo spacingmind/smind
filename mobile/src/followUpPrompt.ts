@@ -51,8 +51,21 @@ export async function sendFollowUpPrompt(
     deps.removeLines([userLine]);
     throw err;
   }
+  // run.attach backfills the new run's whole recorded history before the
+  // live tail (internal/runs Registry.Subscribe) -- which includes the
+  // prompt's own user_message. The optimistic line already rendered it,
+  // so the backfilled echo is skipped exactly once.
+  let skippedPromptEcho = false;
   const attach = conn.call('run.attach', { runId }, {
     onEvent: (event, params) => {
+      if (
+        event === 'user_message' &&
+        !skippedPromptEcho &&
+        (params as { text?: string }).text === prompt
+      ) {
+        skippedPromptEcho = true;
+        return;
+      }
       const newLines = lineFromAttachEvent(event, params, nextSeq());
       if (newLines.length > 0) deps.appendLines(newLines);
     },

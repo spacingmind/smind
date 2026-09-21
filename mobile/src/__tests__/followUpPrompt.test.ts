@@ -124,6 +124,29 @@ describe('sendFollowUpPrompt (relay harness)', () => {
     ]);
   });
 
+  it('skips the backfilled echo of the prompt its own run.attach replays, without affecting a later genuine duplicate', async () => {
+    const { conn, daemon } = await makeRelayHarness();
+    const rec = recordingDeps();
+    const seq = seqFrom(0);
+
+    const pending = sendFollowUpPrompt(conn, rec.deps, 7, 'codex/gpt-5.4', 'run the tests', seq);
+    const [startReq] = await daemon.waitForRequests(1);
+    daemon.reply(startReq.id!, { runId: 'run-2' });
+    await pending;
+    const attachReq = (await daemon.waitForRequests(2))[1];
+
+    // The backfill: user_message echoes the prompt, then live chunks.
+    daemon.emitRequestEvent(attachReq.id!, 'user_message', { text: 'run the tests' });
+    daemon.emitRequestEvent(attachReq.id!, 'user_message', { text: 'run the tests' }); // a genuine duplicate in a later turn must still render
+    daemon.emitRequestEvent(attachReq.id!, 'chunk', { text: 'on it' });
+    await new Promise((r) => setTimeout(r, 10));
+    expect(rec.appended).toEqual([
+      { key: 'f1', role: 'user', text: 'run the tests' }, // the optimistic line
+      { key: 'e2', role: 'user', text: 'run the tests' }, // the second arrival -- not swallowed
+      { key: 'e3', role: 'assistant', text: 'on it' },
+    ]);
+  });
+
   it('cancelling the tracked tail (navigate away) sends task.cancel naming the attach\'s id and stops its event delivery', async () => {
     const { conn, daemon } = await makeRelayHarness();
     const rec = recordingDeps();
