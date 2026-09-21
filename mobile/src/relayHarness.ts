@@ -77,6 +77,11 @@ export class FakeDaemon {
     this.channel.send(new TextEncoder().encode(JSON.stringify({ id, event, params })));
   }
 
+  /** A pushed eventNotification (no request id) -- e.g. permission.pending, delivered to every subscriber of the topic. */
+  pushNotification(topic: string, payload: unknown, seq = 1) {
+    this.channel.send(new TextEncoder().encode(JSON.stringify({ event: { topic, seq, payload } })));
+  }
+
   private async loop() {
     const decoder = new TextDecoder();
     for (;;) {

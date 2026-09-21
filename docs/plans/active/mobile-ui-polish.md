@@ -242,7 +242,7 @@ against the real wire contracts before deciding scope, not assumed):
 ## Progress
 
 - [x] Item 1 — token foundation + PairingScreen
-- [ ] Item 2 — TasksScreen run-card list
+- [x] Item 2 — TasksScreen run-card list
 - [ ] Item 3 — TaskDetailScreen + permission cards visual polish
 - [ ] Hand off implementation via Paseo (GLM as primary implementer,
       per the user's standing preference — direct `deny` + specific
@@ -312,3 +312,40 @@ Criterion with the specific test or manual check that confirmed it.
   for visual regression tooling.
 - `npx tsc --noEmit && npm test`: clean (55 tests passing, up from the
   50-test baseline).
+
+### Item 2
+
+- `mobile/src/taskAttention.ts` (new, colocated logic like
+  `permissionRequests.ts`'s `PermissionBoard`): `PendingApprovalSet`
+  (`has`/`markPending`/`reset`), `subscribeToPendingApprovals` (wraps
+  `conn.subscribe(['permission.pending'], ...)`), and the pure
+  `sortTasksByAttention(tasks, pendingTaskIds)`.
+- `taskAttention.test.ts`: `sortTasksByAttention` unit tests confirm
+  pending-approval-first (even overriding an `"error"` status), then
+  running, then everything else, ties preserving original order in each
+  tier, and an empty pending set falling back to running-first. A
+  subscribe/unsubscribe test extends `mobile/src/relayHarness.ts` with a
+  `pushNotification(topic, payload, seq?)` helper (ported from
+  `RelayConnection.test.ts`'s local fake, which already had this exact
+  method but only for that one file) to push a real `permission.pending`
+  event over the harness's E2EE pipe -- confirms the event's `taskId`
+  reaches the callback, and that unsubscribing stops delivery (no leaked
+  handler), same style as `attachLifecycle.test.ts`.
+- `TasksScreen.tsx`: each task is a card (`theme.surface[1]` +
+  `elevation.sm`), with a status badge that pairs an icon (●/✓/✕/○) with
+  the real `task.Status` text -- never color alone, per the plan's Query
+  2 citation. `pendingApprovals` (a `PendingApprovalSet` ref) subscribes
+  once for the screen's lifetime via `subscribeToPendingApprovals`
+  (unsubscribed on unmount, the effect's cleanup); `load()` calls
+  `pendingApprovals.reset()` and clears the mirrored `pendingTaskIds`
+  React state before fetching, so a refresh drops stale "needs approval"
+  badges immediately, matching the plan's session-scoped Decision.
+  `sortTasksByAttention` is applied per section (ungrouped + each space)
+  right before rendering.
+- Zero hardcoded hex literals: `noHardcodedColors.test.ts` extended to
+  cover `src/screens/TasksScreen.tsx` — green.
+- Existing behavior preserved (unchanged from the prior version aside
+  from styling/sorting): pull-to-refresh, empty state, error + retry,
+  grouped-by-space layout, tap-to-open-task. `loadTasks` itself is
+  untouched.
+- `npx tsc --noEmit && npm test`: clean (60 tests passing).
