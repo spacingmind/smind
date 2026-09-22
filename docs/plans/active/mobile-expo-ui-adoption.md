@@ -189,7 +189,7 @@ directly rather than trust secondhand paraphrase.
 ## Progress
 
 - [x] Item 1 — `@expo/ui` `Button` for fixed, single-instance actions.
-- [ ] Item 2 — `@expo/ui` `TextInput` for the two text inputs
+- [x] Item 2 — `@expo/ui` `TextInput` for the two text inputs
       (best-effort; deferral with a named reason is an acceptable
       outcome).
 - [ ] Hand off implementation via Paseo (GLM as primary implementer,
@@ -242,3 +242,49 @@ directly rather than trust secondhand paraphrase.
   flight; Send disabled while the compose draft is empty/whitespace;
   Retry reloads; Disconnect returns to pairing; Back returns to the task
   list; permission option buttons respond to their request.
+
+### Item 2 — `@expo/ui` `TextInput` (landed, attempted for real)
+
+- `react-native-worklets@0.10.1` installed via `npx expo install`, per the
+  AC. Nuance found by reading the installed package's source: `@expo/ui`
+  treats worklets as an **optional** dependency (`src/State/
+  optionalWorklets.ts` lazy-requires it) because the universal
+  `TextInput`'s `onChangeText` dispatches to plain JS asynchronously via
+  the native `EventDispatcher` (`ios/TextFieldView.swift` fires
+  `onTextChange` as an event; only a worklet-registered handler takes the
+  synchronous `onTextChangeSync` path). So the handlers here are plain JS
+  callbacks — worklets is installed to satisfy the peer dep and enable
+  the flicker-free path if the handler is ever marked `'worklet'`, not a
+  hard runtime requirement for correctness.
+- `react-dom` peer-conflict fixed along the way: `@expo/ui`'s optional
+  `react-dom` peer resolved to `19.3.0`, which demands `react@^19.3.0`
+  against Expo SDK 57's pinned `react@19.2.3` — `npm install` failed on
+  ERESOLVE until `react-dom` was aligned via `npx expo install react-dom`
+  (now `19.2.3`, matching `react`).
+- Both inputs render via `@expo/ui`'s `TextInput` with prop names verified
+  against the installed `.d.ts`
+  (`build/universal/TextInput/types.d.ts`: `value:
+  ObservableState<string>`, `onChangeText`, `style: UniversalStyle` box
+  styling + `textStyle: UniversalTextStyle` text styling, `multiline`,
+  `numberOfLines`, `placeholderTextColor` — a genuinely different shape
+  than RN's single `style`, hence the inputBox/inputText and
+  composeField/composeText style split).
+- **Design: React state stays the validation source of truth; the
+  observable binds the field.** Each screen keeps its existing
+  `useState` (`pairingUrl`, `draft`) plus a `useNativeState('')`
+  observable; `onChangeText` mirrors the text into both. This preserves
+  the surrounding validation logic unchanged: Connect's disabled gate
+  still reads `!pairingUrl.trim() || connecting`, `canSend` still reads
+  `draft.trim()`.
+- Draft-restore on failed send extended to both stores: the catch path
+  now writes `setDraft(text)` **and** `draftState.value = text` (the
+  documented two-way path — assigning the observable's `.value` is how JS
+  pushes text back into the native field). `handleSend`'s success path
+  likewise clears both.
+- `npx tsc --noEmit` clean; `npm test` 13 files / 61 tests pass
+  unmodified.
+- Manual-check list (for whenever a simulator/device is available): typing
+  in the pairing field enables Connect only for non-whitespace; typing in
+  compose enables Send only for non-whitespace; a failed connect keeps
+  the pasted URL for retry; a failed send restores the drafted text into
+  the field; both fields accept multiline input.

@@ -9,8 +9,8 @@
 // color comes from useAppTheme(), never a hardcoded hex literal.
 
 import { useMemo, useState } from 'react';
-import { StyleSheet, Text, TextInput, View } from 'react-native';
-import { Button } from '@expo/ui';
+import { StyleSheet, Text, View } from 'react-native';
+import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { StatusBar } from 'expo-status-bar';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
@@ -26,6 +26,10 @@ export function PairingScreen({ onConnected }: Props) {
   const theme = useAppTheme();
   const styles = useMemo(() => makeStyles(theme), [theme]);
   const [pairingUrl, setPairingUrl] = useState('');
+  // @expo/ui's TextInput binds text via an ObservableState, not a plain
+  // string prop (mobile-expo-ui-adoption plan Item 2); the React state
+  // stays the source of truth for the Connect button's disabled gate.
+  const pairingUrlState = useNativeState('');
   const [status, setStatus] = useState<Status>({ kind: 'idle' });
 
   async function handleConnect() {
@@ -43,15 +47,20 @@ export function PairingScreen({ onConnected }: Props) {
       <StatusBar style="auto" />
       <Text style={styles.title}>smind pairing</Text>
       <Text style={styles.label}>Paste a pairing URL from `smind relay offer`:</Text>
-      <TextInput
-        style={styles.input}
+      <ExpoTextInput
+        style={styles.inputBox}
+        textStyle={styles.inputText}
         multiline
+        numberOfLines={3}
         autoCapitalize="none"
         autoCorrect={false}
         placeholder="https://spacingmind.sh/pair#offer=..."
         placeholderTextColor={theme.foregroundMuted}
-        value={pairingUrl}
-        onChangeText={setPairingUrl}
+        value={pairingUrlState}
+        onChangeText={(text) => {
+          pairingUrlState.value = text;
+          setPairingUrl(text);
+        }}
       />
       <View style={styles.connectWrap}>
         <Button
@@ -86,16 +95,16 @@ function makeStyles(theme: AppTheme) {
       color: theme.foregroundMuted,
       marginBottom: theme.spacing[2],
     },
-    input: {
+    inputBox: {
       borderWidth: 1,
       borderColor: theme.border,
       borderRadius: theme.radius.md,
       padding: theme.spacing[3],
-      minHeight: 80,
+    },
+    inputText: {
       fontSize: theme.type.codeAnnotation.fontSize,
       fontFamily: theme.type.codeAnnotation.fontFamily,
       color: theme.foreground,
-      textAlignVertical: 'top',
     },
     connectWrap: {
       marginTop: theme.spacing[4],
