@@ -22,7 +22,8 @@
 // output-line field on the wire, so no live-output capsule is rendered).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
 import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -69,6 +70,10 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   const [state, setState] = useState<LoadState>({ kind: 'loading' });
   const [lines, setLines] = useState<TimelineLine[]>([]);
   const [draft, setDraft] = useState('');
+  // ObservableState binding for the @expo/ui compose input (plan Item 2);
+  // React state remains the source of truth for canSend and the
+  // restore-on-failed-send path.
+  const draftState = useNativeState('');
   const [sendError, setSendError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionRequestState[]>([]);
   const [expandedToolCalls, setExpandedToolCalls] = useState<ReadonlySet<string>>(new Set());
@@ -159,6 +164,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
     const text = draft.trim();
     if (!text || state.kind !== 'ready' || state.run === null) return;
     setDraft('');
+    draftState.value = '';
     setSendError(null);
     try {
       await sendFollowUpPrompt(
@@ -176,6 +182,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
       );
     } catch (e) {
       setDraft(text); // the typed text is never silently lost
+      draftState.value = text;
       setSendError(e instanceof Error ? e.message : String(e));
     }
   }, [appendLines, conn, draft, nextSeq, removeLines, state, taskId, trackTail]);
@@ -200,9 +207,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={onBack} style={styles.back}>
-        <Text style={styles.backText}>&larr; Back</Text>
-      </TouchableOpacity>
+      <View style={styles.back}>
+        <Button variant="text" label="&larr; Back" onPress={onBack} />
+      </View>
       <Text style={styles.title}>{taskTitle}</Text>
 
       {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
@@ -251,13 +258,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                 {req.status === 'pending' ? (
                   <View style={styles.permissionOptions}>
                     {req.options.map((opt) => (
-                      <TouchableOpacity
-                        key={opt.id}
-                        style={styles.permissionButton}
-                        onPress={() => handlePermissionTap(req.requestId, opt.id)}
-                      >
-                        <Text style={styles.permissionButtonText}>{opt.label}</Text>
-                      </TouchableOpacity>
+                      <View key={opt.id} style={styles.permissionButton}>
+                        <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
+                      </View>
                     ))}
                   </View>
                 ) : (
@@ -272,21 +275,21 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           })}
           {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
           <View style={styles.composeRow}>
-            <TextInput
-              style={styles.composeInput}
-              value={draft}
-              onChangeText={setDraft}
-              placeholder="Send a follow-up prompt…"
-              placeholderTextColor={theme.foregroundMuted}
-              multiline
-            />
-            <TouchableOpacity
-              style={[styles.sendButton, !canSend ? styles.sendButtonDisabled : null]}
-              onPress={handleSend}
-              disabled={!canSend}
-            >
-              <Text style={styles.sendButtonText}>Send</Text>
-            </TouchableOpacity>
+            <View style={styles.composeWrap}>
+              <ExpoTextInput
+                style={styles.composeField}
+                textStyle={styles.composeText}
+                value={draftState}
+                onChangeText={(text) => {
+                  draftState.value = text;
+                  setDraft(text);
+                }}
+                placeholder="Send a follow-up prompt…"
+                placeholderTextColor={theme.foregroundMuted}
+                multiline
+              />
+            </View>
+            <Button label="Send" onPress={handleSend} disabled={!canSend} />
           </View>
         </>
       )}
@@ -334,10 +337,6 @@ function makeStyles(theme: AppTheme) {
     back: {
       alignSelf: 'flex-start',
       marginBottom: theme.spacing[2],
-    },
-    backText: {
-      color: theme.primary,
-      fontSize: theme.type.interface.fontSize,
     },
     title: {
       fontSize: theme.type.sectionTitle.fontSize,
@@ -433,17 +432,8 @@ function makeStyles(theme: AppTheme) {
       flexWrap: 'wrap',
     },
     permissionButton: {
-      backgroundColor: theme.primary,
-      borderRadius: theme.radius.sm,
-      paddingVertical: theme.spacing[2],
-      paddingHorizontal: theme.spacing[3],
       marginBottom: theme.spacing[1],
       marginRight: theme.spacing[2],
-    },
-    permissionButtonText: {
-      color: theme.surface[0],
-      fontSize: theme.type.codeAnnotation.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
     },
     permissionResolved: {
       fontSize: theme.type.metadataLabel.fontSize,
@@ -467,31 +457,21 @@ function makeStyles(theme: AppTheme) {
       paddingTop: theme.spacing[2],
       marginTop: theme.spacing[2],
     },
-    composeInput: {
+    composeWrap: {
       flex: 1,
-      backgroundColor: theme.surface[2],
-      borderRadius: theme.radius.md,
-      paddingHorizontal: theme.spacing[2.5],
-      paddingTop: theme.spacing[2],
-      paddingBottom: theme.spacing[2],
-      fontSize: theme.type.interface.fontSize,
-      color: theme.foreground,
       maxHeight: 120,
       marginRight: theme.spacing[2],
     },
-    sendButton: {
-      backgroundColor: theme.primary,
+    composeField: {
+      width: '100%',
+      backgroundColor: theme.surface[2],
       borderRadius: theme.radius.md,
-      paddingVertical: theme.spacing[2.5],
-      paddingHorizontal: theme.spacing[4],
+      paddingHorizontal: theme.spacing[2.5],
+      paddingVertical: theme.spacing[2],
     },
-    sendButtonDisabled: {
-      opacity: 0.5,
-    },
-    sendButtonText: {
-      color: theme.surface[0],
+    composeText: {
       fontSize: theme.type.interface.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
+      color: theme.foreground,
     },
   });
 }
