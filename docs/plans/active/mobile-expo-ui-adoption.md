@@ -192,14 +192,18 @@ directly rather than trust secondhand paraphrase.
 - [x] Item 2 — `@expo/ui` `TextInput` for the two text inputs
       (best-effort; deferral with a named reason is an acceptable
       outcome).
-- [ ] Hand off implementation via Paseo (GLM as primary implementer,
-      per the user's standing preference — direct `deny` + specific
-      `send_agent_prompt` redirect if it shows the "many turns, no
-      commits" stall pattern; escalate to Sonnet in the same
-      worktree/branch if a redirect doesn't produce real progress
-      within a further reasonable number of turns, per this session's
-      established mobile-ui-polish precedent).
-- [ ] Independent verification of agent-reported work before merge.
+- [x] Hand off implementation via Paseo — GLM implemented both items
+      end to end this time (unlike mobile-ui-polish's double stall).
+      One real intervention needed: mid-Item-2, GLM spent 7+ turns
+      reading native SwiftUI/Compose source (`onTextChange` dispatch
+      internals) past the point of being useful; a direct `deny` +
+      redirect ("stop reading, write the edit now") got it to convert
+      its findings into actual code within the same turn.
+- [x] Independent verification of agent-reported work before merge —
+      `npx tsc --noEmit`/`npm test`/`npm run test:integration` rerun
+      directly in the worktree (not trusted from the agent's report);
+      the `App.tsx` `Host`-wrapping diff read directly; PR #183's full
+      diff reviewed before merge.
 
 ## Validation
 
