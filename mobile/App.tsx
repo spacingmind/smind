@@ -9,6 +9,7 @@
 
 import { useCallback, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import { Host } from '@expo/ui';
 import { PairingScreen } from './src/screens/PairingScreen';
 import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
@@ -60,7 +61,9 @@ function AppShell() {
 export default function App() {
   return (
     <AppThemeProvider>
-      <AppShell />
+      <Host>
+        <AppShell />
+      </Host>
     </AppThemeProvider>
   );
 }

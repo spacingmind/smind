@@ -9,7 +9,8 @@
 // color comes from useAppTheme(), never a hardcoded hex literal.
 
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button } from '@expo/ui';
 import { StatusBar } from 'expo-status-bar';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
@@ -52,17 +53,13 @@ export function PairingScreen({ onConnected }: Props) {
         value={pairingUrl}
         onChangeText={setPairingUrl}
       />
-      <TouchableOpacity
-        style={[styles.button, (!pairingUrl.trim() || status.kind === 'connecting') && styles.buttonDisabled]}
-        onPress={handleConnect}
-        disabled={!pairingUrl.trim() || status.kind === 'connecting'}
-      >
-        {status.kind === 'connecting' ? (
-          <ActivityIndicator color={theme.surface[0]} />
-        ) : (
-          <Text style={styles.buttonText}>Connect</Text>
-        )}
-      </TouchableOpacity>
+      <View style={styles.connectWrap}>
+        <Button
+          label={status.kind === 'connecting' ? 'Connecting…' : 'Connect'}
+          onPress={handleConnect}
+          disabled={!pairingUrl.trim() || status.kind === 'connecting'}
+        />
+      </View>
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
     </View>
   );
@@ -100,20 +97,8 @@ function makeStyles(theme: AppTheme) {
       color: theme.foreground,
       textAlignVertical: 'top',
     },
-    button: {
-      backgroundColor: theme.primary,
-      borderRadius: theme.radius.md,
-      paddingVertical: theme.spacing[3.5],
-      alignItems: 'center',
+    connectWrap: {
       marginTop: theme.spacing[4],
-    },
-    buttonDisabled: {
-      opacity: 0.5,
-    },
-    buttonText: {
-      color: theme.surface[0],
-      fontSize: theme.type.interface.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
     },
     error: {
       color: theme.status.danger,

@@ -188,7 +188,7 @@ directly rather than trust secondhand paraphrase.
 
 ## Progress
 
-- [ ] Item 1 — `@expo/ui` `Button` for fixed, single-instance actions.
+- [x] Item 1 — `@expo/ui` `Button` for fixed, single-instance actions.
 - [ ] Item 2 — `@expo/ui` `TextInput` for the two text inputs
       (best-effort; deferral with a named reason is an acceptable
       outcome).
@@ -203,7 +203,42 @@ directly rather than trust secondhand paraphrase.
 
 ## Validation
 
-To be filled in as each item lands, mapping back to each Acceptance
-Criterion with the specific check that confirmed it (given no automated
-test coverage is possible, this will lean on direct code review + tsc,
-not a test run count).
+### Item 1 — `@expo/ui` `Button` (landed)
+
+- `@expo/ui@~57.0.19` installed via `npx expo install @expo/ui` (resolved
+  against `expo: ~57.0.24`, not raw npm) — `mobile/package.json`.
+- `Host` wraps the app once at the root (`App.tsx`'s `App()` renders
+  `AppThemeProvider > Host > AppShell`), not per-screen.
+- All six in-scope actions render via `@expo/ui` `Button`, exact prop
+  names verified against the installed package's `.d.ts`
+  (`node_modules/@expo/ui/build/universal/Button/types.d.ts`:
+  `label`/`onPress`/`variant: 'filled'|'outlined'|'text'` +
+  `UniversalBaseProps.disabled`; `UniversalStyle` in
+  `build/universal/types.d.ts` supports padding/background/border/opacity
+  but **not margin**, so outer spacing moves to wrapping RN `View`s):
+  - `PairingScreen` Connect — `disabled` keeps the exact
+    `!pairingUrl.trim() || status.kind === 'connecting'` condition; the
+    former `ActivityIndicator`-as-child busy state became
+    `label="Connecting…"` (native `Button` children must themselves be
+    `@expo/ui`-renderable — verified in the installed `Button`
+    implementation — so an RN spinner can't stay a child; disabled-while-
+    connecting behavior is preserved).
+  - `TasksScreen` Retry — `onPress={load}` unchanged.
+  - `TasksScreen` Disconnect — `variant="text"` (it was a text-style
+    link).
+  - `TaskDetailScreen` Back — `variant="text"`, label `&larr; Back`.
+  - `TaskDetailScreen` permission option buttons — one `Button` per
+    option inside the bounded `.map()`; wraps in a `View` carrying the
+    per-option margin (`UniversalStyle` lacks margin).
+  - `TaskDetailScreen` Send — `disabled={!canSend}` unchanged.
+- Task-card tap (`TasksScreen` FlatList row) and tool-call-row
+  expand/collapse (`TaskDetailScreen`'s `ToolCallRow`) untouched — still
+  `TouchableOpacity`, verified by grep: only those two usages remain.
+- `npx tsc --noEmit` clean; `npm test` 13 files / 61 tests pass
+  unmodified (logic-layer suite, as expected).
+- Manual-check list (for whenever a simulator/device is available): each
+  of the six buttons calls its existing handler; Connect disabled until a
+  non-empty trimmed URL is pasted and shows "Connecting…" while in
+  flight; Send disabled while the compose draft is empty/whitespace;
+  Retry reloads; Disconnect returns to pairing; Back returns to the task
+  list; permission option buttons respond to their request.

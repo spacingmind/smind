@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Button } from '@expo/ui';
 import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -200,9 +201,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
 
   return (
     <View style={styles.container}>
-      <TouchableOpacity onPress={onBack} style={styles.back}>
-        <Text style={styles.backText}>&larr; Back</Text>
-      </TouchableOpacity>
+      <View style={styles.back}>
+        <Button variant="text" label="&larr; Back" onPress={onBack} />
+      </View>
       <Text style={styles.title}>{taskTitle}</Text>
 
       {state.kind === 'loading' && <ActivityIndicator style={styles.spinner} size="large" color={theme.primary} />}
@@ -251,13 +252,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                 {req.status === 'pending' ? (
                   <View style={styles.permissionOptions}>
                     {req.options.map((opt) => (
-                      <TouchableOpacity
-                        key={opt.id}
-                        style={styles.permissionButton}
-                        onPress={() => handlePermissionTap(req.requestId, opt.id)}
-                      >
-                        <Text style={styles.permissionButtonText}>{opt.label}</Text>
-                      </TouchableOpacity>
+                      <View key={opt.id} style={styles.permissionButton}>
+                        <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
+                      </View>
                     ))}
                   </View>
                 ) : (
@@ -280,13 +277,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
               placeholderTextColor={theme.foregroundMuted}
               multiline
             />
-            <TouchableOpacity
-              style={[styles.sendButton, !canSend ? styles.sendButtonDisabled : null]}
-              onPress={handleSend}
-              disabled={!canSend}
-            >
-              <Text style={styles.sendButtonText}>Send</Text>
-            </TouchableOpacity>
+            <Button label="Send" onPress={handleSend} disabled={!canSend} />
           </View>
         </>
       )}
@@ -334,10 +325,6 @@ function makeStyles(theme: AppTheme) {
     back: {
       alignSelf: 'flex-start',
       marginBottom: theme.spacing[2],
-    },
-    backText: {
-      color: theme.primary,
-      fontSize: theme.type.interface.fontSize,
     },
     title: {
       fontSize: theme.type.sectionTitle.fontSize,
@@ -433,17 +420,8 @@ function makeStyles(theme: AppTheme) {
       flexWrap: 'wrap',
     },
     permissionButton: {
-      backgroundColor: theme.primary,
-      borderRadius: theme.radius.sm,
-      paddingVertical: theme.spacing[2],
-      paddingHorizontal: theme.spacing[3],
       marginBottom: theme.spacing[1],
       marginRight: theme.spacing[2],
-    },
-    permissionButtonText: {
-      color: theme.surface[0],
-      fontSize: theme.type.codeAnnotation.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
     },
     permissionResolved: {
       fontSize: theme.type.metadataLabel.fontSize,
@@ -478,20 +456,6 @@ function makeStyles(theme: AppTheme) {
       color: theme.foreground,
       maxHeight: 120,
       marginRight: theme.spacing[2],
-    },
-    sendButton: {
-      backgroundColor: theme.primary,
-      borderRadius: theme.radius.md,
-      paddingVertical: theme.spacing[2.5],
-      paddingHorizontal: theme.spacing[4],
-    },
-    sendButtonDisabled: {
-      opacity: 0.5,
-    },
-    sendButtonText: {
-      color: theme.surface[0],
-      fontSize: theme.type.interface.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
     },
   });
 }

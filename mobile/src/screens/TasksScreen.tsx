@@ -14,6 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Button } from '@expo/ui';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
 import { PendingApprovalSet, sortTasksByAttention, subscribeToPendingApprovals } from '../taskAttention';
@@ -92,9 +93,7 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
       <View style={styles.centered}>
         <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
         <Text style={styles.errorDetail}>{state.message}</Text>
-        <TouchableOpacity style={styles.retryButton} onPress={load}>
-          <Text style={styles.retryButtonText}>Retry</Text>
-        </TouchableOpacity>
+        <Button label="Retry" onPress={load} />
       </View>
     );
   }
@@ -106,9 +105,7 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.header}>{workspace.Title}</Text>
-        <TouchableOpacity onPress={onDisconnect}>
-          <Text style={styles.disconnect}>Disconnect</Text>
-        </TouchableOpacity>
+        <Button variant="text" label="Disconnect" onPress={onDisconnect} />
       </View>
       <FlatList
         data={[
@@ -211,10 +208,6 @@ function makeStyles(theme: AppTheme) {
       color: theme.foreground,
       flex: 1,
     },
-    disconnect: {
-      color: theme.primary,
-      fontSize: theme.type.interface.fontSize,
-    },
     section: {
       marginBottom: theme.spacing[6],
     },
@@ -301,17 +294,6 @@ function makeStyles(theme: AppTheme) {
       textAlign: 'center',
       fontFamily: theme.type.codeAnnotation.fontFamily,
       marginBottom: theme.spacing[6],
-    },
-    retryButton: {
-      backgroundColor: theme.primary,
-      borderRadius: theme.radius.md,
-      paddingVertical: theme.spacing[3],
-      paddingHorizontal: theme.spacing[8],
-    },
-    retryButtonText: {
-      color: theme.surface[0],
-      fontSize: theme.type.interface.fontSize,
-      fontWeight: theme.type.interface.fontWeight,
     },
   });
 }
