@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>smind</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    font-family: system-ui, sans-serif;
+    background: #111318;
+    color: #e6e6e6;
+  }
+  h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
+  p { margin: 0; color: #9aa0aa; font-size: .9rem; }
+  #url { font-family: ui-monospace, monospace; }
+  .spinner {
+    width: 22px; height: 22px;
+    border: 3px solid #2a2e37; border-top-color: #7aa2f7;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="spinner"></div>
+  <h1>smind daemon not reachable</h1>
+  <p>Waiting for <span id="url"></span> — retrying.</p>
+  <p>Start it with <code>smind serve</code>.</p>
+  <script>
+    document.getElementById("url").textContent =
+      new URLSearchParams(location.search).get("daemon") || "";
+  </script>
+</body>
+</html>

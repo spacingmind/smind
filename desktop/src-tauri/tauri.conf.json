@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "smind",
+  "version": "0.1.0",
+  "identifier": "dev.spacingmind.desktop",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "smind",
+        "url": "http://127.0.0.1:4648",
+        "width": 1280,
+        "height": 800
+      }
+    ],
+    "security": {
+      "csp": null
+      }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "deb",
+    "icon": ["icons/icon.png"]
+  }
+}
