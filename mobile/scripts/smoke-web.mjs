@@ -115,11 +115,39 @@ function trackErrors(page, label) {
 
 async function assertPairingScreen(page, url) {
   await page.goto(url, { waitUntil: 'load' });
-  await page.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+  const title = page.getByText('smind pairing', { exact: true });
+  await title.waitFor({ timeout: 20_000 });
   if ((await page.locator('textarea, input[type="text"]').count()) === 0) {
     fail('pairing URL input not found');
   }
   await page.getByRole('button', { name: 'Connect' }).waitFor({ timeout: 5_000 });
+  // Regression check for the PR #183 root-<Host> squeeze: the app's root
+  // view must span the full viewport width, and the theme background
+  // must reach both edges (a themed app would otherwise show a white
+  // strip next to the squeezed panel, invisible to DOM assertions).
+  const width = await page.evaluate(() => {
+    const el = document.querySelector('#root > div');
+    return el ? el.getBoundingClientRect().width : 0;
+  });
+  const viewport = page.viewportSize();
+  if (width < viewport.width - 1) {
+    fail(`app fills only ${Math.round(width)}px of ${viewport.width}px viewport width (root-Host squeeze?)`);
+  }
+  const bgAt = (x) =>
+    page.evaluate(
+      (px) => {
+        const el = document.elementFromPoint(px, Math.round(window.innerHeight / 2));
+        return el ? getComputedStyle(el).backgroundColor : 'none';
+      },
+      x,
+    );
+  const [leftBg, rightBg] = await Promise.all([bgAt(2), bgAt(viewport.width - 3)]);
+  if (leftBg !== rightBg) {
+    fail(`background differs at viewport edges: left=${leftBg} right=${rightBg} (squeezed panel?)`);
+  }
+  if (leftBg === 'rgb(255, 255, 255)' && await page.evaluate(() => matchMedia('(prefers-color-scheme: dark)').matches)) {
+    fail(`dark scheme renders white background (${leftBg}) at viewport edges`);
+  }
 }
 
 async function pairAndAssertTasks(page, pairingUrl, scheme) {

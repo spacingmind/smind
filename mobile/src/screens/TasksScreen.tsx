@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button } from '@expo/ui';
+import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
 import { PendingApprovalSet, sortTasksByAttention, subscribeToPendingApprovals } from '../taskAttention';
@@ -93,7 +94,9 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
       <View style={styles.centered}>
         <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
         <Text style={styles.errorDetail}>{state.message}</Text>
-        <Button label="Retry" onPress={load} />
+        <UiHost style={styles.retryHost}>
+          <Button label="Retry" onPress={load} />
+        </UiHost>
       </View>
     );
   }
@@ -105,7 +108,9 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.header}>{workspace.Title}</Text>
-        <Button variant="text" label="Disconnect" onPress={onDisconnect} />
+        <UiHost>
+          <Button variant="text" label="Disconnect" onPress={onDisconnect} />
+        </UiHost>
       </View>
       <FlatList
         data={[
@@ -207,6 +212,10 @@ function makeStyles(theme: AppTheme) {
       fontWeight: theme.type.sectionTitle.fontWeight,
       color: theme.foreground,
       flex: 1,
+    },
+    retryHost: {
+      alignSelf: 'center',
+      marginTop: theme.spacing[2],
     },
     section: {
       marginBottom: theme.spacing[6],

@@ -118,6 +118,19 @@ stated in Validation.
   the two screenshots visibly differ light vs dark background/foreground —
   `@expo/ui` components rendering at all on `react-native-web`, and the
   JS flows. It does not verify SwiftUI/Compose-specific rendering on
-  native. Cosmetic web-only quirk observed, not fixed: `@expo/ui`'s
-  `Host` constrains the app to a narrow panel in the viewport's corner
-  rather than full-width on web; native layout is unaffected.
+  native.
+- Real bug found and fixed (PR #183 regression): the first run showed
+  the app squeezed into a ~347px corner panel — not cosmetic, not
+  web-only. Root cause: App.tsx wrapped the whole RN app in `@expo/ui`'s
+  root `<Host>`; on web Host renders a plain View with no flex, and on
+  native RN children inside a Host need `RNHostView`
+  (.agents/skills/expo-ui/references/swift-ui.md), so native rendering
+  was at risk too. Fix: removed the root Host, wrapped each @expo/ui
+  Button/TextInput subtree in its own `<Host matchContents>` via the new
+  `src/ui/UiHost.tsx` (matchContents implies alignSelf flex-start on
+  web, so row layouts pass a restoring style: stretch for the two text
+  inputs, center for Retry, flex-end for Send). Verified: rerun
+  screenshots fill the full viewport in both schemes (dark background
+  edge to edge), and the smoke script gained regression assertions for
+  root-width fill and edge-to-edge background. `tsc` + `npm test` still
+  61/61. Also recorded in mobile-expo-ui-adoption.md's Validation.

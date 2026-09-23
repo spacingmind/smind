@@ -6,10 +6,13 @@
 // realtime timeline (Item 3). One RelayConnection lives for the whole
 // connected session and is passed down; it is closed when the user
 // disconnects.
+//
+// No root <Host> here: each @expo/ui subtree carries its own Host via
+// src/ui/UiHost (the root-Host pattern from PR #183 broke layout -- see
+// UiHost.tsx's header).
 
 import { useCallback, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { Host } from '@expo/ui';
 import { PairingScreen } from './src/screens/PairingScreen';
 import { TaskDetailScreen } from './src/screens/TaskDetailScreen';
 import { TasksScreen } from './src/screens/TasksScreen';
@@ -61,9 +64,7 @@ function AppShell() {
 export default function App() {
   return (
     <AppThemeProvider>
-      <Host>
-        <AppShell />
-      </Host>
+      <AppShell />
     </AppThemeProvider>
   );
 }
