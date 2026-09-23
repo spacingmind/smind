@@ -74,6 +74,35 @@ function clickTaskRow(task: Task): void {
 }
 
 /**
+ * Opens Diff's tab via the pane's "+" menu -- only Chat is seeded on first
+ * visit now (dogfood default-tabs fix), same helper App.test.tsx defines.
+ * Enter, not pointerdown -- see that file's comment on why pointerdown
+ * never flips the trigger's data-state under this file's fake timers too.
+ */
+async function openDiffTab(): Promise<void> {
+  const trigger = screen.getByTestId("tabs-new-tab");
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Open Diff" }));
+  await flush();
+}
+
+/**
+ * Splits Diff's tab to the right via the tab strip's own "Split" menu --
+ * replaces the old single "Open to the side" button (Item 3's rewrite),
+ * same helper App.test.tsx defines.
+ */
+async function splitDiffTabRight(): Promise<void> {
+  const trigger = screen.getByRole("button", { name: "Split Diff" });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByTestId("workspace-tab-split-right"));
+  await flush();
+}
+
+/**
  * A controllable `window.innerWidth` + `matchMedia` stub so a test can
  * simulate crossing `hooks/use-mobile.ts`'s 768px breakpoint after mount
  * -- the same "stub matchMedia, then fire its change listener" shape
@@ -170,11 +199,11 @@ describe("App compact layout (Item 21)", () => {
     expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
   });
 
-  it("the side dock (Item 6) doesn't apply below the breakpoint even with an existing split, and reappears above it (graceful, not lossy)", async () => {
+  it("the split tree (Item 6) doesn't apply below the breakpoint even with an existing split, and reappears above it (graceful, not lossy)", async () => {
     const viewport = stubViewportWidth(1024);
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
-    render(<App connect={connect} />);
+    const { container } = render(<App connect={connect} />);
     await resolveSidebar(socket);
 
     clickTaskRow(TASK);
@@ -182,21 +211,26 @@ describe("App compact layout (Item 21)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // Move the Diff tab (a movable kind) to the side pane, at desktop width.
-    const moveButton = screen.getByLabelText("Open Diff to the side");
-    fireEvent.click(moveButton);
-    await flush();
+    // Diff isn't seeded any more (dogfood default-tabs fix) -- open it,
+    // then split it (a movable kind) into a second pane, at desktop width.
+    await openDiffTab();
+    await splitDiffTabRight();
 
-    expect(screen.getByTestId("side-pane-resize-handle")).toBeInTheDocument();
+    // A resizable-handle exists beyond the sidebar's own (which always
+    // carries the fixed "sidebar-resize-handle" id) -- that's the new
+    // pane split's own handle.
+    const splitHandle = () =>
+      container.querySelector('[data-slot="resizable-handle"]:not(#sidebar-resize-handle)');
+    expect(splitHandle()).toBeInTheDocument();
 
-    // Resize down: the split stops rendering, and so does the "open to
-    // side" affordance (there's nowhere for it to move a tab to) -- but
-    // the side pane's own tab isn't discarded from state, just not shown.
+    // Resize down: the split stops rendering, and so does the "split"
+    // affordance (there's nowhere for it to open a second pane) -- but
+    // the second pane's own tab isn't discarded from state, just not shown.
     act(() => viewport.resize(375));
     await flush();
 
-    expect(screen.queryByTestId("side-pane-resize-handle")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("workspace-tab-move")).not.toBeInTheDocument();
+    expect(splitHandle()).not.toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-tab-split")).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
 
     // Resize back up: the split reappears with the same tab, proving the
@@ -204,6 +238,6 @@ describe("App compact layout (Item 21)", () => {
     act(() => viewport.resize(1024));
     await flush();
 
-    expect(screen.getByTestId("side-pane-resize-handle")).toBeInTheDocument();
+    expect(splitHandle()).toBeInTheDocument();
   });
 });

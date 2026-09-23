@@ -44,13 +44,28 @@ export interface Space {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
-// internal/taskrunner.ApprovalPolicy's two values, carried over the wire as
-// their underlying string -- run.start/task.prompt's optional
+// internal/taskrunner.ApprovalPolicy's three values, carried over the wire
+// as their underlying string -- run.start/task.prompt's optional
 // `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
 // default when omitted (today's always-ask-a-human behavior); "auto-safe"
 // lets a small, conservative allowlist of read-only verification commands
-// (see internal/taskrunner.AllowlistedCommand) skip the human prompt.
-export type ApprovalPolicy = "manual" | "auto-safe";
+// (see internal/taskrunner.AllowlistedCommand) skip the human prompt;
+// "full-access" installs no decider at all and hands the provider its own
+// native "auto-approve everything" mechanism instead (Claude Code's
+// bypassPermissions mode, Codex's AutoApprovePolicy, ACP's
+// AutoApprovePolicy) -- each provider's own real ceiling, not one shared
+// generic tier (see docs/plans/active/task-move-approval-thinking.md).
+export type ApprovalPolicy = "manual" | "auto-safe" | "full-access";
+
+// internal/taskrunner.ThinkingLevel's values, carried over the wire as
+// their underlying string -- run.start/task.prompt's optional
+// `thinkingLevel` param. Claude-only (every other provider ignores it, and
+// the composer only ever renders this control when provider === "claude-native");
+// GLM/Kimi's own thinking-level control is a completely different,
+// live-session-scoped mechanism (ACP's ConfigOption, see run.listConfigOptions/
+// run.setConfigOption), and Codex has no reachable per-turn equivalent at
+// all. "" (omitted) preserves today's SDK default exactly.
+export type ThinkingLevel = "" | "off" | "standard" | "extended";
 
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
 // spawned as an external CLI subprocess managing its own authentication out
@@ -119,11 +134,22 @@ export interface RunSummary {
   FinishedAt: string | null;
   StopReason: string;
   Err: string;
+  /** The run's current policy -- live for a running run (see run.setApprovalPolicy), whatever it last was for a finished one. */
+  ApprovalPolicy: ApprovalPolicy;
+  /** Claude-only; "" (unset) for every other provider or a run started before the thinking-level selector was touched. Not persisted across a daemon restart -- a rehydrated run always reports "". */
+  ThinkingLevel: ThinkingLevel;
 }
 
 // Result of run.start (internal/wsapi/handlers.go's runStartResult).
 export interface RunStartResult {
   runId: string;
+}
+
+// Result of run.setApprovalPolicy (internal/wsapi/handlers.go's
+// runApprovalPolicyResult): the run's approvalPolicy after the change, so a
+// caller can confirm the switch took without a separate round trip.
+export interface RunSetApprovalPolicyResult {
+  approvalPolicy: ApprovalPolicy;
 }
 
 // Terminal result of a successful run.attach (internal/wsapi/handlers.go's
@@ -137,6 +163,41 @@ export interface RunAttachResult {
 // (internal/wsapi/handlers.go's taskChunkParams).
 export interface RunChunkEventParams {
   text: string;
+}
+
+// One selectable choice of a ConfigOption whose Type is "select"
+// (internal/wsapi/handlers.go's configSelectOptionParams, mirroring
+// internal/acp.ConfigSelectOption -- ACP's own SessionConfigSelectOption).
+export interface ConfigSelectOption {
+  value: string;
+  name: string;
+  description?: string;
+}
+
+// One ACP session config option, as run.listConfigOptions/run.setConfigOption
+// report it (internal/wsapi/handlers.go's configOptionParams, mirroring
+// internal/acp.ConfigOption). GLM/Kimi-only -- Claude/Codex runs always
+// report an empty list (see ThinkingLevel's own doc comment for why their
+// thinking-level knobs work completely differently). currentValue is raw
+// JSON since its shape varies by type: a bare string for "select", a bare
+// boolean for "boolean". options is only ever populated for type "select"
+// (an agent's own enumerated named choices, e.g. GLM's real thinking-level
+// tiers) -- read ids/labels from here, never hardcoded, since this
+// package has no fixed list of what any given agent will advertise.
+export interface ConfigOptionParams {
+  configId: string;
+  name: string;
+  description?: string;
+  category?: string;
+  type: string;
+  currentValue?: unknown;
+  options?: ConfigSelectOption[];
+}
+
+// Result of run.listConfigOptions/run.setConfigOption
+// (internal/wsapi/handlers.go's runConfigOptionsResult).
+export interface RunConfigOptionsResult {
+  options: ConfigOptionParams[];
 }
 
 // One choice offered by a pending permission request (internal/wsapi/
@@ -230,7 +291,7 @@ export interface RunToolCallEventParams {
 // Every event name run.attach/run.logs can carry today
 // (internal/wsapi/handlers.go's toRunLogEvent). The three structured ones
 // were added by ADR 0008 and are additive: a run recorded before it still
-// decodes as chunk/done/permission_* only.
+// decodes as chunk/done/permission_* only. "raw" was added by ADR 0010.
 export type RunEventType =
   | "chunk"
   | "user_message"
@@ -238,7 +299,8 @@ export type RunEventType =
   | "tool_call"
   | "done"
   | "permission_request"
-  | "permission_resolved";
+  | "permission_resolved"
+  | "raw";
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
 // runLogEvent) -- the same fields the streamed events and terminal
@@ -260,6 +322,10 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   options?: PermissionOption[];
   optionId?: string;
   reason?: PermissionResolutionReason;
+  /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */
+  kind?: string;
+  /** Populated for a "raw" entry (ADR 0010) -- the update's full original JSON, forwarded as-is. */
+  payload?: unknown;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).

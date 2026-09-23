@@ -78,7 +78,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -116,7 +116,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderKimi, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -171,7 +171,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -201,7 +201,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -240,7 +240,7 @@ func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -295,7 +295,7 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -352,6 +352,7 @@ func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
 	}{
 		{name: "auto-safe pre-approves the allowlist at the CLI gate", approvalPolicy: ApprovalPolicyAutoSafe, wantRules: true},
 		{name: "manual spawns with no pre-approved tools", approvalPolicy: ApprovalPolicyManual, wantRules: false},
+		{name: "full-access spawns with no pre-approved tools either -- bypassPermissions covers everything already", approvalPolicy: ApprovalPolicyFullAccess, wantRules: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -362,7 +363,7 @@ func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, tc.approvalPolicy, events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, tc.approvalPolicy, "", events)
 			}()
 
 			got := drainEvents(events)
@@ -394,6 +395,71 @@ func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
 			want := SafeBashRules()
 			if strings.Join(allowed, ",") != strings.Join(want, ",") {
 				t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+			}
+		})
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNative_ThinkingLevel proves each ThinkingLevel
+// value maps to the specific claude-agent-sdk-go Option (and therefore CLI
+// flags -- see claudecode's own doc comments for WithAdaptiveThinking/
+// WithThinkingBudget/WithDisabledThinking) runClaudeNative's doc comment
+// promises, using the same "echo-args" observability the AutoSafeAllowedTools
+// test above uses for --allowedTools: the fake CLI dumps its real argv to a
+// file, which is the only way to observe an Option's effect since
+// claudecode.Option values aren't otherwise inspectable from this package.
+// ThinkingLevelUnspecified (the zero value, what an older client that never
+// set the field gets) must add no thinking flags at all -- proving omitting
+// the field doesn't change today's default behavior, per the Test
+// Scenarios.
+func TestRunner_RunPrompt_ClaudeNative_ThinkingLevel(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name      string
+		level     ThinkingLevel
+		wantFlags []string
+	}{
+		{name: "unspecified adds no thinking flags", level: ThinkingLevelUnspecified, wantFlags: nil},
+		{name: "off sends --thinking disabled", level: ThinkingLevelOff, wantFlags: []string{"--thinking", "disabled"}},
+		{name: "standard sends --thinking adaptive", level: ThinkingLevelStandard, wantFlags: []string{"--thinking", "adaptive"}},
+		{name: "extended sends --max-thinking-tokens", level: ThinkingLevelExtended, wantFlags: []string{"--max-thinking-tokens", "32000"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "echo-args")
+			r := claudeNativeRunner(t, wm)
+
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", nil, "", tc.level, events)
+			}()
+
+			got := drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			if len(got) == 0 || got[len(got)-1].Type != EventTypeDone {
+				t.Fatalf("expected a Done event, got %+v", got)
+			}
+
+			data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "args"))
+			if err != nil {
+				t.Fatalf("read args file: %v", err)
+			}
+			args := strings.Split(string(data), "\n")
+
+			var gotFlags []string
+			for i, a := range args {
+				if a == "--thinking" || a == "--max-thinking-tokens" {
+					if i+1 < len(args) {
+						gotFlags = append(gotFlags, a, args[i+1])
+					}
+				}
+			}
+			if strings.Join(gotFlags, ",") != strings.Join(tc.wantFlags, ",") {
+				t.Fatalf("thinking flags = %v, want %v", gotFlags, tc.wantFlags)
 			}
 		})
 	}
@@ -441,7 +507,7 @@ func TestRunner_RunPrompt_NoWorktree(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -461,7 +527,7 @@ func TestRunner_RunPrompt_UnknownProvider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", nil, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, Provider("bogus"), "hi", nil, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -490,7 +556,7 @@ func TestRunner_RunPrompt_ContextCancellationStopsSubprocess(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", nil, "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hi", nil, "", "", events)
 	}()
 
 	select {
@@ -543,7 +609,7 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	defer cancel()
 
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", nil, "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, ProviderGLM, "hello", nil, "", "", events)
 	}()
 
 	select {
@@ -616,7 +682,7 @@ func TestRunner_RunPrompt_PermissionRequest_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -671,7 +737,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -718,7 +784,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -760,7 +826,7 @@ func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, ApprovalPolicyManual, events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, ApprovalPolicyManual, "", events)
 			}()
 
 			got := drainEvents(events)
@@ -779,5 +845,120 @@ func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
 				t.Fatalf("CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS = %q, want %q", data, tc.wantEnv)
 			}
 		})
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNative_FullAccess_NeverAsksDecider proves
+// ApprovalPolicyFullAccess installs no decider at all for Claude Code
+// native, even when RunPrompt is handed a non-nil one: it reuses the
+// "permission" fake-CLI scenario the manual-tier tests above drive through
+// claudeDeciderAdapter, but wires a decider that would answer "deny" if
+// consulted -- since runClaudeNative's full-access branch never adds
+// claudecode.WithPermissionPolicy(claudeDeciderAdapter{...}) at all (only
+// WithPermissionMode("bypassPermissions")), the SDK's own can_use_tool
+// handling never reaches this decider, so a deny-leaning decider going
+// unconsulted is exactly the signal that no permission-request round trip
+// (taskrunner.EventTypePermissionRequest, emitted one level up by
+// internal/runs' own PermissionDecider wrapper) ever happens under this
+// tier -- see docs/plans/active/task-move-approval-thinking.md's Item 2
+// Test Scenarios.
+func TestRunner_RunPrompt_ClaudeNative_FullAccess_NeverAsksDecider(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := claudeNativeRunner(t, wm)
+	decider := &stubDecider{optionID: claudeOptionDeny}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderClaudeNative, "hi", decider, ApprovalPolicyFullAccess, "", events)
+	}()
+
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	if decider.callCount() != 0 {
+		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
+	}
+}
+
+// TestRunner_RunPrompt_GLM_FullAccess_InstallsAutoApprove proves
+// ApprovalPolicyFullAccess installs acp.AutoApprovePolicy{} for ACP
+// (GLM/Kimi), not merely "no decider": the fake agent's "permission"
+// scenario offers an allow_once and a reject_once option and echoes back
+// whichever optionId the client chose, so seeing "chose:allow-1" (the
+// allow option AutoApprovePolicy always selects) rather than the
+// deny-leaning stubDecider's answer proves the real auto-approve
+// mechanism is actually wired in, and decider.callCount() == 0 proves the
+// decider it was handed is never consulted to get there.
+func TestRunner_RunPrompt_GLM_FullAccess_InstallsAutoApprove(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := glmRunner(wm)
+	decider := &stubDecider{optionID: "deny-1"}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderGLM, "hi", decider, ApprovalPolicyFullAccess, "", events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if decider.callCount() != 0 {
+		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
+	}
+
+	var texts []string
+	for _, e := range got {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "chose:allow-1" {
+		t.Fatalf("got texts %v, want [%q] (proves acp.AutoApprovePolicy{} chose the allow option, not the stub decider's deny)", texts, "chose:allow-1")
+	}
+}
+
+// TestRunner_RunPrompt_CodexNative_FullAccess_InstallsAutoApprove is the
+// Codex-native twin of the GLM test above: the fake app-server's
+// "permission" scenario issues a real item/commandExecution/requestApproval
+// call and streams back the decision it received, so "decision:accept"
+// (what codex.AutoApprovePolicy{} always answers) rather than the
+// deny-leaning stubDecider's "decline" proves the real policy is installed,
+// and decider.callCount() == 0 proves codexDeciderAdapter is never reached
+// to get there.
+func TestRunner_RunPrompt_CodexNative_FullAccess_InstallsAutoApprove(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := codexRunner(wm)
+	decider := &stubDecider{optionID: codexOptionDecline}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, ProviderCodexNative, "hi", decider, ApprovalPolicyFullAccess, "", events)
+	}()
+
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if decider.callCount() != 0 {
+		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
+	}
+
+	var texts []string
+	for _, e := range got {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	if len(texts) != 1 || texts[0] != "decision:accept" {
+		t.Fatalf("got texts %v, want [%q] (proves codex.AutoApprovePolicy{} accepted, not the stub decider's decline)", texts, "decision:accept")
 	}
 }

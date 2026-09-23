@@ -25,6 +25,8 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
     startedAt: "2024-01-01T00:00:00Z",
     finishedAt: "2024-01-01T00:00:02Z",
     items: buildTimeline(events),
+    approvalPolicy: "manual",
+    thinkingLevel: "",
     ...overrides,
   };
 }

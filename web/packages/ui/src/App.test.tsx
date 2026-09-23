@@ -44,6 +44,34 @@ const TASK_B: Task = {
   Branch: "task-b",
 };
 
+const TASK_C: Task = {
+  ...TASK,
+  ID: 3,
+  Title: "Task C",
+  Branch: "task-c",
+};
+
+const TASK_D: Task = {
+  ...TASK,
+  ID: 4,
+  Title: "Task D",
+  Branch: "task-d",
+};
+
+const TASK_E: Task = {
+  ...TASK,
+  ID: 5,
+  Title: "Task E",
+  Branch: "task-e",
+};
+
+const TASK_F: Task = {
+  ...TASK,
+  ID: 6,
+  Title: "Task F",
+  Branch: "task-f",
+};
+
 /** Flushes pending microtasks, wrapped in `act` so React commits any resulting state updates before the caller asserts -- same helper other component test files use. */
 async function flush(): Promise<void> {
   await act(async () => {
@@ -105,6 +133,43 @@ function clickTaskRow(task: Task): void {
   fireEvent.click(screen.getAllByText(task.Title)[0]!);
 }
 
+/**
+ * Opens `label`'s tab via the pane's "+" menu -- the real flow now that
+ * only Chat is seeded on first visit (dogfood default-tabs fix; the other
+ * three base kinds are one click away instead of pre-opened clutter).
+ * Radix's DropdownMenuTrigger opens on pointerdown, same as
+ * theme-toggle.test.tsx. The newly opened tab is already active (openTab
+ * activates whatever it just opened), so callers don't need a separate
+ * focus+click to select it.
+ */
+async function openBaseTab(label: "Files" | "Diff" | "Terminal"): Promise<void> {
+  // Enter, not pointerdown -- Radix's DropdownMenuTrigger opens on either,
+  // but under this file's fake timers a bare fireEvent.pointerDown never
+  // flips data-state to "open" (unclear why; keyboard activation is
+  // reliable and just as real a user path).
+  const trigger = screen.getByTestId("tabs-new-tab");
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByRole("menuitem", { name: `Open ${label}` }));
+  await flush();
+}
+
+/**
+ * Splits `title`'s tab to the right via the tab strip's own "Split" menu --
+ * replaces the old single "Open to the side" button (Item 3's rewrite).
+ * Same focus+Enter dance as `openBaseTab` for opening the trigger reliably
+ * under this file's fake timers.
+ */
+async function splitTabRight(title: string): Promise<void> {
+  const trigger = screen.getByRole("button", { name: `Split ${title}` });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  await flush();
+  fireEvent.click(screen.getByTestId("workspace-tab-split-right"));
+  await flush();
+}
+
 /** Selects task's row, opens its Files tab, expands nothing, and clicks the README.md row -- the file-open flow the tab registry tests build on. */
 async function openFileInTask(socket: FakeSocket, task: Task, content: string): Promise<void> {
   clickTaskRow(task);
@@ -112,13 +177,7 @@ async function openFileInTask(socket: FakeSocket, task: Task, content: string): 
   respondAll(socket, "run.list", []);
   await flush();
 
-  // Radix's tab trigger needs DOM focus before its click activates a tab
-  // (it activates on pointer-down-with-focus semantics); jsdom's
-  // fireEvent.click doesn't focus first like a real browser click does.
-  const filesTab = screen.getByRole("tab", { name: "Files" });
-  filesTab.focus();
-  fireEvent.click(filesTab);
-  await flush();
+  await openBaseTab("Files");
   respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
   await flush();
   fireEvent.click(screen.getByTestId("file-row"));
@@ -265,7 +324,7 @@ describe("App", () => {
     expect(screen.getByRole("tab", { name: /README\.md/ })).toBeInTheDocument();
   });
 
-  it("closing a file tab removes only that tab, leaving the base tabs intact", async () => {
+  it("closing a file tab removes only that tab, leaving the other open base tabs intact", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -279,8 +338,6 @@ describe("App", () => {
     expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Chat" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
   });
 
   it("a task with an errored run shows an attention dot, and selecting the task clears it", async () => {
@@ -304,6 +361,8 @@ describe("App", () => {
       FinishedAt: "2024-01-01T00:01:00Z",
       StopReason: "",
       Err: "boom",
+      ApprovalPolicy: "manual",
+      ThinkingLevel: "",
     };
     // run.list #0 is useTaskAttention's (fired on connect, before any selection).
     respond(socket, "run.list", [erroredRun]);
@@ -341,6 +400,8 @@ describe("App", () => {
         FinishedAt: null,
         StopReason: "",
         Err: "",
+        ApprovalPolicy: "manual",
+        ThinkingLevel: "",
       } satisfies RunSummary,
     ]);
     await flush();
@@ -453,7 +514,7 @@ describe("App keyboard shortcuts", () => {
       await flush();
 
       expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
-      for (const name of ["Chat", "Files", "Diff", "Terminal"]) {
+      for (const name of ["Chat", "Files"]) {
         expect(screen.getByRole("tab", { name })).toBeInTheDocument();
       }
       view.unmount();
@@ -494,9 +555,19 @@ describe("App keyboard shortcuts", () => {
     await flush();
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
 
-    // Default strip order is Chat, Files, Diff, Terminal.
+    // Strip order after opening Diff via "+" (only Chat is seeded now):
+    // Chat, Diff. Opening it also activates it, so switch back to Chat
+    // first -- otherwise the assertion below would pass even if the
+    // shortcut itself did nothing.
+    await openBaseTab("Diff");
+    const chatTab = screen.getByRole("tab", { name: "Chat" });
+    chatTab.focus();
+    fireEvent.click(chatTab);
+    await flush();
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
     await act(async () => {
-      pressCtrl("3", "Digit3", { altKey: true });
+      pressCtrl("2", "Digit2", { altKey: true });
     });
     await flush();
     expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
@@ -766,6 +837,19 @@ describe("App routing", () => {
     await flush();
     expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
 
+    // Diff isn't seeded any more (dogfood default-tabs fix); opening it
+    // via "+" already updates the URL once...
+    await openBaseTab("Diff");
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/diff`);
+
+    // ...switching back to Chat and forward to Diff again proves it's the
+    // click, not just the open, that drives the URL.
+    const chatTab = screen.getByRole("tab", { name: "Chat" });
+    chatTab.focus();
+    fireEvent.click(chatTab);
+    await flush();
+    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
+
     const diffTab = screen.getByRole("tab", { name: "Diff" });
     diffTab.focus();
     fireEvent.click(diffTab);
@@ -835,29 +919,36 @@ describe("App routing", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // Opening a file switches the active tab away from Files (Radix
-    // unmounts the inactive pane), so Files has to be reselected before
-    // each pick -- refetching file.list each time, same as a real remount.
-    for (const name of ["a.md", "b.md"]) {
-      const filesTab = screen.getByRole("tab", { name: "Files" });
-      // Radix activates a tab on mousedown (or on focus, in its default
-      // "automatic" mode) -- not on click. `.focus()` alone is a no-op
-      // the second time around here, since the Files trigger is already
-      // `document.activeElement` from the first iteration (nothing else
-      // in this flow steals it), so mousedown is the one that reliably
-      // reactivates it regardless of where focus currently sits.
-      fireEvent.mouseDown(filesTab, { button: 0 });
-      await flush();
-      respondAll(socket, "file.list", [
-        { name: "a.md", isDir: false, size: 1 },
-        { name: "b.md", isDir: false, size: 1 },
-      ]);
-      await flush();
-      fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="${name}"]`)!);
-      await flush();
-      respondAll(socket, "file.read", { content: `# ${name}` });
-      await flush();
-    }
+    // Files isn't seeded any more (dogfood default-tabs fix) -- open it
+    // once via "+"; picking a.md switches the active tab away from Files
+    // (Radix unmounts the inactive pane), so Files has to be reselected
+    // before the second pick -- refetching file.list each time, same as a
+    // real remount.
+    await openBaseTab("Files");
+    respondAll(socket, "file.list", [
+      { name: "a.md", isDir: false, size: 1 },
+      { name: "b.md", isDir: false, size: 1 },
+    ]);
+    await flush();
+    fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="a.md"]`)!);
+    await flush();
+    respondAll(socket, "file.read", { content: "# a.md" });
+    await flush();
+
+    // Radix activates a tab on mousedown (or on focus, in its default
+    // "automatic" mode) -- not on click.
+    const filesTab = screen.getByRole("tab", { name: "Files" });
+    fireEvent.mouseDown(filesTab, { button: 0 });
+    await flush();
+    respondAll(socket, "file.list", [
+      { name: "a.md", isDir: false, size: 1 },
+      { name: "b.md", isDir: false, size: 1 },
+    ]);
+    await flush();
+    fireEvent.click(document.querySelector(`[data-testid="file-row"][data-path="b.md"]`)!);
+    await flush();
+    respondAll(socket, "file.read", { content: "# b.md" });
+    await flush();
     expect(screen.getByRole("tab", { name: /b\.md/ })).toHaveAttribute("aria-selected", "true");
     first.unmount();
 
@@ -889,6 +980,41 @@ describe("App sidebar resize", () => {
     await resolveSidebar(socket);
 
     expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
+  });
+
+  it("icon-collapsing the sidebar shrinks its ResizablePanel instead of leaving its expanded width as dead space", async () => {
+    // jsdom never lays anything out, so react-resizable-panels can't report
+    // real pixel widths here (a real-browser check confirmed the panel
+    // actually goes 256px -> 48px -> 256px) -- what jsdom *can* prove is
+    // that toggling collapse drives the panel's own flex-grow via its
+    // imperative handle at all, which is the bug this guards: before this
+    // fix, nothing ever called collapse()/expand(), so the panel's style
+    // never changed no matter what the Sidebar's own data-state said.
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const { container } = render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const panel = container.querySelector('[data-slot="resizable-panel"]') as HTMLElement;
+    const sidebar = document.querySelector('[data-slot="sidebar"]');
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+    const expandedStyle = panel.getAttribute("style");
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    expect(panel.getAttribute("style")).not.toBe(expandedStyle);
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+
+    expect(sidebar).toHaveAttribute("data-state", "expanded");
+    expect(panel.getAttribute("style")).toBe(expandedStyle);
   });
 
   it("a fresh mount reads the sidebar width back from persistence (simulating a reload after a previous resize)", async () => {
@@ -968,6 +1094,30 @@ describe("App quick-open (Item 18)", () => {
 });
 
 describe("App splits (Item 6)", () => {
+  it("the \"Split\" menu lists all 4 directions (Item 7)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openBaseTab("Diff");
+
+    const trigger = screen.getByRole("button", { name: "Split Diff" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    await flush();
+
+    expect(screen.getByTestId("workspace-tab-split-left")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-right")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-up")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-split-down")).toBeInTheDocument();
+  });
+
   it("the file explorer's \"Open to side\" action opens directly into a new side pane -- a genuinely different placement than the row's own \"prefer\" click", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
@@ -983,10 +1133,7 @@ describe("App splits (Item 6)", () => {
     // primary because none exists.
     expect(screen.queryByTestId("side-pane")).not.toBeInTheDocument();
 
-    const filesTab = screen.getByRole("tab", { name: "Files" });
-    filesTab.focus();
-    fireEvent.click(filesTab);
-    await flush();
+    await openBaseTab("Files");
     respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
 
@@ -1019,10 +1166,7 @@ describe("App splits (Item 6)", () => {
     // own cancellation guard already covers, and a fresh one is fetched
     // once Chat is reactivated below.
 
-    const filesTab = screen.getByRole("tab", { name: "Files" });
-    filesTab.focus();
-    fireEvent.click(filesTab);
-    await flush();
+    await openBaseTab("Files");
     respondAll(socket, "file.list", [{ name: "README.md", isDir: false, size: 1 }]);
     await flush();
     fireEvent.contextMenu(screen.getByTestId("file-row"));
@@ -1048,6 +1192,8 @@ describe("App splits (Item 6)", () => {
       FinishedAt: "2024-01-01T00:00:05Z",
       StopReason: "end_turn",
       Err: "",
+      ApprovalPolicy: "manual",
+      ThinkingLevel: "",
     };
     // run.list #0 is useTaskAttention's (on connect); #1 is the first,
     // abandoned "Chat" mount; #2 is this remount's.
@@ -1095,8 +1241,10 @@ describe("App splits (Item 6)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    // The terminal tab force-mounts (Item 20) as soon as the task is
-    // selected, independent of which tab is active.
+    // Terminal isn't seeded any more (dogfood default-tabs fix); opening
+    // it force-mounts (Item 20) independent of which tab ends up active.
+    await openBaseTab("Terminal");
+
     respond(socket, "terminal.list", []);
     await flush();
     respond(socket, "terminal.create", { terminalId: "term-1" });
@@ -1106,8 +1254,7 @@ describe("App splits (Item 6)", () => {
 
     expect(socket.sent.filter((e) => e.method === "terminal.create")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Open Terminal to the side" }));
-    await flush();
+    await splitTabRight("Terminal");
 
     // The pane remounts fresh in the side dock's own <Tabs> root, which
     // re-runs TerminalPane's list-then-attach effect exactly like a
@@ -1126,5 +1273,413 @@ describe("App splits (Item 6)", () => {
 
     const sidePane = screen.getByTestId("side-pane");
     expect(within(sidePane).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+  });
+
+  it("splitting twice creates a third pane, each retaining its own independent tab state (Item 4)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    // TASK_B, not TASK_A -- this opens a fresh terminal tab and expects a
+    // genuine terminal.create, which a taskId=1 terminal tab (TASK_A's)
+    // wouldn't get if an earlier test in this file already bound
+    // "1:terminal" to a session id (lib/terminal-sessions.ts's bindings
+    // map isn't reset between tests in this file).
+    await resolveSidebar(socket, [TASK_B]);
+
+    clickTaskRow(TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // First split: Diff moves out of the default pane into a second pane.
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+
+    // Second split, from the default pane again: open Terminal there,
+    // then split it into its own (third) pane.
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+
+    const splitTerminalTrigger = within(primaryPane).getByRole("button", { name: "Split Terminal" });
+    splitTerminalTrigger.focus();
+    fireEvent.keyDown(splitTerminalTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByTestId("workspace-tab-split-down"));
+    await flush();
+
+    // The second split wraps the default pane's own tree position in a new
+    // group (a pane converting to a group at that spot), so its Tabs root
+    // remounts fresh -- re-query it rather than reuse the pre-split node.
+    const finalPrimaryPane = screen.getByTestId("primary-pane");
+
+    // Three independent panes now exist -- the fixed primary-pane/side-pane
+    // testids only tell the common 0-or-1-split case apart, so the third
+    // pane is targeted via data-pane-id instead.
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+
+    const diffPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Diff" }));
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }));
+    expect(diffPane).toBeDefined();
+    expect(terminalPane).toBeDefined();
+    expect(diffPane).not.toBe(terminalPane);
+    expect(diffPane).not.toBe(finalPrimaryPane);
+    expect(terminalPane).not.toBe(finalPrimaryPane);
+
+    // Each pane really is independent -- neither Diff nor Terminal leaked
+    // back into the default pane, which kept only Chat.
+    expect(within(finalPrimaryPane).getByRole("tab", { name: "Chat" })).toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Diff" })).not.toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("with 3 panes open, each pane's own \"+\" -> \"Open Files\" lands the new tab in that exact pane, not whichever non-default pane the old \"side\" sentinel would have picked first (Item 9)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_C]);
+
+    clickTaskRow(TASK_C);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Same 2-splits-deep fixture shape as Item 4's 3-pane test: Diff moves
+    // into a second pane (splitRight), then Terminal moves into a third
+    // (splitDown from the default pane again).
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+
+    const splitTerminalTrigger = within(primaryPane).getByRole("button", { name: "Split Terminal" });
+    splitTerminalTrigger.focus();
+    fireEvent.keyDown(splitTerminalTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByTestId("workspace-tab-split-down"));
+    await flush();
+
+    const finalPrimaryPane = screen.getByTestId("primary-pane");
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+    const diffPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Diff" }))!;
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }))!;
+    expect(diffPane).toBeDefined();
+    expect(terminalPane).toBeDefined();
+
+    // Files hasn't been opened anywhere yet -- open it from the Diff
+    // pane's own "+", which under the old "side" sentinel would have
+    // landed in whichever non-default pane collectAllPanes lists first
+    // (the terminal pane, per this tree's DFS order), not necessarily the
+    // one whose "+" was actually clicked.
+    const diffPaneNewTabTrigger = within(diffPane as HTMLElement).getByTestId("tabs-new-tab");
+    diffPaneNewTabTrigger.focus();
+    fireEvent.keyDown(diffPaneNewTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Files" }));
+    await flush();
+    respondAll(socket, "file.list", []);
+    await flush();
+
+    expect(within(diffPane as HTMLElement).getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    expect(within(terminalPane as HTMLElement).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(within(finalPrimaryPane).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+  });
+});
+
+describe("App drag-to-split (Item 8)", () => {
+  interface StubRect {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  }
+
+  // jsdom never lays anything out, so getBoundingClientRect is always a
+  // zero rect by default -- every drop would resolve to the same (0,0)-
+  // relative position without this. Keyed by element identity (a WeakMap,
+  // same idea as resizable.test.tsx's testid-keyed stub) since the Item 8
+  // droppable pane wrapper has no testid of its own -- callers grab the
+  // actual DOM node via `within(...).getByTestId(...)`.parentElement and
+  // register its rect directly.
+  const rectByElement = new WeakMap<Element, StubRect>();
+  let originalGetBoundingClientRect: typeof Element.prototype.getBoundingClientRect;
+
+  beforeEach(() => {
+    originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const r = rectByElement.get(this) ?? { left: 0, top: 0, width: 0, height: 0 };
+      return {
+        x: r.left,
+        y: r.top,
+        width: r.width,
+        height: r.height,
+        top: r.top,
+        left: r.left,
+        right: r.left + r.width,
+        bottom: r.top + r.height,
+        toJSON: () => {},
+      } as DOMRect;
+    };
+  });
+
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+  });
+
+  function stubRect(el: Element, rect: StubRect): void {
+    rectByElement.set(el, rect);
+  }
+
+  /**
+   * Simulates a dnd-kit PointerSensor drag from scratch: pointerdown on
+   * the draggable element (dnd-kit's activator handler requires
+   * `isPrimary`/`button: 0`), then two pointermoves dispatched on
+   * `document` -- PointerSensor attaches its move/end listeners there,
+   * not on the node itself, once a drag is pending. The first move
+   * crosses the 8px activation-distance threshold and only *starts* the
+   * drag (dnd-kit's own AbstractPointerSensor doesn't forward that
+   * event's coordinates as a position update, it just flips `activated`);
+   * the second move is what actually delivers `target` as the drag's
+   * live position, recomputing `active.rect.current.translated`. A final
+   * pointerup at `target` ends the drag. Choosing `tabCenter` to be the
+   * dragged element's own stubbed center means the translated rect's
+   * center lands exactly on `target` with no extra offset arithmetic at
+   * each call site (translated = initialRect shifted by target-tabCenter,
+   * and initialRect's own center is tabCenter).
+   */
+  async function dragTabTo(
+    tabElement: Element,
+    tabCenter: { x: number; y: number },
+    target: { x: number; y: number },
+  ): Promise<void> {
+    fireEvent.pointerDown(tabElement, {
+      pointerId: 1,
+      isPrimary: true,
+      button: 0,
+      clientX: tabCenter.x,
+      clientY: tabCenter.y,
+    });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: tabCenter.x + 20, clientY: tabCenter.y });
+    fireEvent.pointerMove(document, { pointerId: 1, clientX: target.x, clientY: target.y });
+    fireEvent.pointerUp(document, { pointerId: 1, clientX: target.x, clientY: target.y });
+    // dnd-kit's PointerSensor suppresses the stray "click" that would
+    // otherwise fire right after a drag (it adds a capture-phase
+    // document-level stopPropagation listener on drag start) and removes
+    // it via `setTimeout(..., 50)`, not synchronously on drag end --
+    // without advancing past that window here, the listener leaks into
+    // whatever runs next (the test's own later assertions' events, or the
+    // next test entirely) and silently swallows every click in the
+    // document until it expires. This file runs under fake timers (the
+    // top-level `beforeEach`'s `vi.useFakeTimers()`), so it's advanced
+    // explicitly rather than waited on in real wall-clock time -- same
+    // pattern as this file's own `advanceReconnectTimer`.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60);
+    });
+  }
+
+  /**
+   * `task` with Diff split into its own side pane and Terminal left in
+   * primary -- two draggable, movable tabs in two distinct panes, the
+   * fixture every test below drags between. Each test passes its own
+   * task (TASK_D/E/F) rather than sharing one: `lib/terminal-sessions.ts`
+   * binds a session to `${taskId}:terminal` for the process lifetime of
+   * this test file, so a second test reusing the same task id would skip
+   * the `terminal.create` round-trip this setup waits on.
+   */
+  async function setUpTwoPanes(socket: FakeSocket, task: Task): Promise<void> {
+    await resolveSidebar(socket, [task]);
+    clickTaskRow(task);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const newTabTrigger = within(primaryPane).getByTestId("tabs-new-tab");
+    newTabTrigger.focus();
+    fireEvent.keyDown(newTabTrigger, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+  }
+
+  /** Registers stubbed rects for both panes' droppable wrappers (side-by-side, 400x300 each) and for `terminalTab` (the tab every test drags), returning nothing -- callers then call `dragTabTo`. */
+  function stubTwoPaneRects(primaryPane: HTMLElement, sidePane: HTMLElement, terminalTab: HTMLElement): void {
+    stubRect(primaryPane.parentElement!, { left: 0, top: 0, width: 400, height: 300 });
+    stubRect(sidePane.parentElement!, { left: 400, top: 0, width: 400, height: 300 });
+    stubRect(terminalTab, { left: 50, top: 10, width: 60, height: 20 });
+  }
+
+  it("dropping a movable tab on another pane's left-edge zone splits it left", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_D);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    // x=430 is 30px (7.5%) into the side pane's left edge -- well inside
+    // its 15% (60px) edge threshold.
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 430, y: 150 });
+    await flush();
+
+    const allPanes = Array.from(document.querySelectorAll("[data-pane-id]"));
+    expect(allPanes).toHaveLength(3);
+    const terminalPane = allPanes.find((el) => within(el as HTMLElement).queryByRole("tab", { name: "Terminal" }));
+    expect(terminalPane).toBeDefined();
+    expect(within(screen.getByTestId("primary-pane")).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("dropping on a pane's center zone moves the tab there instead of splitting", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_E);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    // (600, 150) is the side pane's own center -- well inside its 40% center band.
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 600, y: 150 });
+    await flush();
+
+    expect(document.querySelectorAll("[data-pane-id]")).toHaveLength(2);
+    expect(within(screen.getByTestId("side-pane")).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+    expect(within(screen.getByTestId("primary-pane")).queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("releasing outside every pane's droppable zone is a no-op", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await setUpTwoPanes(socket, TASK_F);
+
+    const primaryPane = screen.getByTestId("primary-pane");
+    const sidePane = screen.getByTestId("side-pane");
+    const terminalTab = within(primaryPane).getByRole("tab", { name: "Terminal" });
+    stubTwoPaneRects(primaryPane, sidePane, terminalTab);
+
+    await dragTabTo(terminalTab, { x: 80, y: 20 }, { x: 5000, y: 5000 });
+    await flush();
+
+    expect(document.querySelectorAll("[data-pane-id]")).toHaveLength(2);
+    expect(within(screen.getByTestId("primary-pane")).getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+  });
+});
+
+describe("App settings view (dogfood Item 4)", () => {
+  it("the sidebar's settings button swaps the main area to the settings screen, and Back returns to the previous view", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    clickTaskRow(TASK);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.queryByTestId("primary-pane")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+  });
+
+  it("Escape from the settings screen returns to the task view", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
+    await flush();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+  });
+
+  it("the settings view shows with no task selected too (from the empty state)", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, []);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+  });
+});
+
+describe("App chat column (dogfood Item 2)", () => {
+  it("the chat tab's timeline scrolls inside a centered max-width column, while the Files pane stays full-width", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    clickTaskRow(TASK);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const column = screen.getByTestId("run-log-column");
+    expect(column.className).toContain("mx-auto");
+    expect(column.className).toContain("max-w-3xl");
+
+    await openBaseTab("Files");
+    respondAll(socket, "file.list", []);
+    await flush();
+
+    const explorer = screen.getByTestId("file-explorer-pane");
+    expect(explorer.className).not.toContain("max-w");
   });
 });

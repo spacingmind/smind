@@ -400,6 +400,19 @@ trace.
 - **The dark `--sidebar-primary` anomaly** (`docs/research/uiux-audit.md`
   §2.5) was resolved by making it achromatic, matching the light theme's
   polarity — confirmed unused anywhere in `src/` before changing it.
+  **Superseded (2026-09-18):** smind now has an actual brand mark (the
+  sidebar logo), so `--primary`/`--ring`/`--sidebar-primary`/
+  `--sidebar-ring` were deliberately given the logo's own hue back —
+  `oklch(0.489 0.08 194.8)` (light, ~#0d6e6e) / `oklch(0.904 0.136
+  196.2)` (dark, ~#51fbfd, sampled directly from the logo's core glow).
+  This is the one chromatic hue in the palette, confined to primary
+  actions/focus rings/the active-sidebar-item token — matching the
+  researched pattern other dev-tool brands use (Linear's lavender-blue,
+  Raycast's red, Cursor's orange): a bold, glowing logo mark, but the
+  same hue used *sparingly* in the product UI rather than spread across
+  backgrounds or `--accent`/`--secondary`/`--muted` (those stay
+  achromatic, unchanged). Everything else in the calm-technical-console
+  thesis (§Character) still holds — this is one accent, not a repaint.
 - **`StatusBadge` and `Toast` ship with no consumer yet.** Both are
   complete, tested primitives; wiring them into a real surface (a
   running-task pill, a commit-success toast) is left to whichever later

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { applyLifecycleEvent, buildWorkspaceTree, LIFECYCLE_TOPICS, searchTasks } from "@/lib/workspace-tree";
+import {
+  applyLifecycleEvent,
+  buildWorkspaceTree,
+  LIFECYCLE_TOPICS,
+  recentWorkspaceParentDirs,
+  searchTasks,
+} from "@/lib/workspace-tree";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WS_1: Workspace = {
@@ -199,5 +205,33 @@ describe("searchTasks", () => {
 
     const [ungroupedHit] = searchTasks(tree, "Fix the bug");
     expect(ungroupedHit!.space).toBeNull();
+  });
+});
+
+describe("recentWorkspaceParentDirs", () => {
+  it("returns each workspace's parent directory, most recently created first", () => {
+    const older: Workspace = { ...WS_1, Path: "/home/user/code/alpha", CreatedAt: "2024-01-01T00:00:00Z" };
+    const newer: Workspace = { ...WS_2, Path: "/home/user/other/beta", CreatedAt: "2024-06-01T00:00:00Z" };
+    expect(recentWorkspaceParentDirs([older, newer])).toEqual(["/home/user/other", "/home/user/code"]);
+  });
+
+  it("deduplicates siblings under the same parent, keeping the most recent's position", () => {
+    const older: Workspace = { ...WS_1, Path: "/home/user/code/alpha", CreatedAt: "2024-01-01T00:00:00Z" };
+    const newer: Workspace = { ...WS_2, Path: "/home/user/code/beta", CreatedAt: "2024-06-01T00:00:00Z" };
+    expect(recentWorkspaceParentDirs([older, newer])).toEqual(["/home/user/code"]);
+  });
+
+  it("caps at 5 even with more registered workspaces", () => {
+    const many: Workspace[] = Array.from({ length: 8 }, (_, i) => ({
+      ...WS_1,
+      ID: i,
+      Path: `/repos/repo-${i}/dir`,
+      CreatedAt: `2024-01-0${(i % 9) + 1}T00:00:00Z`,
+    }));
+    expect(recentWorkspaceParentDirs(many)).toHaveLength(5);
+  });
+
+  it("returns an empty list for no workspaces", () => {
+    expect(recentWorkspaceParentDirs([])).toEqual([]);
   });
 });

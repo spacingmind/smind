@@ -83,12 +83,31 @@ export const TimelineRow = memo(function TimelineRow({
       // An event type this build has never heard of. The daemon's enum is
       // append-only (ADR 0008), so this is a supported state: say what
       // arrived and keep the rest of the transcript intact.
+      //
+      // A "raw" event (ADR 0010) has a `rawKind` -- the ACP session-update
+      // kind the daemon's normalizer didn't recognize (e.g. "plan") -- which
+      // is far more informative than the wire `type` itself (always "raw").
+      // Shown with the same collapsed-details pattern as "thinking" above,
+      // since the payload is a debugging aid, not something to read by
+      // default.
       return (
         <li data-testid="timeline-unknown" data-item-kind="unknown">
-          <p className="flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-xs text-foreground-muted">
-            <CircleHelp className="size-3 shrink-0" />
-            Unrecognised event: {item.eventType}
-          </p>
+          {item.rawKind ? (
+            <details className="rounded-lg border border-dashed">
+              <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-xs text-foreground-muted select-none">
+                <CircleHelp className="size-3 shrink-0" />
+                Unrecognised event: {item.rawKind}
+              </summary>
+              <pre className="overflow-x-auto border-t border-dashed px-2.5 py-1.5 text-xs whitespace-pre-wrap text-foreground-muted">
+                {JSON.stringify(item.rawPayload, null, 2)}
+              </pre>
+            </details>
+          ) : (
+            <p className="flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-xs text-foreground-muted">
+              <CircleHelp className="size-3 shrink-0" />
+              Unrecognised event: {item.eventType}
+            </p>
+          )}
         </li>
       );
   }

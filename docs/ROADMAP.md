@@ -90,6 +90,11 @@ noted here so Phase 3 design starts from this rather than re-litigating it.
       amendment — while rotation starts a fresh session)
 - [ ] Mobile app (Expo + @expo/ui): pairing + workspace/task list, realtime
       agent timeline + follow-up, push notifications, mobile permission approval
+  - [x] Pairing, workspace/task list, realtime timeline, follow-up
+        prompts, mobile permission approval (PRs #175, #176, #178) --
+        design-token/native-control polish on top (PRs #181, #183)
+  - [ ] Push notifications -- needs its own design pass (E2EE data-
+        minimization for what reaches APNs/FCM); not started
 - [ ] Deploy relay at `relay.spacingmind.sh` (Cloudflare TLS)
 
 Definition of done: from a phone off-network — assign new work, get notified, approve an agent.

@@ -1,8 +1,10 @@
 import { useCallback, useRef } from "react";
 import { ArrowDown } from "lucide-react";
 
+import { ApprovalPolicyControl } from "@/components/approval-policy-control";
 import { Composer } from "@/components/composer/composer";
 import { PermissionCard } from "@/components/permission/permission-card";
+import { RunConfigOptions } from "@/components/run-config-options";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -11,7 +13,9 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useTaskDiff } from "@/hooks/use-task-diff";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import type { Task } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -29,6 +33,7 @@ export function TaskDetailPane({
   task,
   connectionStatus = "connected",
   onOpenFile,
+  onOpenDiffTab,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -36,8 +41,19 @@ export function TaskDetailPane({
   connectionStatus?: ConnectionStatus;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
   onOpenFile?: (path: string) => void;
+  /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
+  onOpenDiffTab?: () => void;
 }) {
-  const { runs, error, submitPrompt, stopRun, respondPermission } = useRunTimeline(client, task.ID);
+  const { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort } = useRunTimeline(
+    client,
+    task.ID,
+  );
+  // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
+  // same task.diff this is -- the same hook the diff pane itself uses, so
+  // the pill and the pane's header stat can't disagree and no extra RPC
+  // is introduced. It stays mounted even when the Diff tab isn't (the
+  // fetch is cheap and the refresh signal is identical).
+  const wholeDiff = useTaskDiff(client, task, undefined);
 
   // Every run currently holding an unanswered permission request -- in
   // practice at most one (a task has one active run at a time), but this
@@ -49,7 +65,17 @@ export function TaskDetailPane({
 
   // The task's live run, if any. A task has at most one at a time, so the
   // first match is the one the composer's Stop and queue drain act on.
-  const runningRunId = runs?.find((run) => run.status === "running")?.id ?? null;
+  const runningRun = runs?.find((run) => run.status === "running") ?? null;
+  const runningRunId = runningRun?.id ?? null;
+
+  // GLM/Kimi's own live-session-scoped config-option control (thinking
+  // level, etc, see use-run-config-options) -- Claude/Codex/no-live-run
+  // pass null, which the hook treats as "nothing to show". Keyed off the
+  // running run's own item count so a fresh option list is fetched as the
+  // session progresses (see the hook's own doc comment for why there's no
+  // dedicated push notification for this instead).
+  const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi") ? runningRun.id : null;
+  const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
 
   // Auto-follow keys off the total item count across every run: that is
   // the one number that changes whenever anything is appended anywhere in
@@ -111,24 +137,35 @@ export function TaskDetailPane({
           data-following={follow.following}
           className="h-full overflow-y-auto px-4 py-3"
         >
-          {error && <Alert variant="error" description={error} />}
-          {!error && runs === null && <InlineSpinner label="Loading runs…" />}
-          {!error && runs !== null && runs.length === 0 && (
-            <EmptyState title="No runs yet" description="Send a prompt to start one" />
-          )}
-          {runs !== null && runs.length > 0 && (
-            <ul className="space-y-4">
-              {runs.map((run) => (
-                <RunTimeline
-                  key={run.id}
-                  run={run}
-                  detailLevel={detailLevel}
-                  worktreePath={task.WorktreePath ?? undefined}
-                  onOpenFile={openFile}
-                />
-              ))}
-            </ul>
-          )}
+          {/*
+           * Dogfood Item 2: the chat timeline is a reading column, not a
+           * pane -- cap it (and center it) on wide screens instead of
+           * stretching line length edge-to-edge. The wrapper lives
+           * *inside* the scroll container (so it scrolls with the log)
+           * and only the chat tab gets it: files/diff/terminal render
+           * their own full-width roots.
+           */}
+          <div data-testid="run-log-column" className="mx-auto max-w-3xl">
+            {error && <Alert variant="error" description={error} />}
+            {!error && runs === null && <InlineSpinner label="Loading runs…" />}
+            {!error && runs !== null && runs.length === 0 && (
+              <EmptyState title="No runs yet" description="Send a prompt to start one" />
+            )}
+            {runs !== null && runs.length > 0 && (
+              <ul className="space-y-4">
+                {runs.map((run) => (
+                  <RunTimeline
+                    key={run.id}
+                    run={run}
+                    detailLevel={detailLevel}
+                    worktreePath={task.WorktreePath ?? undefined}
+                    onOpenFile={openFile}
+                    onRetry={retryWithHigherEffort}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         {!follow.following && (
@@ -150,10 +187,14 @@ export function TaskDetailPane({
        * The pending-permission dock: a sibling of the scrolling log above,
        * not a descendant of it, so it stays pinned in place (like the
        * prompt form right below it) no matter how far the log has
-       * scrolled or how much new output streams in. See the plan's Item 3.
+       * scrolled or how much new output streams in (see the plan's Item 3)
+       * -- and aligned to the same reading column as that log (dogfood
+       * Item 2): mx-auto with the same max-w-3xl keeps a permission card
+       * sitting at the bottom of the log visually continuous with it on
+       * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="shrink-0 border-t bg-background px-4 py-2">
+        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 border-t bg-background px-4 py-2">
           {pendingRuns.map((run) => (
             <PermissionCard
               key={run.id}
@@ -166,11 +207,26 @@ export function TaskDetailPane({
         </div>
       )}
 
+      {runningRun && (runningRun.approvalPolicy === "manual" || runningRun.approvalPolicy === "auto-safe") && (
+        <ApprovalPolicyControl
+          policy={runningRun.approvalPolicy}
+          onChange={(policy) => setApprovalPolicy(runningRun.id, policy)}
+        />
+      )}
+
+      <RunConfigOptions
+        options={configOptions.options}
+        error={configOptions.error}
+        onSetOption={configOptions.setOption}
+      />
+
       <Composer
         client={client}
         taskId={task.ID}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
+        diffStat={wholeDiff.stat}
+        onOpenDiff={onOpenDiffTab}
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}

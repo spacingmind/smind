@@ -82,6 +82,7 @@ func TestApprovalPolicy_IsValid(t *testing.T) {
 	}{
 		{ApprovalPolicyManual, true},
 		{ApprovalPolicyAutoSafe, true},
+		{ApprovalPolicyFullAccess, true},
 		{ApprovalPolicy(""), false},
 		{ApprovalPolicy("auto"), false},
 		{ApprovalPolicy("Manual"), false},

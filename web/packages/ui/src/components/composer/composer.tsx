@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+
+import { GitCompare } from "lucide-react";
 
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { Button } from "@/components/ui/button";
+import { type DiffStat } from "@/lib/diff-stat";
 import {
   Select,
   SelectContent,
@@ -10,33 +13,91 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
-// internal/taskrunner.ApprovalPolicy's two values. "manual" is first since
-// it's the daemon's default when run.start omits the field entirely.
-const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
-  { id: "manual", label: "Manual approval" },
-  { id: "auto-safe", label: "Auto-safe" },
-];
+/** One entry in the approval-policy Select, per provider -- see approvalPolicyOptions. */
+interface ApprovalPolicyOption {
+  id: ApprovalPolicy;
+  label: string;
+  /** Per-option tooltip (SelectItem's `title`), and -- for the current selection -- the trigger's own `title` too. */
+  help: string;
+}
 
-const APPROVAL_POLICY_HELP =
+const MANUAL_HELP = "Every action needs your approval before it runs.";
+const AUTO_SAFE_HELP =
   "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
+
+/**
+ * "manual" and "auto-safe" behave identically across every provider (a
+ * decider smind installs itself), but "full-access" doesn't -- it installs
+ * no decider at all and hands the provider its own native "auto-approve
+ * everything" mechanism instead, a different mechanism per provider (see
+ * internal/taskrunner/runner.go's runClaudeNative/runCodexNative/runACP).
+ * The user explicitly rejected one shared generic label for that tier (see
+ * docs/plans/active/task-move-approval-thinking.md's Context), so its
+ * label/help here is that provider's own real vocabulary, not smind's own
+ * words: Codex's and GLM's copied verbatim from Paseo's real provider
+ * metadata, Claude's from Claude Code's own CLI mode name.
+ */
+const FULL_ACCESS_BY_PROVIDER: Record<Provider, { label: string; help: string }> = {
+  "claude-native": {
+    label: "Bypass",
+    help: "Skip all permission prompts (use with caution).",
+  },
+  "codex-native": {
+    label: "Full Access",
+    help: "Edit files, run commands, and access the network without additional prompts.",
+  },
+  glm: {
+    label: "Bypass all permissions",
+    help: "Edits and commands run without prompting.",
+  },
+  kimi: {
+    label: "Bypass all permissions",
+    help: "Edits and commands run without prompting.",
+  },
+};
+
+function approvalPolicyOptions(provider: Provider): ApprovalPolicyOption[] {
+  const fullAccess = FULL_ACCESS_BY_PROVIDER[provider] ?? FULL_ACCESS_BY_PROVIDER["claude-native"];
+  return [
+    { id: "manual", label: "Manual approval", help: MANUAL_HELP },
+    { id: "auto-safe", label: "Auto-safe", help: AUTO_SAFE_HELP },
+    { id: "full-access", label: fullAccess.label, help: fullAccess.help },
+  ];
+}
+
+/**
+ * Claude's own thinking-level tiers (internal/taskrunner.ThinkingLevel;
+ * "" is the unset default, deliberately not offered as its own option --
+ * choosing a tier is opt-in, and "Standard" already IS today's ordinary
+ * behavior in effect, just via the adaptive Option instead of no Option at
+ * all). Only ever shown when provider === "claude-native" (see the
+ * composer's provider !== "claude-native" && null guard below) -- GLM/
+ * Kimi's thinking-level control is a different, live-session-scoped
+ * mechanism (see the chat view, not this composer), and Codex has none.
+ */
+const THINKING_LEVELS: { id: ThinkingLevel; label: string; help: string }[] = [
+  { id: "off", label: "Off", help: "No extended thinking -- responds immediately." },
+  { id: "standard", label: "Standard", help: "The model adapts how much it thinks to the turn." },
+  { id: "extended", label: "Extended", help: "A large fixed thinking budget, for turns that need to reason at length before acting." },
+];
 
 // Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
 // the original dense sizing at `md:` and above -- see
 // COMPACT_TOUCH_BUTTON_CLASS's doc comment for why this is plain
 // responsive Tailwind rather than a threaded `isMobile` prop.
 //
-// Only the sizing lives here now. Everything these selects used to
-// hand-roll to *approximate* a shadcn trigger (border, background, focus
-// ring, disabled dimming) comes from SelectTrigger itself, and cn()'s
-// tailwind-merge drops the conflicting halves of its defaults (h-8,
-// px-2.5, text-base/md:text-sm) in favour of these.
-const SELECT_TRIGGER_CLASS = "h-11 shrink-0 px-2 text-sm md:h-7 md:px-1.5 md:text-xs";
+// Label-less, per web-ui-dogfood-polish Item 5: the selects sit inside the
+// input card's bottom toolbar, so their visible chrome is nothing -- the
+// card is the border, and cn()'s tailwind-merge strips SelectTrigger's
+// own border/background halves in favour of these.
+const SELECT_TRIGGER_CLASS =
+  "h-11 shrink-0 border-0 bg-transparent px-2 text-sm hover:bg-accent md:h-7 md:px-1.5 md:text-xs";
 
 const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
 
@@ -59,13 +120,40 @@ export function composerPlaceholder({
   if (!connected) return "Not connected — reconnecting to the daemon…";
   if (!hasTask) return "Select a task to send a prompt";
   if (running) return "Queue a follow-up — it sends when this run finishes";
-  return "Send a prompt…";
+  return "Message the agent…";
 }
 
 /**
- * The task composer (ui-redesign-parity Item 10): an autogrowing multiline
- * prompt box, a labelled toolbar for provider and approval policy, a Stop
- * that interrupts the live run, and per-task draft persistence.
+ * The task's diff stat as a compact pill above the input card
+ * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
+ * click jumps to the task's Diff tab. The numbers are the same stat the
+ * diff pane renders (hooks/use-task-diff.ts), so nothing new is fetched
+ * here -- the parent hands the already-derived stat in.
+ */
+function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="composer-diff-stat"
+      aria-label={`Open diff: ${stat.additions} additions, ${stat.deletions} deletions`}
+      onClick={onOpenDiff}
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface-2 px-2.5 py-0.5 text-xs text-foreground-muted transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <GitCompare aria-hidden className="size-3 opacity-70" />
+      <span className="font-medium text-status-success">+{stat.additions}</span>
+      <span className="font-medium text-status-danger">−{stat.deletions}</span>
+    </button>
+  );
+}
+
+/**
+ * The task composer (ui-redesign-parity Item 10, reshaped to the input
+ * card anatomy by web-ui-dogfood-polish Item 5): one rounded card whose
+ * top is the autogrowing prompt textarea and whose bottom edge is the
+ * toolbar (compact provider/approval-policy selects, Stop/Send), with the
+ * task's diff-stat pill sitting above the card. The only affordances
+ * shown are ones that work -- no attachment "+" placeholder until
+ * attachments exist.
  *
  * **Queue, not steer.** The daemon exposes no "send more input to a run
  * already in flight" RPC (internal/wsapi/handlers.go's method table has
@@ -81,6 +169,8 @@ export function Composer({
   taskId,
   connected,
   runningRunId,
+  diffStat,
+  onOpenDiff,
   onSubmit,
   onStop,
   textareaRef,
@@ -91,7 +181,16 @@ export function Composer({
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop and the queue drain. */
   runningRunId: string | null;
-  onSubmit: (provider: Provider, prompt: string, approvalPolicy: ApprovalPolicy) => Promise<void>;
+  /** The task's diff stat (use-task-diff) for the pill above the card -- pill omitted when null/unchanged. */
+  diffStat?: DiffStat | null;
+  /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
+  onOpenDiff?: () => void;
+  onSubmit: (
+    provider: Provider,
+    prompt: string,
+    approvalPolicy: ApprovalPolicy,
+    thinkingLevel?: ThinkingLevel,
+  ) => Promise<void>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
@@ -100,12 +199,23 @@ export function Composer({
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
   const [provider, setProvider] = useState<Provider>("claude-native");
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
+  const approvalPolicies = approvalPolicyOptions(provider);
+  // Claude-only (see THINKING_LEVELS' doc comment) -- kept in state
+  // regardless of the current provider (switching away and back preserves
+  // the choice), but only ever sent on the wire when provider is actually
+  // claude-native, so a GLM/Codex run never carries a stray leftover value.
+  // "" (untouched) is never itself sent -- same omit-the-default-value
+  // convention approvalPolicy already uses (see submitPrompt's doc
+  // comment): a Claude run submitted without ever touching this selector
+  // sends the exact same run.start payload as before this selector
+  // existed. The Select's displayed value falls back to "standard" purely
+  // visually (see its `value` prop below) so the control never shows
+  // "nothing selected".
+  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("");
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [queued, setQueued] = useState<string[]>([]);
-  const providerFieldId = useId();
-  const policyFieldId = useId();
 
   // A queued follow-up belongs to the task it was typed for; switching
   // tasks drops it rather than firing it at whatever is selected next.
@@ -132,13 +242,17 @@ export function Composer({
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
+  const hasChanges =
+    diffStat !== null &&
+    diffStat !== undefined &&
+    (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
 
   const send = useCallback(
     async (text: string) => {
       setSubmitting(true);
       setFormError(null);
       try {
-        await onSubmit(provider, text, approvalPolicy);
+        await onSubmit(provider, text, approvalPolicy, provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined);
         return true;
       } catch (err) {
         setFormError(err instanceof Error ? err.message : String(err));
@@ -147,7 +261,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, approvalPolicy],
+    [onSubmit, provider, approvalPolicy, thinkingLevel],
   );
 
   // draft is a fresh object every render (it closes over the current
@@ -225,7 +339,7 @@ export function Composer({
   const inactive = !canSend || submitting;
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="flex shrink-0 flex-col gap-2 border-t px-4 py-3">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto w-full max-w-3xl shrink-0 flex-col gap-2 border-t px-4 py-3 flex">
       {queued.length > 0 && (
         <ul data-testid="composer-queue" className="flex flex-col gap-1">
           {queued.map((text, index) => (
@@ -250,37 +364,53 @@ export function Composer({
         </ul>
       )}
 
-      <PromptTextarea
-        ref={textareaRef}
-        label="Prompt"
-        value={draft.value}
-        onChange={draft.setValue}
-        onSubmit={submit}
-        onKeyDown={handleKeyDown}
-        placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
-        disabled={inactive}
-      />
+      {/* The pill row above the card (Item 5): only real data -- the diff
+          stat, only when there are changes and there's a Diff tab to jump
+          to. No invented run/subagent pills. */}
+      {hasChanges && onOpenDiff && (
+        <div className="flex items-center gap-2">
+          <DiffStatPill stat={diffStat} onOpenDiff={onOpenDiff} />
+        </div>
+      )}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <div className="flex items-center gap-1.5">
-          <label htmlFor={providerFieldId} className="text-xs text-foreground-muted">
-            Provider
-          </label>
+      {/*
+       * The input card (Item 5): one rounded surface whose top is the
+       * textarea and whose bottom edge is the toolbar. The card carries
+       * the border/focus ring; the textarea and toolbar controls inside
+       * are chrome-less, which is why the selects are aria-labelled
+       * rather than sitting under visible <label> text anymore.
+       */}
+      <div
+        data-testid="composer-card"
+        className="flex flex-col rounded-xl border border-transparent bg-surface-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+      >
+        <PromptTextarea
+          ref={textareaRef}
+          label="Prompt"
+          value={draft.value}
+          onChange={draft.setValue}
+          onSubmit={submit}
+          onKeyDown={handleKeyDown}
+          placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
+          disabled={inactive}
+          className="rounded-none border-0 bg-transparent px-3 py-2.5 focus-visible:border-transparent focus-visible:ring-0"
+        />
+
+        <div className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
           {/*
            * shadcn/Radix rather than a native <select>: the closed state
            * was already styled to match, but the *open* list was OS chrome
            * -- square, light-mode-only, ignoring bg-popover/text-popover-
-           * foreground like every other menu in the app. The visible
-           * <label htmlFor> still works because SelectTrigger takes a real
-           * `id` and renders a real button (Item 10's "not unlabelled
-           * native selects" holds either way).
+           * foreground like every other menu in the app. The accessible
+           * name survives the move into the toolbar via aria-label, since
+           * there is no visible <label> beside it anymore.
            */}
           <Select
             value={provider}
             onValueChange={(value) => setProvider(value as Provider)}
             disabled={inactive}
           >
-            <SelectTrigger id={providerFieldId} className={SELECT_TRIGGER_CLASS}>
+            <SelectTrigger aria-label="Provider" className={SELECT_TRIGGER_CLASS}>
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
             <SelectContent>
@@ -291,61 +421,93 @@ export function Composer({
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="flex items-center gap-1.5">
-          <label htmlFor={policyFieldId} className="text-xs text-foreground-muted">
-            Approval policy
-          </label>
           <Select
             value={approvalPolicy}
             onValueChange={(value) => setApprovalPolicy(value as ApprovalPolicy)}
             disabled={inactive}
           >
             {/* The help text stays a plain `title` -- a hover tooltip on the
-                trigger, exactly where it was on the native select. */}
+                trigger, exactly where it was on the native select. Reflects
+                the *current* selection's own help (each option gets its own
+                too, in the open list below), since the three tiers no
+                longer share one description now that full-access differs
+                per provider. */}
             <SelectTrigger
-              id={policyFieldId}
-              title={APPROVAL_POLICY_HELP}
+              aria-label="Approval policy"
+              title={approvalPolicies.find((p) => p.id === approvalPolicy)?.help}
               className={SELECT_TRIGGER_CLASS}
             >
               <SelectValue placeholder="Select policy" />
             </SelectTrigger>
             <SelectContent>
-              {APPROVAL_POLICIES.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
+              {approvalPolicies.map((p) => (
+                <SelectItem key={p.id} value={p.id} title={p.help}>
                   {p.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
 
-        <div className="ml-auto flex items-center gap-2">
-          {formError && <span className="text-xs text-destructive">{formError}</span>}
-          {running && (
+          {/*
+           * Claude-only, pre-run control (see THINKING_LEVELS' doc
+           * comment) -- omitted entirely, not just disabled, for every
+           * other provider: no dead control sitting in the toolbar for a
+           * provider that can't act on it. GLM/Kimi's own thinking-level
+           * control lives in the chat view instead, once a live session
+           * exists (see run-config-options in task-detail), since that
+           * option list is only ever known after ACP's NewSession
+           * responds.
+           */}
+          {provider === "claude-native" && (
+            <Select
+              value={thinkingLevel || "standard"}
+              onValueChange={(value) => setThinkingLevel(value as ThinkingLevel)}
+              disabled={inactive}
+            >
+              <SelectTrigger
+                aria-label="Thinking level"
+                title={THINKING_LEVELS.find((t) => t.id === (thinkingLevel || "standard"))?.help}
+                className={SELECT_TRIGGER_CLASS}
+              >
+                <SelectValue placeholder="Select thinking level" />
+              </SelectTrigger>
+              <SelectContent>
+                {THINKING_LEVELS.map((t) => (
+                  <SelectItem key={t.id} value={t.id} title={t.help}>
+                    {t.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          <div className="ml-auto flex items-center gap-2">
+            {formError && <span className="text-xs text-destructive">{formError}</span>}
+            {running && (
+              <Button
+                type="button"
+                variant="execute"
+                size="sm"
+                className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
+                disabled={stopping}
+                data-testid="chat-stop-button"
+                onClick={handleStop}
+              >
+                {stopping ? "Stopping…" : "Stop"}
+              </Button>
+            )}
             <Button
-              type="button"
-              variant="execute"
+              type="submit"
+              variant={running ? "default" : "execute"}
               size="sm"
               className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-              disabled={stopping}
-              data-testid="chat-stop-button"
-              onClick={handleStop}
+              disabled={inactive || !draft.value.trim()}
+              data-testid="chat-send-button"
             >
-              {stopping ? "Stopping…" : "Stop"}
+              {running ? "Queue" : "Send"}
             </Button>
-          )}
-          <Button
-            type="submit"
-            variant={running ? "default" : "execute"}
-            size="sm"
-            className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-            disabled={inactive || !draft.value.trim()}
-            data-testid="chat-send-button"
-          >
-            {running ? "Queue" : "Send"}
-          </Button>
+          </div>
         </div>
       </div>
     </form>

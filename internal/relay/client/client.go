@@ -93,15 +93,25 @@ func Admit(ctx context.Context, c relaypb.RelayClient, workspaceID, daemonKeyID 
 }
 
 // OpenControl opens the control stream under the given admission. It
-// sends one registration frame and returns the raw stream for liveness
-// use; device lifecycle announcements are a later concern.
+// sends one initial ping and returns the raw stream for liveness use;
+// device lifecycle announcements are a later concern.
+//
+// The first frame sent on OpenControl must carry a Ping body:
+// internal/relay/server.Server.OpenControl treats any first frame without
+// one as an unhandled control frame type and terminates the stream (a
+// bare, payload-less registration frame -- the OpenData convention -- is
+// NOT a valid OpenControl registration, unlike OpenData's route-derived
+// first frame).
 func OpenControl(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID string) (relaypb.Relay_OpenControlClient, error) {
 	sctx := metadata.AppendToOutgoingContext(ctx, metadataKeyAdmission, admissionID)
 	stream, err := c.OpenControl(sctx)
 	if err != nil {
 		return nil, fmt.Errorf("relay client: open control: %w", err)
 	}
-	if err := stream.Send(&relaypb.ControlFrame{WorkspaceId: workspaceID}); err != nil {
+	if err := stream.Send(&relaypb.ControlFrame{
+		WorkspaceId: workspaceID,
+		Body:        &relaypb.ControlFrame_Ping_{Ping: &relaypb.ControlFrame_Ping{Sequence: 0}},
+	}); err != nil {
 		return nil, fmt.Errorf("relay client: control register: %w", err)
 	}
 	return stream, nil

@@ -71,6 +71,23 @@ type RunStatus struct {
 	// Err is populated once Status is StatusError, carrying the error
 	// RunPrompt returned.
 	Err string
+
+	// ApprovalPolicy is this run's current taskrunner.ApprovalPolicy --
+	// live (may differ from what Start was called with, see
+	// Registry.SetApprovalPolicy) for a running run, and whatever it was
+	// last switched to (or started with) for a finished one. Lets a caller
+	// (internal/wsapi, and from there the web UI) know whether a live
+	// manual<->auto-safe switch control applies to this run at all.
+	ApprovalPolicy taskrunner.ApprovalPolicy
+
+	// ThinkingLevel is this run's taskrunner.ThinkingLevel as passed to
+	// Start -- immutable thereafter (see the run struct's own field doc
+	// comment), Claude-only, and not persisted across a daemon restart (a
+	// rehydrated run always reports taskrunner.ThinkingLevelUnspecified
+	// here). Lets a caller determine whether a failed Claude-native run has
+	// a higher tier left to retry at (docs/plans/active/mid-run-approval-
+	// and-retry-effort.md's Item B).
+	ThinkingLevel taskrunner.ThinkingLevel
 }
 
 // RunSummary is the shape List returns; it's the same information as

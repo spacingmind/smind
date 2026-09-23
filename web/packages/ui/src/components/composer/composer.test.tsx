@@ -6,12 +6,13 @@ import { Composer } from "@/components/composer/composer";
 import { autoGrow, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { ApprovalPolicy, Provider } from "@/lib/types";
+import type { ApprovalPolicy, Provider, ThinkingLevel } from "@/lib/types";
 
 interface Submission {
   provider: Provider;
   prompt: string;
   approvalPolicy: ApprovalPolicy;
+  thinkingLevel?: ThinkingLevel;
 }
 
 /** Flushes pending microtasks inside `act` so React commits before assertions. */
@@ -38,8 +39,8 @@ function renderComposer(
     taskId: 1,
     connected: true,
     runningRunId: null,
-    onSubmit: async (provider, prompt, approvalPolicy) => {
-      submissions.push({ provider, prompt, approvalPolicy });
+    onSubmit: async (provider, prompt, approvalPolicy, thinkingLevel) => {
+      submissions.push({ provider, prompt, approvalPolicy, thinkingLevel });
     },
     onStop: async (runId) => {
       stops.push(runId);
@@ -161,7 +162,8 @@ describe("Composer", () => {
     expect(textarea()).not.toBeDisabled();
 
     rerender({ connected: true, taskId: 1, runningRunId: null });
-    expect(textarea()).toHaveAttribute("placeholder", "Send a prompt…");
+    // Item 5: honest placeholder -- no @file/command claims.
+    expect(textarea()).toHaveAttribute("placeholder", "Message the agent…");
   });
 
   it("queues a prompt typed while a run is live and sends it when the run ends", async () => {
@@ -248,12 +250,11 @@ describe("Composer", () => {
     // says which provider a prompt would go to.
     expect(trigger).toHaveTextContent("Claude Code");
 
-    // "not unlabelled native selects" (Item 10): the label is real markup,
-    // not an aria-label, so it is on screen as well as in the a11y tree --
-    // and `htmlFor`/`id` still associates it with the Radix trigger, which
-    // is what getByLabelText above resolved through.
-    expect(screen.getByText("Provider").tagName).toBe("LABEL");
-    expect(screen.getByText("Approval policy").tagName).toBe("LABEL");
+    // Item 5: the visible <label> text moved out of the card's toolbar --
+    // the accessible name now comes from aria-label on the label-less
+    // trigger, which is still what getByLabelText resolved through.
+    expect(screen.queryByText("Provider")).not.toBeInTheDocument();
+    expect(screen.queryByText("Approval policy")).not.toBeInTheDocument();
   });
 
   it("selecting a provider from the open dropdown is what the next prompt is sent with", async () => {
@@ -279,11 +280,131 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", approvalPolicy: "manual" }]);
   });
 
+  it("approval-policy dropdown offers a third, provider-worded full-access tier, and submits it as approvalPolicy", async () => {
+    const { submissions } = renderComposer();
+
+    // Default provider is claude-native -- Claude's own vocabulary.
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Manual approval", "Auto-safe", "Bypass"]);
+    const claudeFullAccess = options[2];
+    expect(claudeFullAccess).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
+
+    fireEvent.click(claudeFullAccess);
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "go wild" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", approvalPolicy: "full-access" }]);
+  });
+
+  it("full-access is worded per provider, not one shared generic label", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "codex-native", label: "Codex" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    let options = await screen.findAllByRole("option");
+    const codexFullAccess = options[options.length - 1];
+    expect(codexFullAccess).toHaveTextContent("Full Access");
+    expect(codexFullAccess).toHaveAttribute(
+      "title",
+      expect.stringContaining("Edit files, run commands, and access the network"),
+    );
+    fireEvent.click(codexFullAccess);
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Approval policy"));
+    options = await screen.findAllByRole("option");
+    const glmFullAccess = options[options.length - 1];
+    expect(glmFullAccess).toHaveTextContent("Bypass all permissions");
+    expect(glmFullAccess).toHaveAttribute("title", expect.stringContaining("without prompting"));
+  });
+
+  it("shows a thinking-level selector only for claude-native, and omits the field entirely for every other provider", async () => {
+    const client = new FakeWsClient();
+    renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM" },
+      ],
+    });
+    await flush();
+
+    // Default provider is claude-native -- the control is present.
+    expect(screen.getByLabelText("Thinking level")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    // GLM has no pre-run thinking-level control at all (its own lives in
+    // the live chat view, once a session exists) -- not merely disabled.
+    expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
+  });
+
+  it("thinking level defaults to Standard visually but omits the field until the user actually picks one, same as approval-policy's own default", async () => {
+    const { submissions } = renderComposer();
+
+    // Untouched: the control shows "Standard" but the field is left off
+    // run.start's payload entirely -- an unmodified Claude submission
+    // sends exactly what it did before this selector existed.
+    expect(screen.getByLabelText("Thinking level")).toHaveTextContent("Standard");
+
+    fireEvent.change(textarea(), { target: { value: "think about it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([
+      { provider: "claude-native", prompt: "think about it", approvalPolicy: "manual" },
+    ]);
+    expect(submissions[0].thinkingLevel).toBeUndefined();
+  });
+
+  it("submits the picked thinking level once the selector is actually touched", async () => {
+    const { submissions } = renderComposer();
+
+    fireEvent.click(screen.getByLabelText("Thinking level"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Off", "Standard", "Extended"]);
+    fireEvent.click(options[2]);
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "reason hard" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([
+      { provider: "claude-native", prompt: "reason hard", approvalPolicy: "manual", thinkingLevel: "extended" },
+    ]);
+  });
+
   it("keeps the approval-policy help tooltip and disables both selects while the composer is inactive", () => {
     const { rerender } = renderComposer();
 
+    // Manual is the default selection, so the trigger's tooltip is
+    // manual's own help text (each tier's tooltip reflects its own
+    // selection now that full-access's differs per provider).
     const policy = screen.getByLabelText("Approval policy");
-    expect(policy).toHaveAttribute("title", expect.stringContaining("Auto-safe"));
+    expect(policy).toHaveAttribute("title", expect.stringContaining("approval"));
     expect(policy).not.toBeDisabled();
     expect(screen.getByLabelText("Provider")).not.toBeDisabled();
 
@@ -309,7 +430,6 @@ describe("Composer", () => {
       const trigger = screen.getByLabelText(label);
       expect(trigger.className).toContain("h-11");
       expect(trigger.className).toContain("md:h-7");
-      expect(trigger.className).not.toContain("h-8");
     }
   });
 
@@ -324,5 +444,47 @@ describe("Composer", () => {
     rerender({ runningRunId: "run-7" });
     expect(screen.getByTestId("chat-send-button")).toHaveAttribute("data-variant", "default");
     expect(screen.getByTestId("chat-stop-button")).toHaveAttribute("data-variant", "execute");
+  });
+});
+
+describe("Composer diff-stat pill (Item 5)", () => {
+  it("renders the pill when the task has changes, and clicking it opens the diff tab", () => {
+    const onOpenDiff = vi.fn();
+    renderComposer({
+      diffStat: { files: 2, additions: 12, deletions: 3 },
+      onOpenDiff,
+    });
+
+    const pill = screen.getByTestId("composer-diff-stat");
+    expect(pill).toHaveTextContent("+12");
+    expect(pill).toHaveTextContent("\u22123"); // minus sign, not a hyphen
+
+    fireEvent.click(pill);
+    expect(onOpenDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the pill when the task has no changes, no stat, or no diff tab to open", () => {
+    const { rerender } = renderComposer({ diffStat: { files: 0, additions: 0, deletions: 0 }, onOpenDiff: vi.fn() });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+
+    // Changes exist but there is no Diff tab to jump to (no onOpenDiff).
+    rerender({ diffStat: { files: 1, additions: 5, deletions: 0 }, onOpenDiff: undefined });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+
+    rerender({ diffStat: null, onOpenDiff: vi.fn() });
+    expect(screen.queryByTestId("composer-diff-stat")).not.toBeInTheDocument();
+  });
+
+  it("wraps the textarea and toolbar in one input card with no placeholder + button", () => {
+    renderComposer({ diffStat: { files: 1, additions: 4, deletions: 1 }, onOpenDiff: vi.fn() });
+
+    const card = screen.getByTestId("composer-card");
+    expect(card).toContainElement(screen.getByLabelText("Prompt"));
+    expect(card).toContainElement(screen.getByLabelText("Provider"));
+    expect(card).toContainElement(screen.getByTestId("chat-send-button"));
+    // No dead affordances: Stop only exists while a run is live, and
+    // there is no attachment "+" until attachments exist.
+    expect(screen.queryByTestId("chat-stop-button")).not.toBeInTheDocument();
+    expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
 });

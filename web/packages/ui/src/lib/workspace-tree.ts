@@ -283,3 +283,36 @@ export function searchTasks(tree: readonly WorkspaceWithTree[], query: string): 
   }
   return results;
 }
+
+/** The path with its last "/"-separated segment dropped -- "/" for a path with no parent (already root, or a single segment). */
+function parentDir(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (lastSlash <= 0) return "/";
+  return trimmed.slice(0, lastSlash);
+}
+
+/**
+ * Quick-jump folder suggestions for the "New workspace" folder picker: the
+ * parent directory of every already-registered workspace, since another
+ * git repo worth adding is most often a sibling of one already known about
+ * -- no separate "recent paths" storage needed, this is just a projection
+ * over data already loaded for the sidebar tree. Ordered most-recently-
+ * created workspace first, deduplicated (a parent with three registered
+ * siblings surfaces once, at its most recent child's position), and capped
+ * at 5 so the picker's header doesn't grow without bound as workspaces
+ * accumulate.
+ */
+export function recentWorkspaceParentDirs(workspaces: readonly Workspace[]): string[] {
+  const sorted = [...workspaces].sort((a, b) => b.CreatedAt.localeCompare(a.CreatedAt));
+  const seen = new Set<string>();
+  const dirs: string[] = [];
+  for (const ws of sorted) {
+    const dir = parentDir(ws.Path);
+    if (seen.has(dir)) continue;
+    seen.add(dir);
+    dirs.push(dir);
+    if (dirs.length >= 5) break;
+  }
+  return dirs;
+}

@@ -32,6 +32,8 @@ function runningRun(overrides: Partial<RunSummary> = {}): RunSummary {
     FinishedAt: null,
     StopReason: "",
     Err: "",
+    ApprovalPolicy: "manual",
+    ThinkingLevel: "",
     ...overrides,
   };
 }
@@ -47,6 +49,8 @@ function doneRun(overrides: Partial<RunSummary> = {}): RunSummary {
     FinishedAt: "2024-01-01T00:00:05Z",
     StopReason: "end_turn",
     Err: "",
+    ApprovalPolicy: "manual",
+    ThinkingLevel: "",
     ...overrides,
   };
 }
@@ -603,5 +607,280 @@ describe("TaskDetailPane", () => {
       prompt: "do the thing",
       approvalPolicy: "auto-safe",
     });
+  });
+
+  it("fetches and renders GLM's live config options, but never for a Claude run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+
+    const listCall = client.nth("run.listConfigOptions", 0);
+    expect(listCall.params).toEqual({ runId: "run-1" });
+    listCall.resolve({
+      options: [
+        {
+          configId: "thinking-level",
+          name: "Thinking Level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("Medium");
+    // A Claude/Codex run never even asks -- there's no live-session config
+    // surface for it at all (see ThinkingLevel's own doc comment).
+    expect(client.calls.some((c) => c.method === "run.listConfigOptions")).toBe(true);
+    expect(client.calls.filter((c) => c.method === "run.listConfigOptions")).toHaveLength(1);
+  });
+
+  it("omits the config-options control entirely for a Claude run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    await flush();
+    client.emit("run.attach", 0, "chunk", { text: "hi" });
+    await flush();
+
+    expect(client.calls.some((c) => c.method === "run.listConfigOptions")).toBe(false);
+    expect(screen.queryByTestId("run-config-options")).not.toBeInTheDocument();
+  });
+
+  it("re-fetches config options as the live run streams more events", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "kimi" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({ options: [] });
+    await flush();
+
+    // Nothing to show yet -- the session's option list wasn't ready on the
+    // first fetch (a plausible race between run.start and NewSession).
+    expect(screen.queryByTestId("run-config-options")).not.toBeInTheDocument();
+
+    client.emit("run.attach", 0, "chunk", { text: "hello" });
+    await flush();
+
+    const secondList = client.nth("run.listConfigOptions", 1);
+    expect(secondList.params).toEqual({ runId: "run-1" });
+    secondList.resolve({
+      options: [{ configId: "web-search", name: "Web Search", type: "boolean", currentValue: true }],
+    });
+    await flush();
+
+    expect(screen.getByTestId("run-config-option-toggle")).toHaveTextContent("On");
+  });
+
+  it("changing a config option calls run.setConfigOption and reflects the new value", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [
+        {
+          configId: "thinking-level",
+          name: "Thinking Level",
+          type: "select",
+          currentValue: "medium",
+          options: [
+            { value: "low", name: "Low" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Thinking Level"));
+    fireEvent.click(await screen.findByRole("option", { name: "High" }));
+    await flush();
+
+    const setCall = client.nth("run.setConfigOption", 0);
+    expect(setCall.params).toEqual({ runId: "run-1", configId: "thinking-level", value: "high" });
+
+    await act(async () => {
+      setCall.resolve({
+        options: [
+          {
+            configId: "thinking-level",
+            name: "Thinking Level",
+            type: "select",
+            currentValue: "high",
+            options: [
+              { value: "low", name: "Low" },
+              { value: "high", name: "High" },
+            ],
+          },
+        ],
+      });
+    });
+
+    expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("High");
+  });
+
+  it("surfaces a failed run.setConfigOption as an error instead of silently no-op'ing", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [{ configId: "thinking-level", name: "Thinking Level", type: "select", currentValue: "medium" }],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Set" }));
+    await flush();
+
+    const setCall = client.nth("run.setConfigOption", 0);
+    await act(async () => {
+      setCall.reject(new Error("no such config option"));
+    });
+
+    expect(screen.getByTestId("run-config-options-error")).toHaveTextContent("no such config option");
+  });
+
+  it("shows the live approval-policy control for a running manual run and switches it via run.setApprovalPolicy", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
+    await flush();
+
+    const control = screen.getByTestId("approval-policy-control");
+    expect(within(control).getByTestId("approval-policy-option-manual")).toHaveAttribute("aria-pressed", "true");
+    expect(within(control).getByTestId("approval-policy-option-auto-safe")).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(within(control).getByTestId("approval-policy-option-auto-safe"));
+    await flush();
+
+    const setCall = client.nth("run.setApprovalPolicy", 0);
+    expect(setCall.params).toEqual({ runId: "run-1", policy: "auto-safe" });
+
+    await act(async () => {
+      setCall.resolve({ approvalPolicy: "auto-safe" });
+    });
+
+    expect(within(control).getByTestId("approval-policy-option-auto-safe")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("surfaces a failed run.setApprovalPolicy as an error instead of silently no-op'ing", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("approval-policy-option-auto-safe"));
+    await flush();
+
+    await act(async () => {
+      client.nth("run.setApprovalPolicy", 0).reject(new Error("run already finished"));
+    });
+
+    expect(screen.getByTestId("approval-policy-error")).toHaveTextContent("run already finished");
+  });
+
+  it("hides the approval-policy control entirely for a full-access run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "full-access" })]);
+    await flush();
+
+    expect(screen.queryByTestId("approval-policy-control")).not.toBeInTheDocument();
+  });
+
+  it("hides the approval-policy control once the run has finished", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([doneRun({ ApprovalPolicy: "manual" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", events: [] });
+    await flush();
+
+    expect(screen.queryByTestId("approval-policy-control")).not.toBeInTheDocument();
+  });
+
+  it("shows Retry with higher effort for a failed Claude run below extended and resubmits at the next tier", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([
+      doneRun({
+        Status: "error",
+        Err: "boom",
+        Provider: "claude-native",
+        ApprovalPolicy: "auto-safe",
+        ThinkingLevel: "off",
+      }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", err: "boom", events: [] });
+    await flush();
+
+    const retryButton = screen.getByTestId("run-retry-higher-effort");
+    fireEvent.click(retryButton);
+    await flush();
+
+    const startCall = client.nth("run.start", 0);
+    expect(startCall.params).toEqual({
+      taskId: TASK_A.ID,
+      provider: "claude-native",
+      prompt: "do the thing",
+      approvalPolicy: "auto-safe",
+      thinkingLevel: "standard",
+    });
+  });
+
+  it("shows no Retry with higher effort for a failed run already at extended", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([
+      doneRun({ Status: "error", Err: "boom", Provider: "claude-native", ThinkingLevel: "extended" }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", err: "boom", events: [] });
+    await flush();
+
+    expect(screen.queryByTestId("run-retry-higher-effort")).not.toBeInTheDocument();
+  });
+
+  it("shows no Retry with higher effort for a failed non-Claude provider's run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([doneRun({ Status: "error", Err: "boom", Provider: "glm", ThinkingLevel: "off" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "error", err: "boom", events: [] });
+    await flush();
+
+    expect(screen.queryByTestId("run-retry-higher-effort")).not.toBeInTheDocument();
+  });
+
+  it("shows no Retry with higher effort for a successful Claude run", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([doneRun({ Provider: "claude-native", ThinkingLevel: "off" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", stopReason: "end_turn", events: [] });
+    await flush();
+
+    expect(screen.queryByTestId("run-retry-higher-effort")).not.toBeInTheDocument();
   });
 });

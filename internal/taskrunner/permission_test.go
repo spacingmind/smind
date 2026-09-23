@@ -66,6 +66,67 @@ func TestACPDeciderAdapter_TranslatesOptionsAndChoice(t *testing.T) {
 	}
 }
 
+// livePolicyDecider wraps recordingDecider with a live, externally
+// mutable ApprovalPolicy, for proving acpDeciderAdapter's autoAllowACPFileEdit
+// gate consults a wrapped LivePolicyDecider's current value instead of its
+// own frozen approvalPolicy field once the wrapped decider implements it
+// (internal/runs.runPermissionDecider is the real implementation; see
+// LivePolicyDecider's doc comment for why this matters for a mid-run
+// Registry.SetApprovalPolicy switch).
+type livePolicyDecider struct {
+	recordingDecider
+	policy ApprovalPolicy
+}
+
+func (d *livePolicyDecider) CurrentApprovalPolicy() ApprovalPolicy {
+	return d.policy
+}
+
+func TestACPDeciderAdapter_AutoAllowFileEdit_PrefersLiveApprovalPolicyOverFrozenField(t *testing.T) {
+	t.Parallel()
+	d := &livePolicyDecider{recordingDecider: recordingDecider{optionID: "should-not-be-reached"}, policy: ApprovalPolicyManual}
+	// The adapter's own frozen field also says manual -- proving any
+	// auto-allow that happens below can only be coming from d's live
+	// value, never this field.
+	adapter := acpDeciderAdapter{decider: d, worktreePath: "/wt/task-1", approvalPolicy: ApprovalPolicyManual}
+
+	req := acp.RequestPermissionParams{
+		ToolCall: json.RawMessage(`{"kind":"edit","locations":[{"path":"/wt/task-1/a.go"}]}`),
+		Options: []acp.PermissionOption{
+			{OptionID: "allow-1", Name: "Allow", Kind: acp.PermissionAllowOnce},
+			{OptionID: "deny-1", Name: "Deny", Kind: acp.PermissionRejectOnce},
+		},
+	}
+
+	// Still manual (both the frozen field and d's live value): falls
+	// through to the wrapped decider, exactly as if LivePolicyDecider
+	// didn't exist.
+	got, err := adapter.Decide(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if got != d.optionID {
+		t.Fatalf("Decide() while still manual = %q, want it to fall through to the wrapped decider's %q", got, d.optionID)
+	}
+
+	// d's live value switches to auto-safe -- the adapter's own frozen
+	// field is untouched (still ApprovalPolicyManual), so an auto-allow
+	// here can only be explained by the adapter reading d's live value via
+	// LivePolicyDecider.
+	d.policy = ApprovalPolicyAutoSafe
+	d.gotSummary = ""
+	got, err = adapter.Decide(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if got != "allow-1" {
+		t.Fatalf("Decide() after live switch to auto-safe = %q, want %q (auto-allowed via the live policy, not the frozen field)", got, "allow-1")
+	}
+	if d.gotSummary != "" {
+		t.Fatalf("wrapped decider was called (gotSummary = %q) -- the auto-allow fast path should have short-circuited before ever reaching it", d.gotSummary)
+	}
+}
+
 func TestACPDeciderAdapter_ExtractsExecuteCommand(t *testing.T) {
 	t.Parallel()
 	d := &recordingDecider{optionID: "opt-1"}

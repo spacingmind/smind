@@ -18,8 +18,12 @@
 // each, for proving a caller observes genuinely incremental delivery rather
 // than a reply buffered until the end; "permission" issues a real
 // session/request_permission call and streams back which option was chosen,
-// for proving Runner's PermissionDecider wiring end to end; anything else
-// (including no file at all) runs the default two-chunk scripted reply.
+// for proving Runner's PermissionDecider wiring end to end; "permission-edit"
+// is the same idea for an edit-kind request (ApprovalPolicyAutoSafe's
+// ACP file-edit fast path, see acpDeciderAdapter.Decide), with a
+// synchronization chunk and a real delay before the request goes out so a
+// test can reliably switch ApprovalPolicy mid-run before it arrives; anything
+// else (including no file at all) runs the default two-chunk scripted reply.
 package main
 
 import (
@@ -126,7 +130,25 @@ func handle(msg message, sessionCwd *string) {
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
-		respond(msg.ID, map[string]any{"sessionId": sessionID})
+		// A select-kind option with its own enumerated choices (mirrors
+		// GLM's real thinking-level tiers), so Runner/Registry/wsapi tests
+		// can drive a real config-option round trip end to end rather than
+		// asserting only against the non-ACP "not supported" path.
+		respond(msg.ID, map[string]any{
+			"sessionId": sessionID,
+			"configOptions": []map[string]any{{
+				"configId":     "thinking-level",
+				"name":         "Thinking Level",
+				"type":         "select",
+				"currentValue": "medium",
+				"options": []map[string]any{
+					{"value": "minimal", "name": "Minimal"},
+					{"value": "low", "name": "Low"},
+					{"value": "medium", "name": "Medium"},
+					{"value": "high", "name": "High"},
+				},
+			}},
+		})
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)
 	case msg.Method == "session/prompt":
@@ -187,6 +209,45 @@ func runPromptScript(promptMsg message, cwd string) {
 		permResp := call("session/request_permission", map[string]any{
 			"sessionId": sessionID,
 			"toolCall":  map[string]any{"toolCallId": "tc-1", "title": "Run a risky command"},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	if scenario == "permission-edit" {
+		// Unlike "permission" above, this scenario needs genuine
+		// happens-before ordering, not a race: a test proving a mid-run
+		// ApprovalPolicy switch (internal/runs.Registry.SetApprovalPolicy)
+		// lands *before* this scenario's edit-kind session/request_permission
+		// call needs a reliable signal to synchronize on first. The
+		// preceding sessionUpdate + sleep gives the test time to observe
+		// the "ready" chunk (causally ordered before this, via the
+		// notification-forwarding pipeline) and call SetApprovalPolicy
+		// before the request actually goes out.
+		sessionUpdate("ready")
+		time.Sleep(300 * time.Millisecond)
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall": map[string]any{
+				"toolCallId": "tc-edit-1",
+				"kind":       "edit",
+				"locations":  []map[string]any{{"path": "a.go"}},
+			},
 			"options": []map[string]any{
 				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
 				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},

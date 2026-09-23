@@ -192,20 +192,31 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // today's behavior exactly: each provider falls through to its own
 // Runner-level default.
 //
-// approvalPolicy is the run's ApprovalPolicy (see policy.go): it only
-// matters when decider is non-nil, and only widens what may run without a
-// human -- ApprovalPolicyAutoSafe pre-approves the allowlisted
-// verification commands at the provider's own gate (see SafeBashRules for
-// why the decider-side check alone is not enough for claude-native) in
-// addition to auto-allowing them in the decider itself. The zero value
+// approvalPolicy is the run's ApprovalPolicy (see policy.go). For
+// ApprovalPolicyManual/ApprovalPolicyAutoSafe it only matters when decider
+// is non-nil, and only widens what may run without a human --
+// ApprovalPolicyAutoSafe pre-approves the allowlisted verification commands
+// at the provider's own gate (see SafeBashRules for why the decider-side
+// check alone is not enough for claude-native) in addition to
+// auto-allowing them in the decider itself. The zero value
 // (ApprovalPolicyManual) preserves today's behavior exactly.
+// ApprovalPolicyFullAccess is different: it takes priority over decider
+// entirely -- no decider is installed at all, regardless of whether the
+// caller supplied one, and each provider's own native "auto-approve
+// everything" mechanism is used instead (see runClaudeNative/
+// runCodexNative/runACP).
+//
+// thinkingLevel is Claude-only (see ThinkingLevel's doc comment): every
+// other provider ignores it entirely, regardless of what it's set to.
+// ThinkingLevelUnspecified (the zero value) preserves today's behavior
+// exactly -- no thinking Option is added to the Claude Code session at all.
 //
 // The backend client spawned for this call is not reused: RunPrompt owns
 // its subprocess end to end and closes it before returning. ctx cancellation
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -221,9 +232,9 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, worktreePath, prompt, decider, events)
+		return r.runCodexNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -242,6 +253,13 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 
 	var opts []acp.Option
 	switch {
+	case approvalPolicy == ApprovalPolicyFullAccess:
+		// ACP has no native permission-mode concept to defer to (unlike
+		// Claude/Codex) -- AutoApprovePolicy answering allow_once/
+		// allow_always on every request already is this provider's real
+		// ceiling. No decider is installed at all, same as the other two
+		// providers' full-access branch.
+		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case decider != nil:
 		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider, worktreePath: worktreePath, approvalPolicy: approvalPolicy}))
 	case r.acpPermissionPolicy != nil:
@@ -381,9 +399,26 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
+	switch thinkingLevel {
+	case ThinkingLevelOff:
+		opts = append(opts, claudecode.WithDisabledThinking())
+	case ThinkingLevelStandard:
+		opts = append(opts, claudecode.WithAdaptiveThinking())
+	case ThinkingLevelExtended:
+		opts = append(opts, claudecode.WithThinkingBudget(extendedThinkingBudgetTokens))
+	case ThinkingLevelUnspecified:
+		// No thinking Option at all -- preserves today's SDK default
+		// exactly, for an older client or any request that never set the
+		// field.
+	}
 	switch {
+	case approvalPolicy == ApprovalPolicyFullAccess:
+		// No decider at all -- the CLI's own bypassPermissions mode is
+		// Claude Code's real "skip every permission prompt" mode, the same
+		// one its own CLI exposes under that name.
+		opts = append(opts, claudecode.WithPermissionMode("bypassPermissions"))
 	case decider != nil:
 		// A human decider is wired up, so ask the CLI for permission-mode
 		// "acceptEdits" (not its "default"): under "default", the CLI blocks
@@ -545,9 +580,16 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []codex.Option
 	switch {
+	case approvalPolicy == ApprovalPolicyFullAccess:
+		// No decider at all -- codex.AutoApprovePolicy{} auto-resolves every
+		// commandExecution/fileChange approval request, the closest smind
+		// gets to driving Codex's own never/danger-full-access combination
+		// without owning its native approval_policy/sandbox_mode config
+		// surface (see docs/plans/active/task-move-approval-thinking.md).
+		opts = append(opts, codex.WithPermissionPolicy(codex.AutoApprovePolicy{}))
 	case decider != nil:
 		opts = append(opts, codex.WithPermissionPolicy(codexDeciderAdapter{decider}))
 	case r.codexPermissionPolicy != nil:
