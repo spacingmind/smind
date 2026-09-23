@@ -1,0 +1,152 @@
+//! The connection loop: fetch the daemon token over HTTP, open /ws,
+//! subscribe to permission.pending, and reconnect with backoff. Lives
+//! here (not in the tauri crate) so it compiles and is exercisable
+//! without webkit2gtk; the shell passes in a notification callback.
+
+use std::time::Duration;
+
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+
+use crate::backoff::Backoff;
+use crate::config::Config;
+use crate::protocol;
+
+/// A connection counts as stable (and resets the backoff schedule)
+/// after it has stayed up this long without an error.
+const STABLE_AFTER: Duration = Duration::from_secs(30);
+const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
+const SUBSCRIBE_ID: &str = "events-sub-1";
+
+/// healthz_ok reports whether the daemon answers GET /healthz.
+pub async fn healthz_ok(cfg: &Config) -> bool {
+    let client = reqwest::Client::new();
+    match client.get(cfg.healthz_url()).timeout(HTTP_TIMEOUT).send().await {
+        Ok(resp) => resp.status().is_success(),
+        Err(_) => false,
+    }
+}
+
+/// subscribe_message builds the events.subscribe request the client
+/// sends right after the /ws upgrade.
+pub fn subscribe_message() -> serde_json::Value {
+    serde_json::json!({
+        "id": SUBSCRIBE_ID,
+        "method": "events.subscribe",
+        "params": { "topics": ["permission.pending"] }
+    })
+}
+
+/// run drives the token fetch + WS connection forever, handing each
+/// permission.pending notification to on_notification. Reconnects with
+/// exponential backoff (reset after a stable connection), refetching
+/// the token and resubscribing on every attempt.
+pub async fn run(cfg: Config, on_notification: impl Fn(protocol::Notification) + Send + Sync + 'static) {
+    let client = reqwest::Client::new();
+    let mut backoff = Backoff::default();
+    loop {
+        let stable = run_once(&cfg, &client, &on_notification).await;
+        if stable {
+            backoff.reset();
+        }
+        tokio::time::sleep(backoff.next()).await;
+    }
+}
+
+/// run_once performs one connect/subscribe/serve cycle. Returns true
+/// if the connection stayed up long enough to count as stable (so the
+/// caller resets its backoff) before ending.
+async fn run_once(
+    cfg: &Config,
+    client: &reqwest::Client,
+    on_notification: &impl Fn(protocol::Notification),
+) -> bool {
+    match try_run_once(cfg, client, on_notification).await {
+        Ok(stable) => stable,
+        Err(err) => {
+            eprintln!("smind desktop: daemon connection error: {err}");
+            false
+        }
+    }
+}
+
+async fn try_run_once(
+    cfg: &Config,
+    client: &reqwest::Client,
+    on_notification: &impl Fn(protocol::Notification),
+) -> Result<bool, String> {
+    let token = fetch_token(cfg, client).await?;
+    let ws_url = cfg.ws_url(&token)?;
+    let (ws, _resp) = connect_async(ws_url.as_str())
+        .await
+        .map_err(|e| format!("ws connect: {e}"))?;
+    let (mut tx, mut rx) = ws.split();
+
+    let sub = subscribe_message().to_string();
+    tx.send(Message::Text(sub.into()))
+        .await
+        .map_err(|e| format!("ws send subscribe: {e}"))?;
+
+    let mut stable = false;
+    let stable_timer = tokio::time::sleep(STABLE_AFTER);
+    tokio::pin!(stable_timer);
+    loop {
+        tokio::select! {
+            _ = &mut stable_timer, if !stable => {
+                stable = true;
+            }
+            msg = rx.next() => {
+                match msg {
+                    Some(Ok(m)) if m.is_text() || m.is_binary() => {
+                        let text = m.into_text().map_err(|e| format!("ws text: {e}"))?;
+                        if let Some(event) =
+                            protocol::parse_server_message(text.as_str()).and_then(|m| m.event)
+                        {
+                            if let Some(n) = protocol::notification_for(&event) {
+                                on_notification(n);
+                            }
+                        }
+                    }
+                    Some(Ok(_)) => {} // ping/pong frames; tungstenite answers pings itself
+                    Some(Err(e)) => return Ok(stable),
+                    None => return Ok(stable),
+                }
+            }
+        }
+    }
+}
+
+async fn fetch_token(cfg: &Config, client: &reqwest::Client) -> Result<String, String> {
+    #[derive(serde::Deserialize)]
+    struct TokenResp {
+        token: String,
+    }
+    let resp: TokenResp = client
+        .get(cfg.token_url())
+        .timeout(HTTP_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| format!("token fetch: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("token decode: {e}"))?;
+    Ok(resp.token)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscribe_message_shape() {
+        let msg = subscribe_message();
+        assert_eq!(msg["method"], "events.subscribe");
+        assert_eq!(msg["params"]["topics"][0], "permission.pending");
+        assert!(msg.get("id").is_some());
+        // Round-trips through the envelope parser without being mistaken
+        // for a server event.
+        let parsed = crate::protocol::parse_server_message(&msg.to_string()).unwrap();
+        assert!(parsed.event.is_none());
+    }
+}

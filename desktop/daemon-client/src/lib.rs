@@ -1,9 +1,5 @@
-//! Pure-logic daemon client for the smind desktop shell: daemon URL
-//! resolution, wsapi wire parsing, notification shaping, and reconnect
-//! backoff. GUI-free so `cargo test` runs on machines without
-//! webkit2gtk; the tauri crate wires these into the connection loop.
-
 pub mod backoff;
+pub mod client;
 pub mod config;
 pub mod protocol;
 
