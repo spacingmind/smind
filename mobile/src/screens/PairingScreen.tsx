@@ -11,6 +11,7 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { UiHost } from '../ui/UiHost';
 import { StatusBar } from 'expo-status-bar';
 import { RelayConnection } from '../relay/RelayConnection';
 import { AppTheme } from '../theme';
@@ -47,27 +48,31 @@ export function PairingScreen({ onConnected }: Props) {
       <StatusBar style="auto" />
       <Text style={styles.title}>smind pairing</Text>
       <Text style={styles.label}>Paste a pairing URL from `smind relay offer`:</Text>
-      <ExpoTextInput
-        style={styles.inputBox}
-        textStyle={styles.inputText}
-        multiline
-        numberOfLines={3}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="https://spacingmind.sh/pair#offer=..."
-        placeholderTextColor={theme.foregroundMuted}
-        value={pairingUrlState}
-        onChangeText={(text) => {
-          pairingUrlState.value = text;
-          setPairingUrl(text);
-        }}
-      />
-      <View style={styles.connectWrap}>
-        <Button
-          label={status.kind === 'connecting' ? 'Connecting…' : 'Connect'}
-          onPress={handleConnect}
-          disabled={!pairingUrl.trim() || status.kind === 'connecting'}
+      <UiHost style={styles.inputHost}>
+        <ExpoTextInput
+          style={styles.inputBox}
+          textStyle={styles.inputText}
+          multiline
+          numberOfLines={3}
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="https://spacingmind.sh/pair#offer=..."
+          placeholderTextColor={theme.foregroundMuted}
+          value={pairingUrlState}
+          onChangeText={(text) => {
+            pairingUrlState.value = text;
+            setPairingUrl(text);
+          }}
         />
+      </UiHost>
+      <View style={styles.connectWrap}>
+        <UiHost>
+          <Button
+            label={status.kind === 'connecting' ? 'Connecting…' : 'Connect'}
+            onPress={handleConnect}
+            disabled={!pairingUrl.trim() || status.kind === 'connecting'}
+          />
+        </UiHost>
       </View>
       {status.kind === 'error' && <Text style={styles.error}>{status.message}</Text>}
     </View>
@@ -94,6 +99,9 @@ function makeStyles(theme: AppTheme) {
       lineHeight: theme.type.interface.lineHeight,
       color: theme.foregroundMuted,
       marginBottom: theme.spacing[2],
+    },
+    inputHost: {
+      alignSelf: 'stretch',
     },
     inputBox: {
       borderWidth: 1,
