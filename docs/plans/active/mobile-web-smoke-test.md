@@ -91,9 +91,33 @@ stated in Validation.
 
 ## Progress
 
-- [ ] Item 1 — web build + PairingScreen render
+- [x] Item 1 — web build + PairingScreen render
 - [ ] Item 2 — full flow against the relay harness (best-effort)
 
 ## Validation
 
-To be filled in as each item lands.
+### Item 1 (2026-09-24)
+
+- Deps installed via `npx expo install react-native-web @expo/metro-runtime`
+  (resolved to `react-native-web@~0.21.2`, `@expo/metro-runtime@~57.0.16`).
+  Playwright pinned to `1.63.0` as a devDependency — that is the release
+  whose bundled Chromium is build 1243, matching the pre-cached
+  `~/.cache/ms-playwright/chromium-1243`, so no browser download was needed.
+- `npx expo export --platform web` succeeds (368 modules, 744KB bundle);
+  no fallback to `expo start --web` was necessary.
+- `npm run smoke:web` (`mobile/scripts/smoke-web.mjs`): builds the export,
+  serves `dist/` from a tiny static server, opens it in headless Chromium
+  in both emulated color schemes. Asserts the "smind pairing" title, a
+  textarea/input for the pairing URL, the Connect button, and zero
+  `pageerror`/`console.error` events during load. Exit 0;
+  `pairing-light.png` + `pairing-dark.png` written to `mobile/.smoke/`
+  (gitignored). Negative check: breaking the expected title made the
+  script exit 1 (locator timeout), then reverted.
+- `npx tsc --noEmit` clean; `npm test` 13 files / 61 tests green.
+- Limitation (accepted per Context): web proves layout, theme tokens —
+  the two screenshots visibly differ light vs dark background/foreground —
+  `@expo/ui` components rendering at all on `react-native-web`, and the
+  JS flows. It does not verify SwiftUI/Compose-specific rendering on
+  native. Cosmetic web-only quirk observed, not fixed: `@expo/ui`'s
+  `Host` constrains the app to a narrow panel in the viewport's corner
+  rather than full-width on web; native layout is unaffected.
