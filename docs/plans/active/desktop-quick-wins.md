@@ -361,5 +361,19 @@ If an item turns out to be impossible under these constraints, stop and report i
     were both killed; `/tmp/smind-desktop-live-test` removed; the real
     daemon on 4648 confirmed still answering `/healthz` afterward.
 
-- **AC7 Windows build**: pushed to `origin/feat/desktop-tauri-shell`;
-  see below for the `desktop-windows` workflow result.
+- **AC7 Windows build**: first push (`a89a656`) failed
+  `desktop-windows` at the `Build installers` step:
+  `error[E0277]: NonNull<c_void> cannot be sent between threads safely`
+  on `static KEEPALIVE: Mutex<Vec<Toast>>` in `notify.rs` -- exactly the
+  risk flagged in AC3's Validation ("unverified locally... depends on
+  the desktop-windows CI build to catch any API mismatch"). `Toast`
+  wraps a WinRT/COM handle down to a raw `NonNull<c_void>`, so
+  `Vec<Toast>` isn't `Sync` and can't live in a shared `static`/`Mutex`
+  at all, on any Rust version -- not a version mismatch between 0.7.3
+  (read locally) and 0.8.1 (only in CI), the same problem exists in
+  both. Fixed by leaking each shown toast (`Box::leak(Box::new(toast))`)
+  instead of pushing it into a static `Vec`: leaking needs no
+  `Send`/`Sync` bound at all, so it sidesteps the type error entirely
+  while keeping the same "outlive the process" intent the comment
+  already described. Re-pushed as `<fix commit>`; result recorded
+  below once the rebuilt workflow finishes.

@@ -66,17 +66,9 @@ pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use std::sync::Mutex;
-
     use tauri_winrt_notification::Toast;
 
     use super::{navigate_to_task, ClickContext};
-
-    /// `Toast::show()`'s activation handler must outlive the call or
-    /// WinRT drops it early with no unregister path, so shown toasts are
-    /// simply kept alive for the process's lifetime -- acceptable for a
-    /// desktop app's session-scoped notification volume.
-    static KEEPALIVE: Mutex<Vec<Toast>> = Mutex::new(Vec::new());
 
     pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
         let toast = Toast::new(Toast::POWERSHELL_APP_ID)
@@ -86,9 +78,15 @@ mod windows {
                 navigate_to_task(&ctx, task_id);
                 Ok(())
             });
-        if toast.show().is_ok() {
-            KEEPALIVE.lock().unwrap().push(toast);
-        }
+        // Toast::show()'s activation handler must outlive the call or
+        // WinRT drops it early with no unregister path. Toast wraps a
+        // raw WinRT/COM handle (a non-Send, non-Sync NonNull<c_void>
+        // deep inside it), so it can't be parked in a shared static or
+        // Mutex -- leaking it is the simplest way to keep it alive for
+        // the process's lifetime, acceptable for a desktop app's
+        // session-scoped notification volume.
+        let toast = Box::leak(Box::new(toast));
+        let _ = toast.show();
     }
 }
 
