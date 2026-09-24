@@ -47,6 +47,20 @@ export interface BindingWhen {
    * plan's "except where explicitly marked global".
    */
   global?: true;
+  /**
+   * `true` = blocked in `editable` scope like the default, but only for
+   * this binding's *default* combo -- once the user rebinds it, the block
+   * lifts and the new combo fires while typing too. Ported from Paseo's
+   * `editable: false` + `withoutDefaultComboGuard`
+   * (`keyboard-shortcuts.ts`): the pane-focus defaults collide with the
+   * browser/OS's own Shift+Arrow text-selection keys (word-select on
+   * Win/Linux, line-select on mac), so *those specific keys* must stay
+   * out of a text field -- but a combo the user chose on purpose shouldn't
+   * inherit a restriction that was only ever about the shipped default.
+   * Unlike `global`, this does not affect `terminal` scope -- Paseo's own
+   * guard is `editable`-only, and nothing here needs a terminal exemption.
+   */
+  editableWhenRebound?: true;
 }
 
 export interface ShortcutBinding {
@@ -196,8 +210,8 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     combo: "Mod+Shift+ArrowLeft",
     section: "tabs",
     label: "Focus pane left",
-    when: { global: true },
-    note: "Works while typing",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
   },
   {
     id: "pane-focus-right",
@@ -205,8 +219,8 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     combo: "Mod+Shift+ArrowRight",
     section: "tabs",
     label: "Focus pane right",
-    when: { global: true },
-    note: "Works while typing",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
   },
   {
     id: "pane-focus-up",
@@ -214,8 +228,8 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     combo: "Mod+Shift+ArrowUp",
     section: "tabs",
     label: "Focus pane up",
-    when: { global: true },
-    note: "Works while typing",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
   },
   {
     id: "pane-focus-down",
@@ -223,8 +237,8 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     combo: "Mod+Shift+ArrowDown",
     section: "tabs",
     label: "Focus pane down",
-    when: { global: true },
-    note: "Works while typing",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
   },
   {
     id: "pane-move-tab-next",
@@ -243,9 +257,19 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
   },
   {
+    // Not Mod+Digit: Ctrl/Cmd+1-9 already switches the *browser's own*
+    // tabs in Chrome/Edge/Firefox and the page never reliably sees the
+    // keydown, matching Paseo's own web-runtime substitution (its
+    // `workspace.navigate.index` is `Mod+Digit` only under `desktop: true`;
+    // the web build gets `Alt+Digit` instead -- `keyboard-shortcuts.ts`
+    // around lines 538-566). Exact-modifier matching (`matchCombo`) is
+    // what keeps this from colliding with `tab-jump`'s `Mod+Alt+Digit`
+    // below -- Alt alone and Mod+Alt are different combos. A future
+    // desktop (Tauri) runtime that can actually own Ctrl/Cmd+digit could
+    // offer `Mod+Digit` there; nothing here forecloses that.
     id: "sidebar-task-jump",
     action: "sidebar.task-jump",
-    combo: "Mod+Digit",
+    combo: "Alt+Digit",
     section: "navigation",
     label: "Jump to task by number",
     when: { global: true },
@@ -348,12 +372,19 @@ export function resolveBindings(
   });
 }
 
-/** Whether a binding is allowed to fire with focus where it currently is. */
-export function bindingAllowedInScope(binding: ShortcutBinding, scope: FocusScope): boolean {
+/** Whether a binding is allowed to fire with focus where it currently is. `overridden` is `ResolvedBinding`'s field -- omitted (or false), a binding with `editableWhenRebound` is treated as still on its default combo. */
+export function bindingAllowedInScope(
+  binding: ShortcutBinding & { overridden?: boolean },
+  scope: FocusScope,
+): boolean {
   // No binding fires inside a modal: a dialog owns its own keyboard, down
   // to Escape (which closes it rather than interrupting a run).
   if (scope === "modal") return false;
-  if (scope === "editable" || scope === "terminal") return binding.when?.global === true;
+  if (binding.when?.global === true) return true;
+  if (scope === "editable") {
+    return binding.when?.editableWhenRebound === true && binding.overridden === true;
+  }
+  if (scope === "terminal") return false;
   return true;
 }
 

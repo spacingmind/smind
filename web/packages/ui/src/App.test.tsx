@@ -1541,7 +1541,32 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     );
   });
 
-  it("a pane-focus shortcut fires from inside the composer textarea", async () => {
+  it("the default pane-focus combo does not fire from inside the composer textarea -- it's the browser's own text-selection key there", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [, sideId] = await splitDiffToSide();
+    expect(focusedPaneId()).toBe(sideId);
+
+    const composer = screen.getByLabelText("Prompt");
+    composer.focus();
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    });
+    await flush();
+
+    // Focus never moved off the side pane -- Ctrl+Shift+ArrowLeft stayed
+    // the composer's own word-select key.
+    expect(focusedPaneId()).toBe(sideId);
+  });
+
+  it("a rebound pane-focus combo does fire from inside the composer textarea", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -1554,10 +1579,20 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     const [primaryId, sideId] = await splitDiffToSide();
     expect(focusedPaneId()).toBe(sideId);
 
+    // Rebind pane.focus.left away from its default -- the whole point of
+    // `editableWhenRebound` is that a combo the user picked on purpose
+    // isn't stuck with the default's text-field exemption.
+    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    await flush();
+    fireEvent.click(screen.getByLabelText("Change shortcut for Focus pane left"));
+    fireEvent.keyDown(window, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+
     const composer = screen.getByLabelText("Prompt");
     composer.focus();
     await act(async () => {
-      fireEvent.keyDown(composer, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+      fireEvent.keyDown(composer, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
     });
     await flush();
 
@@ -1686,7 +1721,17 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
   });
 
-  it("Mod+<digit> jumps to the Nth task in the sidebar, distinct from Ctrl+Alt+<digit>'s tab-position jump", async () => {
+  it("Alt+<digit> jumps to the Nth task in the sidebar, distinct from Ctrl+Alt+<digit>'s tab-position jump", async () => {
+    // Not Mod+<digit>: Ctrl/Cmd+1-9 is the browser's own tab-switching
+    // shortcut and the page never reliably sees it (see the binding's own
+    // comment in keyboard/shortcuts.ts).
+    async function pressAlt(key: string, code: string): Promise<void> {
+      await act(async () => {
+        fireEvent.keyDown(document, { key, code, altKey: true });
+      });
+      await flush();
+    }
+
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -1696,13 +1741,13 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    await press("2", "Digit2");
+    await pressAlt("2", "Digit2");
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
     expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
 
-    await press("3", "Digit3");
+    await pressAlt("3", "Digit3");
     await flush();
     respondAll(socket, "run.list", []);
     await flush();

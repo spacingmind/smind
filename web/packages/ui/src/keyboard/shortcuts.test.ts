@@ -153,6 +153,39 @@ describe("bindingAllowedInScope", () => {
     expect(bindingAllowedInScope(global, "terminal")).toBe(true);
     expect(bindingAllowedInScope(global, "modal")).toBe(false);
   });
+
+  describe("editableWhenRebound", () => {
+    const paneFocus: ShortcutBinding = {
+      id: "pane-focus-left",
+      action: "pane.focus.left",
+      combo: "Mod+Shift+ArrowLeft",
+      section: "tabs",
+      label: "Focus pane left",
+      when: { editableWhenRebound: true },
+    };
+
+    it("blocks the default combo in editable, matching the unmarked default", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: false }, "editable")).toBe(false);
+      expect(bindingAllowedInScope(paneFocus, "editable")).toBe(false);
+    });
+
+    it("allows a rebound combo in editable", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "editable")).toBe(true);
+    });
+
+    it("does not extend to terminal scope -- unlike global, it stays blocked there even when rebound", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "terminal")).toBe(false);
+    });
+
+    it("fires outside editable/terminal regardless of override", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: false }, "other")).toBe(true);
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "other")).toBe(true);
+    });
+
+    it("never fires in a modal, rebound or not", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "modal")).toBe(false);
+    });
+  });
 });
 
 describe("resolveBindings", () => {
@@ -217,6 +250,62 @@ describe("helpSections", () => {
     const row = sections.flatMap((s) => s.rows).find((r) => r.id === "palette-open")!;
     expect(row.keys).toBeNull();
     expect(row.overridden).toBe(true);
+  });
+});
+
+describe("pane-focus defaults vs. a rebind, in an editable field", () => {
+  const paneFocusLeft = event({ key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+
+  it("the shipped default (Mod+Shift+ArrowLeft) does not fire in editable scope -- it's the browser's word-select key there", () => {
+    const bindings = resolveBindings();
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "editable" }),
+    ).toBeNull();
+  });
+
+  it("the same default still fires outside editable/terminal scope", () => {
+    const bindings = resolveBindings();
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "other" })?.action,
+    ).toBe("pane.focus.left");
+  });
+
+  it("a rebind of the same binding does fire in editable scope", () => {
+    const bindings = resolveBindings(SHORTCUT_BINDINGS, { "pane-focus-left": "Alt+Shift+H" });
+    const rebound = event({ key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    expect(
+      matchShortcut(bindings, rebound, { isMac: false, scope: "editable" })?.action,
+    ).toBe("pane.focus.left");
+    // The original default combo no longer matches anything, rebound or not.
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "editable" }),
+    ).toBeNull();
+  });
+});
+
+describe("sidebar.task-jump (Alt+Digit) vs. tab.jump (Mod+Alt+Digit)", () => {
+  const bindings = resolveBindings();
+  const NON_MAC_2 = { isMac: false, scope: "other" } as const;
+
+  it("Alt+2 alone fires sidebar.task-jump, not tab.jump", () => {
+    const match = matchShortcut(bindings, event({ key: "2", code: "Digit2", altKey: true }), NON_MAC_2);
+    expect(match?.action).toBe("sidebar.task-jump");
+    expect(match?.payload).toEqual({ digit: 2 });
+  });
+
+  it("Ctrl+Alt+2 fires tab.jump, not sidebar.task-jump -- exact-modifier matching keeps the two apart", () => {
+    const match = matchShortcut(
+      bindings,
+      event({ key: "2", code: "Digit2", ctrlKey: true, altKey: true }),
+      NON_MAC_2,
+    );
+    expect(match?.action).toBe("tab.jump");
+  });
+
+  it("Ctrl+2 alone (no Alt) fires neither -- not the browser-reserved Mod+Digit this binding deliberately avoids", () => {
+    expect(
+      matchShortcut(bindings, event({ key: "2", code: "Digit2", ctrlKey: true }), NON_MAC_2),
+    ).toBeNull();
   });
 });
 

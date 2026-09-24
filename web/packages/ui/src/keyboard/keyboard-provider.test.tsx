@@ -312,6 +312,72 @@ describe("handler registry", () => {
   });
 });
 
+describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
+  it("the default pane-focus combo neither fires nor preventDefaults inside a text field -- it's the browser's own selection key there", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <Claim action="pane.focus.left" onFire={fire} />
+        <textarea aria-label="composer" />
+      </KeyboardProvider>,
+    );
+
+    const textarea = screen.getByLabelText("composer");
+    textarea.focus();
+    const domEvent = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    textarea.dispatchEvent(domEvent);
+
+    expect(fire).not.toHaveBeenCalled();
+    expect(domEvent.defaultPrevented).toBe(false);
+  });
+
+  it("a rebound pane-focus combo does fire inside a text field", () => {
+    const fire = vi.fn();
+    function Host() {
+      const { rebind } = useKeyboard();
+      return (
+        <>
+          <Claim action="pane.focus.left" onFire={fire} />
+          <textarea aria-label="composer" />
+          <button onClick={() => rebind("pane-focus-left", "Alt+Shift+H")}>rebind</button>
+        </>
+      );
+    }
+    render(
+      <KeyboardProvider>
+        <Host />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind"));
+
+    const textarea = screen.getByLabelText("composer");
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("the default combo still fires outside a text field", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <Claim action="pane.focus.left" onFire={fire} />
+      </KeyboardProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("chords", () => {
   function ChordHost({ fire }: { fire: (payload: unknown) => void }) {
     const { rebind } = useKeyboard();

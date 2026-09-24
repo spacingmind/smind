@@ -55,8 +55,12 @@ smind today:
     interacted pane, plus explicit focus actions).
   - Tab actions (`Ctrl+W`, the digit shortcuts, next/prev) target the
     focused pane, not just the default one.
-  - Pane-focus shortcuts fire even while typing in an input, matching
-    Paseo #5287.
+  - A **rebound** pane-focus shortcut fires even while typing in an
+    input, matching Paseo #5287 -- the shipped **default** does not: it
+    collides with the browser/OS's own Shift+Arrow text-selection key
+    (word-select on Win/Linux, line-select on mac), and that collision is
+    exactly what Paseo's own `editable: false` guard exists to avoid for
+    the default combo specifically.
 - **New actions**, with suggested defaults (read Paseo's table for the
   exact defaults and avoid clashing with browser/OS keys):
   - split right, split down;
@@ -66,8 +70,12 @@ smind today:
   - new tab;
   - next tab / previous tab;
   - open Settings (`Mod+,`);
-  - `Mod+<digit>` jumps to the Nth task in the sidebar (task jump; keep
-    the existing `Ctrl+Alt+<digit>` tab-position binding);
+  - `Alt+<digit>` jumps to the Nth task in the sidebar (task jump; keep
+    the existing `Ctrl+Alt+<digit>` tab-position binding). Not
+    `Mod+<digit>`: Chrome/Edge/Firefox keep Ctrl/Cmd+1-9 for switching
+    the *browser's own* tabs and a page never reliably sees it, matching
+    Paseo's own `desktop: true`-only `Mod+Digit` vs. its `Alt+Digit` web
+    fallback;
   - Shift+Tab in the composer cycles approval mode/policy.
 - **Settings → Shortcuts section:** move rebinding into the Settings
   screen (`components/settings/settings-registry.ts`, a new section).
@@ -93,12 +101,14 @@ smind today:
   - Keyboard actions move focus between panes of the split tree, with a
     visible focused-pane indicator.
   - Tab actions apply to the focused pane.
-  - Pane-focus shortcuts work while typing.
+  - A rebound pane-focus shortcut works while typing; the shipped
+    default doesn't (it's the browser/OS's own text-selection key
+    there).
 - **AC3 — split/tab keyboard actions.** Split right/down, close pane, new
   tab, next/prev tab and move tab to the next pane all work from the
   keyboard and from the palette.
-- **AC4 — `Mod+,`** opens Settings; **`Mod+<digit>`** opens the Nth
-  sidebar task.
+- **AC4 — `Mod+,`** opens Settings; **`Alt+<digit>`** opens the Nth
+  sidebar task (not `Mod+<digit>` -- the browser already owns that).
 - **AC5 — Settings → Shortcuts** lists every action, with search, rebind,
   per-binding reset, reset-all and conflict warnings. The old dialog is
   removed or reduced to help.
@@ -119,12 +129,13 @@ smind today:
 - Unit/component:
   - focused-pane transitions across a nested split tree;
   - tab actions target the focused pane;
-  - pane focus fires from inside a textarea.
+  - a rebound pane focus fires from inside a textarea; the default
+    doesn't.
 - Component:
   - Shortcuts settings search/rebind/reset/conflict;
   - tab context menu actions;
   - `Mod+,`;
-  - `Mod+<digit>` task jump;
+  - `Alt+<digit>` task jump;
   - Shift+Tab mode cycle.
 - Manual: drive a 3-pane layout entirely from the keyboard, in both
   themes.
@@ -134,7 +145,7 @@ smind today:
 - [x] AC1 chords
 - [x] AC2 pane focus
 - [x] AC3 split/tab actions
-- [x] AC4 Mod+, and Mod+digit
+- [x] AC4 Mod+, and Alt+digit
 - [x] AC5 Settings → Shortcuts
 - [x] AC6 tab context menu
 - [x] AC7 Shift+Tab mode cycle
@@ -165,7 +176,7 @@ smind today:
     wrong second key cancels.
 
 - **AC2 (pane focus) / AC3 (split/tab actions) / AC4 (Mod+, and
-  Mod+digit).** `lib/split-tree.ts` already carried `TaskLayout.
+  Alt+digit).** `lib/split-tree.ts` already carried `TaskLayout.
   focusedPaneId` and the layout functions (`focusPaneInLayout`,
   `closePaneInLayout`, `splitPaneEmptyInLayout`, `moveTabToPaneInLayout`)
   from an earlier item, unused by any UI -- this item is mostly wiring,
@@ -186,31 +197,46 @@ smind today:
   `tab.new` pops the focused pane's own `NewTabButton` menu open via a
   new controlled `open`/`onOpenChange` pair on that component (mirrors
   Paseo's `workspace.tab.menu.open`, which opens a picker rather than a
-  fixed kind). Every pane-focus binding carries `when: { global: true }`
-  (smind's existing bypass-editable-scope mechanism), which satisfies
-  "fires while typing" without needing Paseo's more elaborate
-  default-combo-vs-override guard-dropping (`withoutDefaultComboGuard`) --
-  smind's overrides never touch a binding's `when`, so `global: true`
-  already covers both the default and any future rebind uniformly.
-  "Move tab to the next pane" (plan's Decisions, singular -- not 4
-  directional variants) cycles through `collectAllPanes`' tree order,
-  wrapping.
+  fixed kind). "Move tab to the next pane" (plan's Decisions, singular --
+  not 4 directional variants) cycles through `collectAllPanes`' tree
+  order, wrapping.
+
+  Pane-focus's editable-scope rule (fixed in review, see below):
+  `BindingWhen` grows `editableWhenRebound?: true`, ported from Paseo's
+  `editable: false` + `withoutDefaultComboGuard` -- the pane-focus
+  *default* combos (`Mod+Shift+Arrow*`) stay blocked in `editable` scope
+  (they're the browser/OS's own text-selection keys there: word-select
+  on Win/Linux, line-select on mac), but once the user rebinds one, the
+  block lifts for that binding's new combo. `bindingAllowedInScope` reads
+  `ResolvedBinding.overridden` (already computed by `resolveBindings`) to
+  tell "still on the default" from "rebound" apart; `terminal` scope is
+  untouched either way, matching Paseo's own guard being `editable`-only.
   - `lib/split-navigation.test.ts`: adjacent-pane resolution across a
     nested 2x2 grid, overlap-over-center-distance tie-breaking, no
     candidate in a direction, unknown focused pane, single-pane tree.
   - `hooks/use-task-tabs.test.ts`: `focusPane`/`closePane`/
     `splitPaneEmpty`/`moveTabToNextPane`, including the last-pane guard
     and the max-tree-depth cap.
+  - `keyboard/shortcuts.test.ts`: `bindingAllowedInScope` with
+    `editableWhenRebound` (blocked in editable at the default, allowed
+    once overridden, never extended to terminal or modal), plus the same
+    through `matchShortcut` against the real `pane-focus-left` binding
+    (default blocked in editable/allowed elsewhere, a rebind allowed in
+    editable and the old default no longer matching anything).
+  - `keyboard/keyboard-provider.test.tsx`: the same over a real
+    `KeyboardProvider` and a real `<textarea>` -- the default neither
+    fires nor `preventDefault`s there, a rebind does fire, the default
+    still fires outside a text field.
   - `App.test.tsx` ("App pane focus and pane/tab keyboard actions (Item
-    6)"): the focus ring moving between panes, a pane-focus shortcut
-    firing from inside the composer textarea, `tab.jump` targeting
-    whichever pane is currently focused (not always the default one),
-    `Mod+\` creating an empty split, `Mod+Shift+W` closing a pane (never
-    the last), `Alt+Shift+T` opening the focused pane's new-tab menu,
-    `Alt+Shift+]`/`[` cycling tabs with wraparound, `Mod+Shift+M` moving
-    a tab to the next pane, `Mod+,` opening Settings, `Mod+<digit>`
-    jumping to the Nth sidebar task (distinct from `Ctrl+Alt+<digit>`'s
-    tab-position jump).
+    6)"): the focus ring moving between panes, the default pane-focus
+    combo *not* firing from inside the composer textarea, a rebound one
+    firing there, `tab.jump` targeting whichever pane is currently
+    focused (not always the default one), `Mod+\` creating an empty
+    split, `Mod+Shift+W` closing a pane (never the last), `Alt+Shift+T`
+    opening the focused pane's new-tab menu, `Alt+Shift+]`/`[` cycling
+    tabs with wraparound, `Mod+Shift+M` moving a tab to the next pane,
+    `Mod+,` opening Settings, `Alt+<digit>` jumping to the Nth sidebar
+    task (distinct from `Ctrl+Alt+<digit>`'s tab-position jump).
 
   **Combo choices not already fixed by the plan's Decisions** (the plan
   asked for defaults matching Paseo's table where it has one, adapted to
@@ -226,8 +252,31 @@ smind today:
     a page's own JS), matching Paseo's own substitution pattern for its
     web runtime (its `close-tab`'s `Alt+Shift+W`, its already-universal
     `Alt+Shift+[`/`]` for tab prev/next).
-  - `settings.open` `Mod+,` and `sidebar.task-jump` `Mod+<digit>` are the
-    plan's own explicit choices.
+  - `settings.open` `Mod+,` is the plan's own explicit choice.
+    `sidebar.task-jump` shipped as `Mod+<digit>` initially and was
+    corrected to `Alt+Digit` in review (see below) -- Chrome/Edge/Firefox
+    keep Ctrl/Cmd+1-9 for their own tab switching and a page never
+    reliably sees it, matching Paseo's own `desktop: true`-only
+    `Mod+Digit` vs. `Alt+Digit` on web. Exact-modifier matching
+    (`matchCombo`) is what keeps `Alt+Digit` from colliding with
+    `tab-jump`'s `Mod+Alt+Digit`. A future desktop (Tauri) runtime that
+    can actually own Ctrl/Cmd+digit could offer `Mod+Digit` there;
+    nothing here forecloses it.
+
+  **Review fixes (post-implementation, before merge):** two defaults
+  shipped wrong and were corrected here, both against the same source
+  (`refs/paseo/packages/app/src/keyboard/keyboard-shortcuts.ts`) misread
+  the first time:
+  1. Pane-focus's `Mod+Shift+Arrow*` originally carried `when: {
+     global: true }`, so it fired inside a text field -- stealing
+     Ctrl+Shift+Arrow's word-select and Cmd+Shift+Arrow's line-select
+     from the composer. Paseo's actual rule (`editable: false`, lifted
+     only on a rebind via `withoutDefaultComboGuard`) is what's
+     implemented now, via the new `editableWhenRebound` flag above.
+  2. `sidebar.task-jump`'s default was `Mod+Digit`, which
+     Chrome/Edge/Firefox already reserve for browser tab switching and a
+     page never reliably receives -- changed to `Alt+Digit`, matching
+     Paseo's own `desktop: false` fallback for the same action.
 
 - **AC5 (Settings → Shortcuts).** `components/shortcuts-dialog.tsx`'s
   `<ShortcutRows />` was already written reusable ("exported so Item 13's
@@ -362,11 +411,14 @@ smind today:
 
 ## AC8 validation
 
-Full green run after every item above, from the repo root:
-`cd web && bun run --filter '@smind/ui' test` (919 tests, 77 files, 0
-failures) and `cd web/packages/ui && bun run typecheck` (clean), plus
-`task lint` from the repo root (`go vet ./...` and `gofmt -l` both
-clean -- no Go code touched by this plan). No existing test was weakened
-to make it pass; where an existing test's own premise changed (the
-`Shift+?` dialog's tests, `defaultPane`-targeted tab actions), the test
-was rewritten to assert the new, correct behavior rather than deleted.
+Full green run after every item above (including the review fixes),
+from the repo root: `cd web && bun run --filter '@smind/ui' test` (934
+tests, 77 files, 0 failures), `cd web/packages/ui && bun run typecheck`
+(clean) and `bun run build` (clean production build), plus `task lint`
+and `task test` from the repo root (Go tests, `go vet ./...` and
+`gofmt -l` all clean -- no Go code touched by this plan). No existing
+test was weakened to make it pass; where an existing test's own premise
+changed (the `Shift+?` dialog's tests, `defaultPane`-targeted tab
+actions, and -- after review -- the pane-focus-in-a-textarea and
+`Mod+<digit>` tests), the test was rewritten to assert the new, correct
+behavior rather than deleted.
