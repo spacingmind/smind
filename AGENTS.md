@@ -13,6 +13,9 @@ See [README.md](README.md) for what smind is and how to build/run it.
 - `internal/server` — HTTP server: API routes + embedded web UI (`internal/server/dist`).
 - `web/` — bun workspace root for the web UI (`web/packages/ui`, React + Vite).
 - `docs/` — architecture notes, ADRs (`docs/decisions/`), and active/completed plans (`docs/plans/`).
+  New research notes (competitor/reference studies, pplx findings) go in
+  `docs/research/local/` — gitignored, never committed; plans may cite
+  them as local-only.
 - `refs/` — read-only reference clones of other projects for pattern lookup (see below).
 
 ## Workflow rules

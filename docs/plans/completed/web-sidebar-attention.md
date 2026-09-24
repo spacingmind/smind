@@ -3,7 +3,7 @@
 ## Context
 
 smind runs agents in the background, so attention signals matter. See
-`docs/research/paseo-uiux-2026-09.md`, gaps #7 and #8.
+`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored), gaps #7 and #8.
 
 What smind does today:
 

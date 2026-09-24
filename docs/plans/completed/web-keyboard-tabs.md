@@ -5,7 +5,7 @@
 Paseo is keyboard-first: about 156 binding rows covering roughly 60
 actions, multi-step chord shortcuts, rebinding in Settings with search,
 and many workspace actions in its Command Center. See
-`docs/research/paseo-uiux-2026-09.md` gaps #3, #4, #9 and the
+`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored) gaps #3, #4, #9 and the
 `Cmd+digit` part of #8.
 
 smind today:
