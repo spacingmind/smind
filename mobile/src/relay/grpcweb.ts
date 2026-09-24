@@ -70,7 +70,14 @@ function parseTrailerPayload(payload: Uint8Array): GRPCWebTrailers {
 export async function grpcWebUnary<Resp>(baseUrl: string, method: string, requestBytes: Uint8Array, decode: (b: Uint8Array) => Resp): Promise<Resp> {
   const resp = await fetch(`${baseUrl}/relay.v1.Relay/${method}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/grpc-web+proto' },
+    // x-grpc-web: 1 is the protocol's documented client indicator header.
+    // It matters in browsers: the relay's grpc-web wrapper (traefik/grpc-web)
+    // only routes a CORS preflight through its permissive CORS handler when
+    // the request advertises that header, so omitting it makes the browser
+    // fetch fail the preflight with no Access-Control-Allow-Origin. Node/RN
+    // fetch never preflights, which is why the integration tests pass either
+    // way -- a real browser target (the web smoke test) needs it.
+    headers: { 'content-type': 'application/grpc-web+proto', 'x-grpc-web': '1' },
     body: frameLPM(requestBytes),
   });
   const buf = new Uint8Array(await resp.arrayBuffer());
