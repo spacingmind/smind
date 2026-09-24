@@ -15,10 +15,10 @@ const VARIANT_ICON: Record<AlertVariant, typeof Info> = {
 
 const VARIANT_CLASSES: Record<AlertVariant, string> = {
   default: "border-border text-foreground",
-  info: "border-status-running/40 text-status-running",
-  success: "border-status-success/40 text-status-success",
-  warning: "border-status-warning/40 text-status-warning",
-  error: "border-status-danger/40 text-status-danger",
+  info: "border-warning/40 text-warning",
+  success: "border-success/40 text-success",
+  warning: "border-warning/40 text-warning",
+  error: "border-destructive/40 text-destructive",
 };
 
 /**

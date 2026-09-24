@@ -64,7 +64,7 @@ export function ApprovalPolicyControl({
         </Button>
       ))}
       {error && (
-        <span data-testid="approval-policy-error" role="alert" className="text-status-danger">
+        <span data-testid="approval-policy-error" role="alert" className="text-destructive">
           {error}
         </span>
       )}

@@ -28,7 +28,7 @@ function KeyCaps({ keys }: { keys: string }) {
       {parts.map((part, i) => (
         <kbd
           key={`${part}-${i}`}
-          className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-ui-xs text-foreground"
+          className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground"
         >
           {part}
         </kbd>
@@ -113,7 +113,7 @@ function ShortcutRow({
         <div className="truncate text-ui-sm">{row.label}</div>
         {row.note && <div className="truncate text-ui-xs text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
-          <div className="text-ui-xs text-status-warning" data-testid="shortcut-conflict">
+          <div className="text-ui-xs text-warning" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}
@@ -196,7 +196,7 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
         <div className="flex flex-col gap-4" data-testid="shortcut-sections">
           {sections.map((section) => (
             <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
-              <h3 className="mb-1 text-metadata-label tracking-wide text-foreground-muted uppercase">
+              <h3 className="mb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">
                 {section.title}
               </h3>
               <div className="divide-y divide-border">

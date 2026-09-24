@@ -322,7 +322,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[a.provider] && (
                     <p
-                      className={`pl-3.5 text-ui-xs ${testResults[a.provider].ok ? "text-status-success" : "text-destructive"}`}
+                      className={`pl-3.5 text-ui-xs ${testResults[a.provider].ok ? "text-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${a.provider}`}
                     >
                       {testResults[a.provider].detail}
@@ -367,7 +367,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[p.id] && (
                     <p
-                      className={`pl-3.5 text-ui-xs ${testResults[p.id].ok ? "text-status-success" : "text-destructive"}`}
+                      className={`pl-3.5 text-ui-xs ${testResults[p.id].ok ? "text-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${p.id}`}
                     >
                       {testResults[p.id].detail}

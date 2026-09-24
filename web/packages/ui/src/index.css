@@ -6,27 +6,24 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Token layering (ui-redesign-parity plan, Item 1). Two layers, same as
- * audit-deepseek-harness.md §5 and audit-paseo.md §6:
+ * Token layering. Two layers:
  *
  *   1. Static layer: the shadcn oklch scale below (background, foreground,
  *      card, popover, primary, secondary, muted, accent, destructive,
  *      border, input, ring, chart-1..5, sidebar and friends), one value
- *      per name per theme. This was already the whole palette pre-Item-1
- *      and stays as-is -- it's achromatic-plus-one-red and every
- *      primitive already composes from it correctly (see docs/design.md's
- *      "no hardcoded colour" rule).
+ *      per name per theme -- background/foreground/card/popover/
+ *      popover-foreground/primary/primary-foreground/secondary/accent/
+ *      destructive/border/sidebar are overwritten in place with ZCode's
+ *      Zai Light/Dark values (zcode-visual-parity plan, P1 Step 2; see
+ *      the `:root`/`.dark` comments below) -- `--radius*`, `--ring`,
+ *      `--input`, and `--chart-*` are untouched.
  *   2. Semantic layer: named-by-purpose tokens that alias into the static
- *      layer or introduce a new hue where none existed. This is the part
- *      Item 1 actually adds: `surface-0..3` (elevation, aliased onto the
- *      existing scale -- see docs/design.md's Decisions for why a second
- *      independent scale wasn't introduced), `foreground-muted` (an
- *      explicit alias of `muted-foreground`, so new code can spell it the
- *      audit-paseo.md §6 way without a second source of truth), and the
- *      status family below.
+ *      layer or introduce a new hue where none existed -- ZCode's ported
+ *      token vocabulary (P1 Step 2) plus `foreground-muted` (an explicit
+ *      alias of `muted-foreground`).
  *
  * `@theme inline` re-exports every semantic token as a `--color-*` var,
- * which is what makes `bg-status-warning`, `text-foreground-muted`, etc.
+ * which is what makes `bg-success`, `text-foreground-muted`, etc.
  * exist as Tailwind utilities with zero extra config (Tailwind v4 is
  * CSS-first -- there is no tailwind.config.js in this package).
  */
@@ -72,19 +69,7 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 
     /* Semantic layer additions -- see the comment above this block. */
-    --color-surface-0: var(--surface-0);
-    --color-surface-1: var(--surface-1);
-    --color-surface-2: var(--surface-2);
-    --color-surface-3: var(--surface-3);
     --color-foreground-muted: var(--foreground-muted);
-    --color-status-success: var(--status-success);
-    --color-status-danger: var(--status-danger);
-    --color-status-warning: var(--status-warning);
-    --color-status-running: var(--status-running);
-    --color-status-dot-success: var(--status-dot-success);
-    --color-status-dot-danger: var(--status-dot-danger);
-    --color-status-dot-warning: var(--status-dot-warning);
-    --color-status-dot-running: var(--status-dot-running);
     --color-diff-addition: var(--diff-addition);
     --color-diff-deletion: var(--diff-deletion);
 
@@ -192,33 +177,15 @@
     --color-terminal-bright-white: var(--terminal-bright-white);
 
     /*
-     * Type-role scale (visual-identity-console plan, Item 2). Roles, not
-     * raw sizes: each `--text-*` name is the ONE legal spelling for that
-     * typographic job, with paired line-height (`--*--line-height`) and,
-     * where the role fixes its weight, a paired font-weight -- both per
-     * Tailwind v4's @theme conventions (deepseek-harness's
-     * font-size/line-height token pairing is the same shape). Values are
-     * defined once in `:root` below and re-declared identically in
-     * `.dark` so both themes carry the token (token-presence test
-     * enforces this; sizes don't vary by theme).
+     * `--text-content` (visual-identity-console plan, Item 2) is the one
+     * surviving member of that Item's type-role scale -- the rest
+     * (workspace-title/section-title/panel-title/metadata-label/
+     * code-annotation/interface) were retired in favor of `text-ui-*`
+     * (zcode-visual-parity plan, P1 Step 4) and their aliases removed.
+     * `--text-content` stays: markdown prose keeps its own independent
+     * `--font-scale-content`-driven size, per refs/zcode/DESIGN.md's
+     * code/diff/terminal-content exceptions to the `text-ui-*` scale.
      */
-    --text-workspace-title: var(--workspace-title-size);
-    --text-workspace-title--line-height: var(--workspace-title-line-height);
-    --text-workspace-title--font-weight: var(--workspace-title-weight);
-    --text-section-title: var(--section-title-size);
-    --text-section-title--line-height: var(--section-title-line-height);
-    --text-section-title--font-weight: var(--section-title-weight);
-    --text-panel-title: var(--panel-title-size);
-    --text-panel-title--line-height: var(--panel-title-line-height);
-    --text-panel-title--font-weight: var(--panel-title-weight);
-    --text-metadata-label: var(--metadata-label-size);
-    --text-metadata-label--line-height: var(--metadata-label-line-height);
-    --text-metadata-label--font-weight: var(--metadata-label-weight);
-    --text-code-annotation: var(--code-annotation-size);
-    --text-code-annotation--line-height: var(--code-annotation-line-height);
-    --text-code-annotation--font-weight: var(--code-annotation-weight);
-    --text-interface: var(--interface-size);
-    --text-interface--line-height: var(--interface-line-height);
     --text-content: var(--content-size);
     --text-content--line-height: var(--content-line-height);
 
@@ -384,80 +351,22 @@
     --terminal-bright-cyan: #0aa7a7;
     --terminal-bright-white: #0d0d0d;
 
-    /*
-     * Elevation scale (audit-paseo.md §6's surface0..3 vocabulary),
-     * aliased onto the existing static scale rather than a second
-     * independent set of hex values -- see docs/design.md's Decisions.
-     * surface-0 is the page; each step up is one visible notch more
-     * raised/elevated.
-     */
-    --surface-0: var(--background);
-    --surface-1: var(--card);
-    --surface-2: var(--surface);
-    --surface-3: var(--accent);
     --foreground-muted: var(--muted-foreground);
 
     /*
-     * Status family (retired -- zcode-visual-parity plan, P1 Step 2):
-     * aliased onto ZCode's semantic tokens so P1 Step 4's migration off
-     * these names is a safe, value-preserving rename rather than a
-     * simultaneous value change. `running` has no ZCode equivalent --
-     * refs/zcode/DESIGN.md's workflow-timeline section uses
-     * `--color-warning` for a running station lamp, so that's what it
-     * aliases onto here.
-     */
-    --status-success: var(--success);
-    --status-danger: var(--destructive);
-    --status-warning: var(--warning);
-    --status-running: var(--warning);
-
-    /*
-     * Diff family (retired -- see status family comment above): aliased
-     * onto ZCode's diff-added/-removed tokens.
+     * Diff family (retired -- zcode-visual-parity plan, P1 Step 2):
+     * aliased onto ZCode's diff-added/-removed tokens so a future P1 Step
+     * 4-style migration off this name (not required this phase -- see
+     * P4's diff2html repointing) stays value-preserving.
      */
     --diff-addition: var(--diff-added);
     --diff-deletion: var(--diff-removed);
 
-    /* Status dot family (retired -- see status family comment above). */
-    --status-dot-success: var(--success);
-    --status-dot-danger: var(--destructive);
-    --status-dot-warning: var(--warning);
-    --status-dot-running: var(--warning);
-
     /*
-     * Type-role scale (visual-identity-console plan, Item 2) -- sizes,
-     * paired line-heights, and fixed weights per role. Canonical
-     * consumers live in docs/design.md's type-role table.
-     *
-     * workspace-title tokenizes the sidebar wordmark's existing
-     * 14px/600 look as-is (the one legal semibold in the app);
-     * section-title unifies dialog + sheet titles at 16/500;
-     * panel-title tokenizes PaneHeader's existing 14/500; metadata-label
-     * and code-annotation are the 12/500 structural-label tier
-     * (code-annotation pairs with `font-mono`, e.g. git status letters);
-     * interface names the dense-UI base size (the ramp above it stays
-     * the existing Tailwind text-xs/sm/base utilities); content is the
-     * fixed prose size that ignores the interface-density scale (paseo's
-     * content-vs-interface split) -- 15px scaled only by the
-     * content-specific font-scale setting.
+     * `--content-size`/`--content-line-height` are the one surviving pair
+     * from the retired type-role scale -- see the `@theme inline` comment
+     * above.
      */
-    --workspace-title-size: 14px;
-    --workspace-title-line-height: 20px;
-    --workspace-title-weight: 600;
-    --section-title-size: 16px;
-    --section-title-line-height: 24px;
-    --section-title-weight: 500;
-    --panel-title-size: 14px;
-    --panel-title-line-height: 20px;
-    --panel-title-weight: 500;
-    --metadata-label-size: 12px;
-    --metadata-label-line-height: 16px;
-    --metadata-label-weight: 500;
-    --code-annotation-size: 12px;
-    --code-annotation-line-height: 16px;
-    --code-annotation-weight: 500;
-    --interface-size: 14px;
-    --interface-line-height: 20px;
     --content-size: calc(15px * var(--font-scale-content, 1));
     --content-line-height: 1.6;
 
@@ -602,47 +511,13 @@
     --terminal-bright-cyan: #8ee5e5;
     --terminal-bright-white: #f8f8f8;
 
-    --surface-0: var(--background);
-    --surface-1: var(--card);
-    --surface-2: var(--surface);
-    --surface-3: var(--accent);
     --foreground-muted: var(--muted-foreground);
 
-    /* Retired status/diff/dot families (dark band) -- see :root's comment above. */
-    --status-success: var(--success);
-    --status-danger: var(--destructive);
-    --status-warning: var(--warning);
-    --status-running: var(--warning);
+    /* Diff family (retired -- see :root's comment above). */
     --diff-addition: var(--diff-added);
     --diff-deletion: var(--diff-removed);
-    --status-dot-success: var(--success);
-    --status-dot-danger: var(--destructive);
-    --status-dot-warning: var(--warning);
-    --status-dot-running: var(--warning);
 
-    /*
-     * Type-role scale: identical values in both themes (sizes don't vary
-     * by theme) -- re-declared so the token exists in `.dark` too and
-     * nothing silently falls back to a browser default if a future theme
-     * layer forgets to inherit :root (token-presence test enforces).
-     */
-    --workspace-title-size: 14px;
-    --workspace-title-line-height: 20px;
-    --workspace-title-weight: 600;
-    --section-title-size: 16px;
-    --section-title-line-height: 24px;
-    --section-title-weight: 500;
-    --panel-title-size: 14px;
-    --panel-title-line-height: 20px;
-    --panel-title-weight: 500;
-    --metadata-label-size: 12px;
-    --metadata-label-line-height: 16px;
-    --metadata-label-weight: 500;
-    --code-annotation-size: 12px;
-    --code-annotation-line-height: 16px;
-    --code-annotation-weight: 500;
-    --interface-size: 14px;
-    --interface-line-height: 20px;
+    /* `--content-size`/`--content-line-height`: see :root's comment above. */
     --content-size: calc(15px * var(--font-scale-content, 1));
     --content-line-height: 1.6;
 
@@ -687,15 +562,15 @@
  * same look for free.
  */
 :root {
-  --d2h-bg-color: var(--surface-1);
+  --d2h-bg-color: var(--card);
   --d2h-border-color: var(--border);
   --d2h-line-border-color: var(--border);
   --d2h-dim-color: var(--foreground-muted);
-  --d2h-file-header-bg-color: var(--surface-2);
+  --d2h-file-header-bg-color: var(--surface);
   --d2h-file-header-border-color: var(--border);
-  --d2h-empty-placeholder-bg-color: var(--surface-2);
+  --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
-  --d2h-selected-color: color-mix(in oklch, var(--status-running) 15%, transparent);
+  --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
   --d2h-ins-bg-color: color-mix(in oklch, var(--diff-addition) 15%, transparent);
   --d2h-ins-border-color: color-mix(in oklch, var(--diff-addition) 40%, transparent);
   --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-addition) 30%, transparent);
@@ -704,12 +579,12 @@
   --d2h-del-border-color: color-mix(in oklch, var(--diff-deletion) 40%, transparent);
   --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-deletion) 30%, transparent);
   --d2h-del-label-color: var(--diff-deletion);
-  --d2h-change-del-color: color-mix(in oklch, var(--status-warning) 20%, transparent);
+  --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
   --d2h-change-ins-color: color-mix(in oklch, var(--diff-addition) 20%, transparent);
-  --d2h-info-bg-color: var(--surface-2);
+  --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
-  --d2h-change-label-color: var(--status-warning);
-  --d2h-moved-label-color: var(--status-running);
+  --d2h-change-label-color: var(--warning);
+  --d2h-moved-label-color: var(--warning);
 }
 
 /*

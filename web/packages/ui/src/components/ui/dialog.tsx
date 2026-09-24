@@ -106,7 +106,7 @@ function DialogTitle({
   return (
     <SheetPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-section-title", className)}
+      className={cn("text-ui-lg font-medium", className)}
       {...props}
     />
   )

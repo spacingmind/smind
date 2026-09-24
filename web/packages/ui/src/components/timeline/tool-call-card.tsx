@@ -64,7 +64,7 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="rounded-lg border bg-surface-1"
+      className="rounded-lg border bg-card"
     >
       <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-xs">
         <button
@@ -124,8 +124,8 @@ export function ToolCallCard({
 export function ToolPayload({ label, body, testId }: { label: string; body: string; testId?: string }) {
   return (
     <div className="mt-1 first:mt-0">
-      <p className="text-metadata-label tracking-wide uppercase text-foreground-muted">{label}</p>
-      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded bg-surface-2 p-2 whitespace-pre-wrap">
+      <p className="text-ui-sm font-medium tracking-wide uppercase text-foreground-muted">{label}</p>
+      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded bg-surface p-2 whitespace-pre-wrap">
         {body}
       </pre>
     </div>

@@ -72,7 +72,7 @@ export const RunTimeline = memo(function RunTimeline({
 
         {run.err && (
           <div className="mt-2 flex items-center gap-2">
-            <p className="text-ui-xs text-status-danger" data-testid="run-error">
+            <p className="text-ui-xs text-destructive" data-testid="run-error">
               {run.err}
             </p>
             {onRetry && canRetryWithHigherEffort(run) && (

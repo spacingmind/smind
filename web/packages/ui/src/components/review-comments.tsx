@@ -47,14 +47,14 @@ export function ReviewComments({
   if (drafts.length === 0 && !pending) return null;
 
   return (
-    <div className="mt-2 space-y-2 border-l-2 border-status-warning/40 pl-3" data-testid="review-comments">
+    <div className="mt-2 space-y-2 border-l-2 border-warning/40 pl-3" data-testid="review-comments">
       {drafts.map((draft) => (
         <div
           key={draft.id}
           data-testid="review-draft"
           data-path={draft.path}
           data-line={draft.line ?? ""}
-          className="rounded-md bg-surface-1 px-3 py-2 text-ui-sm"
+          className="rounded-md bg-card px-3 py-2 text-ui-sm"
         >
           <div className="flex items-start justify-between gap-2">
             <span className="text-ui-xs text-foreground-muted">{lineLabel(draft.line, draft.side)}</span>
@@ -69,7 +69,7 @@ export function ReviewComments({
             </button>
           </div>
           {draft.snippet.trim() && (
-            <pre className="mt-1 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-ui-xs text-foreground-muted">
+            <pre className="mt-1 overflow-x-auto rounded bg-surface px-2 py-1 font-mono text-ui-xs text-foreground-muted">
               {draft.snippet.trim()}
             </pre>
           )}
@@ -109,13 +109,13 @@ function CommentComposer({
   }
 
   return (
-    <div className="rounded-md border bg-surface-1 px-3 py-2" data-testid="review-composer" data-path={pending.path}>
+    <div className="rounded-md border bg-card px-3 py-2" data-testid="review-composer" data-path={pending.path}>
       <div className="mb-1 flex items-center gap-1.5 text-ui-xs text-foreground-muted">
         <MessageSquarePlus className="size-3" />
         {lineLabel(pending.line, pending.side)}
       </div>
       {pending.snippet.trim() && (
-        <pre className="mb-2 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-ui-xs text-foreground-muted">
+        <pre className="mb-2 overflow-x-auto rounded bg-surface px-2 py-1 font-mono text-ui-xs text-foreground-muted">
           {pending.snippet.trim()}
         </pre>
       )}

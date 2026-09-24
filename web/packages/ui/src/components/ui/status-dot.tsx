@@ -5,21 +5,19 @@ import { cn } from "@/lib/utils";
 export type StatusDotStatus = "success" | "danger" | "warning" | "running" | "neutral";
 
 const STATUS_DOT_CLASSES: Record<StatusDotStatus, string> = {
-  success: "bg-status-dot-success",
-  danger: "bg-status-dot-danger",
-  warning: "bg-status-dot-warning",
-  running: "bg-status-dot-running animate-pulse",
+  success: "bg-success",
+  danger: "bg-destructive",
+  warning: "bg-warning",
+  running: "bg-warning animate-pulse",
   neutral: "bg-foreground-muted/40",
 };
 
 /**
- * A small filled status dot -- refs/paseo/docs/design.md §13's exception
- * to "one token per signal": a dot is 6px of solid color with no shape or
- * label, so it reads dimmer than the metadata beside it at the regular
- * status-family chroma, and needs its own higher-chroma `status-dot-*`
- * token band (see index.css). `neutral` (not tested/unknown) isn't a
- * signal at all, so it stays on the plain muted-foreground scale rather
- * than getting a fifth status hue.
+ * A small filled status dot. `running` shares ZCode's warning hue (no
+ * distinct "running" color in refs/zcode/DESIGN.md's palette -- its own
+ * workflow-timeline station lamps use `--color-warning` for running too).
+ * `neutral` (not tested/unknown) isn't a signal at all, so it stays on the
+ * plain muted-foreground scale rather than getting a status hue.
  */
 export function StatusDot({
   status,

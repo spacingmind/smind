@@ -530,7 +530,7 @@ export function AppSidebar({
           className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden"
         >
           <img src="/logo.png" alt="" className="size-5 shrink-0" />
-          <span className="text-workspace-title tracking-tight">smind</span>
+          <span className="text-ui-base font-semibold tracking-tight">smind</span>
           <div className="ml-auto flex items-center gap-1">
             <ThemeToggle />
             <Button
@@ -1267,8 +1267,8 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
               className="ml-auto shrink-0 tabular-nums"
               title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
             >
-              {stat.filesChanged}f <span className="text-status-success">+{stat.insertions}</span>{" "}
-              <span className="text-status-danger">-{stat.deletions}</span>
+              {stat.filesChanged}f <span className="text-success">+{stat.insertions}</span>{" "}
+              <span className="text-destructive">-{stat.deletions}</span>
             </span>
           )}
         </>
@@ -1301,8 +1301,8 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
       {stat && stat.filesChanged > 0 && (
         <p className="text-ui-xs tabular-nums text-muted-foreground">
           {stat.filesChanged} file{stat.filesChanged === 1 ? "" : "s"} changed,{" "}
-          <span className="text-status-success">+{stat.insertions}</span>{" "}
-          <span className="text-status-danger">-{stat.deletions}</span>
+          <span className="text-success">+{stat.insertions}</span>{" "}
+          <span className="text-destructive">-{stat.deletions}</span>
         </p>
       )}
       <p className="text-ui-xs text-muted-foreground">

@@ -161,7 +161,7 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
           data-testid="tab-dirty-marker"
           data-tab-key={entry.key}
           aria-label="unsaved changes"
-          className="size-1.5 shrink-0 rounded-full bg-status-dot-warning"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       )}
       {busy && (
@@ -169,7 +169,7 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
           data-testid="tab-activity-marker"
           data-tab-key={entry.key}
           aria-label="new output"
-          className="size-1.5 shrink-0 rounded-full bg-status-dot-running"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       )}
     </>

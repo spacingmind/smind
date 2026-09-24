@@ -119,12 +119,12 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
           </Button>
         </div>
         {testState.status === "sent" && (
-          <p data-testid="settings-notifications-test-success" className="text-ui-sm text-status-success">
+          <p data-testid="settings-notifications-test-success" className="text-ui-sm text-success">
             Test notification sent.
           </p>
         )}
         {testState.status === "error" && (
-          <p data-testid="settings-notifications-test-error" className="text-ui-sm text-status-danger">
+          <p data-testid="settings-notifications-test-error" className="text-ui-sm text-destructive">
             {testState.message}
           </p>
         )}

@@ -92,7 +92,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
   return (
     <div
       data-testid="find-bar"
-      className="flex w-[340px] max-w-full flex-col gap-1 rounded-lg border bg-surface-1 p-1.5 shadow-md"
+      className="flex w-[340px] max-w-full flex-col gap-1 rounded-lg border bg-card p-1.5 shadow-md"
     >
       <div className="flex items-center gap-1">
         {replace && (
@@ -108,7 +108,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
             {replaceExpanded ? <ChevronDown /> : <ChevronRight />}
           </Button>
         )}
-        <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-surface-2 px-2">
+        <div className="flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md bg-surface px-2">
           <input
             ref={inputRef}
             autoFocus
@@ -170,7 +170,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
             autoCorrect="off"
             spellCheck={false}
             data-testid="find-replace-input"
-            className="h-7 min-w-0 flex-1 rounded-md bg-surface-2 px-2 text-ui-sm outline-none placeholder:text-foreground-muted"
+            className="h-7 min-w-0 flex-1 rounded-md bg-surface px-2 text-ui-sm outline-none placeholder:text-foreground-muted"
           />
           <Button
             type="button"

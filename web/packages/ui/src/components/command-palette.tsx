@@ -167,7 +167,7 @@ export function CommandPalette() {
                 <div key={row.command.key}>
                   {row.groupStart !== null && (
                     <div
-                      className="px-3 pt-3 pb-1 text-metadata-label tracking-wide text-foreground-muted uppercase"
+                      className="px-3 pt-3 pb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase"
                       data-testid="command-palette-group"
                     >
                       {row.groupStart}
@@ -189,7 +189,7 @@ export function CommandPalette() {
                       row.command.run();
                     }}
                     className={`flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-ui-sm ${
-                      index === highlight ? "bg-surface-3 text-foreground" : "text-foreground"
+                      index === highlight ? "bg-accent text-foreground" : "text-foreground"
                     }`}
                   >
                     <span className="min-w-0">
@@ -201,7 +201,7 @@ export function CommandPalette() {
                       )}
                     </span>
                     {keys && (
-                      <kbd className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
+                      <kbd className="shrink-0 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
                         {keys}
                       </kbd>
                     )}

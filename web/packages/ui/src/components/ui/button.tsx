@@ -20,9 +20,9 @@ const buttonVariants = cva(
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         link: "text-primary underline-offset-4 hover:underline",
         execute:
-          "bg-status-running/10 text-status-running hover:bg-status-running/20 focus-visible:border-status-running/40 focus-visible:ring-status-running/20 dark:bg-status-running/20 dark:hover:bg-status-running/30 dark:focus-visible:ring-status-running/40",
+          "bg-warning/10 text-warning hover:bg-warning/20 focus-visible:border-warning/40 focus-visible:ring-warning/20 dark:bg-warning/20 dark:hover:bg-warning/30 dark:focus-visible:ring-warning/40",
         approval:
-          "bg-status-success/10 text-status-success hover:bg-status-success/20 focus-visible:border-status-success/40 focus-visible:ring-status-success/20 dark:bg-status-success/20 dark:hover:bg-status-success/30 dark:focus-visible:ring-status-success/40",
+          "bg-success/10 text-success hover:bg-success/20 focus-visible:border-success/40 focus-visible:ring-success/20 dark:bg-success/20 dark:hover:bg-success/30 dark:focus-visible:ring-success/40",
         quiet:
           "text-foreground-muted hover:text-foreground aria-expanded:text-foreground",
       },

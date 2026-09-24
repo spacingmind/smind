@@ -39,7 +39,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-user" data-item-kind="user" className="flex justify-end">
           <div
             data-chat-find-text="true"
-            className="max-w-[85%] rounded-lg bg-surface-2 px-2.5 py-1.5 text-ui-sm whitespace-pre-wrap"
+            className="max-w-[85%] rounded-lg bg-surface px-2.5 py-1.5 text-ui-sm whitespace-pre-wrap"
           >
             {item.text}
           </div>
