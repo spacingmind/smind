@@ -41,9 +41,16 @@ pub fn daemon_url_from(override_value: impl AsRef<str>) -> Result<Url, String> {
 }
 
 impl Config {
-    /// ws_url builds the /ws?token=... upgrade URL from the base.
+    /// ws_url builds the ws:// (or wss://) /ws?token=... upgrade URL
+    /// from the http(s) base: tungstenite rejects http:// URLs.
     pub fn ws_url(&self, token: &str) -> Result<Url, String> {
         let mut url = self.daemon_url.clone();
+        let scheme = match url.scheme() {
+            "https" => "wss",
+            _ => "ws",
+        };
+        url.set_scheme(scheme)
+            .map_err(|_| "cannot set ws scheme".to_string())?;
         url.set_path("/ws");
         url.query_pairs_mut().clear().append_pair("token", token);
         Ok(url)
@@ -97,7 +104,9 @@ mod tests {
     #[test]
     fn derived_urls() {
         let cfg = Config { daemon_url: daemon_url_from("http://127.0.0.1:4648").unwrap() };
-        assert_eq!(cfg.ws_url("t").unwrap().as_str(), "http://127.0.0.1:4648/ws?token=t");
+        assert_eq!(cfg.ws_url("t").unwrap().as_str(), "ws://127.0.0.1:4648/ws?token=t");
+        let tls_cfg = Config { daemon_url: daemon_url_from("https://example.net").unwrap() };
+        assert_eq!(tls_cfg.ws_url("t").unwrap().as_str(), "wss://example.net/ws?token=t");
         assert_eq!(cfg.token_url().as_str(), "http://127.0.0.1:4648/api/token");
         assert_eq!(cfg.healthz_url().as_str(), "http://127.0.0.1:4648/healthz");
     }

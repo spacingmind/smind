@@ -145,6 +145,7 @@ fn show_main_window(win: &tauri::WebviewWindow) {
 async fn watch_daemon_and_navigate(cfg: &Config, navigate: impl Fn()) {
     loop {
         if dclient::client::healthz_ok(cfg).await {
+            eprintln!("smind desktop: /healthz ok, switching to daemon UI");
             navigate();
             return;
         }
