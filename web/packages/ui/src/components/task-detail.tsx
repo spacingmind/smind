@@ -3,11 +3,13 @@ import { ArrowDown } from "lucide-react";
 
 import { ApprovalPolicyControl } from "@/components/approval-policy-control";
 import { Composer } from "@/components/composer/composer";
+import { FindBar } from "@/components/find/find-bar";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
+import { useChatFind } from "@/components/timeline/use-chat-find";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -83,6 +85,23 @@ export function TaskDetailPane({
   const itemCount = runs?.reduce((total, run) => total + run.items.length, 0) ?? 0;
   const follow = useAutoFollow<HTMLDivElement>(itemCount);
 
+  // Chat Find's revision signal: item count alone misses a streamed chunk
+  // appended to the *last* item (no new item, just more text), so this
+  // also sums text length -- the one other thing that changes whenever the
+  // transcript's searchable content grows. See use-chat-find.ts's doc
+  // comment for why a re-walk (not incremental patching) needs this.
+  const textLength =
+    runs?.reduce(
+      (total, run) =>
+        total +
+        run.items.reduce(
+          (n, item) => n + (item.kind === "assistant" || item.kind === "user" || item.kind === "thinking" ? item.text.length : 0),
+          0,
+        ),
+      0,
+    ) ?? 0;
+  const chatFind = useChatFind(follow.ref, `${itemCount}:${textLength}`);
+
   const [detailLevel, setDetailLevel] = useDetailLevel();
 
   // App.tsx re-creates its openFileTab closure on every render, which
@@ -133,9 +152,12 @@ export function TaskDetailPane({
         <div
           ref={follow.ref}
           onScroll={follow.onScroll}
+          onFocus={chatFind.onFocus}
+          onBlur={chatFind.onBlur}
+          tabIndex={-1}
           data-testid="run-log-scroll"
           data-following={follow.following}
-          className="h-full overflow-y-auto px-4 py-3"
+          className="h-full overflow-y-auto px-4 py-3 outline-none"
         >
           {/*
            * Dogfood Item 2: the chat timeline is a reading column, not a
@@ -180,6 +202,21 @@ export function TaskDetailPane({
             <ArrowDown className="size-3" />
             Jump to latest
           </Button>
+        )}
+
+        {chatFind.open && (
+          <div className="absolute top-2 right-3 z-10">
+            <FindBar
+              ref={chatFind.barRef}
+              query={chatFind.query}
+              status={chatFind.status}
+              canNavigate={chatFind.count > 0}
+              onQueryChange={chatFind.setQuery}
+              onNext={chatFind.next}
+              onPrevious={chatFind.previous}
+              onClose={chatFind.close}
+            />
+          </div>
         )}
       </div>
 

@@ -90,12 +90,37 @@ is React + Tailwind + shadcn.
 
 ## Progress
 
-- [ ] Shared FindBar + `pane.find` action
-- [ ] AC1 chat Find
+- [x] Shared FindBar + `pane.find` action
+- [x] AC1 chat Find
 - [ ] AC2 file Find (+ replace)
 - [ ] AC3 terminal Find
 - [ ] Tests + docs
 
 ## Validation
 
-To be filled in as items land.
+- **Shared FindBar + `pane.find`**: `components/find/find-bar.tsx` +
+  `find-bar.test.tsx` (Enter/Shift+Enter/Esc, replace row, imperative
+  focus). `keyboard/actions.ts`/`shortcuts.ts` add the `pane.find` action
+  bound to `Mod+F` (`global: true`, so it reaches into the editable/
+  terminal focus scopes); `use-pane-focus-within.ts` is the per-pane
+  focus-within gate each Find surface's `useActionHandler` call is
+  `enabled` on, so only the one pane holding real DOM focus claims it —
+  verified by `chat-find.test.tsx`'s "only once the chat pane is focused"
+  case.
+- **AC1 chat Find**: client-side, no host RPC (`use-chat-find.ts`),
+  matching Decisions. `chat-find-text.ts` is the pure match model (regex
+  build, counting, wraparound) — unit-tested in `chat-find-text.test.ts`
+  for counting, case-insensitivity, whitespace-tolerant queries, and an
+  empty query giving zero matches. `chat-find-dom.ts` walks
+  `[data-chat-find-text]` containers (added to user/thinking text,
+  `TimelineMarkdown`, and tool-call name/summary) and highlights matches
+  with real `<mark>` elements (not the CSS Custom Highlight API Paseo's
+  web build uses — unsupported in jsdom) — unit-tested directly against
+  jsdom-built DOM in `chat-find-dom.test.ts`, including the
+  multiple-matches-in-one-text-node case. `chat-find.test.tsx` exercises
+  the full stack through `TaskDetailPane`: `Mod+F` gated on chat-pane
+  focus, highlight count/status, Enter/Shift+Enter wraparound, close
+  clearing every mark, and — AC1's explicit streamed-text scenario — a
+  match found in an assistant chunk that arrives *after* Find is already
+  open. Full suite (`bun run test`) stayed green throughout (866/866,
+  up from the 842/842 baseline), confirming AC5 for this item.
