@@ -222,6 +222,27 @@
     --text-content: var(--content-size);
     --text-content--line-height: var(--content-line-height);
 
+    /*
+     * `text-ui-*` scale (zcode-visual-parity plan, P1 Step 3) -- the
+     * mandatory application-interface type scale per
+     * refs/zcode/DESIGN.md's "Highest-priority UI constraint" and
+     * refs/zcode/packages/ui/src/styles.css's `@theme` block, formulas
+     * ported verbatim off the one interface-scaling variable,
+     * `--ui-font-size` (declared in `:root` below, default 14px). This
+     * replaces smind's `--text-interface`/`--font-scale-interface`
+     * system for application UI -- `--text-content`/`--font-scale-content`
+     * above are untouched (markdown prose keeps its own independent
+     * scale, per DESIGN.md's code/diff/terminal exceptions).
+     * `--text-ui-2xs` and `text-mobile-input-safe` are not ported: no
+     * consumer (workflows and mobile-Web iOS are out of scope for smind).
+     */
+    --text-ui-xl: calc(var(--ui-font-size) + 4px);
+    --text-ui-lg: calc(var(--ui-font-size) + 2px);
+    --text-ui-base: var(--ui-font-size);
+    --text-ui-caption: calc(var(--ui-font-size) - 1px);
+    --text-ui-sm: calc(var(--ui-font-size) - 2px);
+    --text-ui-xs: calc(var(--ui-font-size) - 4px);
+
     /* Shadow tiers (Item 3) -- see :root below. */
     --shadow-sm: var(--elevation-shadow-sm);
     --shadow-md: var(--elevation-shadow-md);
@@ -229,6 +250,15 @@
 }
 
 :root {
+    /*
+     * The one interface-scaling variable (zcode-visual-parity plan, P1
+     * Step 3) -- refs/zcode/DESIGN.md: "Changing the interface font size
+     * updates only --ui-font-size; never mutate the root html font size."
+     * A single value, not per-theme -- unlike the color tokens above,
+     * font size doesn't vary between light and dark.
+     */
+    --ui-font-size: 14px;
+
     /*
      * background/foreground/card/popover/popover-foreground/primary/
      * primary-foreground/secondary/accent/destructive/border/sidebar below

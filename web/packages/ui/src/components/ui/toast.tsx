@@ -128,7 +128,7 @@ export function Toaster() {
             data-variant={t.variant}
             role={t.variant === "error" ? "alert" : "status"}
             className={cn(
-              "pointer-events-auto flex gap-2 rounded-lg border bg-surface-1 px-3 py-2 text-sm shadow-md",
+              "pointer-events-auto flex gap-2 rounded-lg border bg-surface-1 px-3 py-2 text-ui-sm shadow-md",
               VARIANT_CLASSES[t.variant],
             )}
           >

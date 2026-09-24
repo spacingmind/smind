@@ -36,7 +36,7 @@ export function StatusBadge({
       data-slot="status-badge"
       data-status={status}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors duration-(--duration-hover)",
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-ui-xs font-medium transition-colors duration-(--duration-hover)",
         STATUS_BADGE_CLASSES[status],
         className,
       )}

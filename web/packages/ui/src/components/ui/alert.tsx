@@ -57,7 +57,7 @@ export function Alert({
       data-variant={variant}
       role={variant === "error" ? "alert" : "status"}
       className={cn(
-        "flex gap-2 rounded-lg border bg-transparent px-3 py-2 text-sm",
+        "flex gap-2 rounded-lg border bg-transparent px-3 py-2 text-ui-sm",
         VARIANT_CLASSES[variant],
         className,
       )}

@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  */
 export function InlineSpinner({ label, className }: { label?: string; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-sm text-foreground-muted", className)} role="status">
+    <span className={cn("inline-flex items-center gap-1.5 text-ui-sm text-foreground-muted", className)} role="status">
       <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
       {label}
     </span>
