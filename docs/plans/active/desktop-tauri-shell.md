@@ -129,17 +129,37 @@ directory, no Tauri config.
   admits requests with no `Origin` header — exactly what the
   non-browser Rust client sends. Auth is only the `token` query param.
   No daemon change was needed and none was made.
-- **Blocked on system deps**: `pkg-config` (and the webkit2gtk-4.1
-  stack) is not yet installed, so `cargo check`/`cargo build` for
-  `desktop/src-tauri` has NOT been run — the Tauri app source is
-  written against the Tauri 2 plugin APIs but **unbuilt/unverified**.
-  Re-run once `pkg-config --modversion webkit2gtk-4.1` works, then fix
-  any compile errors and do the WSLg manual pass. Dependency
-  resolution itself now succeeds (`cargo check` gets past version
-  selection; the current hard failure is `libdbus-sys` needing
-  `pkg-config` + `libdbus-1-dev`), so remaining risk is compile-level,
-  not config-level.
-- **Not yet exercised (manual, WSLg)**: window loads daemon UI; daemon
-  stop -> fallback page -> restart -> UI returns; tray Open/Quit;
-  close hides to tray; shortcut toggles; a real permission request
-  shows a notification.
+- **Build**: `cargo check` + `cargo build` pass in
+  `desktop/src-tauri` on Linux with webkit2gtk-4.1 2.52.6 / dbus-1
+  1.16.2 / libxdo / appindicator installed. Two compile-time bugs were
+  found and fixed against the real APIs: `tauri-build` has no
+  `tray-icon` feature (only the `tauri` crate does), and tokio had to
+  be a direct dep of src-tauri for the healthz poll loop.
+- **Live run (WSLg, X11 :0)**: app launches without panicking (window
+  + tray up; only WSLg-typical libEGL/Mesa warnings and a benign
+  libayatana-appindicator deprecation notice in stderr). Against a
+  locally started daemon (`smind serve` on 4648): logs show
+  `ws connected to ws://127.0.0.1:4648/ws?token=...`,
+  `subscribed to permission.pending`, and
+  `/healthz ok, switching to daemon UI` — verifying token fetch, WS
+  connect, subscribe, and the AC1 URL switch. A live-daemon bug was
+  caught and fixed here: tungstenite rejects `http://` upgrade URLs,
+  so `ws_url` now translates to `ws://`/`wss://` (unit-tested).
+- **Reconnect/backoff**: a first run (daemon temporarily unreachable)
+  retried with visibly growing spacing and no crash; the
+  reconnect/backoff logic is otherwise unit-tested.
+- **Fallback path**: with `SMIND_DAEMON_URL=http://127.0.0.1:4699`
+  (nothing listening; real daemon untouched) the app stays on the
+  local offline.html page, retries `/api/token` with backoff
+  (4 attempts in 15s), no panic.
+- **Single instance (AC2)**: first instance running; second launch
+  exits 0 immediately with an empty log — it deferred to the first
+  instance's focus callback.
+- **Screenshot**: no screenshot tool available in this environment
+  (no `import`/`grim`/`scrot`/`spectacle`), so no image captured.
+- **Not yet exercised (needs human eyes, WSLg)**: tray Open/Quit
+  clicks; close-hides-to-tray; CommandOrControl+Shift+S toggle; a real
+  permission request showing its notification; the daemon UI visibly
+  rendering in the window (the healthz switch is logged but not
+  screenshotted). Note: the tray needs an actual desktop session to
+  fully work — WSLg supports it.
