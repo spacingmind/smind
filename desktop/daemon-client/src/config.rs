@@ -7,6 +7,7 @@ use url::Url;
 pub const DEFAULT_DAEMON_URL: &str = "http://127.0.0.1:4648";
 pub const ENV_DAEMON_URL: &str = "SMIND_DAEMON_URL";
 
+#[derive(Clone)]
 pub struct Config {
     pub daemon_url: Url,
 }

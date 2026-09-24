@@ -12,10 +12,8 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-smind-daemon-client = { path = "../daemon-client" }
 url = "2"
+smind-daemon-client = { path = "../daemon-client" }
 
 [lib]
 name = "smind_desktop_lib"
