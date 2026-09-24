@@ -9,3 +9,6 @@ web/packages/*/*.tsbuildinfo
 internal/server/dist/*
 !internal/server/dist/.gitkeep
 tmp/
+
+# Research notes stay local (user decision 2026-09-24); plans in docs/plans are committed.
+docs/research/local/

@@ -3,7 +3,7 @@
 ## Context
 
 Paseo 0.9 shipped `Cmd/Ctrl+F` Find across chat, file and terminal
-(`docs/research/paseo-uiux-2026-09.md`, gap #1). smind has no Find
+(`docs/research/local/paseo-uiux-2026-09.md` (local-only, gitignored), gap #1). smind has no Find
 anywhere in `web/packages/ui/src`:
 
 - **Chat:** the timeline (`components/timeline/*`, `hooks/use-run-timeline.ts`)
