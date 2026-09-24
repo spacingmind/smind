@@ -310,7 +310,7 @@ Per-phase scenarios:
 
 ## Progress
 
-- [ ] P1 — design system: tokens, `text-ui-*` scale, guards, NOTICE
+- [x] P1 — design system: tokens, `text-ui-*` scale, guards, NOTICE
 - [ ] P2 — app shell + sidebar
 - [ ] P3 — chat timeline + composer + tool/permission/question cards
 - [ ] P4 — panes: diff/git, terminal, files, settings
@@ -318,4 +318,110 @@ Per-phase scenarios:
 
 ## Validation
 
-(empty — fill per phase as acceptance criteria are confirmed)
+### P1 — design system: tokens, `text-ui-*` scale, guards
+
+Baseline before P1: 94 test files / 1067 tests, typecheck green. After
+P1: 96 test files / 1227 tests, typecheck green, `task lint` green (no
+Go changes). Commits (`feat/zcode-visual-parity`, oldest first):
+`8ee70c9` (tokens), `e52a9ce` + `961b4cd` + `c2b4ee0` (type scale +
+migration, 4 commits — one per `MIGRATED_ROOTS` batch), `5610d0c`
+(retired-token migration + alias deletion), `ac4ff69` (primitives),
+`20c2d32` (NOTICE + docs/design.md).
+
+- **index.css carries ZCode's `@theme` semantic token set** — ported in
+  `8ee70c9`. `src/test/zcode-tokens.test.ts` + `zcode-tokens.fixture.json`
+  resolve all 82 ported `--color-*` tokens (41 families × 2 themes)
+  through `index.css`'s own var() chains and assert a match against
+  values copied from `refs/zcode/packages/ui/src/styles.css`'s
+  `.theme-zai-light`/`.theme-zai-dark` blocks — 164 assertions, all
+  green. Tokens ZCode shares a name with smind's pre-existing static
+  layer (background/foreground/card/popover/primary/secondary/accent/
+  destructive/border/sidebar) are covered by the same test via their
+  existing `--color-*` aliases, not duplicated in the fixture.
+- **The `text-ui-*` scale exists** — `--ui-font-size` +
+  `--text-ui-xl/lg/base/caption/sm/xs`, `8ee70c9`. `--text-ui-2xs`/
+  `text-mobile-input-safe` deliberately not ported (no consumers).
+- **Guard test fails the build on built-in text-size utilities,
+  arbitrary `text-[…px]`, or inline `font-size`** —
+  `src/test/text-ui-scale.test.ts` (`e52a9ce`), with 7 deliberately-
+  violating fixtures (asserted red) and 4 legal-spelling fixtures
+  (asserted not flagged) in the test itself, plus a real scan across
+  every non-test `.ts(x)` file. Exemption: `code-mirror-editor.tsx`'s
+  one `text-sm` (sets the CodeMirror container's ambient font-size,
+  which the code content inherits — the code-content exception).
+  Migrated one directory at a time (`components/ui` in `e52a9ce`;
+  `composer`/`find`/`permission`/`settings`/`timeline` in `961b4cd`;
+  the remaining top-level `components/*.tsx` + `App.tsx` in `c2b4ee0`,
+  which also deletes the `MIGRATED_ROOTS` scaffolding); the guard now
+  scans the whole tree unconditionally and is green.
+- **All existing components migrated off retired tokens, aliases
+  deleted** — `5610d0c`. `surface-1/2/3`, `status-{success,danger,
+  warning,running}`, `status-dot-*`, and the type-role scale (minus
+  `--text-content`) have zero remaining `.tsx`/`.ts` consumers
+  (verified by repo-wide grep before committing) and their `index.css`
+  aliases are deleted; `token-presence.test.ts` was updated to match.
+  `--diff-addition`/`-deletion` are the one exception, left aliased —
+  not required by this AC (P4 owns diff2html's own repointing) and
+  still asserted present by `token-presence.test.ts`.
+- **`no-hardcoded-colors.test.ts` passes unchanged** — the test file
+  itself has zero diff across all of P1 (`git log -p` on that path is
+  empty for this range); it passed at every commit.
+- **Radii/spacing/shadows follow DESIGN.md rules in `components/ui/`**
+  — `ac4ff69`. `--radius-*` deleted (Tailwind's own default scale
+  applies); `button.tsx`'s per-size radius overrides removed (DESIGN.md:
+  size doesn't independently change radius); `dialog.tsx` shell
+  `rounded-2xl` (the dialog exception) with its close button dropped to
+  the basic-control default `rounded-lg`; `toast.tsx` `rounded-2xl` (the
+  toast exception) + `bg-toast` + `shadow-lg`; `dropdown-menu.tsx`/
+  `context-menu.tsx`/`select.tsx` content shells `bg-menu`/`rounded-lg`,
+  items `rounded-md`/`bg-menu-hover`; `dialog.tsx`/`sheet.tsx` shadow
+  `shadow-md` (Overlay tier, not Attention). Spacing scale was already
+  Tailwind's numeric scale pre-P1 (docs/design.md §4) and untouched.
+  `input.tsx`/`select.tsx` also moved off the redirected `border-input`/
+  `bg-input` names onto `border-input-border`/`bg-input`/
+  `border-input-border-hover`/`border-input-border-focused`/
+  `bg-input-focused` (promised in `8ee70c9`'s commit message).
+- **`NOTICE` exists at the repo root** — `20c2d32`, Apache-2.0 §4(d)
+  attribution for the ZCode-derived token values, listing
+  `web/packages/ui/src/index.css` as the derived file.
+- **`docs/design.md` is rewritten** — `20c2d32`; describes the
+  ZCode-derived token/type-scale/radius/shadow system (§1, §12, §13)
+  and an updated Forbidden list (§14); keyboard/palette/persistence/
+  responsive sections (§7–10) untouched, no ZCode equivalent.
+- **Token fixture checked in, test asserts resolution in both themes**
+  — `zcode-tokens.fixture.json` + `zcode-tokens.test.ts`, `8ee70c9`
+  (see above).
+
+**Web Interface Guidelines review** (P1 Step 7, `.agents/skills/
+web-design-guidelines/SKILL.md`, fetched fresh): reviewed every
+`components/ui/` primitive changed in P1. Two real findings, both
+fixed: `button.tsx` and `tabs.tsx` used `transition-all` (guideline:
+"never use `transition: all` — list properties explicitly"); both now
+use Tailwind's bare `transition` utility, which maps to its curated
+safe property list (color/background/border/opacity/box-shadow/
+transform/filter — not literally every property) rather than
+`transition-property: all`, preserving the same animated properties.
+One accepted trade-off, not fixed: `input.tsx`/`select.tsx`'s
+`focus-visible:border-input-border-focused` replaces the old
+`focus-visible:ring-*` (guideline: interactive elements need a visible
+focus replacement for `outline-none`) — a border-color change is a
+real, present replacement, just lower-contrast than a ring; this is
+ZCode's own actual design (`refs/zcode/packages/ui/src/components/ui/
+input.tsx`: inputs are "calm and integrated, not glowing by default"
+per `refs/zcode/DESIGN.md`), so fixing it would mean deviating from the
+visual-parity mandate rather than a real component bug.
+
+**Not done in P1** (all explicitly deferred to a later phase by the
+plan, not scope creep left behind): diff2html's own variable overrides
+still read `--diff-addition`/`-deletion` rather than the ZCode-named
+`--diff-added`/`-removed` (P4); the terminal's `resolveTerminalTheme()`
+still only resolves chrome colors, not the ZCode 16-color ANSI set now
+sitting unused in `index.css` (P4); markdown's heading hierarchy uses
+its pre-existing pixel-preserving `text-ui-*` mapping, not yet
+DESIGN.md's h1→`text-ui-xl`/h2→`text-ui-lg` scale (P3); most
+`components/ui/` primitives outside the interactive-control/menu/
+overlay family (`sidebar.tsx`, `tooltip.tsx`, `hover-card.tsx`,
+`scroll-area.tsx`, `resizable.tsx`, `skeleton.tsx`) were left as-is —
+no explicit DESIGN.md violation found in a light pass, and their
+surfaces get pixel-matched against a specific ZCode source file in
+P2–P4 rather than guessed at here.
