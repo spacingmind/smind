@@ -312,6 +312,98 @@ describe("handler registry", () => {
   });
 });
 
+describe("chords", () => {
+  function ChordHost({ fire }: { fire: (payload: unknown) => void }) {
+    const { rebind } = useKeyboard();
+    return (
+      <>
+        <Claim action="palette.open" onFire={fire} />
+        <button onClick={() => rebind("palette-open", "Mod+K S")}>rebind to chord</button>
+      </>
+    );
+  }
+
+  it("fires only after both keys of a rebound chord, not on the first alone", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <ChordHost fire={fire} />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    expect(fire).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("abandons an in-progress chord once the timeout elapses", () => {
+    vi.useFakeTimers();
+    try {
+      const fire = vi.fn();
+      render(
+        <KeyboardProvider>
+          <ChordHost fire={fire} />
+        </KeyboardProvider>,
+      );
+      fireEvent.click(screen.getByText("rebind to chord"));
+
+      pressCtrl("k", "KeyK");
+      vi.advanceTimersByTime(1500);
+      fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+      expect(fire).not.toHaveBeenCalled();
+
+      // The attempt truly reset, not just paused: starting over from the
+      // first key still works.
+      pressCtrl("k", "KeyK");
+      fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+      expect(fire).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("survives a re-render between the chord's two keys", () => {
+    const fire = vi.fn();
+    function Host() {
+      const [, setTick] = useState(0);
+      return (
+        <>
+          <ChordHost fire={fire} />
+          <button onClick={() => setTick((n) => n + 1)}>rerender</button>
+        </>
+      );
+    }
+    render(
+      <KeyboardProvider>
+        <Host />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    fireEvent.click(screen.getByText("rerender"));
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("a wrong second key cancels the chord instead of firing", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <ChordHost fire={fire} />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    fireEvent.keyDown(document, { key: "z", code: "KeyZ" });
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).not.toHaveBeenCalled();
+  });
+});
+
 describe("rebinding", () => {
   it("applies an override, persists it, and restores it on remount", () => {
     const fire = vi.fn();

@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canonicalChord,
+  chordToString,
   comboStringFromEvent,
   DIGIT_WILDCARD,
+  formatChord,
   formatCombo,
+  isModifierKeyCode,
   matchCombo,
+  parseChord,
   parseCombo,
   SHORTCUT_KEY_NAMES,
   type KeyEventLike,
@@ -100,6 +105,56 @@ describe("formatCombo", () => {
   it("labels special keys and the digit wildcard", () => {
     expect(formatCombo("Escape", false)).toBe("Esc");
     expect(formatCombo("Mod+Alt+Digit", false)).toBe("Ctrl+Alt+1–9");
+  });
+});
+
+describe("parseChord / chordToString", () => {
+  it("round-trips a single-combo binding through both directions", () => {
+    const chord = parseChord("Mod+K");
+    expect(chord).toEqual([parseCombo("Mod+K")]);
+    expect(chordToString(chord)).toBe("Mod+K");
+  });
+
+  it("round-trips a two-step chord", () => {
+    const chord = parseChord("Mod+K S");
+    expect(chord).toEqual([parseCombo("Mod+K"), parseCombo("S")]);
+    expect(chordToString(chord)).toBe("Mod+K S");
+  });
+
+  it("propagates a malformed step's error", () => {
+    expect(() => parseChord("Mod+K NotAKey")).toThrow(/unknown key/);
+  });
+});
+
+describe("canonicalChord", () => {
+  it("sees through platform spelling on every step", () => {
+    expect(canonicalChord("Mod+K S", false)).toBe(canonicalChord("Ctrl+K S", false));
+    expect(canonicalChord("Mod+K S", true)).toBe(canonicalChord("Cmd+K S", true));
+  });
+
+  it("does not equate a chord with its own single-step prefix", () => {
+    expect(canonicalChord("Mod+K", false)).not.toBe(canonicalChord("Mod+K S", false));
+  });
+});
+
+describe("formatChord", () => {
+  it("formats a single-combo binding exactly like formatCombo", () => {
+    expect(formatChord("Mod+Alt+T", true)).toBe(formatCombo("Mod+Alt+T", true));
+    expect(formatChord("Mod+Alt+T", false)).toBe(formatCombo("Mod+Alt+T", false));
+  });
+
+  it("joins a chord's steps with 'then'", () => {
+    expect(formatChord("Mod+K S", true)).toBe("⌘K then S");
+    expect(formatChord("Mod+K S", false)).toBe("Ctrl+K then S");
+  });
+});
+
+describe("isModifierKeyCode", () => {
+  it("recognizes a bare modifier keydown", () => {
+    expect(isModifierKeyCode("ControlLeft")).toBe(true);
+    expect(isModifierKeyCode("ShiftRight")).toBe(true);
+    expect(isModifierKeyCode("KeyK")).toBe(false);
+    expect(isModifierKeyCode(undefined)).toBe(false);
   });
 });
 

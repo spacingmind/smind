@@ -1,10 +1,11 @@
 import type { ActionId, ActionPayload, FocusScope } from "@/keyboard/actions";
 import {
-  canonicalCombo,
+  canonicalChord,
   DIGIT_WILDCARD,
-  formatCombo,
+  formatChord,
+  isModifierKeyCode,
   matchCombo,
-  parseCombo,
+  parseChord,
   type KeyCombo,
   type KeyEventLike,
 } from "@/keyboard/shortcut-string";
@@ -185,9 +186,10 @@ export const UNASSIGNED = "";
 
 /** A binding with its effective combo resolved and parsed. `combo`/`parsed` are null when unassigned. */
 export interface ResolvedBinding extends ShortcutBinding {
-  /** The combo actually in effect: the override if there is one, else the default. */
+  /** The combo actually in effect: the override if there is one, else the default. Space-separated for a chord (`"Mod+K S"`). */
   effectiveCombo: string | null;
-  parsed: KeyCombo | null;
+  /** The effective combo's steps -- length 1 for a plain binding, more for a chord. */
+  parsed: KeyCombo[] | null;
   /** True when the effective combo differs from what the binding shipped with. */
   overridden: boolean;
 }
@@ -219,14 +221,14 @@ export function resolveBindings(
       return {
         ...binding,
         effectiveCombo: combo,
-        parsed: parseCombo(combo),
+        parsed: parseChord(combo),
         overridden: combo !== binding.combo,
       };
     } catch {
       return {
         ...binding,
         effectiveCombo: binding.combo,
-        parsed: parseCombo(binding.combo),
+        parsed: parseChord(binding.combo),
         overridden: false,
       };
     }
@@ -248,31 +250,140 @@ export interface ShortcutMatch {
   payload: ActionPayload;
 }
 
+/** How far into a chord attempt the matcher currently is -- opaque to callers besides {@link INITIAL_CHORD_STATE} and the value {@link resolveChordStep} hands back. */
+export interface ChordState {
+  /** Indices into the bindings array still alive in the current attempt. Empty at step 0: nothing pending. */
+  candidateIndices: number[];
+  step: number;
+}
+
+/** The matcher's state before any key of a chord has been pressed. */
+export const INITIAL_CHORD_STATE: ChordState = { candidateIndices: [], step: 0 };
+
+/** How long a chord's first key(s) wait for the next step before the attempt is abandoned -- Paseo's own `CHORD_TIMEOUT_MS`. */
+export const CHORD_TIMEOUT_MS = 1500;
+
+export interface ChordResolution {
+  match: ShortcutMatch | null;
+  nextChordState: ChordState;
+  /** True while this event was consumed as the start or continuation of a chord -- the caller should still preventDefault even though no action fired. */
+  pending: boolean;
+}
+
+function resolveInitialChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+): ChordResolution {
+  const advancing: number[] = [];
+  let singleMatch: ShortcutMatch | null = null;
+
+  bindings.forEach((binding, index) => {
+    const chord = binding.parsed;
+    const firstCombo = chord?.[0];
+    if (!chord || !firstCombo) return;
+    if (!bindingAllowedInScope(binding, context.scope)) return;
+    const stepMatch = matchCombo(firstCombo, event, context.isMac);
+    if (stepMatch === null) return;
+    if (chord.length > 1) {
+      advancing.push(index);
+      return;
+    }
+    if (!singleMatch) {
+      singleMatch = {
+        binding,
+        action: binding.action,
+        payload: stepMatch.digit === undefined ? null : { digit: stepMatch.digit },
+      };
+    }
+  });
+
+  if (advancing.length > 0) {
+    return { match: null, nextChordState: { candidateIndices: advancing, step: 1 }, pending: true };
+  }
+  return { match: singleMatch, nextChordState: INITIAL_CHORD_STATE, pending: false };
+}
+
+function resolveAdvancingChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+  chordState: ChordState,
+): ChordResolution {
+  const matching: number[] = [];
+  let completed: ShortcutMatch | null = null;
+
+  for (const index of chordState.candidateIndices) {
+    const binding = bindings[index];
+    const chord = binding?.parsed;
+    const combo = chord?.[chordState.step];
+    if (!binding || !chord || !combo) continue;
+    if (!bindingAllowedInScope(binding, context.scope)) continue;
+    const stepMatch = matchCombo(combo, event, context.isMac);
+    if (stepMatch === null) continue;
+    if (chordState.step + 1 === chord.length) {
+      completed = {
+        binding,
+        action: binding.action,
+        payload: stepMatch.digit === undefined ? null : { digit: stepMatch.digit },
+      };
+      break;
+    }
+    matching.push(index);
+  }
+
+  if (completed) return { match: completed, nextChordState: INITIAL_CHORD_STATE, pending: false };
+  if (matching.length > 0) {
+    return {
+      match: null,
+      nextChordState: { candidateIndices: matching, step: chordState.step + 1 },
+      pending: true,
+    };
+  }
+  // A wrong second key cancels the attempt outright rather than falling back
+  // to step 0 as if it were a fresh first key -- the plan's "a wrong second
+  // key cancels" scenario, not "restarts".
+  return { match: null, nextChordState: INITIAL_CHORD_STATE, pending: false };
+}
+
 /**
- * The first binding this event fires, or null.
- *
- * Auto-repeat is dropped outright: every action here is a discrete command
- * (open a palette, close a tab), and holding the key down should do it once.
+ * Advances the chord matcher by one keydown. Stateless besides what the
+ * caller threads back in as `chordState` -- the timeout that abandons a
+ * stale attempt is the caller's to own (a real `setTimeout` in
+ * `keyboard-provider.tsx`, nothing here), since this function has no way to
+ * observe the passage of time on its own.
+ */
+export function resolveChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+  chordState: ChordState = INITIAL_CHORD_STATE,
+): ChordResolution {
+  if (event.repeat) return { match: null, nextChordState: chordState, pending: false };
+  // Pressing a modifier emits its own keydown before the combo that holds
+  // it, so a chord waiting on e.g. `Ctrl+J` sees a bare `Control` first.
+  // That keydown matches no combo, and resolving it would drop the chord
+  // back to its first step -- leave the chord exactly where it is instead.
+  if (isModifierKeyCode(event.code)) {
+    return { match: null, nextChordState: chordState, pending: false };
+  }
+  if (chordState.step === 0) return resolveInitialChordStep(bindings, event, context);
+  return resolveAdvancingChordStep(bindings, event, context, chordState);
+}
+
+/**
+ * The first binding this event fires on its own (chord-less), or null.
+ * Convenience wrapper over {@link resolveChordStep} for callers -- most
+ * tests, and any one-shot check -- that don't need to track chord state
+ * across events: a plain single-combo binding always resolves on its first
+ * key, same as before chords existed.
  */
 export function matchShortcut(
   bindings: readonly ResolvedBinding[],
   event: KeyEventLike,
   context: { isMac: boolean; scope: FocusScope },
 ): ShortcutMatch | null {
-  if (event.repeat) return null;
-
-  for (const binding of bindings) {
-    if (binding.parsed === null) continue;
-    if (!bindingAllowedInScope(binding, context.scope)) continue;
-    const match = matchCombo(binding.parsed, event, context.isMac);
-    if (match === null) continue;
-    return {
-      binding,
-      action: binding.action,
-      payload: match.digit === undefined ? null : { digit: match.digit },
-    };
-  }
-  return null;
+  return resolveChordStep(bindings, event, context, INITIAL_CHORD_STATE).match;
 }
 
 export interface HelpRow {
@@ -310,7 +421,7 @@ export function helpSections(bindings: readonly ResolvedBinding[], isMac: boolea
         id: b.id,
         label: b.label,
         ...(b.note === undefined ? {} : { note: b.note }),
-        keys: b.effectiveCombo === null ? null : formatCombo(b.effectiveCombo, isMac),
+        keys: b.effectiveCombo === null ? null : formatChord(b.effectiveCombo, isMac),
         overridden: b.overridden,
       })),
   })).filter((section) => section.rows.length > 0);
@@ -334,14 +445,14 @@ export function conflictingBindings(
 ): ResolvedBinding[] {
   let target: string;
   try {
-    target = canonicalCombo(combo, isMac);
+    target = canonicalChord(combo, isMac);
   } catch {
     return [];
   }
   return bindings.filter((b) => {
     if (b.id === exceptId || b.effectiveCombo === null) return false;
     try {
-      return canonicalCombo(b.effectiveCombo, isMac) === target;
+      return canonicalChord(b.effectiveCombo, isMac) === target;
     } catch {
       return false;
     }

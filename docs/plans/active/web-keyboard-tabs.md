@@ -131,7 +131,7 @@ smind today:
 
 ## Progress
 
-- [ ] AC1 chords
+- [x] AC1 chords
 - [ ] AC2 pane focus
 - [ ] AC3 split/tab actions
 - [ ] AC4 Mod+, and Mod+digit
@@ -141,4 +141,25 @@ smind today:
 
 ## Validation
 
-To be filled in as items land.
+- **AC1 (chords).** `keyboard/shortcuts.ts` grows `resolveChordStep`
+  (pure, given a `ChordState`) alongside the existing `matchShortcut`
+  (now a chord-less convenience wrapper over it at `INITIAL_CHORD_STATE`,
+  so every pre-existing single-combo caller/test is unchanged).
+  `ResolvedBinding.parsed` is now `KeyCombo[] | null` (a chord of length
+  1 for a plain binding) via `shortcut-string.ts`'s new `parseChord`/
+  `chordToString`/`canonicalChord`/`formatChord`. The real
+  `CHORD_TIMEOUT_MS` (1500ms) timer lives in `keyboard-provider.tsx`,
+  which threads `ChordState` through a `useRef` (not React state) so an
+  in-progress chord survives a re-render between its two keys.
+  Overrides need no migration code: `resolveBindings` already re-parses
+  whatever string is stored, chord or not, each render.
+  - `keyboard/shortcut-string.test.ts`: chord parse/format round-trip,
+    canonicalization, `isModifierKeyCode`.
+  - `keyboard/shortcuts.test.ts`: `resolveChordStep` (waits, completes,
+    wrong-second-key cancels, bare-modifier-mid-chord is a no-op,
+    auto-repeat ignored), override migration both directions
+    (single→chord, chord→single).
+  - `keyboard/keyboard-provider.test.tsx`: chords over the real
+    `KeyboardProvider` with real timers (`vi.useFakeTimers`) --
+    end-to-end fire, timeout abandons the attempt, survives a re-render,
+    wrong second key cancels.
