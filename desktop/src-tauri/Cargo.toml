@@ -9,12 +9,20 @@ tauri-build = { version = "2" }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-single-instance = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-window-state = "2"
+tauri-plugin-deep-link = "2"
 url = "2"
 smind-daemon-client = { path = "../daemon-client" }
 tokio = { version = "1", features = ["rt", "time"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+tauri-winrt-notification = "0.8"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+notify-rust = "4"
 
 [lib]
 name = "smind_desktop_lib"

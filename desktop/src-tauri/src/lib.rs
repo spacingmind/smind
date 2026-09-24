@@ -39,6 +39,13 @@ pub fn run() {
                 })
                 .build(),
         )
+        // quick-wins AC1: size/position/maximized persist across restarts,
+        // restored automatically on the main window's `ready` event
+        // (fires for a window built at runtime via WebviewWindowBuilder,
+        // not only ones declared in tauri.conf.json); falls back to the
+        // OS's own placement when the saved monitor is gone rather than
+        // forcing an off-screen position.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let cfg = Config {
                 daemon_url: dclient::config::daemon_url().unwrap_or_else(|e| {

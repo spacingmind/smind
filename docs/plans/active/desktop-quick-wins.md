@@ -79,10 +79,22 @@ If an item turns out to be impossible under these constraints, stop and report i
 
 - Stay on branch `feat/desktop-tauri-shell`, so the desktop shell ships as one PR.
 - Record the new dependencies (plugins) and the notification-click approach you chose in this section as you go.
+- **New crates** (all Tauri-2-compatible stable releases, not the `3.0.0-alpha.1` line that `cargo search`/`cargo info` show as "latest" -- pinned to `2`/`4`/`0.8` so the version req resolves the 2.x/stable release):
+  - `tauri-plugin-window-state` 2.4.1 (AC1).
+  - `tauri-plugin-single-instance`'s `deep-link` feature (AC6), forwarding a
+    second instance's `smind://...` argv into `tauri-plugin-deep-link`'s
+    `on_open_url` in the running instance instead of spawning a second
+    window.
+  - `tauri-plugin-deep-link` 2.4.10 (AC6).
+  - `tauri-winrt-notification` 0.8.1, Windows-only
+    (`target_os = "windows"`) (AC3).
+  - `notify-rust` 4.18.0, Linux-only (`target_os = "linux"`) (AC3).
 
 ## Progress
 
-- [ ] AC1 window state
+- [x] AC1 window state (`tauri-plugin-window-state` 2.4.1; auto-restores on
+  the main window's `ready` event, no change needed to how the window is
+  built)
 - [ ] AC2 app menu
 - [ ] AC3 notification click → task
 - [ ] AC4 tray attention
@@ -92,4 +104,20 @@ If an item turns out to be impossible under these constraints, stop and report i
 
 ## Validation
 
-To be filled in as items land.
+- **AC1**: `cargo check` in `desktop/src-tauri` passes with
+  `tauri-plugin-window-state = "2"` added and
+  `.plugin(tauri_plugin_window_state::Builder::default().build())`
+  registered. The plugin's `on_window_ready` hook fires for any window
+  (including one built at runtime via `WebviewWindowBuilder`, not only
+  ones declared in `tauri.conf.json`), so no change to the AC1 window
+  construction code was needed. Read the plugin's 2.4.1 source
+  (`~/.cargo/registry/src/.../tauri-plugin-window-state-2.4.1/src/lib.rs`)
+  to confirm: on restore it only repositions onto the saved monitor if
+  `available_monitors()` still intersects that position/size, otherwise
+  leaves placement to the OS (satisfies "clamped onto a visible monitor if
+  the saved monitor is gone" without a hard clamp) --  and first launch
+  (no saved state / all-default state) leaves the builder's explicit
+  `inner_size(1280, 800)` alone. `daemon-client`'s 16 unit tests still
+  pass (unaffected). Manual restart/monitor-loss check is in the Linux
+  live-run pass below, done once more ACs land so a single WSLg session
+  covers all of them.
