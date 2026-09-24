@@ -1,22 +1,14 @@
-import { useState } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ShortcutsDialog } from "@/components/shortcuts-dialog";
-import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
+import { ShortcutRows } from "@/components/shortcuts-dialog";
+import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import { SECTION_TITLES, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 
-/** The dialog wired to `shortcuts.help` exactly as App.tsx wires it, so `Shift+?` is exercised end to end. */
-function Host() {
-  const [open, setOpen] = useState(false);
-  useActionHandler("shortcuts.help", () => setOpen(true));
-  return <ShortcutsDialog open={open} onOpenChange={setOpen} />;
-}
-
-function renderHost() {
+function renderRows(query?: string) {
   return render(
     <KeyboardProvider>
-      <Host />
+      <ShortcutRows query={query} />
     </KeyboardProvider>,
   );
 }
@@ -30,28 +22,21 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe("ShortcutsDialog", () => {
-  it("opens on Shift+? and lists every registered binding", () => {
-    renderHost();
-    expect(screen.queryByTestId("shortcuts-dialog")).not.toBeInTheDocument();
-
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
-
-    const dialog = screen.getByTestId("shortcuts-dialog");
-    const rows = within(dialog).getAllByTestId("shortcut-row");
+describe("ShortcutRows", () => {
+  it("lists every registered binding", () => {
+    renderRows();
+    const rows = screen.getAllByTestId("shortcut-row");
     expect(rows).toHaveLength(SHORTCUT_BINDINGS.length);
     expect(rows.map((r) => r.dataset.bindingId).sort()).toEqual(
       SHORTCUT_BINDINGS.map((b) => b.id).sort(),
     );
     for (const binding of SHORTCUT_BINDINGS) {
-      expect(within(dialog).getByText(binding.label)).toBeInTheDocument();
+      expect(screen.getByText(binding.label)).toBeInTheDocument();
     }
   });
 
   it("groups rows under their section headings", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
-
+    renderRows();
     for (const binding of SHORTCUT_BINDINGS) {
       const section = screen.getByTestId(`shortcut-section-${binding.section}`);
       expect(within(section).getByText(SECTION_TITLES[binding.section])).toBeInTheDocument();
@@ -60,28 +45,49 @@ describe("ShortcutsDialog", () => {
   });
 
   it("renders each binding's keys", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
-
+    renderRows();
     // Non-mac in jsdom, so Ctrl+K renders as three caps.
-    const row = screen.getByTestId("shortcuts-dialog").querySelector<HTMLElement>(
+    const row = screen.getByTestId("shortcut-sections").querySelector<HTMLElement>(
       '[data-binding-id="palette-open"]',
     )!;
     expect(within(row).getByText("Ctrl")).toBeInTheDocument();
     expect(within(row).getByText("K")).toBeInTheDocument();
   });
 
-  it("rebinds a shortcut from the captured key press", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+  it("narrows to rows matching a search query", () => {
+    renderRows("close current tab");
+    const rowIds = screen.getAllByTestId("shortcut-row").map((r) => r.dataset.bindingId);
+    expect(rowIds).toEqual(["tab-close"]);
+  });
 
+  it("keeps every row of a section whose own title matches the query", () => {
+    renderRows("tabs");
+    // The "Tabs & panes" section title itself matches "tabs" -- every row
+    // in it stays, not just ones individually matching the query.
+    const tabsSection = screen.getByTestId("shortcut-section-tabs");
+    const tabsRowIds = within(tabsSection)
+      .getAllByTestId("shortcut-row")
+      .map((r) => r.dataset.bindingId);
+    expect(tabsRowIds).toEqual(
+      SHORTCUT_BINDINGS.filter((b) => b.section === "tabs").map((b) => b.id),
+    );
+  });
+
+  it("shows an empty state for a query matching nothing", () => {
+    renderRows("this matches no binding at all");
+    expect(screen.queryByTestId("shortcut-sections")).not.toBeInTheDocument();
+    expect(screen.getByTestId("shortcut-sections-empty")).toBeInTheDocument();
+  });
+
+  it("rebinds a shortcut from the captured key press", () => {
+    renderRows();
     fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
     expect(screen.getByTestId("shortcut-capturing")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "j", code: "KeyJ", ctrlKey: true, shiftKey: true });
 
     const row = screen
-      .getByTestId("shortcuts-dialog")
+      .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("J")).toBeInTheDocument();
     expect(within(row).getByText("Shift")).toBeInTheDocument();
@@ -89,8 +95,7 @@ describe("ShortcutsDialog", () => {
   });
 
   it("stays in capture for a bare modifier press and cancels on Escape", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    renderRows();
     fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
 
     fireEvent.keyDown(window, { key: "Shift", shiftKey: true });
@@ -99,15 +104,13 @@ describe("ShortcutsDialog", () => {
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
     expect(screen.queryByTestId("shortcut-capturing")).not.toBeInTheDocument();
     const row = screen
-      .getByTestId("shortcuts-dialog")
+      .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("K")).toBeInTheDocument();
   });
 
   it("flags a rebind that collides with another binding", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
-
+    renderRows();
     // Put "Close current tab" onto Ctrl+K, which "Open command palette" has.
     fireEvent.click(screen.getByLabelText("Change shortcut for Close current tab"));
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
@@ -123,8 +126,7 @@ describe("ShortcutsDialog", () => {
   });
 
   it("offers Reset only on an overridden row, and restores the default", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    renderRows();
     expect(
       screen.queryByLabelText("Reset shortcut for Open command palette"),
     ).not.toBeInTheDocument();
@@ -134,7 +136,7 @@ describe("ShortcutsDialog", () => {
     fireEvent.click(screen.getByLabelText("Reset shortcut for Open command palette"));
 
     const row = screen
-      .getByTestId("shortcuts-dialog")
+      .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("K")).toBeInTheDocument();
     expect(
@@ -143,8 +145,7 @@ describe("ShortcutsDialog", () => {
   });
 
   it("shows Reset all only once something is overridden", () => {
-    renderHost();
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    renderRows();
     expect(screen.queryByText("Reset all to defaults")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
@@ -153,31 +154,60 @@ describe("ShortcutsDialog", () => {
 
     expect(screen.queryByText("Reset all to defaults")).not.toBeInTheDocument();
     const row = screen
-      .getByTestId("shortcuts-dialog")
+      .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("K")).toBeInTheDocument();
   });
 
-  it("holds the modal keyboard lock while open, so no shortcut fires underneath it", () => {
-    const palette = vi.fn();
-    function Underneath() {
-      useActionHandler("palette.open", palette);
-      return null;
-    }
-    render(
-      <KeyboardProvider>
-        <Underneath />
-        <Host />
-      </KeyboardProvider>,
-    );
+  it("records a chord across two key presses and commits on Enter", () => {
+    renderRows();
+    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    expect(screen.getByTestId("shortcut-capturing")).toHaveTextContent("Recording a chord");
 
-    fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
-    expect(palette).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    // Still capturing -- a chord isn't committed by its first step.
+    expect(screen.getByTestId("shortcut-capturing")).toBeInTheDocument();
 
-    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
-    expect(screen.getByTestId("shortcuts-dialog")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "s", code: "KeyS" });
+    fireEvent.keyDown(window, { key: "Enter", code: "Enter" });
 
-    fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
-    expect(palette).toHaveBeenCalledTimes(1);
+    const row = screen
+      .getByTestId("shortcut-sections")
+      .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
+    // formatChord renders "Ctrl+K then S" off mac; KeyCaps splits display
+    // text on "+" only (mac's own separator-less glyphs), so the chord's
+    // "then" separator stays inside its own cap rather than being split
+    // further: two caps, "Ctrl" and "K then S".
+    expect(within(row).getByText("Ctrl")).toBeInTheDocument();
+    expect(within(row).getByText("K then S")).toBeInTheDocument();
+  });
+
+  it("cancels a chord recording via the Cancel button without committing anything captured so far", () => {
+    // Escape itself is a legitimate chord step once recording is underway
+    // (it has to be, for a binding whose combo genuinely is Escape) -- the
+    // Cancel button, not Escape, is how a chord recording in progress is
+    // aborted after its first step.
+    renderRows();
+    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
+    fireEvent.click(screen.getByLabelText("Cancel rebinding Open command palette"));
+
+    expect(screen.queryByTestId("shortcut-capturing")).not.toBeInTheDocument();
+    const row = screen
+      .getByTestId("shortcut-sections")
+      .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
+    expect(within(row).getByText("K")).toBeInTheDocument();
+  });
+
+  it("Escape cancels a chord recording that hasn't captured a first step yet", () => {
+    renderRows();
+    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+
+    expect(screen.queryByTestId("shortcut-capturing")).not.toBeInTheDocument();
+    const row = screen
+      .getByTestId("shortcut-sections")
+      .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
+    expect(within(row).getByText("K")).toBeInTheDocument();
   });
 });

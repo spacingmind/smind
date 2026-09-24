@@ -642,20 +642,43 @@ describe("App keyboard shortcuts", () => {
     );
   });
 
-  it("Shift+? opens the shortcuts dialog listing every binding", async () => {
+  it("Shift+? opens Settings on the Shortcuts section, listing every binding (AC5: the old dialog is now a Settings section)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
     await resolveSidebar(socket);
 
-    expect(screen.queryByTestId("shortcuts-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
     await act(async () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
     await flush();
 
-    expect(screen.getByTestId("shortcuts-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);
+  });
+
+  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior Shift+? left behind", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+
+    await act(async () => {
+      pressCtrl(",", "Comma");
+    });
+    await flush();
+
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-shortcuts")).not.toBeInTheDocument();
   });
 });
 

@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 import "@/components/settings/appearance-section";
 import "@/components/settings/general-section";
 import "@/components/settings/notifications-section";
+import "@/components/settings/shortcuts-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
@@ -39,13 +40,18 @@ import type { WsClient } from "@/lib/ws-client";
 export function SettingsScreen({
   client,
   onNavigateBack,
+  initialSectionId,
 }: {
   client: WsClient | null;
   /** Returns to the view the settings screen was opened from (back button / Escape). */
   onNavigateBack: () => void;
+  /** Which section a fresh mount opens to, if it exists in the registry -- `shortcuts.help` (AC5) deep-links to "shortcuts" this way. Defaults to the first registered section, same as before this prop existed. */
+  initialSectionId?: string;
 }) {
   const sections = listSettingsSections();
-  const [activeId, setActiveId] = useState<string | null>(sections[0]?.id ?? null);
+  const [activeId, setActiveId] = useState<string | null>(
+    () => sections.find((s) => s.id === initialSectionId)?.id ?? sections[0]?.id ?? null,
+  );
 
   // Re-derive the active section whenever the registry changes shape, but
   // only snap to the first section when the current selection no longer

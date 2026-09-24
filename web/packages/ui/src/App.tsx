@@ -15,7 +15,6 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
@@ -140,7 +139,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Which settings section a fresh mount of SettingsScreen should land on --
+  // `shortcuts.help` deep-links to "shortcuts" (AC5: the old Shift+? dialog
+  // is now a Settings section, not a separate surface); every other path
+  // into Settings clears this back to null (the screen's own default).
+  const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<string | null>(null);
   // Every task across the tree, handed up by AppSidebar (the one component
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
@@ -508,7 +511,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // rather than the shell -- `composer.focus`, `run.interrupt` -- are
   // deliberately absent here; the composer claims them itself.
 
-  useActionHandler("shortcuts.help", () => setShortcutsOpen(true));
+  useActionHandler("shortcuts.help", () => {
+    setSettingsInitialSectionId("shortcuts");
+    setActiveView("settings");
+  });
 
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
@@ -626,7 +632,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   useActionHandler("pane.focus.up", () => focusAdjacentPane("up"), { enabled: paneCount > 1 });
   useActionHandler("pane.focus.down", () => focusAdjacentPane("down"), { enabled: paneCount > 1 });
 
-  useActionHandler("settings.open", () => setActiveView("settings"));
+  useActionHandler("settings.open", () => {
+    setSettingsInitialSectionId(null);
+    setActiveView("settings");
+  });
 
   useActionHandler(
     "sidebar.task-jump",
@@ -674,7 +683,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
-      onOpenSettings={() => setActiveView("settings")}
+      onOpenSettings={() => {
+        setSettingsInitialSectionId(null);
+        setActiveView("settings");
+      }}
     />
   );
 
@@ -739,7 +751,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const mainContentElement = (
     <div className="flex-1 min-h-0">
       {activeView === "settings" ? (
-        <SettingsScreen client={client} onNavigateBack={() => setActiveView("workspace")} />
+        <SettingsScreen
+          client={client}
+          onNavigateBack={() => setActiveView("workspace")}
+          initialSectionId={settingsInitialSectionId ?? undefined}
+        />
       ) : selectedTask && taskState ? (
         isMobile ? (
           compactPrimaryStrip
@@ -820,7 +836,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
        * its own parent mounts.
        */}
       <SidebarToggleAction />
-      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <CommandPalette />
       <ShellCommands
         client={client}

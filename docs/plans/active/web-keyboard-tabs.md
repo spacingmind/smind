@@ -135,7 +135,7 @@ smind today:
 - [x] AC2 pane focus
 - [x] AC3 split/tab actions
 - [x] AC4 Mod+, and Mod+digit
-- [ ] AC5 Settings → Shortcuts
+- [x] AC5 Settings → Shortcuts
 - [ ] AC6 tab context menu
 - [ ] AC7 Shift+Tab mode cycle
 
@@ -228,3 +228,48 @@ smind today:
     `Alt+Shift+[`/`]` for tab prev/next).
   - `settings.open` `Mod+,` and `sidebar.task-jump` `Mod+<digit>` are the
     plan's own explicit choices.
+
+- **AC5 (Settings → Shortcuts).** `components/shortcuts-dialog.tsx`'s
+  `<ShortcutRows />` was already written reusable ("exported so Item 13's
+  settings screen can embed it") and already had rebind/reset/reset-all/
+  conflicts -- only search and chord-capture were missing, plus removing
+  the dialog wrapper now that Settings is rebinding's permanent home. Added
+  `keyboard/shortcut-help-search.ts` (`filterShortcutHelpSections`, scaled
+  down from Paseo's combinatorial-alias version: a fixed `Mod`/`Alt`/`Cmd`/
+  `Ctrl` -> word-alias table against `HelpRow`'s new `effectiveCombo` field,
+  since smind's rows carry one formatted string rather than Paseo's
+  per-step chord array). `ShortcutRow`'s capture grew a second, opt-in
+  "Record chord…" mode (multi-step, committed by Enter) alongside the
+  original single-key "Change" (commits immediately, unchanged) -- a
+  real timer-based capture (waiting out `CHORD_TIMEOUT_MS` after every
+  key to guess "is a second step coming?") would make the overwhelmingly
+  common single-key rebind feel laggy, so chord recording is a distinct,
+  explicit mode instead. `components/settings/shortcuts-section.tsx` is
+  the new registered section (search box + `<ShortcutRows query={...} />`).
+  `SettingsScreen` grew an `initialSectionId` prop; `shortcuts.help`
+  (`Shift+?`) now deep-links to `"shortcuts"` instead of opening a
+  separate dialog -- the old dialog is removed outright (AC5 offered
+  "reduced to help" as an alternative; removal was simpler and avoids
+  keeping two overlapping rebind UIs in sync).
+  - `keyboard/shortcut-help-search.test.ts`: label/note/keys matching,
+    section-title-matches-keeps-everything, `cmd`/`command`/`ctrl`/
+    `control` aliases resolving to a `Mod`-bound row regardless of
+    platform, an unassigned row still matching by label.
+  - `components/shortcuts-dialog.test.tsx` (renamed in place from testing
+    the dialog to testing `<ShortcutRows />` directly): listing, grouping,
+    key rendering, search narrowing a section vs. a title match keeping it
+    whole, the empty state, single-key rebind, bare-modifier-stays-in-
+    capture, Escape-cancels-before-any-step, conflict flagging, reset/
+    reset-all, chord recording (two steps, Enter commits, `Escape`
+    captured as this chord's own second step once a first step exists,
+    Cancel-button abandons a chord recording in progress).
+  - `components/settings/shortcuts-section.test.tsx`: registered and
+    reachable from the nav, lists every binding, search narrows and
+    clearing restores the full list.
+  - `components/settings/settings-screen.test.tsx`: `initialSectionId`
+    opens on that section; an unknown id falls back to the first
+    registered one instead of blanking the screen.
+  - `App.test.tsx`: `Shift+?` lands on the Shortcuts section with every
+    binding listed; `Mod+,` opens Settings on its default section even
+    right after a `Shift+?` left it on Shortcuts (the stale-initial-
+    section reset).

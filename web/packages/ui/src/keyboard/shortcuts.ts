@@ -505,6 +505,8 @@ export interface HelpRow {
   note?: string;
   /** How the effective combo reads on this platform, or null when unassigned. */
   keys: string | null;
+  /** The effective combo's raw storage spelling ("Mod+K S"), or null when unassigned -- what a search box matches "ctrl"/"cmd"-style aliases against; `keys` is display-only. */
+  effectiveCombo: string | null;
   overridden: boolean;
 }
 
@@ -535,6 +537,7 @@ export function helpSections(bindings: readonly ResolvedBinding[], isMac: boolea
         label: b.label,
         ...(b.note === undefined ? {} : { note: b.note }),
         keys: b.effectiveCombo === null ? null : formatChord(b.effectiveCombo, isMac),
+        effectiveCombo: b.effectiveCombo,
         overridden: b.overridden,
       })),
   })).filter((section) => section.rows.length > 0);
