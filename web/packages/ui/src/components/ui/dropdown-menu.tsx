@@ -40,7 +40,7 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-(--duration-menu)",
+          "z-50 min-w-[8rem] overflow-hidden rounded-lg border bg-menu p-1 shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-(--duration-menu)",
           className
         )}
         {...props}
@@ -69,7 +69,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
+        "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
         className
       )}
       {...props}
@@ -113,7 +113,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-menu-hover data-[state=open]:bg-menu-hover data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
         className
       )}
       {...props}
@@ -133,7 +133,7 @@ function DropdownMenuSubContent({
       <DropdownMenuPrimitive.SubContent
         data-slot="dropdown-menu-sub-content"
         className={cn(
-          "z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-(--duration-menu)",
+          "z-50 min-w-[8rem] overflow-hidden rounded-lg border bg-menu p-1 shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 duration-(--duration-menu)",
           className
         )}
         {...props}

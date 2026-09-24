@@ -15,8 +15,10 @@
  *      popover-foreground/primary/primary-foreground/secondary/accent/
  *      destructive/border/sidebar are overwritten in place with ZCode's
  *      Zai Light/Dark values (zcode-visual-parity plan, P1 Step 2; see
- *      the `:root`/`.dark` comments below) -- `--radius*`, `--ring`,
- *      `--input`, and `--chart-*` are untouched.
+ *      the `:root`/`.dark` comments below); `--ring` is neutralized (P1
+ *      Step 5) and the `--radius-*` scale is deleted in favor of
+ *      Tailwind's own defaults (P1 Step 5, see below) -- `--input` and
+ *      `--chart-*` are the two untouched holdouts.
  *   2. Semantic layer: named-by-purpose tokens that alias into the static
  *      layer or introduce a new hue where none existed -- ZCode's ported
  *      token vocabulary (P1 Step 2) plus `foreground-muted` (an explicit
@@ -60,13 +62,12 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    /*
+     * No --radius-* overrides (zcode-visual-parity plan, P1 Step 5
+     * decision): Tailwind v4's own default radius scale applies
+     * unmodified, for parity with ZCode (which does the same -- no radius
+     * theme override in refs/zcode/packages/ui/src/styles.css either).
+     */
 
     /* Semantic layer additions -- see the comment above this block. */
     --color-foreground-muted: var(--foreground-muted);
@@ -256,13 +257,19 @@
     --destructive: #e03131;
     --border: rgba(13, 13, 13, 0.1);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.75 0.11 194.8);
+    /*
+     * Neutral, not the sidebar wordmark's teal (zcode-visual-parity plan,
+     * P1 Step 5 decision) -- refs/zcode/DESIGN.md's inputs are "calm and
+     * integrated, not glowing by default", and ZCode has no ring/focus-glow
+     * token at all. Same lightness as the retired teal value, chroma
+     * zeroed rather than re-picked, so contrast is unchanged.
+     */
+    --ring: oklch(0.75 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
     --sidebar: #f0f0f0;
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.489 0.08 194.8);
@@ -412,7 +419,8 @@
     --destructive: #ff5c5c;
     --border: rgba(255, 255, 255, 0.1);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.904 0.136 196.2);
+    /* Neutral, not teal -- see :root's comment above. */
+    --ring: oklch(0.904 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
