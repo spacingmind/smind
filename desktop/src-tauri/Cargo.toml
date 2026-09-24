@@ -5,7 +5,7 @@ description = "smind desktop thin-client shell"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "2", features = ["tray-icon"] }
+tauri-build = { version = "2" }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
