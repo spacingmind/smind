@@ -37,7 +37,10 @@ export const TimelineRow = memo(function TimelineRow({
     case "user":
       return (
         <li data-testid="timeline-user" data-item-kind="user" className="flex justify-end">
-          <div className="max-w-[85%] rounded-lg bg-surface-2 px-2.5 py-1.5 text-sm whitespace-pre-wrap">
+          <div
+            data-chat-find-text="true"
+            className="max-w-[85%] rounded-lg bg-surface-2 px-2.5 py-1.5 text-sm whitespace-pre-wrap"
+          >
             {item.text}
           </div>
         </li>
@@ -58,7 +61,10 @@ export const TimelineRow = memo(function TimelineRow({
             <summary className="cursor-pointer px-2.5 py-1 text-xs text-foreground-muted select-none">
               Thinking
             </summary>
-            <div className="border-t border-dashed px-2.5 py-1.5 text-xs whitespace-pre-wrap text-foreground-muted">
+            <div
+              data-chat-find-text="true"
+              className="border-t border-dashed px-2.5 py-1.5 text-xs whitespace-pre-wrap text-foreground-muted"
+            >
               {item.text}
             </div>
           </details>

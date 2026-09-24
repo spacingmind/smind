@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { EditorView, basicSetup } from "codemirror";
 import { keymap } from "@codemirror/view";
+import type { Extension } from "@codemirror/state";
 
 /**
  * Maps a mounted CodeMirrorEditor's container element to its live
@@ -71,11 +72,17 @@ export function CodeMirrorEditor({
   onChange,
   onSave,
   testId,
+  findExtension,
+  onViewReady,
 }: {
   value: string;
   onChange: (value: string) => void;
   onSave: () => void;
   testId?: string;
+  /** Extra extension(s) folded into the view at creation time -- `file-editor-pane.tsx` passes `FileFindModel.extension` (AC2) here. Optional so every other caller/test is unaffected. */
+  findExtension?: Extension;
+  /** Called with the live `EditorView` once created, and with `null` on unmount -- how a Find model outside this component gets the view instance `openSearchPanel`/`findNext`/etc. need. */
+  onViewReady?: (view: EditorView | null) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -87,6 +94,8 @@ export function CodeMirrorEditor({
   onChangeRef.current = onChange;
   const onSaveRef = useRef(onSave);
   onSaveRef.current = onSave;
+  const onViewReadyRef = useRef(onViewReady);
+  onViewReadyRef.current = onViewReady;
 
   useEffect(() => {
     const container = containerRef.current;
@@ -97,6 +106,7 @@ export function CodeMirrorEditor({
       extensions: [
         basicSetup,
         appChromeTheme,
+        ...(findExtension ? [findExtension] : []),
         keymap.of([
           {
             key: "Mod-s",
@@ -117,11 +127,13 @@ export function CodeMirrorEditor({
     });
     viewRef.current = view;
     editorViewRegistry.set(container, view);
+    onViewReadyRef.current?.(view);
 
     return () => {
       editorViewRegistry.delete(container);
       view.destroy();
       viewRef.current = null;
+      onViewReadyRef.current?.(null);
     };
     // Intentionally mount-once: see the doc comment above for why `value`
     // changes are synced via the effect below instead of a dependency here.
