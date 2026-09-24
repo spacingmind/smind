@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Columns2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Columns2, Copy, Pencil } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -22,6 +22,13 @@ import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -181,6 +188,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     closePane,
     splitPaneEmpty,
     moveTabToNextPane,
+    closeOtherTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    renameTab,
   } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
@@ -347,6 +358,28 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   function resizePaneGroup(groupId: string, sizes: number[]) {
     if (!selectedTask) return;
     resizeGroup(selectedTask.ID, groupId, sizes);
+  }
+
+  // --- Tab context menu (Item 6: close others/left/right, rename, copy path) ---
+
+  function closeOtherTabsForTask(key: string) {
+    if (!selectedTask) return;
+    closeOtherTabs(selectedTask.ID, key);
+  }
+
+  function closeTabsToLeftForTask(key: string) {
+    if (!selectedTask) return;
+    closeTabsToLeft(selectedTask.ID, key);
+  }
+
+  function closeTabsToRightForTask(key: string) {
+    if (!selectedTask) return;
+    closeTabsToRight(selectedTask.ID, key);
+  }
+
+  function renameTabForTask(key: string, title: string) {
+    if (!selectedTask) return;
+    renameTab(selectedTask.ID, key, title);
   }
 
   // --- Drag-to-split (Item 8) -------------------------------------------
@@ -733,6 +766,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onOpenFileToSide={openFileTabToSide}
       onActivate={(key) => activate(selectedTask.ID, key)}
       onClose={(key) => closeTab(selectedTask.ID, key)}
+      onCloseOthers={closeOtherTabsForTask}
+      onCloseLeft={closeTabsToLeftForTask}
+      onCloseRight={closeTabsToRightForTask}
+      onRenameTab={renameTabForTask}
       onSplit={() => {}}
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
@@ -793,6 +830,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               onOpenFileToSide={openFileTabToSide}
               onActivate={(key) => activate(selectedTask.ID, key)}
               onClose={(key) => closeTab(selectedTask.ID, key)}
+              onCloseOthers={closeOtherTabsForTask}
+              onCloseLeft={closeTabsToLeftForTask}
+              onCloseRight={closeTabsToRightForTask}
+              onRenameTab={renameTabForTask}
               onSplitTab={splitPaneTab}
               onResizeGroup={resizePaneGroup}
               onRevealInDiff={revealInDiff}
@@ -1120,6 +1161,12 @@ interface SplitPaneCallbacks {
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  /** Item 6's tab context menu: close every other closable tab in key's pane, or every closable tab to its left/right. */
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  /** Item 6's "Rename" (terminal tabs only -- see DraggableTabTrigger). */
+  onRenameTab: (key: string, title: string) => void;
   /** Splits `key`'s tab off of `paneId` in `direction` -- Item 3's affordance, threaded down so each pane can bind its own id at the point it's rendered. */
   onSplitTab: (paneId: string, key: string, direction: SplitDirection) => void;
   /** Persists a resize handle drag's new sizes for the group with `groupId`. */
@@ -1180,6 +1227,10 @@ function SplitTreeView({
         onOpenFileToSide={shared.onOpenFileToSide}
         onActivate={shared.onActivate}
         onClose={shared.onClose}
+        onCloseOthers={shared.onCloseOthers}
+        onCloseLeft={shared.onCloseLeft}
+        onCloseRight={shared.onCloseRight}
+        onRenameTab={shared.onRenameTab}
         onSplit={(key, direction) => shared.onSplitTab(node.pane.id, key, direction)}
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
@@ -1259,6 +1310,10 @@ function PaneTabStrip({
   onOpenFileToSide,
   onActivate,
   onClose,
+  onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
+  onRenameTab,
   onSplit,
   onRevealInDiff,
   onNewTerminal,
@@ -1285,6 +1340,10 @@ function PaneTabStrip({
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  onRenameTab: (key: string, title: string) => void;
   onSplit: (key: string, direction: SplitDirection) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
@@ -1334,7 +1393,7 @@ function PaneTabStrip({
         <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
           {tabs.length > 0 && (
             <TabsList className="w-fit">
-              {tabs.map((entry) => (
+              {tabs.map((entry, index) => (
                 <DraggableTabTrigger
                   key={entry.key}
                   entry={entry}
@@ -1342,6 +1401,13 @@ function PaneTabStrip({
                   showMoveAffordance={showMoveAffordance}
                   onSplit={onSplit}
                   onClose={onClose}
+                  onCloseOthers={onCloseOthers}
+                  onCloseLeft={onCloseLeft}
+                  onCloseRight={onCloseRight}
+                  onRenameTab={onRenameTab}
+                  hasOtherClosableTabs={tabs.some((t) => t.key !== entry.key && t.closable)}
+                  hasClosableTabsToLeft={tabs.slice(0, index).some((t) => t.closable)}
+                  hasClosableTabsToRight={tabs.slice(index + 1).some((t) => t.closable)}
                 />
               ))}
             </TabsList>
@@ -1403,13 +1469,36 @@ function DraggableTabTrigger({
   showMoveAffordance,
   onSplit,
   onClose,
+  onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
+  onRenameTab,
+  hasOtherClosableTabs,
+  hasClosableTabsToLeft,
+  hasClosableTabsToRight,
 }: {
   entry: TabEntry;
   paneId: string;
   showMoveAffordance: boolean;
   onSplit: (key: string, direction: SplitDirection) => void;
   onClose: (key: string) => void;
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  onRenameTab: (key: string, title: string) => void;
+  hasOtherClosableTabs: boolean;
+  hasClosableTabsToLeft: boolean;
+  hasClosableTabsToRight: boolean;
 }) {
+  // Rename (terminal tabs only -- their title is arbitrary already, unlike
+  // a file/diff/chat tab's, which is derived from real identity a cosmetic
+  // override would just make misleading) swaps the trigger for a plain
+  // input in the same slot rather than trying to nest one inside
+  // TabsTrigger's own <button> -- same reasoning as the close "×" below
+  // being a span, not a button, but an <input> genuinely can't go inside
+  // one at all.
+  const [renaming, setRenaming] = useState(false);
+  const cancelledRenameRef = useRef(false);
   // Every tab is draggable, not just movable kinds -- dropping a Chat/Files
   // tab onto another pane's center still moves it there (Item 8's scope);
   // only *splitting* (an edge drop, handled in App.tsx's onDragEnd) is
@@ -1428,15 +1517,44 @@ function DraggableTabTrigger({
     data: { tabKey: entry.key, sourcePaneId: paneId, kind: entry.kind } satisfies DraggedTabData,
   });
 
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        defaultValue={entry.title}
+        aria-label={`Rename ${entry.title}`}
+        data-testid="workspace-tab-rename-input"
+        className="h-7 max-w-48 shrink-0 rounded border border-ring bg-transparent px-2 text-sm outline-none"
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            cancelledRenameRef.current = true;
+            setRenaming(false);
+          }
+        }}
+        onBlur={(e) => {
+          if (!cancelledRenameRef.current) onRenameTab(entry.key, e.currentTarget.value);
+          cancelledRenameRef.current = false;
+          setRenaming(false);
+        }}
+      />
+    );
+  }
+
   return (
-    <TabsTrigger
-      ref={setNodeRef}
-      value={entry.key}
-      data-testid={`workspace-tab-${entry.kind}`}
-      className="max-w-48 gap-1.5"
-      {...listeners}
-    >
-      <TabLabel entry={entry} />
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <TabsTrigger
+          ref={setNodeRef}
+          value={entry.key}
+          data-testid={`workspace-tab-${entry.kind}`}
+          className="max-w-48 gap-1.5"
+          {...listeners}
+        >
+          <TabLabel entry={entry} />
       {isMovableKind(entry.kind) && showMoveAffordance && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1504,7 +1622,78 @@ function DraggableTabTrigger({
           <span aria-hidden="true">×</span>
         </span>
       )}
-    </TabsTrigger>
+        </TabsTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="workspace-tab-context-menu" data-tab-key={entry.key}>
+        <ContextMenuItem
+          disabled={!entry.closable}
+          onSelect={() => onClose(entry.key)}
+          data-testid="workspace-tab-menu-close"
+        >
+          Close
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasOtherClosableTabs}
+          onSelect={() => onCloseOthers(entry.key)}
+          data-testid="workspace-tab-menu-close-others"
+        >
+          Close others
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasClosableTabsToLeft}
+          onSelect={() => onCloseLeft(entry.key)}
+          data-testid="workspace-tab-menu-close-left"
+        >
+          Close to the left
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasClosableTabsToRight}
+          onSelect={() => onCloseRight(entry.key)}
+          data-testid="workspace-tab-menu-close-right"
+        >
+          Close to the right
+        </ContextMenuItem>
+        {(entry.kind === "terminal" || (entry.kind === "file" && entry.path)) && <ContextMenuSeparator />}
+        {entry.kind === "terminal" && (
+          <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
+            <Pencil />
+            Rename
+          </ContextMenuItem>
+        )}
+        {entry.kind === "file" && entry.path && (
+          <ContextMenuItem
+            onSelect={() => {
+              void navigator.clipboard?.writeText(entry.path!).catch(() => {});
+            }}
+            data-testid="workspace-tab-menu-copy-path"
+          >
+            <Copy />
+            Copy path
+          </ContextMenuItem>
+        )}
+        {isMovableKind(entry.kind) && showMoveAffordance && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "left")} data-testid="workspace-tab-menu-split-left">
+              <Columns2 />
+              Split left
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "right")} data-testid="workspace-tab-menu-split-right">
+              <Columns2 />
+              Split right
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "up")} data-testid="workspace-tab-menu-split-up">
+              <Columns2 />
+              Split up
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "down")} data-testid="workspace-tab-menu-split-down">
+              <Columns2 />
+              Split down
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

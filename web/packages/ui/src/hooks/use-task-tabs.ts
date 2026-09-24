@@ -274,6 +274,101 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
+  /** Closes every one of `keys` in turn, recomputing the sole-pane/preserve-empty guard fresh before each -- the same rule `closeTab` applies to a single key. */
+  function closeManyFromLayout(layout: TaskLayout, keys: readonly string[]): TaskLayout {
+    let root = layout.root;
+    for (const key of keys) {
+      const pane = findPaneContainingTab(root, key);
+      if (!pane) continue;
+      const isSolePane = collectAllPanes(root).length === 1;
+      root = detachTabFromTree(root, { tabKey: key, preserveEmptyPaneId: isSolePane ? pane.id : null }).root;
+    }
+    const focusedPaneId = findPaneById(root, layout.focusedPaneId)
+      ? layout.focusedPaneId
+      : (collectAllPanes(root)[0]?.id ?? null);
+    return { root, focusedPaneId };
+  }
+
+  /** Closes every closable tab in key's pane except key itself -- the tab context menu's "Close others" (Item 6). */
+  const closeOtherTabs = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const targets = pane.tabs.filter((t) => t.key !== key && t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Closes every closable tab to the left of key within its own pane -- "Close to the left". */
+  const closeTabsToLeft = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const index = pane.tabs.findIndex((t) => t.key === key);
+        if (index <= 0) return prev;
+        const targets = pane.tabs.slice(0, index).filter((t) => t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Closes every closable tab to the right of key within its own pane -- "Close to the right". */
+  const closeTabsToRight = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const index = pane.tabs.findIndex((t) => t.key === key);
+        if (index === -1) return prev;
+        const targets = pane.tabs.slice(index + 1).filter((t) => t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Overrides key's displayed title -- the tab context menu's "Rename" (terminal tabs only, App.tsx). A blank title is a no-op rather than clearing it to empty. */
+  const renameTab = useCallback(
+    (taskId: number, key: string, title: string): void => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const root = updatePaneInTree(layout.root, {
+          paneId: pane.id,
+          updater: (p) => ({ ...p, tabs: p.tabs.map((t) => (t.key === key ? { ...t, title: trimmed } : t)) }),
+        });
+        const next = new Map(prev);
+        next.set(taskId, { ...layout, root });
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
   /** Makes key the active tab of whichever pane it's open in (a no-op if it isn't open anywhere). */
   const activate = useCallback(
     (taskId: number, key: string): void => {
@@ -440,5 +535,9 @@ export function useTaskTabs() {
     closePane,
     splitPaneEmpty,
     moveTabToNextPane,
+    closeOtherTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    renameTab,
   };
 }

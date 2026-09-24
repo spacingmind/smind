@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -202,6 +203,13 @@ afterEach(() => {
   // cases -- without this, an earlier test's opened tab or active-tab
   // choice leaks into a later test's "freshly selected task" assumptions.
   window.localStorage.clear();
+  // The session<->tab binding (lib/terminal-sessions.ts, Item 20) lives
+  // outside React and outside this file's per-test render tree -- without
+  // clearing it, a later test opening a terminal tab for the same task id
+  // would see it as already bound to a prior test's session and try to
+  // reconnect instead of creating one (same reasoning as
+  // terminal-pane.test.tsx's own afterEach).
+  resetTerminalSessions();
 });
 
 describe("App", () => {
@@ -1699,6 +1707,159 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     respondAll(socket, "run.list", []);
     await flush();
     expect(screen.getByRole("heading", { name: TASK_C.Title })).toBeInTheDocument();
+  });
+});
+
+describe("App tab context menu (Item 6)", () => {
+  async function openFileTabNamed(socket: FakeSocket, name: string): Promise<void> {
+    await openBaseTab("Files");
+    respondAll(socket, "file.list", [{ name, isDir: false, size: 1 }]);
+    await flush();
+    fireEvent.click(screen.getByTestId("file-row"));
+    await flush();
+    respondAll(socket, "file.read", { content: "hello" });
+    await flush();
+  }
+
+  async function openTerminal(socket: FakeSocket): Promise<void> {
+    await openBaseTab("Terminal");
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+  }
+
+  function openMenuFor(title: string) {
+    fireEvent.contextMenu(screen.getByRole("tab", { name: new RegExp(title) }));
+  }
+
+  it("shows Copy path (not Rename) on a file tab, and Rename (not Copy path) on a terminal tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openFileTabNamed(socket, "README.md");
+    openMenuFor("README.md");
+    expect(screen.getByTestId("workspace-tab-menu-copy-path")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-tab-menu-rename")).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await openTerminal(socket);
+    openMenuFor("Terminal");
+    expect(screen.getByTestId("workspace-tab-menu-rename")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-tab-menu-copy-path")).not.toBeInTheDocument();
+  });
+
+  it("copies a file tab's path to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      const socket = new FakeSocket();
+      const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+      render(<App connect={connect} />);
+      await resolveSidebar(socket, [TASK_A]);
+      clickTaskRow(TASK_A);
+      await flush();
+      respondAll(socket, "run.list", []);
+      await flush();
+      await openFileTabNamed(socket, "README.md");
+
+      openMenuFor("README.md");
+      fireEvent.click(screen.getByTestId("workspace-tab-menu-copy-path"));
+
+      expect(writeText).toHaveBeenCalledWith("README.md");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("renames a terminal tab on Enter, and leaves it alone on Escape", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openTerminal(socket);
+
+    openMenuFor("Terminal");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-rename"));
+
+    const input = screen.getByTestId("workspace-tab-rename-input");
+    fireEvent.change(input, { target: { value: "build" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /build/ })).toBeInTheDocument();
+
+    openMenuFor("build");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-rename"));
+    const secondInput = screen.getByTestId("workspace-tab-rename-input");
+    fireEvent.change(secondInput, { target: { value: "should not stick" } });
+    fireEvent.keyDown(secondInput, { key: "Escape" });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /build/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /should not stick/ })).not.toBeInTheDocument();
+  });
+
+  it("Close others / Close to the left / Close to the right target only the clicked tab's pane", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Strip order: Chat, Files, Diff, Terminal.
+    await openBaseTab("Files");
+    await openBaseTab("Diff");
+    await openTerminal(socket);
+
+    openMenuFor("Diff");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-close-left"));
+    await flush();
+    expect(screen.queryByRole("tab", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+
+    openMenuFor("Diff");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-close-others"));
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("still offers the existing split entries alongside the new items", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openBaseTab("Diff");
+
+    openMenuFor("Diff");
+
+    expect(screen.getByTestId("workspace-tab-menu-split-left")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-right")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-up")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-down")).toBeInTheDocument();
   });
 });
 

@@ -136,7 +136,7 @@ smind today:
 - [x] AC3 split/tab actions
 - [x] AC4 Mod+, and Mod+digit
 - [x] AC5 Settings → Shortcuts
-- [ ] AC6 tab context menu
+- [x] AC6 tab context menu
 - [ ] AC7 Shift+Tab mode cycle
 
 ## Validation
@@ -273,3 +273,43 @@ smind today:
     binding listed; `Mod+,` opens Settings on its default section even
     right after a `Shift+?` left it on Shortcuts (the stale-initial-
     section reset).
+
+- **AC6 (tab context menu).** `hooks/use-task-tabs.ts` grows
+  `closeOtherTabs`/`closeTabsToLeft`/`closeTabsToRight` (all pane-scoped:
+  they only ever touch the clicked tab's own pane, via
+  `findPaneContainingTab` + a shared `closeManyFromLayout` that reapplies
+  `closeTab`'s own sole-pane/preserve-empty guard fresh before each
+  closure) and `renameTab` (a plain `TabEntry.title` override, trimmed,
+  a no-op on blank). `App.tsx`'s `DraggableTabTrigger` wraps the existing
+  tab trigger in `components/ui/context-menu.tsx`'s `<ContextMenu>`
+  (already used by the file explorer's row menu -- same component,
+  same "Copy path" implementation) with Close / Close others / Close to
+  the left / Close to the right (each `disabled` when there's nothing to
+  do, derived once per pane render rather than re-scanned per item) /
+  Rename (terminal tabs only) / Copy path (file tabs only) / the existing
+  Split entries. Rename swaps the trigger for a bare `<input>` in the
+  same slot rather than nesting one inside `TabsTrigger`'s own `<button>`
+  (invalid HTML, and unlike the close "×" span this one is a real form
+  control jsdom and real browsers both refuse to focus there); Enter
+  commits via blur, Escape cancels via a ref flag guarding the blur
+  handler. Rename is terminal-only: a file/diff/chat tab's title is
+  derived from real identity (a path, or what the tab fundamentally is),
+  so a cosmetic override would just be misleading, whereas a terminal
+  tab's title is already arbitrary.
+  - `hooks/use-task-tabs.test.ts`: each of the three multi-close
+    functions (closes the right set, no-ops at either edge, only ever
+    touches the tab's own pane), `renameTab` (overrides the title, trims
+    and ignores blank, persists across a remount, no-ops for an unopened
+    tab).
+  - `App.test.tsx` ("App tab context menu (Item 6)"): Copy path shown
+    only on a file tab and Rename only on a terminal tab (never both),
+    Copy path writes to the clipboard, rename commits on Enter and is
+    discarded on Escape, close others/left/right each verified against a
+    3+-tab strip, the existing Split entries still present alongside the
+    new ones. (Uncovered a real cross-test leak while writing these:
+    `lib/terminal-sessions.ts`'s tab<->session binding is a module-level
+    singleton that outlives any one render tree, so this file's
+    `afterEach` now calls `resetTerminalSessions()` -- the same fix
+    `terminal-pane.test.tsx` already has, needed here for the first time
+    now that more than one test opens a terminal tab for the same task
+    id.)
