@@ -111,7 +111,7 @@ export function SettingsScreen({
                   data-testid={`settings-nav-${section.id}`}
                   onClick={() => setActiveId(section.id)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-accent",
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-sm text-foreground hover:bg-accent",
                     section.id === activeId && "bg-accent font-medium",
                   )}
                 >

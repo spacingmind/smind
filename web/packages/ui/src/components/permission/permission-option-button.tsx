@@ -12,7 +12,7 @@ type ButtonVariant = NonNullable<VariantProps<typeof buttonVariants>["variant"]>
  * keys off the same 768px breakpoint `useIsMobile()` does, and `cn`'s
  * `twMerge` resolves the unprefixed/`md:`-prefixed pair without conflict.
  */
-export const COMPACT_TOUCH_BUTTON_CLASS = "h-11 px-3 text-sm md:h-6 md:px-2 md:text-xs";
+export const COMPACT_TOUCH_BUTTON_CLASS = "h-11 px-3 text-ui-sm md:h-6 md:px-2 md:text-ui-xs";
 
 /**
  * The Button variant one option renders with, from its ACP `kind`

@@ -98,9 +98,9 @@ const THINKING_LEVELS: { id: ThinkingLevel; label: string; help: string }[] = [
 // card is the border, and cn()'s tailwind-merge strips SelectTrigger's
 // own border/background halves in favour of these.
 const SELECT_TRIGGER_CLASS =
-  "h-11 shrink-0 border-0 bg-transparent px-2 text-sm hover:bg-accent md:h-7 md:px-1.5 md:text-xs";
+  "h-11 shrink-0 border-0 bg-transparent px-2 text-ui-sm hover:bg-accent md:h-7 md:px-1.5 md:text-ui-xs";
 
-const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
+const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-ui-sm md:h-7 md:px-2.5 md:text-ui-sm";
 
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
@@ -138,7 +138,7 @@ function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
       data-testid="composer-diff-stat"
       aria-label={`Open diff: ${stat.additions} additions, ${stat.deletions} deletions`}
       onClick={onOpenDiff}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface-2 px-2.5 py-0.5 text-xs text-foreground-muted transition-colors hover:bg-accent hover:text-foreground"
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface-2 px-2.5 py-0.5 text-ui-xs text-foreground-muted transition-colors hover:bg-accent hover:text-foreground"
     >
       <GitCompare aria-hidden className="size-3 opacity-70" />
       <span className="font-medium text-status-success">+{stat.additions}</span>
@@ -360,7 +360,7 @@ export function Composer({
             <li
               key={`${index}-${text}`}
               data-testid="composer-queued-item"
-              className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1 text-xs text-foreground-muted"
+              className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1 text-ui-xs text-foreground-muted"
             >
               <span className="shrink-0 uppercase">Queued</span>
               <span className="min-w-0 flex-1 truncate">{text}</span>
@@ -497,7 +497,7 @@ export function Composer({
           )}
 
           <div className="ml-auto flex items-center gap-2">
-            {formError && <span className="text-xs text-destructive">{formError}</span>}
+            {formError && <span className="text-ui-xs text-destructive">{formError}</span>}
             {running && (
               <Button
                 type="button"

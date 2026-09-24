@@ -39,7 +39,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-user" data-item-kind="user" className="flex justify-end">
           <div
             data-chat-find-text="true"
-            className="max-w-[85%] rounded-lg bg-surface-2 px-2.5 py-1.5 text-sm whitespace-pre-wrap"
+            className="max-w-[85%] rounded-lg bg-surface-2 px-2.5 py-1.5 text-ui-sm whitespace-pre-wrap"
           >
             {item.text}
           </div>
@@ -58,12 +58,12 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-thinking" data-item-kind="thinking">
           {/* Collapsed by default (Item 8): reasoning is available, not in the way. */}
           <details className="rounded-lg border border-dashed">
-            <summary className="cursor-pointer px-2.5 py-1 text-xs text-foreground-muted select-none">
+            <summary className="cursor-pointer px-2.5 py-1 text-ui-xs text-foreground-muted select-none">
               Thinking
             </summary>
             <div
               data-chat-find-text="true"
-              className="border-t border-dashed px-2.5 py-1.5 text-xs whitespace-pre-wrap text-foreground-muted"
+              className="border-t border-dashed px-2.5 py-1.5 text-ui-xs whitespace-pre-wrap text-foreground-muted"
             >
               {item.text}
             </div>
@@ -100,16 +100,16 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-unknown" data-item-kind="unknown">
           {item.rawKind ? (
             <details className="rounded-lg border border-dashed">
-              <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-xs text-foreground-muted select-none">
+              <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-ui-xs text-foreground-muted select-none">
                 <CircleHelp className="size-3 shrink-0" />
                 Unrecognised event: {item.rawKind}
               </summary>
-              <pre className="overflow-x-auto border-t border-dashed px-2.5 py-1.5 text-xs whitespace-pre-wrap text-foreground-muted">
+              <pre className="overflow-x-auto border-t border-dashed px-2.5 py-1.5 text-ui-xs whitespace-pre-wrap text-foreground-muted">
                 {JSON.stringify(item.rawPayload, null, 2)}
               </pre>
             </details>
           ) : (
-            <p className="flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-xs text-foreground-muted">
+            <p className="flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-ui-xs text-foreground-muted">
               <CircleHelp className="size-3 shrink-0" />
               Unrecognised event: {item.eventType}
             </p>
@@ -131,7 +131,7 @@ export const TimelineRow = memo(function TimelineRow({
 function PermissionRow({ item }: { item: TimelinePermissionItem }) {
   const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
   return (
-    <p className="flex items-center gap-1.5 px-0.5 text-xs text-foreground-muted">
+    <p className="flex items-center gap-1.5 px-0.5 text-ui-xs text-foreground-muted">
       <ShieldCheck className="size-3 shrink-0" />
       Permission resolved
       {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}

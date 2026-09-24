@@ -43,7 +43,14 @@ const EXEMPT_FILES = new Set(["components/code-mirror-editor.tsx"]);
  * below. A path (relative to `src/`) is "covered" if it equals an entry
  * here or is nested under one.
  */
-const MIGRATED_ROOTS = ["components/ui"];
+const MIGRATED_ROOTS = [
+  "components/ui",
+  "components/composer",
+  "components/find",
+  "components/permission",
+  "components/settings",
+  "components/timeline",
+];
 
 function isMigrated(rel: string): boolean {
   return MIGRATED_ROOTS.some((root) => rel === root || rel.startsWith(`${root}/`));
