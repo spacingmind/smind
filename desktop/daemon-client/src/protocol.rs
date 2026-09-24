@@ -14,6 +14,11 @@ pub struct ServerMessage {
     pub id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event: Option<EventNotification>,
+    /// The result of a request this client sent (currently only
+    /// task.get, for resolving a notification's workspaceId). Present
+    /// only alongside a matching `id`, never alongside `event`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
 }
 
 /// EventNotification is the pushed-event wire shape per ADR 0005:
@@ -40,11 +45,57 @@ pub struct PermissionPending {
     pub options: Vec<serde_json::Value>,
 }
 
-/// Notification is the OS-notification-ready form of an event.
+/// Notification is the OS-notification-ready form of an event. task_id
+/// carries the source task so the click handler can look up its
+/// workspaceId (see `crate::cache::WorkspaceCache`) and build a route.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Notification {
     pub title: String,
     pub body: String,
+    pub task_id: i64,
+}
+
+/// TaskGetResult is the subset of task.get's result (a store.Task,
+/// marshalled with no `json` tags -- see internal/store/types.go -- so
+/// its wire keys are the exact Go field names) this client needs: the
+/// workspaceId a permission.pending notification's taskId belongs to.
+#[derive(Debug, Deserialize)]
+pub struct TaskGetResult {
+    #[serde(rename = "WorkspaceID")]
+    pub workspace_id: i64,
+}
+
+/// task_get_message builds a task.get request. `id` is expected to be
+/// `task_get_request_id(task_id)` so the response can be matched back to
+/// the task without extra bookkeeping.
+pub fn task_get_message(id: &str, task_id: i64) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "method": "task.get",
+        "params": { "id": task_id }
+    })
+}
+
+const TASK_GET_ID_PREFIX: &str = "task-get-";
+
+/// task_get_request_id is the deterministic id a task.get request for
+/// `task_id` is sent with.
+pub fn task_get_request_id(task_id: i64) -> String {
+    format!("{TASK_GET_ID_PREFIX}{task_id}")
+}
+
+/// task_get_response_task_id extracts the task id back out of a
+/// response's `id`, if it looks like one of ours.
+pub fn task_get_response_task_id(id: &str) -> Option<i64> {
+    id.strip_prefix(TASK_GET_ID_PREFIX)?.parse().ok()
+}
+
+/// task_get_workspace_id decodes a task.get response's `result` into the
+/// workspaceId it carries.
+pub fn task_get_workspace_id(result: &serde_json::Value) -> Option<i64> {
+    serde_json::from_value::<TaskGetResult>(result.clone())
+        .ok()
+        .map(|r| r.workspace_id)
 }
 
 /// parse_server_message decodes one inbound WS text message.
@@ -66,6 +117,7 @@ pub fn notification_for(event: &EventNotification) -> Option<Notification> {
             Some(Notification {
                 title: "smind: permission needed".to_string(),
                 body: p.summary,
+                task_id: p.task_id,
             })
         }
         _ => None,
@@ -96,6 +148,28 @@ mod tests {
         let n = notification_for(msg.event.as_ref().unwrap()).unwrap();
         assert_eq!(n.title, "smind: permission needed");
         assert_eq!(n.body, "Run `cargo test` in task 42?");
+        assert_eq!(n.task_id, 42);
+    }
+
+    #[test]
+    fn task_get_message_shape() {
+        let id = task_get_request_id(42);
+        assert_eq!(id, "task-get-42");
+        let msg = task_get_message(&id, 42);
+        assert_eq!(msg["method"], "task.get");
+        assert_eq!(msg["params"]["id"], 42);
+        assert_eq!(msg["id"], "task-get-42");
+    }
+
+    #[test]
+    fn task_get_response_round_trip() {
+        assert_eq!(task_get_response_task_id("task-get-42"), Some(42));
+        assert_eq!(task_get_response_task_id("events-sub-1"), None);
+        assert_eq!(task_get_response_task_id("task-get-not-a-number"), None);
+
+        let result = serde_json::json!({"ID": 42, "WorkspaceID": 7, "Title": "t", "Status": "running"});
+        assert_eq!(task_get_workspace_id(&result), Some(7));
+        assert_eq!(task_get_workspace_id(&serde_json::json!({"ID": 42})), None);
     }
 
     #[test]

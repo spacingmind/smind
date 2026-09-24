@@ -94,6 +94,31 @@ If an item turns out to be impossible under these constraints, stop and report i
     (`app.opener()...`, `app.dialog()...` inside menu event handlers,
     never exposed as an `invoke`-able command), so they add no IPC
     surface for the daemon-origin webview and need no capability grant.
+
+- **Notification-click research (AC3), done before implementing**:
+  `tauri-plugin-notification`'s action/click API
+  (`registerActionTypes`/`onAction`) is mobile-only -- confirmed via its
+  own docs (`v2.tauri.app/plugin/notification`) and the plugin's GitHub
+  issue history; there is no click/activation callback for desktop
+  Windows or Linux in that plugin. Picked platform-specific crates
+  instead, used directly (no Tauri capability needed either way, since
+  neither is reachable from the remote webview):
+  - **Windows**: `tauri-winrt-notification` 0.8.1's `Toast::on_activated`
+    (`FnMut(Option<String>) -> Result<()>`, confirmed against the
+    0.7.3 source in the local registry cache -- 0.8 wasn't locally
+    extractable to read directly, so this is verified live by the
+    Windows CI build rather than by a local read). `None` (no action id)
+    means the user clicked the toast body itself, which is treated the
+    same as a button click here since there's only one action.
+  - **Linux**: `notify-rust` 4.18.0's `NotificationHandle::
+    wait_for_action`, given a `"default"` action so a plain click (where
+    the notification server honors it) reaches the callback; blocks, so
+    it runs on its own spawned thread per notification. Coverage is
+    genuinely "as far as the platform supports it" (AC3's own wording):
+    the freedesktop notification spec's `"default"` action is honored by
+    some notification servers/desktop environments and not others.
+  - **Other platforms** (macOS, not built/tested in this task): falls
+    back to the existing `tauri-plugin-notification`, no click handling.
   - `notify-rust` 4.18.0, Linux-only (`target_os = "linux"`) (AC3).
 
 ## Progress
@@ -105,7 +130,10 @@ If an item turns out to be impossible under these constraints, stop and report i
   Window/Help via `app.set_menu`; zoom clamping in
   `smind-daemon-client::zoom`, persisted to `zoom.txt` under
   `app_config_dir` by `desktop/src-tauri/src/zoom_store.rs`)
-- [ ] AC3 notification click → task
+- [x] AC3 notification click → task (`desktop/src-tauri/src/notify.rs`
+  platform split; `smind-daemon-client::{route,cache}` for the pure
+  route-building and the task->workspace lookup; `client.rs` resolves
+  workspaceId via a background `task.get`)
 - [ ] AC4 tray attention
 - [ ] AC5 offline/splash
 - [ ] AC6 deep links
@@ -155,3 +183,27 @@ If an item turns out to be impossible under these constraints, stop and report i
   the app's own startup log line. Zoom persists to a plain-text
   `zoom.txt` under `app_config_dir`, applied via `WebviewWindow::
   set_zoom` on launch.
+
+- **AC3**: `permission.pending`'s payload has no workspaceId (confirmed
+  against `internal/wsapi/events.go`'s `permissionPendingPayload`), so
+  `client.rs` now fires a `task.get{id: taskId}` request over the
+  already-open `/ws` connection right after emitting the notification,
+  matches the response back by its deterministic
+  `task-get-<taskId>` id (`protocol::task_get_response_task_id`), and
+  decodes `WorkspaceID` (`store.Task` marshals with no `json` tags, so
+  its Go field name is the wire key verbatim -- confirmed against
+  `internal/store/types.go` and `web/packages/ui/src/lib/types.ts`'s
+  matching `WorkspaceID: number`) into
+  `smind-daemon-client::cache::WorkspaceCache`. The click handler reads
+  that cache synchronously; if it's not populated yet (resolution still
+  in flight, or failed), the click still focuses the window without
+  navigating, per the AC's own fallback wording. `cargo test` in
+  `daemon-client` is 31/31 (9 new: `cache` insert/get/overwrite/clone,
+  `route` hash-shape/URL-join, `protocol` task.get message/response
+  round-trip, notification now carrying `task_id`). `cargo check` and
+  `cargo build` pass on Linux, which also compiles `notify.rs`'s
+  `#[cfg(target_os = "linux")]` branch (`notify-rust`) for real; the
+  `#[cfg(target_os = "windows")]` branch (`tauri-winrt-notification`)
+  is unverified locally (no Windows toolchain here) and depends on the
+  `desktop-windows` CI build in AC7 to catch any API mismatch against
+  the pinned 0.8.1 version.

@@ -10,6 +10,7 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::backoff::Backoff;
+use crate::cache::WorkspaceCache;
 use crate::config::Config;
 use crate::protocol;
 
@@ -39,14 +40,20 @@ pub fn subscribe_message() -> serde_json::Value {
 }
 
 /// run drives the token fetch + WS connection forever, handing each
-/// permission.pending notification to on_notification. Reconnects with
+/// permission.pending notification to on_notification and resolving its
+/// workspaceId into `cache` in the background (permission.pending
+/// carries no workspaceId -- see `crate::cache`). Reconnects with
 /// exponential backoff (reset after a stable connection), refetching
 /// the token and resubscribing on every attempt.
-pub async fn run(cfg: Config, on_notification: impl Fn(protocol::Notification) + Send + Sync + 'static) {
+pub async fn run(
+    cfg: Config,
+    cache: WorkspaceCache,
+    on_notification: impl Fn(protocol::Notification) + Send + Sync + 'static,
+) {
     let client = reqwest::Client::new();
     let mut backoff = Backoff::default();
     loop {
-        let stable = run_once(&cfg, &client, &on_notification).await;
+        let stable = run_once(&cfg, &client, &cache, &on_notification).await;
         if stable {
             backoff.reset();
         }
@@ -60,9 +67,10 @@ pub async fn run(cfg: Config, on_notification: impl Fn(protocol::Notification) +
 async fn run_once(
     cfg: &Config,
     client: &reqwest::Client,
+    cache: &WorkspaceCache,
     on_notification: &impl Fn(protocol::Notification),
 ) -> bool {
-    match try_run_once(cfg, client, on_notification).await {
+    match try_run_once(cfg, client, cache, on_notification).await {
         Ok(stable) => stable,
         Err(err) => {
             eprintln!("smind desktop: daemon connection error: {err}");
@@ -74,6 +82,7 @@ async fn run_once(
 async fn try_run_once(
     cfg: &Config,
     client: &reqwest::Client,
+    cache: &WorkspaceCache,
     on_notification: &impl Fn(protocol::Notification),
 ) -> Result<bool, String> {
     let token = fetch_token(cfg, client).await?;
@@ -102,11 +111,25 @@ async fn try_run_once(
                 match msg {
                     Some(Ok(m)) if m.is_text() || m.is_binary() => {
                         let text = m.into_text().map_err(|e| format!("ws text: {e}"))?;
-                        if let Some(event) =
-                            protocol::parse_server_message(text.as_str()).and_then(|m| m.event)
-                        {
+                        let Some(parsed) = protocol::parse_server_message(text.as_str()) else {
+                            continue;
+                        };
+                        if let Some(event) = parsed.event {
                             if let Some(n) = protocol::notification_for(&event) {
+                                // quick-wins AC3: resolve the notification's
+                                // workspaceId in the background, over this
+                                // same connection, so a later click can
+                                // build a route without blocking on it.
+                                let req_id = protocol::task_get_request_id(n.task_id);
+                                let req = protocol::task_get_message(&req_id, n.task_id).to_string();
+                                let _ = tx.send(Message::Text(req.into())).await;
                                 on_notification(n);
+                            }
+                        } else if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
+                            if let Some(task_id) = protocol::task_get_response_task_id(&id) {
+                                if let Some(workspace_id) = protocol::task_get_workspace_id(&result) {
+                                    cache.insert(task_id, workspace_id);
+                                }
                             }
                         }
                     }

@@ -7,12 +7,12 @@ use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::webview::WebviewWindowBuilder;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
-use tauri_plugin_notification::NotificationExt;
 
 use smind_daemon_client as dclient;
 use smind_daemon_client::Config;
 
 mod menu;
+mod notify;
 mod zoom_store;
 
 const MAIN_WINDOW: &str = "main";
@@ -120,16 +120,20 @@ pub fn run() {
             // AC5: register the toggle shortcut.
             app.global_shortcut().register(TOGGLE_SHORTCUT)?;
 
-            // AC4: daemon events -> OS notifications.
+            // AC4/quick-wins AC3: daemon events -> OS notifications,
+            // click -> focus + navigate to the task.
+            let cache = dclient::WorkspaceCache::new();
+            let notify_cfg = cfg.clone();
+            let notify_cache = cache.clone();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                dclient::client::run(cfg, move |n| {
-                    let _ = handle
-                        .notification()
-                        .builder()
-                        .title(n.title)
-                        .body(n.body)
-                        .show();
+                dclient::client::run(cfg, cache, move |n| {
+                    let ctx = notify::ClickContext {
+                        app: handle.clone(),
+                        cache: notify_cache.clone(),
+                        daemon_url: notify_cfg.daemon_url.clone(),
+                    };
+                    notify::show(ctx, n.title, n.body, n.task_id);
                 })
                 .await;
             });
