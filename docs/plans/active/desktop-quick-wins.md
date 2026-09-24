@@ -375,5 +375,6 @@ If an item turns out to be impossible under these constraints, stop and report i
   instead of pushing it into a static `Vec`: leaking needs no
   `Send`/`Sync` bound at all, so it sidesteps the type error entirely
   while keeping the same "outlive the process" intent the comment
-  already described. Re-pushed as `<fix commit>`; result recorded
-  below once the rebuilt workflow finishes.
+  already described. Re-pushed as `cca9a82`: `desktop-windows` run
+  36010611257 completed successfully in 4m40s, building both the NSIS
+  and MSI installers.
