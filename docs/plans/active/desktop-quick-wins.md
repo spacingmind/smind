@@ -88,6 +88,12 @@ If an item turns out to be impossible under these constraints, stop and report i
   - `tauri-plugin-deep-link` 2.4.10 (AC6).
   - `tauri-winrt-notification` 0.8.1, Windows-only
     (`target_os = "windows"`) (AC3).
+  - `tauri-plugin-log` 2.9.2, `tauri-plugin-opener` 2.5.5,
+    `tauri-plugin-dialog` 2.7.3 (AC2: log folder, GitHub link/log-folder
+    opening, About dialog). All three are used only from Rust
+    (`app.opener()...`, `app.dialog()...` inside menu event handlers,
+    never exposed as an `invoke`-able command), so they add no IPC
+    surface for the daemon-origin webview and need no capability grant.
   - `notify-rust` 4.18.0, Linux-only (`target_os = "linux"`) (AC3).
 
 ## Progress
@@ -95,7 +101,10 @@ If an item turns out to be impossible under these constraints, stop and report i
 - [x] AC1 window state (`tauri-plugin-window-state` 2.4.1; auto-restores on
   the main window's `ready` event, no change needed to how the window is
   built)
-- [ ] AC2 app menu
+- [x] AC2 app menu (`desktop/src-tauri/src/menu.rs`: File/Edit/View/
+  Window/Help via `app.set_menu`; zoom clamping in
+  `smind-daemon-client::zoom`, persisted to `zoom.txt` under
+  `app_config_dir` by `desktop/src-tauri/src/zoom_store.rs`)
 - [ ] AC3 notification click → task
 - [ ] AC4 tray attention
 - [ ] AC5 offline/splash
@@ -121,3 +130,28 @@ If an item turns out to be impossible under these constraints, stop and report i
   pass (unaffected). Manual restart/monitor-loss check is in the Linux
   live-run pass below, done once more ACs land so a single WSLg session
   covers all of them.
+
+- **AC2**: `tauri::menu::PredefinedMenuItem`'s own doc comments (read
+  from the vendored `tauri-2.11.6` source in the local cargo registry
+  cache) list `quit`/`close_window`/`minimize`/`fullscreen`/`maximize` as
+  **"Linux: Unsupported"** -- since Linux/WSLg is where this app is
+  actually run live, File > Quit, Window > Minimize and View > Toggle
+  Fullscreen are custom `MenuItem`s calling `app.exit(0)` /
+  `window.minimize()` / `window.set_fullscreen()` directly instead, which
+  behave identically on every platform. Edit's Cut/Copy/Paste/Select All
+  have no such caveat and stay the builder's predefined shorthands
+  (`.cut()`/`.copy()`/`.paste()`/`.select_all()`), needed for macOS
+  clipboard shortcuts to work at all. Accelerators are plain OS
+  conventions (`Ctrl+R`, `Ctrl+Q`, `Ctrl+Plus`/`Ctrl+-`/`Ctrl+0`, `F11`,
+  `F12`) checked one-by-one against every combo in
+  `web/packages/ui/src/keyboard/shortcuts.ts`'s `SHORTCUT_BINDINGS` table
+  -- none collide (the web table only uses `Mod+letter`, `Mod+[`/`Mod+]`,
+  `Escape`, `Shift+?`). `cargo check`/`cargo build` pass; `cargo test` in
+  `daemon-client` is 22/22 (6 new: zoom step-in/out, top/bottom clamping,
+  persistence round-trip, garbage-parse fallback). DevTools menu item is
+  present only when `cfg!(debug_assertions)` (a release build never adds
+  it). "Open Log Folder" uses `tauri-plugin-log`'s default `LogDir`
+  target (`app.path().app_log_dir()`), so the folder always has at least
+  the app's own startup log line. Zoom persists to a plain-text
+  `zoom.txt` under `app_config_dir`, applied via `WebviewWindow::
+  set_zoom` on launch.

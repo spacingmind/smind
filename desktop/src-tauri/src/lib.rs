@@ -12,6 +12,9 @@ use tauri_plugin_notification::NotificationExt;
 use smind_daemon_client as dclient;
 use smind_daemon_client::Config;
 
+mod menu;
+mod zoom_store;
+
 const MAIN_WINDOW: &str = "main";
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+S";
 const HEALTHZ_POLL: std::time::Duration = std::time::Duration::from_secs(2);
@@ -46,6 +49,11 @@ pub fn run() {
         // OS's own placement when the saved monitor is gone rather than
         // forcing an off-screen position.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // quick-wins AC2 Help > Open Log Folder: writes to the platform
+        // log dir (app.path().app_log_dir()) in addition to stdout.
+        .plugin(tauri_plugin_log::Builder::new().build())
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let cfg = Config {
                 daemon_url: dclient::config::daemon_url().unwrap_or_else(|e| {
@@ -67,6 +75,14 @@ pub fn run() {
             .title("smind")
             .inner_size(1280.0, 800.0)
             .build()?;
+
+            // quick-wins AC2: restore the persisted zoom level.
+            let _ = win.set_zoom(zoom_store::load(app.handle()));
+
+            // quick-wins AC2: native app menu (File/Edit/View/Window/Help).
+            let win_menu = menu::build(app.handle())?;
+            app.set_menu(win_menu)?;
+            app.on_menu_event(|app, event| menu::handle_event(app, event.id().0.as_str()));
 
             let watch_cfg = cfg.clone();
             let watch_win = win.clone();
