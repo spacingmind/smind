@@ -583,7 +583,7 @@ export function TerminalPane({
               type="button"
               variant="outline"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2 text-ui-xs"
               disabled={!terminalId || (selectionReportable && !hasSelection)}
               onClick={() => void handleCopy()}
               data-testid="terminal-copy"
@@ -595,7 +595,7 @@ export function TerminalPane({
               type="button"
               variant="outline"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2 text-ui-xs"
               disabled={!terminalId}
               onClick={() => void handlePaste()}
               data-testid="terminal-paste"
@@ -608,7 +608,7 @@ export function TerminalPane({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-6 px-2 text-xs"
+                className="h-6 px-2 text-ui-xs"
                 onClick={onNewTerminal}
                 data-testid="terminal-new"
               >
@@ -620,7 +620,7 @@ export function TerminalPane({
               type="button"
               variant="outline"
               size="sm"
-              className="h-6 px-2 text-xs"
+              className="h-6 px-2 text-ui-xs"
               disabled={!terminalId || closing}
               onClick={handleClose}
               data-testid="terminal-close"
@@ -639,17 +639,17 @@ export function TerminalPane({
         />
       )}
       {endedStatus === "interrupted" && (
-        <p className="px-3 py-1 text-xs text-muted-foreground" data-testid="terminal-ended">
+        <p className="px-3 py-1 text-ui-xs text-muted-foreground" data-testid="terminal-ended">
           session ended: daemon restarted
         </p>
       )}
       {error && (
-        <p className="px-3 py-1 text-xs text-destructive" data-testid="terminal-error">
+        <p className="px-3 py-1 text-ui-xs text-destructive" data-testid="terminal-error">
           {error}
         </p>
       )}
       {pasteError && (
-        <p className="px-3 py-1 text-xs text-destructive" data-testid="terminal-paste-error">
+        <p className="px-3 py-1 text-ui-xs text-destructive" data-testid="terminal-paste-error">
           paste failed: {pasteError}
         </p>
       )}

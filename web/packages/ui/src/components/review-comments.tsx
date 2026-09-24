@@ -54,10 +54,10 @@ export function ReviewComments({
           data-testid="review-draft"
           data-path={draft.path}
           data-line={draft.line ?? ""}
-          className="rounded-md bg-surface-1 px-3 py-2 text-sm"
+          className="rounded-md bg-surface-1 px-3 py-2 text-ui-sm"
         >
           <div className="flex items-start justify-between gap-2">
-            <span className="text-xs text-foreground-muted">{lineLabel(draft.line, draft.side)}</span>
+            <span className="text-ui-xs text-foreground-muted">{lineLabel(draft.line, draft.side)}</span>
             <button
               type="button"
               aria-label={`Remove comment on ${draft.path}`}
@@ -69,7 +69,7 @@ export function ReviewComments({
             </button>
           </div>
           {draft.snippet.trim() && (
-            <pre className="mt-1 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-xs text-foreground-muted">
+            <pre className="mt-1 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-ui-xs text-foreground-muted">
               {draft.snippet.trim()}
             </pre>
           )}
@@ -110,18 +110,18 @@ function CommentComposer({
 
   return (
     <div className="rounded-md border bg-surface-1 px-3 py-2" data-testid="review-composer" data-path={pending.path}>
-      <div className="mb-1 flex items-center gap-1.5 text-xs text-foreground-muted">
+      <div className="mb-1 flex items-center gap-1.5 text-ui-xs text-foreground-muted">
         <MessageSquarePlus className="size-3" />
         {lineLabel(pending.line, pending.side)}
       </div>
       {pending.snippet.trim() && (
-        <pre className="mb-2 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-xs text-foreground-muted">
+        <pre className="mb-2 overflow-x-auto rounded bg-surface-2 px-2 py-1 font-mono text-ui-xs text-foreground-muted">
           {pending.snippet.trim()}
         </pre>
       )}
       <textarea
         ref={textareaRef}
-        className="w-full rounded border bg-background p-2 text-sm"
+        className="w-full rounded border bg-background p-2 text-ui-sm"
         rows={2}
         placeholder="Leave a comment…"
         value={body}

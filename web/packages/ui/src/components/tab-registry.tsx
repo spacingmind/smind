@@ -186,7 +186,7 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
   return (
     <div
       data-testid="tabs-empty-state"
-      className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+      className="flex h-full flex-col items-center justify-center gap-3 text-ui-sm text-muted-foreground"
     >
       <p>No tabs open</p>
       <div className="flex flex-wrap items-center justify-center gap-2">

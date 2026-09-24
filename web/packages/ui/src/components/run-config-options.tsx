@@ -40,7 +40,7 @@ export function RunConfigOptions({
         <ConfigOptionControl key={option.configId} option={option} onSetOption={onSetOption} />
       ))}
       {error && (
-        <span data-testid="run-config-options-error" role="alert" className="text-xs text-destructive">
+        <span data-testid="run-config-options-error" role="alert" className="text-ui-xs text-destructive">
           {error}
         </span>
       )}
@@ -101,7 +101,7 @@ function ConfigOptionControl({
         <SelectTrigger
           aria-label={option.name}
           title={option.description}
-          className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-xs hover:bg-accent"
+          className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-ui-xs hover:bg-accent"
         >
           <SelectValue placeholder={option.name} />
         </SelectTrigger>
@@ -158,7 +158,7 @@ function ConfigOptionTextField({
 
   return (
     <form className="flex items-center gap-1" onSubmit={handleSubmit}>
-      <label htmlFor={inputId} className="text-xs text-foreground-muted">
+      <label htmlFor={inputId} className="text-ui-xs text-foreground-muted">
         {name}
       </label>
       <Input
@@ -167,7 +167,7 @@ function ConfigOptionTextField({
         onChange={(e) => setValue(e.target.value)}
         disabled={pending}
         title={description}
-        className="h-7 w-28 text-xs"
+        className="h-7 w-28 text-ui-xs"
       />
       <Button type="submit" variant="outline" size="xs" disabled={pending}>
         Set

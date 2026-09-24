@@ -387,7 +387,7 @@ export function DiffViewerPane({
       {(prUrl || prError) && (
         <div className="border-b px-4 py-2">
           {prUrl && (
-            <p className="text-sm" data-testid="pr-url">
+            <p className="text-ui-sm" data-testid="pr-url">
               PR opened:{" "}
               <a href={prUrl} target="_blank" rel="noreferrer" className="underline" data-testid="pr-url-link">
                 {prUrl}
@@ -395,7 +395,7 @@ export function DiffViewerPane({
             </p>
           )}
           {prError && (
-            <p className="text-sm text-destructive" data-testid="pr-error">
+            <p className="text-ui-sm text-destructive" data-testid="pr-error">
               {prError}
             </p>
           )}
@@ -404,7 +404,7 @@ export function DiffViewerPane({
 
       <div ref={listRef} className="flex-1 overflow-auto p-4" data-testid="diff-file-list">
         {error && (
-          <p className="text-sm text-destructive" data-testid="diff-error">
+          <p className="text-ui-sm text-destructive" data-testid="diff-error">
             {error}
           </p>
         )}
@@ -434,7 +434,7 @@ export function DiffViewerPane({
               />
             )}
             {wholeDiff.error && (
-              <p className="text-sm text-destructive" data-testid="whole-diff-error">
+              <p className="text-ui-sm text-destructive" data-testid="whole-diff-error">
                 {wholeDiff.error}
               </p>
             )}
@@ -492,7 +492,7 @@ export function DiffViewerPane({
             >
               {submittingReview ? "Submitting…" : `Submit review (${drafts.length})`}
             </Button>
-            <span className="text-xs text-foreground-muted">
+            <span className="text-ui-xs text-foreground-muted">
               Sent as one prompt to the agent, then cleared
             </span>
           </div>
@@ -501,18 +501,18 @@ export function DiffViewerPane({
 
       <div className="border-t px-4 py-3" data-testid="commit-bar">
         {lastCommit && (
-          <p className="mb-2 text-sm text-muted-foreground" data-testid="commit-success">
+          <p className="mb-2 text-ui-sm text-muted-foreground" data-testid="commit-success">
             Committed {lastCommit.subject} ({lastCommit.commit.slice(0, 8)}) — {lastCommit.files} file
             {lastCommit.files === 1 ? "" : "s"}
           </p>
         )}
         {commitError && (
-          <p className="mb-2 text-sm text-destructive" data-testid="commit-error">
+          <p className="mb-2 text-ui-sm text-destructive" data-testid="commit-error">
             {commitError}
           </p>
         )}
         <textarea
-          className="mb-2 w-full rounded border p-2 text-sm"
+          className="mb-2 w-full rounded border p-2 text-ui-sm"
           rows={2}
           placeholder="Commit message…"
           value={message}
@@ -593,13 +593,13 @@ function FileRow({
         />
         <button
           type="button"
-          className="flex-1 text-left text-sm font-medium"
+          className="flex-1 text-left text-ui-sm font-medium"
           onClick={onToggleCollapse}
           data-testid={`diff-file-header-${file.path}`}
         >
           {collapsed ? "▸" : "▾"} {file.path} <span className="text-muted-foreground">({file.status})</span>
         </button>
-        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+        <label className="flex items-center gap-1 text-ui-xs text-muted-foreground">
           <input
             type="checkbox"
             checked={state?.viewed ?? false}
@@ -612,9 +612,9 @@ function FileRow({
       {!collapsed && (
         <div className="mt-1">
           {diff === null ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <p className="text-ui-sm text-muted-foreground">Loading…</p>
           ) : diff === "" ? (
-            <p className="text-sm text-muted-foreground">No changes</p>
+            <p className="text-ui-sm text-muted-foreground">No changes</p>
           ) : (
             <DiffRender
               diff={diff}
@@ -673,7 +673,7 @@ function SegmentedToggle<T extends string>({
           disabled={value === option.value}
           aria-pressed={value === option.value}
           data-testid={`${testId}-${option.value}`}
-          className="flex h-6 items-center rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+          className="flex h-6 items-center rounded-md px-2 text-ui-xs font-medium disabled:pointer-events-none disabled:bg-muted"
         >
           {option.label}
         </button>

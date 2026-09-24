@@ -595,7 +595,7 @@ export function AppSidebar({
                 placeholder="Search tasks"
                 aria-label="Search tasks"
                 data-testid="sidebar-search-input"
-                className="h-6 rounded-md px-1.5 text-xs"
+                className="h-6 rounded-md px-1.5 text-ui-xs"
               />
             ) : (
               <>
@@ -649,7 +649,7 @@ export function AppSidebar({
                   {empty && !searching && (
                     <SidebarMenuItem>
                       <div className="flex flex-col gap-3 px-2 py-4">
-                        <div className="text-xs text-muted-foreground">
+                        <div className="text-ui-xs text-muted-foreground">
                           <p className="font-medium text-foreground">Welcome to smind</p>
                           <p className="mt-1">
                             A workspace is an existing git repo. Tasks are its isolated
@@ -966,7 +966,7 @@ function StatusGroupItem({
 function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; className?: string }) {
   return (
     <SidebarMenuItem>
-      <div className={cn("flex items-center gap-2 px-2 py-1.5 text-xs text-muted-foreground", className)}>
+      <div className={cn("flex items-center gap-2 px-2 py-1.5 text-ui-xs text-muted-foreground", className)}>
         {icon}
         <span>{text}</span>
       </div>
@@ -1253,7 +1253,7 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
   return (
     <span
       data-testid="sidebar-task-meta"
-      className="flex h-4 w-full items-center gap-1.5 overflow-hidden text-[10px] text-muted-foreground"
+      className="flex h-4 w-full items-center gap-1.5 overflow-hidden text-ui-xs text-muted-foreground"
     >
       {stat ? (
         <>
@@ -1291,24 +1291,24 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
 function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat; status: string }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="truncate text-sm font-medium text-foreground">{task.Title}</p>
+      <p className="truncate text-ui-sm font-medium text-foreground">{task.Title}</p>
       {(stat?.branch ?? task.Branch) && (
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-1.5 text-ui-xs text-muted-foreground">
           <GitBranch className="size-3 shrink-0" />
           <span className="min-w-0 truncate">{stat?.branch ?? task.Branch}</span>
         </div>
       )}
       {stat && stat.filesChanged > 0 && (
-        <p className="text-xs tabular-nums text-muted-foreground">
+        <p className="text-ui-xs tabular-nums text-muted-foreground">
           {stat.filesChanged} file{stat.filesChanged === 1 ? "" : "s"} changed,{" "}
           <span className="text-status-success">+{stat.insertions}</span>{" "}
           <span className="text-status-danger">-{stat.deletions}</span>
         </p>
       )}
-      <p className="text-xs text-muted-foreground">
+      <p className="text-ui-xs text-muted-foreground">
         Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt)}</span>
       </p>
-      <p className="text-xs uppercase text-muted-foreground">{status}</p>
+      <p className="text-ui-xs uppercase text-muted-foreground">{status}</p>
     </div>
   );
 }
@@ -1343,7 +1343,7 @@ function TaskRows({
   if (tasks.length === 0) {
     return (
       <SidebarMenuSubItem>
-        <span className="px-2 text-xs text-muted-foreground">{emptyText}</span>
+        <span className="px-2 text-ui-xs text-muted-foreground">{emptyText}</span>
       </SidebarMenuSubItem>
     );
   }

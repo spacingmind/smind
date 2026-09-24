@@ -287,16 +287,16 @@ export function AccountsDialog({
             Provider accounts used for routing. No edit or removal yet.
           </DialogDescription>
         </DialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        {error && <p className="text-ui-sm text-destructive">{error}</p>}
         <div className="max-h-40 overflow-y-auto">
           {accounts === null ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <p className="text-ui-sm text-muted-foreground">Loading…</p>
           ) : accounts.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
+            <p className="text-ui-sm text-muted-foreground">
               No accounts yet — connect one below.
             </p>
           ) : (
-            <ul className="grid gap-1 text-sm">
+            <ul className="grid gap-1 text-ui-sm">
               {accounts.map((a) => (
                 <li key={a.id} className="flex flex-col gap-1 rounded-md px-2 py-1 hover:bg-accent" data-testid={`accounts-row-${a.provider}`}>
                   <div className="flex items-center justify-between gap-2">
@@ -305,7 +305,7 @@ export function AccountsDialog({
                       <span className="min-w-0 truncate font-medium">{a.label}</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
                         {providerLabel(providers, a.provider)} · {a.credentialType}
                       </span>
                       <Button
@@ -322,7 +322,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[a.provider] && (
                     <p
-                      className={`pl-3.5 text-xs ${testResults[a.provider].ok ? "text-status-success" : "text-destructive"}`}
+                      className={`pl-3.5 text-ui-xs ${testResults[a.provider].ok ? "text-status-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${a.provider}`}
                     >
                       {testResults[a.provider].detail}
@@ -336,8 +336,8 @@ export function AccountsDialog({
 
         {externalProviders.length > 0 && (
           <div className="grid gap-1 border-t pt-4" data-testid="accounts-external-providers">
-            <p className="text-sm font-medium">Managed externally</p>
-            <ul className="grid gap-1 text-sm">
+            <p className="text-ui-sm font-medium">Managed externally</p>
+            <ul className="grid gap-1 text-ui-sm">
               {externalProviders.map((p) => (
                 <li
                   key={p.id}
@@ -350,7 +350,7 @@ export function AccountsDialog({
                       <span className="min-w-0 truncate font-medium">{p.label ?? p.id}</span>
                     </span>
                     <span className="flex shrink-0 items-center gap-2">
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
                         Managed externally via CLI
                       </span>
                       <Button
@@ -367,7 +367,7 @@ export function AccountsDialog({
                   </div>
                   {testResults[p.id] && (
                     <p
-                      className={`pl-3.5 text-xs ${testResults[p.id].ok ? "text-status-success" : "text-destructive"}`}
+                      className={`pl-3.5 text-ui-xs ${testResults[p.id].ok ? "text-status-success" : "text-destructive"}`}
                       data-testid={`accounts-test-result-${p.id}`}
                     >
                       {testResults[p.id].detail}
@@ -376,7 +376,7 @@ export function AccountsDialog({
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-ui-xs text-muted-foreground">
               These run as a CLI subprocess and handle their own login — nothing to
               connect or paste here.
             </p>
@@ -384,9 +384,9 @@ export function AccountsDialog({
         )}
 
         <div className="grid gap-3 border-t pt-4">
-          <p className="text-sm font-medium">Connect an account</p>
+          <p className="text-ui-sm font-medium">Connect an account</p>
           <div className="grid gap-1">
-            <label htmlFor="account-oauth-label" className="text-sm font-medium">
+            <label htmlFor="account-oauth-label" className="text-ui-sm font-medium">
               Label
             </label>
             <Input
@@ -409,18 +409,18 @@ export function AccountsDialog({
               </Button>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-ui-xs text-muted-foreground">
             Adding a second account for a provider you're already signed into in this
             browser may just reconnect the same one — sign out first, or use a private
             window, to pick a different account.
           </p>
           {oauthError && (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-sm text-destructive">
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-ui-sm text-destructive">
               {oauthError}
             </p>
           )}
           {connecting && (
-            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-sm text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-sm text-muted-foreground">
               <p>
                 {authorizeUrl ? (
                   <>
@@ -454,12 +454,12 @@ export function AccountsDialog({
             aria-expanded={showManual}
             data-testid="accounts-manual-toggle"
             onClick={() => setShowManual((v) => !v)}
-            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            className="flex items-center gap-1 text-ui-sm text-muted-foreground hover:text-foreground"
           >
             {showManual ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
             Paste a credential instead
           </button>
-          <p className="mt-1 pl-4.5 text-xs text-muted-foreground">
+          <p className="mt-1 pl-4.5 text-ui-xs text-muted-foreground">
             For providers with no Connect flow yet, or to paste a credential
             obtained elsewhere.
           </p>
@@ -469,7 +469,7 @@ export function AccountsDialog({
               <div className="grid gap-2">
                 <div className="grid grid-cols-2 gap-2">
                   <div className="grid gap-1">
-                    <label htmlFor="account-provider" className="text-sm font-medium">
+                    <label htmlFor="account-provider" className="text-ui-sm font-medium">
                       Provider
                     </label>
                     <Select value={provider} onValueChange={setProvider}>
@@ -486,7 +486,7 @@ export function AccountsDialog({
                     </Select>
                   </div>
                   <div className="grid gap-1">
-                    <label htmlFor="account-label" className="text-sm font-medium">
+                    <label htmlFor="account-label" className="text-ui-sm font-medium">
                       Label
                     </label>
                     <Input
@@ -496,12 +496,12 @@ export function AccountsDialog({
                     />
                   </div>
                 </div>
-                <label htmlFor="account-credential" className="text-sm font-medium">
+                <label htmlFor="account-credential" className="text-ui-sm font-medium">
                   Credential
                 </label>
                 <textarea
                   id="account-credential"
-                  className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-ui-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
                   placeholder="Paste the credential JSON (or API key) — same blob the CLI reads on stdin."
                   value={credential}
                   onChange={(e) => setCredential(e.target.value)}
@@ -515,7 +515,7 @@ export function AccountsDialog({
                     aria-expanded={showBaseUrl}
                     data-testid="accounts-base-url-toggle"
                     onClick={() => setShowBaseUrl((v) => !v)}
-                    className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+                    className="flex items-center gap-1 text-ui-sm text-muted-foreground hover:text-foreground"
                   >
                     {showBaseUrl ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
                     Base URL (optional)
@@ -529,7 +529,7 @@ export function AccountsDialog({
                         value={baseUrl}
                         onChange={(e) => setBaseUrl(e.target.value)}
                       />
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-ui-xs text-muted-foreground">
                         Override the upstream endpoint for this account — advanced, for
                         self-hosted or local proxy endpoints only.
                       </p>

@@ -36,26 +36,6 @@ const INLINE_FONT_SIZE = /font-size\s*:|fontSize\s*[:=]/;
  */
 const EXEMPT_FILES = new Set(["components/code-mirror-editor.tsx"]);
 
-/**
- * Migration is landing one directory per commit (zcode-visual-parity plan,
- * P1 Step 3) -- this list grows with each commit until it covers the whole
- * tree, at which point it's deleted along with this comment and the filter
- * below. A path (relative to `src/`) is "covered" if it equals an entry
- * here or is nested under one.
- */
-const MIGRATED_ROOTS = [
-  "components/ui",
-  "components/composer",
-  "components/find",
-  "components/permission",
-  "components/settings",
-  "components/timeline",
-];
-
-function isMigrated(rel: string): boolean {
-  return MIGRATED_ROOTS.some((root) => rel === root || rel.startsWith(`${root}/`));
-}
-
 function listFiles(dir: string): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -77,8 +57,7 @@ function relPath(f: string): string {
 describe("text-ui-* scale guard (zcode-visual-parity plan, P1 Step 3)", () => {
   const files = listFiles(SRC_DIR)
     .filter((f) => !f.endsWith(".test.ts") && !f.endsWith(".test.tsx"))
-    .filter((f) => !EXEMPT_FILES.has(relPath(f)))
-    .filter((f) => isMigrated(relPath(f)));
+    .filter((f) => !EXEMPT_FILES.has(relPath(f)));
 
   it("no app-UI file uses a Tailwind built-in text-size utility", () => {
     const offenders = files.filter((f) => TAILWIND_BUILTIN_TEXT_SIZE.test(readFileSync(f, "utf-8")));
