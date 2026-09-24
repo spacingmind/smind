@@ -497,3 +497,133 @@ describe("useTaskTabs panes", () => {
     expect(reloaded.root.group.sizes[1]).toBeCloseTo(0.7);
   });
 });
+
+describe("focusPane", () => {
+  it("moves focus to another pane and persists it", () => {
+    const first = renderHook(() => useTaskTabs());
+    act(() => {
+      first.result.current.openTab(1, fileTab(1, "a.ts"));
+      first.result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "right");
+    });
+    const sidePaneId = otherPaneId(first.result.current.tabsByTask.get(1)!.root)!;
+    // splitTab already focuses the freshly created pane -- refocus the
+    // default one so this test actually exercises focusPane's own move.
+    act(() => first.result.current.focusPane(1, DEFAULT_PANE_ID));
+    expect(first.result.current.tabsByTask.get(1)!.focusedPaneId).toBe(DEFAULT_PANE_ID);
+
+    act(() => first.result.current.focusPane(1, sidePaneId));
+    expect(first.result.current.tabsByTask.get(1)!.focusedPaneId).toBe(sidePaneId);
+
+    const second = renderHook(() => useTaskTabs());
+    expect(second.result.current.tabsByTask.get(1)!.focusedPaneId).toBe(sidePaneId);
+  });
+
+  it("is a no-op for an unknown pane id", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+    const before = result.current.tabsByTask.get(1);
+    act(() => result.current.focusPane(1, "does-not-exist"));
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+});
+
+describe("closePane", () => {
+  it("removes a non-last pane and its tabs, refocusing a sibling", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => {
+      result.current.openTab(1, fileTab(1, "a.ts"));
+      result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "right");
+    });
+    const sidePaneId = otherPaneId(result.current.tabsByTask.get(1)!.root)!;
+
+    act(() => result.current.closePane(1, sidePaneId));
+
+    const layout = result.current.tabsByTask.get(1)!;
+    expect(collectAllPanes(layout.root)).toHaveLength(1);
+    expect(findPaneById(layout.root, sidePaneId)).toBeNull();
+    expect(layout.focusedPaneId).toBe(DEFAULT_PANE_ID);
+  });
+
+  it("never removes the tree's last remaining pane", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+    const before = result.current.tabsByTask.get(1);
+
+    act(() => result.current.closePane(1, DEFAULT_PANE_ID));
+
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+});
+
+describe("splitPaneEmpty", () => {
+  it("creates a new, tab-less pane and focuses it, without touching the source pane's tabs", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+
+    act(() => result.current.splitPaneEmpty(1, DEFAULT_PANE_ID, "right"));
+
+    const layout = result.current.tabsByTask.get(1)!;
+    const panes = collectAllPanes(layout.root);
+    expect(panes).toHaveLength(2);
+    const newPaneId = otherPaneId(layout.root)!;
+    expect(findPaneById(layout.root, newPaneId)!.tabs).toEqual([]);
+    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual([
+      "1:task",
+      "1:file:a.ts",
+    ]);
+    expect(layout.focusedPaneId).toBe(newPaneId);
+  });
+
+  it("is a no-op past the max tree depth", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+    // Alternating direction forces genuine nesting each time (a same-
+    // direction split just adds a sibling to the same flat group instead),
+    // so this reaches MAX_TREE_DEPTH's 5 levels in 4 splits.
+    const directions: Array<"right" | "down"> = ["right", "down", "right", "down"];
+    for (const direction of directions) {
+      act(() => result.current.splitPaneEmpty(1, DEFAULT_PANE_ID, direction));
+    }
+    const depthBefore = collectAllPanes(result.current.tabsByTask.get(1)!.root).length;
+    expect(depthBefore).toBe(5);
+    const before = result.current.tabsByTask.get(1);
+
+    act(() => result.current.splitPaneEmpty(1, DEFAULT_PANE_ID, "right"));
+
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+    expect(collectAllPanes(result.current.tabsByTask.get(1)!.root)).toHaveLength(depthBefore);
+  });
+});
+
+describe("moveTabToNextPane", () => {
+  it("cycles a tab through 3 panes and wraps back to the first", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => {
+      result.current.openTab(1, fileTab(1, "a.ts"));
+      result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "right");
+    });
+    const layoutAfterSplit = result.current.tabsByTask.get(1)!;
+    const secondPaneId = otherPaneId(layoutAfterSplit.root)!;
+    act(() => result.current.splitPaneEmpty(1, secondPaneId, "right"));
+    const thirdPaneId = collectAllPanes(result.current.tabsByTask.get(1)!.root)
+      .map((p) => p.id)
+      .find((id) => id !== DEFAULT_PANE_ID && id !== secondPaneId)!;
+
+    // "1:file:a.ts" is in secondPaneId (splitTab carried it there).
+    act(() => result.current.moveTabToNextPane(1, "1:file:a.ts", secondPaneId));
+    let layout = result.current.tabsByTask.get(1)!;
+    expect(findPaneContainingTab(layout.root, "1:file:a.ts")?.id).toBe(thirdPaneId);
+
+    act(() => result.current.moveTabToNextPane(1, "1:file:a.ts", thirdPaneId));
+    layout = result.current.tabsByTask.get(1)!;
+    expect(findPaneContainingTab(layout.root, "1:file:a.ts")?.id).toBe(DEFAULT_PANE_ID);
+  });
+
+  it("is a no-op with only one pane", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+    const before = result.current.tabsByTask.get(1);
+    act(() => result.current.moveTabToNextPane(1, "1:file:a.ts", DEFAULT_PANE_ID));
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+});

@@ -66,6 +66,7 @@ import {
   MIN_SPLIT_SIZE,
   type SplitNode,
 } from "@/lib/split-tree";
+import { findAdjacentPane, type PaneDirection } from "@/lib/split-navigation";
 import type { ThemePreference } from "@/lib/theme";
 import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
@@ -164,7 +165,20 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // owns.
   const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup } = useTaskTabs();
+  const {
+    tabsByTask,
+    ensureTask,
+    openTab,
+    closeTab,
+    activate,
+    moveTab,
+    splitTab,
+    resizeGroup,
+    focusPane,
+    closePane,
+    splitPaneEmpty,
+    moveTabToNextPane,
+  } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
   // null until the tree's first successful load (treeLoaded), so an
@@ -344,6 +358,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [dropPosition, setDropPosition] = useState<SplitDropZonePosition | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
 
+  /** Which pane's "+" menu the `tab.new` keyboard action popped open, if any -- see PaneTabStrip's NewTabButton. */
+  const [openNewTabPaneId, setOpenNewTabPaneId] = useState<string | null>(null);
+
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
       // 8px so a plain click-to-activate-tab isn't swallowed as a drag
@@ -417,7 +434,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
-  const defaultPane = taskState ? findPaneById(taskState.root, DEFAULT_PANE_ID) : null;
   const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
   const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
 
@@ -504,32 +520,122 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     setPreference(next);
   });
 
-  // Both bindings are scoped to the default pane -- Item 6 adds no
-  // "which pane has keyboard focus" concept (Paseo's pane.focus.*
-  // actions were already out of scope for Item 4's binding table), so
-  // Ctrl+W/Ctrl+Alt+<digit> reach the default pane's tabs only. Every
-  // other pane's tabs stay mouse/palette-operable.
+  // Both bindings target the *focused* pane -- the last one the user
+  // interacted with (click, tab switch, or a pane-focus action below), not
+  // always the default one. See the plan's Decisions ("Tab actions target
+  // the focused pane, not just the default one").
   useActionHandler(
     "tab.close",
     () => {
-      if (!selectedTask || !defaultPane?.activeKey) return;
-      const active = defaultPane.tabs.find((t) => t.key === defaultPane.activeKey);
+      if (!selectedTask || !focusedPane?.activeKey) return;
+      const active = focusedPane.tabs.find((t) => t.key === focusedPane.activeKey);
       // Every tab is closable (Item 3), but the shortcut still mirrors
       // the strip: no active tab (everything closed) means nothing to do.
       if (!active?.closable) return;
       closeTab(selectedTask.ID, active.key);
     },
-    { enabled: Boolean(selectedTask && defaultPane?.activeKey) },
+    { enabled: Boolean(selectedTask && focusedPane?.activeKey) },
   );
 
   useActionHandler(
     "tab.jump",
     (payload) => {
-      if (!selectedTask || !defaultPane || payload === null) return;
-      const entry = defaultPane.tabs[payload.digit - 1];
+      if (!selectedTask || !focusedPane || payload === null) return;
+      const entry = focusedPane.tabs[payload.digit - 1];
       if (entry) activate(selectedTask.ID, entry.key);
     },
-    { enabled: Boolean(selectedTask && defaultPane) },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+
+  /** Steps the focused pane's active tab by delta, wrapping -- shared by tab.next/tab.prev. */
+  const stepFocusedTab = useCallback(
+    (delta: 1 | -1) => {
+      if (!selectedTask || !focusedPane || focusedPane.tabs.length === 0) return;
+      const current = focusedPane.tabs.findIndex((t) => t.key === focusedPane.activeKey);
+      const next = current === -1 ? 0 : (current + delta + focusedPane.tabs.length) % focusedPane.tabs.length;
+      const entry = focusedPane.tabs[next];
+      if (entry) activate(selectedTask.ID, entry.key);
+    },
+    [selectedTask, focusedPane, activate],
+  );
+  useActionHandler("tab.next", () => stepFocusedTab(1), {
+    enabled: Boolean(selectedTask && focusedPane && focusedPane.tabs.length > 1),
+  });
+  useActionHandler("tab.prev", () => stepFocusedTab(-1), {
+    enabled: Boolean(selectedTask && focusedPane && focusedPane.tabs.length > 1),
+  });
+
+  useActionHandler(
+    "tab.new",
+    () => {
+      if (!focusedPane) return;
+      setOpenNewTabPaneId(focusedPane.id);
+    },
+    { enabled: Boolean(focusedPane) },
+  );
+
+  useActionHandler(
+    "pane.split.right",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      splitPaneEmpty(selectedTask.ID, focusedPane.id, "right");
+    },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+  useActionHandler(
+    "pane.split.down",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      splitPaneEmpty(selectedTask.ID, focusedPane.id, "down");
+    },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+
+  useActionHandler(
+    "pane.close",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      closePane(selectedTask.ID, focusedPane.id);
+    },
+    { enabled: Boolean(selectedTask && focusedPane && paneCount > 1) },
+  );
+
+  useActionHandler(
+    "pane.move-tab.next",
+    () => {
+      if (!selectedTask || !focusedPane?.activeKey) return;
+      moveTabToNextPane(selectedTask.ID, focusedPane.activeKey, focusedPane.id);
+    },
+    { enabled: Boolean(selectedTask && focusedPane?.activeKey && paneCount > 1) },
+  );
+
+  const focusAdjacentPane = useCallback(
+    (direction: PaneDirection) => {
+      if (!selectedTask || !taskState || !focusedPane) return;
+      const adjacent = findAdjacentPane(taskState.root, focusedPane.id, direction);
+      if (adjacent) focusPane(selectedTask.ID, adjacent);
+    },
+    [selectedTask, taskState, focusedPane, focusPane],
+  );
+  // Every pane-focus binding carries `when: { global: true }` (Decisions:
+  // "Pane-focus shortcuts fire even while typing in an input") -- `enabled`
+  // here only gates "is there a pane tree to navigate at all", not focus
+  // scope, which the binding table already handles.
+  useActionHandler("pane.focus.left", () => focusAdjacentPane("left"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.right", () => focusAdjacentPane("right"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.up", () => focusAdjacentPane("up"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.down", () => focusAdjacentPane("down"), { enabled: paneCount > 1 });
+
+  useActionHandler("settings.open", () => setActiveView("settings"));
+
+  useActionHandler(
+    "sidebar.task-jump",
+    (payload) => {
+      if (payload === null) return;
+      const task = allTasks[payload.digit - 1];
+      if (task) selectTask(task);
+    },
+    { enabled: allTasks.length > 0 },
   );
 
   const stepTask = useCallback(
@@ -620,6 +726,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
       showMoveAffordance={false}
+      newTabMenuOpen={openNewTabPaneId === DEFAULT_PANE_ID}
+      onNewTabMenuOpenChange={(open) => setOpenNewTabPaneId(open ? DEFAULT_PANE_ID : null)}
     />
   );
 
@@ -677,6 +785,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               dragOverPaneId={dragOverPaneId}
               dropPosition={dropPosition}
               isDragActive={isDragActive}
+              focusedPaneId={taskState.focusedPaneId}
+              onFocusPane={(paneId) => focusPane(selectedTask.ID, paneId)}
+              openNewTabPaneId={openNewTabPaneId}
+              onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
             />
           </DndContext>
         )
@@ -1007,6 +1119,13 @@ interface SplitPaneCallbacks {
   dropPosition: SplitDropZonePosition | null;
   /** Whether a tab drag is in progress at all -- panes stay droppable-but-invisible until one starts. */
   isDragActive: boolean;
+  /** Which pane keyboard actions (tab.close, pane.focus.*, ...) target -- Item 6's focused-pane concept. Drives the visible ring below. */
+  focusedPaneId: string | null;
+  /** Moves keyboard focus to a pane -- bound to a click/pointerdown anywhere in it, same as clicking a pane in most split-pane editors. */
+  onFocusPane: (paneId: string) => void;
+  /** The pane whose "+" menu `tab.new` popped open, if any -- see NewTabButton's controlled open/onOpenChange. */
+  openNewTabPaneId: string | null;
+  onOpenNewTabPaneIdChange: (paneId: string | null) => void;
 }
 
 function splitNodeId(node: SplitNode): string {
@@ -1053,6 +1172,10 @@ function SplitTreeView({
         dragOverPaneId={shared.dragOverPaneId}
         dropPosition={shared.dropPosition}
         isDragActive={shared.isDragActive}
+        focused={shared.focusedPaneId === node.pane.id}
+        onFocusPane={() => shared.onFocusPane(node.pane.id)}
+        newTabMenuOpen={shared.openNewTabPaneId === node.pane.id}
+        onNewTabMenuOpenChange={(open) => shared.onOpenNewTabPaneIdChange(open ? node.pane.id : null)}
       />
     );
   }
@@ -1129,6 +1252,10 @@ function PaneTabStrip({
   dragOverPaneId = null,
   dropPosition = null,
   isDragActive = false,
+  focused = false,
+  onFocusPane,
+  newTabMenuOpen = false,
+  onNewTabMenuOpenChange,
 }: {
   paneId: PaneId;
   tabs: TabEntry[];
@@ -1154,6 +1281,12 @@ function PaneTabStrip({
   dragOverPaneId?: string | null;
   dropPosition?: SplitDropZonePosition | null;
   isDragActive?: boolean;
+  /** Item 6: whether this is the pane keyboard actions currently target -- drives the visible ring. Compact mode (a single merged strip) never sets this; there's nothing to distinguish it from. */
+  focused?: boolean;
+  /** Moves keyboard focus here -- bound to a pointerdown anywhere in the pane. */
+  onFocusPane?: () => void;
+  newTabMenuOpen?: boolean;
+  onNewTabMenuOpenChange?: (open: boolean) => void;
 }) {
   // Item 8: the whole pane (tab strip + content) is one drop target --
   // `data` carries just the pane id, which `App.tsx`'s onDragMove/onDragEnd
@@ -1162,7 +1295,15 @@ function PaneTabStrip({
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
 
   return (
-    <div ref={setDroppableRef} className="relative h-full">
+    <div
+      ref={setDroppableRef}
+      // A ring rather than a border: a border would shift every pane's
+      // content by its width when focus moves, and only means anything
+      // once there's more than one pane to tell apart.
+      className={cn("relative h-full", focused && paneCount > 1 && "ring-1 ring-inset ring-ring")}
+      data-testid={focused ? "pane-focused" : undefined}
+      onPointerDownCapture={onFocusPane}
+    >
       <Tabs
         key={`${task.ID}:${paneId}`}
         // The fixed `primary-pane`/`side-pane` testids only tell the two
@@ -1190,7 +1331,11 @@ function PaneTabStrip({
               ))}
             </TabsList>
           )}
-          <NewTabButton onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
+          <NewTabButton
+            onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
+            open={newTabMenuOpen}
+            onOpenChange={onNewTabMenuOpenChange}
+          />
         </div>
         {tabs.length === 0 && (
           <TabsEmptyState onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />

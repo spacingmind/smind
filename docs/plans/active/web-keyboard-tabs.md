@@ -132,9 +132,9 @@ smind today:
 ## Progress
 
 - [x] AC1 chords
-- [ ] AC2 pane focus
-- [ ] AC3 split/tab actions
-- [ ] AC4 Mod+, and Mod+digit
+- [x] AC2 pane focus
+- [x] AC3 split/tab actions
+- [x] AC4 Mod+, and Mod+digit
 - [ ] AC5 Settings → Shortcuts
 - [ ] AC6 tab context menu
 - [ ] AC7 Shift+Tab mode cycle
@@ -163,3 +163,68 @@ smind today:
     `KeyboardProvider` with real timers (`vi.useFakeTimers`) --
     end-to-end fire, timeout abandons the attempt, survives a re-render,
     wrong second key cancels.
+
+- **AC2 (pane focus) / AC3 (split/tab actions) / AC4 (Mod+, and
+  Mod+digit).** `lib/split-tree.ts` already carried `TaskLayout.
+  focusedPaneId` and the layout functions (`focusPaneInLayout`,
+  `closePaneInLayout`, `splitPaneEmptyInLayout`, `moveTabToPaneInLayout`)
+  from an earlier item, unused by any UI -- this item is mostly wiring,
+  not new data model. Added `lib/split-navigation.ts` (`findAdjacentPane`,
+  ported from Paseo's `utils/split-navigation.ts` -- normalizes every
+  pane's bounding box from the split tree's direction/sizes, picks the
+  nearest candidate in a direction). `hooks/use-task-tabs.ts` grows
+  `focusPane`/`closePane`/`splitPaneEmpty`/`moveTabToNextPane` over the
+  existing layout functions. `App.tsx`'s `tab.close`/`tab.jump`/new
+  `tab.next`/`tab.prev` handlers read `focusedPane` (was `defaultPane`,
+  now dead and removed); new `pane.focus.*` handlers call
+  `findAdjacentPane` then `focusPane`. The focused pane gets a visible
+  ring (`PaneTabStrip`'s outer div, `ring-1 ring-inset ring-ring`, only
+  once `paneCount > 1`) and a click-anywhere-in-the-pane handler
+  (`onPointerDownCapture`) sets it, mirroring Paseo's
+  `shouldFocusPaneFromEventTarget` intent without its interactive-target
+  exemption (unneeded here -- see the function's own doc comment).
+  `tab.new` pops the focused pane's own `NewTabButton` menu open via a
+  new controlled `open`/`onOpenChange` pair on that component (mirrors
+  Paseo's `workspace.tab.menu.open`, which opens a picker rather than a
+  fixed kind). Every pane-focus binding carries `when: { global: true }`
+  (smind's existing bypass-editable-scope mechanism), which satisfies
+  "fires while typing" without needing Paseo's more elaborate
+  default-combo-vs-override guard-dropping (`withoutDefaultComboGuard`) --
+  smind's overrides never touch a binding's `when`, so `global: true`
+  already covers both the default and any future rebind uniformly.
+  "Move tab to the next pane" (plan's Decisions, singular -- not 4
+  directional variants) cycles through `collectAllPanes`' tree order,
+  wrapping.
+  - `lib/split-navigation.test.ts`: adjacent-pane resolution across a
+    nested 2x2 grid, overlap-over-center-distance tie-breaking, no
+    candidate in a direction, unknown focused pane, single-pane tree.
+  - `hooks/use-task-tabs.test.ts`: `focusPane`/`closePane`/
+    `splitPaneEmpty`/`moveTabToNextPane`, including the last-pane guard
+    and the max-tree-depth cap.
+  - `App.test.tsx` ("App pane focus and pane/tab keyboard actions (Item
+    6)"): the focus ring moving between panes, a pane-focus shortcut
+    firing from inside the composer textarea, `tab.jump` targeting
+    whichever pane is currently focused (not always the default one),
+    `Mod+\` creating an empty split, `Mod+Shift+W` closing a pane (never
+    the last), `Alt+Shift+T` opening the focused pane's new-tab menu,
+    `Alt+Shift+]`/`[` cycling tabs with wraparound, `Mod+Shift+M` moving
+    a tab to the next pane, `Mod+,` opening Settings, `Mod+<digit>`
+    jumping to the Nth sidebar task (distinct from `Ctrl+Alt+<digit>`'s
+    tab-position jump).
+
+  **Combo choices not already fixed by the plan's Decisions** (the plan
+  asked for defaults matching Paseo's table where it has one, adapted to
+  avoid browser/OS conflicts on smind's web-only runtime):
+  - `pane.split.right` `Mod+\`, `pane.split.down` `Mod+Shift+\`,
+    `pane.close` `Mod+Shift+W`, `pane.focus.*` `Mod+Shift+Arrow*`,
+    `pane.move-tab.next` `Mod+Shift+M` -- Paseo's own pane-management
+    combos are mac-desktop-only rows (`when: { mac: true }`, no non-mac
+    variant); smind's single `Mod` token makes one row cover both
+    platforms, so these needed no second row.
+  - `tab.new` `Alt+Shift+T`, `tab.next`/`tab.prev` `Alt+Shift+]`/`[` --
+    not `Mod+T`/`Mod+Tab` (a browser tab's own shortcuts, unblockable in
+    a page's own JS), matching Paseo's own substitution pattern for its
+    web runtime (its `close-tab`'s `Alt+Shift+W`, its already-universal
+    `Alt+Shift+[`/`]` for tab prev/next).
+  - `settings.open` `Mod+,` and `sidebar.task-jump` `Mod+<digit>` are the
+    plan's own explicit choices.

@@ -3,12 +3,15 @@ import { useCallback, useState } from "react";
 import { baseTabForKind, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
 import {
+  canDismissPaneInLayout,
+  closePaneInLayout,
   collectAllPanes,
   collectAllTabs,
   DEFAULT_PANE_ID,
   detachTabFromTree,
   findPaneById,
   findPaneContainingTab,
+  focusPaneInLayout,
   focusTabInLayout,
   MAX_TREE_DEPTH,
   moveTabToPaneInLayout,
@@ -344,5 +347,98 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
-  return { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup };
+  /** Moves keyboard/tab-action focus to paneId -- a no-op if it's already focused or doesn't exist. */
+  const focusPane = useCallback(
+    (taskId: number, paneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const focused = focusPaneInLayout({ layout, paneId });
+        if (!focused) return prev;
+        const next = new Map(prev);
+        next.set(taskId, focused);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Removes paneId outright, tabs and all -- a no-op for the tree's last remaining pane (canDismissPaneInLayout). */
+  const closePane = useCallback(
+    (taskId: number, paneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout || !canDismissPaneInLayout(layout, paneId)) return prev;
+        const closed = closePaneInLayout({ layout, paneId });
+        if (!closed) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closed);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Splits targetPaneId in `direction` with a fresh, tab-less pane -- the keyboard/palette split action, which (unlike splitTab) has no particular tab to carry across. A no-op past `MAX_TREE_DEPTH`. */
+  const splitPaneEmpty = useCallback(
+    (taskId: number, targetPaneId: string, direction: SplitDirection): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const result = splitPaneEmptyInLayout({
+          layout,
+          targetPaneId,
+          position: SPLIT_DIRECTION_TO_POSITION[direction],
+          createNodeId,
+          maxTreeDepth: MAX_TREE_DEPTH,
+        });
+        if (!result) return prev;
+        const next = new Map(prev);
+        next.set(taskId, result.layout);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /**
+   * Moves key's tab from fromPaneId into whichever pane follows it in tree
+   * order (wrapping past the last back to the first) -- the keyboard
+   * action's "next pane", not a specific direction. A no-op with only one
+   * pane in the tree.
+   */
+  const moveTabToNextPane = useCallback(
+    (taskId: number, key: string, fromPaneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const panes = collectAllPanes(layout.root);
+        if (panes.length < 2) return prev;
+        const fromIndex = panes.findIndex((pane) => pane.id === fromPaneId);
+        if (fromIndex === -1) return prev;
+        const toPaneId = panes[(fromIndex + 1) % panes.length]!.id;
+        const moved = moveTabToPaneInLayout({ layout, tabKey: key, toPaneId });
+        if (!moved) return prev;
+        const next = new Map(prev);
+        next.set(taskId, moved);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  return {
+    tabsByTask,
+    ensureTask,
+    openTab,
+    closeTab,
+    activate,
+    moveTab,
+    splitTab,
+    resizeGroup,
+    focusPane,
+    closePane,
+    splitPaneEmpty,
+    moveTabToNextPane,
+  };
 }
