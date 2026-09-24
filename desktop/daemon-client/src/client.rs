@@ -81,12 +81,14 @@ async fn try_run_once(
     let (ws, _resp) = connect_async(ws_url.as_str())
         .await
         .map_err(|e| format!("ws connect: {e}"))?;
+    eprintln!("smind desktop: ws connected to {}", ws_url.as_str());
     let (mut tx, mut rx) = ws.split();
 
     let sub = subscribe_message().to_string();
     tx.send(Message::Text(sub.into()))
         .await
         .map_err(|e| format!("ws send subscribe: {e}"))?;
+    eprintln!("smind desktop: subscribed to permission.pending");
 
     let mut stable = false;
     let stable_timer = tokio::time::sleep(STABLE_AFTER);
@@ -109,8 +111,14 @@ async fn try_run_once(
                         }
                     }
                     Some(Ok(_)) => {} // ping/pong frames; tungstenite answers pings itself
-                    Some(Err(e)) => return Ok(stable),
-                    None => return Ok(stable),
+                    Some(Err(e)) => {
+                        eprintln!("smind desktop: ws error: {e}");
+                        return Ok(stable);
+                    }
+                    None => {
+                        eprintln!("smind desktop: ws closed by daemon");
+                        return Ok(stable);
+                    }
                 }
             }
         }

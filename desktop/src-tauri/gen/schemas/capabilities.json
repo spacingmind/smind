@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Local shell capabilities: the fallback page runs with no plugin permissions; the daemon UI is remote content granted nothing.","local":true,"windows":["main"],"permissions":[]}}
