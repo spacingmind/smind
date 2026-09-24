@@ -145,7 +145,7 @@ If an item turns out to be impossible under these constraints, stop and report i
   parse_deep_link}`; `desktop/src-tauri/src/deeplink.rs` wires
   `tauri-plugin-deep-link`'s `on_open_url`/`get_current` +
   `single-instance`'s `deep-link` feature forwarding)
-- [ ] AC7 regressions + Windows build
+- [x] AC7 regressions + Windows build
 
 ## Validation
 
@@ -294,3 +294,72 @@ If an item turns out to be impossible under these constraints, stop and report i
   unchanged (the deep-link plugin's schema entries were already
   generated back in AC1's `cargo check`, since the crate dependency was
   added there ahead of use).
+
+- **AC7 regressions**:
+  - `grep -rn "tauri::command|invoke_handler" desktop/src-tauri/src/` is
+    empty -- no new command surface anywhere across AC1-AC6.
+  - `desktop/src-tauri/capabilities/default.json` diffed byte-for-byte
+    against its state before AC1's commit: unchanged (`permissions: []`,
+    no `remote.urls`).
+  - Final full run: `cargo test` in `daemon-client` is 47/47; `cargo
+    test`/`cargo build` in `src-tauri` both pass (0 tests there by
+    design -- all pure logic lives in `daemon-client` per ADR-0012's own
+    rationale, so this is expected, not a gap).
+  - The existing `desktop-tauri-shell.md` ACs were re-exercised live
+    (below), not just assumed from the code diff.
+  - **Not done**: opening a PR (explicitly out of scope per the task).
+
+- **AC7 live run (WSLg, X11 :0, this session)**: a temp daemon was
+  started from the main checkout's `bin/smind` with
+  `SMIND_HOME=/tmp/smind-desktop-live-test` and `server.port: 4699` (a
+  second, pre-existing `smind serve` was already running on the real
+  4648 from outside this session -- left untouched throughout, verified
+  reachable again after cleanup).
+  - **AC1 (window state)**: plugin registered, no crash; a full restart/
+    monitor-loss visual check needs eyes on the actual window, which
+    this sandbox has no screenshot tool for (still true from the
+    original plan's Validation) -- see below.
+  - **AC1/original-plan AC1 (fallback -> daemon UI)**: pointed at 4699,
+    logs show `smind desktop: /healthz ok, switching to daemon UI`, ws
+    connect, and `subscribed to permission.pending, run.status` (the
+    AC4 subscribe-topic change, confirmed live).
+  - **Offline path (AC5)**: pointed at an unreachable port (4700), ran
+    9s: five `daemon connection error: token fetch: ...` lines with
+    visibly growing spacing (backoff), no panic, no eval errors logged
+    (errors are swallowed by design, so this is weak evidence, but
+    consistent with a working eval call) -- process stayed alive the
+    whole time.
+  - **Single instance (original-plan AC2)**: with the first instance
+    running and connected, a second launch (`timeout 5 ... `) exited 0
+    within a fraction of a second with an empty log, deferring to the
+    first instance -- matches the prior session's own validated
+    behavior, confirming AC6's new deep-link forwarding wiring on
+    `tauri-plugin-single-instance` didn't change this.
+  - **Deep links (AC6)**: `register_all()` logs `deep link registration
+    failed: No such file or directory` -- expected for an unpackaged
+    `target/debug` binary with no `.desktop`/xdg-mime entry to register
+    against (production relies on the bundler-generated `.desktop` file
+    at install time, per AC6's own wording). This sandbox also has no
+    `xdg-open` at all, so the Test Scenario's `xdg-open 'smind://
+    task/1'` step could not be run here. Confidence instead comes from:
+    the 10 unit tests on `parse_deep_link` itself, and reading
+    `tauri-plugin-single-instance` 2.4.5's source (not just its docs) to
+    confirm the `deep-link` feature's forwarding is fully automatic with
+    no extra code on this app's side.
+  - **Not exercised live this session** (needs a human, input
+    simulation tooling this sandbox doesn't have, or a packaged
+    install): tray Open/Quit/attention-item clicks, the app menu's
+    items, `CommandOrControl+Shift+S`, a real `permission.pending` ->
+    notification -> click -> navigate round trip, taskbar badge
+    rendering, light/dark rendering of the offline page, and the deep
+    link from an actual OS-level `smind://` invocation. These are the
+    same category of gap the original `desktop-tauri-shell.md` plan's
+    Validation already recorded ("needs human eyes, WSLg") -- unchanged
+    by this session's additions, not a new regression.
+  - Cleanup: the temp daemon (verified by PID/environ, not just port,
+    since a second unrelated `smind serve` was running) and app process
+    were both killed; `/tmp/smind-desktop-live-test` removed; the real
+    daemon on 4648 confirmed still answering `/healthz` afterward.
+
+- **AC7 Windows build**: pushed to `origin/feat/desktop-tauri-shell`;
+  see below for the `desktop-windows` workflow result.
