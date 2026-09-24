@@ -167,7 +167,15 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
-  const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null);
+  // null until the tree's first successful load (treeLoaded), so an
+  // archived/deleted task can be pruned from `unread` without an empty
+  // *initial* task list wiping out a persisted unread set before the real
+  // fetch even lands -- see useUnreadTasks' own doc comment.
+  const liveTaskIds = useMemo(
+    () => (treeLoaded ? new Set(allTasks.map((t) => t.ID)) : null),
+    [treeLoaded, allTasks],
+  );
+  const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
 
   // AC2: the tab title mirrors the sidebar's own unread count live -- a
   // plain effect, not a ref, since document.title has no React-owned

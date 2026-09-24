@@ -339,7 +339,25 @@ export function AppSidebar({
   const statusOverrides = useStatusOverrides(client, events ?? null);
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
   const stats = useTaskStats(client, events ?? null, workspaceIds);
-  const { pinned, togglePin } = usePinnedTasks();
+
+  // Out-of-tab attention notifications (Item 4): every task across the
+  // whole tree, flattened just far enough to label a Notification by
+  // title -- this list changing (workspace/space/task fetch completing)
+  // never itself fires anything; only a *new* attention reason while the
+  // tab is hidden does, in the hook itself.
+  const allTasks = useMemo(
+    () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
+    [workspaces],
+  );
+  // null until the tree's first successful load (workspaces !== null), so
+  // an archived/deleted task can be pruned from `pinned` without the
+  // tree's empty *initial* render wiping a persisted pin out before the
+  // real fetch even lands -- see usePinnedTasks' own doc comment.
+  const liveTaskIds = useMemo(
+    () => (workspaces === null ? null : new Set(allTasks.map((t) => t.ID))),
+    [workspaces, allTasks],
+  );
+  const { pinned, togglePin } = usePinnedTasks(liveTaskIds);
   const rowSignal = useMemo<RowSignal>(
     () => ({
       attention,
@@ -354,15 +372,6 @@ export function AppSidebar({
     [attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
   );
 
-  // Out-of-tab attention notifications (Item 4): every task across the
-  // whole tree, flattened just far enough to label a Notification by
-  // title -- this list changing (workspace/space/task fetch completing)
-  // never itself fires anything; only a *new* attention reason while the
-  // tab is hidden does, in the hook itself.
-  const allTasks = useMemo(
-    () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
-    [workspaces],
-  );
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
   const { groupMode, setGroupMode } = useSidebarGroupMode();
   const statusGroups = useMemo(

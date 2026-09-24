@@ -133,6 +133,26 @@ What smind does today:
   `tab-title.test.ts`, and `app-sidebar.test.tsx`'s "unread marker (AC2)"
   describe block (marker presence/slot-width stability, the task menu's
   Mark unread action). Wired into the tab title in `App.tsx`.
+  **Post-review fixes:**
+  - *Ghost unread count*: `useUnreadTasks`/`usePinnedTasks` now take a
+    `liveTaskIds: ReadonlySet<number> | null` param and prune stale entries
+    against it -- `null` means "tree not loaded yet" and is never pruned
+    against (an empty *initial* task list must not wipe a persisted set
+    before the real fetch lands); `App.tsx`/`app-sidebar.tsx` derive it
+    from `treeLoaded`/`workspaces !== null` respectively, so pruning only
+    starts after the first successful load. The title count is therefore
+    `unread ∩ live tasks` for free -- `formatTabTitle` reads the same
+    already-pruned `unread` state. Covered by both hooks' "pruning against
+    the live task list" describe blocks (no prune before load, archived
+    task drops out, a still-live id survives).
+  - *Hidden-window gap*: the currently-selected task is now exempt from a
+    new attention gain only while `document.hidden` is false; a gain while
+    the tab/window is hidden marks it unread same as any other task. A new
+    `visibilitychange` listener clears the still-selected task's unread
+    flag when the document becomes visible again. Covered by
+    `use-unread-tasks.test.ts`'s "hidden-window gap" describe block (marks
+    unread while hidden, clears on visibility return for the selected
+    task, does not clear an unrelated task's unread flag).
 - **AC3**: `components/settings/notifications-section.tsx`, a new
   registered settings section (permission status/request -- moved from
   `general-section.tsx`, not duplicated; a sound toggle backed by
