@@ -13,7 +13,11 @@
 //            its READY line carries the pairing URL), paste the URL into
 //            the pairing input, press Connect, and screenshot the task list
 //            screen in both schemes. The harness's relay uses a self-signed
-//            cert, hence ignoreHTTPSErrors on the browser context.
+//            cert, hence ignoreHTTPSErrors on the browser context. Only ONE
+//            admit/handshake runs against the harness -- the light/dark
+//            screenshots come from one live connection via
+//            page.emulateMedia, not two separate connects (see
+//            pairAndAssertTasks's doc comment for why a second one breaks).
 //
 // The build is deterministic (`npx expo export --platform web` + a tiny
 // static file server), not the Metro dev server, so the run does not
@@ -100,7 +104,19 @@ async function startHarness() {
   return {
     pairingUrl,
     cleanup: () => {
-      proc.kill();
+      // SIGKILL, not the default SIGTERM: internal/relay/server.Run installs
+      // its own signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM) for
+      // *its own* derived context, which process-wide disables the Go
+      // runtime's default terminate-on-SIGTERM behavior -- but that context
+      // is local to Run() (shadows its parameter) and is never wired to the
+      // ctx harness/main.go's bridge.Run shares, and main() itself blocks on
+      // a bare `select {}` that no cancellation reaches either. Net effect:
+      // once Run() has started, plain SIGTERM cancels the relay's own
+      // listeners (so its bridge starts an endless reconnect-retry loop
+      // against a now-closed port) while the process itself never exits.
+      // Confirmed by hand: `proc.kill()` here left a relayharness process
+      // alive and logging reconnect attempts for 8+ minutes.
+      proc.kill('SIGKILL');
       rmSync(tmpDir, { recursive: true, force: true });
     },
   };
@@ -150,20 +166,44 @@ async function assertPairingScreen(page, url) {
   }
 }
 
-async function pairAndAssertTasks(page, pairingUrl, scheme) {
+/**
+ * Runs Item 2's full pairing flow once (one admit + one E2EE handshake),
+ * then screenshots both color schemes via page.emulateMedia -- NOT two
+ * separate connections. RelayConnection.ts's DEFAULT_SESSION_ID/
+ * DEFAULT_DEVICE_ID are fixed constants (Milestone 1's single-device
+ * assumption), so a second independent connect() against the same harness
+ * collides with the first: the daemon-side bridge (internal/relay/bridge/
+ * bridge.go) treats it as a *resume* of the still-known session rather
+ * than a new one, and the resume/fresh-handshake fallback races the new
+ * client's hello, failing with "e2ee: protocol violation: expected hello,
+ * got frame type 0x02". Confirmed by hand: two sequential contexts each
+ * doing their own connect() reliably broke the second one. One connection,
+ * two emulated color schemes, matches how the real app would toggle dark
+ * mode anyway (ThemeProvider's useColorScheme reacts to the same
+ * prefers-color-scheme media query).
+ */
+async function pairAndAssertTasks(page, pairingUrl) {
   await page.fill('textarea, input[type="text"]', pairingUrl);
   await page.getByRole('button', { name: 'Connect' }).click();
-  // TasksScreen's initial load state: header is the workspace title,
-  // empty workspaces render the "No workspaces yet" empty state.
-  const loaded = page.getByText('No workspaces yet').or(page.getByText("Couldn't load the workspace"));
+  // TasksScreen's post-connect states: 'ready' always renders a Disconnect
+  // button (even for a workspace-less daemon -- its FlatList always has an
+  // "ungrouped" section, so the ListEmptyComponent's "No workspaces yet"
+  // never actually renders); 'error' renders "Couldn't load the workspace".
+  const ready = page.getByRole('button', { name: 'Disconnect' });
+  const errored = page.getByText("Couldn't load the workspace");
+  const loaded = ready.or(errored).first();
   try {
     await loaded.waitFor({ timeout: 20_000 });
   } catch {
-    fail(`tasks screen did not render (${scheme})`);
-    return;
+    fail('tasks screen did not render');
+    return false;
   }
-  await page.screenshot({ path: join(SMOKE_DIR, `tasks-${scheme}.png`), fullPage: true });
-  console.log(`wrote tasks-${scheme}.png`);
+  if (await errored.isVisible().catch(() => false)) {
+    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '(unknown)');
+    fail(`tasks screen rendered the error state: ${bodyText}`);
+    return false;
+  }
+  return true;
 }
 
 async function run() {
@@ -183,10 +223,27 @@ async function run() {
       await assertPairingScreen(page, url);
       await page.screenshot({ path: join(SMOKE_DIR, `pairing-${scheme}.png`), fullPage: true });
       console.log(`wrote pairing-${scheme}.png`);
+      await context.close();
+    }
 
-      if (FULL) {
-        if (!harness) harness = await startHarness();
-        await pairAndAssertTasks(page, harness.pairingUrl, scheme);
+    if (FULL) {
+      // One connection for both screenshots -- see pairAndAssertTasks's
+      // doc comment for why a second connect() against the same harness
+      // isn't safe.
+      harness = await startHarness();
+      const context = await browser.newContext({ colorScheme: 'light', ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      trackErrors(page, 'full');
+      await page.goto(url, { waitUntil: 'load' });
+      await page.getByText('smind pairing', { exact: true }).waitFor({ timeout: 20_000 });
+      if (await pairAndAssertTasks(page, harness.pairingUrl)) {
+        await page.screenshot({ path: join(SMOKE_DIR, 'tasks-light.png'), fullPage: true });
+        console.log('wrote tasks-light.png');
+
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await page.waitForTimeout(200); // theme re-render after the media-query flip
+        await page.screenshot({ path: join(SMOKE_DIR, 'tasks-dark.png'), fullPage: true });
+        console.log('wrote tasks-dark.png');
       }
       await context.close();
     }

@@ -92,7 +92,7 @@ stated in Validation.
 ## Progress
 
 - [x] Item 1 — web build + PairingScreen render
-- [ ] Item 2 — full flow against the relay harness (best-effort)
+- [x] Item 2 — full flow against the relay harness (best-effort)
 
 ## Validation
 
@@ -134,3 +134,102 @@ stated in Validation.
   edge to edge), and the smoke script gained regression assertions for
   root-width fill and edge-to-edge background. `tsc` + `npm test` still
   61/61. Also recorded in mobile-expo-ui-adoption.md's Validation.
+
+### Item 2 (2026-09-24)
+
+`npm run smoke:web:full` builds the harness (`go build ...
+internal/relay/bridge/harness`), spawns it, admits + E2EE-handshakes
+once, drives Connect, and screenshots `tasks-light.png` /
+`tasks-dark.png`. Confirmed green on 2 consecutive runs, no leaked
+`relayharness`/Chromium processes afterward. Three real bugs found and
+fixed along the way — none were the browser TLS problem the WIP
+(`mobile/src/relay/grpcweb.ts`) assumed:
+
+1. **`grpcweb.ts`'s `x-grpc-web: 1` header claim: verified true, kept.**
+   Confirmed against `internal/relay/server/grpcweb.go` and the vendored
+   `traefik/grpc-web@v0.16.0` source
+   (`go/grpcweb/wrapper.go:IsAcceptableGrpcCorsRequest`): the wrapper only
+   treats an `OPTIONS` request as an acceptable CORS preflight if
+   `Access-Control-Request-Headers` contains `x-grpc-web`; grpc-web's
+   content-type (`application/grpc-web+proto`) always forces a browser
+   preflight regardless of custom headers, so without this header the
+   preflight falls through to the raw `*grpc.Server` (which doesn't
+   answer `OPTIONS`), and the browser blocks the real request with no
+   `Access-Control-Allow-Origin`. The relay's own `WithOriginFunc`/
+   `WithWebsocketOriginFunc` already allow every origin (by design — see
+   grpcweb.go's doc comment: admission is the real access control, CORS
+   here is not a security boundary), so this header addition is purely a
+   protocol-conformance fix, not a security loosening.
+2. **The probe's "TLS failure" was a CORS preflight rejection, not TLS.**
+   Reproduced directly: a fetch identical to grpcweb.ts's but with the
+   `x-grpc-web` header genuinely removed (not just renamed — a header
+   named `x-grpc-web-DISABLED` still matches the wrapper's
+   `strings.Contains(..., "x-grpc-web")` check, which is why an earlier
+   sanity check looked like it still passed) fails in Chromium with
+   `[console] error Access to fetch ... has been blocked by CORS policy:
+   Response to preflight request doesn't pass access control check` —
+   not a certificate error. `ignoreHTTPSErrors: true` on the Playwright
+   context was working correctly the whole time. `probe-tls.mjs` is
+   deleted; its finding is preserved here and in grpcweb.ts's comment.
+3. **A second connect() against the same harness collides on session
+   identity.** `RelayConnection.connect()`'s `DEFAULT_SESSION_ID`/
+   `DEFAULT_DEVICE_ID` (`mobile/src/relay/RelayConnection.ts`) are fixed
+   constants (Milestone 1's single-device assumption). The original
+   smoke-web.mjs opened a fresh browser context per color scheme and
+   called `pairAndAssertTasks` in each, i.e. two independent
+   admit+handshake attempts against one harness process. The daemon-side
+   bridge (`internal/relay/bridge/bridge.go`) treats the second one as a
+   *resume* of the still-known session rather than a new session; the
+   resume fails ("transport already closed cleanly"), it falls back to a
+   fresh handshake, but that races the new client's hello and fails with
+   `e2ee: protocol violation: expected hello, got frame type 0x02`,
+   repeating until the retry backoff gives up. Fixed in the smoke script
+   only (no relay/daemon change): Item 2 now runs one admit+handshake and
+   gets both screenshots from that single live connection via
+   `page.emulateMedia({ colorScheme })` — matches how the real app
+   toggles dark mode anyway (`ThemeProvider`'s `useColorScheme` reacts to
+   the same `prefers-color-scheme` media query).
+4. **`proc.kill()` (SIGTERM) does not reliably terminate the harness.**
+   `internal/relay/server.Run` calls `signal.NotifyContext(ctx,
+   os.Interrupt, syscall.SIGTERM)` for its own locally-shadowed `ctx` —
+   this disables the Go runtime's default SIGTERM-terminates behavior
+   process-wide, but the harness's `main()` blocks on a bare `select {}`
+   that observes no context at all, and `bridge.Run`'s copy of `ctx` is
+   the original, un-cancelled one. Net effect, confirmed by hand: sending
+   the harness process SIGTERM cancels only the relay's own listeners
+   (closing them), while the bridge inside the same process loops forever
+   retrying a connection to that now-closed port, and the OS process
+   never exits — left a `relayharness` alive logging reconnect attempts
+   for 8+ minutes in one investigation run. Fixed by using
+   `proc.kill('SIGKILL')` in smoke-web.mjs's harness cleanup (documented
+   inline); confirmed no leaked process after 2 repeat runs. Not fixed in
+   the harness/relay itself (out of this item's scope, and
+   `mobile/src/relay/__tests__/integration.node.test.ts` has the same
+   `harnessProcess?.kill()` pattern) — worth a follow-up if anyone hits
+   it elsewhere.
+
+Not attempted: opening a task and screenshotting the task-detail screen.
+The harness's `EnrollWorkspace` only creates a relay-level admission
+secret, not an actual row in the daemon's own workspace store (a fresh,
+empty `store.Open` temp db), so `workspace.list` legitimately returns
+`[]` and the app correctly renders `(no workspace)` / "No tasks" (which
+is also why the plan's assumed empty-state text, "No workspaces yet",
+never appears: `TasksScreen`'s `FlatList` always has an "ungrouped"
+section object in its data array, so `ListEmptyComponent` never
+renders — fixed the smoke script's ready-state assertion to check for
+the `Disconnect` button instead). Creating a real task via the daemon's
+own RPCs would need the harness to `git init` + commit a repo
+(`workspace.create` requires an existing `.git`) and materialize a `git
+worktree add` (`task.create`), all under a `SMIND_HOME` sandboxed away
+from the real user's `~/.spacingmind` (worktrees land under
+`config.Dir()/worktrees`) — more surface than "simply via the daemon's
+existing RPCs" for a best-effort item; not attempted, no relay/daemon
+code touched for it.
+
+`npx tsc --noEmit`, `npm test` (61/61), `npm run smoke:web`, and `npm
+run smoke:web:full` all green; `go test ./internal/relay/...` green
+(one `TestReHelloWithDifferentKeyClosesChannel` panic was seen once
+under heavy concurrent load from parallel debugging processes, did not
+reproduce across 5 isolated reruns or a clean full-package rerun — a
+pre-existing flake, not caused by anything in this session's Go-untouched
+diff).
