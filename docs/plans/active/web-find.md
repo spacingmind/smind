@@ -92,7 +92,7 @@ is React + Tailwind + shadcn.
 
 - [x] Shared FindBar + `pane.find` action
 - [x] AC1 chat Find
-- [ ] AC2 file Find (+ replace)
+- [x] AC2 file Find (+ replace)
 - [ ] AC3 terminal Find
 - [ ] Tests + docs
 
@@ -124,3 +124,22 @@ is React + Tailwind + shadcn.
   match found in an assistant chunk that arrives *after* Find is already
   open. Full suite (`bun run test`) stayed green throughout (866/866,
   up from the 842/842 baseline), confirming AC5 for this item.
+- **AC2 file Find**: `components/file-editor-find.ts`'s `FileFindModel` is
+  a near-verbatim port of Paseo's `file-pane/find/model.web.ts` (same
+  `@codemirror/search` API, no React Native in the original to strip) --
+  CodeMirror owns query/matching/selection/replacement; the model only
+  drives its commands and republishes state as a snapshot. The floating
+  bar (`components/file-editor-find-bar.tsx`) renders the shared `FindBar`
+  outside the editor, wired into `code-mirror-editor.tsx` via a new
+  `findExtension`/`onViewReady` prop pair (added, not changed, so every
+  other caller/test is unaffected) and into `file-editor-pane.tsx` next to
+  its existing per-tab-mount lifecycle. `pane.find`'s own copy of `Mod-f`
+  is filtered out of the model's `searchKeymap` extension so it can't
+  double-fire alongside the global keyboard action. `file-editor-find.test.ts`
+  drives the model against a real headless `EditorView` (open, count,
+  next/previous wraparound, empty query, replace, replace-all, and the
+  read-only branch hiding replace) the same way `code-mirror-editor.tsx`'s
+  own tests avoid mocking CodeMirror. `file-editor-find-bar.test.tsx`
+  exercises the full stack through `FileEditorPane`: `Mod+F` gated on
+  editor-pane focus, match count/prev/next, replace + replace-all editing
+  the live document, and Escape closing the bar. Full suite: 878/878.
