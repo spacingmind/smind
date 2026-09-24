@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -202,6 +203,13 @@ afterEach(() => {
   // cases -- without this, an earlier test's opened tab or active-tab
   // choice leaks into a later test's "freshly selected task" assumptions.
   window.localStorage.clear();
+  // The session<->tab binding (lib/terminal-sessions.ts, Item 20) lives
+  // outside React and outside this file's per-test render tree -- without
+  // clearing it, a later test opening a terminal tab for the same task id
+  // would see it as already bound to a prior test's session and try to
+  // reconnect instead of creating one (same reasoning as
+  // terminal-pane.test.tsx's own afterEach).
+  resetTerminalSessions();
 });
 
 describe("App", () => {
@@ -642,20 +650,43 @@ describe("App keyboard shortcuts", () => {
     );
   });
 
-  it("Shift+? opens the shortcuts dialog listing every binding", async () => {
+  it("Shift+? opens Settings on the Shortcuts section, listing every binding (AC5: the old dialog is now a Settings section)", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
     await resolveSidebar(socket);
 
-    expect(screen.queryByTestId("shortcuts-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
     await act(async () => {
       fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
     });
     await flush();
 
-    expect(screen.getByTestId("shortcuts-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);
+  });
+
+  it("Mod+, opens Settings on its default section, not the Shortcuts one a prior Shift+? left behind", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+
+    await act(async () => {
+      pressCtrl(",", "Comma");
+    });
+    await flush();
+
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-shortcuts")).not.toBeInTheDocument();
   });
 });
 
@@ -1408,6 +1439,535 @@ describe("App splits (Item 6)", () => {
     expect(within(diffPane as HTMLElement).getByRole("tab", { name: "Files" })).toBeInTheDocument();
     expect(within(terminalPane as HTMLElement).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
     expect(within(finalPrimaryPane).queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+  });
+});
+
+describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
+  /** Every pane's outer wrapper, keyed by its data-pane-id. */
+  function panesById(): Record<string, HTMLElement> {
+    const result: Record<string, HTMLElement> = {};
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>("[data-pane-id]"))) {
+      result[el.dataset.paneId!] = el;
+    }
+    return result;
+  }
+
+  /** The pane id currently carrying the visible focused-pane ring, or null if there's only one pane (no ring shown). */
+  function focusedPaneId(): string | null {
+    const focused = screen.queryByTestId("pane-focused");
+    return focused?.querySelector("[data-pane-id]")?.getAttribute("data-pane-id") ?? null;
+  }
+
+  async function press(key: string, code: string, extra: Record<string, unknown> = {}): Promise<void> {
+    await act(async () => {
+      fireEvent.keyDown(document, { key, code, ctrlKey: true, ...extra });
+    });
+    await flush();
+  }
+
+  /** Splits Diff to the right of the primary pane, returning [primaryPaneId, sidePaneId]. Mirrors the file's existing splitTabRight flow. */
+  async function splitDiffToSide(): Promise<[string, string]> {
+    await openBaseTab("Diff");
+    await splitTabRight("Diff");
+    const ids = Object.keys(panesById());
+    const side = ids.find((id) => id !== "primary")!;
+    return ["primary", side];
+  }
+
+  it("Mod+Shift+ArrowLeft/Right moves the focused-pane ring between panes", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [primaryId, sideId] = await splitDiffToSide();
+    // Splitting a tab off focuses the pane it landed in (use-task-tabs.ts).
+    expect(focusedPaneId()).toBe(sideId);
+
+    await press("ArrowLeft", "ArrowLeft", { shiftKey: true });
+    expect(focusedPaneId()).toBe(primaryId);
+
+    await press("ArrowRight", "ArrowRight", { shiftKey: true });
+    expect(focusedPaneId()).toBe(sideId);
+  });
+
+  it("tab.jump (Mod+Alt+<digit>) targets whichever pane is currently focused, not always the default one", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Primary ends up [Chat, Files]; splitting Diff off leaves it there and
+    // carries only Diff into a fresh side pane.
+    await openBaseTab("Files");
+    const [primaryId, sideId] = await splitDiffToSide();
+
+    // Give the side pane a second tab too, so "position 1" and "position
+    // 2" mean something different in each pane.
+    const sidePaneNewTab = within(panesById()[sideId]!).getByTestId("tabs-new-tab");
+    sidePaneNewTab.focus();
+    fireEvent.keyDown(sidePaneNewTab, { key: "Enter" });
+    await flush();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
+    await flush();
+    respondAll(socket, "terminal.list", []);
+    await flush();
+
+    // Side is focused (the split above landed there); Mod+Alt+2 there
+    // means "the side pane's 2nd tab" -- Terminal, not Files.
+    expect(focusedPaneId()).toBe(sideId);
+    await press("2", "Digit2", { altKey: true });
+    expect(within(panesById()[sideId]!).getByRole("tab", { name: "Terminal" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    // Move focus to primary; the same Mod+Alt+2 now means primary's 2nd
+    // tab -- Files.
+    await press("ArrowLeft", "ArrowLeft", { shiftKey: true });
+    expect(focusedPaneId()).toBe(primaryId);
+    await press("2", "Digit2", { altKey: true });
+    expect(within(panesById()[primaryId]!).getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
+  it("the default pane-focus combo does not fire from inside the composer textarea -- it's the browser's own text-selection key there", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [, sideId] = await splitDiffToSide();
+    expect(focusedPaneId()).toBe(sideId);
+
+    const composer = screen.getByLabelText("Prompt");
+    composer.focus();
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    });
+    await flush();
+
+    // Focus never moved off the side pane -- Ctrl+Shift+ArrowLeft stayed
+    // the composer's own word-select key.
+    expect(focusedPaneId()).toBe(sideId);
+  });
+
+  it("a rebound pane-focus combo does fire from inside the composer textarea", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [primaryId, sideId] = await splitDiffToSide();
+    expect(focusedPaneId()).toBe(sideId);
+
+    // Rebind pane.focus.left away from its default -- the whole point of
+    // `editableWhenRebound` is that a combo the user picked on purpose
+    // isn't stuck with the default's text-field exemption.
+    fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    await flush();
+    fireEvent.click(screen.getByLabelText("Change shortcut for Focus pane left"));
+    fireEvent.keyDown(window, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+
+    const composer = screen.getByLabelText("Prompt");
+    composer.focus();
+    await act(async () => {
+      fireEvent.keyDown(composer, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    });
+    await flush();
+
+    expect(focusedPaneId()).toBe(primaryId);
+  });
+
+  it("Mod+\\ splits the focused pane right with a fresh, empty pane", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(Object.keys(panesById())).toHaveLength(1);
+    await press("\\", "Backslash");
+    expect(Object.keys(panesById())).toHaveLength(2);
+    // The new pane carries no tabs and is now the one focused.
+    const newPaneId = Object.keys(panesById()).find((id) => id !== "primary")!;
+    expect(focusedPaneId()).toBe(newPaneId);
+    expect(within(panesById()[newPaneId]!).getByTestId("tabs-empty-state")).toBeInTheDocument();
+  });
+
+  it("Mod+Shift+W closes the focused pane but never the tree's last one", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [primaryId, sideId] = await splitDiffToSide();
+    expect(focusedPaneId()).toBe(sideId);
+
+    await press("w", "KeyW", { shiftKey: true });
+    expect(Object.keys(panesById())).toEqual([primaryId]);
+
+    // One pane left -- closing again is a no-op, not a crash.
+    await press("w", "KeyW", { shiftKey: true });
+    expect(Object.keys(panesById())).toEqual([primaryId]);
+  });
+
+  it("Alt+Shift+T opens the focused pane's own new-tab menu", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "T", code: "KeyT", altKey: true, shiftKey: true });
+    });
+    await flush();
+
+    expect(screen.getByRole("menuitem", { name: "Open Files" })).toBeInTheDocument();
+  });
+
+  it("Alt+Shift+] and Alt+Shift+[ cycle the focused pane's tabs and wrap", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openBaseTab("Diff");
+    // Strip order: Chat, Diff -- Diff is active (openBaseTab activates it).
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "]", code: "BracketRight", altKey: true, shiftKey: true });
+    });
+    await flush();
+    // Past the end wraps back to the first tab.
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "[", code: "BracketLeft", altKey: true, shiftKey: true });
+    });
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Mod+Shift+M moves the focused pane's active tab to the next pane", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    const [primaryId, sideId] = await splitDiffToSide();
+    const sidePane = panesById()[sideId]!;
+    expect(within(sidePane).getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(focusedPaneId()).toBe(sideId);
+
+    await press("m", "KeyM", { shiftKey: true });
+
+    // The side pane had only that one tab, so moving it away collapses the
+    // now-empty pane back into the tree -- same as closing its last tab
+    // would (detachTabFromTree's preserveEmptyPaneId only protects a
+    // tree's sole remaining pane, not an ordinary sibling).
+    const panesAfter = panesById();
+    expect(Object.keys(panesAfter)).toEqual([primaryId]);
+    expect(within(panesAfter[primaryId]!).getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+  });
+
+  it("Mod+, opens Settings", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    await press(",", "Comma");
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+  });
+
+  it("Alt+<digit> jumps to the Nth task in the sidebar, distinct from Ctrl+Alt+<digit>'s tab-position jump", async () => {
+    // Not Mod+<digit>: Ctrl/Cmd+1-9 is the browser's own tab-switching
+    // shortcut and the page never reliably sees it (see the binding's own
+    // comment in keyboard/shortcuts.ts).
+    async function pressAlt(key: string, code: string): Promise<void> {
+      await act(async () => {
+        fireEvent.keyDown(document, { key, code, altKey: true });
+      });
+      await flush();
+    }
+
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B, TASK_C]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await pressAlt("2", "Digit2");
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+
+    await pressAlt("3", "Digit3");
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("heading", { name: TASK_C.Title })).toBeInTheDocument();
+  });
+});
+
+describe("App tab context menu (Item 6)", () => {
+  async function openFileTabNamed(socket: FakeSocket, name: string): Promise<void> {
+    await openBaseTab("Files");
+    respondAll(socket, "file.list", [{ name, isDir: false, size: 1 }]);
+    await flush();
+    fireEvent.click(screen.getByTestId("file-row"));
+    await flush();
+    respondAll(socket, "file.read", { content: "hello" });
+    await flush();
+  }
+
+  async function openTerminal(socket: FakeSocket): Promise<void> {
+    await openBaseTab("Terminal");
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+  }
+
+  function openMenuFor(title: string) {
+    fireEvent.contextMenu(screen.getByRole("tab", { name: new RegExp(title) }));
+  }
+
+  it("shows Copy path (not Rename) on a file tab, and Rename (not Copy path) on a terminal tab", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    await openFileTabNamed(socket, "README.md");
+    openMenuFor("README.md");
+    expect(screen.getByTestId("workspace-tab-menu-copy-path")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-tab-menu-rename")).not.toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await openTerminal(socket);
+    openMenuFor("Terminal");
+    expect(screen.getByTestId("workspace-tab-menu-rename")).toBeInTheDocument();
+    expect(screen.queryByTestId("workspace-tab-menu-copy-path")).not.toBeInTheDocument();
+  });
+
+  it("copies a file tab's path to the clipboard", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    try {
+      const socket = new FakeSocket();
+      const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+      render(<App connect={connect} />);
+      await resolveSidebar(socket, [TASK_A]);
+      clickTaskRow(TASK_A);
+      await flush();
+      respondAll(socket, "run.list", []);
+      await flush();
+      await openFileTabNamed(socket, "README.md");
+
+      openMenuFor("README.md");
+      fireEvent.click(screen.getByTestId("workspace-tab-menu-copy-path"));
+
+      expect(writeText).toHaveBeenCalledWith("README.md");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("renames a terminal tab on Enter, and leaves it alone on Escape", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openTerminal(socket);
+
+    openMenuFor("Terminal");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-rename"));
+
+    const input = screen.getByTestId("workspace-tab-rename-input");
+    fireEvent.change(input, { target: { value: "build" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /build/ })).toBeInTheDocument();
+
+    openMenuFor("build");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-rename"));
+    const secondInput = screen.getByTestId("workspace-tab-rename-input");
+    fireEvent.change(secondInput, { target: { value: "should not stick" } });
+    fireEvent.keyDown(secondInput, { key: "Escape" });
+    await flush();
+
+    expect(screen.getByRole("tab", { name: /build/ })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /should not stick/ })).not.toBeInTheDocument();
+  });
+
+  it("Close others / Close to the left / Close to the right target only the clicked tab's pane", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Strip order: Chat, Files, Diff, Terminal.
+    await openBaseTab("Files");
+    await openBaseTab("Diff");
+    await openTerminal(socket);
+
+    openMenuFor("Diff");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-close-left"));
+    await flush();
+    expect(screen.queryByRole("tab", { name: "Chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Files" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
+
+    openMenuFor("Diff");
+    fireEvent.click(screen.getByTestId("workspace-tab-menu-close-others"));
+    await flush();
+    expect(screen.getByRole("tab", { name: "Diff" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Terminal" })).not.toBeInTheDocument();
+  });
+
+  it("still offers the existing split entries alongside the new items", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openBaseTab("Diff");
+
+    openMenuFor("Diff");
+
+    expect(screen.getByTestId("workspace-tab-menu-split-left")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-right")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-up")).toBeInTheDocument();
+    expect(screen.getByTestId("workspace-tab-menu-split-down")).toBeInTheDocument();
+  });
+});
+
+describe("App pane focus vs. web-find's per-pane focus-within (rebase interop)", () => {
+  it("Mod+F opens Find only in the pane that actually has DOM focus (Chat vs. a split-off Terminal), unaffected by the split-tree click-to-focus-pane handler", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Terminal, opened in primary alongside Chat, then split into its own
+    // pane -- Chat stays behind in primary.
+    await openBaseTab("Terminal");
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+    await splitTabRight("Terminal");
+
+    const panes = Object.fromEntries(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-pane-id]")).map((el) => [
+        el.dataset.paneId!,
+        el,
+      ]),
+    );
+    const paneIds = Object.keys(panes);
+    expect(paneIds).toHaveLength(2);
+    const sideId = paneIds.find((id) => id !== "primary")!;
+    // Chat's find-focus wrapper (task-detail.tsx) is still in primary.
+    expect(within(panes.primary!).getByTestId("run-log-scroll")).toBeInTheDocument();
+    expect(within(panes[sideId]!).getByTestId("terminal-container")).toBeInTheDocument();
+
+    // Nothing focused yet -- Mod+F opens Find nowhere.
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+    expect(screen.queryByTestId("find-bar")).not.toBeInTheDocument();
+
+    // A click (App.tsx's split-tree focus handler is onPointerDownCapture,
+    // never stopPropagation/preventDefault-ing) followed by the DOM focus
+    // a real click into the terminal would cause -- proving the two focus
+    // concepts (the split-tree's `focusedPaneId`, and web-find's own
+    // usePaneFocusWithin) don't fight each other over the same click.
+    fireEvent.pointerDown(panes[sideId]!);
+    fireEvent.focus(within(panes[sideId]!).getByTestId("terminal-container"));
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+
+    expect(within(panes[sideId]!).getByTestId("find-bar")).toBeInTheDocument();
+    expect(within(panes.primary!).queryByTestId("find-bar")).not.toBeInTheDocument();
+
+    // Switching DOM focus to primary's Chat moves which pane's Find claims
+    // Mod+F next, independent of the split-tree's own focused pane (which
+    // the click above already moved to the side pane, and which
+    // tab.close/tab.jump/etc. still target).
+    fireEvent.pointerDown(panes.primary!);
+    fireEvent.focus(within(panes.primary!).getByTestId("run-log-scroll"));
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+
+    expect(within(panes.primary!).getByTestId("find-bar")).toBeInTheDocument();
   });
 });
 

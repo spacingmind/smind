@@ -1,10 +1,11 @@
 import type { ActionId, ActionPayload, FocusScope } from "@/keyboard/actions";
 import {
-  canonicalCombo,
+  canonicalChord,
   DIGIT_WILDCARD,
-  formatCombo,
+  formatChord,
+  isModifierKeyCode,
   matchCombo,
-  parseCombo,
+  parseChord,
   type KeyCombo,
   type KeyEventLike,
 } from "@/keyboard/shortcut-string";
@@ -46,6 +47,20 @@ export interface BindingWhen {
    * plan's "except where explicitly marked global".
    */
   global?: true;
+  /**
+   * `true` = blocked in `editable` scope like the default, but only for
+   * this binding's *default* combo -- once the user rebinds it, the block
+   * lifts and the new combo fires while typing too. Ported from Paseo's
+   * `editable: false` + `withoutDefaultComboGuard`
+   * (`keyboard-shortcuts.ts`): the pane-focus defaults collide with the
+   * browser/OS's own Shift+Arrow text-selection keys (word-select on
+   * Win/Linux, line-select on mac), so *those specific keys* must stay
+   * out of a text field -- but a combo the user chose on purpose shouldn't
+   * inherit a restriction that was only ever about the shipped default.
+   * Unlike `global`, this does not affect `terminal` scope -- Paseo's own
+   * guard is `editable`-only, and nothing here needs a terminal exemption.
+   */
+  editableWhenRebound?: true;
 }
 
 export interface ShortcutBinding {
@@ -137,6 +152,129 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
   },
   {
+    id: "tab-new",
+    action: "tab.new",
+    combo: "Alt+Shift+T",
+    section: "tabs",
+    label: "New tab",
+    when: { global: true },
+    // Not Mod+T: a browser tab's own new-tab shortcut can't be
+    // intercepted (see `docs/plans/active/web-keyboard-tabs.md`'s
+    // Decisions) -- matches Paseo's own web-runtime substitutions for
+    // otherwise browser-reserved combos (e.g. its close-tab's Alt+Shift+W).
+    note: "Not Mod+T -- the browser owns that one",
+  },
+  {
+    id: "tab-next",
+    action: "tab.next",
+    combo: "Alt+Shift+]",
+    section: "tabs",
+    label: "Next tab",
+    when: { global: true },
+  },
+  {
+    id: "tab-prev",
+    action: "tab.prev",
+    combo: "Alt+Shift+[",
+    section: "tabs",
+    label: "Previous tab",
+    when: { global: true },
+  },
+  {
+    id: "pane-split-right",
+    action: "pane.split.right",
+    combo: "Mod+\\",
+    section: "tabs",
+    label: "Split pane right",
+    when: { global: true },
+  },
+  {
+    id: "pane-split-down",
+    action: "pane.split.down",
+    combo: "Mod+Shift+\\",
+    section: "tabs",
+    label: "Split pane down",
+    when: { global: true },
+  },
+  {
+    id: "pane-close",
+    action: "pane.close",
+    combo: "Mod+Shift+W",
+    section: "tabs",
+    label: "Close focused pane",
+    when: { global: true },
+  },
+  {
+    id: "pane-focus-left",
+    action: "pane.focus.left",
+    combo: "Mod+Shift+ArrowLeft",
+    section: "tabs",
+    label: "Focus pane left",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
+  },
+  {
+    id: "pane-focus-right",
+    action: "pane.focus.right",
+    combo: "Mod+Shift+ArrowRight",
+    section: "tabs",
+    label: "Focus pane right",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
+  },
+  {
+    id: "pane-focus-up",
+    action: "pane.focus.up",
+    combo: "Mod+Shift+ArrowUp",
+    section: "tabs",
+    label: "Focus pane up",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
+  },
+  {
+    id: "pane-focus-down",
+    action: "pane.focus.down",
+    combo: "Mod+Shift+ArrowDown",
+    section: "tabs",
+    label: "Focus pane down",
+    when: { editableWhenRebound: true },
+    note: "Not while typing (the default collides with text selection) -- rebinding lifts that",
+  },
+  {
+    id: "pane-move-tab-next",
+    action: "pane.move-tab.next",
+    combo: "Mod+Shift+M",
+    section: "tabs",
+    label: "Move tab to the next pane",
+    when: { global: true },
+  },
+  {
+    id: "settings-open",
+    action: "settings.open",
+    combo: "Mod+,",
+    section: "general",
+    label: "Open settings",
+    when: { global: true },
+  },
+  {
+    // Not Mod+Digit: Ctrl/Cmd+1-9 already switches the *browser's own*
+    // tabs in Chrome/Edge/Firefox and the page never reliably sees the
+    // keydown, matching Paseo's own web-runtime substitution (its
+    // `workspace.navigate.index` is `Mod+Digit` only under `desktop: true`;
+    // the web build gets `Alt+Digit` instead -- `keyboard-shortcuts.ts`
+    // around lines 538-566). Exact-modifier matching (`matchCombo`) is
+    // what keeps this from colliding with `tab-jump`'s `Mod+Alt+Digit`
+    // below -- Alt alone and Mod+Alt are different combos. A future
+    // desktop (Tauri) runtime that can actually own Ctrl/Cmd+digit could
+    // offer `Mod+Digit` there; nothing here forecloses that.
+    id: "sidebar-task-jump",
+    action: "sidebar.task-jump",
+    combo: "Alt+Digit",
+    section: "navigation",
+    label: "Jump to task by number",
+    when: { global: true },
+  },
+  {
     id: "composer-focus",
     action: "composer.focus",
     combo: "Mod+L",
@@ -185,9 +323,10 @@ export const UNASSIGNED = "";
 
 /** A binding with its effective combo resolved and parsed. `combo`/`parsed` are null when unassigned. */
 export interface ResolvedBinding extends ShortcutBinding {
-  /** The combo actually in effect: the override if there is one, else the default. */
+  /** The combo actually in effect: the override if there is one, else the default. Space-separated for a chord (`"Mod+K S"`). */
   effectiveCombo: string | null;
-  parsed: KeyCombo | null;
+  /** The effective combo's steps -- length 1 for a plain binding, more for a chord. */
+  parsed: KeyCombo[] | null;
   /** True when the effective combo differs from what the binding shipped with. */
   overridden: boolean;
 }
@@ -219,26 +358,33 @@ export function resolveBindings(
       return {
         ...binding,
         effectiveCombo: combo,
-        parsed: parseCombo(combo),
+        parsed: parseChord(combo),
         overridden: combo !== binding.combo,
       };
     } catch {
       return {
         ...binding,
         effectiveCombo: binding.combo,
-        parsed: parseCombo(binding.combo),
+        parsed: parseChord(binding.combo),
         overridden: false,
       };
     }
   });
 }
 
-/** Whether a binding is allowed to fire with focus where it currently is. */
-export function bindingAllowedInScope(binding: ShortcutBinding, scope: FocusScope): boolean {
+/** Whether a binding is allowed to fire with focus where it currently is. `overridden` is `ResolvedBinding`'s field -- omitted (or false), a binding with `editableWhenRebound` is treated as still on its default combo. */
+export function bindingAllowedInScope(
+  binding: ShortcutBinding & { overridden?: boolean },
+  scope: FocusScope,
+): boolean {
   // No binding fires inside a modal: a dialog owns its own keyboard, down
   // to Escape (which closes it rather than interrupting a run).
   if (scope === "modal") return false;
-  if (scope === "editable" || scope === "terminal") return binding.when?.global === true;
+  if (binding.when?.global === true) return true;
+  if (scope === "editable") {
+    return binding.when?.editableWhenRebound === true && binding.overridden === true;
+  }
+  if (scope === "terminal") return false;
   return true;
 }
 
@@ -248,31 +394,140 @@ export interface ShortcutMatch {
   payload: ActionPayload;
 }
 
+/** How far into a chord attempt the matcher currently is -- opaque to callers besides {@link INITIAL_CHORD_STATE} and the value {@link resolveChordStep} hands back. */
+export interface ChordState {
+  /** Indices into the bindings array still alive in the current attempt. Empty at step 0: nothing pending. */
+  candidateIndices: number[];
+  step: number;
+}
+
+/** The matcher's state before any key of a chord has been pressed. */
+export const INITIAL_CHORD_STATE: ChordState = { candidateIndices: [], step: 0 };
+
+/** How long a chord's first key(s) wait for the next step before the attempt is abandoned -- Paseo's own `CHORD_TIMEOUT_MS`. */
+export const CHORD_TIMEOUT_MS = 1500;
+
+export interface ChordResolution {
+  match: ShortcutMatch | null;
+  nextChordState: ChordState;
+  /** True while this event was consumed as the start or continuation of a chord -- the caller should still preventDefault even though no action fired. */
+  pending: boolean;
+}
+
+function resolveInitialChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+): ChordResolution {
+  const advancing: number[] = [];
+  let singleMatch: ShortcutMatch | null = null;
+
+  bindings.forEach((binding, index) => {
+    const chord = binding.parsed;
+    const firstCombo = chord?.[0];
+    if (!chord || !firstCombo) return;
+    if (!bindingAllowedInScope(binding, context.scope)) return;
+    const stepMatch = matchCombo(firstCombo, event, context.isMac);
+    if (stepMatch === null) return;
+    if (chord.length > 1) {
+      advancing.push(index);
+      return;
+    }
+    if (!singleMatch) {
+      singleMatch = {
+        binding,
+        action: binding.action,
+        payload: stepMatch.digit === undefined ? null : { digit: stepMatch.digit },
+      };
+    }
+  });
+
+  if (advancing.length > 0) {
+    return { match: null, nextChordState: { candidateIndices: advancing, step: 1 }, pending: true };
+  }
+  return { match: singleMatch, nextChordState: INITIAL_CHORD_STATE, pending: false };
+}
+
+function resolveAdvancingChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+  chordState: ChordState,
+): ChordResolution {
+  const matching: number[] = [];
+  let completed: ShortcutMatch | null = null;
+
+  for (const index of chordState.candidateIndices) {
+    const binding = bindings[index];
+    const chord = binding?.parsed;
+    const combo = chord?.[chordState.step];
+    if (!binding || !chord || !combo) continue;
+    if (!bindingAllowedInScope(binding, context.scope)) continue;
+    const stepMatch = matchCombo(combo, event, context.isMac);
+    if (stepMatch === null) continue;
+    if (chordState.step + 1 === chord.length) {
+      completed = {
+        binding,
+        action: binding.action,
+        payload: stepMatch.digit === undefined ? null : { digit: stepMatch.digit },
+      };
+      break;
+    }
+    matching.push(index);
+  }
+
+  if (completed) return { match: completed, nextChordState: INITIAL_CHORD_STATE, pending: false };
+  if (matching.length > 0) {
+    return {
+      match: null,
+      nextChordState: { candidateIndices: matching, step: chordState.step + 1 },
+      pending: true,
+    };
+  }
+  // A wrong second key cancels the attempt outright rather than falling back
+  // to step 0 as if it were a fresh first key -- the plan's "a wrong second
+  // key cancels" scenario, not "restarts".
+  return { match: null, nextChordState: INITIAL_CHORD_STATE, pending: false };
+}
+
 /**
- * The first binding this event fires, or null.
- *
- * Auto-repeat is dropped outright: every action here is a discrete command
- * (open a palette, close a tab), and holding the key down should do it once.
+ * Advances the chord matcher by one keydown. Stateless besides what the
+ * caller threads back in as `chordState` -- the timeout that abandons a
+ * stale attempt is the caller's to own (a real `setTimeout` in
+ * `keyboard-provider.tsx`, nothing here), since this function has no way to
+ * observe the passage of time on its own.
+ */
+export function resolveChordStep(
+  bindings: readonly ResolvedBinding[],
+  event: KeyEventLike,
+  context: { isMac: boolean; scope: FocusScope },
+  chordState: ChordState = INITIAL_CHORD_STATE,
+): ChordResolution {
+  if (event.repeat) return { match: null, nextChordState: chordState, pending: false };
+  // Pressing a modifier emits its own keydown before the combo that holds
+  // it, so a chord waiting on e.g. `Ctrl+J` sees a bare `Control` first.
+  // That keydown matches no combo, and resolving it would drop the chord
+  // back to its first step -- leave the chord exactly where it is instead.
+  if (isModifierKeyCode(event.code)) {
+    return { match: null, nextChordState: chordState, pending: false };
+  }
+  if (chordState.step === 0) return resolveInitialChordStep(bindings, event, context);
+  return resolveAdvancingChordStep(bindings, event, context, chordState);
+}
+
+/**
+ * The first binding this event fires on its own (chord-less), or null.
+ * Convenience wrapper over {@link resolveChordStep} for callers -- most
+ * tests, and any one-shot check -- that don't need to track chord state
+ * across events: a plain single-combo binding always resolves on its first
+ * key, same as before chords existed.
  */
 export function matchShortcut(
   bindings: readonly ResolvedBinding[],
   event: KeyEventLike,
   context: { isMac: boolean; scope: FocusScope },
 ): ShortcutMatch | null {
-  if (event.repeat) return null;
-
-  for (const binding of bindings) {
-    if (binding.parsed === null) continue;
-    if (!bindingAllowedInScope(binding, context.scope)) continue;
-    const match = matchCombo(binding.parsed, event, context.isMac);
-    if (match === null) continue;
-    return {
-      binding,
-      action: binding.action,
-      payload: match.digit === undefined ? null : { digit: match.digit },
-    };
-  }
-  return null;
+  return resolveChordStep(bindings, event, context, INITIAL_CHORD_STATE).match;
 }
 
 export interface HelpRow {
@@ -281,6 +536,8 @@ export interface HelpRow {
   note?: string;
   /** How the effective combo reads on this platform, or null when unassigned. */
   keys: string | null;
+  /** The effective combo's raw storage spelling ("Mod+K S"), or null when unassigned -- what a search box matches "ctrl"/"cmd"-style aliases against; `keys` is display-only. */
+  effectiveCombo: string | null;
   overridden: boolean;
 }
 
@@ -310,7 +567,8 @@ export function helpSections(bindings: readonly ResolvedBinding[], isMac: boolea
         id: b.id,
         label: b.label,
         ...(b.note === undefined ? {} : { note: b.note }),
-        keys: b.effectiveCombo === null ? null : formatCombo(b.effectiveCombo, isMac),
+        keys: b.effectiveCombo === null ? null : formatChord(b.effectiveCombo, isMac),
+        effectiveCombo: b.effectiveCombo,
         overridden: b.overridden,
       })),
   })).filter((section) => section.rows.length > 0);
@@ -334,14 +592,14 @@ export function conflictingBindings(
 ): ResolvedBinding[] {
   let target: string;
   try {
-    target = canonicalCombo(combo, isMac);
+    target = canonicalChord(combo, isMac);
   } catch {
     return [];
   }
   return bindings.filter((b) => {
     if (b.id === exceptId || b.effectiveCombo === null) return false;
     try {
-      return canonicalCombo(b.effectiveCombo, isMac) === target;
+      return canonicalChord(b.effectiveCombo, isMac) === target;
     } catch {
       return false;
     }

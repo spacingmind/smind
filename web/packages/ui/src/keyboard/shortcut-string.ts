@@ -227,6 +227,70 @@ export function formatCombo(input: string, isMac: boolean): string {
   return [...modifiers.map((m) => (m === "Mod" ? "Ctrl" : m)), key].join("+");
 }
 
+/**
+ * A chord: one or more combos pressed in sequence, space-separated in a
+ * binding's combo string (`"Mod+K S"`). A plain single-combo binding is a
+ * chord of length 1 -- there is no separate representation to keep in sync.
+ */
+export function parseChord(input: string): KeyCombo[] {
+  return input.split(" ").map(parseCombo);
+}
+
+/** The inverse of {@link parseCombo}: a combo's canonical storage spelling. */
+function comboToString(combo: KeyCombo): string {
+  const parts: string[] = [];
+  if (combo.mod === true) parts.push("Mod");
+  if (combo.ctrl === true) parts.push("Ctrl");
+  if (combo.alt === true) parts.push("Alt");
+  if (combo.shift === true) parts.push("Shift");
+  if (combo.meta === true) parts.push("Cmd");
+  const name = CODE_TO_NAME[combo.code];
+  if (name !== undefined) parts.push(name);
+  return parts.join("+");
+}
+
+/** The inverse of {@link parseChord}: a parsed chord's storage spelling, for the round trip a rebinding capture writes back. */
+export function chordToString(chord: readonly KeyCombo[]): string {
+  return chord.map(comboToString).join(" ");
+}
+
+/** {@link canonicalCombo}, extended step-by-step over a chord -- what a conflict check compares. */
+export function canonicalChord(input: string, isMac: boolean): string {
+  return input
+    .split(" ")
+    .map((step) => canonicalCombo(step, isMac))
+    .join(" ");
+}
+
+/** {@link formatCombo}, extended step-by-step over a chord for display -- `"⌘K then S"`. */
+export function formatChord(input: string, isMac: boolean): string {
+  return input
+    .split(" ")
+    .map((step) => formatCombo(step, isMac))
+    .join(" then ");
+}
+
+const MODIFIER_CODES = new Set([
+  "MetaLeft",
+  "MetaRight",
+  "ControlLeft",
+  "ControlRight",
+  "AltLeft",
+  "AltRight",
+  "ShiftLeft",
+  "ShiftRight",
+]);
+
+/**
+ * Whether a keydown carries a modifier key itself rather than a key pressed
+ * with one. The browser emits one of these before every combo that holds a
+ * modifier -- mid-chord, that keydown matches no combo, and resolving it
+ * would wrongly drop the chord back to its first step. It decides nothing.
+ */
+export function isModifierKeyCode(code: string | undefined): boolean {
+  return code !== undefined && MODIFIER_CODES.has(code);
+}
+
 /** The combo string an event spells, or null for a bare modifier press -- the capture side of a rebinding UI. */
 export function comboStringFromEvent(event: KeyEventLike): string | null {
   const parts: string[] = [];

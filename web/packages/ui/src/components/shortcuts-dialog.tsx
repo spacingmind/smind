@@ -1,24 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { useKeyboard, useModalKeyboardLock } from "@/keyboard/keyboard-provider";
-import { comboStringFromEvent, formatCombo } from "@/keyboard/shortcut-string";
+import { useKeyboard } from "@/keyboard/keyboard-provider";
+import { filterShortcutHelpSections } from "@/keyboard/shortcut-help-search";
+import { comboStringFromEvent } from "@/keyboard/shortcut-string";
 import { conflictingBindings, helpSections, UNASSIGNED } from "@/keyboard/shortcuts";
 
 /**
- * The shortcuts reference (`Shift+?`), and the place bindings are rebound.
- *
- * Rebinding lives here rather than waiting for Item 13's settings screen
- * for a plain reason: this is the surface someone is already looking at
- * when they decide a shortcut is wrong. Item 13 can embed the same
- * `<ShortcutRows />` when it lands.
+ * The grouped, searchable, rebindable binding list -- what the Settings
+ * screen's Shortcuts section (`components/settings/shortcuts-section.tsx`)
+ * renders. This used to be a standalone `Shift+?` dialog; moving rebinding
+ * into Settings (AC5 of `docs/plans/active/web-keyboard-tabs.md`) folded
+ * the dialog into this file's `<ShortcutRows />`, which is now the whole of
+ * what this file exports.
  */
 
 /** Renders a formatted combo as individual key caps, split on the platform's own separator. */
@@ -44,22 +38,35 @@ function KeyCaps({ keys }: { keys: string }) {
 }
 
 /**
- * One binding's row. While `capturing`, the next key press becomes the new
- * combo -- Escape cancels instead, since a binding whose combo is Escape
- * would otherwise be impossible to back out of.
+ * One binding's row.
+ *
+ * "Change" captures a single key press and commits immediately -- the
+ * overwhelming common case, and unchanged from before chords existed.
+ * "Record chord…" instead captures key press after key press, each
+ * appended as a further step, until Enter commits the whole sequence or
+ * Escape cancels it; the first Escape-cancels-immediately shortcut Change
+ * offers isn't available there, since Escape is itself a legitimate chord
+ * step and a binding whose combo is Escape must stay reachable. Committing
+ * on an explicit Enter rather than a pause avoids needing a real timer at
+ * all here (a fixed pause long enough for a deliberate multi-key chord
+ * would also be long enough to make a single-key rebind feel laggy) --
+ * unlike the live matcher's own {@link CHORD_TIMEOUT_MS}, which times a
+ * chord the user is trying to *use*, not one they're *recording*.
  */
 function ShortcutRow({
   row,
   capturing,
   onStartCapture,
+  onStartChordCapture,
   onCancelCapture,
   onRebind,
   onReset,
   conflictLabel,
 }: {
   row: ReturnType<typeof helpSections>[number]["rows"][number];
-  capturing: boolean;
+  capturing: false | "single" | "chord";
   onStartCapture: () => void;
+  onStartChordCapture: () => void;
   onCancelCapture: () => void;
   onRebind: (combo: string) => void;
   onReset: () => void;
@@ -68,17 +75,28 @@ function ShortcutRow({
   useEffect(() => {
     if (!capturing) return;
 
+    const steps: string[] = [];
+
     function onKeyDown(event: KeyboardEvent) {
       event.preventDefault();
       event.stopPropagation();
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && (capturing === "single" || steps.length === 0)) {
         onCancelCapture();
+        return;
+      }
+      if (capturing === "chord" && event.key === "Enter") {
+        if (steps.length > 0) onRebind(steps.join(" "));
         return;
       }
       const combo = comboStringFromEvent(event);
       // A bare modifier press (Shift alone, on the way to Shift+K) yields
-      // null -- stay in capture rather than treating it as a failed attempt.
-      if (combo !== null) onRebind(combo);
+      // null -- stay in capture rather than treating it as a failed step.
+      if (combo === null) return;
+      if (capturing === "single") {
+        onRebind(combo);
+        return;
+      }
+      steps.push(combo);
     }
 
     window.addEventListener("keydown", onKeyDown, true);
@@ -101,7 +119,11 @@ function ShortcutRow({
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
-        {capturing ? (
+        {capturing === "chord" ? (
+          <span className="text-xs text-foreground-muted" data-testid="shortcut-capturing">
+            Recording a chord… (Enter to save, Esc to cancel)
+          </span>
+        ) : capturing === "single" ? (
           <span className="text-xs text-foreground-muted" data-testid="shortcut-capturing">
             Press a key… (Esc to cancel)
           </span>
@@ -120,6 +142,16 @@ function ShortcutRow({
         >
           {capturing ? "Cancel" : "Change"}
         </Button>
+        {!capturing && (
+          <Button
+            variant="ghost"
+            size="xs"
+            onClick={onStartChordCapture}
+            aria-label={`Record a chord for ${row.label}`}
+          >
+            Record chord…
+          </Button>
+        )}
         {row.overridden && !capturing && (
           <Button
             variant="ghost"
@@ -135,85 +167,72 @@ function ShortcutRow({
   );
 }
 
-/** The grouped binding list. Exported so Item 13's settings screen can embed it without a dialog around it. */
-export function ShortcutRows() {
-  const { bindings, isMac, rebind, resetBinding } = useKeyboard();
-  const [capturingId, setCapturingId] = useState<string | null>(null);
+/**
+ * The grouped binding list. Exported so the settings screen's Shortcuts
+ * section (`components/settings/shortcuts-section.tsx`) can embed it
+ * without a dialog around it, narrowed by that section's own search box.
+ */
+export function ShortcutRows({ query = "" }: { query?: string } = {}) {
+  const { bindings, isMac, overrides, rebind, resetBinding, resetAllBindings } = useKeyboard();
+  const [capturing, setCapturing] = useState<{ id: string; mode: "single" | "chord" } | null>(null);
 
-  const sections = helpSections(bindings, isMac);
+  const sections = filterShortcutHelpSections(helpSections(bindings, isMac), query);
 
   const handleRebind = useCallback(
     (bindingId: string, combo: string) => {
       rebind(bindingId, combo);
-      setCapturingId(null);
+      setCapturing(null);
     },
     [rebind],
   );
 
   return (
-    <div className="flex flex-col gap-4" data-testid="shortcut-sections">
-      {sections.map((section) => (
-        <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
-          <h3 className="mb-1 text-metadata-label tracking-wide text-foreground-muted uppercase">
-            {section.title}
-          </h3>
-          <div className="divide-y divide-border">
-            {section.rows.map((row) => {
-              const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
-              const conflicts =
-                effective === undefined || effective === null
-                  ? []
-                  : conflictingBindings(bindings, effective, row.id, isMac);
-              return (
-                <ShortcutRow
-                  key={row.id}
-                  row={row}
-                  capturing={capturingId === row.id}
-                  onStartCapture={() => setCapturingId(row.id)}
-                  onCancelCapture={() => setCapturingId(null)}
-                  onRebind={(combo) => handleRebind(row.id, combo)}
-                  onReset={() => resetBinding(row.id)}
-                  conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
-                />
-              );
-            })}
-          </div>
-        </section>
-      ))}
+    <div className="flex flex-col gap-4">
+      {sections.length === 0 ? (
+        <p className="text-sm text-foreground-muted" data-testid="shortcut-sections-empty">
+          No shortcuts match "{query}".
+        </p>
+      ) : (
+        <div className="flex flex-col gap-4" data-testid="shortcut-sections">
+          {sections.map((section) => (
+            <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
+              <h3 className="mb-1 text-metadata-label tracking-wide text-foreground-muted uppercase">
+                {section.title}
+              </h3>
+              <div className="divide-y divide-border">
+                {section.rows.map((row) => {
+                  const effective = bindings.find((b) => b.id === row.id)?.effectiveCombo;
+                  const conflicts =
+                    effective === undefined || effective === null
+                      ? []
+                      : conflictingBindings(bindings, effective, row.id, isMac);
+                  return (
+                    <ShortcutRow
+                      key={row.id}
+                      row={row}
+                      capturing={capturing?.id === row.id ? capturing.mode : false}
+                      onStartCapture={() => setCapturing({ id: row.id, mode: "single" })}
+                      onStartChordCapture={() => setCapturing({ id: row.id, mode: "chord" })}
+                      onCancelCapture={() => setCapturing(null)}
+                      onRebind={(combo) => handleRebind(row.id, combo)}
+                      onReset={() => resetBinding(row.id)}
+                      conflictLabel={conflicts.length > 0 ? conflicts.map((c) => c.label).join(", ") : null}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+      {Object.keys(overrides).length > 0 && (
+        <div className="flex justify-end">
+          <Button variant="ghost" size="sm" onClick={resetAllBindings}>
+            Reset all to defaults
+          </Button>
+        </div>
+      )}
     </div>
-  );
-}
-
-export function ShortcutsDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const { overrides, resetAllBindings, isMac } = useKeyboard();
-  useModalKeyboardLock(open);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[80svh] overflow-y-auto sm:max-w-2xl" data-testid="shortcuts-dialog">
-        <DialogHeader>
-          <DialogTitle>Keyboard shortcuts</DialogTitle>
-          <DialogDescription>
-            Press {formatCombo("Shift+?", isMac)} any time to reopen this. Click Change on a row to
-            rebind it.
-          </DialogDescription>
-        </DialogHeader>
-        <ShortcutRows />
-        {Object.keys(overrides).length > 0 && (
-          <div className="flex justify-end">
-            <Button variant="ghost" size="sm" onClick={resetAllBindings}>
-              Reset all to defaults
-            </Button>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
   );
 }
 

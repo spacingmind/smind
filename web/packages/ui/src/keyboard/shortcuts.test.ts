@@ -4,11 +4,14 @@ import {
   bindingAllowedInScope,
   conflictingBindings,
   helpSections,
+  INITIAL_CHORD_STATE,
   matchShortcut,
   resolveBindings,
+  resolveChordStep,
   SECTION_ORDER,
   SHORTCUT_BINDINGS,
   UNASSIGNED,
+  type ChordState,
   type ShortcutBinding,
 } from "@/keyboard/shortcuts";
 import type { KeyEventLike } from "@/keyboard/shortcut-string";
@@ -150,6 +153,39 @@ describe("bindingAllowedInScope", () => {
     expect(bindingAllowedInScope(global, "terminal")).toBe(true);
     expect(bindingAllowedInScope(global, "modal")).toBe(false);
   });
+
+  describe("editableWhenRebound", () => {
+    const paneFocus: ShortcutBinding = {
+      id: "pane-focus-left",
+      action: "pane.focus.left",
+      combo: "Mod+Shift+ArrowLeft",
+      section: "tabs",
+      label: "Focus pane left",
+      when: { editableWhenRebound: true },
+    };
+
+    it("blocks the default combo in editable, matching the unmarked default", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: false }, "editable")).toBe(false);
+      expect(bindingAllowedInScope(paneFocus, "editable")).toBe(false);
+    });
+
+    it("allows a rebound combo in editable", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "editable")).toBe(true);
+    });
+
+    it("does not extend to terminal scope -- unlike global, it stays blocked there even when rebound", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "terminal")).toBe(false);
+    });
+
+    it("fires outside editable/terminal regardless of override", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: false }, "other")).toBe(true);
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "other")).toBe(true);
+    });
+
+    it("never fires in a modal, rebound or not", () => {
+      expect(bindingAllowedInScope({ ...paneFocus, overridden: true }, "modal")).toBe(false);
+    });
+  });
 });
 
 describe("resolveBindings", () => {
@@ -217,6 +253,62 @@ describe("helpSections", () => {
   });
 });
 
+describe("pane-focus defaults vs. a rebind, in an editable field", () => {
+  const paneFocusLeft = event({ key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+
+  it("the shipped default (Mod+Shift+ArrowLeft) does not fire in editable scope -- it's the browser's word-select key there", () => {
+    const bindings = resolveBindings();
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "editable" }),
+    ).toBeNull();
+  });
+
+  it("the same default still fires outside editable/terminal scope", () => {
+    const bindings = resolveBindings();
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "other" })?.action,
+    ).toBe("pane.focus.left");
+  });
+
+  it("a rebind of the same binding does fire in editable scope", () => {
+    const bindings = resolveBindings(SHORTCUT_BINDINGS, { "pane-focus-left": "Alt+Shift+H" });
+    const rebound = event({ key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    expect(
+      matchShortcut(bindings, rebound, { isMac: false, scope: "editable" })?.action,
+    ).toBe("pane.focus.left");
+    // The original default combo no longer matches anything, rebound or not.
+    expect(
+      matchShortcut(bindings, paneFocusLeft, { isMac: false, scope: "editable" }),
+    ).toBeNull();
+  });
+});
+
+describe("sidebar.task-jump (Alt+Digit) vs. tab.jump (Mod+Alt+Digit)", () => {
+  const bindings = resolveBindings();
+  const NON_MAC_2 = { isMac: false, scope: "other" } as const;
+
+  it("Alt+2 alone fires sidebar.task-jump, not tab.jump", () => {
+    const match = matchShortcut(bindings, event({ key: "2", code: "Digit2", altKey: true }), NON_MAC_2);
+    expect(match?.action).toBe("sidebar.task-jump");
+    expect(match?.payload).toEqual({ digit: 2 });
+  });
+
+  it("Ctrl+Alt+2 fires tab.jump, not sidebar.task-jump -- exact-modifier matching keeps the two apart", () => {
+    const match = matchShortcut(
+      bindings,
+      event({ key: "2", code: "Digit2", ctrlKey: true, altKey: true }),
+      NON_MAC_2,
+    );
+    expect(match?.action).toBe("tab.jump");
+  });
+
+  it("Ctrl+2 alone (no Alt) fires neither -- not the browser-reserved Mod+Digit this binding deliberately avoids", () => {
+    expect(
+      matchShortcut(bindings, event({ key: "2", code: "Digit2", ctrlKey: true }), NON_MAC_2),
+    ).toBeNull();
+  });
+});
+
 describe("conflictingBindings", () => {
   it("reports another binding already on the same combo, never the binding itself", () => {
     const resolved = resolveBindings(SHORTCUT_BINDINGS, { "tab-close": "Mod+K" });
@@ -240,5 +332,151 @@ describe("conflictingBindings", () => {
 
   it("returns nothing for an unparseable combo instead of throwing", () => {
     expect(conflictingBindings(resolveBindings(), "Mod+NotAKey", "tab-close", false)).toEqual([]);
+  });
+});
+
+describe("resolveChordStep", () => {
+  const chordBinding: ShortcutBinding = {
+    id: "go-to-settings",
+    action: "shortcuts.help",
+    combo: "Mod+K S",
+    section: "general",
+    label: "Chord test binding",
+  };
+  const plainBinding: ShortcutBinding = {
+    id: "palette-open",
+    action: "palette.open",
+    combo: "Mod+K",
+    section: "general",
+    label: "Plain binding sharing the chord's first key",
+  };
+  const bindings = resolveBindings([chordBinding, plainBinding]);
+
+  const step1 = event({ key: "k", code: "KeyK", ctrlKey: true });
+  const step2 = event({ key: "s", code: "KeyS" });
+
+  it("waits for the second key instead of firing on the first", () => {
+    const result = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    expect(result.match).toBeNull();
+    expect(result.pending).toBe(true);
+    expect(result.nextChordState.step).toBe(1);
+  });
+
+  it("completes on the matching second key", () => {
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    const result = resolveChordStep(bindings, step2, NON_MAC, afterFirst.nextChordState);
+    expect(result.match?.action).toBe("shortcuts.help");
+    expect(result.pending).toBe(false);
+    expect(result.nextChordState).toEqual(INITIAL_CHORD_STATE);
+  });
+
+  it("a wrong second key cancels the attempt rather than firing anything", () => {
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    const wrongKey = event({ key: "z", code: "KeyZ" });
+    const result = resolveChordStep(bindings, wrongKey, NON_MAC, afterFirst.nextChordState);
+    expect(result.match).toBeNull();
+    expect(result.nextChordState).toEqual(INITIAL_CHORD_STATE);
+  });
+
+  it("the caller's abandon-on-timeout is a plain reset back to the initial state", () => {
+    // resolveChordStep has no timers of its own (see its doc comment) --
+    // the "waits for the timeout, then cancels" behavior is the caller
+    // (keyboard-provider.tsx) resetting chordState back to
+    // INITIAL_CHORD_STATE and discarding whatever candidates were pending.
+    // Modelled here as: an in-progress attempt, then a fresh event handled
+    // against INITIAL_CHORD_STATE, behaves exactly as if no chord had
+    // started.
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    expect(afterFirst.nextChordState.step).toBe(1);
+    const abandoned: ChordState = INITIAL_CHORD_STATE;
+    const result = resolveChordStep(bindings, step2, NON_MAC, abandoned);
+    expect(result.match).toBeNull();
+  });
+
+  it("survives a re-render: chord state threaded back in from a previous call still completes", () => {
+    // The whole point of resolveChordStep being a pure function of its
+    // `chordState` argument (not internal state) is that a caller can
+    // re-render between the two calls without losing the attempt, as long
+    // as it keeps threading `nextChordState` back in -- which is exactly
+    // what `keyboard-provider.tsx`'s ref (not React state) does.
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    const carriedOver: ChordState = { ...afterFirst.nextChordState };
+    const result = resolveChordStep(bindings, step2, NON_MAC, carriedOver);
+    expect(result.match?.action).toBe("shortcuts.help");
+  });
+
+  it("a bare modifier keydown mid-chord decides nothing", () => {
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    const bareModifier = event({ key: "Control", code: "ControlLeft", ctrlKey: true });
+    const result = resolveChordStep(bindings, bareModifier, NON_MAC, afterFirst.nextChordState);
+    expect(result.nextChordState).toEqual(afterFirst.nextChordState);
+    expect(result.pending).toBe(false);
+    expect(result.match).toBeNull();
+  });
+
+  it("ignores auto-repeat mid-chord without disturbing the pending state", () => {
+    const afterFirst = resolveChordStep(bindings, step1, NON_MAC, INITIAL_CHORD_STATE);
+    const repeated = event({ ...step2, repeat: true });
+    const result = resolveChordStep(bindings, repeated, NON_MAC, afterFirst.nextChordState);
+    expect(result.match).toBeNull();
+    expect(result.nextChordState).toEqual(afterFirst.nextChordState);
+  });
+});
+
+describe("matchShortcut with a chord binding", () => {
+  it("does not fire a chord on its first key alone", () => {
+    const bindings = resolveBindings([
+      {
+        id: "go-to-settings",
+        action: "shortcuts.help",
+        combo: "Mod+K S",
+        section: "general",
+        label: "Chord test binding",
+      },
+    ]);
+    expect(
+      matchShortcut(bindings, event({ key: "k", code: "KeyK", ctrlKey: true }), NON_MAC),
+    ).toBeNull();
+  });
+});
+
+describe("override migration between single-combo and chord", () => {
+  const binding: ShortcutBinding = {
+    id: "toggleable",
+    action: "shortcuts.help",
+    combo: "Mod+K",
+    section: "general",
+    label: "Migratable binding",
+  };
+
+  it("a chord override on a single-combo default still matches its full sequence", () => {
+    const resolved = resolveBindings([binding], { toggleable: "Mod+K S" });
+    const row = resolved.find((b) => b.id === "toggleable")!;
+    expect(row.effectiveCombo).toBe("Mod+K S");
+    expect(row.overridden).toBe(true);
+
+    const afterFirst = resolveChordStep(
+      resolved,
+      event({ key: "k", code: "KeyK", ctrlKey: true }),
+      NON_MAC,
+      INITIAL_CHORD_STATE,
+    );
+    expect(afterFirst.pending).toBe(true);
+    const result = resolveChordStep(resolved, event({ key: "s", code: "KeyS" }), NON_MAC, afterFirst.nextChordState);
+    expect(result.match?.action).toBe("shortcuts.help");
+  });
+
+  it("a single-combo override on a chord default resolves on the first key, matching a plain binding", () => {
+    const chordDefault: ShortcutBinding = { ...binding, combo: "Mod+K S" };
+    const resolved = resolveBindings([chordDefault], { toggleable: "Mod+Shift+K" });
+    const row = resolved.find((b) => b.id === "toggleable")!;
+    expect(row.effectiveCombo).toBe("Mod+Shift+K");
+    expect(
+      matchShortcut(
+        resolved,
+        event({ key: "k", code: "KeyK", ctrlKey: true, shiftKey: true }),
+        NON_MAC,
+      )?.action,
+    ).toBe("shortcuts.help");
   });
 });

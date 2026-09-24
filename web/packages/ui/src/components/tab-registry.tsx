@@ -216,10 +216,22 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
  * The tab strip's "+" affordance (Item 3): opens any base tab kind. The
  * parent decides open-vs-activate -- it owns the tab state, so a kind
  * that's already open just comes forward rather than duplicating.
+ *
+ * `open`/`onOpenChange` are optional: omitted, the menu is the ordinary
+ * click-to-open Radix default; passed, the keyboard's `tab.new` action
+ * (App.tsx) can pop this exact pane's menu open without a synthetic click.
  */
-export function NewTabButton({ onOpen }: { onOpen: (kind: BaseTabKind) => void }) {
+export function NewTabButton({
+  onOpen,
+  open,
+  onOpenChange,
+}: {
+  onOpen: (kind: BaseTabKind) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}) {
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"

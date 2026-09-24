@@ -312,6 +312,164 @@ describe("handler registry", () => {
   });
 });
 
+describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
+  it("the default pane-focus combo neither fires nor preventDefaults inside a text field -- it's the browser's own selection key there", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <Claim action="pane.focus.left" onFire={fire} />
+        <textarea aria-label="composer" />
+      </KeyboardProvider>,
+    );
+
+    const textarea = screen.getByLabelText("composer");
+    textarea.focus();
+    const domEvent = new KeyboardEvent("keydown", {
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+      ctrlKey: true,
+      shiftKey: true,
+      cancelable: true,
+      bubbles: true,
+    });
+    textarea.dispatchEvent(domEvent);
+
+    expect(fire).not.toHaveBeenCalled();
+    expect(domEvent.defaultPrevented).toBe(false);
+  });
+
+  it("a rebound pane-focus combo does fire inside a text field", () => {
+    const fire = vi.fn();
+    function Host() {
+      const { rebind } = useKeyboard();
+      return (
+        <>
+          <Claim action="pane.focus.left" onFire={fire} />
+          <textarea aria-label="composer" />
+          <button onClick={() => rebind("pane-focus-left", "Alt+Shift+H")}>rebind</button>
+        </>
+      );
+    }
+    render(
+      <KeyboardProvider>
+        <Host />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind"));
+
+    const textarea = screen.getByLabelText("composer");
+    textarea.focus();
+    fireEvent.keyDown(textarea, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("the default combo still fires outside a text field", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <Claim action="pane.focus.left" onFire={fire} />
+      </KeyboardProvider>,
+    );
+
+    fireEvent.keyDown(document, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("chords", () => {
+  function ChordHost({ fire }: { fire: (payload: unknown) => void }) {
+    const { rebind } = useKeyboard();
+    return (
+      <>
+        <Claim action="palette.open" onFire={fire} />
+        <button onClick={() => rebind("palette-open", "Mod+K S")}>rebind to chord</button>
+      </>
+    );
+  }
+
+  it("fires only after both keys of a rebound chord, not on the first alone", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <ChordHost fire={fire} />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    expect(fire).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("abandons an in-progress chord once the timeout elapses", () => {
+    vi.useFakeTimers();
+    try {
+      const fire = vi.fn();
+      render(
+        <KeyboardProvider>
+          <ChordHost fire={fire} />
+        </KeyboardProvider>,
+      );
+      fireEvent.click(screen.getByText("rebind to chord"));
+
+      pressCtrl("k", "KeyK");
+      vi.advanceTimersByTime(1500);
+      fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+      expect(fire).not.toHaveBeenCalled();
+
+      // The attempt truly reset, not just paused: starting over from the
+      // first key still works.
+      pressCtrl("k", "KeyK");
+      fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+      expect(fire).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("survives a re-render between the chord's two keys", () => {
+    const fire = vi.fn();
+    function Host() {
+      const [, setTick] = useState(0);
+      return (
+        <>
+          <ChordHost fire={fire} />
+          <button onClick={() => setTick((n) => n + 1)}>rerender</button>
+        </>
+      );
+    }
+    render(
+      <KeyboardProvider>
+        <Host />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    fireEvent.click(screen.getByText("rerender"));
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it("a wrong second key cancels the chord instead of firing", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <ChordHost fire={fire} />
+      </KeyboardProvider>,
+    );
+    fireEvent.click(screen.getByText("rebind to chord"));
+
+    pressCtrl("k", "KeyK");
+    fireEvent.keyDown(document, { key: "z", code: "KeyZ" });
+    fireEvent.keyDown(document, { key: "s", code: "KeyS" });
+    expect(fire).not.toHaveBeenCalled();
+  });
+});
+
 describe("rebinding", () => {
   it("applies an override, persists it, and restores it on remount", () => {
     const fire = vi.fn();

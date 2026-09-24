@@ -71,6 +71,19 @@ describe("SettingsScreen shell", () => {
     expect(onNavigateBack).toHaveBeenCalledTimes(2);
   });
 
+  it("initialSectionId opens on that section instead of the first registered one", () => {
+    render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="shortcuts" />);
+
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
+  });
+
+  it("an unknown initialSectionId falls back to the first registered section instead of blanking the screen", () => {
+    render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="does-not-exist" />);
+
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+  });
+
   it("registering a new section in the test makes it appear without editing the shell", () => {
     const unregister = registerSettingsSection({
       id: "test-only",
