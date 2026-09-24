@@ -9,6 +9,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use smind_daemon_client as dclient;
 use smind_daemon_client::{ClientEvent, Config};
 
+mod deeplink;
 mod menu;
 mod notify;
 mod tray;
@@ -53,6 +54,11 @@ pub fn run() {
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // quick-wins AC6: smind://... deep links. A link that arrives
+        // while the app is already running is forwarded here through
+        // tauri-plugin-single-instance's deep-link feature (registered
+        // above), which is why single-instance is set up first.
+        .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
             let cfg = Config {
                 daemon_url: dclient::config::daemon_url().unwrap_or_else(|e| {
@@ -120,6 +126,32 @@ pub fn run() {
             // taskbar badge).
             let cache = dclient::WorkspaceCache::new();
             let tray = tray::build(app.handle(), cache.clone(), cfg.daemon_url.clone())?;
+
+            // quick-wins AC6: deep links, both at launch (get_current)
+            // and while running (on_open_url, fed by single-instance's
+            // deep-link feature for a second launch).
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+
+                let handle = app.handle().clone();
+                let open_cache = cache.clone();
+                let open_cfg = cfg.clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        deeplink::handle(&handle, open_cache.clone(), open_cfg.clone(), url.as_str());
+                    }
+                });
+
+                if let Err(e) = app.deep_link().register_all() {
+                    eprintln!("smind desktop: deep link registration failed: {e}");
+                }
+
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    for url in urls {
+                        deeplink::handle(app.handle(), cache.clone(), cfg.clone(), url.as_str());
+                    }
+                }
+            }
 
             // AC3: hide-on-close instead of destroy.
             let close_win = win.clone();

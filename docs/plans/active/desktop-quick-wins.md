@@ -141,7 +141,10 @@ If an item turns out to be impossible under these constraints, stop and report i
 - [x] AC5 offline/splash (`desktop/ui/offline.html` rebranded with real
   design-token colors + light/dark; live state pushed via
   `WebviewWindow::eval`, formatted by `smind-daemon-client::offline`)
-- [ ] AC6 deep links
+- [x] AC6 deep links (`smind_daemon_client::route::{DeepLink,
+  parse_deep_link}`; `desktop/src-tauri/src/deeplink.rs` wires
+  `tauri-plugin-deep-link`'s `on_open_url`/`get_current` +
+  `single-instance`'s `deep-link` feature forwarding)
 - [ ] AC7 regressions + Windows build
 
 ## Validation
@@ -260,3 +263,34 @@ If an item turns out to be impossible under these constraints, stop and report i
   "Retry now" reloads the page (`location.reload()`), which starts on
   attempt 0/"connecting..." until the next eval update arrives from the
   still-running Rust-side poll loop.
+
+- **AC6**: `parse_deep_link` accepts exactly `smind://task/<id>` and
+  `smind://workspace/<wsId>/task/<id>`, rejecting wrong scheme,
+  non-numeric ids, extra path segments, a query string, and no-authority
+  forms (`smind:task/1`) -- all via the same `url` crate already used
+  elsewhere, no hand-rolled parsing. 10 new unit tests (both accepted
+  forms; each rejection case named in the Test Scenarios list, plus a
+  couple of adjacent malformed-input cases). A bare `smind://task/<id>`
+  link (no workspaceId in the link itself) reuses AC3's
+  `WorkspaceCache`: a cache hit navigates immediately, a miss opens a
+  short-lived one-shot connection
+  (`smind_daemon_client::client::resolve_workspace_id`, reusing the same
+  `task.get` request/response helpers `client.rs` already has for AC3)
+  rather than leaving the link at "focused but nowhere" -- the window is
+  focused immediately either way, then upgraded to a navigate once
+  resolution lands, satisfying "unknown/malformed just focuses" for the
+  genuinely-unknown case while still giving the known-but-unresolved
+  case its navigation. `tauri-plugin-single-instance`'s `deep-link`
+  feature is fully automatic (confirmed by reading its 2.4.5 source):
+  it calls `handle_cli_arguments` before our existing single-instance
+  callback, with no extra wiring needed beyond enabling the feature
+  (done in AC1) and registering both plugins. One build fix along the
+  way: adding the `plugins.deep-link` block to `tauri.conf.json` made
+  `tauri::generate_context!()`'s generated code reference `serde_json`
+  unqualified, which only resolves if the app crate depends on it
+  directly -- added `serde_json = "1"` to `Cargo.toml`. `cargo test` in
+  `daemon-client` is 47/47 (10 new); `cargo build` passes on Linux with
+  no new warnings; the capability file and `gen/schemas/` are both
+  unchanged (the deep-link plugin's schema entries were already
+  generated back in AC1's `cargo check`, since the crate dependency was
+  added there ahead of use).

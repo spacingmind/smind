@@ -11,6 +11,13 @@
       "csp": null
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["smind"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "deb",

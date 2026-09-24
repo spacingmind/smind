@@ -20,12 +20,53 @@ const STABLE_AFTER: Duration = Duration::from_secs(30);
 const HTTP_TIMEOUT: Duration = Duration::from_secs(2);
 const SUBSCRIBE_ID: &str = "events-sub-1";
 
+/// A one-shot resolution has this long to get an answer before giving up.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// healthz_ok reports whether the daemon answers GET /healthz.
 pub async fn healthz_ok(cfg: &Config) -> bool {
     let client = reqwest::Client::new();
     match client.get(cfg.healthz_url()).timeout(HTTP_TIMEOUT).send().await {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
+    }
+}
+
+/// resolve_workspace_id opens its own short-lived connection to answer
+/// one task.get, for a `smind://task/<id>` deep link (quick-wins AC6)
+/// that arrives with no workspaceId and isn't already in the
+/// long-lived connection's cache. Best-effort: None on any failure or
+/// timeout, same as a cache miss.
+pub async fn resolve_workspace_id(cfg: &Config, task_id: i64) -> Option<i64> {
+    let client = reqwest::Client::new();
+    let token = fetch_token(cfg, &client).await.ok()?;
+    let ws_url = cfg.ws_url(&token).ok()?;
+    let (ws, _resp) = connect_async(ws_url.as_str()).await.ok()?;
+    let (mut tx, mut rx) = ws.split();
+
+    let req_id = protocol::task_get_request_id(task_id);
+    let req = protocol::task_get_message(&req_id, task_id).to_string();
+    tx.send(Message::Text(req.into())).await.ok()?;
+
+    let deadline = tokio::time::sleep(RESOLVE_TIMEOUT);
+    tokio::pin!(deadline);
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return None,
+            msg = rx.next() => {
+                let m = msg?.ok()?;
+                if !(m.is_text() || m.is_binary()) {
+                    continue;
+                }
+                let text = m.into_text().ok()?;
+                let parsed = protocol::parse_server_message(&text)?;
+                if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
+                    if protocol::task_get_response_task_id(&id) == Some(task_id) {
+                        return protocol::task_get_workspace_id(&result);
+                    }
+                }
+            }
+        }
     }
 }
 

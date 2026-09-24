@@ -3703,6 +3703,7 @@ version = "0.1.0"
 dependencies = [
  "log",
  "notify-rust",
+ "serde_json",
  "smind-daemon-client",
  "tauri",
  "tauri-build",
