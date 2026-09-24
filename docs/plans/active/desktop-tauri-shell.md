@@ -100,13 +100,42 @@ directory, no Tauri config.
 
 ## Progress
 
-- [ ] AC1 window + daemon URL + fallback page
-- [ ] AC2 single instance
-- [ ] AC3 tray + hide-on-close
-- [ ] AC4 permission.pending notifications + reconnect
-- [ ] AC5 global shortcut
-- [ ] AC6 ADR-0012
+- [x] AC1 window + daemon URL + fallback page (`desktop/src-tauri/src/lib.rs`,
+  `desktop/ui/offline.html`; window starts on the local page, a
+  /healthz poll loop navigates to the daemon URL once it answers)
+- [x] AC2 single instance (tauri-plugin-single-instance, registered
+  first, focuses the existing window)
+- [x] AC3 tray + hide-on-close (tray menu Open/Quit via
+  TrayIconBuilder; CloseRequested is prevented and hides the window)
+- [x] AC4 permission.pending notifications + reconnect
+  (`desktop/daemon-client`: fetch /api/token, /ws?token=...,
+  events.subscribe, notification from payload.summary; exponential
+  backoff resetting after 30s of stability; resubscribes each
+  reconnect)
+- [x] AC5 global shortcut (CommandOrControl+Shift+S toggles the main
+  window via tauri-plugin-global-shortcut)
+- [x] AC6 ADR-0012 (`docs/decisions/0012-desktop-thin-client.md`)
 
 ## Validation
 
-To be filled in as items land.
+- **Unit tests pass**: `cargo test` in `desktop/daemon-client` — 16
+  tests green (URL resolution default/env-override/invalid, ws/token/
+  healthz URL derivation, event-notification parsing incl.
+  permission.pending title/body from payload.summary, malformed frames,
+  other topics, missing payload fields, backoff grow/cap/reset/
+  saturation, subscribe-message shape).
+- **wsapi Origin check investigated (finding)**: `internal/wsapi/
+  server.go` uses gorilla's default upgrader `CheckOrigin`, which
+  admits requests with no `Origin` header — exactly what the
+  non-browser Rust client sends. Auth is only the `token` query param.
+  No daemon change was needed and none was made.
+- **Blocked on system deps**: `pkg-config` (and the webkit2gtk-4.1
+  stack) is not yet installed, so `cargo check`/`cargo build` for
+  `desktop/src-tauri` has NOT been run — the Tauri app source is
+  written against the Tauri 2 plugin APIs but **unbuilt/unverified**.
+  Re-run once `pkg-config --modversion webkit2gtk-4.1` works, then fix
+  any compile errors and do the WSLg manual pass.
+- **Not yet exercised (manual, WSLg)**: window loads daemon UI; daemon
+  stop -> fallback page -> restart -> UI returns; tray Open/Quit;
+  close hides to tray; shortcut toggles; a real permission request
+  shows a notification.
