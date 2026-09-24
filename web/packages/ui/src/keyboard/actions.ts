@@ -30,7 +30,8 @@ export type ActionId =
   | "tab.jump"
   | "task.prev"
   | "task.next"
-  | "quick-open.open";
+  | "quick-open.open"
+  | "pane.find";
 
 /**
  * Where keyboard focus is, as far as shortcut routing cares.

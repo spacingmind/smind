@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eye, PenLine } from "lucide-react";
+import type { EditorView } from "@codemirror/view";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
+import { FileEditorFindBar, FileFindModel } from "@/components/file-editor-find-bar";
+import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { FilePreview, previewKind } from "@/components/file-preview";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -64,6 +67,17 @@ export function FileEditorPane({
   // conditional save or by the run.status probe, cleared only by an
   // explicit Reload/Overwrite click (or a clean re-read on path change).
   const [conflict, setConflict] = useState<"changed" | "deleted" | null>(null);
+
+  // File Find (AC2): one model per mount -- this pane's `path` is fixed for
+  // its lifetime (a different file is a different tab, hence a fresh
+  // mount; see file-editor-pane.test.tsx and this file's own header
+  // comment), so there's no case where the model needs to reset mid-life.
+  // `editorViewRef` is set imperatively by CodeMirrorEditor's onViewReady
+  // rather than through state, since FileEditorFindBar only reads it at
+  // the moment `pane.find` fires, never needing a render of its own.
+  const findModel = useMemo(() => new FileFindModel(), []);
+  const editorViewRef = useRef<EditorView | null>(null);
+  const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
 
   // null for non-previewable files -- the Edit/Preview control doesn't
   // render at all in that case, never as a disabled dead button.
@@ -251,7 +265,12 @@ export function FileEditorPane({
   }, [events, task.ID, probe]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="file-editor-pane">
+    <div
+      className="flex h-full min-h-0 flex-col"
+      data-testid="file-editor-pane"
+      onFocus={onFindFocus}
+      onBlur={onFindBlur}
+    >
       <PaneHeader
         testId="file-editor-header"
         title={
@@ -332,8 +351,18 @@ export function FileEditorPane({
               onChange keeps equal to the editor's live document -- unsaved
               edits included. Preview does not auto-save.
             */}
-            <div className={previewing ? "hidden" : "flex h-full min-h-0 flex-col"}>
-              <CodeMirrorEditor value={content} onChange={setContent} onSave={handleSave} testId="file-editor" />
+            <div className={previewing ? "hidden" : "relative flex h-full min-h-0 flex-col"}>
+              <CodeMirrorEditor
+                value={content}
+                onChange={setContent}
+                onSave={handleSave}
+                testId="file-editor"
+                findExtension={findModel.extension}
+                onViewReady={(view) => {
+                  editorViewRef.current = view;
+                }}
+              />
+              <FileEditorFindBar model={findModel} editor={editorViewRef} focused={findFocused} />
             </div>
             {previewing && kind && <FilePreview kind={kind} content={content} path={path} />}
           </>

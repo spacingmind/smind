@@ -153,6 +153,15 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
   },
   {
+    id: "pane-find",
+    action: "pane.find",
+    combo: "Mod+F",
+    section: "navigation",
+    label: "Find in pane",
+    when: { global: true },
+    note: "Chat, file editor, or terminal, whichever has focus",
+  },
+  {
     id: "run-interrupt",
     action: "run.interrupt",
     combo: "Escape",
