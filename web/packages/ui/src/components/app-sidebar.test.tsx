@@ -421,6 +421,91 @@ describe("AppSidebar", () => {
       expect(within(card).getByTestId("task-hover-card-last-activity")).toBeInTheDocument();
     });
   });
+
+  describe("group-by-status view toggle (AC6)", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("defaults to the tree view -- no status groups, the workspace row is present", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-workspace-row")).toBeInTheDocument();
+      expect(screen.queryByTestId("sidebar-status-group")).not.toBeInTheDocument();
+    });
+
+    it("toggling shows status groups instead of the workspace tree, and running task lands under Running", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar
+            client={client as never}
+            selectedTaskId={null}
+            runStatus={new Map([[TASK.ID, "running"]])}
+          />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+
+      expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+      const groups = screen.getAllByTestId("sidebar-status-group");
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toHaveAttribute("data-status-group", "running");
+      expect(within(groups[0]!).getByText("Fix the bug")).toBeInTheDocument();
+    });
+
+    it("collapsing a status group's header hides its rows", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+
+      const group = await screen.findByTestId("sidebar-status-group");
+      expect(within(group).getByText("Fix the bug")).toBeInTheDocument();
+
+      fireEvent.click(within(group).getByTestId("sidebar-status-group-header"));
+      expect(within(group).queryByText("Fix the bug")).not.toBeInTheDocument();
+    });
+
+    it("persists the chosen view across a remount", async () => {
+      const client = new FakeWsClient();
+      const { unmount } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+      await screen.findByTestId("sidebar-status-group");
+      unmount();
+
+      const client2 = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client2 as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client2, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-status-group")).toBeInTheDocument();
+      expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+    });
+  });
 });
 
 /** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as diff-viewer-pane.test.tsx's). */

@@ -115,7 +115,7 @@ What smind does today:
 - [x] AC3 Notifications settings section
 - [x] AC4 pinned section
 - [x] AC5 hover card
-- [ ] AC6 group-by-status view
+- [x] AC6 group-by-status view
 
 ## Validation
 
@@ -168,3 +168,21 @@ What smind does today:
   `relative-time.test.ts` and `app-sidebar.test.tsx`'s "task hover card
   (AC5)" describe block (pointer-enter + fake-timer advance past the open
   delay, asserting branch/diff-stat/last-activity content).
+- **AC6**: `lib/sidebar-status-groups.ts`'s `statusGroupForTask`/
+  `groupTasksByStatus` derive the five buckets (needs attention / error /
+  running / done / idle) from the same `TaskAttention`/`TaskRunStatus`
+  data the tree view's dots use -- `error` keys off the run's own status
+  (survives being "seen"), `permission`/`finished` route through
+  needs-attention ahead of running/done. `hooks/use-sidebar-group-mode.ts`
+  persists the tree/status choice; `app-sidebar.tsx`'s new
+  `StatusGroupedList`/`StatusGroupItem` render it (replacing the workspace
+  tree while active; Pinned stays above either view) via a header toggle
+  button. Covered by `sidebar-status-groups.test.ts`,
+  `use-sidebar-group-mode.test.ts`, and `app-sidebar.test.tsx`'s
+  "group-by-status view toggle (AC6)" describe block (default tree view,
+  toggle swaps to grouped view with correct bucket, per-group collapse,
+  persistence across remount).
+
+All seven acceptance criteria (AC1-AC7) are satisfied. AC7's own checks
+(no hardcoded colors, full test suite, typecheck, lint) are verified as
+part of each item above and the final `task lint` pass before merge.

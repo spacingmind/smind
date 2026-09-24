@@ -10,8 +10,10 @@ import {
   ChevronRight,
   Circle,
   FolderGit2,
+  FolderTree,
   GitBranch,
   Layers,
+  ListChecks,
   Loader2,
   MoreHorizontal,
   Pin,
@@ -44,6 +46,8 @@ import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
+import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
+import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
@@ -360,6 +364,11 @@ export function AppSidebar({
     [workspaces],
   );
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
+  const { groupMode, setGroupMode } = useSidebarGroupMode();
+  const statusGroups = useMemo(
+    () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
+    [allTasks, attention, runStatus],
+  );
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
@@ -583,6 +592,18 @@ export function AppSidebar({
               <>
                 <span>Workspaces</span>
                 <span className="flex items-center">
+                  {!empty && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={groupMode === "tree" ? "Group by status" : "Group by workspace"}
+                      aria-pressed={groupMode === "status"}
+                      data-testid="sidebar-group-mode-toggle"
+                      onClick={() => setGroupMode(groupMode === "tree" ? "status" : "tree")}
+                    >
+                      {groupMode === "tree" ? <FolderTree /> : <ListChecks />}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -655,7 +676,16 @@ export function AppSidebar({
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                     />
                   )}
+                  {!searching && groupMode === "status" && (
+                    <StatusGroupedList
+                      groups={statusGroups}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
                   {!searching &&
+                    groupMode === "tree" &&
                     workspaces?.map((ws) => (
                     <WorkspaceItem
                       key={ws.ID}
@@ -846,6 +876,76 @@ function PinnedSection({
             selectedTaskId={selectedTaskId}
             onSelectTask={onSelectTask}
             emptyText="No pinned tasks"
+            onArchiveTask={onArchiveTask}
+          />
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The group-by-status view (AC6): one collapsible bucket per
+ * lib/sidebar-status-groups.ts group, each rendering its tasks through the
+ * same TaskRows the tree view uses -- replaces the workspace/space tree
+ * entirely while active (Pinned stays above either view, per app-sidebar's
+ * render order). Each bucket's own open/closed state is local, ephemeral
+ * UI state, matching PinnedSection's own collapse.
+ */
+function StatusGroupedList({
+  groups,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  groups: StatusGroup[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <StatusGroupItem
+          key={group.key}
+          group={group}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onArchiveTask={onArchiveTask}
+        />
+      ))}
+    </>
+  );
+}
+
+function StatusGroupItem({
+  group,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  group: StatusGroup;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
+      <SidebarMenuButton onClick={() => setOpen((o) => !o)} data-testid="sidebar-status-group-header">
+        <span className="min-w-0 truncate">
+          {group.label} <span className="text-muted-foreground">({group.tasks.length})</span>
+        </span>
+        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-90")} />
+      </SidebarMenuButton>
+      {open && (
+        <SidebarMenuSub>
+          <TaskRows
+            tasks={group.tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No tasks"
             onArchiveTask={onArchiveTask}
           />
         </SidebarMenuSub>
