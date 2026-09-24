@@ -3,16 +3,15 @@
 //! the Rust side. A second instance only focuses the existing window.
 
 use tauri::Manager;
-use tauri::menu::{Menu, MenuItem};
-use tauri::tray::TrayIconBuilder;
 use tauri::webview::WebviewWindowBuilder;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use smind_daemon_client as dclient;
-use smind_daemon_client::Config;
+use smind_daemon_client::{ClientEvent, Config};
 
 mod menu;
 mod notify;
+mod tray;
 mod zoom_store;
 
 const MAIN_WINDOW: &str = "main";
@@ -93,20 +92,11 @@ pub fn run() {
                 .await;
             });
 
-            // AC3: tray icon with Open / Quit.
-            let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
-            TrayIconBuilder::with_id("main-tray")
-                .icon(app.default_window_icon().unwrap().clone())
-                .menu(&menu)
-                .show_menu_on_left_click(true)
-                .on_menu_event(|app, event| match event.id().as_ref() {
-                    "open" => show_main(app),
-                    "quit" => app.exit(0),
-                    _ => {}
-                })
-                .build(app)?;
+            // AC3/quick-wins AC4: tray icon with Open / Quit plus a
+            // pending-approvals indicator (tooltip, first menu item,
+            // taskbar badge).
+            let cache = dclient::WorkspaceCache::new();
+            let tray = tray::build(app.handle(), cache.clone(), cfg.daemon_url.clone())?;
 
             // AC3: hide-on-close instead of destroy.
             let close_win = win.clone();
@@ -120,20 +110,25 @@ pub fn run() {
             // AC5: register the toggle shortcut.
             app.global_shortcut().register(TOGGLE_SHORTCUT)?;
 
-            // AC4/quick-wins AC3: daemon events -> OS notifications,
-            // click -> focus + navigate to the task.
-            let cache = dclient::WorkspaceCache::new();
+            // AC4/quick-wins AC3+AC4: daemon events -> OS notifications
+            // (click -> focus + navigate) and the tray's pending-
+            // approvals indicator, both fed by the same event stream.
             let notify_cfg = cfg.clone();
             let notify_cache = cache.clone();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                dclient::client::run(cfg, cache, move |n| {
-                    let ctx = notify::ClickContext {
-                        app: handle.clone(),
-                        cache: notify_cache.clone(),
-                        daemon_url: notify_cfg.daemon_url.clone(),
-                    };
-                    notify::show(ctx, n.title, n.body, n.task_id);
+                dclient::client::run(cfg, cache, move |event| match event {
+                    ClientEvent::Notification(n) => {
+                        tray.on_permission_pending(n.task_id, &n.request_id);
+                        let ctx = notify::ClickContext {
+                            app: handle.clone(),
+                            cache: notify_cache.clone(),
+                            daemon_url: notify_cfg.daemon_url.clone(),
+                        };
+                        notify::show(ctx, n.title, n.body, n.task_id);
+                    }
+                    ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
+                    ClientEvent::Reconnected => tray.on_reconnected(),
                 })
                 .await;
             });

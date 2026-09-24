@@ -134,7 +134,10 @@ If an item turns out to be impossible under these constraints, stop and report i
   platform split; `smind-daemon-client::{route,cache}` for the pure
   route-building and the task->workspace lookup; `client.rs` resolves
   workspaceId via a background `task.get`)
-- [ ] AC4 tray attention
+- [x] AC4 tray attention (`smind-daemon-client::attention::Attention`
+  state machine; `desktop/src-tauri/src/tray.rs` renders it as tooltip +
+  first menu item + taskbar badge, and reuses `notify::navigate_to_task`
+  for the "open most recent waiting task" click)
 - [ ] AC5 offline/splash
 - [ ] AC6 deep links
 - [ ] AC7 regressions + Windows build
@@ -207,3 +210,29 @@ If an item turns out to be impossible under these constraints, stop and report i
   is unverified locally (no Windows toolchain here) and depends on the
   `desktop-windows` CI build in AC7 to catch any API mismatch against
   the pinned 0.8.1 version.
+
+- **AC4**: no `permission.resolved` event exists (checked
+  `internal/wsapi/events.go`'s `knownTopics` -- there is no such topic),
+  so `client.rs` now also subscribes to the already-existing
+  `run.status` topic and the tray clears a task's pending entry when
+  that task's run reports `status: "running"` again -- the same signal
+  `web/packages/ui/src/hooks/use-task-attention.ts` uses to clear its own
+  permission badge on a live `run.status` event (its full resync path
+  additionally calls `run.list`/`run.logs`, which this tray skipped: not
+  worth the extra round-trips for a tooltip count, so a reconnect resets
+  to zero instead of resyncing against those RPCs -- rebuilds correctly
+  as soon as fresh events arrive, per the AC's own "resets or rebuilds"
+  wording). `smind_daemon_client::Attention` is unit-tested standalone
+  (pending count up, duplicate requestId counted once, `run.status`
+  clears only that task, reset clears everything, most-recent-task
+  ordering, label formatting for 0/1/N) --  `cargo test` in
+  `daemon-client` is 38/38 (7 new, plus one existing test extended for
+  the new `run.status` subscribe topic). The taskbar badge uses
+  `Window::set_badge_count`, which its own doc comment (read from the
+  vendored source) marks **"Windows: Unsupported, use set_overlay_icon
+  instead"** -- `set_overlay_icon` needs a distinct badge-count icon
+  image per count, which this pass has no assets for, so Windows gets
+  the tooltip/menu-item text but no taskbar visual; Linux/macOS pick up
+  `set_badge_count` where their desktop environment supports a
+  launcher/dock badge. `cargo check`/`cargo build` pass on Linux with no
+  new warnings.

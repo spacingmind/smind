@@ -37,12 +37,14 @@ pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
     fallback::show(ctx, title, body);
 }
 
-/// on_click is the platform-independent click reaction: focus the main
-/// window and, if the task's workspace id has been resolved by then,
-/// navigate to its route -- if not, AC3 says to still focus the window.
-/// Dispatched via `run_on_main_thread` since the OS notification
-/// callback fires on its own thread, not the app's main thread.
-fn on_click(ctx: &ClickContext, task_id: i64) {
+/// navigate_to_task is the platform-independent click reaction: focus
+/// the main window and, if the task's workspace id has been resolved by
+/// then, navigate to its route -- if not, AC3 says to still focus the
+/// window. Dispatched via `run_on_main_thread` since the OS notification
+/// callback fires on its own thread, not the app's main thread. Also
+/// reused by the tray's attention item (AC4): same navigation, different
+/// trigger.
+pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
     let app = ctx.app.clone();
     let cache = ctx.cache.clone();
     let daemon_url = ctx.daemon_url.clone();
@@ -68,7 +70,7 @@ mod windows {
 
     use tauri_winrt_notification::Toast;
 
-    use super::{on_click, ClickContext};
+    use super::{navigate_to_task, ClickContext};
 
     /// `Toast::show()`'s activation handler must outlive the call or
     /// WinRT drops it early with no unregister path, so shown toasts are
@@ -81,7 +83,7 @@ mod windows {
             .title(&title)
             .text1(&body)
             .on_activated(move |_action| {
-                on_click(&ctx, task_id);
+                navigate_to_task(&ctx, task_id);
                 Ok(())
             });
         if toast.show().is_ok() {
@@ -94,7 +96,7 @@ mod windows {
 mod linux {
     use notify_rust::Notification;
 
-    use super::{on_click, ClickContext};
+    use super::{navigate_to_task, ClickContext};
 
     /// notify-rust's own reserved action key for "closed without an
     /// action" -- not a click.
@@ -115,7 +117,7 @@ mod linux {
         std::thread::spawn(move || {
             handle.wait_for_action(|action| {
                 if action != CLOSED {
-                    on_click(&ctx, task_id);
+                    navigate_to_task(&ctx, task_id);
                 }
             });
         });

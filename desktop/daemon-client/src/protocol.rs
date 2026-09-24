@@ -45,14 +45,32 @@ pub struct PermissionPending {
     pub options: Vec<serde_json::Value>,
 }
 
+/// RunStatus is the payload of run.status events:
+/// {runId, taskId, status, stopReason, err} -- only the fields this
+/// client needs (see internal/wsapi/events.go's runStatusPayload).
+#[derive(Debug, Deserialize)]
+pub struct RunStatus {
+    #[serde(rename = "taskId")]
+    pub task_id: i64,
+    pub status: String,
+}
+
+/// run_status decodes a run.status event's payload.
+pub fn run_status(payload: &serde_json::Value) -> Option<RunStatus> {
+    serde_json::from_value(payload.clone()).ok()
+}
+
 /// Notification is the OS-notification-ready form of an event. task_id
 /// carries the source task so the click handler can look up its
-/// workspaceId (see `crate::cache::WorkspaceCache`) and build a route.
+/// workspaceId (see `crate::cache::WorkspaceCache`) and build a route;
+/// request_id feeds the tray's attention count (`crate::attention`),
+/// which dedupes by it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Notification {
     pub title: String,
     pub body: String,
     pub task_id: i64,
+    pub request_id: String,
 }
 
 /// TaskGetResult is the subset of task.get's result (a store.Task,
@@ -118,6 +136,7 @@ pub fn notification_for(event: &EventNotification) -> Option<Notification> {
                 title: "smind: permission needed".to_string(),
                 body: p.summary,
                 task_id: p.task_id,
+                request_id: p.request_id,
             })
         }
         _ => None,
@@ -149,6 +168,7 @@ mod tests {
         assert_eq!(n.title, "smind: permission needed");
         assert_eq!(n.body, "Run `cargo test` in task 42?");
         assert_eq!(n.task_id, 42);
+        assert_eq!(n.request_id, "req_9");
     }
 
     #[test]
@@ -184,6 +204,17 @@ mod tests {
         assert_eq!(msg.id.as_deref(), Some("1"));
         assert!(msg.event.is_none());
         assert!(notification_for_through(&msg).is_none());
+    }
+
+    #[test]
+    fn run_status_decodes_task_id_and_status() {
+        let msg = parse_server_message(
+            r#"{"event":{"topic":"run.status","seq":1,"payload":{"runId":"r1","taskId":42,"status":"running"}}}"#,
+        )
+        .unwrap();
+        let rs = run_status(&msg.event.unwrap().payload).unwrap();
+        assert_eq!(rs.task_id, 42);
+        assert_eq!(rs.status, "running");
     }
 
     #[test]

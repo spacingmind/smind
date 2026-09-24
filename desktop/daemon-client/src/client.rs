@@ -30,30 +30,38 @@ pub async fn healthz_ok(cfg: &Config) -> bool {
 }
 
 /// subscribe_message builds the events.subscribe request the client
-/// sends right after the /ws upgrade.
+/// sends right after the /ws upgrade. run.status is subscribed
+/// alongside permission.pending so quick-wins AC4's tray attention can
+/// clear a task's pending entry when its run (re)starts -- see
+/// `crate::attention`.
 pub fn subscribe_message() -> serde_json::Value {
     serde_json::json!({
         "id": SUBSCRIBE_ID,
         "method": "events.subscribe",
-        "params": { "topics": ["permission.pending"] }
+        "params": { "topics": ["permission.pending", "run.status"] }
     })
 }
 
+/// ClientEvent is what `run` hands to its callback: a notification to
+/// show, a run that just (re)started (clears that task's tray
+/// attention), or a fresh connection (resets it).
+pub enum ClientEvent {
+    Notification(protocol::Notification),
+    RunRunning { task_id: i64 },
+    Reconnected,
+}
+
 /// run drives the token fetch + WS connection forever, handing each
-/// permission.pending notification to on_notification and resolving its
-/// workspaceId into `cache` in the background (permission.pending
-/// carries no workspaceId -- see `crate::cache`). Reconnects with
-/// exponential backoff (reset after a stable connection), refetching
-/// the token and resubscribing on every attempt.
-pub async fn run(
-    cfg: Config,
-    cache: WorkspaceCache,
-    on_notification: impl Fn(protocol::Notification) + Send + Sync + 'static,
-) {
+/// event to on_event and resolving a notification's workspaceId into
+/// `cache` in the background (permission.pending carries no workspaceId
+/// -- see `crate::cache`). Reconnects with exponential backoff (reset
+/// after a stable connection), refetching the token and resubscribing
+/// on every attempt.
+pub async fn run(cfg: Config, cache: WorkspaceCache, on_event: impl Fn(ClientEvent) + Send + Sync + 'static) {
     let client = reqwest::Client::new();
     let mut backoff = Backoff::default();
     loop {
-        let stable = run_once(&cfg, &client, &cache, &on_notification).await;
+        let stable = run_once(&cfg, &client, &cache, &on_event).await;
         if stable {
             backoff.reset();
         }
@@ -68,9 +76,9 @@ async fn run_once(
     cfg: &Config,
     client: &reqwest::Client,
     cache: &WorkspaceCache,
-    on_notification: &impl Fn(protocol::Notification),
+    on_event: &impl Fn(ClientEvent),
 ) -> bool {
-    match try_run_once(cfg, client, cache, on_notification).await {
+    match try_run_once(cfg, client, cache, on_event).await {
         Ok(stable) => stable,
         Err(err) => {
             eprintln!("smind desktop: daemon connection error: {err}");
@@ -83,7 +91,7 @@ async fn try_run_once(
     cfg: &Config,
     client: &reqwest::Client,
     cache: &WorkspaceCache,
-    on_notification: &impl Fn(protocol::Notification),
+    on_event: &impl Fn(ClientEvent),
 ) -> Result<bool, String> {
     let token = fetch_token(cfg, client).await?;
     let ws_url = cfg.ws_url(&token)?;
@@ -97,7 +105,8 @@ async fn try_run_once(
     tx.send(Message::Text(sub.into()))
         .await
         .map_err(|e| format!("ws send subscribe: {e}"))?;
-    eprintln!("smind desktop: subscribed to permission.pending");
+    eprintln!("smind desktop: subscribed to permission.pending, run.status");
+    on_event(ClientEvent::Reconnected);
 
     let mut stable = false;
     let stable_timer = tokio::time::sleep(STABLE_AFTER);
@@ -123,7 +132,13 @@ async fn try_run_once(
                                 let req_id = protocol::task_get_request_id(n.task_id);
                                 let req = protocol::task_get_message(&req_id, n.task_id).to_string();
                                 let _ = tx.send(Message::Text(req.into())).await;
-                                on_notification(n);
+                                on_event(ClientEvent::Notification(n));
+                            } else if event.topic == "run.status" {
+                                if let Some(rs) = protocol::run_status(&event.payload) {
+                                    if rs.status == "running" {
+                                        on_event(ClientEvent::RunRunning { task_id: rs.task_id });
+                                    }
+                                }
                             }
                         } else if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
                             if let Some(task_id) = protocol::task_get_response_task_id(&id) {
@@ -174,6 +189,7 @@ mod tests {
         let msg = subscribe_message();
         assert_eq!(msg["method"], "events.subscribe");
         assert_eq!(msg["params"]["topics"][0], "permission.pending");
+        assert_eq!(msg["params"]["topics"][1], "run.status");
         assert!(msg.get("id").is_some());
         // Round-trips through the envelope parser without being mistaken
         // for a server event.
