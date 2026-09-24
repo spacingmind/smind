@@ -137,7 +137,7 @@ smind today:
 - [x] AC4 Mod+, and Mod+digit
 - [x] AC5 Settings → Shortcuts
 - [x] AC6 tab context menu
-- [ ] AC7 Shift+Tab mode cycle
+- [x] AC7 Shift+Tab mode cycle
 
 ## Validation
 
@@ -313,3 +313,60 @@ smind today:
     `terminal-pane.test.tsx` already has, needed here for the first time
     now that more than one test opens a terminal tab for the same task
     id.)
+
+- **AC7 (Shift+Tab mode cycle).** `components/composer/composer.tsx`
+  already had everything the plan's Decisions call for except the
+  keystroke itself: a submission-time `approvalPolicy` `useState`, and
+  `approvalPolicyOptions(provider)` giving the exact ordered, per-provider
+  option list ("Manual approval" / "Auto-safe" / that provider's own
+  full-access wording). Added
+  `components/composer/approval-policy-cycle.ts`'s
+  `resolveNextApprovalPolicy` (ported from Paseo's
+  `composer/agent-controls/mode.ts`'s `resolveNextAgentModeId`: cyclic
+  next-index, wrapping, starting from the first option if the current
+  value isn't found), wired into `handleKeyDown` on `Shift+Tab` (gated on
+  `!inactive`, matching the Select's own disabled state). No separate
+  visible-feedback indicator was added: the toolbar's existing Select
+  re-rendering with the new value already is that feedback, and a second
+  indicator would be one more thing to keep in sync with it for no
+  reason.
+  - `components/composer/approval-policy-cycle.test.ts`: advances,
+    wraps, starts from the first option for an unrecognized current
+    value, returns null with fewer than two options.
+  - `components/composer/composer.test.tsx`: `Shift+Tab` cycles through
+    all three policies and wraps, the cycled-to value is what the next
+    submission actually carries, a plain `Tab` (no Shift) leaves the
+    policy untouched.
+
+## Not done
+
+- **The Shortcuts settings capture UI doesn't record a chord in the same
+  motion as a plain rebind.** "Change" (single key, commits immediately)
+  and "Record chord…" (multi-step, Enter commits) are two separate
+  buttons/modes rather than one unified capture that infers which you
+  meant. A real timer-based unification (wait `CHORD_TIMEOUT_MS` after
+  every key to see if another follows) was rejected because it would
+  make the overwhelmingly common single-key rebind feel laggy; an
+  Enter-driven second mode was the tradeoff made instead. `rebind()`
+  itself fully supports a chord string either way (AC1's "chords can be
+  rebound" holds at the data layer), so this is a capture-UX gap, not a
+  functional one.
+- **A context-window meter** was explicitly out of scope (needs daemon
+  usage data) per the plan's Decisions, and no daemon change was made
+  (per the task's own instructions).
+- **Rename applies to terminal tabs only**, not file tabs, per the
+  plan's "decide per kind": a file/diff/chat tab's title is derived from
+  real identity, so a cosmetic override would just be misleading, and
+  an actual on-disk file rename is a materially different, much larger
+  feature this item never scoped.
+
+## AC8 validation
+
+Full green run after every item above, from the repo root:
+`cd web && bun run --filter '@smind/ui' test` (919 tests, 77 files, 0
+failures) and `cd web/packages/ui && bun run typecheck` (clean), plus
+`task lint` from the repo root (`go vet ./...` and `gofmt -l` both
+clean -- no Go code touched by this plan). No existing test was weakened
+to make it pass; where an existing test's own premise changed (the
+`Shift+?` dialog's tests, `defaultPane`-targeted tab actions), the test
+was rewritten to assert the new, correct behavior rather than deleted.

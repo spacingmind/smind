@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 
 import { GitCompare } from "lucide-react";
 
+import { resolveNextApprovalPolicy } from "@/components/composer/approval-policy-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { Button } from "@/components/ui/button";
@@ -328,6 +329,19 @@ export function Composer({
     if (e.key === "Escape" && running) {
       e.preventDefault();
       void handleStop();
+      return;
+    }
+    // AC7 of docs/plans/active/web-keyboard-tabs.md, ported from Paseo's
+    // Shift+Tab mode cycle (composer/agent-controls/mode.ts): cycles the
+    // same approvalPolicy the toolbar's own Select controls, so the
+    // Select re-rendering with the new value *is* the visible feedback --
+    // no separate indicator to keep in sync.
+    if (e.key === "Tab" && e.shiftKey && !inactive) {
+      const next = resolveNextApprovalPolicy(approvalPolicies, approvalPolicy);
+      if (next) {
+        e.preventDefault();
+        setApprovalPolicy(next);
+      }
     }
   }
 

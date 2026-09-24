@@ -300,6 +300,41 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", approvalPolicy: "full-access" }]);
   });
 
+  it("Shift+Tab in the composer cycles the approval policy, wrapping, and submits the cycled-to value", async () => {
+    const { submissions } = renderComposer();
+
+    const trigger = () => screen.getByLabelText("Approval policy");
+    expect(trigger()).toHaveTextContent("Manual approval");
+
+    fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
+    expect(trigger()).toHaveTextContent("Auto-safe");
+
+    fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
+    expect(trigger()).toHaveTextContent("Bypass");
+
+    // Wraps past the last option back to the first.
+    fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
+    expect(trigger()).toHaveTextContent("Manual approval");
+
+    fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
+    fireEvent.change(textarea(), { target: { value: "go safely" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(submissions).toEqual([
+      { provider: "claude-native", prompt: "go safely", approvalPolicy: "auto-safe" },
+    ]);
+  });
+
+  it("a plain Tab (no Shift) in the composer does not touch the approval policy", async () => {
+    renderComposer();
+    const trigger = () => screen.getByLabelText("Approval policy");
+
+    fireEvent.keyDown(textarea(), { key: "Tab" });
+
+    expect(trigger()).toHaveTextContent("Manual approval");
+  });
+
   it("full-access is worded per provider, not one shared generic label", async () => {
     const client = new FakeWsClient();
     renderComposer({ client });
