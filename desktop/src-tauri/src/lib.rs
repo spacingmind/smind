@@ -83,12 +83,35 @@ pub fn run() {
             app.set_menu(win_menu)?;
             app.on_menu_event(|app, event| menu::handle_event(app, event.id().0.as_str()));
 
+            // quick-wins AC5: live retry state on the offline page,
+            // pushed via `eval` on every failed /healthz poll (not a
+            // re-navigate: the local asset origin differs by platform,
+            // `tauri://localhost` vs `http://tauri.localhost`, so this
+            // avoids depending on that -- see
+            // `smind_daemon_client::offline`).
             let watch_cfg = cfg.clone();
             let watch_win = win.clone();
+            let offline_win = win.clone();
+            let offline_daemon_url = cfg.daemon_url.to_string();
             tauri::async_runtime::spawn(async move {
-                watch_daemon_and_navigate(&watch_cfg, || {
-                    let _ = watch_win.navigate(watch_cfg.daemon_url.clone());
-                })
+                watch_daemon_and_navigate(
+                    &watch_cfg,
+                    || {
+                        let _ = watch_win.navigate(watch_cfg.daemon_url.clone());
+                    },
+                    move |attempt| {
+                        let state = dclient::offline::OfflineState {
+                            daemon_url: offline_daemon_url.clone(),
+                            attempt,
+                            next_retry_secs: HEALTHZ_POLL.as_secs(),
+                        };
+                        let js = format!(
+                            "window.__smindOfflineUpdate && window.__smindOfflineUpdate({:?})",
+                            state.to_query_string()
+                        );
+                        let _ = offline_win.eval(js);
+                    },
+                )
                 .await;
             });
 
@@ -163,14 +186,20 @@ fn show_main_window(win: &tauri::WebviewWindow) {
 }
 
 /// Polls GET /healthz until the daemon answers, then navigates the main
-/// window to the daemon UI exactly once.
-async fn watch_daemon_and_navigate(cfg: &Config, navigate: impl Fn()) {
+/// window to the daemon UI exactly once. Calls update_offline(attempt)
+/// (starting at 0, before the first check) so the fallback page can show
+/// live retry state (quick-wins AC5).
+async fn watch_daemon_and_navigate(cfg: &Config, navigate: impl Fn(), update_offline: impl Fn(u32)) {
+    let mut attempt: u32 = 0;
+    update_offline(attempt);
     loop {
         if dclient::client::healthz_ok(cfg).await {
             eprintln!("smind desktop: /healthz ok, switching to daemon UI");
             navigate();
             return;
         }
+        attempt += 1;
+        update_offline(attempt);
         tokio::time::sleep(HEALTHZ_POLL).await;
     }
 }

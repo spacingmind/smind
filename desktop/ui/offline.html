@@ -4,39 +4,145 @@
 <meta charset="utf-8">
 <title>smind</title>
 <style>
-  :root { color-scheme: dark; }
+  /* Light/dark values copied from web/packages/ui/src/index.css's
+     :root/.dark token layer (background, foreground, card, primary,
+     muted, muted-foreground, border), so the fallback page reads as
+     smind branding rather than a generic placeholder. */
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+    --card: oklch(1 0 0);
+    --primary: oklch(0.489 0.08 194.8);
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+    --border: oklch(0.922 0 0);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --background: oklch(0.145 0 0);
+      --foreground: oklch(0.985 0 0);
+      --card: oklch(0.205 0 0);
+      --primary: oklch(0.904 0.136 196.2);
+      --muted: oklch(0.269 0 0);
+      --muted-foreground: oklch(0.708 0 0);
+      --border: oklch(1 0 0 / 10%);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
   body {
     margin: 0;
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 18px;
     font-family: system-ui, sans-serif;
-    background: #111318;
-    color: #e6e6e6;
+    background: var(--background);
+    color: var(--foreground);
+    padding: 24px;
+    text-align: center;
   }
-  h1 { font-size: 1.1rem; font-weight: 600; margin: 0; }
-  p { margin: 0; color: #9aa0aa; font-size: .9rem; }
-  #url { font-family: ui-monospace, monospace; }
+  .mark {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: var(--primary);
+  }
+  h1 { font-size: 1.15rem; font-weight: 600; margin: 0; }
+  p { margin: 0; color: var(--muted-foreground); font-size: 0.9rem; max-width: 32rem; }
+  #daemon-url { font-family: ui-monospace, monospace; color: var(--foreground); }
   .spinner {
-    width: 22px; height: 22px;
-    border: 3px solid #2a2e37; border-top-color: #7aa2f7;
+    width: 20px; height: 20px;
+    border: 3px solid var(--muted); border-top-color: var(--primary);
     border-radius: 50%;
     animation: spin 1s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+  .command {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: ui-monospace, monospace;
+    font-size: 0.85rem;
+  }
+  button {
+    font: inherit;
+    border: 1px solid var(--border);
+    background: var(--card);
+    color: var(--foreground);
+    border-radius: 6px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--muted); }
+  #retry-now {
+    padding: 8px 16px;
+    background: var(--primary);
+    color: var(--background);
+    border: none;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
-  <div class="spinner"></div>
+  <div class="mark"></div>
   <h1>smind daemon not reachable</h1>
-  <p>Waiting for <span id="url"></span> — retrying.</p>
-  <p>Start it with <code>smind serve</code>.</p>
+  <p>Waiting for <span id="daemon-url"></span> <span id="retry-state"></span></p>
+  <div class="spinner"></div>
+  <p>Start the daemon in WSL:</p>
+  <div class="command">
+    <code id="command-text">smind serve</code>
+    <button id="copy-command" type="button">Copy</button>
+  </div>
+  <button id="retry-now" type="button">Retry now</button>
   <script>
-    document.getElementById("url").textContent =
-      new URLSearchParams(location.search).get("daemon") || "";
+    const DEFAULT_COMMAND = "smind serve";
+
+    function render(params) {
+      const daemon = params.get("daemon") || "";
+      const attempt = params.get("attempt");
+      const next = params.get("next");
+
+      document.getElementById("daemon-url").textContent = daemon;
+
+      const stateEl = document.getElementById("retry-state");
+      if (attempt === null) {
+        stateEl.textContent = "— connecting…";
+      } else {
+        const parts = [`attempt ${attempt}`];
+        if (next !== null) parts.push(`retrying in ${next}s`);
+        stateEl.textContent = `— ${parts.join(", ")}`;
+      }
+    }
+
+    // Rust calls this via WebviewWindow::eval on every retry tick, so
+    // the page updates live without a reload/flash (the local asset
+    // origin differs by platform -- re-navigating to it isn't worth
+    // depending on that).
+    window.__smindOfflineUpdate = function (queryString) {
+      render(new URLSearchParams(queryString));
+    };
+
+    render(new URLSearchParams(location.search));
+
+    document.getElementById("copy-command").addEventListener("click", () => {
+      const button = document.getElementById("copy-command");
+      navigator.clipboard.writeText(DEFAULT_COMMAND).then(() => {
+        const original = button.textContent;
+        button.textContent = "Copied";
+        setTimeout(() => { button.textContent = original; }, 1500);
+      });
+    });
+
+    document.getElementById("retry-now").addEventListener("click", () => {
+      location.reload();
+    });
   </script>
 </body>
 </html>

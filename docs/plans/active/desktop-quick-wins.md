@@ -138,7 +138,9 @@ If an item turns out to be impossible under these constraints, stop and report i
   state machine; `desktop/src-tauri/src/tray.rs` renders it as tooltip +
   first menu item + taskbar badge, and reuses `notify::navigate_to_task`
   for the "open most recent waiting task" click)
-- [ ] AC5 offline/splash
+- [x] AC5 offline/splash (`desktop/ui/offline.html` rebranded with real
+  design-token colors + light/dark; live state pushed via
+  `WebviewWindow::eval`, formatted by `smind-daemon-client::offline`)
 - [ ] AC6 deep links
 - [ ] AC7 regressions + Windows build
 
@@ -236,3 +238,25 @@ If an item turns out to be impossible under these constraints, stop and report i
   `set_badge_count` where their desktop environment supports a
   launcher/dock badge. `cargo check`/`cargo build` pass on Linux with no
   new warnings.
+
+- **AC5**: colors are the real `:root`/`.dark` values from
+  `web/packages/ui/src/index.css`'s token layer (`--background`,
+  `--foreground`, `--card`, `--primary`, `--muted`,
+  `--muted-foreground`, `--border`), not placeholders, switched via
+  `prefers-color-scheme`. Live retry state is pushed with
+  `WebviewWindow::eval` rather than a re-navigate with a `?...` URL:
+  reading the vendored tauri source showed the local asset origin is
+  `tauri://localhost` on Linux/macOS but `http://tauri.localhost` on
+  Windows, and depending on that split for every retry tick (plus the
+  page-reload flash a re-navigate causes) wasn't worth it when `eval`
+  needs no origin at all. The pure formatting
+  (`smind_daemon_client::offline::OfflineState::to_query_string`) is
+  still exactly query-string-shaped and unit-tested (exact format,
+  round-trips through the `url` crate's own query-pair parser), and the
+  page's `URLSearchParams` parsing is identical whether the string
+  arrives via `eval` or `location.search` -- `cargo test` in
+  `daemon-client` is 40/40 (2 new). "Start the daemon in WSL: `smind
+  serve`" has its own copy button (`navigator.clipboard.writeText`);
+  "Retry now" reloads the page (`location.reload()`), which starts on
+  attempt 0/"connecting..." until the next eval update arrives from the
+  still-running Rust-side poll loop.

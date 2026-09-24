@@ -3,6 +3,7 @@ pub mod backoff;
 pub mod cache;
 pub mod client;
 pub mod config;
+pub mod offline;
 pub mod protocol;
 pub mod route;
 pub mod zoom;
