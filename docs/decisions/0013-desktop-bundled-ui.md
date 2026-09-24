@@ -34,7 +34,7 @@ The web UI assumes same-origin throughout (`daemon.ts` relative
 fetches; `ws-client.ts` builds the WS URL from `location.host`). The
 decision, already made: the backend does **not** change — no CORS, no
 Origin allowlist, no new endpoints — and the desktop app ships a
-**bundled** UI with a scoped IPC bridge, like Zode and Paseo.
+**bundled** UI with a scoped IPC bridge, like ZCode and Paseo.
 
 ## Decision
 
@@ -46,8 +46,16 @@ Origin allowlist, no new endpoints — and the desktop app ships a
    same-origin assumptions hold unmodified: `/api/token` is a
    same-origin GET, and `/ws` upgrades same-origin against the daemon.
    Switching hosts in the picker re-points the proxy; the UI can just
-   reload. WebSocket upgrade headers are forwarded as-is; the proxy is
-   a dumb byte pipe, not a second API client.
+   reload. The proxy is a byte pipe, not a second API client. One header
+   rule matters: it **drops the `Origin` header** on proxied requests
+   (gorilla's default `CheckOrigin` admits requests with no `Origin`,
+   the same path the Rust `daemon-client` already relies on), rather
+   than depending on `Host` passing through unrewritten.
+   For a **relay** connection there is no HTTP daemon to proxy to: the
+   Rust side answers `/api/token` itself (relay admission, ADR-0011,
+   replaces the daemon token) and bridges `/ws` JSON-RPC frames onto the
+   E2EE relay channel, so the bundled UI still sees one same-origin
+   `/ws` regardless of transport.
 2. **Scoped IPC bridge.** Native capabilities the UI needs (window
    controls, open-URL, dialogs, relay crypto if placed in Rust — see
    open items) are exposed as an explicit **per-command allowlist** in
@@ -100,8 +108,12 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   changes.**
   (a) Feature-detect at startup (probe endpoints/events the UI needs,
   degrade gracefully).
-  (b) Fall back to loading the daemon-served UI when its `/healthz`
-  advertises a mismatched version.
+  (b) Fall back to loading the daemon-served UI (the ADR-0012 path)
+  when feature detection fails. Note `/healthz` returns only
+  `{status, service}` — there is no version field, and adding one is a
+  daemon change, which is ruled out — so any version signal has to be
+  inferred client-side (RPC/event probes failing, or the served UI's
+  asset manifest).
   *Recommendation: (a) feature-detect as the default, keep (b) as the
   escape hatch for "old daemon, new app"*, since (b) re-introduces the
   ADR-0012 path one release behind.
@@ -110,8 +122,11 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   unauthenticated `/api/token` posture, and the daemon already trusts
   loopback). Fixed port = predictable target; random ephemeral port =
   discovery cost only. *Recommendation: random port + per-launch
-  secret* delivered to the bundled origin via a set-once cookie (or
-  IPC-injected header); proxy rejects requests without it. Not a
+  secret*: Rust opens the window at `http://127.0.0.1:<port>/?k=<secret>`,
+  the proxy swaps it for an `HttpOnly; SameSite=Strict` cookie and
+  redirects; every other request without the cookie is rejected. The
+  secret must never be obtainable from an unauthenticated first
+  request, or any local process could fetch it the same way. Not a
   strong boundary — defense against casual local probing, not a
   malicious same-machine process.
 
@@ -143,9 +158,12 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   scoped to the bundled origin (`local: true` window list); daemon or
   relay content never receives `invoke` access. This keeps ADR-0012's
   "no remote-content IPC" stance.
-- The daemon's `/ws` `CheckOrigin` default continues to see a
-  loopback-to-loopback same-origin upgrade through the proxy; no
-  Origin header rewriting is performed or needed.
+- The daemon's `/ws` `CheckOrigin` default sees an upgrade with no
+  `Origin` header (the proxy drops it), exactly like the existing Rust
+  `daemon-client`; no daemon-side change.
+- Through the proxy, a *remote* daemon's `/api/token` becomes reachable
+  from this machine's loopback — the per-launch secret is what keeps
+  other local processes from using the proxy as a token oracle.
 - Relay pairing keys, if Rust-side (recommended), never enter the
   webview; admission auth stays exactly as ADR-0011 defines it.
 
