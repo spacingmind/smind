@@ -93,7 +93,7 @@ is React + Tailwind + shadcn.
 - [x] Shared FindBar + `pane.find` action
 - [x] AC1 chat Find
 - [x] AC2 file Find (+ replace)
-- [ ] AC3 terminal Find
+- [x] AC3 terminal Find
 - [ ] Tests + docs
 
 ## Validation
@@ -143,3 +143,26 @@ is React + Tailwind + shadcn.
   exercises the full stack through `FileEditorPane`: `Mod+F` gated on
   editor-pane focus, match count/prev/next, replace + replace-all editing
   the live document, and Escape closing the bar. Full suite: 878/878.
+- **AC3 terminal Find**: `@xterm/addon-search`'s `SearchAddon` is loaded
+  in `createRealTerminal` alongside the existing `FitAddon`, exposed
+  through a new optional `find` field on `TerminalHandle` (search/clear/
+  onDidChangeResults) -- optional the same way `setTheme`/`getSelection`
+  already are, so `FakeTerminalHandle` (this file's own test suite) is
+  unaffected and a handle with no search capability simply never shows the
+  Find affordance. Match/active-match decoration colors come from
+  `lib/terminal-theme.ts`'s existing CSS-variable-probe technique (a new
+  `resolveSearchDecorations()`), not hardcoded hex, resolved fresh on
+  every search so a theme toggle mid-search picks up the new colors
+  immediately. The Find UI lives inline in `terminal-pane.tsx` (not a
+  separate child component): a child's first effect commits *before* its
+  parent's, so a separate component subscribing to
+  `termRef.current?.find` would see a still-null handle on first mount --
+  keeping it in the same component as the terminal-creation effect uses
+  React's own same-component effect ordering (source order) to guarantee
+  the handle exists first. `terminal-find.test.tsx` mocks the addon (per
+  the plan's own test-scenario note -- a real `SearchAddon` needs xterm's
+  canvas renderer, which jsdom doesn't implement) to verify: `Mod+F` gated
+  on terminal-pane focus, never showing Find for a handle without `find`,
+  search calls forwarding query/direction, the addon's own reported
+  result index/count reflected in the bar, and Escape clearing the
+  addon's decorations. Full suite: 883/883.
