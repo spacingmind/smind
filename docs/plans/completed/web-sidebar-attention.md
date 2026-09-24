@@ -183,6 +183,11 @@ What smind does today:
   toggle swaps to grouped view with correct bucket, per-group collapse,
   persistence across remount).
 
-All seven acceptance criteria (AC1-AC7) are satisfied. AC7's own checks
-(no hardcoded colors, full test suite, typecheck, lint) are verified as
-part of each item above and the final `task lint` pass before merge.
+- **AC7**: `test/no-hardcoded-colors.test.ts` passes unchanged (no new
+  file introduces a raw Tailwind palette class or hex/oklch literal --
+  every new color use goes through an existing token: `bg-primary`,
+  `text-status-success`/`text-status-danger`, `bg-popover`, etc.). Full
+  suite: 900 tests across 82 files, all green. `bun run --filter
+  '@smind/ui' typecheck` clean. `task lint` (from the repo root) clean.
+
+All seven acceptance criteria (AC1-AC7) are satisfied.
