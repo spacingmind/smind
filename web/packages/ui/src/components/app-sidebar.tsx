@@ -318,7 +318,14 @@ export function AppSidebar({
     [workspaces],
   );
   const { permission: notificationPermission } = useNotificationPermission();
-  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
+  const openNotifiedTask = useCallback(
+    (taskId: number) => {
+      const task = allTasks.find((t) => t.ID === taskId);
+      if (task) onSelectTask?.(task);
+    },
+    [allTasks, onSelectTask],
+  );
+  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission, openNotifiedTask);
 
   useEffect(() => {
     onTasksChange?.(allTasks);

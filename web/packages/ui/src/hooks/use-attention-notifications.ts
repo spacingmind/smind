@@ -35,16 +35,24 @@ const REASON_BODY: Record<AttentionReason, string> = {
  * can refuse to construct a Notification for reasons outside this code's
  * control (permission revoked mid-session, platform quirks), and a
  * best-effort notification is never worth crashing the app over.
+ *
+ * Clicking a fired notification focuses this window and hands `taskId` to
+ * `onOpenTask` -- the caller already owns task selection (AppSidebar's
+ * `onSelectTask`), so this hook only needs to know *which* task, not how
+ * to open one.
  */
 export function useAttentionNotifications(
   attention: TaskAttention,
   tasks: NotifiableTask[],
   permission: NotificationPermissionState,
+  onOpenTask: (taskId: number) => void,
 ): void {
   const notifiedRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
   const tasksRef = useRef(tasks);
   tasksRef.current = tasks;
+  const onOpenTaskRef = useRef(onOpenTask);
+  onOpenTaskRef.current = onOpenTask;
 
   useEffect(() => {
     const currentKeys = new Set<string>();
@@ -60,7 +68,7 @@ export function useAttentionNotifications(
 
     if (initializedRef.current) {
       for (const { taskId, reason } of newlyAdded) {
-        notifyIfEligible(taskId, reason, tasksRef.current, permission);
+        notifyIfEligible(taskId, reason, tasksRef.current, permission, onOpenTaskRef.current);
       }
     }
     initializedRef.current = true;
@@ -73,6 +81,7 @@ function notifyIfEligible(
   reason: AttentionReason,
   tasks: NotifiableTask[],
   permission: NotificationPermissionState,
+  onOpenTask: (taskId: number) => void,
 ): void {
   if (permission !== "granted") return;
   if (typeof document === "undefined" || !document.hidden) return;
@@ -80,7 +89,11 @@ function notifyIfEligible(
 
   const title = tasks.find((t) => t.ID === taskId)?.Title ?? `Task ${taskId}`;
   try {
-    new Notification(title, { body: REASON_BODY[reason] });
+    const notification = new Notification(title, { body: REASON_BODY[reason] });
+    notification.onclick = () => {
+      window.focus();
+      onOpenTask(taskId);
+    };
   } catch {
     // Degrade silently -- a best-effort notification is never worth
     // throwing into the render/effect over.
