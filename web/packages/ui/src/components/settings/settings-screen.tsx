@@ -3,6 +3,7 @@ import { ArrowLeft } from "lucide-react";
 
 import "@/components/settings/appearance-section";
 import "@/components/settings/general-section";
+import "@/components/settings/notifications-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";

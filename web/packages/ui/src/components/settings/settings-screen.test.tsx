@@ -167,41 +167,100 @@ describe("SettingsScreen General section", () => {
     fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "" } });
     expect(readStoredDefaultProvider()).toBeNull();
   });
+});
 
-  describe("notifications toggle (moved here from the sidebar's bell button, Item 13)", () => {
-    /** jsdom has no Notification API -- installs a minimal fake so the toggle's "default" (clickable) state is reachable at all; without it useNotificationPermission reports "unsupported" and the button stays disabled, which a separate test below covers directly. */
-    function installFakeNotification(initialPermission: NotificationPermission) {
-      const requestPermission = vi.fn<() => Promise<NotificationPermission>>().mockResolvedValue("granted");
-      class FakeNotification {
-        static permission: NotificationPermission = initialPermission;
-        static requestPermission = requestPermission;
+describe("SettingsScreen Notifications section (AC3)", () => {
+  function openNotifications(client = new FakeWsClient()) {
+    renderScreen(client);
+    fireEvent.click(screen.getByTestId("settings-nav-notifications"));
+    return client;
+  }
+
+  /** jsdom has no Notification API -- installs a minimal fake so the toggle's "default" (clickable) state is reachable at all; without it useNotificationPermission reports "unsupported" and the button stays disabled, which a separate test below covers directly. */
+  function installFakeNotification(initialPermission: NotificationPermission) {
+    const requestPermission = vi.fn<() => Promise<NotificationPermission>>().mockResolvedValue("granted");
+    const constructed: { title: string; options?: NotificationOptions }[] = [];
+    class FakeNotification {
+      static permission: NotificationPermission = initialPermission;
+      static requestPermission = requestPermission;
+      constructor(title: string, options?: NotificationOptions) {
+        constructed.push({ title, options });
       }
-      vi.stubGlobal("Notification", FakeNotification);
-      return requestPermission;
     }
+    vi.stubGlobal("Notification", FakeNotification);
+    return { requestPermission, constructed };
+  }
 
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
 
-    it("never requests Notification permission on mount -- only an explicit click on the toggle does", async () => {
-      const requestPermission = installFakeNotification("default");
-      openGeneral();
+  it("moved here, not duplicated -- General no longer renders the notifications toggle", () => {
+    renderScreen();
+    fireEvent.click(screen.getByTestId("settings-nav-general"));
+    expect(screen.queryByTestId("settings-notifications-toggle")).not.toBeInTheDocument();
+  });
 
-      expect(requestPermission).not.toHaveBeenCalled();
+  it("never requests Notification permission on mount -- only an explicit click on the toggle does", async () => {
+    const { requestPermission } = installFakeNotification("default");
+    openNotifications();
 
-      fireEvent.click(screen.getByTestId("settings-notifications-toggle"));
-      await flush();
+    expect(requestPermission).not.toHaveBeenCalled();
 
-      expect(requestPermission).toHaveBeenCalledTimes(1);
-    });
+    fireEvent.click(screen.getByTestId("settings-notifications-toggle"));
+    await flush();
 
-    it("without a Notification API at all, the toggle renders disabled instead of throwing", () => {
-      openGeneral();
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+  });
 
-      const button = screen.getByTestId("settings-notifications-toggle");
-      expect(button).toBeDisabled();
-      expect(() => fireEvent.click(button)).not.toThrow();
-    });
+  it("without a Notification API at all, the toggle renders disabled instead of throwing", () => {
+    openNotifications();
+
+    const button = screen.getByTestId("settings-notifications-toggle");
+    expect(button).toBeDisabled();
+    expect(() => fireEvent.click(button)).not.toThrow();
+  });
+
+  it("the sound toggle defaults off and persists a click", () => {
+    installFakeNotification("granted");
+    openNotifications();
+
+    const toggle = screen.getByTestId("settings-notifications-sound-toggle");
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("the test-notification button is disabled until permission is granted, then sends one and shows success", async () => {
+    installFakeNotification("default");
+    openNotifications();
+    expect(screen.getByTestId("settings-notifications-test-button")).toBeDisabled();
+
+    fireEvent.click(screen.getByTestId("settings-notifications-toggle"));
+    await flush();
+
+    const testButton = screen.getByTestId("settings-notifications-test-button");
+    expect(testButton).toBeEnabled();
+    fireEvent.click(testButton);
+
+    expect(await screen.findByTestId("settings-notifications-test-success")).toBeInTheDocument();
+  });
+
+  it("a Notification constructor that throws shows the failed state instead of crashing", async () => {
+    class ThrowingNotification {
+      static permission: NotificationPermission = "granted";
+      static requestPermission = vi.fn();
+      constructor() {
+        throw new Error("blocked by platform policy");
+      }
+    }
+    vi.stubGlobal("Notification", ThrowingNotification);
+    openNotifications();
+
+    fireEvent.click(screen.getByTestId("settings-notifications-test-button"));
+
+    expect(await screen.findByTestId("settings-notifications-test-error")).toBeInTheDocument();
   });
 });

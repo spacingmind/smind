@@ -1,6 +1,6 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -235,6 +235,275 @@ describe("AppSidebar", () => {
       expect(screen.getAllByTestId("row-aggregate-slot")[0]!.className).toBe(aggregateSlotBefore);
       expect(screen.getByTestId("task-run-status")).toBeInTheDocument();
       expect(screen.getAllByTestId("row-aggregate").length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("unread marker (AC2)", () => {
+    it("renders the unread marker only for a task id in the `unread` set", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set([TASK.ID])} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const row = await screen.findByTestId("sidebar-task-row");
+      expect(row.querySelector('[data-testid="task-unread-marker"]')).toBeInTheDocument();
+    });
+
+    it("renders no unread marker for a task id absent from `unread`, but keeps the slot's width reserved", async () => {
+      const client = new FakeWsClient();
+
+      const { rerender } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set()} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const slotBefore = (await screen.findByTestId("task-unread-slot")).className;
+      expect(screen.queryByTestId("task-unread-marker")).not.toBeInTheDocument();
+
+      rerender(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set([TASK.ID])} />
+        </SidebarProvider>,
+      );
+
+      expect(screen.getByTestId("task-unread-slot").className).toBe(slotBefore);
+      expect(screen.getByTestId("task-unread-marker")).toBeInTheDocument();
+    });
+
+    it("the task menu's Mark unread action calls onMarkUnread with that task's id", async () => {
+      const client = new FakeWsClient();
+      const onMarkUnread = vi.fn();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} onMarkUnread={onMarkUnread} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      await screen.findByTestId("sidebar-task-row");
+      const taskMenu = screen.getByTestId("sidebar-task-actions-trigger");
+      fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
+
+      expect(onMarkUnread).toHaveBeenCalledWith(TASK.ID);
+    });
+  });
+
+  describe("pinned section (AC4)", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("pinning a task from its menu shows it in a Pinned section above the tree", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument();
+
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+
+      const pinned = await screen.findByTestId("sidebar-pinned-section");
+      expect(within(pinned).getByText("Fix the bug")).toBeInTheDocument();
+    });
+
+    it("unpinning removes it from the Pinned section, and the action label toggles", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+
+      fireEvent.pointerDown(screen.getAllByTestId("sidebar-task-actions-trigger")[0]!, { button: 0, ctrlKey: false });
+      expect(await screen.findByTestId("sidebar-task-pin-action")).toHaveTextContent("Unpin");
+      fireEvent.click(screen.getByTestId("sidebar-task-pin-action"));
+
+      await waitFor(() => expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument());
+    });
+
+    it("persists the pinned set across a remount", async () => {
+      const client = new FakeWsClient();
+
+      const { unmount } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+      unmount();
+
+      const client2 = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client2 as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client2, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-pinned-section")).toBeInTheDocument();
+    });
+
+    it("collapsing the Pinned section hides its rows without unpinning", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+
+      fireEvent.click(screen.getByTestId("sidebar-pinned-section-header"));
+
+      const pinned = screen.getByTestId("sidebar-pinned-section");
+      // Still pinned (the section itself remains), but its rows are gone.
+      expect(within(pinned).queryByText("Fix the bug")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("task hover card (AC5)", () => {
+    it("shows branch, diff stat and last activity for the hovered task, using only already-fetched data", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByText("Fix the bug");
+
+      client.nth("task.stats", 0).resolve({
+        stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 2, insertions: 5, deletions: 1 }],
+      });
+      await flush();
+
+      const row = screen.getByTestId("sidebar-task-row");
+      vi.useFakeTimers();
+      try {
+        fireEvent.pointerEnter(row, { pointerId: 1, pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(500);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const card = await screen.findByTestId("task-hover-card");
+      expect(within(card).getByText("feat/fix-bug")).toBeInTheDocument();
+      expect(within(card).getByText(/2 files changed/)).toBeInTheDocument();
+      expect(within(card).getByTestId("task-hover-card-last-activity")).toBeInTheDocument();
+    });
+  });
+
+  describe("group-by-status view toggle (AC6)", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("defaults to the tree view -- no status groups, the workspace row is present", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-workspace-row")).toBeInTheDocument();
+      expect(screen.queryByTestId("sidebar-status-group")).not.toBeInTheDocument();
+    });
+
+    it("toggling shows status groups instead of the workspace tree, and running task lands under Running", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar
+            client={client as never}
+            selectedTaskId={null}
+            runStatus={new Map([[TASK.ID, "running"]])}
+          />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+
+      expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
+      const groups = screen.getAllByTestId("sidebar-status-group");
+      expect(groups).toHaveLength(1);
+      expect(groups[0]).toHaveAttribute("data-status-group", "running");
+      expect(within(groups[0]!).getByText("Fix the bug")).toBeInTheDocument();
+    });
+
+    it("collapsing a status group's header hides its rows", async () => {
+      const client = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+
+      const group = await screen.findByTestId("sidebar-status-group");
+      expect(within(group).getByText("Fix the bug")).toBeInTheDocument();
+
+      fireEvent.click(within(group).getByTestId("sidebar-status-group-header"));
+      expect(within(group).queryByText("Fix the bug")).not.toBeInTheDocument();
+    });
+
+    it("persists the chosen view across a remount", async () => {
+      const client = new FakeWsClient();
+      const { unmount } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByTestId("sidebar-workspace-row");
+      fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+      await screen.findByTestId("sidebar-status-group");
+      unmount();
+
+      const client2 = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client2 as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client2, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-status-group")).toBeInTheDocument();
+      expect(screen.queryByTestId("sidebar-workspace-row")).not.toBeInTheDocument();
     });
   });
 });

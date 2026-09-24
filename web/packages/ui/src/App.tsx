@@ -49,11 +49,13 @@ import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
+import { formatTabTitle } from "@/lib/tab-title";
 import { resolveSplitDropPosition, type SplitDropZonePosition } from "@/lib/split-drop-zone";
 import { cn } from "@/lib/utils";
 import {
@@ -165,6 +167,22 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  // null until the tree's first successful load (treeLoaded), so an
+  // archived/deleted task can be pruned from `unread` without an empty
+  // *initial* task list wiping out a persisted unread set before the real
+  // fetch even lands -- see useUnreadTasks' own doc comment.
+  const liveTaskIds = useMemo(
+    () => (treeLoaded ? new Set(allTasks.map((t) => t.ID)) : null),
+    [treeLoaded, allTasks],
+  );
+  const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
+
+  // AC2: the tab title mirrors the sidebar's own unread count live -- a
+  // plain effect, not a ref, since document.title has no React-owned
+  // counterpart to diff against.
+  useEffect(() => {
+    if (typeof document !== "undefined") document.title = formatTabTitle("smind", unread.size);
+  }, [unread]);
 
   // The sidebar's user-resized width (px), persisted across reloads -- see
   // the plan's Item 6. react-resizable-panels' Panel API takes numeric
@@ -542,6 +560,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onSelectTask={selectTask}
       attention={attention}
       runStatus={runStatus}
+      unread={unread}
+      onMarkUnread={markUnread}
       events={events}
       onTasksChange={setAllTasks}
       onWorkspacesChange={(workspaces) => {

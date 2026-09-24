@@ -8,11 +8,16 @@ import {
   AlertCircle,
   Archive,
   ChevronRight,
+  Circle,
   FolderGit2,
+  FolderTree,
   GitBranch,
   Layers,
+  ListChecks,
   Loader2,
   MoreHorizontal,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Settings,
@@ -35,9 +40,14 @@ import {
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { formatRelativeTime } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
+import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
+import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
+import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
+import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
@@ -60,6 +70,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
@@ -84,6 +95,9 @@ const EMPTY_ATTENTION: TaskAttention = new Map();
 
 /** Stable empty fallback for the optional `runStatus` prop, for the same reason EMPTY_ATTENTION exists: a literal `new Map()` inline would re-run the row-signal memo every render. */
 const EMPTY_RUN_STATUS: TaskRunStatus = new Map();
+
+/** Stable empty fallback for the optional `unread` prop, same reasoning as EMPTY_RUN_STATUS. */
+const EMPTY_UNREAD: ReadonlySet<number> = new Set();
 
 /** Human-readable reason text for the task row's attention dot -- part of its accessible name, so the three reasons are distinguishable to a screen reader and not only by colour. */
 const ATTENTION_LABEL: Record<AttentionReason, string> = {
@@ -197,9 +211,25 @@ interface RowSignal {
   runStatus: TaskRunStatus;
   /** Per-task branch and diff size (see useTaskStats). */
   stats: TaskStats;
+  /** Task ids the user hasn't opened since their last attention-worthy event, or a manual "Mark unread" (AC2). */
+  unread: ReadonlySet<number>;
+  /** The task context menu's "Mark unread" action -- lives on the context (like the rest of this interface) rather than threaded as a prop through every intermediate row component. */
+  onMarkUnread: (taskId: number) => void;
+  /** Task ids pinned to the sidebar's Pinned section (AC4). */
+  pinned: ReadonlySet<number>;
+  /** The task context menu's Pin/Unpin action. */
+  onTogglePin: (taskId: number) => void;
 }
 
-const EMPTY_SIGNAL: RowSignal = { statusOverrides: new Map(), runStatus: new Map(), stats: new Map() };
+const EMPTY_SIGNAL: RowSignal = {
+  statusOverrides: new Map(),
+  runStatus: new Map(),
+  stats: new Map(),
+  unread: new Set(),
+  onMarkUnread: () => {},
+  pinned: new Set(),
+  onTogglePin: () => {},
+};
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
 
@@ -264,6 +294,8 @@ export function AppSidebar({
   onSelectTask,
   attention,
   runStatus,
+  unread,
+  onMarkUnread,
   events,
   onTasksChange,
   onWorkspacesChange,
@@ -278,6 +310,10 @@ export function AppSidebar({
   attention?: TaskAttention;
   /** Per-task latest-run status (App.tsx's useTaskAttention, same hook) -- renders the row's leading run dot and feeds the container rows' aggregate. */
   runStatus?: TaskRunStatus;
+  /** Task ids the user hasn't opened since their last attention-worthy event (App.tsx's useUnreadTasks) -- bolds the row's title (AC2). */
+  unread?: ReadonlySet<number>;
+  /** Manual "Mark unread" override from the task's context menu (App.tsx's useUnreadTasks). */
+  onMarkUnread?: (taskId: number) => void;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
   /**
@@ -303,10 +339,6 @@ export function AppSidebar({
   const statusOverrides = useStatusOverrides(client, events ?? null);
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
   const stats = useTaskStats(client, events ?? null, workspaceIds);
-  const rowSignal = useMemo<RowSignal>(
-    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS, stats }),
-    [attention, statusOverrides, runStatus, stats],
-  );
 
   // Out-of-tab attention notifications (Item 4): every task across the
   // whole tree, flattened just far enough to label a Notification by
@@ -317,8 +349,51 @@ export function AppSidebar({
     () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
     [workspaces],
   );
+  // null until the tree's first successful load (workspaces !== null), so
+  // an archived/deleted task can be pruned from `pinned` without the
+  // tree's empty *initial* render wiping a persisted pin out before the
+  // real fetch even lands -- see usePinnedTasks' own doc comment.
+  const liveTaskIds = useMemo(
+    () => (workspaces === null ? null : new Set(allTasks.map((t) => t.ID))),
+    [workspaces, allTasks],
+  );
+  const { pinned, togglePin } = usePinnedTasks(liveTaskIds);
+  const rowSignal = useMemo<RowSignal>(
+    () => ({
+      attention,
+      statusOverrides,
+      runStatus: runStatus ?? EMPTY_RUN_STATUS,
+      stats,
+      unread: unread ?? EMPTY_UNREAD,
+      onMarkUnread: onMarkUnread ?? EMPTY_SIGNAL.onMarkUnread,
+      pinned,
+      onTogglePin: togglePin,
+    }),
+    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
+  );
+
+  const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
+  const { groupMode, setGroupMode } = useSidebarGroupMode();
+  const statusGroups = useMemo(
+    () => groupTasksByStatus(allTasks, attention ?? EMPTY_ATTENTION, runStatus ?? EMPTY_RUN_STATUS),
+    [allTasks, attention, runStatus],
+  );
   const { permission: notificationPermission } = useNotificationPermission();
-  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission);
+  const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
+  const openNotifiedTask = useCallback(
+    (taskId: number) => {
+      const task = allTasks.find((t) => t.ID === taskId);
+      if (task) onSelectTask?.(task);
+    },
+    [allTasks, onSelectTask],
+  );
+  useAttentionNotifications(
+    attention ?? EMPTY_ATTENTION,
+    allTasks,
+    notificationPermission,
+    openNotifiedTask,
+    notificationSoundEnabled,
+  );
 
   useEffect(() => {
     onTasksChange?.(allTasks);
@@ -526,6 +601,18 @@ export function AppSidebar({
               <>
                 <span>Workspaces</span>
                 <span className="flex items-center">
+                  {!empty && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={groupMode === "tree" ? "Group by status" : "Group by workspace"}
+                      aria-pressed={groupMode === "status"}
+                      data-testid="sidebar-group-mode-toggle"
+                      onClick={() => setGroupMode(groupMode === "tree" ? "status" : "tree")}
+                    >
+                      {groupMode === "tree" ? <FolderTree /> : <ListChecks />}
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -590,7 +677,24 @@ export function AppSidebar({
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                     />
                   )}
+                  {!searching && pinnedTasks.length > 0 && (
+                    <PinnedSection
+                      tasks={pinnedTasks}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
+                  {!searching && groupMode === "status" && (
+                    <StatusGroupedList
+                      groups={statusGroups}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
                   {!searching &&
+                    groupMode === "tree" &&
                     workspaces?.map((ws) => (
                     <WorkspaceItem
                       key={ws.ID}
@@ -741,6 +845,120 @@ function SearchResults({
           onArchiveTask={onArchiveTask}
         />
       </SidebarMenuSub>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The Pinned section (AC4): every pinned task, flattened across
+ * workspaces, above the regular tree -- same TaskRows the tree itself
+ * uses, so a pinned row behaves identically to its counterpart in its own
+ * workspace/space (a task appears in both places; pinning doesn't remove
+ * it from where it normally lives). Collapsed state is local, ephemeral
+ * UI state, not persisted -- only *which* tasks are pinned is (AC4's own
+ * "pin/unpin persists across reloads" scope).
+ */
+function PinnedSection({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-pinned-section">
+      <SidebarMenuButton onClick={() => setCollapsed((c) => !c)} data-testid="sidebar-pinned-section-header">
+        <Pin className="size-3.5" />
+        <span className="min-w-0 truncate">Pinned</span>
+        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", !collapsed && "rotate-90")} />
+      </SidebarMenuButton>
+      {!collapsed && (
+        <SidebarMenuSub>
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No pinned tasks"
+            onArchiveTask={onArchiveTask}
+          />
+        </SidebarMenuSub>
+      )}
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The group-by-status view (AC6): one collapsible bucket per
+ * lib/sidebar-status-groups.ts group, each rendering its tasks through the
+ * same TaskRows the tree view uses -- replaces the workspace/space tree
+ * entirely while active (Pinned stays above either view, per app-sidebar's
+ * render order). Each bucket's own open/closed state is local, ephemeral
+ * UI state, matching PinnedSection's own collapse.
+ */
+function StatusGroupedList({
+  groups,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  groups: StatusGroup[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  return (
+    <>
+      {groups.map((group) => (
+        <StatusGroupItem
+          key={group.key}
+          group={group}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onArchiveTask={onArchiveTask}
+        />
+      ))}
+    </>
+  );
+}
+
+function StatusGroupItem({
+  group,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  group: StatusGroup;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
+      <SidebarMenuButton onClick={() => setOpen((o) => !o)} data-testid="sidebar-status-group-header">
+        <span className="min-w-0 truncate">
+          {group.label} <span className="text-muted-foreground">({group.tasks.length})</span>
+        </span>
+        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-90")} />
+      </SidebarMenuButton>
+      {open && (
+        <SidebarMenuSub>
+          <TaskRows
+            tasks={group.tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No tasks"
+            onArchiveTask={onArchiveTask}
+          />
+        </SidebarMenuSub>
+      )}
     </SidebarMenuItem>
   );
 }
@@ -1063,6 +1281,38 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
   );
 }
 
+/**
+ * The task row's hover card (AC5): branch, diff stat and last activity --
+ * the same fields TaskMetaRow already shows plus task.UpdatedAt, no more.
+ * Deliberately no PR state: smind's wire types (lib/types.ts's Task) carry
+ * no PR field at all yet, and the plan's Decisions are explicit that this
+ * card shows "only data the web UI already has; don't invent data."
+ */
+function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat; status: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="truncate text-sm font-medium text-foreground">{task.Title}</p>
+      {(stat?.branch ?? task.Branch) && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <GitBranch className="size-3 shrink-0" />
+          <span className="min-w-0 truncate">{stat?.branch ?? task.Branch}</span>
+        </div>
+      )}
+      {stat && stat.filesChanged > 0 && (
+        <p className="text-xs tabular-nums text-muted-foreground">
+          {stat.filesChanged} file{stat.filesChanged === 1 ? "" : "s"} changed,{" "}
+          <span className="text-status-success">+{stat.insertions}</span>{" "}
+          <span className="text-status-danger">-{stat.deletions}</span>
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt)}</span>
+      </p>
+      <p className="text-xs uppercase text-muted-foreground">{status}</p>
+    </div>
+  );
+}
+
 function TaskRows({
   tasks,
   selectedTaskId,
@@ -1088,7 +1338,7 @@ function TaskRows({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin } = useRowSignal();
 
   if (tasks.length === 0) {
     return (
@@ -1105,8 +1355,13 @@ function TaskRows({
         const runState = runStatus.get(task.ID);
         const runDot = runDotStatus(runState);
         const stat = stats.get(task.ID);
+        const isUnread = unread.has(task.ID);
+        const isTaskPinned = pinned.has(task.ID);
+        const status = statusOverrides.get(task.ID) ?? task.Status;
         return (
           <SidebarMenuSubItem key={task.ID}>
+            <HoverCard openDelay={400} closeDelay={100}>
+              <HoverCardTrigger asChild>
             <SidebarMenuSubButton
               className="h-auto flex-col items-stretch gap-0.5 py-1"
               isActive={task.ID === selectedTaskId}
@@ -1141,6 +1396,24 @@ function TaskRows({
                   />
                 )}
               </span>
+              {/*
+               * The unread marker (AC2): a plain filled dot in its own
+               * reserved slot, same layout-stability rule as the run-status
+               * and attention slots either side of it. Deliberately not a
+               * StatusDot variant -- "unread" isn't a status the task is
+               * in, it's whether the *user* has looked at it yet, so it
+               * uses the neutral `primary` accent token rather than one of
+               * the success/danger/warning/running hues.
+               */}
+              <span data-testid="task-unread-slot" className="flex w-1.5 shrink-0 items-center justify-center">
+                {isUnread && (
+                  <span
+                    data-testid="task-unread-marker"
+                    aria-label="unread"
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
+                  />
+                )}
+              </span>
               <span className="min-w-0 truncate">{task.Title}</span>
               {/*
                * The attention-dot slot is always in the DOM at a fixed
@@ -1171,8 +1444,13 @@ function TaskRows({
                 )}
               </span>
               </span>
-              <TaskMetaRow stat={stat} status={statusOverrides.get(task.ID) ?? task.Status} />
+              <TaskMetaRow stat={stat} status={status} />
             </SidebarMenuSubButton>
+              </HoverCardTrigger>
+              <HoverCardContent data-testid="task-hover-card" side="right" align="start">
+                <TaskHoverCardBody task={task} stat={stat} status={status} />
+              </HoverCardContent>
+            </HoverCard>
             <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -1189,6 +1467,12 @@ function TaskRows({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
+                  <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
+                    {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
+                    <Circle /> Mark unread
+                  </DropdownMenuItem>
                   <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
                     <Archive /> Archive task
                   </DropdownMenuItem>

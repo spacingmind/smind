@@ -3,15 +3,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAttentionNotifications, type NotifiableTask } from "@/hooks/use-attention-notifications";
 import type { TaskAttention } from "@/hooks/use-task-attention";
+import * as notificationSound from "@/lib/notification-sound";
 
 const TASKS: NotifiableTask[] = [{ ID: 1, Title: "Fix the bug" }];
 
-/** Records every `new Notification(title, options)` call made during a test, standing in for jsdom (which has no real Notification API -- see use-notification-permission.test.ts for the same gap). */
+/** No-op stand-in for the `onOpenTask` param in tests that don't exercise the click handler. */
+const NOOP_OPEN = () => {};
+
+/** Records every `new Notification(title, options)` call made during a test, standing in for jsdom (which has no real Notification API -- see use-notification-permission.test.ts for the same gap). Each recorded call also carries the instance, so a test can invoke its `onclick`. */
 function installFakeNotification() {
-  const calls: { title: string; options?: NotificationOptions }[] = [];
+  const calls: { title: string; options?: NotificationOptions; instance: FakeNotification }[] = [];
   class FakeNotification {
-    constructor(title: string, options?: NotificationOptions) {
-      calls.push({ title, options });
+    onclick: (() => void) | null = null;
+    constructor(
+      public title: string,
+      public options?: NotificationOptions,
+    ) {
+      calls.push({ title, options, instance: this });
     }
   }
   vi.stubGlobal("Notification", FakeNotification);
@@ -34,7 +42,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
     expect(calls).toHaveLength(0);
@@ -52,7 +60,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(false);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
 
@@ -68,7 +76,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "denied"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "denied", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
 
@@ -85,7 +93,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
 
@@ -114,7 +122,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     renderHook(() =>
-      useAttentionNotifications(new Map([[1, new Set(["error"])]]) as TaskAttention, TASKS, "granted"),
+      useAttentionNotifications(new Map([[1, new Set(["error"])]]) as TaskAttention, TASKS, "granted", NOOP_OPEN),
     );
 
     expect(calls).toHaveLength(0);
@@ -125,7 +133,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
 
@@ -153,7 +161,7 @@ describe("useAttentionNotifications", () => {
     setDocumentHidden(true);
 
     const { rerender } = renderHook(
-      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted"),
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
       { initialProps: { attention: new Map() as TaskAttention } },
     );
 
@@ -162,5 +170,65 @@ describe("useAttentionNotifications", () => {
         rerender({ attention: new Map([[1, new Set(["error"])]]) });
       }),
     ).not.toThrow();
+  });
+
+  it("clicking a fired notification focuses the window and opens its task (AC1)", () => {
+    const calls = installFakeNotification();
+    setDocumentHidden(true);
+    const onOpenTask = vi.fn();
+    const focusSpy = vi.spyOn(window, "focus").mockImplementation(() => {});
+
+    const { rerender } = renderHook(
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", onOpenTask),
+      { initialProps: { attention: new Map() as TaskAttention } },
+    );
+
+    act(() => {
+      rerender({ attention: new Map([[1, new Set(["error"])]]) });
+    });
+    expect(calls).toHaveLength(1);
+
+    calls[0]!.instance.onclick?.();
+
+    expect(focusSpy).toHaveBeenCalled();
+    expect(onOpenTask).toHaveBeenCalledWith(1);
+    focusSpy.mockRestore();
+  });
+
+  it("plays a sound when playSound is true (AC3)", () => {
+    installFakeNotification();
+    setDocumentHidden(true);
+    const playSpy = vi.spyOn(notificationSound, "playNotificationSound").mockImplementation(() => {});
+
+    const { rerender } = renderHook(
+      ({ attention }: { attention: TaskAttention }) =>
+        useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN, true),
+      { initialProps: { attention: new Map() as TaskAttention } },
+    );
+
+    act(() => {
+      rerender({ attention: new Map([[1, new Set(["error"])]]) });
+    });
+
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    playSpy.mockRestore();
+  });
+
+  it("does not play a sound when playSound is false (the default)", () => {
+    installFakeNotification();
+    setDocumentHidden(true);
+    const playSpy = vi.spyOn(notificationSound, "playNotificationSound").mockImplementation(() => {});
+
+    const { rerender } = renderHook(
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
+      { initialProps: { attention: new Map() as TaskAttention } },
+    );
+
+    act(() => {
+      rerender({ attention: new Map([[1, new Set(["error"])]]) });
+    });
+
+    expect(playSpy).not.toHaveBeenCalled();
+    playSpy.mockRestore();
   });
 });
