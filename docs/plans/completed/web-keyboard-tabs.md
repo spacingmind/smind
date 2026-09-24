@@ -422,3 +422,28 @@ changed (the `Shift+?` dialog's tests, `defaultPane`-targeted tab
 actions, and -- after review -- the pane-focus-in-a-textarea and
 `Mod+<digit>` tests), the test was rewritten to assert the new, correct
 behavior rather than deleted.
+
+**Rebased onto `origin/develop`** after #186 (`feat/web-sidebar-attention`)
+and #187 (`feat/web-find`) merged. Two textual conflicts, both plain
+unions kept as-is (no semantic decision needed): `keyboard/actions.ts`'s
+`ActionId` union (`pane.find` next to this plan's own new ids) and
+`settings-screen.tsx`'s section-registration imports (`notifications-
+section` next to `shortcuts-section`). `pane.find`'s binding
+(`keyboard/shortcuts.ts`) merged in cleanly and needed no changes to work
+through this plan's chord matcher (a single-combo binding is a chord of
+length 1) or to appear in Settings → Shortcuts (both read the same
+`SHORTCUT_BINDINGS` array). Found and fixed one stale comment in
+`App.tsx` left over from before the review-fix commit (a
+`pane.focus.*`-handler comment still claiming `when: { global: true }`,
+which was already wrong post-review even before the rebase). Verified
+this plan's split-tree "focused pane" (used by `tab.close`/`tab.jump`/
+etc., set by a click via `onPointerDownCapture`) and web-find's own
+per-component `usePaneFocusWithin` (real DOM focus/blur, gating each
+mounted pane's own `pane.find` handler) are genuinely independent
+mechanisms with no shared state -- confirmed with a new App-level test
+(a Chat pane and a split-off Terminal pane, `Mod+F` opening Find only in
+whichever one actually has DOM focus, and the split-tree's own
+`onPointerDownCapture` not swallowing or otherwise interfering with that
+focus). Post-rebase, still green: 1067 web tests across 94 files (this
+plan's own plus develop's, including #186's and #187's), typecheck
+clean, production build clean, `task lint` clean.

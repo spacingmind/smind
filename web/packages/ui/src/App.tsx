@@ -656,10 +656,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     },
     [selectedTask, taskState, focusedPane, focusPane],
   );
-  // Every pane-focus binding carries `when: { global: true }` (Decisions:
-  // "Pane-focus shortcuts fire even while typing in an input") -- `enabled`
-  // here only gates "is there a pane tree to navigate at all", not focus
-  // scope, which the binding table already handles.
+  // `enabled` here only gates "is there a pane tree to navigate at all" --
+  // whether the *default* combo is blocked in a text field (and lifted
+  // once the user rebinds it) is `editableWhenRebound` in the binding
+  // table (`keyboard/shortcuts.ts`), not something this handler decides.
   useActionHandler("pane.focus.left", () => focusAdjacentPane("left"), { enabled: paneCount > 1 });
   useActionHandler("pane.focus.right", () => focusAdjacentPane("right"), { enabled: paneCount > 1 });
   useActionHandler("pane.focus.up", () => focusAdjacentPane("up"), { enabled: paneCount > 1 });

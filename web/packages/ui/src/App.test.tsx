@@ -1908,6 +1908,69 @@ describe("App tab context menu (Item 6)", () => {
   });
 });
 
+describe("App pane focus vs. web-find's per-pane focus-within (rebase interop)", () => {
+  it("Mod+F opens Find only in the pane that actually has DOM focus (Chat vs. a split-off Terminal), unaffected by the split-tree click-to-focus-pane handler", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    // Terminal, opened in primary alongside Chat, then split into its own
+    // pane -- Chat stays behind in primary.
+    await openBaseTab("Terminal");
+    respond(socket, "terminal.list", []);
+    await flush();
+    respond(socket, "terminal.create", { terminalId: "term-1" });
+    await flush();
+    respond(socket, "terminal.attach", { terminalId: "term-1" });
+    await flush();
+    await splitTabRight("Terminal");
+
+    const panes = Object.fromEntries(
+      Array.from(document.querySelectorAll<HTMLElement>("[data-pane-id]")).map((el) => [
+        el.dataset.paneId!,
+        el,
+      ]),
+    );
+    const paneIds = Object.keys(panes);
+    expect(paneIds).toHaveLength(2);
+    const sideId = paneIds.find((id) => id !== "primary")!;
+    // Chat's find-focus wrapper (task-detail.tsx) is still in primary.
+    expect(within(panes.primary!).getByTestId("run-log-scroll")).toBeInTheDocument();
+    expect(within(panes[sideId]!).getByTestId("terminal-container")).toBeInTheDocument();
+
+    // Nothing focused yet -- Mod+F opens Find nowhere.
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+    expect(screen.queryByTestId("find-bar")).not.toBeInTheDocument();
+
+    // A click (App.tsx's split-tree focus handler is onPointerDownCapture,
+    // never stopPropagation/preventDefault-ing) followed by the DOM focus
+    // a real click into the terminal would cause -- proving the two focus
+    // concepts (the split-tree's `focusedPaneId`, and web-find's own
+    // usePaneFocusWithin) don't fight each other over the same click.
+    fireEvent.pointerDown(panes[sideId]!);
+    fireEvent.focus(within(panes[sideId]!).getByTestId("terminal-container"));
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+
+    expect(within(panes[sideId]!).getByTestId("find-bar")).toBeInTheDocument();
+    expect(within(panes.primary!).queryByTestId("find-bar")).not.toBeInTheDocument();
+
+    // Switching DOM focus to primary's Chat moves which pane's Find claims
+    // Mod+F next, independent of the split-tree's own focused pane (which
+    // the click above already moved to the side pane, and which
+    // tab.close/tab.jump/etc. still target).
+    fireEvent.pointerDown(panes.primary!);
+    fireEvent.focus(within(panes.primary!).getByTestId("run-log-scroll"));
+    fireEvent.keyDown(document, { key: "f", code: "KeyF", ctrlKey: true });
+
+    expect(within(panes.primary!).getByTestId("find-bar")).toBeInTheDocument();
+  });
+});
+
 describe("App drag-to-split (Item 8)", () => {
   interface StubRect {
     left: number;
