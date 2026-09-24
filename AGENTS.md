@@ -53,6 +53,11 @@ repo's history.
 - `refs/deepseek-harness` — DeepSeek's agent harness (`dsh`,
   everything-is-a-plugin architecture on Cordis) — UI/plugin-system
   reference for agent-harness patterns.
+- `refs/zcode` — Z.ai's ZCode AI coding workbench
+  (https://github.com/zai-org/ZCode): Electron desktop + browser UI +
+  terminal agent (`apps/zcode-cli`), pnpm monorepo (`packages/{desktop,
+  web,ui,server,rpc,provider}`), plugin store — reference for
+  desktop/web workbench UX and GLM-native agent/provider wiring.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading
