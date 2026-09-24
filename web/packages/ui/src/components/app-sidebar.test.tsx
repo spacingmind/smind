@@ -386,6 +386,41 @@ describe("AppSidebar", () => {
       expect(within(pinned).queryByText("Fix the bug")).not.toBeInTheDocument();
     });
   });
+
+  describe("task hover card (AC5)", () => {
+    it("shows branch, diff stat and last activity for the hovered task, using only already-fetched data", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      await screen.findByText("Fix the bug");
+
+      client.nth("task.stats", 0).resolve({
+        stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 2, insertions: 5, deletions: 1 }],
+      });
+      await flush();
+
+      const row = screen.getByTestId("sidebar-task-row");
+      vi.useFakeTimers();
+      try {
+        fireEvent.pointerEnter(row, { pointerId: 1, pointerType: "mouse" });
+        act(() => {
+          vi.advanceTimersByTime(500);
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const card = await screen.findByTestId("task-hover-card");
+      expect(within(card).getByText("feat/fix-bug")).toBeInTheDocument();
+      expect(within(card).getByText(/2 files changed/)).toBeInTheDocument();
+      expect(within(card).getByTestId("task-hover-card-last-activity")).toBeInTheDocument();
+    });
+  });
 });
 
 /** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as diff-viewer-pane.test.tsx's). */

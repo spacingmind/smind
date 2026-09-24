@@ -38,6 +38,7 @@ import {
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { formatRelativeTime } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
@@ -65,6 +66,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
@@ -1170,6 +1172,38 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
   );
 }
 
+/**
+ * The task row's hover card (AC5): branch, diff stat and last activity --
+ * the same fields TaskMetaRow already shows plus task.UpdatedAt, no more.
+ * Deliberately no PR state: smind's wire types (lib/types.ts's Task) carry
+ * no PR field at all yet, and the plan's Decisions are explicit that this
+ * card shows "only data the web UI already has; don't invent data."
+ */
+function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat; status: string }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="truncate text-sm font-medium text-foreground">{task.Title}</p>
+      {(stat?.branch ?? task.Branch) && (
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <GitBranch className="size-3 shrink-0" />
+          <span className="min-w-0 truncate">{stat?.branch ?? task.Branch}</span>
+        </div>
+      )}
+      {stat && stat.filesChanged > 0 && (
+        <p className="text-xs tabular-nums text-muted-foreground">
+          {stat.filesChanged} file{stat.filesChanged === 1 ? "" : "s"} changed,{" "}
+          <span className="text-status-success">+{stat.insertions}</span>{" "}
+          <span className="text-status-danger">-{stat.deletions}</span>
+        </p>
+      )}
+      <p className="text-xs text-muted-foreground">
+        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt)}</span>
+      </p>
+      <p className="text-xs uppercase text-muted-foreground">{status}</p>
+    </div>
+  );
+}
+
 function TaskRows({
   tasks,
   selectedTaskId,
@@ -1214,8 +1248,11 @@ function TaskRows({
         const stat = stats.get(task.ID);
         const isUnread = unread.has(task.ID);
         const isTaskPinned = pinned.has(task.ID);
+        const status = statusOverrides.get(task.ID) ?? task.Status;
         return (
           <SidebarMenuSubItem key={task.ID}>
+            <HoverCard openDelay={400} closeDelay={100}>
+              <HoverCardTrigger asChild>
             <SidebarMenuSubButton
               className="h-auto flex-col items-stretch gap-0.5 py-1"
               isActive={task.ID === selectedTaskId}
@@ -1298,8 +1335,13 @@ function TaskRows({
                 )}
               </span>
               </span>
-              <TaskMetaRow stat={stat} status={statusOverrides.get(task.ID) ?? task.Status} />
+              <TaskMetaRow stat={stat} status={status} />
             </SidebarMenuSubButton>
+              </HoverCardTrigger>
+              <HoverCardContent data-testid="task-hover-card" side="right" align="start">
+                <TaskHoverCardBody task={task} stat={stat} status={status} />
+              </HoverCardContent>
+            </HoverCard>
             <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

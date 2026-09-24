@@ -114,7 +114,7 @@ What smind does today:
 - [x] AC2 unread + title count + mark unread
 - [x] AC3 Notifications settings section
 - [x] AC4 pinned section
-- [ ] AC5 hover card
+- [x] AC5 hover card
 - [ ] AC6 group-by-status view
 
 ## Validation
@@ -158,3 +158,13 @@ What smind does today:
   persistence) and `app-sidebar.test.tsx`'s "pinned section (AC4)" describe
   block (pin shows the section, unpin removes it and flips the menu label,
   persistence across remount, collapse hides rows without unpinning).
+- **AC5**: `components/ui/hover-card.tsx` (new shadcn-style wrapper over
+  `radix-ui`'s HoverCard, already a project dependency) wraps each task
+  row in `TaskRows`; `TaskHoverCardBody` shows title, branch, diff stat
+  (from the same `useTaskStats` data `TaskMetaRow` already renders),
+  `lib/relative-time.ts`'s "last activity" from `task.UpdatedAt`, and the
+  coarse status -- no PR state, since `lib/types.ts`'s `Task` carries no PR
+  field yet (plan's "don't invent data"). Covered by
+  `relative-time.test.ts` and `app-sidebar.test.tsx`'s "task hover card
+  (AC5)" describe block (pointer-enter + fake-timer advance past the open
+  delay, asserting branch/diff-stat/last-activity content).
