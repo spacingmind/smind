@@ -113,17 +113,54 @@ is React + Tailwind + shadcn.
   for counting, case-insensitivity, whitespace-tolerant queries, and an
   empty query giving zero matches. `chat-find-dom.ts` walks
   `[data-chat-find-text]` containers (added to user/thinking text,
-  `TimelineMarkdown`, and tool-call name/summary) and highlights matches
-  with real `<mark>` elements (not the CSS Custom Highlight API Paseo's
-  web build uses — unsupported in jsdom) — unit-tested directly against
-  jsdom-built DOM in `chat-find-dom.test.ts`, including the
-  multiple-matches-in-one-text-node case. `chat-find.test.tsx` exercises
-  the full stack through `TaskDetailPane`: `Mod+F` gated on chat-pane
-  focus, highlight count/status, Enter/Shift+Enter wraparound, close
-  clearing every mark, and — AC1's explicit streamed-text scenario — a
-  match found in an assistant chunk that arrives *after* Find is already
-  open. Full suite (`bun run test`) stayed green throughout (866/866,
-  up from the 842/842 baseline), confirming AC5 for this item.
+  `TimelineMarkdown`, and tool-call name/summary) to find matches, then
+  paints them via the **CSS Custom Highlight API** (`CSS.highlights`/
+  `Highlight`, styled in `index.css`) — the same technique Paseo's web
+  build uses. `chat-find.test.tsx` exercises the full stack through
+  `TaskDetailPane`: `Mod+F` gated on chat-pane focus, highlight count/
+  status, Enter/Shift+Enter wraparound, close clearing every highlight,
+  and — AC1's explicit streamed-text scenario — a match found in an
+  assistant chunk that arrives *after* Find is already open.
+
+  **Post-merge-review fix**: the first cut of this highlighted matches by
+  wrapping each one in a real `<mark>` via `Range.surroundContents`, with
+  `clearChatHighlights` unwrapping it via `parentNode.normalize()`. Code
+  review flagged that both mutate the exact Text nodes React's own fibers
+  reference for the live transcript — a real risk while Find is open and
+  the last assistant item is still streaming, since React commits its own
+  text updates/removals against those nodes independent of this code.
+  Regression tests reproducing this against the pre-fix implementation
+  (`chat-find-react-safety.test.tsx`) confirmed both predicted failure
+  modes: a streamed update to a highlighted-then-cleared text child
+  silently kept the *stale* text instead of the new one, and removing one
+  outright threw `Failed to execute 'removeChild' on 'Node': The node to
+  be removed is not a child of this node.` (A narrower `<p>{text}</p>`
+  shape didn't reproduce anything — React DOM's own "single Text child"
+  fast path (`setTextContent`) rebuilds or reuses whatever's there
+  regardless of identity, self-healing by luck; the bug needed a sibling
+  text expression, e.g. `<p>foo {chunk} bar</p>`, which gives the streamed
+  piece its own independently-tracked fiber — the shape a real assistant
+  message with surrounding text takes.)
+
+  The fix replaces all DOM mutation with the CSS Custom Highlight API:
+  `applyChatHighlights`/`restyleChatHighlights`/`clearChatHighlights` now
+  only build `Range` objects and register/unregister them as `Highlight`s
+  — a pure paint overlay that never touches the DOM tree, so there is
+  nothing left for React's reconciliation to trip over. Feature-detected
+  (`typeof Highlight`, `CSS.highlights`); an environment without the API
+  degrades to counting matches and scrolling the active one into view with
+  nothing painted, never falling back to a DOM-mutating technique. Since
+  jsdom implements neither global, `test/css-highlight-stub.ts` installs a
+  minimal, inspectable stand-in (a real seam: it patches
+  `globalThis.Highlight`/`CSS.highlights`, exercising the actual
+  feature-detected code path rather than mocking `chat-find-dom.ts`
+  itself) that `chat-find-dom.test.ts` and `chat-find.test.tsx` assert
+  against instead of querying for `<mark>` elements. `chat-find-dom.ts`
+  also gained an explicit "never mutates the DOM" test, and
+  `chat-find-react-safety.test.tsx` keeps both reproduced scenarios (now
+  passing) plus a third confirming the same holds with no Highlight API
+  available at all. Full suite (`bun run test`) stayed green throughout
+  (866/866 → 887/887 with this fix), confirming AC5.
 - **AC2 file Find**: `components/file-editor-find.ts`'s `FileFindModel` is
   a near-verbatim port of Paseo's `file-pane/find/model.web.ts` (same
   `@codemirror/search` API, no React Native in the original to strip) --
@@ -171,10 +208,11 @@ is React + Tailwind + shadcn.
   ran green after every item above (it greps the whole `src/` tree, so a
   regression in any of the new files would have failed it immediately).
 - **AC5** (no regressions): full suite went 842/842 (baseline) →
-  866/866 (chat) → 878/878 (file) → 883/883 (terminal), never red at any
-  step; `bun run typecheck`, `task lint` (`go vet` + `gofmt`), `task test`
-  (Go + web), and a production `bun run build` all green at the end. No
-  `internal/` or `cmd/` Go file was touched.
+  866/866 (chat) → 878/878 (file) → 883/883 (terminal) → 887/887 (the
+  chat-highlighting fix below), never red at any step; `bun run
+  typecheck`, `task lint` (`go vet` + `gofmt`), `task test` (Go + web), and
+  a production `bun run build` all green at the end. No `internal/` or
+  `cmd/` Go file was touched.
 - **Docs**: `docs/design.md` §15's canonical-surfaces table gets a Find
   bar row.
 - **Not done**: the plan's one manual scenario ("in the running app,

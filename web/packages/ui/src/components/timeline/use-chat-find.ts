@@ -7,6 +7,7 @@ import {
   clearChatHighlights,
   findChatMatches,
   restyleChatHighlights,
+  scrollChatMatchIntoView,
 } from "@/components/timeline/chat-find-dom";
 import { nextMatchIndex, previousMatchIndex } from "@/components/timeline/chat-find-text";
 import { useActionHandler } from "@/keyboard/keyboard-provider";
@@ -56,14 +57,14 @@ export function useChatFind(containerRef: RefObject<HTMLElement | null>, revisio
   const [query, setQueryState] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [count, setCount] = useState(0);
-  const marksRef = useRef<HTMLElement[]>([]);
+  const rangesRef = useRef<Range[]>([]);
   const barRef = useRef<FindBarHandle>(null);
   const { focused, onFocus, onBlur } = usePaneFocusWithin();
 
-  const clearMarks = useCallback(() => {
-    clearChatHighlights(containerRef.current);
-    marksRef.current = [];
-  }, [containerRef]);
+  const clearHighlights = useCallback(() => {
+    clearChatHighlights();
+    rangesRef.current = [];
+  }, []);
 
   const openBar = useCallback(() => setOpen(true), []);
   useActionHandler("pane.find", openBar, { enabled: focused });
@@ -74,43 +75,45 @@ export function useChatFind(containerRef: RefObject<HTMLElement | null>, revisio
 
   const close = useCallback(() => {
     setOpen(false);
-    clearMarks();
+    clearHighlights();
     setCount(0);
     setActiveIndex(0);
     setQueryState("");
-  }, [clearMarks]);
+  }, [clearHighlights]);
 
   const setQuery = useCallback((next: string) => setQueryState(next), []);
 
   // Re-walk and re-highlight whenever the bar is open and either the query
-  // or the transcript content changes. Debounced: this touches the DOM
-  // directly (never React state that would re-render TimelineRow), so it
-  // can't break that memo, but it's still an O(rendered text) walk that
-  // shouldn't run on every keystroke of a fast typist.
+  // or the transcript content changes. Debounced: this only reads the DOM
+  // (to find matches) and registers a paint-only Highlight over it --
+  // never touching React state or the DOM tree itself, so it can't break
+  // TimelineRow's memo or corrupt React's own reconciliation (see
+  // chat-find-dom.ts's doc comment) -- but it's still an O(rendered text)
+  // walk that shouldn't run on every keystroke of a fast typist.
   useEffect(() => {
     if (!open) return;
     const timer = window.setTimeout(() => {
-      clearMarks();
+      clearHighlights();
       const matches = findChatMatches(containerRef.current, query);
-      const marks = applyChatHighlights(matches, 0);
-      marksRef.current = marks;
+      const ranges = applyChatHighlights(matches, 0);
+      rangesRef.current = ranges;
       setCount(matches.length);
       setActiveIndex(0);
-      marks[0]?.scrollIntoView({ block: "center" });
+      scrollChatMatchIntoView(ranges[0]);
     }, FIND_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
-  }, [open, query, revision, containerRef, clearMarks]);
+  }, [open, query, revision, containerRef, clearHighlights]);
 
-  // Clears any highlight left in the DOM when this pane (or the whole app)
-  // unmounts while Find was open.
-  useEffect(() => clearMarks, [clearMarks]);
+  // Clears any highlight left registered when this pane (or the whole
+  // app) unmounts while Find was open.
+  useEffect(() => clearHighlights, [clearHighlights]);
 
   const move = useCallback(
     (direction: (current: number, count: number) => number) => {
       setActiveIndex((current) => {
         const next = direction(current, count);
-        restyleChatHighlights(marksRef.current, next);
-        marksRef.current[next]?.scrollIntoView({ block: "center" });
+        restyleChatHighlights(rangesRef.current, next);
+        scrollChatMatchIntoView(rangesRef.current[next]);
         return next;
       });
     },

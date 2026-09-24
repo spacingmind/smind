@@ -1,26 +1,37 @@
 import { buildFindPattern, findMatches } from "@/components/timeline/chat-find-text";
 
 /**
- * Chat Find's DOM half: locating and highlighting matches in the already-
- * rendered transcript. `data-chat-find-text="true"` marks every container
- * whose text is searchable (`timeline-row.tsx`'s user/thinking bodies,
- * `timeline-markdown.tsx`'s rendered markdown, `tool-call-card.tsx`'s name
- * and summary) -- Paseo's `ranges.web.ts` walks similarly marked
- * Markdown-block containers.
+ * Chat Find's DOM half: locating matches in the already-rendered
+ * transcript and painting them via the CSS Custom Highlight API
+ * (`CSS.highlights`/`Highlight`, styled in `index.css`) -- the same
+ * technique Paseo's web build uses
+ * (`agent-stream/chat-find/viewport.web.ts`).
  *
- * Highlighting wraps each match in a real `<mark>` element rather than
- * using the CSS Custom Highlight API Paseo's web build uses
- * (`CSS.highlights`/`Highlight`): that API isn't implemented in jsdom, and
- * a `<mark>` is exactly as "highlight in place" as a non-invasive overlay
- * for this codebase's component tests to assert against, at the cost of
- * needing to unwrap it again before the next search or on close (see
- * {@link clearChatHighlights}).
+ * A `Highlight` is a pure paint overlay registered against live `Range`
+ * objects; registering one never mutates the DOM. That matters here
+ * specifically because this module used to highlight by wrapping each
+ * match in a `<mark>` via `Range.surroundContents` -- which splits and
+ * truncates the very Text nodes React's own fibers reference for the
+ * transcript it renders. React was found to hit a detached or
+ * wrong-shaped node the next time it updated or removed that text (a
+ * streamed chunk landing while Find was open), either silently keeping
+ * stale text or throwing "Failed to execute 'removeChild' on 'Node': The
+ * node to be removed is not a child of this node." (see
+ * `chat-find-react-safety.test.tsx`, the regression coverage for exactly
+ * this). The Highlight API sidesteps the whole bug class by never
+ * touching the DOM tree at all.
+ *
+ * Feature-detected: jsdom doesn't implement `CSS.highlights`/`Highlight`,
+ * so this file's own tests stub both (see `chat-find-dom.test.ts`) to
+ * exercise the real paint path against a fake registry. A real browser
+ * without the API degrades to counting matches and scrolling the active
+ * one into view with nothing painted, rather than falling back to any
+ * DOM-mutating technique.
  */
 
+const HIGHLIGHT_ALL = "smind-chat-find";
+const HIGHLIGHT_ACTIVE = "smind-chat-find-active";
 const SEARCHABLE_SELECTOR = '[data-chat-find-text="true"]';
-const MATCH_ATTR = "data-chat-find-match";
-const MATCH_CLASS = "rounded-sm bg-status-warning/35";
-const ACTIVE_CLASS = "rounded-sm bg-status-warning text-surface-0";
 
 interface DomMatch {
   node: Text;
@@ -30,10 +41,10 @@ interface DomMatch {
 
 /**
  * Every match of `query` under `root`, in document order. Each match is
- * entirely inside one Text node -- a query can't span two nodes (e.g.
- * across a bold/plain boundary) -- which is what keeps
- * {@link applyChatHighlights} safe to implement with `Range.surroundContents`
- * (it throws on a range that only partially selects a non-Text node).
+ * scoped to a single Text node -- a query can't span two nodes (e.g.
+ * across a bold/plain boundary) -- a deliberate scope trim (not, unlike
+ * before, a technical requirement of how highlighting is applied: a
+ * `Range` can freely span multiple nodes).
  */
 export function findChatMatches(root: HTMLElement | null, query: string): DomMatch[] {
   const pattern = buildFindPattern(query);
@@ -53,60 +64,60 @@ export function findChatMatches(root: HTMLElement | null, query: string): DomMat
   return matches;
 }
 
+/** True when this runtime implements the CSS Custom Highlight API. */
+function highlightApiAvailable(): boolean {
+  return typeof Highlight !== "undefined" && typeof CSS !== "undefined" && Boolean(CSS.highlights);
+}
+
+function toRange(match: DomMatch): Range {
+  const range = document.createRange();
+  range.setStart(match.node, match.start);
+  range.setEnd(match.node, match.end);
+  return range;
+}
+
+function paint(ranges: readonly Range[], activeIndex: number): void {
+  if (!highlightApiAvailable()) return;
+  CSS.highlights.set(HIGHLIGHT_ALL, new Highlight(...ranges));
+  const active = ranges[activeIndex];
+  if (active) CSS.highlights.set(HIGHLIGHT_ACTIVE, new Highlight(active));
+  else CSS.highlights.delete(HIGHLIGHT_ACTIVE);
+}
+
 /**
- * Wraps every match in a `<mark>`, styling `activeIndex`'s distinctly, and
- * returns the marks in the same order as `matches` so a caller can restyle
- * or scroll to one by index without re-walking the DOM.
- *
- * Multiple matches inside the *same* Text node are wrapped back-to-front
- * (highest `start` first): `surroundContents` mutates the node it wraps
- * into (splitting it and inserting the `<mark>` between the pieces), which
- * would invalidate every other match's offset into that same node computed
- * before any mutation happened -- processing right-to-left means a wrap
- * never disturbs the character offsets of a match still to come.
+ * Builds a live Range for every match and paints them, styling
+ * `activeIndex`'s distinctly. Returns the ranges in the same order as
+ * `matches` so a caller can restyle or scroll to one by index without
+ * re-walking the DOM. A no-op paint (ranges are still returned) when the
+ * Highlight API isn't available.
  */
-export function applyChatHighlights(matches: DomMatch[], activeIndex: number): HTMLElement[] {
-  const marks: HTMLElement[] = new Array(matches.length);
-
-  const indicesByNode = new Map<Text, number[]>();
-  matches.forEach((match, index) => {
-    const indices = indicesByNode.get(match.node) ?? [];
-    indices.push(index);
-    indicesByNode.set(match.node, indices);
-  });
-
-  for (const indices of indicesByNode.values()) {
-    indices.sort((a, b) => matches[b]!.start - matches[a]!.start);
-    for (const index of indices) {
-      const match = matches[index]!;
-      const range = document.createRange();
-      range.setStart(match.node, match.start);
-      range.setEnd(match.node, match.end);
-      const mark = document.createElement("mark");
-      mark.setAttribute(MATCH_ATTR, "true");
-      mark.className = index === activeIndex ? ACTIVE_CLASS : MATCH_CLASS;
-      range.surroundContents(mark);
-      marks[index] = mark;
-    }
-  }
-  return marks;
+export function applyChatHighlights(matches: DomMatch[], activeIndex: number): Range[] {
+  const ranges = matches.map(toRange);
+  paint(ranges, activeIndex);
+  return ranges;
 }
 
-/** Re-styles already-applied marks for a new active index, without re-walking or re-wrapping anything. */
-export function restyleChatHighlights(marks: readonly HTMLElement[], activeIndex: number): void {
-  marks.forEach((mark, index) => {
-    mark.className = index === activeIndex ? ACTIVE_CLASS : MATCH_CLASS;
-  });
+/** Re-paints already-built ranges for a new active index, without re-walking or rebuilding anything. */
+export function restyleChatHighlights(ranges: readonly Range[], activeIndex: number): void {
+  paint(ranges, activeIndex);
 }
 
-/** Unwraps every `<mark>` {@link applyChatHighlights} inserted under `root`, merging text nodes back to their pre-search shape. */
-export function clearChatHighlights(root: HTMLElement | null): void {
-  if (!root) return;
-  for (const mark of Array.from(root.querySelectorAll(`mark[${MATCH_ATTR}]`))) {
-    const parent = mark.parentNode;
-    if (!parent) continue;
-    while (mark.firstChild) parent.insertBefore(mark.firstChild, mark);
-    parent.removeChild(mark);
-    parent.normalize();
-  }
+/** Un-registers both highlights. A no-op if the API isn't available -- nothing was ever painted. */
+export function clearChatHighlights(): void {
+  if (!highlightApiAvailable()) return;
+  CSS.highlights.delete(HIGHLIGHT_ALL);
+  CSS.highlights.delete(HIGHLIGHT_ACTIVE);
+}
+
+/**
+ * Scrolls a match's rendered position into view. Independent of whether
+ * anything is actually painted, so the degraded no-Highlight-API path
+ * still reveals the active match -- counting and navigation don't depend
+ * on the paint succeeding.
+ */
+export function scrollChatMatchIntoView(range: Range | undefined): void {
+  if (!range) return;
+  const { startContainer } = range;
+  const element = startContainer instanceof Element ? startContainer : startContainer.parentElement;
+  element?.scrollIntoView({ block: "center" });
 }

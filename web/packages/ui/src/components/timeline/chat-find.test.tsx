@@ -1,10 +1,11 @@
 import { act } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { TaskDetailPane } from "@/components/task-detail";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
+import { installCssHighlightStub } from "@/test/css-highlight-stub";
 import type { RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 /**
@@ -101,8 +102,20 @@ function focusChatPane(): void {
   fireEvent.focus(screen.getByTestId("run-log-scroll"));
 }
 
+/** Painted matches are asserted against the stubbed CSS Custom Highlight registry (jsdom doesn't implement it) -- see test/css-highlight-stub.ts and chat-find-dom.ts's own doc comment for why this isn't a `<mark>` DOM query anymore. */
+let highlightStub: ReturnType<typeof installCssHighlightStub>;
+
+function highlightedMatchCount(): number {
+  return highlightStub.registry.get("smind-chat-find")?.ranges.length ?? 0;
+}
+
+beforeEach(() => {
+  highlightStub = installCssHighlightStub();
+});
+
 afterEach(() => {
   vi.useRealTimers();
+  highlightStub.restore();
 });
 
 describe("chat Find", () => {
@@ -129,13 +142,13 @@ describe("chat Find", () => {
       vi.advanceTimersByTime(200);
     });
 
-    expect(document.querySelectorAll('mark[data-chat-find-match]')).toHaveLength(2);
+    expect(highlightedMatchCount()).toBe(2);
     expect(screen.getByTestId("find-status")).toHaveTextContent("1/2");
 
     fireEvent.keyDown(screen.getByTestId("find-input"), { key: "Escape" });
 
     expect(screen.queryByTestId("find-bar")).not.toBeInTheDocument();
-    expect(document.querySelectorAll('mark[data-chat-find-match]')).toHaveLength(0);
+    expect(highlightedMatchCount()).toBe(0);
   });
 
   it("Enter/Shift+Enter move between matches with wraparound", async () => {
@@ -185,7 +198,7 @@ describe("chat Find", () => {
       vi.advanceTimersByTime(200);
     });
 
-    expect(document.querySelectorAll('mark[data-chat-find-match]')).toHaveLength(1);
+    expect(highlightedMatchCount()).toBe(1);
     expect(screen.getByTestId("find-status")).toHaveTextContent("1/1");
   });
 
@@ -200,6 +213,6 @@ describe("chat Find", () => {
     });
 
     expect(screen.getByTestId("find-status")).toHaveTextContent("");
-    expect(document.querySelectorAll('mark[data-chat-find-match]')).toHaveLength(0);
+    expect(highlightedMatchCount()).toBe(0);
   });
 });

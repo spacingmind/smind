@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   applyChatHighlights,
@@ -6,6 +6,7 @@ import {
   findChatMatches,
   restyleChatHighlights,
 } from "@/components/timeline/chat-find-dom";
+import { installCssHighlightStub } from "@/test/css-highlight-stub";
 
 function markedDiv(text: string): HTMLDivElement {
   const div = document.createElement("div");
@@ -55,48 +56,76 @@ describe("findChatMatches", () => {
 });
 
 describe("applyChatHighlights / restyleChatHighlights / clearChatHighlights", () => {
-  it("wraps every match in a <mark>, styling only the active one", () => {
+  let stub: ReturnType<typeof installCssHighlightStub>;
+
+  afterEach(() => {
+    stub?.restore();
+  });
+
+  it("never mutates the DOM -- only registers Ranges to paint", () => {
+    stub = installCssHighlightStub();
+    const root = document.createElement("div");
+    root.append(markedDiv("cat cat cat"));
+    const textBefore = root.innerHTML;
+
+    const matches = findChatMatches(root, "cat");
+    applyChatHighlights(matches, 1);
+
+    expect(root.innerHTML).toBe(textBefore);
+    expect(root.querySelectorAll("mark")).toHaveLength(0);
+  });
+
+  it("registers every match under the all-matches highlight, and only the active one under the active highlight", () => {
+    stub = installCssHighlightStub();
     const root = document.createElement("div");
     root.append(markedDiv("cat cat cat"));
 
     const matches = findChatMatches(root, "cat");
-    const marks = applyChatHighlights(matches, 1);
+    const ranges = applyChatHighlights(matches, 1);
 
-    expect(marks).toHaveLength(3);
-    marks.forEach((mark) => expect(mark.tagName).toBe("MARK"));
-    expect(marks.map((m) => m.textContent)).toEqual(["cat", "cat", "cat"]);
-    expect(marks[1]!.className).toContain("bg-status-warning");
-    expect(marks[1]!.className).not.toBe(marks[0]!.className);
-    // The container's overall text is unchanged by wrapping.
-    expect(root.textContent).toBe("cat cat cat");
+    expect(ranges).toHaveLength(3);
+    ranges.forEach((range) => expect(range.toString()).toBe("cat"));
+
+    const all = stub.registry.get("smind-chat-find");
+    expect(all?.ranges).toEqual(ranges);
+
+    const active = stub.registry.get("smind-chat-find-active");
+    expect(active?.ranges).toEqual([ranges[1]]);
   });
 
-  it("restyles without re-wrapping when the active index changes", () => {
+  it("restyles (repaints the active highlight) without recomputing ranges", () => {
+    stub = installCssHighlightStub();
     const root = document.createElement("div");
     root.append(markedDiv("cat cat cat"));
-    const marks = applyChatHighlights(findChatMatches(root, "cat"), 0);
-    const activeClass = marks[0]!.className;
+    const ranges = applyChatHighlights(findChatMatches(root, "cat"), 0);
 
-    restyleChatHighlights(marks, 2);
+    restyleChatHighlights(ranges, 2);
 
-    expect(marks[0]!.className).not.toBe(activeClass);
-    expect(marks[2]!.className).toBe(activeClass);
-    // Still the same three DOM nodes -- no re-walk happened.
-    expect(root.querySelectorAll("mark")).toHaveLength(3);
+    expect(stub.registry.get("smind-chat-find-active")?.ranges).toEqual([ranges[2]]);
+    // Still the exact same Range objects -- no re-walk happened.
+    expect(stub.registry.get("smind-chat-find")?.ranges).toEqual(ranges);
   });
 
-  it("clears every mark, restoring the container's original text", () => {
+  it("clears both highlights", () => {
+    stub = installCssHighlightStub();
     const root = document.createElement("div");
     root.append(markedDiv("cat cat cat"));
     applyChatHighlights(findChatMatches(root, "cat"), 0);
+    expect(stub.registry.size).toBe(2);
 
-    clearChatHighlights(root);
+    clearChatHighlights();
 
-    expect(root.querySelectorAll("mark")).toHaveLength(0);
-    expect(root.textContent).toBe("cat cat cat");
+    expect(stub.registry.size).toBe(0);
   });
 
-  it("clearing is a no-op for a null root", () => {
-    expect(() => clearChatHighlights(null)).not.toThrow();
+  it("degrades to a no-op paint when the Highlight API isn't available (no stub installed)", () => {
+    const root = document.createElement("div");
+    root.append(markedDiv("cat cat cat"));
+
+    // No installCssHighlightStub() here -- this exercises the real jsdom
+    // environment, which has neither `Highlight` nor `CSS.highlights`.
+    expect(() => applyChatHighlights(findChatMatches(root, "cat"), 0)).not.toThrow();
+    expect(() => clearChatHighlights()).not.toThrow();
+    expect(root.querySelectorAll("mark")).toHaveLength(0);
   });
 });
