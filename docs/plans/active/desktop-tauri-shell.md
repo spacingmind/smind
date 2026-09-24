@@ -163,3 +163,38 @@ directory, no Tauri config.
   rendering in the window (the healthz switch is logged but not
   screenshotted). Note: the tray needs an actual desktop session to
   fully work — WSLg supports it.
+
+## Windows build (native, user decision 2026-09-24)
+
+The user picked a native build on Windows over CI or cross-compiling from WSL.
+
+Prep committed on this branch:
+- Real icon set generated with `npx tauri icon ../mobile/assets/icon.png`, including `icon.ico` (1024px source).
+- `src-tauri/tauri.windows.conf.json` sets the bundle targets to `nsis` + `msi`, with the WebView2 `downloadBootstrapper`. Tauri merges this file only on Windows, so Linux still builds `deb`.
+- `cargo check` on Linux still passes.
+
+Steps on Windows (PowerShell):
+
+1. Install the toolchain once:
+   `winget install Rustlang.Rustup Git.Git OpenJS.NodeJS.LTS`, then
+   `winget install Microsoft.VisualStudio.2022.BuildTools --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`.
+   WebView2 already ships with Windows 10/11.
+   After install, open a new shell and run `rustup default stable-msvc`.
+2. Clone onto the Windows filesystem, not `\\wsl$`, which is slow and breaks file watching:
+   `git clone -b feat/desktop-tauri-shell https://github.com/spacingmind/smind C:\src\smind`.
+3. Build:
+   `cd C:\src\smind\desktop; npm install; npx tauri build`.
+   - Outputs: `src-tauri\target\release\bundle\nsis\smind_0.1.0_x64-setup.exe` and `...\bundle\msi\smind_0.1.0_x64_en-US.msi`.
+   - Tauri downloads WiX/NSIS itself.
+   - On Windows 11 24H2+, the WiX (MSI) step needs the optional VBScript feature. If only the MSI step fails, `npx tauri build --bundles nsis` still produces the `.exe`.
+4. Run: start `smind serve` inside WSL (127.0.0.1:4648). The Windows app reaches it through WSL localhost forwarding. `SMIND_DAEMON_URL` overrides the address.
+5. Manual check list (AC1–AC5 on Windows):
+   - the daemon UI loads;
+   - the fallback page shows while the daemon is stopped;
+   - tray Open/Quit;
+   - closing the window hides it to the tray;
+   - Ctrl+Shift+S toggles the window;
+   - a permission request shows a toast;
+   - a second launch focuses the running window.
+
+The build is unsigned, so SmartScreen will warn ("More info" → "Run anyway"). Code signing is out of scope.
