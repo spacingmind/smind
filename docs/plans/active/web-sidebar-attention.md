@@ -112,7 +112,7 @@ What smind does today:
 
 - [x] AC1 notification click → task
 - [x] AC2 unread + title count + mark unread
-- [ ] AC3 Notifications settings section
+- [x] AC3 Notifications settings section
 - [ ] AC4 pinned section
 - [ ] AC5 hover card
 - [ ] AC6 group-by-status view
@@ -133,3 +133,17 @@ What smind does today:
   `tab-title.test.ts`, and `app-sidebar.test.tsx`'s "unread marker (AC2)"
   describe block (marker presence/slot-width stability, the task menu's
   Mark unread action). Wired into the tab title in `App.tsx`.
+- **AC3**: `components/settings/notifications-section.tsx`, a new
+  registered settings section (permission status/request -- moved from
+  `general-section.tsx`, not duplicated; a sound toggle backed by
+  `hooks/use-notification-sound-preference.ts`; a test-notification button
+  with sent/error feedback, behavior ported from refs/paseo's
+  `DesktopNotificationsSection`). Sound plays via
+  `lib/notification-sound.ts`'s Web Audio chime, wired into
+  `useAttentionNotifications`'s new `playSound` param. Covered by
+  `settings-screen.test.tsx`'s "SettingsScreen Notifications section
+  (AC3)" describe block (moved-not-duplicated, permission toggle,
+  disabled-until-granted test button, success/error feedback, sound
+  toggle), `use-notification-sound-preference.test.ts`,
+  `notification-sound.test.ts`, and the two new
+  `use-attention-notifications.test.ts` cases for `playSound`.

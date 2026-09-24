@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAttentionNotifications, type NotifiableTask } from "@/hooks/use-attention-notifications";
 import type { TaskAttention } from "@/hooks/use-task-attention";
+import * as notificationSound from "@/lib/notification-sound";
 
 const TASKS: NotifiableTask[] = [{ ID: 1, Title: "Fix the bug" }];
 
@@ -192,5 +193,42 @@ describe("useAttentionNotifications", () => {
     expect(focusSpy).toHaveBeenCalled();
     expect(onOpenTask).toHaveBeenCalledWith(1);
     focusSpy.mockRestore();
+  });
+
+  it("plays a sound when playSound is true (AC3)", () => {
+    installFakeNotification();
+    setDocumentHidden(true);
+    const playSpy = vi.spyOn(notificationSound, "playNotificationSound").mockImplementation(() => {});
+
+    const { rerender } = renderHook(
+      ({ attention }: { attention: TaskAttention }) =>
+        useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN, true),
+      { initialProps: { attention: new Map() as TaskAttention } },
+    );
+
+    act(() => {
+      rerender({ attention: new Map([[1, new Set(["error"])]]) });
+    });
+
+    expect(playSpy).toHaveBeenCalledTimes(1);
+    playSpy.mockRestore();
+  });
+
+  it("does not play a sound when playSound is false (the default)", () => {
+    installFakeNotification();
+    setDocumentHidden(true);
+    const playSpy = vi.spyOn(notificationSound, "playNotificationSound").mockImplementation(() => {});
+
+    const { rerender } = renderHook(
+      ({ attention }: { attention: TaskAttention }) => useAttentionNotifications(attention, TASKS, "granted", NOOP_OPEN),
+      { initialProps: { attention: new Map() as TaskAttention } },
+    );
+
+    act(() => {
+      rerender({ attention: new Map([[1, new Set(["error"])]]) });
+    });
+
+    expect(playSpy).not.toHaveBeenCalled();
+    playSpy.mockRestore();
   });
 });

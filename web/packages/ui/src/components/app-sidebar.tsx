@@ -39,6 +39,7 @@ import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStat
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
+import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
@@ -345,6 +346,7 @@ export function AppSidebar({
     [workspaces],
   );
   const { permission: notificationPermission } = useNotificationPermission();
+  const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
     (taskId: number) => {
       const task = allTasks.find((t) => t.ID === taskId);
@@ -352,7 +354,13 @@ export function AppSidebar({
     },
     [allTasks, onSelectTask],
   );
-  useAttentionNotifications(attention ?? EMPTY_ATTENTION, allTasks, notificationPermission, openNotifiedTask);
+  useAttentionNotifications(
+    attention ?? EMPTY_ATTENTION,
+    allTasks,
+    notificationPermission,
+    openNotifiedTask,
+    notificationSoundEnabled,
+  );
 
   useEffect(() => {
     onTasksChange?.(allTasks);

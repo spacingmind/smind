@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { NotificationPermissionState } from "@/hooks/use-notification-permission";
+import { playNotificationSound } from "@/lib/notification-sound";
 
 /** Just enough of a Task to label a notification -- callers pass whatever task list they already have (e.g. AppSidebar's workspace tree). */
 export interface NotifiableTask {
@@ -46,6 +47,7 @@ export function useAttentionNotifications(
   tasks: NotifiableTask[],
   permission: NotificationPermissionState,
   onOpenTask: (taskId: number) => void,
+  playSound = false,
 ): void {
   const notifiedRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
@@ -53,6 +55,8 @@ export function useAttentionNotifications(
   tasksRef.current = tasks;
   const onOpenTaskRef = useRef(onOpenTask);
   onOpenTaskRef.current = onOpenTask;
+  const playSoundRef = useRef(playSound);
+  playSoundRef.current = playSound;
 
   useEffect(() => {
     const currentKeys = new Set<string>();
@@ -68,7 +72,7 @@ export function useAttentionNotifications(
 
     if (initializedRef.current) {
       for (const { taskId, reason } of newlyAdded) {
-        notifyIfEligible(taskId, reason, tasksRef.current, permission, onOpenTaskRef.current);
+        notifyIfEligible(taskId, reason, tasksRef.current, permission, onOpenTaskRef.current, playSoundRef.current);
       }
     }
     initializedRef.current = true;
@@ -82,6 +86,7 @@ function notifyIfEligible(
   tasks: NotifiableTask[],
   permission: NotificationPermissionState,
   onOpenTask: (taskId: number) => void,
+  playSound: boolean,
 ): void {
   if (permission !== "granted") return;
   if (typeof document === "undefined" || !document.hidden) return;
@@ -94,6 +99,7 @@ function notifyIfEligible(
       window.focus();
       onOpenTask(taskId);
     };
+    if (playSound) playNotificationSound();
   } catch {
     // Degrade silently -- a best-effort notification is never worth
     // throwing into the render/effect over.
