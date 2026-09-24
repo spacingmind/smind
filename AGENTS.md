@@ -18,6 +18,8 @@ See [README.md](README.md) for what smind is and how to build/run it.
   them as local-only.
 - `refs/` — read-only reference clones of other projects for pattern lookup (see below).
 
+- `.agents/skills/` (symlinked into `.claude/skills/`, pinned in `skills-lock.json`) — agent skills: frontend (`web-design-guidelines`, `vercel-composition-patterns`, `vercel-react-best-practices`, `frontend-design`), mobile (`expo-*`, `sleek-design-mobile-apps`, `vercel-react-native-skills`), Go (`golang-*`), process (`plan`, `adr`, `verify`). Agents that don't auto-load skills should read the relevant `SKILL.md` before UI work.
+
 ## Workflow rules
 
 **(a) Read-only questions.** Inspect the smallest relevant surface for the

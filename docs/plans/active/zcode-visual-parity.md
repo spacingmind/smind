@@ -103,6 +103,16 @@ PR to match what lands.
   checklists (Test Scenarios below). Never build, launch, or screenshot
   ZCode.
 
+## Skills to use
+
+The repo already ships these agent skills under `.agents/skills/`, with symlinks in `.claude/skills/`. Agents that don't load skills automatically (for example GLM over ACP) should read the `SKILL.md` directly:
+
+- `.agents/skills/web-design-guidelines/SKILL.md`: the review checklist at the end of **every phase**, covering spacing, typography, interaction states, focus and a11y. Run it against the changed components before marking a phase done, and record the findings in Validation.
+- `.agents/skills/vercel-composition-patterns/SKILL.md`: use while porting ZCode components (P2–P4), to keep compound components, slots and variants consistent instead of boolean-prop sprawl.
+- `.claude/skills/vercel-react-best-practices/SKILL.md`: use in P2–P4 to avoid re-render regressions. The timeline rows are memoized; keep them that way.
+- `.agents/skills/frontend-design/SKILL.md`: only for surfaces ZCode has no equivalent for, i.e. smind-only features. **Do not** use it to restyle anything ZCode already defines; `refs/zcode/DESIGN.md` wins.
+- Not used here: `sleek-design-mobile-apps` (mobile only) and `ui-ux-pro-max` (not installed; it proposes new palettes/styles, which conflicts with 1:1 parity).
+
 ## Acceptance Criteria
 
 Each phase is one PR. Phases are ordered; a phase may start only when
