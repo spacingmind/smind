@@ -134,7 +134,11 @@ directory, no Tauri config.
   `desktop/src-tauri` has NOT been run — the Tauri app source is
   written against the Tauri 2 plugin APIs but **unbuilt/unverified**.
   Re-run once `pkg-config --modversion webkit2gtk-4.1` works, then fix
-  any compile errors and do the WSLg manual pass.
+  any compile errors and do the WSLg manual pass. Dependency
+  resolution itself now succeeds (`cargo check` gets past version
+  selection; the current hard failure is `libdbus-sys` needing
+  `pkg-config` + `libdbus-1-dev`), so remaining risk is compile-level,
+  not config-level.
 - **Not yet exercised (manual, WSLg)**: window loads daemon UI; daemon
   stop -> fallback page -> restart -> UI returns; tray Open/Quit;
   close hides to tray; shortcut toggles; a real permission request
