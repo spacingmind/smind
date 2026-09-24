@@ -113,7 +113,7 @@ What smind does today:
 - [x] AC1 notification click → task
 - [x] AC2 unread + title count + mark unread
 - [x] AC3 Notifications settings section
-- [ ] AC4 pinned section
+- [x] AC4 pinned section
 - [ ] AC5 hover card
 - [ ] AC6 group-by-status view
 
@@ -147,3 +147,14 @@ What smind does today:
   toggle), `use-notification-sound-preference.test.ts`,
   `notification-sound.test.ts`, and the two new
   `use-attention-notifications.test.ts` cases for `playSound`.
+- **AC4**: `hooks/use-pinned-tasks.ts` persists the pinned-task id set via
+  `lib/sidebar-preferences.ts`; `app-sidebar.tsx`'s new `PinnedSection`
+  renders every pinned task (flattened across workspaces, same `TaskRows`
+  the tree uses) above the workspace list, and the task context menu gets
+  a Pin/Unpin toggle. A pinned task still appears in its normal
+  workspace/space location too (Paseo removes it from the pool entirely;
+  simpler to duplicate here given smind's tree is client-derived, not
+  server-bucketed). Covered by `use-pinned-tasks.test.ts` (toggle,
+  persistence) and `app-sidebar.test.tsx`'s "pinned section (AC4)" describe
+  block (pin shows the section, unpin removes it and flips the menu label,
+  persistence across remount, collapse hides rows without unpinning).

@@ -14,6 +14,8 @@ import {
   Layers,
   Loader2,
   MoreHorizontal,
+  Pin,
+  PinOff,
   Plus,
   Search,
   Settings,
@@ -40,6 +42,7 @@ import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
+import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
@@ -206,6 +209,10 @@ interface RowSignal {
   unread: ReadonlySet<number>;
   /** The task context menu's "Mark unread" action -- lives on the context (like the rest of this interface) rather than threaded as a prop through every intermediate row component. */
   onMarkUnread: (taskId: number) => void;
+  /** Task ids pinned to the sidebar's Pinned section (AC4). */
+  pinned: ReadonlySet<number>;
+  /** The task context menu's Pin/Unpin action. */
+  onTogglePin: (taskId: number) => void;
 }
 
 const EMPTY_SIGNAL: RowSignal = {
@@ -214,6 +221,8 @@ const EMPTY_SIGNAL: RowSignal = {
   stats: new Map(),
   unread: new Set(),
   onMarkUnread: () => {},
+  pinned: new Set(),
+  onTogglePin: () => {},
 };
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
@@ -324,6 +333,7 @@ export function AppSidebar({
   const statusOverrides = useStatusOverrides(client, events ?? null);
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
   const stats = useTaskStats(client, events ?? null, workspaceIds);
+  const { pinned, togglePin } = usePinnedTasks();
   const rowSignal = useMemo<RowSignal>(
     () => ({
       attention,
@@ -332,8 +342,10 @@ export function AppSidebar({
       stats,
       unread: unread ?? EMPTY_UNREAD,
       onMarkUnread: onMarkUnread ?? EMPTY_SIGNAL.onMarkUnread,
+      pinned,
+      onTogglePin: togglePin,
     }),
-    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread],
+    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
   );
 
   // Out-of-tab attention notifications (Item 4): every task across the
@@ -345,6 +357,7 @@ export function AppSidebar({
     () => (workspaces ?? []).flatMap((ws) => [...ws.spaces.flatMap((sp) => sp.tasks), ...ws.ungroupedTasks]),
     [workspaces],
   );
+  const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
   const { permission: notificationPermission } = useNotificationPermission();
   const { enabled: notificationSoundEnabled } = useNotificationSoundPreference();
   const openNotifiedTask = useCallback(
@@ -632,6 +645,14 @@ export function AppSidebar({
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                     />
                   )}
+                  {!searching && pinnedTasks.length > 0 && (
+                    <PinnedSection
+                      tasks={pinnedTasks}
+                      selectedTaskId={selectedTaskId}
+                      onSelectTask={onSelectTask}
+                      onArchiveTask={(task) => setCrud({ kind: "archive", task })}
+                    />
+                  )}
                   {!searching &&
                     workspaces?.map((ws) => (
                     <WorkspaceItem
@@ -783,6 +804,50 @@ function SearchResults({
           onArchiveTask={onArchiveTask}
         />
       </SidebarMenuSub>
+    </SidebarMenuItem>
+  );
+}
+
+/**
+ * The Pinned section (AC4): every pinned task, flattened across
+ * workspaces, above the regular tree -- same TaskRows the tree itself
+ * uses, so a pinned row behaves identically to its counterpart in its own
+ * workspace/space (a task appears in both places; pinning doesn't remove
+ * it from where it normally lives). Collapsed state is local, ephemeral
+ * UI state, not persisted -- only *which* tasks are pinned is (AC4's own
+ * "pin/unpin persists across reloads" scope).
+ */
+function PinnedSection({
+  tasks,
+  selectedTaskId,
+  onSelectTask,
+  onArchiveTask,
+}: {
+  tasks: Task[];
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  onArchiveTask: (task: Task) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <SidebarMenuItem data-testid="sidebar-pinned-section">
+      <SidebarMenuButton onClick={() => setCollapsed((c) => !c)} data-testid="sidebar-pinned-section-header">
+        <Pin className="size-3.5" />
+        <span className="min-w-0 truncate">Pinned</span>
+        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", !collapsed && "rotate-90")} />
+      </SidebarMenuButton>
+      {!collapsed && (
+        <SidebarMenuSub>
+          <TaskRows
+            tasks={tasks}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            emptyText="No pinned tasks"
+            onArchiveTask={onArchiveTask}
+          />
+        </SidebarMenuSub>
+      )}
     </SidebarMenuItem>
   );
 }
@@ -1130,7 +1195,7 @@ function TaskRows({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin } = useRowSignal();
 
   if (tasks.length === 0) {
     return (
@@ -1148,6 +1213,7 @@ function TaskRows({
         const runDot = runDotStatus(runState);
         const stat = stats.get(task.ID);
         const isUnread = unread.has(task.ID);
+        const isTaskPinned = pinned.has(task.ID);
         return (
           <SidebarMenuSubItem key={task.ID}>
             <SidebarMenuSubButton
@@ -1250,6 +1316,9 @@ function TaskRows({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
+                  <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
+                    {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
+                  </DropdownMenuItem>
                   <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
                     <Circle /> Mark unread
                   </DropdownMenuItem>

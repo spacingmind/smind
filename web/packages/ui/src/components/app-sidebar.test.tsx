@@ -1,6 +1,6 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -293,6 +293,97 @@ describe("AppSidebar", () => {
       fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
 
       expect(onMarkUnread).toHaveBeenCalledWith(TASK.ID);
+    });
+  });
+
+  describe("pinned section (AC4)", () => {
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    it("pinning a task from its menu shows it in a Pinned section above the tree", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument();
+
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+
+      const pinned = await screen.findByTestId("sidebar-pinned-section");
+      expect(within(pinned).getByText("Fix the bug")).toBeInTheDocument();
+    });
+
+    it("unpinning removes it from the Pinned section, and the action label toggles", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+
+      fireEvent.pointerDown(screen.getAllByTestId("sidebar-task-actions-trigger")[0]!, { button: 0, ctrlKey: false });
+      expect(await screen.findByTestId("sidebar-task-pin-action")).toHaveTextContent("Unpin");
+      fireEvent.click(screen.getByTestId("sidebar-task-pin-action"));
+
+      await waitFor(() => expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument());
+    });
+
+    it("persists the pinned set across a remount", async () => {
+      const client = new FakeWsClient();
+
+      const { unmount } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+      unmount();
+
+      const client2 = new FakeWsClient();
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client2 as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client2, WORKSPACE, [], [TASK]);
+
+      expect(await screen.findByTestId("sidebar-pinned-section")).toBeInTheDocument();
+    });
+
+    it("collapsing the Pinned section hides its rows without unpinning", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+      await screen.findByTestId("sidebar-pinned-section");
+
+      fireEvent.click(screen.getByTestId("sidebar-pinned-section-header"));
+
+      const pinned = screen.getByTestId("sidebar-pinned-section");
+      // Still pinned (the section itself remains), but its rows are gone.
+      expect(within(pinned).queryByText("Fix the bug")).not.toBeInTheDocument();
     });
   });
 });
