@@ -595,3 +595,4 @@ the foreground) — not decorative entrance animation on every mount.
 | Toast | `components/ui/toast.tsx` |
 | Status pill | `components/ui/status-badge.tsx` |
 | Status dot | `components/ui/status-dot.tsx` |
+| Find bar (floating, per pane) | `components/find/find-bar.tsx` — used by chat (`components/timeline/use-chat-find.ts`), the file editor (`components/file-editor-find-bar.tsx`), and the terminal (inline in `components/terminal-pane.tsx`) |

@@ -94,7 +94,7 @@ is React + Tailwind + shadcn.
 - [x] AC1 chat Find
 - [x] AC2 file Find (+ replace)
 - [x] AC3 terminal Find
-- [ ] Tests + docs
+- [x] Tests + docs
 
 ## Validation
 
@@ -166,3 +166,19 @@ is React + Tailwind + shadcn.
   search calls forwarding query/direction, the addon's own reported
   result index/count reflected in the bar, and Escape clearing the
   addon's decorations. Full suite: 883/883.
+- **AC4** (shared component, tokens-only): every Find surface renders the
+  one `components/find/find-bar.tsx`; `src/test/no-hardcoded-colors.test.ts`
+  ran green after every item above (it greps the whole `src/` tree, so a
+  regression in any of the new files would have failed it immediately).
+- **AC5** (no regressions): full suite went 842/842 (baseline) →
+  866/866 (chat) → 878/878 (file) → 883/883 (terminal), never red at any
+  step; `bun run typecheck`, `task lint` (`go vet` + `gofmt`), `task test`
+  (Go + web), and a production `bun run build` all green at the end. No
+  `internal/` or `cmd/` Go file was touched.
+- **Docs**: `docs/design.md` §15's canonical-surfaces table gets a Find
+  bar row.
+- **Not done**: the plan's one manual scenario ("in the running app,
+  check each of the three panes in both themes") wasn't exercised — this
+  environment has no browser to drive. Worth a human pass before/at
+  review, particularly the terminal's decoration colors and the file
+  editor's top/bottom corner-flip, which only a real layout can show.
