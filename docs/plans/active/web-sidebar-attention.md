@@ -110,8 +110,8 @@ What smind does today:
 
 ## Progress
 
-- [ ] AC1 notification click → task
-- [ ] AC2 unread + title count + mark unread
+- [x] AC1 notification click → task
+- [x] AC2 unread + title count + mark unread
 - [ ] AC3 Notifications settings section
 - [ ] AC4 pinned section
 - [ ] AC5 hover card
@@ -119,4 +119,17 @@ What smind does today:
 
 ## Validation
 
-To be filled in as items land.
+- **AC1**: `hooks/use-attention-notifications.ts` sets `notification.onclick`
+  to `window.focus()` + the caller's `onOpenTask`; `AppSidebar` wires it to
+  find the task in the already-fetched tree and call `onSelectTask`.
+  Covered by `use-attention-notifications.test.ts`'s "clicking a fired
+  notification focuses the window and opens its task" case.
+- **AC2**: `hooks/use-unread-tasks.ts` (edge-triggered off `TaskAttention`,
+  same `${taskId}:${reason}` bookkeeping as the notification hook; clears on
+  selection; `markUnread` is the manual override) persisted via
+  `lib/sidebar-preferences.ts`; `lib/tab-title.ts` formats the document
+  title. Covered by `use-unread-tasks.test.ts` (gain → unread, open → read,
+  manual mark-unread, persistence across remount, no re-add after read),
+  `tab-title.test.ts`, and `app-sidebar.test.tsx`'s "unread marker (AC2)"
+  describe block (marker presence/slot-width stability, the task menu's
+  Mark unread action). Wired into the tab title in `App.tsx`.

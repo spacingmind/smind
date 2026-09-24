@@ -237,6 +237,64 @@ describe("AppSidebar", () => {
       expect(screen.getAllByTestId("row-aggregate").length).toBeGreaterThan(0);
     });
   });
+
+  describe("unread marker (AC2)", () => {
+    it("renders the unread marker only for a task id in the `unread` set", async () => {
+      const client = new FakeWsClient();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set([TASK.ID])} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const row = await screen.findByTestId("sidebar-task-row");
+      expect(row.querySelector('[data-testid="task-unread-marker"]')).toBeInTheDocument();
+    });
+
+    it("renders no unread marker for a task id absent from `unread`, but keeps the slot's width reserved", async () => {
+      const client = new FakeWsClient();
+
+      const { rerender } = render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set()} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      const slotBefore = (await screen.findByTestId("task-unread-slot")).className;
+      expect(screen.queryByTestId("task-unread-marker")).not.toBeInTheDocument();
+
+      rerender(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} unread={new Set([TASK.ID])} />
+        </SidebarProvider>,
+      );
+
+      expect(screen.getByTestId("task-unread-slot").className).toBe(slotBefore);
+      expect(screen.getByTestId("task-unread-marker")).toBeInTheDocument();
+    });
+
+    it("the task menu's Mark unread action calls onMarkUnread with that task's id", async () => {
+      const client = new FakeWsClient();
+      const onMarkUnread = vi.fn();
+
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} onMarkUnread={onMarkUnread} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+
+      await screen.findByTestId("sidebar-task-row");
+      const taskMenu = screen.getByTestId("sidebar-task-actions-trigger");
+      fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
+      fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
+
+      expect(onMarkUnread).toHaveBeenCalledWith(TASK.ID);
+    });
+  });
 });
 
 /** Minimal DaemonEvents stub: records listeners per topic, lets the test fire them (same shape as diff-viewer-pane.test.tsx's). */

@@ -8,6 +8,7 @@ import {
   AlertCircle,
   Archive,
   ChevronRight,
+  Circle,
   FolderGit2,
   GitBranch,
   Layers,
@@ -84,6 +85,9 @@ const EMPTY_ATTENTION: TaskAttention = new Map();
 
 /** Stable empty fallback for the optional `runStatus` prop, for the same reason EMPTY_ATTENTION exists: a literal `new Map()` inline would re-run the row-signal memo every render. */
 const EMPTY_RUN_STATUS: TaskRunStatus = new Map();
+
+/** Stable empty fallback for the optional `unread` prop, same reasoning as EMPTY_RUN_STATUS. */
+const EMPTY_UNREAD: ReadonlySet<number> = new Set();
 
 /** Human-readable reason text for the task row's attention dot -- part of its accessible name, so the three reasons are distinguishable to a screen reader and not only by colour. */
 const ATTENTION_LABEL: Record<AttentionReason, string> = {
@@ -197,9 +201,19 @@ interface RowSignal {
   runStatus: TaskRunStatus;
   /** Per-task branch and diff size (see useTaskStats). */
   stats: TaskStats;
+  /** Task ids the user hasn't opened since their last attention-worthy event, or a manual "Mark unread" (AC2). */
+  unread: ReadonlySet<number>;
+  /** The task context menu's "Mark unread" action -- lives on the context (like the rest of this interface) rather than threaded as a prop through every intermediate row component. */
+  onMarkUnread: (taskId: number) => void;
 }
 
-const EMPTY_SIGNAL: RowSignal = { statusOverrides: new Map(), runStatus: new Map(), stats: new Map() };
+const EMPTY_SIGNAL: RowSignal = {
+  statusOverrides: new Map(),
+  runStatus: new Map(),
+  stats: new Map(),
+  unread: new Set(),
+  onMarkUnread: () => {},
+};
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
 
@@ -264,6 +278,8 @@ export function AppSidebar({
   onSelectTask,
   attention,
   runStatus,
+  unread,
+  onMarkUnread,
   events,
   onTasksChange,
   onWorkspacesChange,
@@ -278,6 +294,10 @@ export function AppSidebar({
   attention?: TaskAttention;
   /** Per-task latest-run status (App.tsx's useTaskAttention, same hook) -- renders the row's leading run dot and feeds the container rows' aggregate. */
   runStatus?: TaskRunStatus;
+  /** Task ids the user hasn't opened since their last attention-worthy event (App.tsx's useUnreadTasks) -- bolds the row's title (AC2). */
+  unread?: ReadonlySet<number>;
+  /** Manual "Mark unread" override from the task's context menu (App.tsx's useUnreadTasks). */
+  onMarkUnread?: (taskId: number) => void;
   /** The app's single-subscription event stream -- drives live task.status overrides. Optional so tests/mounts without it render as before. */
   events?: DaemonEvents | null;
   /**
@@ -304,8 +324,15 @@ export function AppSidebar({
   const workspaceIds = useMemo(() => (workspaces ?? []).map((ws) => ws.ID), [workspaces]);
   const stats = useTaskStats(client, events ?? null, workspaceIds);
   const rowSignal = useMemo<RowSignal>(
-    () => ({ attention, statusOverrides, runStatus: runStatus ?? EMPTY_RUN_STATUS, stats }),
-    [attention, statusOverrides, runStatus, stats],
+    () => ({
+      attention,
+      statusOverrides,
+      runStatus: runStatus ?? EMPTY_RUN_STATUS,
+      stats,
+      unread: unread ?? EMPTY_UNREAD,
+      onMarkUnread: onMarkUnread ?? EMPTY_SIGNAL.onMarkUnread,
+    }),
+    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread],
   );
 
   // Out-of-tab attention notifications (Item 4): every task across the
@@ -1095,7 +1122,7 @@ function TaskRows({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread } = useRowSignal();
 
   if (tasks.length === 0) {
     return (
@@ -1112,6 +1139,7 @@ function TaskRows({
         const runState = runStatus.get(task.ID);
         const runDot = runDotStatus(runState);
         const stat = stats.get(task.ID);
+        const isUnread = unread.has(task.ID);
         return (
           <SidebarMenuSubItem key={task.ID}>
             <SidebarMenuSubButton
@@ -1145,6 +1173,24 @@ function TaskRows({
                     data-testid="task-run-status"
                     data-run-status={runState}
                     aria-label={`latest run ${runState}`}
+                  />
+                )}
+              </span>
+              {/*
+               * The unread marker (AC2): a plain filled dot in its own
+               * reserved slot, same layout-stability rule as the run-status
+               * and attention slots either side of it. Deliberately not a
+               * StatusDot variant -- "unread" isn't a status the task is
+               * in, it's whether the *user* has looked at it yet, so it
+               * uses the neutral `primary` accent token rather than one of
+               * the success/danger/warning/running hues.
+               */}
+              <span data-testid="task-unread-slot" className="flex w-1.5 shrink-0 items-center justify-center">
+                {isUnread && (
+                  <span
+                    data-testid="task-unread-marker"
+                    aria-label="unread"
+                    className="size-1.5 shrink-0 rounded-full bg-primary"
                   />
                 )}
               </span>
@@ -1196,6 +1242,9 @@ function TaskRows({
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
+                  <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
+                    <Circle /> Mark unread
+                  </DropdownMenuItem>
                   <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
                     <Archive /> Archive task
                   </DropdownMenuItem>
