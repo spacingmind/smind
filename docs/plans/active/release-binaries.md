@@ -51,17 +51,50 @@ Branching and release model (see memory/CONTRIBUTING):
 ## Decisions
 
 - Model the build on `refs/cliproxyapi`'s release workflow where it helps; record what was borrowed.
+  - Borrowed: per-target matrix build job shape, archive layout (binary +
+    LICENSE flat inside the tarball, no wrapping directory), and a final
+    job that downloads every build's artifact and computes one
+    `checksums.txt` over all of them (`publish-checksums` there, `publish`
+    here).
+  - Not borrowed: cliproxyapi's workflow runs on tag push and creates the
+    GitHub Release itself (`gh release create`/`edit`) before building;
+    smind's release-please-action already owns tag + Release creation, so
+    the new jobs key off its `release_created`/`tag_name` outputs instead
+    of a tag-push trigger, and only *upload to* the existing Release
+    rather than creating one.
 - Archive format: `.tar.gz` for all four targets, with no Windows daemon binary. A native Windows daemon is blocked on `internal/terminal`, per ADR-0013.
+- AC2 (Windows installers): `desktop-windows.yml` gained a `workflow_call`
+  trigger alongside its existing `push`/`workflow_dispatch` ones, so
+  `release-please.yml` calls it as a reusable workflow (`uses: ./.github/workflows/desktop-windows.yml`)
+  rather than duplicating its steps. Its own version comes from
+  `tauri.conf.json`, already bumped by the same release-please extra-files
+  update as the rest of the tree, so no version is passed in.
+- AC5 (dry run): added `workflow_dispatch` to `release-please.yml` itself,
+  rather than a separate workflow file or a `pull_request` trigger. A
+  `prepare` job gates every downstream job on "release just got created, or
+  this is a manual dispatch" using `always()` + an explicit condition,
+  since `release-please`'s own job only runs `on: push` and is otherwise
+  skipped (and skipped `needs` block downstream jobs by default). The
+  `publish` job re-applies the same `always()` pattern so it still runs
+  (and uploads workflow artifacts) when `release-please` was skipped.
+- AC3 (`extra-files` syntax): confirmed against release-please's own docs
+  (`docs/customizing.md` in `googleapis/release-please`, fetched
+  2026-09-25). JSON files use `{"type": "json", "path": ..., "jsonpath": "$.version"}`.
+  Non-JSON/YAML files (the two `Cargo.toml`s) use `{"type": "generic", "path": ...}`
+  plus an inline `# x-release-please-version` marker comment on the
+  `version = "..."` line in the file itself -- release-please only rewrites
+  the value on that annotated line. This does not change any other
+  release-please behavior (tag/Release/changelog logic untouched).
 
 ## Progress
 
-- [ ] AC1 release job
-- [ ] AC2 desktop installers on release
-- [ ] AC3 version sync + drift check
-- [ ] AC4 pinning/permissions
-- [ ] AC5 dry-run proof
-- [ ] AC6 docs
+- [x] AC1 release job
+- [x] AC2 desktop installers on release
+- [x] AC3 version sync + drift check
+- [x] AC4 pinning/permissions
+- [x] AC5 dry-run proof
+- [x] AC6 docs
 
 ## Validation
 
-To be filled in.
+To be filled in once the AC5 dry run has been pushed and run on this branch.
