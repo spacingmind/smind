@@ -255,6 +255,26 @@ already uses to justify WS-RPC for the Phase 2 browser-facing API. This
 ADR does not resolve mobile↔relay transport; flagging it so the
 implementation plan doesn't silently assume gRPC applies there too.
 
+**Amendment 2026-09-25 — desktop (Rust) device↔relay transport: native
+gRPC.** The mobile client's grpc-web-over-WebSocket choice above was
+driven by a constraint specific to browsers/React Native (no native
+HTTP/2/gRPC without a grpc-web proxy layer). The desktop app's Rust
+relay client (`docs/plans/active/desktop-relay-transport.md`) is a
+native process with no such constraint, so it speaks native gRPC
+directly to the relay's plain gRPC listener (`DefaultListenAddr`,
+`internal/relay/server/run.go`), generated from `relay.proto` via
+`tonic-build`/`prost` — the same transport `internal/relay/client`
+already uses daemon-side. This does not change cross-language
+compatibility: the E2EE handshake/framing bytes (hello/ready/data
+frames, ChaCha20-Poly1305 ciphertext, HKDF-derived keys) ride inside
+`Frame.payload` identically regardless of whether the outer transport
+is native gRPC or grpc-web — only the outer transport differs.
+**Caveat:** this requires the relay's native gRPC port to stay
+reachable from desktop clients wherever it's deployed — it cannot sit
+behind an HTTP/1.1-only CDN or proxy. If that ever isn't possible for a
+given deployment, grpc-web-over-WebSocket (mirroring the mobile client)
+is the fallback for the desktop client too.
+
 ### (g) QR pairing — persistent daemon keypair + URL-fragment offer (follow paseo)
 
 **Recommendation: adopt paseo's pairing pattern.**
@@ -325,3 +345,6 @@ into this one as a side effect of building the relay's protocol.
 - 2026-09-11: (c) resolved by user in-session — **ChaCha20-Poly1305**,
   roadmap unchanged. (a, b, d, e, f, g, h) approved as recommended;
   Status → Accepted.
+- 2026-09-25: (f) amended — desktop's Rust relay client uses **native
+  gRPC** to the relay's plain gRPC listener (not grpc-web), since it is
+  a native process without mobile's browser/RN transport constraint.

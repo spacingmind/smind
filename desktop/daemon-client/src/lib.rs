@@ -6,6 +6,7 @@ pub mod config;
 pub mod offline;
 pub mod protocol;
 pub mod proxy;
+pub mod relay;
 pub mod route;
 pub mod zoom;
 

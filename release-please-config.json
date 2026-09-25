@@ -7,7 +7,27 @@
       "package-name": "smind",
       "changelog-path": "CHANGELOG.md",
       "draft": false,
-      "prerelease": false
+      "prerelease": false,
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "desktop/package.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "desktop/src-tauri/tauri.conf.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "generic",
+          "path": "desktop/src-tauri/Cargo.toml"
+        },
+        {
+          "type": "generic",
+          "path": "desktop/daemon-client/Cargo.toml"
+        }
+      ]
     }
   }
 }

@@ -29,6 +29,7 @@ pub struct Connection {
 pub enum ConnectionKind {
     Local,
     Url,
+    Relay,
 }
 
 /// validate_base_url accepts only an absolute `http(s)://host[:port]`
@@ -45,7 +46,11 @@ pub fn validate_base_url(raw: &str) -> Result<Url, String> {
     let mut url = Url::parse(trimmed).map_err(|e| format!("invalid URL {trimmed:?}: {e}"))?;
     match url.scheme() {
         "http" | "https" => {}
-        s => return Err(format!("invalid URL {trimmed:?}: scheme must be http(s), got {s}")),
+        s => {
+            return Err(format!(
+                "invalid URL {trimmed:?}: scheme must be http(s), got {s}"
+            ))
+        }
     }
     if url.host_str().is_none() {
         return Err(format!("invalid URL {trimmed:?}: missing host"));
@@ -58,6 +63,15 @@ pub fn validate_base_url(raw: &str) -> Result<Url, String> {
 
 fn connection_id_for_url(url: &Url) -> String {
     format!("url:{}", url.as_str().trim_end_matches('/'))
+}
+
+/// connection_id_for_relay derives a stable id from the (workspace,
+/// relay address) pair a pairing offer resolves to, so re-pairing the
+/// same workspace/relay updates the existing entry in place rather than
+/// duplicating it -- mirroring `connection_id_for_url`'s dedup-by-id
+/// behavior.
+pub fn connection_id_for_relay(workspace_id: &str, relay_native_addr: &str) -> String {
+    format!("relay:{workspace_id}@{relay_native_addr}")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -112,14 +126,58 @@ impl Registry {
     pub fn add(&mut self, label: &str, raw_url: &str) -> Result<Connection, String> {
         let url = validate_base_url(raw_url)?;
         let id = connection_id_for_url(&url);
-        let label = if label.trim().is_empty() { url.as_str().trim_end_matches('/').to_string() } else { label.trim().to_string() };
-        let conn = Connection { id: id.clone(), kind: ConnectionKind::Url, label, base_url: url.as_str().trim_end_matches('/').to_string() };
+        let label = if label.trim().is_empty() {
+            url.as_str().trim_end_matches('/').to_string()
+        } else {
+            label.trim().to_string()
+        };
+        let conn = Connection {
+            id: id.clone(),
+            kind: ConnectionKind::Url,
+            label,
+            base_url: url.as_str().trim_end_matches('/').to_string(),
+        };
         if let Some(existing) = self.connections.iter_mut().find(|c| c.id == id) {
             *existing = conn.clone();
         } else {
             self.connections.push(conn.clone());
         }
         Ok(conn)
+    }
+
+    /// add_relay inserts or (if the same workspace+relay-address pairing
+    /// already exists) updates a `relay` connection's display entry.
+    /// Unlike `add`, no URL validation happens here -- the pairing URL
+    /// itself is parsed/validated by `crate::relay::pairing::Offer`
+    /// before this is ever called. This method only manages the
+    /// non-secret display entry: `connections.json` never carries relay
+    /// key material (the admission secret / daemon public key are
+    /// persisted separately, keyed by this connection's id, via
+    /// `crate::relay::pairing_store`).
+    pub fn add_relay(
+        &mut self,
+        label: &str,
+        workspace_id: &str,
+        relay_native_addr: &str,
+    ) -> Connection {
+        let id = connection_id_for_relay(workspace_id, relay_native_addr);
+        let label = if label.trim().is_empty() {
+            format!("Relay ({workspace_id})")
+        } else {
+            label.trim().to_string()
+        };
+        let conn = Connection {
+            id: id.clone(),
+            kind: ConnectionKind::Relay,
+            label,
+            base_url: format!("relay://{workspace_id}@{relay_native_addr}"),
+        };
+        if let Some(existing) = self.connections.iter_mut().find(|c| c.id == id) {
+            *existing = conn.clone();
+        } else {
+            self.connections.push(conn.clone());
+        }
+        conn
     }
 
     /// remove deletes a `url` entry by id. Errors for the local entry or
@@ -162,15 +220,21 @@ impl Registry {
         let Ok(stored) = serde_json::from_str::<StoredRegistry>(&data) else {
             return Self::new(local_base_url);
         };
-        let mut connections: Vec<Connection> =
-            stored.connections.into_iter().filter(|c| c.id != LOCAL_ID).collect();
+        let mut connections: Vec<Connection> = stored
+            .connections
+            .into_iter()
+            .filter(|c| c.id != LOCAL_ID)
+            .collect();
         connections.insert(0, local_connection(local_base_url));
         let selected_id = if connections.iter().any(|c| c.id == stored.selected_id) {
             stored.selected_id
         } else {
             LOCAL_ID.to_string()
         };
-        Self { connections, selected_id }
+        Self {
+            connections,
+            selected_id,
+        }
     }
 
     /// save writes the registry to `path` as JSON, creating parent
@@ -179,8 +243,12 @@ impl Registry {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let stored = StoredRegistry { connections: self.connections.clone(), selected_id: self.selected_id.clone() };
-        let data = serde_json::to_string_pretty(&stored).expect("smind desktop: registry serializes");
+        let stored = StoredRegistry {
+            connections: self.connections.clone(),
+            selected_id: self.selected_id.clone(),
+        };
+        let data =
+            serde_json::to_string_pretty(&stored).expect("smind desktop: registry serializes");
         fs::write(path, data)
     }
 }
@@ -260,6 +328,35 @@ mod tests {
         reg.add("Second", "http://example.com:9000/").unwrap();
         assert_eq!(reg.list().len(), 2);
         assert_eq!(reg.list()[1].label, "Second");
+    }
+
+    #[test]
+    fn add_relay_then_select_then_current() {
+        let mut reg = Registry::new(&local_url());
+        let conn = reg.add_relay("My Desktop", "ws-1", "relay.example.test:7400");
+        assert_eq!(conn.kind, ConnectionKind::Relay);
+        assert_eq!(reg.list().len(), 2);
+        reg.select(&conn.id).unwrap();
+        assert_eq!(reg.current().id, conn.id);
+        assert_eq!(reg.current().label, "My Desktop");
+    }
+
+    #[test]
+    fn add_relay_same_pairing_twice_updates_in_place() {
+        let mut reg = Registry::new(&local_url());
+        reg.add_relay("First", "ws-1", "relay.example.test:7400");
+        reg.add_relay("Second", "ws-1", "relay.example.test:7400");
+        assert_eq!(reg.list().len(), 2);
+        assert_eq!(reg.list()[1].label, "Second");
+    }
+
+    #[test]
+    fn relay_connection_can_be_removed_like_url() {
+        let mut reg = Registry::new(&local_url());
+        let conn = reg.add_relay("My Desktop", "ws-1", "relay.example.test:7400");
+        reg.select(&conn.id).unwrap();
+        reg.remove(&conn.id).unwrap();
+        assert_eq!(reg.current().id, LOCAL_ID);
     }
 
     #[test]
@@ -349,7 +446,10 @@ mod tests {
     fn load_falls_back_to_local_if_selected_entry_is_gone() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("connections.json");
-        let stale = StoredRegistry { connections: vec![], selected_id: "url:http://gone".to_string() };
+        let stale = StoredRegistry {
+            connections: vec![],
+            selected_id: "url:http://gone".to_string(),
+        };
         fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
 
         let loaded = Registry::load(&path, &local_url());

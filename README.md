@@ -40,6 +40,28 @@ binary that serves both the API and an embedded web UI.
 go install github.com/spacingmind/smind/cmd/smind@latest
 ```
 
+### Installing the daemon from a release
+
+Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
+prebuilt `smind` daemon binaries for linux/amd64, linux/arm64, darwin/amd64
+and darwin/arm64, plus a `checksums.txt`. To install one:
+
+```sh
+version=0.7.0   # match the release you're installing
+os=linux        # or darwin
+arch=amd64      # or arm64
+
+curl -fsSLO "https://github.com/spacingmind/smind/releases/download/v${version}/smind_${version}_${os}_${arch}.tar.gz"
+curl -fsSLO "https://github.com/spacingmind/smind/releases/download/v${version}/checksums.txt"
+sha256sum --ignore-missing -c checksums.txt
+tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
+./smind --version
+```
+
+There is no native Windows daemon binary yet (blocked on `internal/terminal`,
+see ADR-0013); Windows users run the desktop app, which manages the daemon
+via WSL2.
+
 ## Quickstart
 
 ```sh
