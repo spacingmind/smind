@@ -395,6 +395,15 @@ relationship with the daemon.
     `generate_handler!` is not enough by itself; forgetting the `build.rs`
     entry fails the build with "Permission allow-X not found" rather than
     silently missing the command.
+- **Post-review safety fix:** "who owns the port now" was being trusted
+  as "who we just started" with no independent check -- correct only
+  when nothing else could already be on the port, which is exactly the
+  case (an unmanaged daemon already running) AC3 exists to handle safely.
+  Fixed by never treating port ownership alone as proof of identity:
+  every place that's about to signal a pid or persist it as managed now
+  also requires an exe-identity match (`ps -o args=` on macOS, `readlink
+  -f /proc/<pid>/exe` on WSL2) against the binary this app actually
+  manages. See Validation for the full breakdown.
 
 ## Progress
 
@@ -548,6 +557,51 @@ relationship with the daemon.
     artifact upload both completed. `desktop-daemon-client`'s own test
     suite (116 tests) was re-run locally after pulling this fix and is
     still green.
+- **Post-review safety fix (2a147ac):** a review caught a blocking bug in
+  `install_or_update` matching the user's actual setup exactly -- an
+  unmanaged `./bin/smind serve` already on `:4648`. Clicking Install/
+  Update started a new process on the already-occupied port (which fails
+  to bind), `find_port_owner` then returned the *unmanaged* pid, and that
+  got saved as the managed record -- the next Restart/Update would have
+  killed the user's own daemon. The macOS branch had the same shape of
+  bug (kill-before-restart only checked "is the recorded pid merely
+  alive", not "is it still the real port owner and really our binary").
+  Fixed with three pure decisions in `managed.rs` (tested without any
+  real process tree):
+  - `assert_safe_to_install(record, port_owner, port)` refuses Install/
+    Update outright -- before touching disk or network -- when
+    `classify()` says the port is `Unmanaged`. Only `take_over` (already
+    gated behind explicit UI confirmation in `daemon-section.tsx`'s
+    confirm/cancel step -- re-verified this session) may adopt an
+    unmanaged daemon.
+  - `safe_to_kill(record, port_owner, exe_matches)` requires *both* the
+    live port owner to equal the recorded pid *and* an independent
+    exe-identity check, before either branch signals a previously-
+    managed pid.
+  - `verify_started_identity`/`verify_fresh_start(port_owner, exe_matches,
+    reported_version, expected_version)` refuse to save a fresh
+    `ManagedRecord` unless the just-started process's identity checks out
+    (and, for install/update specifically, `/healthz` reports the exact
+    version just installed) -- this is what would have caught the
+    original bug directly: if the new process fails to bind, the port's
+    owner is still the old occupant, whose exe path doesn't match.
+  - The identity check itself: `native::exe_path_for_pid` (`ps -o args=`,
+    first token) on macOS, `wsl::exe_path_argv`/`parse_exe_path`
+    (`readlink -f /proc/<pid>/exe`) on WSL2, both wired into `restart`'s
+    pre-kill guard too (previously port-ownership only).
+  - New tests: `daemon-client` grew from 116 to 127 (11 new: 6 in
+    `managed` for the three pure decisions directly -- including the
+    exact three scenarios asked for: unmanaged owner + install refuses,
+    a stale record pid that no longer matches the owner blocks the kill,
+    and a foreign exe on the port after a start attempt is rejected
+    rather than saved; 3 in `native` for `exe_path_for_pid`/`exe_matches`
+    including a live test against a real spawned `/bin/sleep`; 2 in `wsl`
+    for the argv/parser/suffix-match). All 127 pass; `cargo build`/
+    `cargo build --release` for `src-tauri` clean, no warnings;
+    `task lint` and the full web suite (1263/1263, unaffected -- no web
+    files changed by this fix) both green; `go test ./...` green with no
+    Go files touched.
+  - **Windows CI re-run**: pushed; see below.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
