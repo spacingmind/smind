@@ -227,21 +227,31 @@ fn find_port_owner(platform: Platform, distro: Option<&str>, port: u16) -> Optio
     }
 }
 
-/// wsl_exe_matches resolves the pid's real executable via `/proc/<pid>/exe`
-/// (through `wsl.exe`) and checks it's the binary this app manages --
-/// `false` on any lookup failure, since "couldn't confirm" must never be
-/// treated as "confirmed" here (Bug 1's exact failure mode).
-fn wsl_exe_matches(distro: &str, pid: u32) -> bool {
-    let Ok(out) = wsl::run(&wsl::exe_path_argv(distro, pid)) else { return false };
-    let Some(p) = wsl::parse_exe_path(&String::from_utf8_lossy(&out.stdout)) else { return false };
-    wsl::exe_path_matches_managed_bin(&p)
+/// wsl_resolve_exe_path resolves the pid's real executable via
+/// `/proc/<pid>/exe` (through `wsl.exe`). `None` on any lookup failure --
+/// callers must never treat "couldn't confirm" as "confirmed" (Bug 1's
+/// exact failure mode).
+fn wsl_resolve_exe_path(distro: &str, pid: u32) -> Option<String> {
+    let out = wsl::run(&wsl::exe_path_argv(distro, pid)).ok()?;
+    wsl::parse_exe_path(&String::from_utf8_lossy(&out.stdout))
 }
 
-/// macos_exe_matches is `wsl_exe_matches`'s counterpart for the native
-/// path: resolves `pid`'s real command via `ps` and compares it against
-/// the managed `Layout`'s own binary path.
-fn macos_exe_matches(pid: u32, bin_path: &Path) -> bool {
-    native::exe_path_for_pid(pid).ok().flatten().map(|p| native::exe_matches(&p, bin_path)).unwrap_or(false)
+/// wsl_exe_matches_expected checks `pid`'s real executable against a
+/// specific previously-recorded path -- used before signalling a
+/// previously-managed (or previously-adopted, via take-over) pid, where
+/// `expected` is that record's own `exe_path`, not necessarily the bin
+/// this app would install.
+fn wsl_exe_matches_expected(distro: &str, pid: u32, expected: &str) -> bool {
+    wsl_resolve_exe_path(distro, pid).map(|p| wsl::exe_path_matches(&p, expected)).unwrap_or(false)
+}
+
+/// macos_exe_matches resolves `pid`'s real command via `ps` and compares
+/// it against `expected` -- either a previously-recorded `exe_path`
+/// (pre-kill checks) or the managed `Layout`'s own binary path (post-
+/// start checks); macOS always knows the managed path as a concrete
+/// literal, so unlike WSL2 this one function serves both purposes.
+fn macos_exe_matches(pid: u32, expected: &Path) -> bool {
+    native::exe_path_for_pid(pid).ok().flatten().map(|p| native::exe_matches(&p, expected)).unwrap_or(false)
 }
 
 fn log_path_display(app: &AppHandle, platform: Platform, distro: Option<&str>) -> Option<String> {
@@ -316,7 +326,12 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             // liveness check (the pid merely responds to signal 0) is not
             // enough, since a pid can be reused by an unrelated process.
             if let Some(record) = &existing_record {
-                let exe_matches = macos_exe_matches(record.pid, &layout.bin_path);
+                // Compare against *this record's own* exe_path, not the
+                // managed layout path -- a take-over's record.exe_path is
+                // the adopted process's real (non-managed) path, and it
+                // must still be recognized as "safe to kill" so Update
+                // can actually replace it.
+                let exe_matches = macos_exe_matches(record.pid, Path::new(&record.exe_path));
                 if managed::safe_to_kill(record, port_owner_before, exe_matches) {
                     let _ = native::kill_process(record.pid);
                 } else if port_owner_before.is_some() {
@@ -359,7 +374,10 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             emit_progress(app, "starting", "Starting the daemon…");
             // Bug 2, same guard as the macOS branch above.
             if let Some(record) = &existing_record {
-                let exe_matches = wsl_exe_matches(&distro, record.pid);
+                // Same reasoning as the macOS branch: compare against
+                // this record's own exe_path (the adopted path, for a
+                // take-over), not the managed bin's.
+                let exe_matches = wsl_exe_matches_expected(&distro, record.pid, &record.exe_path);
                 if managed::safe_to_kill(record, port_owner_before, exe_matches) {
                     let _ = wsl::run(&wsl::kill_argv(&distro, record.pid));
                 } else if port_owner_before.is_some() {
@@ -375,10 +393,20 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let (_, daemon_version) = probe_healthz(&base_url).await;
             let port_owner_after = find_port_owner(platform, Some(&distro), port);
-            let exe_matches_after = port_owner_after.map(|pid| wsl_exe_matches(&distro, pid)).unwrap_or(false);
+            // Resolve (not just check) the new process's real path, so
+            // the saved record's exe_path is a real absolute path future
+            // pre-kill checks can compare against -- never the "~/..."
+            // literal, which `readlink -f` could never match exactly.
+            let resolved_exe_after = port_owner_after.and_then(|pid| wsl_resolve_exe_path(&distro, pid));
+            let exe_matches_after = resolved_exe_after.as_deref().map(wsl::exe_path_matches_managed_bin).unwrap_or(false);
             let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
 
-            let record = ManagedRecord { pid, version: app_version.clone(), installed_at: now_unix_seconds(), exe_path: format!("~/{}", wsl::BIN_SUBPATH) };
+            let record = ManagedRecord {
+                pid,
+                version: app_version.clone(),
+                installed_at: now_unix_seconds(),
+                exe_path: resolved_exe_after.expect("smind desktop: verify_fresh_start only succeeds when exe_matches_after is true, which requires Some"),
+            };
             wsl_save_managed(&distro, &record)?;
         }
         Platform::Unsupported => {
@@ -411,9 +439,13 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     // isn't enough on its own, since the pid could have been reused by an
     // unrelated process, including the user's own unmanaged daemon).
     let live_owner = find_port_owner(platform, distro.as_deref(), port);
+    // Compare against this record's own exe_path -- for a normal managed
+    // daemon that's already the managed bin's path, and for one reached
+    // via take-over it's the adopted process's real path, so a take-over
+    // followed directly by Restart still passes this check correctly.
     let exe_matches = match platform {
-        Platform::Macos => macos_layout(app).ok().map(|l| macos_exe_matches(record.pid, &l.bin_path)).unwrap_or(false),
-        Platform::Wsl2 => distro.as_deref().map(|d| wsl_exe_matches(d, record.pid)).unwrap_or(false),
+        Platform::Macos => macos_exe_matches(record.pid, Path::new(&record.exe_path)),
+        Platform::Wsl2 => distro.as_deref().map(|d| wsl_exe_matches_expected(d, record.pid, &record.exe_path)).unwrap_or(false),
         Platform::Unsupported => unreachable!(),
     };
     if !managed::safe_to_kill(&record, live_owner, exe_matches) {
@@ -444,7 +476,10 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
             let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
             let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
 
-            let new_record = ManagedRecord { pid, installed_at: now_unix_seconds(), ..record };
+            // `spawn_detached` always execs `layout.bin_path` -- refresh
+            // exe_path to that (never inherit the old record's, which for
+            // a take-over-then-restart would still be the adopted path).
+            let new_record = ManagedRecord { pid, exe_path: layout.bin_path.display().to_string(), installed_at: now_unix_seconds(), ..record };
             managed::save(&layout.state_path, &new_record).map_err(|e| e.to_string())?;
         }
         Platform::Wsl2 => {
@@ -453,10 +488,20 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
 
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let port_owner_after = find_port_owner(platform, Some(distro), port);
-            let exe_matches_after = port_owner_after.map(|pid| wsl_exe_matches(distro, pid)).unwrap_or(false);
+            let resolved_exe_after = port_owner_after.and_then(|pid| wsl_resolve_exe_path(distro, pid));
+            let exe_matches_after = resolved_exe_after.as_deref().map(wsl::exe_path_matches_managed_bin).unwrap_or(false);
             let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
 
-            let new_record = ManagedRecord { pid, installed_at: now_unix_seconds(), ..record };
+            // `start_detached_argv` always execs the managed bin -- refresh
+            // exe_path to the freshly-resolved path (never inherit the old
+            // record's, which for a take-over-then-restart would still be
+            // the adopted path).
+            let new_record = ManagedRecord {
+                pid,
+                exe_path: resolved_exe_after.expect("smind desktop: verify_started_identity only succeeds when exe_matches_after is true, which requires Some"),
+                installed_at: now_unix_seconds(),
+                ..record
+            };
             wsl_save_managed(distro, &new_record)?;
         }
         Platform::Unsupported => unreachable!(),
@@ -474,7 +519,24 @@ async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus
     let owner = find_port_owner(platform, distro.as_deref(), port)
         .ok_or_else(|| "nothing is listening on the configured port -- there is no daemon to take over".to_string())?;
 
-    let record = managed::take_over(owner, "unknown", "unknown", &now_unix_seconds());
+    // Resolve the adopted process's real executable path up front: this
+    // becomes the record's own identity check from now on
+    // (safe_to_kill/verify_started_identity compare against it), so a
+    // take-over that can't resolve it must refuse outright rather than
+    // store a placeholder that could never pass an identity check again
+    // -- which would make Update/Restart permanently refuse afterwards.
+    let exe_path = match platform {
+        Platform::Macos => native::exe_path_for_pid(owner).ok().flatten(),
+        Platform::Wsl2 => wsl_resolve_exe_path(distro.as_deref().unwrap(), owner),
+        Platform::Unsupported => None,
+    };
+    let Some(exe_path) = exe_path else {
+        return Err(format!(
+            "could not resolve the executable for pid {owner} -- refusing to take over management (it may have already exited, or you may lack permission to inspect it)"
+        ));
+    };
+
+    let record = managed::take_over(owner, "unknown", &exe_path, &now_unix_seconds());
     match platform {
         Platform::Macos => {
             let layout = macos_layout(app)?;

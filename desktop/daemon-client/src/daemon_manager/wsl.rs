@@ -198,6 +198,17 @@ pub fn exe_path_matches_managed_bin(actual: &str) -> bool {
     actual.trim().ends_with(BIN_SUBPATH)
 }
 
+/// exe_path_matches compares a resolved executable path against a
+/// specific previously-recorded one (e.g. a `ManagedRecord`'s own
+/// `exe_path`) -- unlike `exe_path_matches_managed_bin`'s suffix check
+/// (needed only because `$HOME` is never known to Rust), this is a plain
+/// trimmed equality: `expected` here is always a full absolute path
+/// already resolved once before (at install/update/restart/take-over
+/// time), never a `$HOME`-relative guess.
+pub fn exe_path_matches(actual: &str, expected: &str) -> bool {
+    actual.trim() == expected.trim()
+}
+
 /// run is the only function in this module that spawns anything.
 pub fn run(argv: &[String]) -> io::Result<Output> {
     let (prog, args) = argv.split_first().expect("smind desktop: argv is never empty");
@@ -318,5 +329,15 @@ mod tests {
         // entirely) because our own process failed to bind.
         assert!(!exe_path_matches_managed_bin("/home/u/bin/smind"));
         assert!(!exe_path_matches_managed_bin("/usr/local/bin/some-other-daemon"));
+    }
+
+    #[test]
+    fn exe_path_matches_compares_exact_trimmed_paths() {
+        // This is what makes a take-over usable: the recorded exe_path is
+        // the *adopted* process's own path (e.g. the user's own dev
+        // checkout), never the managed bin -- so identity must be judged
+        // against that recorded value, not the suffix check above.
+        assert!(exe_path_matches("/home/u/projects/smind/bin/smind\n", "/home/u/projects/smind/bin/smind"));
+        assert!(!exe_path_matches("/home/u/projects/smind/bin/smind", "/home/u/.local/share/smind/bin/smind"));
     }
 }

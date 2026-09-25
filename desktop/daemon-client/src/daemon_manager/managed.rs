@@ -121,12 +121,22 @@ pub fn verify_fresh_start(port_owner: Option<u32>, exe_matches: bool, reported_v
 /// pid from now on. It performs no process action of its own -- see the
 /// module doc and AC3: invoking this *is* the confirmed action, so the
 /// confirmation step lives entirely in the caller (the UI).
-pub fn take_over(port_owner: u32, version_unknown_marker: &str, exe_path_unknown_marker: &str, installed_at: &str) -> ManagedRecord {
+///
+/// `exe_path` must be the adopted process's *real, resolved* executable
+/// path (the caller resolves it, e.g. via `readlink -f /proc/<pid>/exe`
+/// or `ps`, before calling this) -- never a placeholder like `"unknown"`.
+/// `safe_to_kill`/`verify_started_identity` compare against this exact
+/// value before ever signalling or trusting this pid again, so a
+/// placeholder would make every later Update/Restart refuse forever,
+/// turning a successful take-over into a dead end. `version` has no such
+/// constraint (nothing compares against it), so `"unknown"` is fine there
+/// when the adopted daemon's version genuinely isn't known.
+pub fn take_over(port_owner: u32, version: &str, exe_path: &str, installed_at: &str) -> ManagedRecord {
     ManagedRecord {
         pid: port_owner,
-        version: version_unknown_marker.to_string(),
+        version: version.to_string(),
         installed_at: installed_at.to_string(),
-        exe_path: exe_path_unknown_marker.to_string(),
+        exe_path: exe_path.to_string(),
     }
 }
 
@@ -231,9 +241,67 @@ mod tests {
 
     #[test]
     fn take_over_produces_a_record_matching_the_port_owner() {
-        let r = take_over(789, "unknown", "unknown", "2026-09-25T00:00:00Z");
+        let r = take_over(789, "unknown", "/home/user/dev/smind/bin/smind", "2026-09-25T00:00:00Z");
         assert_eq!(r.pid, 789);
         assert_eq!(classify(Some(&r), Some(789)), ManagedState::Managed);
+    }
+
+    #[test]
+    fn take_over_stores_the_resolved_exe_path_not_a_placeholder() {
+        // The bug this guards against: take_over used to be called with a
+        // literal "unknown" exe_path, which could then never pass an
+        // identity check again -- making Update/Restart refuse forever
+        // after a take-over. The caller (daemon_manager.rs) now resolves
+        // the adopted pid's real path first; this is the pure function's
+        // half of that contract: whatever it's given is what gets stored.
+        let r = take_over(789, "unknown", "/home/user/dev/smind/bin/smind", "2026-09-25T00:00:00Z");
+        assert_eq!(r.exe_path, "/home/user/dev/smind/bin/smind");
+        assert_ne!(r.exe_path, "unknown");
+    }
+
+    #[test]
+    fn restart_after_take_over_passes_the_identity_check() {
+        // A take-over's record.exe_path is the *adopted* process's real
+        // binary, not the managed layout path (which that process was
+        // never running) -- safe_to_kill must compare against the
+        // record's own path for this to ever succeed.
+        let adopted_path = "/home/user/dev/smind/bin/smind";
+        let r = take_over(789, "unknown", adopted_path, "2026-09-25T00:00:00Z");
+
+        // The port owner is unchanged and its exe still resolves to the
+        // same adopted path -- restart's pre-kill guard (safe_to_kill,
+        // given the caller's own exe-identity check result) must allow
+        // this rather than refuse forever.
+        assert!(safe_to_kill(&r, Some(789), true));
+        // A mismatched exe (the identity check failed) must still refuse,
+        // even with the right pid -- take-over doesn't weaken this.
+        assert!(!safe_to_kill(&r, Some(789), false));
+    }
+
+    #[test]
+    fn update_after_take_over_kills_the_adopted_pid_then_records_the_managed_path() {
+        let adopted_path = "/home/user/dev/smind/bin/smind";
+        let adopted = take_over(789, "unknown", adopted_path, "2026-09-25T00:00:00Z");
+
+        // Step 1: before install/update starts, the port is still owned
+        // by the adopted pid and its exe still resolves to the adopted
+        // path -- this is exactly what allows Update to kill it (the
+        // fix's whole point: a take-over must not be a dead end).
+        assert!(safe_to_kill(&adopted, Some(789), true));
+
+        // Step 2: a fresh managed process (a different pid) is started;
+        // its identity is checked against the *managed* binary, entirely
+        // independent of the old record's exe_path.
+        let fresh_pid = verify_fresh_start(Some(999), true, Some("0.7.0"), "0.7.0").unwrap();
+        assert_eq!(fresh_pid, 999);
+
+        // Step 3: the new record reflects the managed path, not the
+        // adopted one it replaced.
+        let managed_path = "/home/user/.local/share/smind/bin/smind";
+        let new_record =
+            ManagedRecord { pid: fresh_pid, version: "0.7.0".to_string(), installed_at: "2026-09-25T00:01:00Z".to_string(), exe_path: managed_path.to_string() };
+        assert_eq!(new_record.exe_path, managed_path);
+        assert_ne!(new_record.exe_path, adopted.exe_path);
     }
 
     #[test]
