@@ -11,8 +11,10 @@
 //! separable so tests can inject fakes.
 
 pub mod checksums;
+pub mod managed;
 pub mod release;
 pub mod version;
 
+pub use managed::{ManagedRecord, ManagedState};
 pub use release::{ReleaseError, ReleaseUrls};
 pub use version::{classify, compare, Comparison, VersionKind};
