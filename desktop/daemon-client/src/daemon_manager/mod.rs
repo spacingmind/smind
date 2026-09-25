@@ -12,6 +12,7 @@
 
 pub mod checksums;
 pub mod managed;
+pub mod native;
 pub mod release;
 pub mod version;
 pub mod wsl;
