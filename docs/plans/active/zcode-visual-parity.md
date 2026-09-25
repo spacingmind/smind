@@ -425,3 +425,86 @@ overlay family (`sidebar.tsx`, `tooltip.tsx`, `hover-card.tsx`,
 no explicit DESIGN.md violation found in a light pass, and their
 surfaces get pixel-matched against a specific ZCode source file in
 P2–P4 rather than guessed at here.
+
+### P1 follow-up — screenshot-review bug fixes
+
+A screenshot pass over the committed P1 work (`bd9cfe2`, `da4abdd`,
+after 086bddb) found four visual defects, all fixed and re-verified via
+fresh Playwright screenshots (home/task/settings, light+dark,
+1440×900) before landing:
+
+1. **Selected/active items rendered much larger than siblings**
+   (Settings → Appearance segmented controls, the settings nav, the
+   "Chat" tab label, the sidebar's "Workspaces" heading). Root cause:
+   tailwind-merge's default config doesn't know `text-ui-*` is a
+   font-size scale, so it falls into the `text-color` group by
+   default; any `cn()` call pairing a `text-ui-*` size with a later
+   `text-{color}` class (the exact shape every selected/active variant
+   produces) silently dropped the size, leaving the element to inherit
+   ambient font-size. Fixed in `bd9cfe2` by registering the scale
+   under tailwind-merge's `font-size` group via `extendTailwindMerge`
+   (`lib/utils.ts`); `lib/utils.test.ts` pins the merge behavior, and
+   `appearance-section.test.tsx` + a new `settings-screen.test.tsx`
+   case render the real components and assert the selected and
+   unselected items share one `text-ui-*` class.
+2. **Overall text scale read too small (~11px body text).** The first
+   migration pass ported the old Tailwind class name 1:1
+   (`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`), but ZCode's roles
+   sit one tier higher than those old names suggest. Fixed in `da4abdd`
+   by moving every body/label/title site up one tier and reverting the
+   genuine badge/counter/kbd sites back to `text-ui-xs` (see the role
+   table in `docs/design.md` §12, "Role mapping", reproduced below).
+3. **Dark-theme selected/hover state was a saturated navy; the dark
+   Send button's disabled background was brownish.** The navy came
+   from several components still using the pre-ZCode static
+   `bg-accent`/`text-accent-foreground` pair (dark `--accent` is
+   `#001d3d`, a leftover shadcn value) instead of the Zai-palette
+   `bg-selected`/`bg-hover` tokens P1 already ported; every remaining
+   application-UI use is now `bg-selected`/`hover:bg-hover` (`da4abdd`).
+   The brownish Send button came from the "execute" button variant's
+   already-translucent `bg-warning/10..20` compounding with the shared
+   `disabled:opacity-50`, landing at an effective alpha low enough that
+   the warning hue reads as brown rather than a dimmed orange; its
+   disabled state now falls back to the flat neutral
+   `muted`/`muted-foreground` pair (`da4abdd`). The `execute` variant
+   itself, and its use for the idle Send button, are pinned by an
+   existing `composer.test.tsx` case and were not changed.
+4. **Sidebar task rows pushed the title ~32px right of its branch
+   line.** The title row reserves a run-status-dot + unread-dot lead-in
+   (`w-2.5` + `gap-2` + `w-1.5` + `gap-2` = 32px) so a status change
+   never shifts the title sideways (pre-existing on `develop` too, not
+   a P1 regression); the meta row underneath has no such slots, so it
+   needs a matching `pl-8` to visually align under the title
+   (`app-sidebar.tsx`'s `TaskMetaRow`, `da4abdd`).
+
+**Role mapping** (also recorded in `docs/design.md` §12):
+
+| Token | Role | smind examples |
+| --- | --- | --- |
+| `text-ui-xl` | Markdown h1 | `timeline-markdown.tsx`'s `h1` |
+| `text-ui-lg` | Markdown h2 | `timeline-markdown.tsx`'s `h2` |
+| `text-ui-base` | Markdown h3–h6, body copy, common buttons, titles/labels, primary UI text | dialog/section titles, form labels, timeline message bubbles, button labels, settings nav items, tab labels |
+| `text-ui-caption` | Compact supporting copy one step below body | not yet consumed in smind |
+| `text-ui-sm` | Secondary/supporting copy, helper text, inline code | sidebar task metadata (branch, diff stat, last-activity), hover-card detail rows, form helper/error captions, tooltip copy |
+| `text-ui-xs` | Badges, counters, compact labels, keyboard-shortcut kbds, very weak metadata | `StatusBadge`, `SidebarMenuBadge`, `<kbd>` shortcut chips, account-provider pills, the folder picker's `git` indicator |
+
+**Accepted trade-off, not fixed:** the button primitive's disabled
+treatment is documented (`docs/design.md` §14 Forbidden: "Color-only
+disabled state... a disabled control is the same control, dimmer, not
+a recolored one"). The Send-button fix above technically recolors the
+`execute` variant's disabled state rather than purely dimming it; the
+alternative (raising the variant's base alpha enough that halving it
+via `disabled:opacity-50` still reads as orange, not brown) would
+visibly change the variant's normal, non-disabled appearance too, a
+larger and unrelated change. `aria-invalid:*` overrides already
+recolor this same variant string regardless of disabled state, so this
+isn't a new pattern in this file.
+
+**Verification:** `bun run --filter '@smind/ui' test` — 98 test files,
+1235 tests, all green (up from 96/1227 at the end of P1 proper: +1 new
+file `appearance-section.test.tsx` with 2 cases, +1 new case in
+`settings-screen.test.tsx`, +5 in `lib/utils.test.ts`);
+`bun run --filter '@smind/ui' typecheck` green; `task lint` green;
+`task test` (Go suite) green, unaffected (web-only change). Playwright
+screenshots (`home`/`task`/`settings` × light/dark, 1440×900) confirmed
+all four defects gone before commit.

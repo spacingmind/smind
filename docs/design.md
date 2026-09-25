@@ -461,6 +461,29 @@ error rows) is not exempt and uses `text-ui-*` like everything else.
 survives, for exactly this reason: markdown prose must not rescale with
 the interface-density setting.
 
+**Role mapping.** `text-ui-*` is chosen by content role
+(`refs/zcode/DESIGN.md`'s own table), not by porting the old Tailwind
+class name 1:1 — the first migration pass did the latter mechanically
+(`text-sm`→`text-ui-sm`, `text-xs`→`text-ui-xs`) and a screenshot review
+caught the result reading roughly one step too small everywhere, since
+ZCode's roles sit one tier higher than the old smind names suggest:
+
+| Token | Role | smind examples |
+| --- | --- | --- |
+| `text-ui-xl` | Markdown h1 | `timeline-markdown.tsx`'s `h1` |
+| `text-ui-lg` | Markdown h2 | `timeline-markdown.tsx`'s `h2` |
+| `text-ui-base` | Markdown h3–h6, body copy, common buttons, titles/labels, primary UI text | dialog/section titles, form labels, timeline message bubbles, button labels, settings nav items, tab labels |
+| `text-ui-caption` | Compact supporting copy one step below body | not yet consumed in smind |
+| `text-ui-sm` | Secondary/supporting copy, helper text, inline code | sidebar task metadata (branch, diff stat, last-activity), hover-card detail rows, form helper/error captions, tooltip copy |
+| `text-ui-xs` | Badges, counters, compact labels, keyboard-shortcut kbds, very weak metadata | `StatusBadge`, `SidebarMenuBadge`, `<kbd>` shortcut chips (`shortcuts-dialog.tsx`, `command-palette.tsx`), account-provider pills, the folder picker's `git` indicator |
+
+The fix was mechanical too, but keyed off role rather than old name: every
+non-badge/kbd/counter site moved up one tier (old `text-xs`→`text-ui-sm`,
+old `text-sm`→`text-ui-base`); genuine badge/counter/kbd sites — matched
+against `refs/zcode/packages/ui/src/components/ui/badge.tsx` and
+`kbd.tsx`, both of which stay `text-ui-xs` regardless of content — were
+left at (or reverted back to) `text-ui-xs`.
+
 **Weight** follows `refs/zcode/DESIGN.md`'s looser guidance rather than
 the old strict three-tier token system (retired along with the type-role
 tokens it was defined against): prefer `font-medium` for headings and
@@ -470,11 +493,13 @@ wordmark (`app-sidebar.tsx`) is still the one deliberate `font-semibold`
 in the app — the plan's Brand colour decision, not a typography rule.
 
 Markdown's own heading hierarchy (`components/timeline/
-timeline-markdown.tsx`) mechanically migrated onto `text-ui-*` in P1
-(`text-base`→`text-ui-base`, `text-sm`→`text-ui-sm`, preserving the
-existing pixel sizes) without yet adopting ZCode's h1/h2 sizing
-(`text-ui-xl`/`text-ui-lg`) — that's `zcode-visual-parity`'s P3 scope,
-"Timeline rows match `v4/ConversationTimeline.tsx`".
+timeline-markdown.tsx`) kept its own internal step spacing through the
+role-mapping fix above (h1 one tier above h2, h2 one tier above h3) —
+`text-ui-base`→`text-ui-lg` (h1), `text-ui-sm`→`text-ui-base` (h2) — without
+yet adopting ZCode's actual h1/h2 sizing (`text-ui-xl`/`text-ui-lg`) or its
+h3–h6→`text-ui-base` flattening; full markdown-scale adoption is
+`zcode-visual-parity`'s P3 scope, "Timeline rows match
+`v4/ConversationTimeline.tsx`".
 
 ## 13. Radius, elevation, shadow, and motion
 
