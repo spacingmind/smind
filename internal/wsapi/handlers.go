@@ -11,15 +11,17 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/codex"
+	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, reg, treg, and coord.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
+// bound to wm, runner, reg, treg, profReg, and coord.
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":           handleAccountAdd(acctReg),
 		"account.oauthStart":    handleAccountOAuthStart(coord),
@@ -67,6 +69,11 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"file.read":             handleFileRead(wm),
 		"file.write":            handleFileWrite(wm),
 		"fs.listDir":            handleFsListDir(),
+		"profile.create":        handleProfileCreate(profReg),
+		"profile.list":          handleProfileList(profReg),
+		"profile.get":           handleProfileGet(profReg),
+		"profile.update":        handleProfileUpdate(profReg),
+		"profile.delete":        handleProfileDelete(profReg),
 	}
 }
 
@@ -1319,4 +1326,97 @@ func testProviderCredential(acctReg *accounts.Registry, provider string) provide
 		return providerTestResult{Detail: fmt.Sprintf("no account configured for %q", provider)}
 	}
 	return providerTestResult{Detail: fmt.Sprintf("found %d account(s) for %q, but all credentials are expired", found, provider)}
+}
+
+// handleProfileCreate creates a new agent profile (ADR-0014). Validation
+// (empty name, unknown provider, invalid approvalPolicy/thinkingLevel) is
+// profiles.Registry's job, not this handler's -- the error it returns is
+// passed straight through, matching handleWorkspaceCreate/handleSpaceCreate's
+// passthrough convention.
+func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			ApprovalPolicy string `json:"approvalPolicy"`
+			ThinkingLevel  string `json:"thinkingLevel"`
+			Notes          string `json:"notes"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("profile.create: invalid params: %w", err)
+		}
+		return profReg.Create(store.AgentProfile{
+			Name:           p.Name,
+			Provider:       p.Provider,
+			ApprovalPolicy: p.ApprovalPolicy,
+			ThinkingLevel:  p.ThinkingLevel,
+			Notes:          p.Notes,
+		})
+	}
+}
+
+// handleProfileList returns every agent profile, ordered by id.
+func handleProfileList(profReg *profiles.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
+		return profReg.List()
+	}
+}
+
+// handleProfileGet returns the agent profile with the given id.
+func handleProfileGet(profReg *profiles.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("profile.get: invalid params: %w", err)
+		}
+		return profReg.Get(p.ID)
+	}
+}
+
+// handleProfileUpdate replaces every field of the agent profile p.ID (a
+// full-record replace, not a partial patch -- see ADR-0014's wsapi surface
+// section).
+func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID             int64  `json:"id"`
+			Name           string `json:"name"`
+			Provider       string `json:"provider"`
+			ApprovalPolicy string `json:"approvalPolicy"`
+			ThinkingLevel  string `json:"thinkingLevel"`
+			Notes          string `json:"notes"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
+		}
+		return profReg.Update(store.AgentProfile{
+			ID:             p.ID,
+			Name:           p.Name,
+			Provider:       p.Provider,
+			ApprovalPolicy: p.ApprovalPolicy,
+			ThinkingLevel:  p.ThinkingLevel,
+			Notes:          p.Notes,
+		})
+	}
+}
+
+// handleProfileDelete permanently removes the agent profile with the given
+// id. Nothing else references an agent_profiles row, so there is no
+// deleteSummaryResult-shaped body to return -- an empty object confirms
+// success.
+func handleProfileDelete(profReg *profiles.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("profile.delete: invalid params: %w", err)
+		}
+		if err := profReg.Delete(p.ID); err != nil {
+			return nil, fmt.Errorf("profile.delete: %w", err)
+		}
+		return struct{}{}, nil
+	}
 }

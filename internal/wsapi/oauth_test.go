@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/terminal"
@@ -79,8 +80,9 @@ func newTestWSServerWithCoordinator(t *testing.T, wm *workspace.Manager, acctReg
 	if err != nil {
 		t.Fatalf("terminal.New() error = %v", err)
 	}
+	profReg := profiles.New(db)
 
-	hs := methodHandlers(wm, acctReg, nil, reg, treg, coord)
+	hs := methodHandlers(wm, acctReg, nil, reg, treg, profReg, coord)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {

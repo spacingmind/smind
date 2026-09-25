@@ -466,3 +466,137 @@ func TestEvents_WorkspaceCreatedFiresWhenAccountAttachFails(t *testing.T) {
 	}
 	ec.expectNoEvent(300 * time.Millisecond)
 }
+
+// Tests for ADR 0014's three profile.* lifecycle topics: same shape as the
+// workspace/space/task coverage above, since internal/profiles.Registry's
+// Notifier is wired through the same shared bus.
+
+func TestEvents_ProfileCreatedSubscribeAndReceive(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+	ec.subscribe("sub", TopicProfileCreated)
+
+	sendRequest(t, ec.ws, "create", "profile.create", map[string]any{
+		"name": "UI work", "provider": "claude-native",
+	})
+	resp := ec.nextResponse("create", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("profile.create error = %v", resp.Error.Message)
+	}
+	var created store.AgentProfile
+	if err := json.Unmarshal(resp.Result, &created); err != nil {
+		t.Fatalf("decode profile.create result: %v", err)
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	if ev.Topic != TopicProfileCreated || ev.Seq != 1 {
+		t.Fatalf("event = %+v, want topic %q seq 1", ev, TopicProfileCreated)
+	}
+	var p profileCreatedPayload
+	decodePayload(t, ev, &p)
+	if p.Profile.ID != created.ID || p.Profile.Name != "UI work" {
+		t.Fatalf("profile.created payload = %+v, want the created profile %+v", p.Profile, created)
+	}
+	ec.expectNoEvent(300 * time.Millisecond)
+}
+
+func TestEvents_ProfileCreatedReachesASecondClient(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+
+	ecA := newEventConn(t, dialWS(t, srv, "tok"))
+	ecB := newEventConn(t, dialWS(t, srv, "tok"))
+	ecB.subscribe("sub", TopicProfileCreated)
+
+	sendRequest(t, ecA.ws, "create", "profile.create", map[string]any{
+		"name": "UI work", "provider": "claude-native",
+	})
+	if resp := ecA.nextResponse("create", 5*time.Second); resp.Error != nil {
+		t.Fatalf("profile.create error = %v", resp.Error.Message)
+	}
+
+	ev := ecB.nextEvent(5 * time.Second)
+	if ev.Topic != TopicProfileCreated {
+		t.Fatalf("ecB event topic = %q, want %q", ev.Topic, TopicProfileCreated)
+	}
+	var p profileCreatedPayload
+	decodePayload(t, ev, &p)
+	if p.Profile.Name != "UI work" {
+		t.Fatalf("profile.created payload name = %q, want %q", p.Profile.Name, "UI work")
+	}
+}
+
+func TestEvents_ProfileUpdatedSubscribeAndReceive(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+
+	sendRequest(t, ec.ws, "create", "profile.create", map[string]any{
+		"name": "old", "provider": "claude-native",
+	})
+	var created store.AgentProfile
+	if err := json.Unmarshal(ec.nextResponse("create", 5*time.Second).Result, &created); err != nil {
+		t.Fatalf("decode profile.create result: %v", err)
+	}
+
+	ec.subscribe("sub", TopicProfileUpdated)
+	sendRequest(t, ec.ws, "update", "profile.update", map[string]any{
+		"id": created.ID, "name": "new", "provider": "glm",
+	})
+	if resp := ec.nextResponse("update", 5*time.Second); resp.Error != nil {
+		t.Fatalf("profile.update error = %v", resp.Error.Message)
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	if ev.Topic != TopicProfileUpdated {
+		t.Fatalf("event topic = %q, want %q", ev.Topic, TopicProfileUpdated)
+	}
+	var p profileUpdatedPayload
+	decodePayload(t, ev, &p)
+	if p.Profile.Name != "new" || p.Profile.Provider != "glm" {
+		t.Fatalf("profile.updated payload = %+v, want updated fields", p.Profile)
+	}
+}
+
+func TestEvents_ProfileDeletedSubscribeAndReceive(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ec := newEventConn(t, dialWS(t, srv, "tok"))
+
+	sendRequest(t, ec.ws, "create", "profile.create", map[string]any{
+		"name": "throwaway", "provider": "claude-native",
+	})
+	var created store.AgentProfile
+	if err := json.Unmarshal(ec.nextResponse("create", 5*time.Second).Result, &created); err != nil {
+		t.Fatalf("decode profile.create result: %v", err)
+	}
+
+	ec.subscribe("sub", TopicProfileDeleted)
+	sendRequest(t, ec.ws, "delete", "profile.delete", map[string]any{"id": created.ID})
+	if resp := ec.nextResponse("delete", 5*time.Second); resp.Error != nil {
+		t.Fatalf("profile.delete error = %v", resp.Error.Message)
+	}
+
+	ev := ec.nextEvent(5 * time.Second)
+	if ev.Topic != TopicProfileDeleted {
+		t.Fatalf("event topic = %q, want %q", ev.Topic, TopicProfileDeleted)
+	}
+	var p profileDeletedPayload
+	decodePayload(t, ev, &p)
+	if p.ID != created.ID {
+		t.Fatalf("profile.deleted payload id = %d, want %d", p.ID, created.ID)
+	}
+}

@@ -29,6 +29,9 @@ const (
 	TopicTaskUpdated       = "task.updated"
 	TopicTaskArchived      = "task.archived"
 	TopicTaskDeleted       = "task.deleted"
+	TopicProfileCreated    = "profile.created"
+	TopicProfileUpdated    = "profile.updated"
+	TopicProfileDeleted    = "profile.deleted"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
@@ -45,6 +48,9 @@ var knownTopics = map[string]bool{
 	TopicTaskUpdated:       true,
 	TopicTaskArchived:      true,
 	TopicTaskDeleted:       true,
+	TopicProfileCreated:    true,
+	TopicProfileUpdated:    true,
+	TopicProfileDeleted:    true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):
@@ -142,6 +148,29 @@ type taskDeletedPayload struct {
 	ID          int64  `json:"id"`
 	WorkspaceID int64  `json:"workspaceId"`
 	SpaceID     *int64 `json:"spaceId"`
+}
+
+// Agent-profile lifecycle event payloads (ADR 0014), shaped the same way as
+// the workspace/space/task lifecycle payloads above: created/updated carry
+// the full store entity, deleted carries just the id -- a profile has no
+// parent entity, so unlike space.deleted/task.deleted there is no extra
+// scope field to include.
+
+// profileCreatedPayload is the payload of profile.created events:
+// {profile: store.AgentProfile}.
+type profileCreatedPayload struct {
+	Profile store.AgentProfile `json:"profile"`
+}
+
+// profileUpdatedPayload is the payload of profile.updated events:
+// {profile: store.AgentProfile}.
+type profileUpdatedPayload struct {
+	Profile store.AgentProfile `json:"profile"`
+}
+
+// profileDeletedPayload is the payload of profile.deleted events: {id}.
+type profileDeletedPayload struct {
+	ID int64 `json:"id"`
 }
 
 // Event is what the bus's publish sites hand it: a topic plus an
