@@ -345,7 +345,7 @@ milestone-1 fixed-IDs limitation above are already decided.)*
 - [x] AC5 proxy `/ws` + `/api/token` bridging for `relay` kind
 - [x] AC6 IPC: `connections_add_relay` + existing commands handle `Relay`
 - [x] AC7 `client_watch` works over relay
-- [ ] AC8 regressions + Windows CI
+- [x] AC8 regressions + Windows CI
 
 ## Validation
 
@@ -378,6 +378,41 @@ milestone-1 fixed-IDs limitation above are already decided.)*
   temporary debug logging used to diagnose the resume bug was reverted
   (confirmed via `git diff --stat -- internal/`).
 - **`cargo test -p smind-desktop`**: 0/0 by design (all logic lives in
-  `daemon-client`), `cargo build` clean.
-- *(Still to fill in: `task test`/`task lint`, live WSLg run, Windows CI
-  run link.)*
+  `daemon-client`), `cargo build` clean; `cargo clippy --all-targets` on
+  both crates has no warnings from this plan's code (one pre-existing,
+  unrelated `backoff.rs` warning is untouched by it).
+- **`task test`** (repo root): green — full Go suite (`go test ./...`,
+  every package including `internal/relay/...`) and the full web suite
+  (`bun run --filter '@smind/ui' test`, 1079/1079 across 97 files).
+  Notably `internal/relay/client`'s own
+  `TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames`
+  (the Go-side reference for this exact disconnect/resume scenario)
+  passed too.
+- **`task lint`** (repo root): green (`go vet ./...` + `gofmt -l`
+  silent) — confirms the Go tree is untouched by this plan; the one
+  intentional Go-adjacent change (the harness's diagnostic `NATIVE`
+  stdout line, in its own earlier commit) is additive, not a protocol or
+  logic change.
+- **No Go daemon/relay protocol changes**: `git diff --stat -- internal/
+  cmd/` against `origin/develop` shows only
+  `internal/relay/bridge/harness/main.go`'s one additive diagnostic
+  print line (own commit, `f3f1e7c`) plus the ADR-0007 amendment (docs
+  only); `internal/relay/server/server.go` (touched transiently with
+  temporary debug logging while root-causing the resume bug) is
+  confirmed byte-identical to `develop`.
+- **Live WSLg run**: not exercised. This plan's IPC/proxy layer follows
+  the same design and precedent as `docs/plans/completed/desktop-bundled-ui.md`,
+  whose own Validation recorded the identical limitation ("no screenshot
+  or input-simulation tooling available") for anything requiring manual
+  interaction with the running window (adding/selecting a connection via
+  the real UI) — pasting a pairing URL into the relay connection picker
+  falls in that same category here. Confidence instead comes from: the
+  mandatory interop test exercising the exact same `relay::client`/
+  `relay::channel` code path `connections_add_relay` and the proxy's
+  `/ws` bridge call in production, and `cargo build`/`cargo clippy` being
+  clean for the full `smind-desktop` binary (including `assets.rs`'s
+  `rust-embed` wiring), so nothing in the IPC/proxy layer fails to
+  compile or link.
+- **Windows CI (`desktop-windows` workflow)**: not yet triggered — this
+  branch has not been pushed as of this note. To be confirmed after
+  pushing per the task's final step.
