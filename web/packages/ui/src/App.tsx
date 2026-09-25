@@ -14,6 +14,7 @@ import {
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
+import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
@@ -726,13 +727,16 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
 
   const headerElement = (
-    <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-      <SidebarTrigger />
-      <Separator orientation="vertical" className="h-4" />
-      <span className="text-ui-base text-muted-foreground" data-testid="app-connection-status">
-        {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
-      </span>
-    </header>
+    <>
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+        <SidebarTrigger />
+        <Separator orientation="vertical" className="h-4" />
+        <span className="text-ui-base text-muted-foreground" data-testid="app-connection-status">
+          {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+        </span>
+      </header>
+      {isDesktop && <DesktopDaemonBanner />}
+    </>
   );
 
   const emptyStateElement = (

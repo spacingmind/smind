@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "proxy",
-  "description": "IPC for the bundled UI's connection picker (AC5): list/add/remove/select a daemon connection (by URL or, via connections_add_relay, a relay pairing URL), read the current one, and open an http(s) link in the OS browser. No command exposes relay key material. Scoped to the loopback proxy origin only -- the daemon/relay content served through it never gets these commands.",
+  "description": "IPC for the bundled UI's connection picker (AC5) and the app-managed local daemon (ADR-0013 part D2): list/add/remove/select a daemon connection (by URL or, via connections_add_relay, a relay pairing URL), read the current one, open an http(s) link in the OS browser, and install/update/restart/take-over the local daemon. No command exposes relay key material. Scoped to the loopback proxy origin only -- the daemon/relay content served through it never gets these commands.",
   "local": false,
   "remote": {
     "urls": ["http://127.0.0.1:*"]
@@ -14,6 +14,14 @@
     "allow-connections-remove",
     "allow-connections-select",
     "allow-connections-get-current",
-    "allow-open-external"
+    "allow-open-external",
+    "allow-daemon-status",
+    "allow-daemon-install",
+    "allow-daemon-update",
+    "allow-daemon-restart",
+    "allow-take-over-daemon",
+    "allow-connection-version",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
   ]
 }

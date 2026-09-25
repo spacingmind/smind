@@ -345,6 +345,12 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the connection_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connection-version",
+          "markdownDescription": "Enables the connection_version command without any pre-configured scope."
+        },
+        {
           "description": "Enables the connections_add command without any pre-configured scope.",
           "type": "string",
           "const": "allow-connections-add",
@@ -381,10 +387,46 @@
           "markdownDescription": "Enables the connections_select command without any pre-configured scope."
         },
         {
+          "description": "Enables the daemon_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-daemon-install",
+          "markdownDescription": "Enables the daemon_install command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the daemon_restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-daemon-restart",
+          "markdownDescription": "Enables the daemon_restart command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the daemon_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-daemon-status",
+          "markdownDescription": "Enables the daemon_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the daemon_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-daemon-update",
+          "markdownDescription": "Enables the daemon_update command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_external command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-external",
           "markdownDescription": "Enables the open_external command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the take_over_daemon command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-take-over-daemon",
+          "markdownDescription": "Enables the take_over_daemon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connection_version command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connection-version",
+          "markdownDescription": "Denies the connection_version command without any pre-configured scope."
         },
         {
           "description": "Denies the connections_add command without any pre-configured scope.",
@@ -423,10 +465,40 @@
           "markdownDescription": "Denies the connections_select command without any pre-configured scope."
         },
         {
+          "description": "Denies the daemon_install command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-daemon-install",
+          "markdownDescription": "Denies the daemon_install command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the daemon_restart command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-daemon-restart",
+          "markdownDescription": "Denies the daemon_restart command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the daemon_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-daemon-status",
+          "markdownDescription": "Denies the daemon_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the daemon_update command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-daemon-update",
+          "markdownDescription": "Denies the daemon_update command without any pre-configured scope."
+        },
+        {
           "description": "Denies the open_external command without any pre-configured scope.",
           "type": "string",
           "const": "deny-open-external",
           "markdownDescription": "Denies the open_external command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the take_over_daemon command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-take-over-daemon",
+          "markdownDescription": "Denies the take_over_daemon command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

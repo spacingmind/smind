@@ -9,6 +9,7 @@ afterEach(() => {
   vi.resetModules();
   vi.restoreAllMocks();
   vi.doUnmock("@tauri-apps/api/core");
+  vi.doUnmock("@tauri-apps/api/event");
 });
 
 describe("platform in a non-desktop build", () => {
@@ -23,6 +24,13 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.removeConnection("id")).rejects.toThrow(/unavailable/i);
     await expect(desktop.selectConnection("id")).rejects.toThrow(/unavailable/i);
     await expect(desktop.openExternal("https://example.com")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.daemonStatus()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.daemonInstall()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.daemonUpdate()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.daemonRestart()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.takeOverDaemon()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.connectionVersion("local")).rejects.toThrow(/unavailable/i);
+    expect(() => desktop.onDaemonProgress(() => {})()).not.toThrow();
   });
 });
 
@@ -43,6 +51,14 @@ describe("platform in a desktop build", () => {
           return { id: "local", kind: "local", label: "Local", baseUrl: "http://127.0.0.1:4648" };
         case "open_external":
           return undefined;
+        case "daemon_status":
+        case "daemon_install":
+        case "daemon_update":
+        case "daemon_restart":
+        case "take_over_daemon":
+          return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log", binaryInstalled: true };
+        case "connection_version":
+          return { reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" };
         default:
           throw new Error(`unexpected invoke command ${cmd}`);
       }
@@ -72,5 +88,38 @@ describe("platform in a desktop build", () => {
 
     await desktop.openExternal("https://example.com");
     expect(invoke).toHaveBeenCalledWith("open_external", { url: "https://example.com" });
+
+    const status = await desktop.daemonStatus();
+    expect(status.managedState).toBe("managed");
+    expect(invoke).toHaveBeenCalledWith("daemon_status");
+    await desktop.daemonInstall();
+    expect(invoke).toHaveBeenCalledWith("daemon_install");
+    await desktop.daemonUpdate();
+    expect(invoke).toHaveBeenCalledWith("daemon_update");
+    await desktop.daemonRestart();
+    expect(invoke).toHaveBeenCalledWith("daemon_restart");
+    await desktop.takeOverDaemon();
+    expect(invoke).toHaveBeenCalledWith("take_over_daemon");
+    const versionInfo = await desktop.connectionVersion("url:example");
+    expect(versionInfo.comparison).toBe("older");
+    expect(invoke).toHaveBeenCalledWith("connection_version", { id: "url:example" });
+  });
+
+  it("onDaemonProgress subscribes and forwards events, unsubscribing on cleanup", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_event: string, _handler: (e: { payload: unknown }) => void) => unlisten);
+    vi.doMock("@tauri-apps/api/event", () => ({ listen }));
+
+    const { desktop } = await import("@/lib/platform");
+    const cb = vi.fn();
+    const unsubscribe = desktop.onDaemonProgress(cb);
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("daemon-progress", expect.any(Function)));
+    const handler = listen.mock.calls[0][1];
+    handler({ payload: { stage: "downloading", message: "Downloading…" } });
+    expect(cb).toHaveBeenCalledWith({ stage: "downloading", message: "Downloading…" });
+
+    unsubscribe();
+    expect(unlisten).toHaveBeenCalled();
   });
 });
