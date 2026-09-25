@@ -10,6 +10,9 @@
 //! network) lives in `native`/`wsl` alongside the logic it drives, kept
 //! separable so tests can inject fakes.
 
+pub mod checksums;
+pub mod release;
 pub mod version;
 
+pub use release::{ReleaseError, ReleaseUrls};
 pub use version::{classify, compare, Comparison, VersionKind};
