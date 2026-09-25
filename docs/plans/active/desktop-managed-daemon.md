@@ -307,19 +307,219 @@ relationship with the daemon.
 
 ## Decisions
 
-(filled in as work proceeds)
+- **AC1 (version compare):** `Comparison`/`VersionKind` live in
+  `smind_daemon_client::daemon_manager::version`, both `Serialize` (used
+  directly as the wire DTO field, no separate TS-facing enum needed).
+  `Unknown` unless *both* sides are `Release` -- confirmed this is what
+  "never nag in a loop" needs: any dev build on either side short-circuits
+  to `Unknown` before any ordering happens.
+- **AC2 (release resolution):** `asset_name`/`native_target`/`linux_target`/
+  `release_urls` all live in `release.rs`; `release_urls` is the *only*
+  function that formats a download URL, and it always takes the app's own
+  version, never "latest" -- there is no code path in this plan that calls
+  the GitHub API at all.
+- **AC3 (managed/unmanaged):** the decision table takes an already-
+  resolved `port_owner: Option<u32>` rather than probing anything itself,
+  so `managed::classify` is pure and platform-agnostic; `find_port_owner`
+  (the actual probe) is implemented once per platform (`native::` for
+  macOS via `lsof`, inline in `src-tauri`'s `daemon_manager.rs` for WSL2
+  via `ss`, since that one needs `wsl.exe` plumbing rather than a plain
+  local syscall). `take_over` never signals anything -- it only starts
+  trusting a pid the caller already resolved, so the UI's confirmation
+  step is the only gate that matters.
+- **AC4 (WSL2):**
+  - **Platform detection is capability-based, not `cfg(target_os =
+    "windows")`.** `detect_platform()` treats "is `wsl.exe` reachable and
+    does `-l -v` succeed" as the WSL2 signal. A real Windows host without
+    WSL2 has no `wsl.exe`-reachable distro either, so this is equivalent
+    in practice, and it's also what let the WSL2 argv plumbing be
+    exercised at all from this (Linux) dev sandbox -- see Validation for
+    what that looked like and where it stopped.
+  - **Pid recovery after start doesn't trust `$!`.** `setsid`/`nohup`'s
+    own forking behavior makes `$!` unreliable (see Validation), so
+    `install_or_update`/`restart` resolve the real pid the same way the
+    managed/unmanaged decision does: ask `ss` who is bound to the
+    configured port, after a short delay for the daemon to come up. This
+    reuses one primitive for two purposes instead of inventing a second,
+    less-reliable way to learn a pid.
+  - **`managed.json` is written via base64, not literal JSON in a shell
+    string.** The content is app-generated (pid/version/timestamp), never
+    user input, but base64 (an alphabet with zero shell metacharacters)
+    means the one shell invocation this needs can't have its shape
+    changed by the data, matching the same discipline as
+    `start_detached_argv`.
+  - **Reachability doesn't need `wsl.exe` at all.** WSL2's own localhost
+    port forwarding means a daemon bound to `127.0.0.1:<port>` inside the
+    distro is directly reachable from the Windows host at the same
+    address -- `probe_healthz` just does a normal `reqwest` call against
+    the local connection's URL, regardless of platform.
+- **AC5 (macOS):** child process (`process_group(0)`), not a launchd
+  LaunchAgent -- see the doc comment on `daemon_manager::native` for the
+  reasoning (a LaunchAgent survives the app quitting and needs its own
+  plist/`launchctl` lifecycle for no benefit here). Base dir is `app.path()
+  .app_data_dir()/managed-daemon` (Tauri's own per-app data dir), not a
+  literal hardcoded `~/Library/Application Support/smind` -- functionally
+  the same location class the task's example points at, and consistent
+  with how AC4's connection list already stores `connections.json`.
+- **AC6/AC7 (IPC + UI):**
+  - **`daemon_status` always asks about the *local* connection**,
+    independent of whichever connection is currently selected in the
+    picker -- install/update/restart/take-over only ever make sense for
+    the local daemon, so this keeps that command's contract simple.
+  - **A separate `connection_version` command for the banner's non-local
+    case.** The loopback proxy only forwards `/api/*` and `/ws`
+    (`proxy::server`'s router), not `/healthz` -- so a remote/url/relay
+    connection's version can't be read through the same path the bundled
+    UI uses for everything else. `connection_version(id)` probes that
+    connection's real base URL directly (bypassing the proxy, exactly
+    like `probe_healthz` already does for local), given an id from the
+    already-saved connection list -- never a raw user-supplied URL.
+  - **`install_or_update` backs both `daemon_install` and `daemon_update`**
+    (same operation: ensure the installed binary matches the app's own
+    version, then start it) -- the IPC surface keeps them as two named
+    commands per the task/plan spec, since "install" and "update" are
+    different user intents even though the implementation converges.
+  - Progress events use a plain `daemon-progress` event name (not
+    `daemon://progress` as sketched in the AC7 draft) -- simpler, and nothing
+    else in this codebase uses a URL-shaped event name.
+  - `capabilities/proxy.json` gained `core:event:allow-listen`/
+    `-unlisten` alongside the six new `allow-*` command permissions --
+    the pre-existing six commands never needed the webview to *listen*
+    for anything Rust-initiated, so this capability had never needed
+    Tauri's core event permissions before.
+  - **`build.rs`'s command list must be kept in sync by hand.**
+    Discovered while wiring this up: `tauri_build::try_build`'s ACL
+    generation only knows about the commands explicitly listed in
+    `AppManifest::new().commands(&[...])` in `build.rs` -- adding a
+    `#[tauri::command]` function and registering it in
+    `generate_handler!` is not enough by itself; forgetting the `build.rs`
+    entry fails the build with "Permission allow-X not found" rather than
+    silently missing the command.
 
 ## Progress
 
-- [ ] AC1 version comparison
-- [ ] AC2 release asset resolution
-- [ ] AC3 managed vs unmanaged
-- [ ] AC4 WSL2
-- [ ] AC5 macOS native
-- [ ] AC6 fixed-release-only (folded into AC2, checked off with it)
-- [ ] AC7 IPC + UI
-- [ ] AC8 regressions
+- [x] AC1 version comparison
+- [x] AC2 release asset resolution
+- [x] AC3 managed vs unmanaged
+- [x] AC4 WSL2
+- [x] AC5 macOS native
+- [x] AC6 fixed-release-only (folded into AC2)
+- [x] AC7 IPC + UI
+- [x] AC8 regressions
 
 ## Validation
 
-(filled in as work proceeds)
+- **Rust unit tests** (`cargo test` in `desktop/daemon-client`): 116
+  passed (up from the pre-existing 77 baseline), covering `version`,
+  `checksums`, `release`, `managed`, `wsl` (argv builders + UTF-16LE
+  distro-list parsing against a byte sample captured live in this
+  sandbox, `sha256sum`/`ss` output parsing), and `native` (argv shape,
+  `lsof`/`kill -0` output parsing, and two live integration-style tests:
+  one binds a real `TcpListener` and confirms `find_port_owner` correctly
+  names this test process as the owner; another builds a real fake
+  binary + tarball with `tar` and round-trips install/start/find/kill
+  against it). Plus 3 tests against a real in-process `axum` server for
+  `download_and_verify`/`install_from_release` (good tarball, bad
+  checksum, no asset for this platform). The pre-existing proxy
+  integration test (1) and doc-tests (0) are unaffected.
+- **`desktop/src-tauri`**: `cargo build` and `cargo build --release`
+  both clean, no warnings, including the real `webkit2gtk`/`tao`/
+  `tray-icon` dependency chain. `cargo test` is 0/0 by design, matching
+  this crate's existing precedent (all pure logic lives in
+  `daemon-client`; `daemon_manager.rs` here is glue over already-tested
+  primitives plus Tauri-specific plumbing like `AppHandle`/event
+  emission that can't be unit-tested without a webview).
+- **Full pipeline dry run**: `bun run tauri build --no-bundle` (from
+  `desktop/`) ran the entire pipeline -- `beforeBuildCommand`
+  (`bun install && bun run --filter @smind/ui build:desktop`) then the
+  full release `cargo build` -- and produced a working release binary.
+  The desktop bundle's `event-*.js` chunk (from `onDaemonProgress`'s
+  dynamic `@tauri-apps/api/event` import) is present and separately
+  code-split, confirmed absent from the daemon-embedded (`bun run build`)
+  bundle -- same pattern the AC6 desktop-platform-layer plan established
+  for `@tauri-apps/api/core`.
+- **Web tests**: `bun run --filter '@smind/ui' test` -- 1263/1263 green
+  across 103 files (up from the 1079/97 baseline recorded in
+  `desktop-bundled-ui.md`, reflecting both this plan's additions and
+  other work landed on `develop` since), including:
+  - `lib/platform.test.ts`: every new `DesktopApi` method rejects in a
+    non-desktop build and calls the right `invoke` command (with the
+    right args) in a desktop build; `onDaemonProgress` subscribes via a
+    dynamically-imported `listen`, forwards a fired event's payload to
+    the caller's callback, and unsubscribing calls the returned
+    `unlisten`.
+  - `components/desktop-daemon-banner.test.tsx`: renders nothing when
+    not desktop or when up to date; shows the actionable "Update &
+    restart" banner only for the local+managed+older case; shows the
+    same text with no button for local-but-unmanaged and for a url
+    connection, both older; the button calls `daemonUpdate`.
+  - `components/settings/daemon-section.test.tsx`: does not register in
+    a non-desktop build; shows status/version/managed state/log path;
+    the action button set changes correctly across `notRunning`
+    (Install), `managed`+older (Update & restart, plus Restart),
+    `managed`+same (Restart only), and `unmanaged` (Take over ->
+    confirm/cancel, confirm calls `takeOverDaemon`, cancel never does);
+    a fired progress event updates the shown stage text while an action
+    is busy; an install error surfaces verbatim; the `unsupported`
+    platform shows the not-supported message and no action buttons.
+  - Full existing suite re-run alongside these confirms no regression.
+- **Typecheck**: `bun run --filter '@smind/ui' typecheck` clean.
+- **`task test`**: `go test ./...` all green except
+  `internal/taskrunner`'s `TestRunner_RunPrompt_ClaudeNative_ToolCallEvents`,
+  which failed once on the full-suite run and passed 3/3 on an isolated
+  rerun immediately after -- a pre-existing flake unrelated to this
+  change (`git diff --stat -- internal/ cmd/` is empty; no Go file is
+  touched by this plan at all). `bun run --filter '@smind/ui' test` is
+  the 1263/1263 above. **`task lint`** (`go vet ./...` + `gofmt -l`) is
+  silent.
+- **Live, this sandbox (a genuine WSL2 Ubuntu distro, confirmed via
+  `wsl.exe --version`):**
+  - `wsl.exe -l -v` is reachable via interop from inside the distro
+    itself and returns real output; its raw bytes (UTF-16LE, no BOM) were
+    captured and became `wsl::parse_default_distro`'s unit test fixture.
+  - **Attempted, and stopped, a full install/start/restart live run
+    against a throwaway `HOME`.** `env HOME=<tmp> wsl.exe -d Ubuntu --
+    ...` and even `sh -c 'export HOME=<tmp>; ...'` **did not** redirect
+    `$HOME` for the invoked command -- `wsl.exe`, even when re-entered
+    from inside the same distro it targets, resets `HOME` (and `pwd`
+    inherited the *caller's* cwd, itself a strong sign this sandbox's
+    nested `wsl.exe` interop does not behave like genuine per-invocation
+    Windows+WSL2 session semantics). A `mkdir -p "$HOME/.local/share/
+    smind/bin"` run before this was discovered created a stray *empty*
+    directory under the real `~/.local/share/smind` (cleaned up
+    immediately; nothing was ever written inside it, and the real daemon
+    on `127.0.0.1:4648` answered `{"service":"smind","status":"ok"}`
+    identically before and after, confirmed both times). Given this
+    isolation gap, continuing to drive the full flow here risked writing
+    into the real `~/.local/share/smind` or colliding with the real
+    daemon's port -- exactly what the task requires never happens -- so
+    the live attempt stopped there rather than pushing further.
+  - **What this means for AC4's confidence:** the argv builders, output
+    parsers, and the managed/unmanaged decision table are unit-tested
+    (including against real captured output). The `wsl::run`/orchestration
+    layer that actually drives `wsl.exe` end-to-end (download -> verify
+    -> install -> start -> find-pid -> restart) is *not* exercised live
+    in this session, and the app itself was not run against the WSL2
+    path for the same reason -- this is short of the task's "live WSLg
+    run where feasible" bar, and is called out explicitly rather than
+    implied by a passing test suite.
+  - **macOS: not feasible at all in this sandbox (Linux only).** The
+    platform-agnostic parts of the same logic (`native::` install/start/
+    find/kill/download) were instead exercised live on Linux with a temp
+    dir standing in for the real macOS path (see the Rust unit test list
+    above) -- the macOS-specific wiring in `daemon_manager.rs`
+    (`cfg(target_os = "macos")`'s real path) is unverified beyond
+    `cargo build` type-checking correctly for the logic it shares with
+    the tested `native` module.
+- **Windows CI**: not run from this session -- pushing to
+  `feat/desktop-managed-daemon` and watching `desktop-windows` is the
+  next step (see the task's own instructions); this plan doesn't change
+  anything `desktop-windows.yml` builds differently (same
+  `beforeBuildCommand`/`cargo build` shape as the prior desktop plans),
+  so no workflow file changes were needed.
+- **Not done / explicitly deferred:**
+  - A full live WSL2 end-to-end run (see above) -- stopped for safety
+    once the sandbox's `wsl.exe` isolation gap surfaced.
+  - Any live verification on macOS or native Windows (no such host in
+    this sandbox).
+  - Opening a PR (out of scope per the task's own instructions).
