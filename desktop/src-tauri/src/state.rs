@@ -25,4 +25,12 @@ pub struct DesktopState {
     /// The daemon-client watcher task following the selected connection
     /// (AC7). Replaced (old one aborted) on every `connections_select`.
     pub client_task: Mutex<Option<JoinHandle<()>>>,
+    /// The relay transport's own background reconnect-loop task (see
+    /// `smind_daemon_client::relay::client::spawn`), when the selected
+    /// connection is `relay`-kind. Distinct from `client_task`: this one
+    /// owns the shared tunnel itself (which `proxy.relay` and
+    /// `client_task` both then read/write via a cloned `RelayHandle`),
+    /// so it's stopped separately, only on an actual connection switch
+    /// away from this relay pairing -- not on every watcher restart.
+    pub relay_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }

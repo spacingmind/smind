@@ -476,17 +476,20 @@ pub(crate) fn test_handle() -> TestHandleParts {
 /// spawn starts the background reconnect loop for `pairing` and returns
 /// a handle to it. The loop runs until the returned handle (and every
 /// clone/subscriber) is dropped.
-pub fn spawn(pairing: RelayPairing) -> RelayHandle {
+pub fn spawn(pairing: RelayPairing) -> (RelayHandle, tokio::task::JoinHandle<()>) {
     let (outbound_tx, outbound_rx) = mpsc::channel(FRAME_CHANNEL_CAPACITY);
     let (inbound_tx, _) = broadcast::channel(FRAME_CHANNEL_CAPACITY);
     let (status_tx, status_rx) = watch::channel(Status::Connecting);
     let inbound_tx_task = inbound_tx.clone();
-    tokio::spawn(run(pairing, outbound_rx, inbound_tx_task, status_tx));
-    RelayHandle {
-        outbound_tx,
-        inbound_tx,
-        status_rx,
-    }
+    let task = tokio::spawn(run(pairing, outbound_rx, inbound_tx_task, status_tx));
+    (
+        RelayHandle {
+            outbound_tx,
+            inbound_tx,
+            status_rx,
+        },
+        task,
+    )
 }
 
 /// run is the daemon-side-mirrored reconnect loop: dial + admit, resume
