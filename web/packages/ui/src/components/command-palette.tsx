@@ -147,7 +147,7 @@ export function CommandPalette() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onInputKeyDown}
           placeholder="Search tasks, files and actions…"
-          className="w-full border-b border-border bg-transparent px-4 py-3 text-sm outline-none placeholder:text-foreground-muted"
+          className="w-full border-b border-border bg-transparent px-4 py-3 text-ui-base outline-none placeholder:text-foreground-muted"
         />
 
         <div
@@ -157,7 +157,7 @@ export function CommandPalette() {
           data-testid="command-palette-list"
         >
           {rows.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-foreground-muted" data-testid="command-palette-empty">
+            <div className="px-3 py-6 text-center text-ui-base text-foreground-muted" data-testid="command-palette-empty">
               No matching commands
             </div>
           ) : (
@@ -167,7 +167,7 @@ export function CommandPalette() {
                 <div key={row.command.key}>
                   {row.groupStart !== null && (
                     <div
-                      className="px-3 pt-3 pb-1 text-metadata-label tracking-wide text-foreground-muted uppercase"
+                      className="px-3 pt-3 pb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase"
                       data-testid="command-palette-group"
                     >
                       {row.groupStart}
@@ -188,20 +188,20 @@ export function CommandPalette() {
                       setOpen(false);
                       row.command.run();
                     }}
-                    className={`flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm ${
-                      index === highlight ? "bg-surface-3 text-foreground" : "text-foreground"
+                    className={`flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-ui-base ${
+                      index === highlight ? "bg-selected text-foreground" : "text-foreground"
                     }`}
                   >
                     <span className="min-w-0">
                       <span className="block truncate">{row.command.title}</span>
                       {row.command.subtitle && (
-                        <span className="block truncate text-xs text-foreground-muted">
+                        <span className="block truncate text-ui-sm text-foreground-muted">
                           {row.command.subtitle}
                         </span>
                       )}
                     </span>
                     {keys && (
-                      <kbd className="shrink-0 rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground-muted">
+                      <kbd className="shrink-0 rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted">
                         {keys}
                       </kbd>
                     )}

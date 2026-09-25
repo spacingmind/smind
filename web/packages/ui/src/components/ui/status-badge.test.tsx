@@ -7,7 +7,7 @@ describe("StatusBadge", () => {
   it("renders its label with the status-tinted classes", () => {
     render(<StatusBadge status="warning">Needs review</StatusBadge>);
     const badge = screen.getByText("Needs review");
-    expect(badge).toHaveClass("text-status-warning");
+    expect(badge).toHaveClass("text-warning");
   });
 
   it("optionally renders a matching StatusDot before the label", () => {

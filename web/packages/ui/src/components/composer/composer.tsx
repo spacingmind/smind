@@ -98,9 +98,9 @@ const THINKING_LEVELS: { id: ThinkingLevel; label: string; help: string }[] = [
 // card is the border, and cn()'s tailwind-merge strips SelectTrigger's
 // own border/background halves in favour of these.
 const SELECT_TRIGGER_CLASS =
-  "h-11 shrink-0 border-0 bg-transparent px-2 text-sm hover:bg-accent md:h-7 md:px-1.5 md:text-xs";
+  "h-11 shrink-0 border-0 bg-transparent px-2 text-ui-base hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
 
-const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-sm md:h-7 md:px-2.5 md:text-[0.8rem]";
+const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-ui-base md:h-7 md:px-2.5 md:text-ui-sm";
 
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
@@ -138,11 +138,11 @@ function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
       data-testid="composer-diff-stat"
       aria-label={`Open diff: ${stat.additions} additions, ${stat.deletions} deletions`}
       onClick={onOpenDiff}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface-2 px-2.5 py-0.5 text-xs text-foreground-muted transition-colors hover:bg-accent hover:text-foreground"
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface px-2.5 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
     >
       <GitCompare aria-hidden className="size-3 opacity-70" />
-      <span className="font-medium text-status-success">+{stat.additions}</span>
-      <span className="font-medium text-status-danger">−{stat.deletions}</span>
+      <span className="font-medium text-success">+{stat.additions}</span>
+      <span className="font-medium text-destructive">−{stat.deletions}</span>
     </button>
   );
 }
@@ -360,7 +360,7 @@ export function Composer({
             <li
               key={`${index}-${text}`}
               data-testid="composer-queued-item"
-              className="flex items-center gap-2 rounded-md bg-surface-2 px-2 py-1 text-xs text-foreground-muted"
+              className="flex items-center gap-2 rounded-md bg-surface px-2 py-1 text-ui-sm text-foreground-muted"
             >
               <span className="shrink-0 uppercase">Queued</span>
               <span className="min-w-0 flex-1 truncate">{text}</span>
@@ -396,7 +396,7 @@ export function Composer({
        */}
       <div
         data-testid="composer-card"
-        className="flex flex-col rounded-xl border border-transparent bg-surface-2 focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+        className="flex flex-col rounded-xl border border-transparent bg-surface focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
       >
         <PromptTextarea
           ref={textareaRef}
@@ -497,7 +497,7 @@ export function Composer({
           )}
 
           <div className="ml-auto flex items-center gap-2">
-            {formError && <span className="text-xs text-destructive">{formError}</span>}
+            {formError && <span className="text-ui-sm text-destructive">{formError}</span>}
             {running && (
               <Button
                 type="button"

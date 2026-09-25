@@ -54,8 +54,8 @@ export function resolveTerminalTheme(): ITheme {
  * extra wiring.
  */
 export function resolveSearchDecorations(): ISearchDecorationOptions {
-  const match = resolveCssColor("--status-warning");
-  const active = resolveCssColor("--accent");
+  const match = resolveCssColor("--find-highlight");
+  const active = resolveCssColor("--find-highlight-active");
   return {
     matchBackground: match,
     matchBorder: match,

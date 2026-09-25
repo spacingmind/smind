@@ -6,27 +6,26 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Token layering (ui-redesign-parity plan, Item 1). Two layers, same as
- * audit-deepseek-harness.md §5 and audit-paseo.md §6:
+ * Token layering. Two layers:
  *
  *   1. Static layer: the shadcn oklch scale below (background, foreground,
  *      card, popover, primary, secondary, muted, accent, destructive,
  *      border, input, ring, chart-1..5, sidebar and friends), one value
- *      per name per theme. This was already the whole palette pre-Item-1
- *      and stays as-is -- it's achromatic-plus-one-red and every
- *      primitive already composes from it correctly (see docs/design.md's
- *      "no hardcoded colour" rule).
+ *      per name per theme -- background/foreground/card/popover/
+ *      popover-foreground/primary/primary-foreground/secondary/accent/
+ *      destructive/border/sidebar are overwritten in place with ZCode's
+ *      Zai Light/Dark values (zcode-visual-parity plan, P1 Step 2; see
+ *      the `:root`/`.dark` comments below); `--ring` is neutralized (P1
+ *      Step 5) and the `--radius-*` scale is deleted in favor of
+ *      Tailwind's own defaults (P1 Step 5, see below) -- `--input` and
+ *      `--chart-*` are the two untouched holdouts.
  *   2. Semantic layer: named-by-purpose tokens that alias into the static
- *      layer or introduce a new hue where none existed. This is the part
- *      Item 1 actually adds: `surface-0..3` (elevation, aliased onto the
- *      existing scale -- see docs/design.md's Decisions for why a second
- *      independent scale wasn't introduced), `foreground-muted` (an
- *      explicit alias of `muted-foreground`, so new code can spell it the
- *      audit-paseo.md §6 way without a second source of truth), and the
- *      status family below.
+ *      layer or introduce a new hue where none existed -- ZCode's ported
+ *      token vocabulary (P1 Step 2) plus `foreground-muted` (an explicit
+ *      alias of `muted-foreground`).
  *
  * `@theme inline` re-exports every semantic token as a `--color-*` var,
- * which is what makes `bg-status-warning`, `text-foreground-muted`, etc.
+ * which is what makes `bg-success`, `text-foreground-muted`, etc.
  * exist as Tailwind utilities with zero extra config (Tailwind v4 is
  * CSS-first -- there is no tailwind.config.js in this package).
  */
@@ -47,7 +46,6 @@
     --color-chart-2: var(--chart-2);
     --color-chart-1: var(--chart-1);
     --color-ring: var(--ring);
-    --color-input: var(--input);
     --color-border: var(--border);
     --color-destructive: var(--destructive);
     --color-accent-foreground: var(--accent-foreground);
@@ -64,61 +62,154 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
+    /*
+     * No --radius-* overrides (zcode-visual-parity plan, P1 Step 5
+     * decision): Tailwind v4's own default radius scale applies
+     * unmodified, for parity with ZCode (which does the same -- no radius
+     * theme override in refs/zcode/packages/ui/src/styles.css either).
+     */
 
     /* Semantic layer additions -- see the comment above this block. */
-    --color-surface-0: var(--surface-0);
-    --color-surface-1: var(--surface-1);
-    --color-surface-2: var(--surface-2);
-    --color-surface-3: var(--surface-3);
     --color-foreground-muted: var(--foreground-muted);
-    --color-status-success: var(--status-success);
-    --color-status-danger: var(--status-danger);
-    --color-status-warning: var(--status-warning);
-    --color-status-running: var(--status-running);
-    --color-status-dot-success: var(--status-dot-success);
-    --color-status-dot-danger: var(--status-dot-danger);
-    --color-status-dot-warning: var(--status-dot-warning);
-    --color-status-dot-running: var(--status-dot-running);
     --color-diff-addition: var(--diff-addition);
     --color-diff-deletion: var(--diff-deletion);
 
     /*
-     * Type-role scale (visual-identity-console plan, Item 2). Roles, not
-     * raw sizes: each `--text-*` name is the ONE legal spelling for that
-     * typographic job, with paired line-height (`--*--line-height`) and,
-     * where the role fixes its weight, a paired font-weight -- both per
-     * Tailwind v4's @theme conventions (deepseek-harness's
-     * font-size/line-height token pairing is the same shape). Values are
-     * defined once in `:root` below and re-declared identically in
-     * `.dark` so both themes carry the token (token-presence test
-     * enforces this; sizes don't vary by theme).
+     * ZCode token vocabulary (zcode-visual-parity plan, P1 Step 2) --
+     * ported verbatim (names and values) from
+     * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` /
+     * `.theme-zai-dark` blocks, the active light/dark experiences per
+     * refs/zcode/DESIGN.md's Theme Modes section (the plain `:root`/`.dark`
+     * fallback palettes in that file are not ported). Raw per-theme values
+     * live in `:root`/`.dark` below; aliased here the same way the
+     * pre-existing static/semantic layers above are, so `bg-surface`,
+     * `text-foreground-subtle`, `border-input-border`, etc. exist as
+     * Tailwind utilities for free.
+     *
+     * `--color-background/-foreground/-card/-popover/-popover-foreground/
+     * -primary/-primary-foreground/-secondary/-accent/-destructive/-border/
+     * -sidebar` are NOT re-aliased here -- ZCode reuses those exact same
+     * names for the same concepts smind's pre-existing static layer above
+     * already exports, so their raw values are overwritten in place in
+     * `:root`/`.dark` instead of introducing a second alias for the same
+     * Tailwind token (see this file's `:root`/`.dark` comments).
+     *
+     * `--color-input` is the one exception: smind's existing `border-input`
+     * (shadcn's `--input`, kept unchanged per the plan) and ZCode's
+     * `--color-input` (a field *background*, paired with the new
+     * `-input-border` family below) are different concepts that happen to
+     * share a name upstream. The old `--input` raw var is left untouched,
+     * but no longer aliased here -- `components/ui/` primitives still
+     * reading `border-input`/`bg-input` migrate to the new
+     * `bg-input`/`border-input-border` pair in P1 Step 5; until then their
+     * classes resolve to the new ZCode value rather than the old shadcn one
+     * (same failure mode either way for a mid-migration commit -- a color,
+     * never an unresolved var()).
      */
-    --text-workspace-title: var(--workspace-title-size);
-    --text-workspace-title--line-height: var(--workspace-title-line-height);
-    --text-workspace-title--font-weight: var(--workspace-title-weight);
-    --text-section-title: var(--section-title-size);
-    --text-section-title--line-height: var(--section-title-line-height);
-    --text-section-title--font-weight: var(--section-title-weight);
-    --text-panel-title: var(--panel-title-size);
-    --text-panel-title--line-height: var(--panel-title-line-height);
-    --text-panel-title--font-weight: var(--panel-title-weight);
-    --text-metadata-label: var(--metadata-label-size);
-    --text-metadata-label--line-height: var(--metadata-label-line-height);
-    --text-metadata-label--font-weight: var(--metadata-label-weight);
-    --text-code-annotation: var(--code-annotation-size);
-    --text-code-annotation--line-height: var(--code-annotation-line-height);
-    --text-code-annotation--font-weight: var(--code-annotation-weight);
-    --text-interface: var(--interface-size);
-    --text-interface--line-height: var(--interface-line-height);
+    --color-input: var(--input-bg);
+    --color-input-focused: var(--input-bg-focused);
+    --color-input-border: var(--input-border);
+    --color-input-border-hover: var(--input-border-hover);
+    --color-input-border-focused: var(--input-border-focused);
+    --color-surface: var(--surface);
+    --color-surface-hover: var(--surface-hover);
+    --color-card-selected: var(--card-selected);
+    --color-card-border: var(--card-border);
+    --color-popover-header: var(--popover-header);
+    --color-popover-border: var(--popover-border);
+    --color-menu: var(--menu);
+    --color-menu-hover: var(--menu-hover);
+    --color-header: var(--header);
+    --color-panel: var(--panel);
+    --color-foreground-subtle: var(--foreground-subtle);
+    --color-foreground-subtlest: var(--foreground-subtlest);
+    --color-foreground-inverse: var(--foreground-inverse);
+    --color-border-hover: var(--border-hover);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-diff-added: var(--diff-added);
+    --color-diff-added-foreground: var(--diff-added-foreground);
+    --color-diff-removed: var(--diff-removed);
+    --color-diff-removed-foreground: var(--diff-removed-foreground);
+    --color-git-none: var(--git-none);
+    --color-git-modified: var(--git-modified);
+    --color-git-added: var(--git-added);
+    --color-git-deleted: var(--git-deleted);
+    --color-git-renamed: var(--git-renamed);
+    --color-git-untracked: var(--git-untracked);
+    --color-git-ignored: var(--git-ignored);
+    --color-git-descendant: var(--git-descendant);
+    --color-find-highlight: var(--find-highlight);
+    --color-find-highlight-active: var(--find-highlight-active);
+    --color-hover: var(--hover);
+    --color-selected: var(--selected);
+    --color-interaction-confirmation-surface: var(--interaction-confirmation-surface);
+    --color-interaction-confirmation-foreground: var(--interaction-confirmation-foreground);
+    --color-toast: var(--toast);
+    --color-tooltip: var(--tooltip);
+    --color-tooltip-foreground: var(--tooltip-foreground);
+    --color-tooltip-tag: var(--tooltip-tag);
+    --color-tooltip-tag-foreground: var(--tooltip-tag-foreground);
+    --color-tag: var(--tag);
+    --color-terminal-bg: var(--terminal-bg);
+    --color-terminal-fg: var(--terminal-fg);
+    --color-terminal-cursor: var(--terminal-cursor);
+    --color-terminal-cursor-accent: var(--terminal-cursor-accent);
+    --color-terminal-selection: var(--terminal-selection);
+    --color-terminal-selection-inactive: var(--terminal-selection-inactive);
+    --color-terminal-black: var(--terminal-black);
+    --color-terminal-red: var(--terminal-red);
+    --color-terminal-green: var(--terminal-green);
+    --color-terminal-yellow: var(--terminal-yellow);
+    --color-terminal-blue: var(--terminal-blue);
+    --color-terminal-magenta: var(--terminal-magenta);
+    --color-terminal-cyan: var(--terminal-cyan);
+    --color-terminal-white: var(--terminal-white);
+    --color-terminal-bright-black: var(--terminal-bright-black);
+    --color-terminal-bright-red: var(--terminal-bright-red);
+    --color-terminal-bright-green: var(--terminal-bright-green);
+    --color-terminal-bright-yellow: var(--terminal-bright-yellow);
+    --color-terminal-bright-blue: var(--terminal-bright-blue);
+    --color-terminal-bright-magenta: var(--terminal-bright-magenta);
+    --color-terminal-bright-cyan: var(--terminal-bright-cyan);
+    --color-terminal-bright-white: var(--terminal-bright-white);
+
+    /*
+     * `--text-content` (visual-identity-console plan, Item 2) is the one
+     * surviving member of that Item's type-role scale -- the rest
+     * (workspace-title/section-title/panel-title/metadata-label/
+     * code-annotation/interface) were retired in favor of `text-ui-*`
+     * (zcode-visual-parity plan, P1 Step 4) and their aliases removed.
+     * `--text-content` stays: markdown prose keeps its own independent
+     * `--font-scale-content`-driven size, per refs/zcode/DESIGN.md's
+     * code/diff/terminal-content exceptions to the `text-ui-*` scale.
+     */
     --text-content: var(--content-size);
     --text-content--line-height: var(--content-line-height);
+
+    /*
+     * `text-ui-*` scale (zcode-visual-parity plan, P1 Step 3) -- the
+     * mandatory application-interface type scale per
+     * refs/zcode/DESIGN.md's "Highest-priority UI constraint" and
+     * refs/zcode/packages/ui/src/styles.css's `@theme` block, formulas
+     * ported verbatim off the one interface-scaling variable,
+     * `--ui-font-size` (declared in `:root` below, default 14px). This
+     * replaces smind's `--text-interface`/`--font-scale-interface`
+     * system for application UI -- `--text-content`/`--font-scale-content`
+     * above are untouched (markdown prose keeps its own independent
+     * scale, per DESIGN.md's code/diff/terminal exceptions).
+     * `--text-ui-2xs` and `text-mobile-input-safe` are not ported: no
+     * consumer (workflows and mobile-Web iOS are out of scope for smind).
+     */
+    --text-ui-xl: calc(var(--ui-font-size) + 4px);
+    --text-ui-lg: calc(var(--ui-font-size) + 2px);
+    --text-ui-base: var(--ui-font-size);
+    --text-ui-caption: calc(var(--ui-font-size) - 1px);
+    --text-ui-sm: calc(var(--ui-font-size) - 2px);
+    --text-ui-xs: calc(var(--ui-font-size) - 4px);
 
     /* Shadow tiers (Item 3) -- see :root below. */
     --shadow-sm: var(--elevation-shadow-sm);
@@ -127,31 +218,59 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
+    /*
+     * The one interface-scaling variable (zcode-visual-parity plan, P1
+     * Step 3) -- refs/zcode/DESIGN.md: "Changing the interface font size
+     * updates only --ui-font-size; never mutate the root html font size."
+     * A single value, not per-theme -- unlike the color tokens above,
+     * font size doesn't vary between light and dark.
+     */
+    --ui-font-size: 14px;
+
+    /*
+     * background/foreground/card/popover/popover-foreground/primary/
+     * primary-foreground/secondary/accent/destructive/border/sidebar below
+     * are overwritten in place with ZCode's Zai Light values (zcode-visual-
+     * parity plan, P1 Step 2) rather than aliased -- ZCode reuses these
+     * exact names for the same concepts, so there is nothing to alias onto,
+     * only a value to replace. This is also where smind's teal `--primary`
+     * is superseded by ZCode's neutral black/white primary (the plan's
+     * Brand colour decision) -- the sidebar wordmark is the one element
+     * that keeps its own hue, and it doesn't read this token.
+     * `--input` is the deliberate exception -- see the `@theme inline`
+     * comment above.
+     */
+    --background: #f8f8f8;
+    --foreground: var(--color-neutral-800);
+    --card: #ffffff;
     --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.489 0.08 194.8);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
+    --popover: #ffffff;
+    --popover-foreground: var(--foreground);
+    --primary: #000000;
+    --primary-foreground: #ffffff;
+    --secondary: #e6e6e6;
     --secondary-foreground: oklch(0.205 0 0);
     --muted: oklch(0.97 0 0);
     --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
+    --accent: #ebf4ff;
     --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
+    --destructive: #e03131;
+    --border: rgba(13, 13, 13, 0.1);
     --input: oklch(0.922 0 0);
-    --ring: oklch(0.75 0.11 194.8);
+    /*
+     * Neutral, not the sidebar wordmark's teal (zcode-visual-parity plan,
+     * P1 Step 5 decision) -- refs/zcode/DESIGN.md's inputs are "calm and
+     * integrated, not glowing by default", and ZCode has no ring/focus-glow
+     * token at all. Same lightness as the retired teal value, chroma
+     * zeroed rather than re-picked, so contrast is unchanged.
+     */
+    --ring: oklch(0.75 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: #f0f0f0;
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.489 0.08 194.8);
     --sidebar-primary-foreground: oklch(0.985 0 0);
@@ -161,102 +280,100 @@
     --sidebar-ring: oklch(0.75 0.11 194.8);
 
     /*
-     * Elevation scale (audit-paseo.md §6's surface0..3 vocabulary),
-     * aliased onto the existing static scale rather than a second
-     * independent set of hex values -- see docs/design.md's Decisions.
-     * surface-0 is the page; each step up is one visible notch more
-     * raised/elevated.
+     * ZCode token vocabulary, Zai Light values (zcode-visual-parity plan,
+     * P1 Step 2) -- brand-new raw vars with no pre-existing smind name to
+     * collide with; ported verbatim from
+     * refs/zcode/packages/ui/src/styles.css's `.theme-zai-light` block.
+     * `--color-neutral-*` references below are Tailwind v4's own default
+     * palette (from `@import "tailwindcss"`), not a smind-defined var.
      */
-    --surface-0: var(--background);
-    --surface-1: var(--card);
-    --surface-2: var(--muted);
-    --surface-3: var(--accent);
+    --input-bg: #ffffff;
+    --input-bg-focused: var(--input-bg);
+    --input-border: var(--border);
+    --input-border-hover: rgba(13, 13, 13, 0.15);
+    --input-border-focused: var(--input-border-hover);
+    --surface: rgba(13, 13, 13, 0.03);
+    --surface-hover: rgba(13, 13, 13, 0.05);
+    --card-selected: var(--input-bg);
+    --card-border: var(--border);
+    --popover-header: #f8f8f8;
+    --popover-border: var(--border);
+    --menu: #ffffff;
+    --menu-hover: #f0f0f0;
+    --header: #ffffff;
+    --panel: #ffffff;
+    --foreground-subtle: color-mix(in oklab, var(--color-neutral-800) 60%, transparent);
+    --foreground-subtlest: color-mix(in oklab, var(--color-neutral-800) 40%, transparent);
+    --foreground-inverse: #ffffff;
+    --border-hover: rgba(13, 13, 13, 0.15);
+    --success: #1e8a3e;
+    --success-foreground: #ffffff;
+    --warning: #e07b00;
+    --warning-foreground: #ffffff;
+    --destructive-foreground: #ffffff;
+    --diff-added: #1e8a3e;
+    --diff-added-foreground: #ffffff;
+    --diff-removed: #e03131;
+    --diff-removed-foreground: #ffffff;
+    --git-none: var(--foreground);
+    --git-modified: #e07b00;
+    --git-added: #1e8a3e;
+    --git-deleted: #e03131;
+    --git-renamed: #0b7fff;
+    --git-untracked: #1e8a3e;
+    --git-ignored: var(--foreground-subtlest);
+    --git-descendant: #e07b00;
+    --find-highlight: #fff4eb;
+    --find-highlight-active: #ffb26b;
+    --hover: rgba(13, 13, 13, 0.05);
+    --selected: rgba(13, 13, 13, 0.05);
+    --interaction-confirmation-surface: #eaf7ee;
+    --interaction-confirmation-foreground: #166b32;
+    --toast: #ffffff;
+    --tooltip: #f0f0f0;
+    --tooltip-foreground: #0d0d0d;
+    --tooltip-tag: #e6e6e6;
+    --tooltip-tag-foreground: #5c5c5c;
+    --tag: #e6e6e6;
+    --terminal-bg: var(--background);
+    --terminal-fg: var(--foreground);
+    --terminal-cursor: #0d0d0d;
+    --terminal-cursor-accent: var(--background);
+    --terminal-selection: rgba(11, 127, 255, 0.22);
+    --terminal-selection-inactive: rgba(13, 13, 13, 0.1);
+    --terminal-black: #5c5c5c;
+    --terminal-red: #e03131;
+    --terminal-green: #1e8a3e;
+    --terminal-yellow: #e07b00;
+    --terminal-blue: #0b7fff;
+    --terminal-magenta: #9e77ed;
+    --terminal-cyan: #0aa7a7;
+    --terminal-white: #adadad;
+    --terminal-bright-black: #888888;
+    --terminal-bright-red: #e03131;
+    --terminal-bright-green: #1e8a3e;
+    --terminal-bright-yellow: #e07b00;
+    --terminal-bright-blue: #0066dd;
+    --terminal-bright-magenta: #9e77ed;
+    --terminal-bright-cyan: #0aa7a7;
+    --terminal-bright-white: #0d0d0d;
+
     --foreground-muted: var(--muted-foreground);
 
     /*
-     * Status family -- text/icon tier (pills, PR-state icons, diff
-     * stats). One token per signal, per audit-paseo.md §13: a surface
-     * never gets a quieter/louder variant of the same signal. `danger`
-     * is a deliberate alias of the existing `--destructive` rather than a
-     * second red (see docs/design.md's Decisions) -- smind has exactly
-     * one flavor of "bad" today, unlike Paseo's PR/CI-state red vs.
-     * destructive-action red.
-     *
-     * success/warning hues are carried over from
-     * refs/paseo/packages/app/src/styles/theme.ts's lightStatusColors
-     * (L=0.50, chroma ~60% of gamut max at that lightness). `running` is
-     * a new hue smind needs that Paseo's text tier doesn't define
-     * (Paseo only carries a running dot, not a running pill/text color) --
-     * blue at the same L/chroma band, hue chosen clear of the identity
-     * palette per refs/paseo/docs/design.md §13's own reasoning for its
-     * running dot.
+     * Diff family (retired -- zcode-visual-parity plan, P1 Step 2):
+     * aliased onto ZCode's diff-added/-removed tokens so a future P1 Step
+     * 4-style migration off this name (not required this phase -- see
+     * P4's diff2html repointing) stays value-preserving.
      */
-    --status-success: #3e704a;
-    --status-danger: var(--destructive);
-    --status-warning: #7b5d39;
-    --status-running: oklch(0.50 0.09 250);
+    --diff-addition: var(--diff-added);
+    --diff-deletion: var(--diff-removed);
 
     /*
-     * Diff family -- the third color family (visual-identity-console
-     * plan, Item 5), deliberately separate from status-success/danger:
-     * the +/- inside a diff view is the signal itself and has to survive
-     * being scanned line by line, so it stays more saturated than the
-     * status text tier. Values are Paseo's own light-band diff table
-     * (refs/paseo/packages/app/src/styles/theme.ts lightDiffColors).
+     * `--content-size`/`--content-line-height` are the one surviving pair
+     * from the retired type-role scale -- see the `@theme inline` comment
+     * above.
      */
-    --diff-addition: #15803d;
-    --diff-deletion: #b91c1c;
-
-    /*
-     * Status dot family -- refs/paseo/docs/design.md §13: a dot is 6px
-     * of solid color with no shape or label, so it needs to read louder
-     * than the status-family text tier or it goes backwards (a state dot
-     * reading dimmer than the row's own metadata). Same hues, higher
-     * chroma, own lightness band. Values below are Paseo's own generated
-     * light-band table (L=0.62, chroma 90% of gamut max) -- reused
-     * directly rather than re-derived, since the generation is exactly
-     * the rule this file's comment describes and re-picking the numbers
-     * by eye would just drift from it.
-     */
-    --status-dot-success: #299f51;
-    --status-dot-danger: #f12e2f;
-    --status-dot-warning: #b37824;
-    --status-dot-running: #268ae0;
-
-    /*
-     * Type-role scale (visual-identity-console plan, Item 2) -- sizes,
-     * paired line-heights, and fixed weights per role. Canonical
-     * consumers live in docs/design.md's type-role table.
-     *
-     * workspace-title tokenizes the sidebar wordmark's existing
-     * 14px/600 look as-is (the one legal semibold in the app);
-     * section-title unifies dialog + sheet titles at 16/500;
-     * panel-title tokenizes PaneHeader's existing 14/500; metadata-label
-     * and code-annotation are the 12/500 structural-label tier
-     * (code-annotation pairs with `font-mono`, e.g. git status letters);
-     * interface names the dense-UI base size (the ramp above it stays
-     * the existing Tailwind text-xs/sm/base utilities); content is the
-     * fixed prose size that ignores the interface-density scale (paseo's
-     * content-vs-interface split) -- 15px scaled only by the
-     * content-specific font-scale setting.
-     */
-    --workspace-title-size: 14px;
-    --workspace-title-line-height: 20px;
-    --workspace-title-weight: 600;
-    --section-title-size: 16px;
-    --section-title-line-height: 24px;
-    --section-title-weight: 500;
-    --panel-title-size: 14px;
-    --panel-title-line-height: 20px;
-    --panel-title-weight: 500;
-    --metadata-label-size: 12px;
-    --metadata-label-line-height: 16px;
-    --metadata-label-weight: 500;
-    --code-annotation-size: 12px;
-    --code-annotation-line-height: 16px;
-    --code-annotation-weight: 500;
-    --interface-size: 14px;
-    --interface-line-height: 20px;
     --content-size: calc(15px * var(--font-scale-content, 1));
     --content-line-height: 1.6;
 
@@ -284,30 +401,32 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
+    /* See :root's comment above -- same overwrite-in-place rule, Zai Dark values. */
+    --background: #161616;
+    --foreground: var(--color-neutral-300);
+    --card: #2b2b2b;
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.904 0.136 196.2);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
+    --popover: #2b2b2b;
+    --popover-foreground: var(--foreground);
+    --primary: #ffffff;
+    --primary-foreground: #000000;
+    --secondary: #363636;
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.269 0 0);
     --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --accent: #001d3d;
     --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --destructive: #ff5c5c;
+    --border: rgba(255, 255, 255, 0.1);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.904 0.136 196.2);
+    /* Neutral, not teal -- see :root's comment above. */
+    --ring: oklch(0.904 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
+    --sidebar: #161616;
     --sidebar-foreground: oklch(0.985 0 0);
     /*
      * Brand cyan (smind logo's core glow color, ~#51fbfd, sampled directly
@@ -328,51 +447,85 @@
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.904 0.136 196.2);
 
-    --surface-0: var(--background);
-    --surface-1: var(--card);
-    --surface-2: var(--muted);
-    --surface-3: var(--accent);
+    /* ZCode token vocabulary, Zai Dark values -- see :root's comment above. */
+    --input-bg: #2b2b2b;
+    --input-bg-focused: var(--input-bg);
+    --input-border: var(--border);
+    --input-border-hover: rgba(255, 255, 255, 0.15);
+    --input-border-focused: var(--input-border-hover);
+    --surface: rgba(255, 255, 255, 0.05);
+    --surface-hover: rgba(255, 255, 255, 0.1);
+    --card-selected: var(--input-bg);
+    --card-border: var(--border);
+    --popover-header: #202020;
+    --popover-border: var(--border);
+    --menu: #2b2b2b;
+    --menu-hover: #363636;
+    --header: #202020;
+    --panel: #202020;
+    --foreground-subtle: color-mix(in oklab, var(--color-neutral-300) 60%, transparent);
+    --foreground-subtlest: color-mix(in oklab, var(--color-neutral-300) 30%, transparent);
+    --foreground-inverse: #000000;
+    --border-hover: rgba(255, 255, 255, 0.15);
+    --success: #46bf72;
+    --success-foreground: #000000;
+    --warning: #ff8a30;
+    --warning-foreground: #000000;
+    --destructive-foreground: #ffffff;
+    --diff-added: #46bf72;
+    --diff-added-foreground: #000000;
+    --diff-removed: #ff5c5c;
+    --diff-removed-foreground: #000000;
+    --git-none: var(--foreground);
+    --git-modified: #ff8a30;
+    --git-added: #46bf72;
+    --git-deleted: #ff5c5c;
+    --git-renamed: #4099ff;
+    --git-untracked: #46bf72;
+    --git-ignored: var(--foreground-subtlest);
+    --git-descendant: #ff8a30;
+    --find-highlight: #542500;
+    --find-highlight-active: #ff8a30;
+    --hover: rgba(255, 255, 255, 0.05);
+    --selected: rgba(255, 255, 255, 0.1);
+    --interaction-confirmation-surface: rgba(70, 191, 114, 0.16);
+    --interaction-confirmation-foreground: #87d9a4;
+    --toast: #2b2b2b;
+    --tooltip: #2b2b2b;
+    --tooltip-foreground: #f8f8f8;
+    --tooltip-tag: #363636;
+    --tooltip-tag-foreground: #adadad;
+    --tag: #363636;
+    --terminal-bg: var(--background);
+    --terminal-fg: var(--foreground);
+    --terminal-cursor: #f8f8f8;
+    --terminal-cursor-accent: #161616;
+    --terminal-selection: rgba(64, 153, 255, 0.28);
+    --terminal-selection-inactive: rgba(255, 255, 255, 0.1);
+    --terminal-black: #363636;
+    --terminal-red: #ff5c5c;
+    --terminal-green: #46bf72;
+    --terminal-yellow: #ff8a30;
+    --terminal-blue: #4099ff;
+    --terminal-magenta: #7b5ce5;
+    --terminal-cyan: #42c8c8;
+    --terminal-white: #adadad;
+    --terminal-bright-black: #747474;
+    --terminal-bright-red: #ff9999;
+    --terminal-bright-green: #87d9a4;
+    --terminal-bright-yellow: #ffb26b;
+    --terminal-bright-blue: #80beff;
+    --terminal-bright-magenta: #a888f2;
+    --terminal-bright-cyan: #8ee5e5;
+    --terminal-bright-white: #f8f8f8;
+
     --foreground-muted: var(--muted-foreground);
 
-    /* Dark-band status family: refs/paseo/packages/app/src/styles/theme.ts's darkStatusColors (L=0.70, chroma ~55% of gamut max). running's dark value keeps the same hue as the light band, lightened/desaturated to the same band as success/danger/warning above. */
-    --status-success: #6cb17b;
-    --status-danger: var(--destructive);
-    --status-warning: #c09664;
-    --status-running: oklch(0.70 0.08 250);
+    /* Diff family (retired -- see :root's comment above). */
+    --diff-addition: var(--diff-added);
+    --diff-deletion: var(--diff-removed);
 
-    /* Dark-band diff family: Paseo's darkDiffColors -- brighter palette values than the light band, same rationale as :root's. */
-    --diff-addition: #4ade80;
-    --diff-deletion: #ef4444;
-
-    /* Dark-band status dots: Paseo's own generated table (L=0.72, chroma 90% of gamut max -- see refs/paseo/packages/app/src/styles/theme.ts's darkStatusDotColors). */
-    --status-dot-success: #35c264;
-    --status-dot-danger: #f7796d;
-    --status-dot-warning: #db932e;
-    --status-dot-running: #5caaf6;
-
-    /*
-     * Type-role scale: identical values in both themes (sizes don't vary
-     * by theme) -- re-declared so the token exists in `.dark` too and
-     * nothing silently falls back to a browser default if a future theme
-     * layer forgets to inherit :root (token-presence test enforces).
-     */
-    --workspace-title-size: 14px;
-    --workspace-title-line-height: 20px;
-    --workspace-title-weight: 600;
-    --section-title-size: 16px;
-    --section-title-line-height: 24px;
-    --section-title-weight: 500;
-    --panel-title-size: 14px;
-    --panel-title-line-height: 20px;
-    --panel-title-weight: 500;
-    --metadata-label-size: 12px;
-    --metadata-label-line-height: 16px;
-    --metadata-label-weight: 500;
-    --code-annotation-size: 12px;
-    --code-annotation-line-height: 16px;
-    --code-annotation-weight: 500;
-    --interface-size: 14px;
-    --interface-line-height: 20px;
+    /* `--content-size`/`--content-line-height`: see :root's comment above. */
     --content-size: calc(15px * var(--font-scale-content, 1));
     --content-line-height: 1.6;
 
@@ -417,15 +570,15 @@
  * same look for free.
  */
 :root {
-  --d2h-bg-color: var(--surface-1);
+  --d2h-bg-color: var(--card);
   --d2h-border-color: var(--border);
   --d2h-line-border-color: var(--border);
   --d2h-dim-color: var(--foreground-muted);
-  --d2h-file-header-bg-color: var(--surface-2);
+  --d2h-file-header-bg-color: var(--surface);
   --d2h-file-header-border-color: var(--border);
-  --d2h-empty-placeholder-bg-color: var(--surface-2);
+  --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
-  --d2h-selected-color: color-mix(in oklch, var(--status-running) 15%, transparent);
+  --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
   --d2h-ins-bg-color: color-mix(in oklch, var(--diff-addition) 15%, transparent);
   --d2h-ins-border-color: color-mix(in oklch, var(--diff-addition) 40%, transparent);
   --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-addition) 30%, transparent);
@@ -434,12 +587,12 @@
   --d2h-del-border-color: color-mix(in oklch, var(--diff-deletion) 40%, transparent);
   --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-deletion) 30%, transparent);
   --d2h-del-label-color: var(--diff-deletion);
-  --d2h-change-del-color: color-mix(in oklch, var(--status-warning) 20%, transparent);
+  --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
   --d2h-change-ins-color: color-mix(in oklch, var(--diff-addition) 20%, transparent);
-  --d2h-info-bg-color: var(--surface-2);
+  --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
-  --d2h-change-label-color: var(--status-warning);
-  --d2h-moved-label-color: var(--status-running);
+  --d2h-change-label-color: var(--warning);
+  --d2h-moved-label-color: var(--warning);
 }
 
 /*
@@ -478,9 +631,9 @@ html {
  * diff2html's overrides above already use.
  */
 ::highlight(smind-chat-find) {
-  background-color: color-mix(in oklch, var(--status-warning) 35%, transparent);
+  background-color: var(--color-find-highlight);
 }
 ::highlight(smind-chat-find-active) {
-  background-color: var(--status-warning);
-  color: var(--surface-0);
+  background-color: var(--color-find-highlight-active);
+  color: var(--color-background);
 }

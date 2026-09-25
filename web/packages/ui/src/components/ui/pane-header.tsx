@@ -35,8 +35,8 @@ export function PaneHeader({
       className={cn("flex items-center justify-between gap-2 border-b px-4 py-2.5", className)}
     >
       <div className="min-w-0">
-        <h2 className="truncate text-panel-title">{title}</h2>
-        {subtitle && <div className="mt-0.5 flex items-center gap-2 text-xs text-foreground-muted">{subtitle}</div>}
+        <h2 className="truncate text-ui-base font-medium">{title}</h2>
+        {subtitle && <div className="mt-0.5 flex items-center gap-2 text-ui-sm text-foreground-muted">{subtitle}</div>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>

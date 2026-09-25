@@ -25,13 +25,13 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
 
   return (
     <li data-testid="timeline-tool-group" data-item-kind="tool-group" data-count={items.length}>
-      <div className="rounded-lg border bg-surface-1">
+      <div className="rounded-lg border bg-card">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
           data-testid="tool-group-toggle"
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Layers className="size-3 shrink-0 text-foreground-muted" />

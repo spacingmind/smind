@@ -288,7 +288,7 @@ export function FileEditorPane({
                   onClick={() => setMode("edit")}
                   disabled={mode === "edit"}
                   aria-pressed={mode === "edit"}
-                  className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+                  className="flex h-6 items-center gap-1 rounded-md px-2 text-ui-sm font-medium disabled:pointer-events-none disabled:bg-muted"
                 >
                   <PenLine className="size-3" />
                   Edit
@@ -298,7 +298,7 @@ export function FileEditorPane({
                   onClick={() => setMode("preview")}
                   disabled={mode === "preview"}
                   aria-pressed={mode === "preview"}
-                  className="flex h-6 items-center gap-1 rounded-md px-2 text-xs font-medium disabled:pointer-events-none disabled:bg-muted"
+                  className="flex h-6 items-center gap-1 rounded-md px-2 text-ui-sm font-medium disabled:pointer-events-none disabled:bg-muted"
                 >
                   <Eye className="size-3" />
                   Preview

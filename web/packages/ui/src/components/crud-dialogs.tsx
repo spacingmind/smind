@@ -24,7 +24,7 @@ import type { WsClient } from "@/lib/ws-client";
 /** Inline, per-dialog error text for a failed submit -- the daemon's message verbatim (e.g. workspace.create's "not a git repository"). */
 function FormError({ message }: { message: string | null }) {
   if (!message) return null;
-  return <p className="text-sm text-destructive">{message}</p>;
+  return <p className="text-ui-base text-destructive">{message}</p>;
 }
 
 /** Shared submit row: Create disabled while in flight, Cancel always closes. */
@@ -156,7 +156,7 @@ export function CreateWorkspaceDialog({
             }}
           >
             <div className="grid gap-2">
-              <label htmlFor="workspace-path" className="text-sm font-medium">
+              <label htmlFor="workspace-path" className="text-ui-base font-medium">
                 Path
               </label>
               <div className="flex gap-2">
@@ -180,7 +180,7 @@ export function CreateWorkspaceDialog({
               </div>
             </div>
             <div className="grid gap-2">
-              <label htmlFor="workspace-title" className="text-sm font-medium">
+              <label htmlFor="workspace-title" className="text-ui-base font-medium">
                 Title <span className="font-normal text-muted-foreground">(optional)</span>
               </label>
               <Input
@@ -249,7 +249,7 @@ export function CreateSpaceDialog({
           }}
         >
           <div className="grid gap-2">
-            <label htmlFor="space-title" className="text-sm font-medium">
+            <label htmlFor="space-title" className="text-ui-base font-medium">
               Title
             </label>
             <Input
@@ -321,7 +321,7 @@ export function CreateTaskDialog({
           }}
         >
           <div className="grid gap-2">
-            <label htmlFor="task-title" className="text-sm font-medium">
+            <label htmlFor="task-title" className="text-ui-base font-medium">
               Title
             </label>
             <Input
@@ -334,7 +334,7 @@ export function CreateTaskDialog({
           </div>
           {fixedSpaceId === null && (
             <div className="grid gap-2">
-              <label htmlFor="task-space" className="text-sm font-medium">
+              <label htmlFor="task-space" className="text-ui-base font-medium">
                 Space <span className="font-normal text-muted-foreground">(optional)</span>
               </label>
               <Select value={spaceId} onValueChange={setSpaceId}>

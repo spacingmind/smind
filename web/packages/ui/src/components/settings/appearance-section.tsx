@@ -47,7 +47,7 @@ function StepGroup<T extends string>({
           aria-pressed={opt.value === value}
           data-testid={`settings-${groupLabel}-${opt.value}`}
           onClick={() => onChange(opt.value)}
-          className={cn("h-7 rounded-md px-3 text-xs", opt.value === value && "bg-accent text-accent-foreground")}
+          className={cn("h-7 rounded-md px-3 text-ui-sm", opt.value === value && "bg-selected")}
         >
           {opt.label}
         </Button>
@@ -70,17 +70,17 @@ export function AppearanceSection() {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-appearance">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Theme</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Theme</h3>
         <StepGroup groupLabel="theme" options={THEME_OPTIONS} value={preference} onChange={setPreference} />
       </section>
 
       <section className="flex flex-col gap-4">
-        <h3 className="text-sm font-medium text-foreground">Font size</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Font size</h3>
         {FONT_SIZE_AXES.map(({ axis, label, description }) => (
           <div key={axis} className="flex items-center justify-between gap-4">
             <div>
-              <p className="text-sm text-foreground">{label}</p>
-              <p className="text-xs text-muted-foreground">{description}</p>
+              <p className="text-ui-base text-foreground">{label}</p>
+              <p className="text-ui-sm text-muted-foreground">{description}</p>
             </div>
             <StepGroup
               groupLabel={`font-size-${axis}`}

@@ -101,14 +101,14 @@ export function FolderPickerDialog({
           >
             <ChevronUp className="size-4" />
           </Button>
-          <p className="min-w-0 flex-1 truncate text-sm font-medium" title={result?.path ?? ""}>
+          <p className="min-w-0 flex-1 truncate text-ui-base font-medium" title={result?.path ?? ""}>
             {result?.path ?? "…"}
           </p>
         </div>
 
         {recentPaths.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-muted-foreground">Recent:</span>
+            <span className="text-ui-sm text-muted-foreground">Recent:</span>
             {recentPaths.map((path) => (
               <Button
                 key={path}
@@ -117,7 +117,7 @@ export function FolderPickerDialog({
                 size="sm"
                 data-testid="folder-picker-recent-path"
                 data-path={path}
-                className="h-6 max-w-48 truncate px-2 text-xs"
+                className="h-6 max-w-48 truncate px-2 text-ui-sm"
                 title={path}
                 onClick={() => void navigate(path)}
               >
@@ -128,7 +128,7 @@ export function FolderPickerDialog({
         )}
 
         {error && (
-          <p className="flex items-center gap-1.5 text-sm text-destructive">
+          <p className="flex items-center gap-1.5 text-ui-base text-destructive">
             <AlertCircle className="size-3.5 shrink-0" />
             {error}
           </p>
@@ -136,12 +136,12 @@ export function FolderPickerDialog({
 
         <ScrollArea className="h-64 rounded-md border">
           {loading && !result ? (
-            <p className="flex items-center gap-1.5 p-3 text-sm text-muted-foreground">
+            <p className="flex items-center gap-1.5 p-3 text-ui-base text-muted-foreground">
               <Loader2 className="size-3.5 animate-spin" />
               Loading…
             </p>
           ) : result && result.entries.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No subdirectories.</p>
+            <p className="p-3 text-ui-base text-muted-foreground">No subdirectories.</p>
           ) : (
             <ul>
               {result?.entries.map((entry) => (
@@ -151,7 +151,7 @@ export function FolderPickerDialog({
                     data-testid="folder-row"
                     data-path={entry.path}
                     onClick={() => void navigate(entry.path)}
-                    className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-sm hover:bg-accent"
+                    className="flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-ui-base hover:bg-hover"
                   >
                     {entry.isGitRepo ? (
                       <FolderGit2 className="size-3.5 shrink-0 text-primary" />
@@ -162,7 +162,7 @@ export function FolderPickerDialog({
                     {entry.isGitRepo && (
                       <span
                         data-testid="git-repo-indicator"
-                        className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[0.65rem] text-muted-foreground"
+                        className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-ui-xs text-muted-foreground"
                       >
                         git
                       </span>

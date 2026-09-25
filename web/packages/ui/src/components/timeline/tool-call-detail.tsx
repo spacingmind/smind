@@ -76,16 +76,16 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
     const diff = inlineDiff(input);
     if (diff.length > 0) {
       return (
-        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded bg-surface-2 p-2 font-mono text-code-annotation">
+        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded bg-surface p-2 font-mono text-ui-sm font-medium">
           {diff.map((line, index) => (
             <div
               key={index}
               data-diff-sign={line.sign}
               className={
                 line.sign === "+"
-                  ? "text-status-success"
+                  ? "text-success"
                   : line.sign === "-"
-                    ? "text-status-danger"
+                    ? "text-destructive"
                     : "text-foreground-muted"
               }
             >
@@ -119,7 +119,7 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
     const startLine = num(input, "offset", "start_line") ?? 1;
     return (
       <div className="mt-1 first:mt-0">
-        <p className="text-metadata-label tracking-wide text-foreground-muted uppercase">Content</p>
+        <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Content</p>
         <ToolReadPreview content={output} startLine={startLine} testId="tool-detail-output" />
       </div>
     );
@@ -136,7 +136,7 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
 function TerminalCommand({ body }: { body: string }) {
   return (
     <div className="mt-1 first:mt-0">
-      <p className="text-metadata-label tracking-wide text-foreground-muted uppercase">Command</p>
+      <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Command</p>
       <pre
         data-testid="tool-detail-command"
         className="mt-0.5 overflow-x-auto rounded border bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
@@ -173,7 +173,7 @@ function TerminalOutput({ output, failed }: { output: string; failed: boolean })
 
   return (
     <div className="mt-1 first:mt-0">
-      <p className="text-metadata-label tracking-wide text-foreground-muted uppercase">Output</p>
+      <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Output</p>
       <pre
         ref={preRef}
         data-testid="tool-detail-output"
@@ -207,8 +207,8 @@ function SearchMatches({ output }: { output: string }) {
 
   return (
     <div className="mt-1 first:mt-0">
-      <p className="text-metadata-label tracking-wide text-foreground-muted uppercase">Matches</p>
-      <pre data-testid="tool-detail-output" className="mt-0.5 max-h-64 overflow-auto rounded bg-surface-2 p-2 whitespace-pre-wrap">
+      <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Matches</p>
+      <pre data-testid="tool-detail-output" className="mt-0.5 max-h-64 overflow-auto rounded bg-surface p-2 whitespace-pre-wrap">
         {visible.join("\n")}
       </pre>
       {bounded && (
@@ -246,9 +246,9 @@ function GenericBody({ item }: { item: TimelineToolCallItem }) {
 
 function ToolSection({ label, body, testId }: { label: string; body: string; testId: string }) {
   return (
-    <div className="flex gap-2 bg-surface-2 p-2">
-      <span className="w-6 shrink-0 text-metadata-label tracking-wide text-foreground-muted uppercase">{label}</span>
-      <pre data-testid={testId} className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap font-mono text-code-annotation">
+    <div className="flex gap-2 bg-surface p-2">
+      <span className="w-6 shrink-0 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">{label}</span>
+      <pre data-testid={testId} className="min-w-0 flex-1 overflow-x-auto whitespace-pre-wrap font-mono text-ui-sm font-medium">
         {body}
       </pre>
     </div>

@@ -46,7 +46,7 @@ export function ApprovalPolicyControl({
   return (
     <div
       data-testid="approval-policy-control"
-      className="mx-auto flex w-full max-w-3xl shrink-0 flex-wrap items-center gap-2 px-4 py-1.5 text-xs text-foreground-muted"
+      className="mx-auto flex w-full max-w-3xl shrink-0 flex-wrap items-center gap-2 px-4 py-1.5 text-ui-sm text-foreground-muted"
     >
       <span>Approval:</span>
       {LIVE_SWITCHABLE_POLICIES.map((candidate) => (
@@ -64,7 +64,7 @@ export function ApprovalPolicyControl({
         </Button>
       ))}
       {error && (
-        <span data-testid="approval-policy-error" role="alert" className="text-status-danger">
+        <span data-testid="approval-policy-error" role="alert" className="text-destructive">
           {error}
         </span>
       )}

@@ -32,8 +32,8 @@ export function EmptyState({
       className={cn("flex flex-1 flex-col items-center justify-center gap-2 px-4 py-8 text-center", className)}
     >
       {icon && <div className="text-foreground-muted">{icon}</div>}
-      <p className="text-sm font-medium text-foreground">{title}</p>
-      {description && <p className="max-w-sm text-sm text-foreground-muted">{description}</p>}
+      <p className="text-ui-base font-medium text-foreground">{title}</p>
+      {description && <p className="max-w-sm text-ui-base text-foreground-muted">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
   );

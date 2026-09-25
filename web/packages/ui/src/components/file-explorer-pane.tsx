@@ -326,9 +326,9 @@ function TreeRow({
           : undefined
       }
       className={cn(
-        "flex w-full items-center gap-1.5 truncate px-2 py-1 text-left text-sm",
-        onClick && "cursor-pointer hover:bg-accent",
-        active && "bg-accent font-medium",
+        "flex w-full items-center gap-1.5 truncate px-2 py-1 text-left text-ui-base",
+        onClick && "cursor-pointer hover:bg-hover",
+        active && "bg-selected font-medium",
         className,
       )}
       style={{ paddingLeft: `${depth * 14 + 8}px` }}

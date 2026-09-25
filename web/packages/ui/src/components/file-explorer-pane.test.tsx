@@ -98,7 +98,7 @@ describe("FileExplorerPane", () => {
 
     expect(onOpenFile).toHaveBeenCalledWith("README.md");
     // Row highlighting still works via the hook's selectedPath.
-    expect(screen.getByTestId("file-row")).toHaveClass("bg-accent");
+    expect(screen.getByTestId("file-row")).toHaveClass("bg-selected");
   });
 
   it("renders tree-only without an inline editor even after a file is clicked", async () => {

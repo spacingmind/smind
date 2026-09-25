@@ -45,15 +45,15 @@ export const appChromeTheme = EditorView.theme({
     backgroundColor: "var(--accent)",
   },
   ".cm-activeLine": {
-    backgroundColor: "var(--surface-2)",
+    backgroundColor: "var(--surface)",
   },
   ".cm-gutters": {
-    backgroundColor: "var(--surface-1)",
+    backgroundColor: "var(--card)",
     color: "var(--foreground-muted)",
     border: "none",
   },
   ".cm-activeLineGutter": {
-    backgroundColor: "var(--surface-2)",
+    backgroundColor: "var(--surface)",
   },
 });
 

@@ -45,7 +45,7 @@ export function PlanReviewCard({
   return (
     <Alert testId="pending-permission" variant="warning" title={pending.summary} description={error ?? undefined}>
       <div className="flex w-full flex-col gap-2" data-testid="plan-review">
-        <div className="rounded-md border bg-surface-2 px-2 py-1.5">
+        <div className="rounded-md border bg-surface px-2 py-1.5">
           <TimelineMarkdown content={pending.plan} />
         </div>
         <div className="flex items-center gap-2">

@@ -14,16 +14,16 @@ describe("buttonVariants", () => {
     }
   });
 
-  it("execute uses the status-running color family", () => {
+  it("execute uses the warning color family", () => {
     const classes = buttonVariants({ variant: "execute" });
-    expect(classes).toContain("bg-status-running/10");
-    expect(classes).toContain("text-status-running");
+    expect(classes).toContain("bg-warning/10");
+    expect(classes).toContain("text-warning");
   });
 
-  it("approval uses the status-success color family", () => {
+  it("approval uses the success color family", () => {
     const classes = buttonVariants({ variant: "approval" });
-    expect(classes).toContain("bg-status-success/10");
-    expect(classes).toContain("text-status-success");
+    expect(classes).toContain("bg-success/10");
+    expect(classes).toContain("text-success");
   });
 
   it("quiet has no fill, only muted text -- lower emphasis than ghost", () => {

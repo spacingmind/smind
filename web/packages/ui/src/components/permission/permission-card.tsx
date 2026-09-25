@@ -57,7 +57,7 @@ export function PermissionCard({
       role="group"
       aria-label={pending.summary}
       data-testid="permission-card"
-      className="rounded-lg bg-surface-1 shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="rounded-lg bg-card shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
       {pending.plan ? (
         <PlanReviewCard runId={runId} pending={{ ...pending, plan: pending.plan }} onRespond={onRespond} onChat={onChat} />

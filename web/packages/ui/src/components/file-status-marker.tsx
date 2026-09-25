@@ -16,9 +16,9 @@ import type { TaskFile } from "@/lib/types";
  * of being mislabelled as one of the three.
  */
 const STATUS_STYLE: Record<string, { letter: string; className: string; label: string }> = {
-  added: { letter: "A", className: "text-status-success", label: "added" },
-  modified: { letter: "M", className: "text-status-warning", label: "modified" },
-  deleted: { letter: "D", className: "text-status-danger", label: "deleted" },
+  added: { letter: "A", className: "text-success", label: "added" },
+  modified: { letter: "M", className: "text-warning", label: "modified" },
+  deleted: { letter: "D", className: "text-destructive", label: "deleted" },
 };
 
 export function FileStatusMarker({ status, className }: { status: TaskFile["status"]; className?: string }) {
@@ -33,7 +33,7 @@ export function FileStatusMarker({ status, className }: { status: TaskFile["stat
       data-status={status}
       title={style.label}
       aria-label={style.label}
-      className={cn("shrink-0 font-mono text-code-annotation tabular-nums", style.className, className)}
+      className={cn("shrink-0 font-mono text-ui-sm font-medium tabular-nums", style.className, className)}
     >
       {style.letter}
     </span>
