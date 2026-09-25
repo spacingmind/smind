@@ -3,6 +3,7 @@ pub mod backoff;
 pub mod cache;
 pub mod client;
 pub mod config;
+pub mod daemon_manager;
 pub mod offline;
 pub mod protocol;
 pub mod proxy;
