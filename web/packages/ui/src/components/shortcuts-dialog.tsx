@@ -28,7 +28,7 @@ function KeyCaps({ keys }: { keys: string }) {
       {parts.map((part, i) => (
         <kbd
           key={`${part}-${i}`}
-          className="rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-xs text-foreground"
+          className="rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground"
         >
           {part}
         </kbd>
@@ -110,25 +110,25 @@ function ShortcutRow({
       data-binding-id={row.id}
     >
       <div className="min-w-0">
-        <div className="truncate text-sm">{row.label}</div>
-        {row.note && <div className="truncate text-xs text-foreground-muted">{row.note}</div>}
+        <div className="truncate text-ui-base">{row.label}</div>
+        {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
-          <div className="text-xs text-status-warning" data-testid="shortcut-conflict">
+          <div className="text-ui-sm text-warning" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {capturing === "chord" ? (
-          <span className="text-xs text-foreground-muted" data-testid="shortcut-capturing">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
           </span>
         ) : capturing === "single" ? (
-          <span className="text-xs text-foreground-muted" data-testid="shortcut-capturing">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Press a key… (Esc to cancel)
           </span>
         ) : row.keys === null ? (
-          <span className="text-xs text-foreground-muted" data-testid="shortcut-unassigned">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-unassigned">
             Unassigned
           </span>
         ) : (
@@ -189,14 +189,14 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
   return (
     <div className="flex flex-col gap-4">
       {sections.length === 0 ? (
-        <p className="text-sm text-foreground-muted" data-testid="shortcut-sections-empty">
+        <p className="text-ui-base text-foreground-muted" data-testid="shortcut-sections-empty">
           No shortcuts match "{query}".
         </p>
       ) : (
         <div className="flex flex-col gap-4" data-testid="shortcut-sections">
           {sections.map((section) => (
             <section key={section.id} data-testid={`shortcut-section-${section.id}`}>
-              <h3 className="mb-1 text-metadata-label tracking-wide text-foreground-muted uppercase">
+              <h3 className="mb-1 text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">
                 {section.title}
               </h3>
               <div className="divide-y divide-border">

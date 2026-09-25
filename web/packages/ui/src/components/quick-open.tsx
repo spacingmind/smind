@@ -113,17 +113,17 @@ export function QuickOpen({
           placeholder="Go to file…"
           aria-label="Go to file"
           data-testid="quick-open-input"
-          className="w-full border-b bg-transparent px-4 py-3 text-sm outline-none placeholder:text-muted-foreground"
+          className="w-full border-b bg-transparent px-4 py-3 text-ui-base outline-none placeholder:text-muted-foreground"
         />
         <div className="max-h-80 overflow-y-auto py-1" data-testid="quick-open-results">
           {index.loading && index.paths === null && <InlineSpinner label="Loading files…" className="px-4 py-3" />}
           {index.error && (
-            <p className="px-4 py-3 text-sm text-destructive" data-testid="quick-open-error">
+            <p className="px-4 py-3 text-ui-base text-destructive" data-testid="quick-open-error">
               {index.error}
             </p>
           )}
           {!index.loading && index.paths !== null && matches.length === 0 && (
-            <p className="px-4 py-3 text-sm text-muted-foreground">No matching files</p>
+            <p className="px-4 py-3 text-ui-base text-muted-foreground">No matching files</p>
           )}
           {matches.map((match, i) => (
             <button
@@ -134,8 +134,8 @@ export function QuickOpen({
               onMouseEnter={() => setActiveIndex(i)}
               onClick={() => choose(match)}
               className={
-                "flex w-full items-center gap-2 truncate px-4 py-1.5 text-left text-sm " +
-                (i === activeIndex ? "bg-accent" : "")
+                "flex w-full items-center gap-2 truncate px-4 py-1.5 text-left text-ui-base " +
+                (i === activeIndex ? "bg-selected" : "")
               }
             >
               <FileIcon path={match.path} />

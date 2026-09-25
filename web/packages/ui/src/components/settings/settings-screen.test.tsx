@@ -43,6 +43,17 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-section-general")).not.toBeInTheDocument();
   });
 
+  it("gives the active and inactive nav items the same text-ui-* size (tailwind-merge font-size group regression, see lib/utils.ts's cn() comment)", () => {
+    renderScreen();
+
+    const active = screen.getByTestId("settings-nav-appearance");
+    const inactive = screen.getByTestId("settings-nav-general");
+    const sizeOf = (el: HTMLElement) => el.className.match(/\btext-ui-(?:xl|lg|base|caption|sm|xs)\b/)?.[0];
+
+    expect(sizeOf(active)).toBeDefined();
+    expect(sizeOf(active)).toBe(sizeOf(inactive));
+  });
+
   it("switches the detail pane when a different section is clicked", async () => {
     renderScreen();
 

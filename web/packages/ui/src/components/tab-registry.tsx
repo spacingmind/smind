@@ -161,7 +161,7 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
           data-testid="tab-dirty-marker"
           data-tab-key={entry.key}
           aria-label="unsaved changes"
-          className="size-1.5 shrink-0 rounded-full bg-status-dot-warning"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       )}
       {busy && (
@@ -169,7 +169,7 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
           data-testid="tab-activity-marker"
           data-tab-key={entry.key}
           aria-label="new output"
-          className="size-1.5 shrink-0 rounded-full bg-status-dot-running"
+          className="size-1.5 shrink-0 rounded-full bg-warning"
         />
       )}
     </>
@@ -186,7 +186,7 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
   return (
     <div
       data-testid="tabs-empty-state"
-      className="flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground"
+      className="flex h-full flex-col items-center justify-center gap-3 text-ui-base text-muted-foreground"
     >
       <p>No tabs open</p>
       <div className="flex flex-wrap items-center justify-center gap-2">

@@ -54,9 +54,9 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-notifications">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Notifications</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Notifications</h3>
         <div className="flex items-center justify-between gap-4">
-          <p className="max-w-sm text-sm text-muted-foreground">{PERMISSION_DESCRIPTION[permission]}</p>
+          <p className="max-w-sm text-ui-base text-muted-foreground">{PERMISSION_DESCRIPTION[permission]}</p>
           <Button
             variant="outline"
             size="sm"
@@ -72,8 +72,8 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
 
       <section className="flex items-center justify-between gap-4">
         <div className="flex flex-col gap-0.5">
-          <h3 className="text-sm font-medium text-foreground">Play a sound</h3>
-          <p className="max-w-sm text-sm text-muted-foreground">
+          <h3 className="text-ui-base font-medium text-foreground">Play a sound</h3>
+          <p className="max-w-sm text-ui-base text-muted-foreground">
             Play a short sound alongside a browser notification.
           </p>
         </div>
@@ -101,8 +101,8 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-col gap-0.5">
-            <h3 className="text-sm font-medium text-foreground">Test notification</h3>
-            <p className="max-w-sm text-sm text-muted-foreground">
+            <h3 className="text-ui-base font-medium text-foreground">Test notification</h3>
+            <p className="max-w-sm text-ui-base text-muted-foreground">
               {permission === "granted"
                 ? "Send a test notification to confirm it works."
                 : "Enable notifications above first."}
@@ -119,12 +119,12 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
           </Button>
         </div>
         {testState.status === "sent" && (
-          <p data-testid="settings-notifications-test-success" className="text-sm text-status-success">
+          <p data-testid="settings-notifications-test-success" className="text-ui-base text-success">
             Test notification sent.
           </p>
         )}
         {testState.status === "error" && (
-          <p data-testid="settings-notifications-test-error" className="text-sm text-status-danger">
+          <p data-testid="settings-notifications-test-error" className="text-ui-base text-destructive">
             {testState.message}
           </p>
         )}

@@ -6,10 +6,10 @@ import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 export type StatusBadgeStatus = Exclude<StatusDotStatus, "neutral">;
 
 const STATUS_BADGE_CLASSES: Record<StatusBadgeStatus, string> = {
-  success: "border-status-success/30 bg-status-success/10 text-status-success",
-  danger: "border-status-danger/30 bg-status-danger/10 text-status-danger",
-  warning: "border-status-warning/30 bg-status-warning/10 text-status-warning",
-  running: "border-status-running/30 bg-status-running/10 text-status-running",
+  success: "border-success/30 bg-success/10 text-success",
+  danger: "border-destructive/30 bg-destructive/10 text-destructive",
+  warning: "border-warning/30 bg-warning/10 text-warning",
+  running: "border-warning/30 bg-warning/10 text-warning",
 };
 
 /**
@@ -36,7 +36,7 @@ export function StatusBadge({
       data-slot="status-badge"
       data-status={status}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium transition-colors duration-(--duration-hover)",
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-ui-xs font-medium transition-colors duration-(--duration-hover)",
         STATUS_BADGE_CLASSES[status],
         className,
       )}

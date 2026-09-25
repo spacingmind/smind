@@ -35,6 +35,9 @@ jobs:
       - name: Lint
         run: task lint
 
+      - name: Check desktop version sync
+        run: task check:versions
+
       - name: Guard release metadata (develop -> master PRs only)
         if: github.event_name == 'pull_request' && github.base_ref == 'master'
         run: ./scripts/check-release-metadata.sh

@@ -44,15 +44,15 @@ export function GeneralSection({ client }: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-general">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Defaults for new tasks</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Defaults for new tasks</h3>
         <label className="flex items-center justify-between gap-4">
-          <span className="text-sm text-foreground">Provider</span>
+          <span className="text-ui-base text-foreground">Provider</span>
           <select
             aria-label="Default provider"
             data-testid="settings-default-provider"
             value={defaultProvider ?? ""}
             onChange={(e) => setDefaultProvider((e.target.value || null) as Provider | null)}
-            className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <option value="">No preference</option>
             {providers.map((p) => (
@@ -63,13 +63,13 @@ export function GeneralSection({ client }: SettingsSectionContext) {
           </select>
         </label>
         <label className="flex items-center justify-between gap-4">
-          <span className="text-sm text-foreground">Approval policy</span>
+          <span className="text-ui-base text-foreground">Approval policy</span>
           <select
             aria-label="Default approval policy"
             data-testid="settings-default-approval-policy"
             value={defaultApprovalPolicy ?? ""}
             onChange={(e) => setDefaultApprovalPolicy((e.target.value || null) as ApprovalPolicy | null)}
-            className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="h-8 shrink-0 rounded-lg border border-input bg-transparent px-2 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <option value="">No preference</option>
             {APPROVAL_POLICIES.map((p) => (

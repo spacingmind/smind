@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { desktop, isDesktop, type Connection } from "@/lib/platform";
 
 /**
@@ -81,7 +82,7 @@ function ConnectionsSection() {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-connections">
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Daemon connections</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Daemon connections</h3>
         <ul className="flex flex-col gap-1">
           {connections.map((c) => (
             <li
@@ -90,15 +91,15 @@ function ConnectionsSection() {
               className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
             >
               <div className="flex min-w-0 flex-col">
-                <span className="text-sm text-foreground">
+                <span className="text-ui-base text-foreground">
                   {c.label}
                   {current?.id === c.id && (
-                    <span className="ml-2 text-xs text-muted-foreground" data-testid={`connection-current-${c.id}`}>
+                    <span className="ml-2 text-ui-sm text-muted-foreground" data-testid={`connection-current-${c.id}`}>
                       (current)
                     </span>
                   )}
                 </span>
-                <span className="truncate font-mono text-xs text-muted-foreground">{c.baseUrl}</span>
+                <span className="truncate font-mono text-ui-sm text-muted-foreground">{c.baseUrl}</span>
               </div>
               <div className="flex shrink-0 gap-1">
                 {current?.id !== c.id && (
@@ -122,30 +123,28 @@ function ConnectionsSection() {
         </ul>
       </section>
       <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Add a connection</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Add a connection</h3>
         <form className="flex flex-col gap-2" onSubmit={handleAdd}>
-          <input
+          <Input
             aria-label="Connection label"
             data-testid="connection-add-label"
             placeholder="Label (optional)"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
-          <input
+          <Input
             aria-label="Connection URL"
             data-testid="connection-add-url"
             placeholder="http://host:port"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            className="h-8 rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
           />
           <Button type="submit" size="sm" data-testid="connection-add-submit" disabled={busy || !url.trim()}>
             Add
           </Button>
         </form>
         {error && (
-          <p role="alert" data-testid="connection-error" className="text-sm text-destructive">
+          <p role="alert" data-testid="connection-error" className="text-ui-base text-destructive">
             {error}
           </p>
         )}

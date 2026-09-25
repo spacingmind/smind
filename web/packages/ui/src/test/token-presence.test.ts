@@ -32,25 +32,21 @@ function block(selector: string): string {
 }
 
 /**
- * Every token the visual-identity-console plan's Items 2, 3 and 5 add.
- * Values may be identical across themes, but the declaration must exist
- * in BOTH `:root` and `.dark` -- a token defined only in one theme makes
- * the other theme silently fall back to whatever inherits, which is
- * exactly the drift this test exists to catch.
+ * Every token the visual-identity-console plan's Items 3 and 5 add, plus
+ * `--content-size` (Item 2's one surviving type-role token -- the rest were
+ * retired by zcode-visual-parity's P1 Step 4 in favor of `text-ui-*`, see
+ * text-ui-scale.test.ts). Values may be identical across themes, but the
+ * declaration must exist in BOTH `:root` and `.dark` -- a token defined
+ * only in one theme makes the other theme silently fall back to whatever
+ * inherits, which is exactly the drift this test exists to catch.
  *
- * For the type-role and shadow/duration tokens the convention is two
- * spellings: a `--{name}` custom property (value, per theme) declared in
- * `:root`/`.dark`, plus a `--text-{name}`/`--shadow-{tier}` alias in
- * `@theme inline` that turns it into a Tailwind utility. The tests below
- * assert both halves.
+ * For the shadow/duration/content tokens the convention is two spellings:
+ * a `--{name}` custom property (value, per theme) declared in `:root`/
+ * `.dark`, plus a `--text-{name}`/`--shadow-{tier}` alias in `@theme
+ * inline` that turns it into a Tailwind utility. The tests below assert
+ * both halves.
  */
 const TOKENS = [
-  "--workspace-title-size",
-  "--section-title-size",
-  "--panel-title-size",
-  "--metadata-label-size",
-  "--code-annotation-size",
-  "--interface-size",
   "--content-size",
   "--elevation-shadow-sm",
   "--elevation-shadow-md",
@@ -63,12 +59,6 @@ const TOKENS = [
 ] as const;
 
 const THEME_ALIASES = [
-  "--text-workspace-title",
-  "--text-section-title",
-  "--text-panel-title",
-  "--text-metadata-label",
-  "--text-code-annotation",
-  "--text-interface",
   "--text-content",
   "--shadow-sm",
   "--shadow-md",
@@ -94,9 +84,7 @@ describe("token presence (visual-identity-console Items 2, 3, 5)", () => {
     expect(theme).toContain(`${alias}:`);
   });
 
-  it("re-exports every type-role token with a paired line-height", () => {
-    for (const role of ["workspace-title", "section-title", "panel-title", "metadata-label", "code-annotation", "interface", "content"]) {
-      expect(theme).toContain(`--text-${role}--line-height:`);
-    }
+  it("re-exports --text-content with a paired line-height", () => {
+    expect(theme).toContain("--text-content--line-height:");
   });
 });

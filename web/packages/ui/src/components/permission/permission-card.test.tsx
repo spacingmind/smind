@@ -67,7 +67,7 @@ describe("PermissionCard: options variant", () => {
   it("the outer card carries the floating elevation recipe", () => {
     render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
     const outer = screen.getByTestId("permission-card");
-    expect(outer.className).toContain("bg-surface-1");
+    expect(outer.className).toContain("bg-card");
     expect(outer.className).toContain("shadow-lg");
   });
 

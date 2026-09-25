@@ -51,10 +51,10 @@ export function DesktopUnreachable({
       className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center"
     >
       <div className="flex flex-col gap-1">
-        <h2 className="text-sm font-medium text-foreground">Can&apos;t reach {current?.label ?? "the daemon"}</h2>
-        {current && <p className="font-mono text-xs text-muted-foreground">{current.baseUrl}</p>}
+        <h2 className="text-ui-base font-medium text-foreground">Can&apos;t reach {current?.label ?? "the daemon"}</h2>
+        {current && <p className="font-mono text-ui-sm text-muted-foreground">{current.baseUrl}</p>}
       </div>
-      <p className="max-w-sm text-sm text-muted-foreground">
+      <p className="max-w-sm text-ui-base text-muted-foreground">
         Start the daemon (<code>smind serve</code>), or switch to a different connection.
       </p>
       <div className="flex gap-2">
