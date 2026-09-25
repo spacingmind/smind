@@ -604,6 +604,60 @@ relationship with the daemon.
   - **Windows CI re-run**: [36115170662](https://github.com/spacingmind/smind/actions/runs/36115170662)
     -- green in 3m59s (rust-cache hit, since only `desktop/` Rust sources
     changed, no new dependency).
+- **Follow-up fix (12b10db): take-over was a dead end.** The previous
+  fix's exe-identity check compared every pid against the *managed*
+  layout path, but `take_over` saved `exe_path: "unknown"` for the
+  adopted daemon -- so the identity check could never pass for it, and
+  every Restart/Update after a Take-over refused forever ("safe", but
+  pointless for the one real scenario Take-over exists for: the user's
+  own `./bin/smind serve`).
+  - `take_over` now resolves the owner pid's real executable up front
+    (same primitives as everywhere else: `native::exe_path_for_pid` /
+    `wsl::exe_path_argv`+`parse_exe_path`) and refuses the take-over
+    outright -- a typed error, no record saved -- if it can't resolve
+    one, rather than storing a placeholder.
+  - The identity check is now parameterized by *which* path a call site
+    expects: pre-kill guards (`install_or_update`, `restart`) compare
+    against the record's own `exe_path` (the adopted path right after a
+    take-over, or the managed path for a normal managed daemon --
+    `wsl::exe_path_matches`, exact string match, since it's always a
+    previously-resolved absolute path now); the post-start check after a
+    fresh install/update/restart compares against the *managed* binary
+    specifically (`wsl::exe_path_matches_managed_bin`, suffix match,
+    since `$HOME` is never known to Rust on the WSL2 path -- macOS always
+    knows the literal managed path, so one function serves both cases
+    there).
+  - Fixed a related staleness bug found while doing this: `restart`'s
+    saved record inherited the old `exe_path` unchanged via `..record`,
+    which would keep an adopted path around forever even after the
+    managed binary took over the port on a successful restart. Both
+    platforms now refresh `exe_path` to whatever was just verified.
+  - **New tests** (`daemon-client` 127 -> 131): `managed.rs` gained the
+    three scenarios asked for directly -- take-over stores the resolved
+    path, not a placeholder; a take-over record passes `safe_to_kill`
+    against its own adopted path (this is what makes Restart-after-
+    take-over work); and the update-after-take-over sequence (kill the
+    adopted pid via the same guard, then a freshly-verified managed pid
+    gets a record with the managed path, distinct from the adopted one).
+    `wsl.rs` gained `exe_path_matches`'s own test. All 131 pass; `cargo
+    build`/`--release` clean for `src-tauri` (one `dead_code` warning
+    from an unused convenience wrapper, removed); `task lint` and the
+    full web suite (1263/1263, unaffected) both green; no Go files
+    touched.
+  - **Residual gap noted, not fixed (out of scope for this ask):**
+    `restart()` always starts the *managed* binary
+    (`start_detached_argv`/`spawn_detached` never target the adopted
+    path), regardless of the record's own `exe_path`. If a user does
+    Take-over and then clicks Restart *without ever having clicked
+    Install/Update first*, the pre-kill guard now correctly kills the
+    adopted process (as designed), but there is no managed binary on
+    disk yet for the restart to start -- leaving nothing running. This
+    is a availability/UX gap, not a wrong-process-killed safety bug (the
+    process identity checks are exactly what's intended), and Update's
+    own flow (install, *then* kill-and-start) does not hit it. Flagging
+    for a future decision on whether to gate Restart or nudge the UI
+    toward Update-first for a purely-adopted, never-installed record.
+  - **Windows CI re-run**: pushed; see below.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
