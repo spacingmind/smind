@@ -601,7 +601,9 @@ relationship with the daemon.
     `task lint` and the full web suite (1263/1263, unaffected -- no web
     files changed by this fix) both green; `go test ./...` green with no
     Go files touched.
-  - **Windows CI re-run**: pushed; see below.
+  - **Windows CI re-run**: [36115170662](https://github.com/spacingmind/smind/actions/runs/36115170662)
+    -- green in 3m59s (rust-cache hit, since only `desktop/` Rust sources
+    changed, no new dependency).
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
