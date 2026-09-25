@@ -4,6 +4,7 @@
 
 pub mod admission;
 pub mod channel;
+pub mod client;
 pub mod crypto;
 pub mod pairing;
 pub mod pairing_store;

@@ -103,6 +103,16 @@ impl<T: FrameTransport> Channel<T> {
         self.peer_pub
     }
 
+    /// Gives a reconnect loop access to the underlying transport so it
+    /// can be swapped out after a transport-level drop (e.g.
+    /// `DataFrameTransport::reopen`) WITHOUT touching the established
+    /// session/counters — mirrors `frameConn.reopen` (Go), which the
+    /// `client.DataConn.Resume` wrapper calls without going anywhere
+    /// near `e2ee.Channel` itself.
+    pub fn transport_mut(&mut self) -> &mut T {
+        &mut self.transport
+    }
+
     /// Runs the X25519 handshake: send hello, read the peer's hello,
     /// derive the session, then exchange ready frames. Starts a FRESH
     /// session — for a transport-level reconnect that should keep the
