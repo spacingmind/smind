@@ -16,6 +16,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/terminal"
+	"github.com/spacingmind/smind/internal/version"
 	"github.com/spacingmind/smind/internal/workspace"
 	"github.com/spacingmind/smind/internal/wsapi"
 )
@@ -108,6 +109,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":  "ok",
 		"service": "smind",
+		"version": version.Version,
 	})
 }
 
