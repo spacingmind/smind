@@ -26,8 +26,9 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as TMessage;
 use url::Url;
 
-use crate::proxy::connections::Registry;
+use crate::proxy::connections::{ConnectionKind, Registry};
 use crate::proxy::secret::{self, GateOutcome};
+use crate::relay::client::RelayHandle;
 
 /// AssetSource serves the bundled UI's static files. Implemented by a
 /// `rust-embed`-backed type in `desktop/src-tauri` for the real app, and
@@ -44,15 +45,44 @@ pub struct ProxyState {
     pub registry: Mutex<Registry>,
     pub assets: Box<dyn AssetSource>,
     pub http_client: reqwest::Client,
+    /// The relay transport for the currently-selected connection, if it
+    /// is `relay`-kind -- `None` for `local`/`url` connections, and
+    /// while a relay connection is still (re)connecting for the first
+    /// time. Shared (not owned) with `client_watch` (AC7): both the
+    /// `/ws` bridge below and the daemon-client watcher read/write the
+    /// same underlying tunnel via cloned `RelayHandle`s, matching the
+    /// plan's "one relay connection is one shared, multiplexed pipe"
+    /// decision.
+    pub relay: Mutex<Option<RelayHandle>>,
 }
 
 impl ProxyState {
     pub fn new(secret: String, registry: Registry, assets: Box<dyn AssetSource>) -> Arc<Self> {
-        Arc::new(Self { secret, registry: Mutex::new(registry), assets, http_client: reqwest::Client::new() })
+        Arc::new(Self {
+            secret,
+            registry: Mutex::new(registry),
+            assets,
+            http_client: reqwest::Client::new(),
+            relay: Mutex::new(None),
+        })
     }
 
-    fn current_base_url(&self) -> String {
-        self.registry.lock().unwrap().current().base_url.clone()
+    fn current(&self) -> (ConnectionKind, String) {
+        let reg = self.registry.lock().unwrap();
+        let c = reg.current();
+        (c.kind, c.base_url.clone())
+    }
+
+    /// set_relay installs (or, with `None`, clears) the relay transport
+    /// for the currently-selected connection -- called by whichever
+    /// layer owns `connections_select` (the src-tauri command) whenever
+    /// the selection changes.
+    pub fn set_relay(&self, handle: Option<RelayHandle>) {
+        *self.relay.lock().unwrap() = handle;
+    }
+
+    fn current_relay(&self) -> Option<RelayHandle> {
+        self.relay.lock().unwrap().clone()
     }
 }
 
@@ -71,7 +101,9 @@ pub fn build_router(state: Arc<ProxyState>) -> Router {
 /// serve binds `127.0.0.1:0` (a random port), returning the bound port
 /// and a future that runs the server forever -- the caller spawns that
 /// future and uses the port to build the window's initial URL.
-pub async fn serve(state: Arc<ProxyState>) -> std::io::Result<(u16, impl std::future::Future<Output = ()>)> {
+pub async fn serve(
+    state: Arc<ProxyState>,
+) -> std::io::Result<(u16, impl std::future::Future<Output = ()>)> {
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     let app = build_router(state);
@@ -86,7 +118,10 @@ pub async fn serve(state: Arc<ProxyState>) -> std::io::Result<(u16, impl std::fu
 // --- the secret gate (AC3) ---------------------------------------------
 
 async fn gate(State(state): State<Arc<ProxyState>>, req: Request<Body>, next: Next) -> Response {
-    let cookie_header = req.headers().get(header::COOKIE).and_then(|v| v.to_str().ok());
+    let cookie_header = req
+        .headers()
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok());
     let query_k = query_param(req.uri().query(), "k");
 
     match secret::evaluate(&state.secret, cookie_header, query_k.as_deref()) {
@@ -97,7 +132,8 @@ async fn gate(State(state): State<Arc<ProxyState>>, req: Request<Body>, next: Ne
             let cookie = secret::build_set_cookie(&state.secret);
             resp.headers_mut().append(
                 header::SET_COOKIE,
-                HeaderValue::from_str(&cookie).expect("smind desktop: cookie header is valid ASCII"),
+                HeaderValue::from_str(&cookie)
+                    .expect("smind desktop: cookie header is valid ASCII"),
             );
             resp
         }
@@ -107,7 +143,9 @@ async fn gate(State(state): State<Arc<ProxyState>>, req: Request<Body>, next: Ne
 
 fn query_param(query: Option<&str>, name: &str) -> Option<String> {
     let query = query?;
-    url::form_urlencoded::parse(query.as_bytes()).find(|(k, _)| k == name).map(|(_, v)| v.into_owned())
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(k, _)| k == name)
+        .map(|(_, v)| v.into_owned())
 }
 
 /// strip_query_param rebuilds `uri`'s path+query with `name` removed
@@ -127,7 +165,9 @@ fn strip_query_param(uri: &Uri, name: &str) -> String {
     if remaining.is_empty() {
         return path.to_string();
     }
-    let qs = url::form_urlencoded::Serializer::new(String::new()).extend_pairs(&remaining).finish();
+    let qs = url::form_urlencoded::Serializer::new(String::new())
+        .extend_pairs(&remaining)
+        .finish();
     format!("{path}?{qs}")
 }
 
@@ -144,7 +184,11 @@ async fn serve_asset(State(state): State<Arc<ProxyState>>, uri: Uri) -> Response
     // so the app's own router takes over from there.
     match state.assets.get("index.html") {
         Some((bytes, content_type)) => asset_response(bytes, &content_type),
-        None => (StatusCode::NOT_FOUND, "smind desktop: no bundled UI assets found").into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            "smind desktop: no bundled UI assets found",
+        )
+            .into_response(),
     }
 }
 
@@ -165,12 +209,23 @@ fn asset_response(bytes: Vec<u8>, content_type: &str) -> Response {
 /// request, and dropping it here keeps `/api/*` and `/ws` consistent);
 /// `Cookie` carries this proxy's own secret cookie, which the daemon
 /// has no reason to ever see.
-const HOP_BY_HOP_REQUEST_HEADERS: &[header::HeaderName] =
-    &[header::HOST, header::CONNECTION, header::ORIGIN, header::COOKIE];
+const HOP_BY_HOP_REQUEST_HEADERS: &[header::HeaderName] = &[
+    header::HOST,
+    header::CONNECTION,
+    header::ORIGIN,
+    header::COOKIE,
+];
 
 async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) -> Response {
-    let base = state.current_base_url();
-    let path_and_query = req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let (kind, base) = state.current();
+    if kind == ConnectionKind::Relay {
+        return relay_api_response(req.uri());
+    }
+    let path_and_query = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/");
     let url = format!("{}{}", base.trim_end_matches('/'), path_and_query);
 
     let method = req.method().clone();
@@ -195,22 +250,80 @@ async fn proxy_http(State(state): State<Arc<ProxyState>>, req: Request<Body>) ->
             headers.remove(header::CONNECTION);
             let body = Body::from_stream(resp.bytes_stream());
             let mut builder = Response::builder().status(status);
-            *builder.headers_mut().expect("smind desktop: response builder has headers") = headers;
-            builder.body(body).expect("smind desktop: proxied response is well-formed")
+            *builder
+                .headers_mut()
+                .expect("smind desktop: response builder has headers") = headers;
+            builder
+                .body(body)
+                .expect("smind desktop: proxied response is well-formed")
         }
-        Err(e) => (StatusCode::BAD_GATEWAY, format!("smind desktop: proxy error: {e}")).into_response(),
+        Err(e) => (
+            StatusCode::BAD_GATEWAY,
+            format!("smind desktop: proxy error: {e}"),
+        )
+            .into_response(),
     }
+}
+
+// --- relay `/api/token` synthesis (ADR-0013, ADR-0011) -------------------
+
+/// relay_api_response answers `/api/*` for a `relay`-kind connection
+/// locally, in Rust -- there is no daemon HTTP surface to reverse-proxy
+/// to. Only `/api/token` is ever called by the bundled UI
+/// (`web/packages/ui/src/lib/daemon.ts`'s `fetchToken`); the synthesized
+/// value satisfies that `{token: string}` contract, but is not itself a
+/// security boundary (see the plan's Decisions) -- the E2EE tunnel plus
+/// the proxy's own per-launch secret cookie (checked by `gate`, above,
+/// on every request including this one) are what actually gate access.
+fn relay_api_response(uri: &Uri) -> Response {
+    let rest = uri.path().strip_prefix("/api/").unwrap_or("");
+    if rest == "token" {
+        use base64::Engine;
+        let mut buf = [0u8; 16];
+        getrandom::fill(&mut buf).expect("getrandom: relay token");
+        let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(buf);
+        return axum::Json(serde_json::json!({ "token": token })).into_response();
+    }
+    (
+        StatusCode::NOT_FOUND,
+        "smind desktop: relay connections have no daemon HTTP surface",
+    )
+        .into_response()
 }
 
 // --- /ws bridge, frame-by-frame, Origin-less upstream handshake ---------
 
-async fn proxy_ws(State(state): State<Arc<ProxyState>>, RawQuery(query): RawQuery, ws: WebSocketUpgrade) -> Response {
-    let base = state.current_base_url();
+async fn proxy_ws(
+    State(state): State<Arc<ProxyState>>,
+    RawQuery(query): RawQuery,
+    ws: WebSocketUpgrade,
+) -> Response {
+    let (kind, base) = state.current();
+    if kind == ConnectionKind::Relay {
+        return match state.current_relay() {
+            Some(handle) => ws.on_upgrade(move |socket| bridge_relay(socket, handle)),
+            None => (
+                StatusCode::BAD_GATEWAY,
+                "smind desktop: relay connection not active",
+            )
+                .into_response(),
+        };
+    }
     let mut target = match Url::parse(&base) {
         Ok(u) => u,
-        Err(_) => return (StatusCode::BAD_GATEWAY, "smind desktop: invalid upstream URL").into_response(),
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                "smind desktop: invalid upstream URL",
+            )
+                .into_response()
+        }
     };
-    let scheme = if target.scheme() == "https" { "wss" } else { "ws" };
+    let scheme = if target.scheme() == "https" {
+        "wss"
+    } else {
+        "ws"
+    };
     // set_scheme rejects switching to/from a "special" scheme in some
     // `url` versions for certain hosts; ws/wss on an http(s) URL always
     // succeeds, so this is infallible in practice.
@@ -257,6 +370,51 @@ async fn bridge(socket: WebSocket, target: Url) {
                 }
                 if closing {
                     break;
+                }
+            }
+        }
+    }
+}
+
+/// bridge_relay pumps JSON-RPC messages between the browser-side
+/// `socket` and `handle`'s shared relay tunnel: each inbound WS
+/// text/binary message is sent as-is into the E2EE channel, and every
+/// message the relay transport delivers is forwarded out as a WS text
+/// frame -- the plaintext on both sides is the same `internal/wsapi`
+/// JSON envelope the daemon's own `/ws` speaks, so the bundled UI needs
+/// no relay-awareness at all. Unlike `bridge` (which dials a fresh
+/// upstream WS per browser connection), this subscribes to the one
+/// relay tunnel `crate::relay::client::spawn` already keeps alive
+/// (reconnecting with backoff on its own) -- ending this browser
+/// connection never tears the relay transport down.
+async fn bridge_relay(socket: WebSocket, handle: RelayHandle) {
+    let mut inbound = handle.subscribe();
+    let (mut down_tx, mut down_rx) = socket.split();
+
+    loop {
+        tokio::select! {
+            msg = down_rx.next() => {
+                let Some(Ok(m)) = msg else { break };
+                let bytes = match m {
+                    AxumMessage::Text(t) => t.as_bytes().to_vec(),
+                    AxumMessage::Binary(b) => b.to_vec(),
+                    AxumMessage::Close(_) => break,
+                    AxumMessage::Ping(_) | AxumMessage::Pong(_) => continue,
+                };
+                if handle.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+            msg = inbound.recv() => {
+                match msg {
+                    Ok(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes).into_owned();
+                        if down_tx.send(AxumMessage::Text(text.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         }
@@ -314,5 +472,57 @@ mod tests {
 
         let uri: Uri = "/foo".parse().unwrap();
         assert_eq!(strip_query_param(&uri, "k"), "/foo");
+    }
+
+    #[test]
+    fn relay_api_response_synthesizes_token() {
+        let uri: Uri = "/api/token".parse().unwrap();
+        let resp = relay_api_response(&uri);
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn relay_api_response_rejects_everything_else() {
+        let uri: Uri = "/api/healthz".parse().unwrap();
+        let resp = relay_api_response(&uri);
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn bridge_relay_pumps_both_directions() {
+        let (handle, mut outbound_rx, inbound_tx, _status_tx) = crate::relay::client::test_handle();
+
+        // Build a real WS pair (client <-> proxy) via an in-process
+        // server so `bridge_relay` runs against a genuine `WebSocket`.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/ws",
+            axum::routing::get(move |ws: WebSocketUpgrade| async move {
+                ws.on_upgrade(move |s| bridge_relay(s, handle))
+            }),
+        );
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        let (mut ws, _) = tokio_tungstenite::connect_async(format!("ws://{addr}/ws"))
+            .await
+            .unwrap();
+
+        // Browser -> relay: a client message must reach the relay handle.
+        ws.send(TMessage::text("outbound from browser"))
+            .await
+            .unwrap();
+        let forwarded = outbound_rx.recv().await.unwrap();
+        assert_eq!(forwarded, b"outbound from browser");
+
+        // Relay -> browser: a message pushed onto the relay's inbound
+        // channel must reach the WS client.
+        inbound_tx.send(b"inbound from relay".to_vec()).unwrap();
+        let received = ws.next().await.unwrap().unwrap();
+        assert_eq!(received.into_text().unwrap(), "inbound from relay");
+
+        ws.close(None).await.ok();
     }
 }
