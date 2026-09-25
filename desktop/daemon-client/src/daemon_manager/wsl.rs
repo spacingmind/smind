@@ -170,6 +170,34 @@ pub fn kill_argv(distro: &str, pid: u32) -> Vec<String> {
     vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "kill".into(), pid.to_string()]
 }
 
+/// exe_path_argv resolves the real executable backing `pid` via
+/// `/proc/<pid>/exe`, so callers can verify a pid found via
+/// `port_owner_argv` is really the binary this app manages before
+/// trusting or signalling it (AC3's stale-record / unmanaged-adoption
+/// guard, mirroring `native::exe_path_for_pid` on macOS). `readlink -f`
+/// resolves the symlink to an absolute path in one call, argv-only.
+pub fn exe_path_argv(distro: &str, pid: u32) -> Vec<String> {
+    vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "readlink".into(), "-f".into(), format!("/proc/{pid}/exe")]
+}
+
+pub fn parse_exe_path(stdout: &str) -> Option<String> {
+    let trimmed = stdout.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+/// exe_path_matches_managed_bin is the pure identity check for the WSL2
+/// path: `readlink -f` always resolves to an absolute path under the
+/// real `$HOME` (never known to Rust -- see the module doc, `$HOME` is
+/// only ever expanded shell-side), so this compares by suffix against
+/// `BIN_SUBPATH` rather than requiring an exact full-path match.
+pub fn exe_path_matches_managed_bin(actual: &str) -> bool {
+    actual.trim().ends_with(BIN_SUBPATH)
+}
+
 /// run is the only function in this module that spawns anything.
 pub fn run(argv: &[String]) -> io::Result<Output> {
     let (prog, args) = argv.split_first().expect("smind desktop: argv is never empty");
@@ -229,6 +257,7 @@ mod tests {
             chmod_x_argv("Ubuntu"),
             port_owner_argv("Ubuntu", 4648),
             kill_argv("Ubuntu", 123),
+            exe_path_argv("Ubuntu", 123),
         ] {
             assert_eq!(v[0], WSL_EXE);
             assert_eq!(v[1], "-d");
@@ -271,5 +300,23 @@ mod tests {
     fn parse_ss_pid_none_when_absent() {
         assert_eq!(parse_ss_pid(""), None);
         assert_eq!(parse_ss_pid("LISTEN 0 4096 *:22 *:*\n"), None);
+    }
+
+    #[test]
+    fn parse_exe_path_trims_and_rejects_empty() {
+        assert_eq!(parse_exe_path("/home/u/.local/share/smind/bin/smind\n").as_deref(), Some("/home/u/.local/share/smind/bin/smind"));
+        assert_eq!(parse_exe_path(""), None);
+        assert_eq!(parse_exe_path("\n"), None);
+    }
+
+    #[test]
+    fn exe_path_matches_managed_bin_checks_the_suffix() {
+        assert!(exe_path_matches_managed_bin("/home/u/.local/share/smind/bin/smind"));
+        assert!(exe_path_matches_managed_bin("/home/u/.local/share/smind/bin/smind\n"));
+        // The exact regression this guards against: the port is still
+        // held by the previous unmanaged occupant (a different binary
+        // entirely) because our own process failed to bind.
+        assert!(!exe_path_matches_managed_bin("/home/u/bin/smind"));
+        assert!(!exe_path_matches_managed_bin("/usr/local/bin/some-other-daemon"));
     }
 }

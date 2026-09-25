@@ -12,6 +12,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use smind_daemon_client::daemon_manager::managed::{self, ManagedRecord, ManagedState};
+use std::path::Path;
 use smind_daemon_client::daemon_manager::{native, release, version, wsl};
 
 use crate::state::DesktopState;
@@ -226,6 +227,23 @@ fn find_port_owner(platform: Platform, distro: Option<&str>, port: u16) -> Optio
     }
 }
 
+/// wsl_exe_matches resolves the pid's real executable via `/proc/<pid>/exe`
+/// (through `wsl.exe`) and checks it's the binary this app manages --
+/// `false` on any lookup failure, since "couldn't confirm" must never be
+/// treated as "confirmed" here (Bug 1's exact failure mode).
+fn wsl_exe_matches(distro: &str, pid: u32) -> bool {
+    let Ok(out) = wsl::run(&wsl::exe_path_argv(distro, pid)) else { return false };
+    let Some(p) = wsl::parse_exe_path(&String::from_utf8_lossy(&out.stdout)) else { return false };
+    wsl::exe_path_matches_managed_bin(&p)
+}
+
+/// macos_exe_matches is `wsl_exe_matches`'s counterpart for the native
+/// path: resolves `pid`'s real command via `ps` and compares it against
+/// the managed `Layout`'s own binary path.
+fn macos_exe_matches(pid: u32, bin_path: &Path) -> bool {
+    native::exe_path_for_pid(pid).ok().flatten().map(|p| native::exe_matches(&p, bin_path)).unwrap_or(false)
+}
+
 fn log_path_display(app: &AppHandle, platform: Platform, distro: Option<&str>) -> Option<String> {
     match platform {
         Platform::Macos => macos_layout(app).ok().map(|l| l.log_path.display().to_string()),
@@ -271,61 +289,96 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
 async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
     let platform = detect_platform();
     let app_version = app_version_string(app);
-
-    emit_progress(app, "downloading", "Downloading the daemon release…");
+    let base_url = local_base_url(state);
+    let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
     match platform {
         Platform::Macos => {
+            let layout = macos_layout(app)?;
+            let existing_record = managed::load(&layout.state_path);
+
+            // Bug 1: refuse outright, before touching the disk or the
+            // network, if the port is already owned by a daemon this app
+            // doesn't manage (e.g. the user's own `./bin/smind serve`).
+            // Only `take_over` (explicit UI confirmation) may adopt it.
+            let port_owner_before = native::find_port_owner(port).ok().flatten();
+            managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port)?;
+
+            emit_progress(app, "downloading", "Downloading the daemon release…");
             let (os, arch) = release::native_target(std::env::consts::OS, std::env::consts::ARCH)?;
             let urls = release::release_urls(&app_version, os, arch);
-            let layout = macos_layout(app)?;
-
             let client = reqwest::Client::new();
             native::install_from_release(&client, &urls, &layout).await.map_err(|e| e.to_string())?;
 
             emit_progress(app, "starting", "Starting the daemon…");
-            if let Some(record) = managed::load(&layout.state_path) {
-                if native::is_pid_alive(record.pid) {
+            // Bug 2: only signal the previously-managed pid if it's still
+            // the live port owner *and* really our binary -- a bare
+            // liveness check (the pid merely responds to signal 0) is not
+            // enough, since a pid can be reused by an unrelated process.
+            if let Some(record) = &existing_record {
+                let exe_matches = macos_exe_matches(record.pid, &layout.bin_path);
+                if managed::safe_to_kill(record, port_owner_before, exe_matches) {
                     let _ = native::kill_process(record.pid);
+                } else if port_owner_before.is_some() {
+                    emit_progress(app, "starting", "The previously-managed process could not be verified; starting alongside it instead of stopping it.");
                 }
             }
+
             let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
-            let record = ManagedRecord {
-                pid: child.id(),
-                version: app_version.clone(),
-                installed_at: now_unix_seconds(),
-                exe_path: layout.bin_path.display().to_string(),
-            };
+            drop(child); // detached (its own process group); tracked by pid below, not by this handle.
+
+            // Don't trust "whoever now owns the port" on its own -- verify
+            // it's really the binary just installed (and, since /healthz
+            // answered, that it reports the version just installed)
+            // before saving a ManagedRecord. This is what would have
+            // caught Bug 1: if the new process failed to bind because the
+            // port was already taken, the port's owner is still the old
+            // occupant, whose exe path won't match.
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let (_, daemon_version) = probe_healthz(&base_url).await;
+            let port_owner_after = native::find_port_owner(port).ok().flatten();
+            let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
+            let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
+
+            let record = ManagedRecord { pid, version: app_version.clone(), installed_at: now_unix_seconds(), exe_path: layout.bin_path.display().to_string() };
             managed::save(&layout.state_path, &record).map_err(|e| e.to_string())?;
         }
         Platform::Wsl2 => {
             let distro = resolve_distro(state)?;
+            let existing_record = wsl_load_managed(&distro);
+
+            // Bug 1, same guard as the macOS branch above.
+            let port_owner_before = find_port_owner(platform, Some(&distro), port);
+            managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port)?;
+
+            emit_progress(app, "downloading", "Downloading the daemon release…");
             let arch = wsl_arch(&distro)?;
             let urls = release::release_urls(&app_version, "linux", arch);
-
             wsl_install(&distro, &urls)?;
 
             emit_progress(app, "starting", "Starting the daemon…");
-            if let Some(record) = wsl_load_managed(&distro) {
-                let _ = wsl::run(&wsl::kill_argv(&distro, record.pid));
+            // Bug 2, same guard as the macOS branch above.
+            if let Some(record) = &existing_record {
+                let exe_matches = wsl_exe_matches(&distro, record.pid);
+                if managed::safe_to_kill(record, port_owner_before, exe_matches) {
+                    let _ = wsl::run(&wsl::kill_argv(&distro, record.pid));
+                } else if port_owner_before.is_some() {
+                    emit_progress(app, "starting", "The previously-managed process could not be verified; starting alongside it instead of stopping it.");
+                }
             }
+
             wsl_start(&distro)?;
 
-            // The pid isn't reliably recoverable from the detach script
-            // itself (see AC4's design note); resolve it the same way
-            // "managed vs unmanaged" does, by asking who now owns the
-            // configured port, after giving the daemon a moment to bind.
+            // Bug 1's post-start half: don't trust "whoever now owns the
+            // port" -- verify identity (and reported version) before
+            // saving a ManagedRecord, exactly as the macOS branch does.
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let base_url = local_base_url(state);
-            let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
-            let pid = find_port_owner(platform, Some(&distro), port)
-                .ok_or_else(|| "daemon did not start (nothing is listening on the configured port)".to_string())?;
-            let record = ManagedRecord {
-                pid,
-                version: app_version.clone(),
-                installed_at: now_unix_seconds(),
-                exe_path: format!("~/{}", wsl::BIN_SUBPATH),
-            };
+            let (_, daemon_version) = probe_healthz(&base_url).await;
+            let port_owner_after = find_port_owner(platform, Some(&distro), port);
+            let exe_matches_after = port_owner_after.map(|pid| wsl_exe_matches(&distro, pid)).unwrap_or(false);
+            let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
+
+            let record = ManagedRecord { pid, version: app_version.clone(), installed_at: now_unix_seconds(), exe_path: format!("~/{}", wsl::BIN_SUBPATH) };
             wsl_save_managed(&distro, &record)?;
         }
         Platform::Unsupported => {
@@ -352,10 +405,18 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
         return Err("no managed daemon to restart -- install it first".to_string());
     };
 
-    // Re-check immediately before signalling: refuse if the recorded pid
-    // is no longer the real port owner (AC3's PID-reuse guard).
+    // Re-check immediately before signalling: refuse unless the recorded
+    // pid is still the real port owner (closes a PID-reuse race) *and*
+    // really our binary (Bug 2's guard -- a bare port-ownership match
+    // isn't enough on its own, since the pid could have been reused by an
+    // unrelated process, including the user's own unmanaged daemon).
     let live_owner = find_port_owner(platform, distro.as_deref(), port);
-    if live_owner != Some(record.pid) {
+    let exe_matches = match platform {
+        Platform::Macos => macos_layout(app).ok().map(|l| macos_exe_matches(record.pid, &l.bin_path)).unwrap_or(false),
+        Platform::Wsl2 => distro.as_deref().map(|d| wsl_exe_matches(d, record.pid)).unwrap_or(false),
+        Platform::Unsupported => unreachable!(),
+    };
+    if !managed::safe_to_kill(&record, live_owner, exe_matches) {
         return Err("the managed daemon's pid no longer matches what's actually running -- refusing to restart (use status to re-check)".to_string());
     }
 
@@ -376,15 +437,25 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
         Platform::Macos => {
             let layout = macos_layout(app)?;
             let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
-            let new_record = ManagedRecord { pid: child.id(), installed_at: now_unix_seconds(), ..record };
+            drop(child);
+
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let port_owner_after = native::find_port_owner(port).ok().flatten();
+            let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
+            let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
+
+            let new_record = ManagedRecord { pid, installed_at: now_unix_seconds(), ..record };
             managed::save(&layout.state_path, &new_record).map_err(|e| e.to_string())?;
         }
         Platform::Wsl2 => {
             let distro = distro.as_deref().unwrap();
             wsl_start(distro)?;
+
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let pid = find_port_owner(platform, Some(distro), port)
-                .ok_or_else(|| "daemon did not restart (nothing is listening on the configured port)".to_string())?;
+            let port_owner_after = find_port_owner(platform, Some(distro), port);
+            let exe_matches_after = port_owner_after.map(|pid| wsl_exe_matches(distro, pid)).unwrap_or(false);
+            let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
+
             let new_record = ManagedRecord { pid, installed_at: now_unix_seconds(), ..record };
             wsl_save_managed(distro, &new_record)?;
         }

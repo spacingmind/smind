@@ -117,6 +117,37 @@ pub fn kill_process(pid: u32) -> io::Result<()> {
     }
 }
 
+/// exe_path_for_pid resolves the full command a pid was launched with, so
+/// callers can verify a pid found via `find_port_owner` is really the
+/// binary this app manages before trusting or signalling it (AC3's
+/// stale-record / unmanaged-adoption guard). `ps -o args=`/`command=`
+/// (unlike `-o comm=`, which on Linux truncates to a 15-character bare
+/// name with no path at all) reports the full invoked command line on
+/// both macOS and Linux -- only the first (whitespace-separated) token,
+/// the executable path itself, is kept; any arguments (`serve`) are not
+/// part of the identity check.
+pub fn exe_path_for_pid(pid: u32) -> io::Result<Option<String>> {
+    let output = Command::new("ps").arg("-p").arg(pid.to_string()).arg("-o").arg("args=").output()?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    Ok(parse_ps_args_output(&String::from_utf8_lossy(&output.stdout)))
+}
+
+pub fn parse_ps_args_output(stdout: &str) -> Option<String> {
+    stdout.split_whitespace().next().map(str::to_string)
+}
+
+/// exe_matches is the pure identity check `managed::safe_to_kill`/
+/// `managed::verify_fresh_start` need as a precomputed bool: both sides
+/// are absolute paths (one resolved by the OS via `exe_path_for_pid`, the
+/// other `Layout::bin_path`, which is always what `spawn_detached` execs),
+/// so a trimmed exact match is the whole check -- no normalization beyond
+/// whitespace is needed.
+pub fn exe_matches(actual: &str, expected: &Path) -> bool {
+    actual.trim() == expected.display().to_string()
+}
+
 /// download_and_verify fetches `urls.checksums`, then `urls.tarball`, and
 /// verifies the tarball's SHA-256 against the checksums file -- the only
 /// place raw release bytes are downloaded directly in-process (the WSL2
@@ -195,6 +226,42 @@ mod tests {
         };
         assert_eq!(pid, std::process::id());
         drop(listener);
+    }
+
+    #[test]
+    fn parse_ps_args_output_extracts_the_executable_path() {
+        assert_eq!(parse_ps_args_output("/opt/smind/bin/smind serve\n").as_deref(), Some("/opt/smind/bin/smind"));
+        assert_eq!(parse_ps_args_output(""), None);
+    }
+
+    #[test]
+    fn exe_matches_compares_trimmed_absolute_paths() {
+        assert!(exe_matches(" /opt/smind/bin/smind \n", Path::new("/opt/smind/bin/smind")));
+        assert!(!exe_matches("/usr/local/bin/some-other-daemon", Path::new("/opt/smind/bin/smind")));
+    }
+
+    #[test]
+    fn exe_path_for_pid_reports_the_absolute_path_a_real_process_was_spawned_with() {
+        let sleep_path = "/bin/sleep";
+        if !Path::new(sleep_path).exists() {
+            eprintln!("smind desktop: {sleep_path} not present, skipping");
+            return;
+        }
+        let mut child = Command::new(sleep_path).arg("30").spawn().expect("smind desktop: sleep must spawn");
+        let pid = child.id();
+
+        let resolved = exe_path_for_pid(pid).unwrap();
+        assert_eq!(resolved.as_deref(), Some(sleep_path));
+        assert!(exe_matches(&resolved.unwrap(), Path::new(sleep_path)));
+
+        // A different expected path must not match this real process --
+        // this is the exact check that would have caught Bug 1 (the port
+        // owner after a failed start is the *old* unmanaged process, not
+        // the binary we just installed).
+        assert!(!exe_matches(&exe_path_for_pid(pid).unwrap().unwrap(), Path::new("/opt/smind/bin/smind")));
+
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     #[test]
