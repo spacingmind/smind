@@ -5,7 +5,19 @@ tasks:
     desc: Build web UI then the smind binary
     deps: [build:web]
     cmds:
-      - go build -buildvcs=false -o bin/smind ./cmd/smind
+      # Version signal (AC2): <manifest> at a release tag (v<manifest>),
+      # otherwise <manifest>-dev+<shortsha>, plus .dirty on an unclean tree.
+      # Backticks, not $(...): go-task's shell parser rejects $( ) in cmds.
+      - |
+        v=`grep -o '"[^"]*"' .release-please-manifest.json | sed -n 2p | tr -d '"'`
+        short=`git rev-parse --short HEAD`
+        tag=`git describe --exact-match --tags HEAD 2>/dev/null || true`
+        if [ "$tag" != "v$v" ]; then
+          v="$v-dev+$short"
+          if [ -n "`git status --porcelain`" ]; then v="$v.dirty"; fi
+        fi
+        echo "building smind $v ($short)"
+        go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o bin/smind ./cmd/smind
 
   build:web:
     desc: Build the web UI into internal/server/dist
