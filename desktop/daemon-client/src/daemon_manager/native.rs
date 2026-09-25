@@ -16,6 +16,7 @@
 
 use std::fs::{self, File};
 use std::io;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -69,13 +70,16 @@ pub fn install_binary(tarball: &Path, layout: &Layout) -> io::Result<()> {
 pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
     let log_out = File::options().create(true).append(true).open(&layout.log_path)?;
     let log_err = log_out.try_clone()?;
-    Command::new(&layout.bin_path)
-        .arg("serve")
+    let mut cmd = Command::new(&layout.bin_path);
+    cmd.arg("serve")
         .stdout(Stdio::from(log_out))
         .stderr(Stdio::from(log_err))
-        .stdin(Stdio::null())
-        .process_group(0)
-        .spawn()
+        .stdin(Stdio::null());
+    // The native path only runs on macOS; the module still has to compile
+    // on Windows (WSL2 path) and Linux, where process groups are unix-only.
+    #[cfg(unix)]
+    cmd.process_group(0);
+    cmd.spawn()
 }
 
 /// find_port_owner asks `lsof` who is bound (listening) on `port`, the
