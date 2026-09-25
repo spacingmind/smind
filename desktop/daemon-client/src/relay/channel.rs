@@ -31,6 +31,11 @@ pub enum ChannelError<E> {
     /// mid-handshake) session — rotation always means a new session, per
     /// ADR-0007 (e).
     KeyRotation(String),
+    /// The peer's hello carried a public key different from the one
+    /// pinned via `handshake`'s `pin_peer_public_key` (the pairing
+    /// offer's daemon key) — a fresh handshake attempt, not a rotation
+    /// of an already-established session.
+    PinMismatch,
     Replay {
         got: u64,
         want: u64,
@@ -48,6 +53,12 @@ impl<E: std::fmt::Display> std::fmt::Display for ChannelError<E> {
             ChannelError::Protocol(s) => write!(f, "e2ee: protocol violation: {s}"),
             ChannelError::KeyRotation(s) => {
                 write!(f, "e2ee: peer re-handshaked with a different key: {s}")
+            }
+            ChannelError::PinMismatch => {
+                write!(
+                    f,
+                    "e2ee: peer public key does not match the pinned pairing offer"
+                )
             }
             ChannelError::Replay { got, want } => {
                 write!(
@@ -117,7 +128,21 @@ impl<T: FrameTransport> Channel<T> {
     /// derive the session, then exchange ready frames. Starts a FRESH
     /// session — for a transport-level reconnect that should keep the
     /// existing session, don't call this again; see `crate::relay::client`.
-    pub async fn handshake(&mut self, kp: &KeyPair) -> Result<(), ChannelError<T::Error>> {
+    ///
+    /// `pin_peer_public_key`, when `Some`, rejects a peer hello whose
+    /// public key doesn't match — the pairing-offer pinning check
+    /// `mobile/src/relay/e2ee.ts`'s `handshake()` does via its
+    /// `daemonPublicKeyIfMobile` parameter: a device (mobile role)
+    /// connecting to a specific paired daemon must refuse to complete a
+    /// handshake with anything else, even if the relay/admission layer
+    /// let the connection through. The daemon role passes `None` (it
+    /// accepts any device that reaches it, having already been through
+    /// its own admission check).
+    pub async fn handshake(
+        &mut self,
+        kp: &KeyPair,
+        pin_peer_public_key: Option<&[u8; PUBLIC_KEY_SIZE]>,
+    ) -> Result<(), ChannelError<T::Error>> {
         if self.established {
             return Err(ChannelError::AlreadyEstablished);
         }
@@ -129,6 +154,11 @@ impl<T: FrameTransport> Channel<T> {
             .map_err(ChannelError::Transport)?;
 
         let (peer_role, peer_pub) = self.read_hello().await?;
+        if let Some(expected) = pin_peer_public_key {
+            if &peer_pub != expected {
+                return Err(ChannelError::PinMismatch);
+            }
+        }
         let (daemon_pub, mobile_pub) = if self.role == Role::Mobile {
             (peer_pub, kp.public())
         } else {
@@ -394,7 +424,10 @@ mod tests {
         let daemon_kp = kp(1);
         let mobile_kp = kp(2);
 
-        let (r1, r2) = tokio::join!(daemon.handshake(&daemon_kp), mobile.handshake(&mobile_kp));
+        let (r1, r2) = tokio::join!(
+            daemon.handshake(&daemon_kp, None),
+            mobile.handshake(&mobile_kp, None)
+        );
         r1.unwrap();
         r2.unwrap();
         assert!(daemon.established());
@@ -412,6 +445,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handshake_pins_expected_peer_public_key() {
+        let (a, b) = pipe();
+        let mut daemon = Channel::new(a, Role::Daemon);
+        let mut mobile = Channel::new(b, Role::Mobile);
+        let daemon_kp = kp(1);
+        let mobile_kp = kp(2);
+        let daemon_pub = daemon_kp.public();
+
+        let (r1, r2) = tokio::join!(
+            daemon.handshake(&daemon_kp, None),
+            mobile.handshake(&mobile_kp, Some(&daemon_pub))
+        );
+        r1.unwrap();
+        r2.unwrap();
+        assert!(mobile.established());
+    }
+
+    #[tokio::test]
+    async fn handshake_rejects_wrong_pinned_peer_public_key() {
+        let (a, b) = pipe();
+        let mut daemon = Channel::new(a, Role::Daemon);
+        let mut mobile = Channel::new(b, Role::Mobile);
+        let daemon_kp = kp(1);
+        let mobile_kp = kp(2);
+        let wrong_expected_daemon_pub = kp(99).public();
+
+        // Only mobile's side is asserted on: it must reject before ever
+        // reading a ready frame, so daemon's own handshake never
+        // completes (mobile stops mid-handshake) -- run it in the
+        // background rather than joining it, or the two futures would
+        // deadlock waiting on each other.
+        tokio::spawn(async move {
+            let _ = daemon.handshake(&daemon_kp, None).await;
+        });
+        let err = mobile
+            .handshake(&mobile_kp, Some(&wrong_expected_daemon_pub))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, ChannelError::PinMismatch));
+    }
+
+    #[tokio::test]
     async fn duplicate_hello_with_same_key_is_tolerated_before_ready() {
         let (a, b) = pipe();
         let mut daemon = Channel::new(a, Role::Daemon);
@@ -425,7 +500,7 @@ mod tests {
         send_raw(&b, crypto::FRAME_HELLO, hello);
         send_raw(&b, crypto::FRAME_READY, vec![]);
 
-        daemon.handshake(&daemon_kp).await.unwrap();
+        daemon.handshake(&daemon_kp, None).await.unwrap();
         assert!(daemon.established());
     }
 
@@ -448,7 +523,7 @@ mod tests {
             hello_payload(Role::Mobile, &other_kp.public()),
         );
 
-        let err = daemon.handshake(&daemon_kp).await.unwrap_err();
+        let err = daemon.handshake(&daemon_kp, None).await.unwrap_err();
         assert!(matches!(err, ChannelError::KeyRotation(_)), "got {err:?}");
     }
 
@@ -460,7 +535,10 @@ mod tests {
         let mut mobile = Channel::new(b, Role::Mobile);
         let daemon_kp = kp(1);
         let mobile_kp = kp(2);
-        let (r1, r2) = tokio::join!(daemon.handshake(&daemon_kp), mobile.handshake(&mobile_kp));
+        let (r1, r2) = tokio::join!(
+            daemon.handshake(&daemon_kp, None),
+            mobile.handshake(&mobile_kp, None)
+        );
         r1.unwrap();
         r2.unwrap();
 
@@ -485,7 +563,10 @@ mod tests {
         let daemon_kp = kp(1);
         let mobile_kp = kp(2);
         let other_kp = kp(3);
-        let (r1, r2) = tokio::join!(daemon.handshake(&daemon_kp), mobile.handshake(&mobile_kp));
+        let (r1, r2) = tokio::join!(
+            daemon.handshake(&daemon_kp, None),
+            mobile.handshake(&mobile_kp, None)
+        );
         r1.unwrap();
         r2.unwrap();
 

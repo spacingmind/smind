@@ -349,16 +349,17 @@ impl FrameTransport for DataFrameTransport {
 }
 
 /// open_data opens a fresh `OpenData` stream under `admission_id` for
-/// (workspace, session, device), sends the routing registration frame,
-/// and returns the raw `(sender, transport)` pair — the sender is kept
-/// separately so `reopen` can build a fresh one per attempt.
-async fn open_data_stream(
+/// (workspace, session, device), returning the raw `(sender, receiver)`
+/// pair for the caller to either wrap fresh (`open_data`) or feed into
+/// an existing `DataFrameTransport::reopen` (a transport-level resume,
+/// which needs a fresh stream but must NOT touch the workspace/session/
+/// device/sequence state already stored on the transport it's resuming).
+/// Exposed as a public building block for anyone driving the handshake/
+/// reconnect steps manually (e.g. the mandatory harness interop test)
+/// rather than through the full `spawn`-managed reconnect loop.
+pub async fn open_data_stream(
     grpc: &mut GrpcRelayClient<GrpcChannel>,
     admission_id: &str,
-    workspace_id: &str,
-    session_id: &str,
-    device_id: &str,
-    direction: Direction,
 ) -> Result<(mpsc::Sender<Frame>, tonic::Streaming<Frame>), String> {
     let (tx, rx) = mpsc::channel::<Frame>(FRAME_CHANNEL_CAPACITY);
     let mut req = Request::new(ReceiverStream::new(rx));
@@ -367,7 +368,6 @@ async fn open_data_stream(
         MetadataValue::try_from(admission_id)
             .map_err(|e| format!("relay client: admission metadata: {e}"))?,
     );
-    let _ = (workspace_id, session_id, device_id, direction); // used by caller to build frames
     let stream = grpc
         .open_data(req)
         .await
@@ -376,7 +376,11 @@ async fn open_data_stream(
     Ok((tx, stream))
 }
 
-async fn open_data(
+/// open_data opens a fresh `OpenData` stream under `admission_id` for
+/// (workspace, session, device), sends the routing registration frame,
+/// and wraps it as a `DataFrameTransport` -- the device-role counterpart
+/// of `internal/relay/client.OpenData` (Go).
+pub async fn open_data(
     grpc: &mut GrpcRelayClient<GrpcChannel>,
     admission_id: &str,
     workspace_id: &str,
@@ -384,15 +388,7 @@ async fn open_data(
     device_id: &str,
 ) -> Result<DataFrameTransport, String> {
     let direction = Direction::DeviceToDaemon; // this client always plays the device (mobile) role
-    let (tx, rx) = open_data_stream(
-        grpc,
-        admission_id,
-        workspace_id,
-        session_id,
-        device_id,
-        direction,
-    )
-    .await?;
+    let (tx, rx) = open_data_stream(grpc, admission_id).await?;
     let mut transport = DataFrameTransport {
         tx,
         rx,
@@ -556,17 +552,12 @@ async fn run(
 
             let mut resumed = false;
             if let Some(existing) = data.as_mut() {
-                match open_data(
-                    grpc.as_mut().unwrap(),
-                    &admission_id,
-                    &pairing.workspace_id,
-                    DEFAULT_SESSION_ID,
-                    DEFAULT_DEVICE_ID,
-                )
-                .await
-                {
-                    Ok(fresh_transport) => {
-                        let (tx, rx) = (fresh_transport.tx, fresh_transport.rx);
+                // A fresh stream, not a fresh transport: `reopen` sends
+                // its own registration frame, so building a throwaway
+                // `DataFrameTransport` here (via `open_data`) would send
+                // it twice.
+                match open_data_stream(grpc.as_mut().unwrap(), &admission_id).await {
+                    Ok((tx, rx)) => {
                         if existing.transport_mut().reopen(tx, rx).await.is_ok() {
                             resumed = true;
                         }
@@ -586,8 +577,11 @@ async fn run(
                 {
                     Ok(transport) => {
                         let mut channel = E2eeChannel::new(transport, Role::Mobile);
-                        let handshake =
-                            tokio::time::timeout(HANDSHAKE_TIMEOUT, channel.handshake(&kp)).await;
+                        let handshake = tokio::time::timeout(
+                            HANDSHAKE_TIMEOUT,
+                            channel.handshake(&kp, Some(&pairing.daemon_public_key)),
+                        )
+                        .await;
                         match handshake {
                             Ok(Ok(())) => data = Some(channel),
                             Ok(Err(e)) => {
