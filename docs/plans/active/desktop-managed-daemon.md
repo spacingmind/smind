@@ -675,7 +675,8 @@ relationship with the daemon.
     disabled and a click never calls `daemonRestart`). All pass; `cargo
     build`/`--release` clean for `src-tauri`, no warnings; `task lint`
     and the full web suite both green; no Go files touched.
-  - **Windows CI re-run**: pushed; see below.
+  - **Windows CI re-run**: [36117374799](https://github.com/spacingmind/smind/actions/runs/36117374799)
+    -- green in 3m37s.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
