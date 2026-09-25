@@ -14,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
@@ -198,6 +198,13 @@ export function Composer({
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  // ADR-0014's Profiles picker: a named provider/approvalPolicy/
+  // thinkingLevel bundle a user applies in one click. Empty when the
+  // daemon has none (a fresh install, or client.call failing) -- the
+  // control below renders nothing in that case, so the composer's
+  // pre-profiles defaults are exactly what an empty-profiles daemon still
+  // gets (AC15's regression requirement).
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
   const [provider, setProvider] = useState<Provider>("claude-native");
   const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
   const approvalPolicies = approvalPolicyOptions(provider);
@@ -240,6 +247,40 @@ export function Composer({
       cancelled = true;
     };
   }, [client]);
+
+  useEffect(() => {
+    setProfiles([]);
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<AgentProfile[]>("profile.list")
+      .then((result) => {
+        if (!cancelled) setProfiles(result ?? []);
+      })
+      .catch((err) => console.error("profile.list failed, hiding the Profiles picker", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  // Applies profileId's provider/approvalPolicy/thinkingLevel to this
+  // composer's own state, per ADR-0014's "client copies the fields" apply
+  // mechanism -- a plain client-side seed, no task.prompt wire change.
+  // Deliberately not stored as "the selected profile": the Select below
+  // always shows its placeholder (AC13 -- selecting a profile is a
+  // one-time seed, not a locked mode a later field edit needs to break out
+  // of), so picking the same or a different profile again always re-seeds
+  // cleanly with nothing to reconcile.
+  const applyProfile = useCallback(
+    (profileId: string) => {
+      const p = profiles.find((candidate) => String(candidate.ID) === profileId);
+      if (!p) return;
+      setProvider(p.Provider as Provider);
+      if (p.ApprovalPolicy) setApprovalPolicy(p.ApprovalPolicy as ApprovalPolicy);
+      if (p.ThinkingLevel) setThinkingLevel(p.ThinkingLevel as ThinkingLevel);
+    },
+    [profiles],
+  );
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
@@ -419,6 +460,21 @@ export function Composer({
            * name survives the move into the toolbar via aria-label, since
            * there is no visible <label> beside it anymore.
            */}
+          {profiles.length > 0 && (
+            <Select value="" onValueChange={applyProfile} disabled={inactive}>
+              <SelectTrigger aria-label="Profiles" data-testid="composer-profile-select" className={SELECT_TRIGGER_CLASS}>
+                <SelectValue placeholder="Profiles" />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((p) => (
+                  <SelectItem key={p.ID} value={String(p.ID)} title={p.Notes || undefined}>
+                    {p.Name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
           <Select
             value={provider}
             onValueChange={(value) => setProvider(value as Provider)}

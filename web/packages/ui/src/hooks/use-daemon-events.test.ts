@@ -30,9 +30,10 @@ describe("useDaemonEvents", () => {
 
     const subs = socket.sent.filter((e) => e.method === "events.subscribe");
     expect(subs).toHaveLength(1);
-    // ADR 0005's three plus ADR 0009's eight lifecycle topics. Notably
-    // absent: "event.dropped", which the daemon synthesises rather than
-    // publishes and whose name knownTopics rejects.
+    // ADR 0005's three, ADR 0009's eight lifecycle topics, and ADR 0014's
+    // three profile.* topics. Notably absent: "event.dropped", which the
+    // daemon synthesises rather than publishes and whose name knownTopics
+    // rejects.
     expect(subs[0]!.params).toEqual({
       topics: [
         "task.status",
@@ -46,6 +47,9 @@ describe("useDaemonEvents", () => {
         "task.updated",
         "task.archived",
         "task.deleted",
+        "profile.created",
+        "profile.updated",
+        "profile.deleted",
       ],
     });
 

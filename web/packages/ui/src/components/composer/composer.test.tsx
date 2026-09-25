@@ -522,4 +522,126 @@ describe("Composer diff-stat pill (Item 5)", () => {
     expect(screen.queryByTestId("chat-stop-button")).not.toBeInTheDocument();
     expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
+
+  // ADR-0014's Profiles picker: client-side seed of provider/approvalPolicy/
+  // thinkingLevel from a saved profile, per the ADR's "How a profile is
+  // applied" section.
+  describe("Profiles picker (ADR-0014)", () => {
+    it("does not render when profile.list resolves empty (AC15 regression)", async () => {
+      const client = new FakeWsClient();
+      renderComposer({ client });
+
+      client.nth("profile.list", 0).resolve([]);
+      await flush();
+
+      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+    });
+
+    it("does not render while profile.list is still pending, and every other control works as before", async () => {
+      const client = new FakeWsClient();
+      const { submissions } = renderComposer({ client });
+
+      // profile.list is left unresolved -- mirrors a daemon predating this
+      // feature just as well as one that's merely slow to answer.
+      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+
+      fireEvent.change(textarea(), { target: { value: "still works" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await flush();
+
+      expect(submissions).toEqual([{ provider: "claude-native", prompt: "still works", approvalPolicy: "manual" }]);
+    });
+
+    it("selecting a profile seeds provider/approvalPolicy/thinkingLevel in one click", async () => {
+      const client = new FakeWsClient();
+      renderComposer({ client });
+
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      client.nth("profile.list", 0).resolve([
+        {
+          ID: 1,
+          Name: "UI work",
+          Provider: "glm",
+          ApprovalPolicy: "auto-safe",
+          ThinkingLevel: "",
+          Notes: "",
+          CreatedAt: "2026-09-25T00:00:00Z",
+          UpdatedAt: "2026-09-25T00:00:00Z",
+        },
+      ]);
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
+      await flush();
+
+      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+    });
+
+    it("the Profiles trigger always shows its placeholder, not the last-applied profile's name (one-time seed, not a locked mode)", async () => {
+      const client = new FakeWsClient();
+      renderComposer({ client });
+
+      client.nth("profile.list", 0).resolve([
+        {
+          ID: 1,
+          Name: "UI work",
+          Provider: "claude-native",
+          ApprovalPolicy: "auto-safe",
+          ThinkingLevel: "",
+          Notes: "",
+          CreatedAt: "2026-09-25T00:00:00Z",
+          UpdatedAt: "2026-09-25T00:00:00Z",
+        },
+      ]);
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
+      await flush();
+
+      expect(screen.getByLabelText("Profiles")).toHaveTextContent("Profiles");
+    });
+
+    it("a field changed after applying a profile is not reverted by anything", async () => {
+      const client = new FakeWsClient();
+      const { submissions } = renderComposer({ client });
+
+      client.nth("profile.list", 0).resolve([
+        {
+          ID: 1,
+          Name: "UI work",
+          Provider: "claude-native",
+          ApprovalPolicy: "auto-safe",
+          ThinkingLevel: "",
+          Notes: "",
+          CreatedAt: "2026-09-25T00:00:00Z",
+          UpdatedAt: "2026-09-25T00:00:00Z",
+        },
+      ]);
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
+      await flush();
+      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+
+      fireEvent.click(screen.getByLabelText("Approval policy"));
+      fireEvent.click(await screen.findByRole("option", { name: "Manual approval" }));
+      await flush();
+      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Manual approval");
+
+      fireEvent.change(textarea(), { target: { value: "go" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await flush();
+
+      expect(submissions).toEqual([{ provider: "claude-native", prompt: "go", approvalPolicy: "manual" }]);
+    });
+  });
 });

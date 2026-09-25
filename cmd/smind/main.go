@@ -41,6 +41,8 @@ func run(args []string) int {
 		return cmdSpace(args[1:])
 	case "task":
 		return cmdTask(args[1:])
+	case "profile":
+		return cmdProfile(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
@@ -81,6 +83,11 @@ Usage:
   smind task attach <runId>                                stream a run (Ctrl+C to detach)
   smind task logs <runId> [-f|--follow] [--tail N]        show (or follow) a run's history
   smind task stop <runId>                                  stop a running run
+
+  smind profile add <name> <provider> [--approval-policy=<policy>]
+      [--thinking-level=<level>] [--notes=<text>]         create an agent profile
+  smind profile ls                                         list agent profiles
+  smind profile rm <id>                                    remove an agent profile
 
 Every subcommand except "serve" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to

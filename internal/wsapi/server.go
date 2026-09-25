@@ -8,6 +8,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
@@ -87,12 +88,14 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	if err != nil {
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
+	profReg := profiles.New(db)
 	bus := newEventBus()
 	wm.SetNotifier(busWorkspaceNotifier{bus: bus})
 	reg.SetNotifier(busRunNotifier{bus: bus})
+	profReg.SetNotifier(busProfileNotifier{bus: bus})
 
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, coord)
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, coord)
 	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
 	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
@@ -153,6 +156,25 @@ func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
 
 func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
 	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
+}
+
+// busProfileNotifier adapts the shared event bus to profiles.Notifier,
+// translating each Registry lifecycle notification into its ADR-0014 wire
+// payload -- mirrors busWorkspaceNotifier's shape.
+type busProfileNotifier struct {
+	bus *eventBus
+}
+
+func (b busProfileNotifier) NotifyProfileCreated(p store.AgentProfile) {
+	b.bus.Publish(Event{Topic: TopicProfileCreated, Payload: profileCreatedPayload{Profile: p}})
+}
+
+func (b busProfileNotifier) NotifyProfileUpdated(p store.AgentProfile) {
+	b.bus.Publish(Event{Topic: TopicProfileUpdated, Payload: profileUpdatedPayload{Profile: p}})
+}
+
+func (b busProfileNotifier) NotifyProfileDeleted(id int64) {
+	b.bus.Publish(Event{Topic: TopicProfileDeleted, Payload: profileDeletedPayload{ID: id}})
 }
 
 // busRunNotifier adapts the shared event bus to runs.Notifier, translating

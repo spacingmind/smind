@@ -95,6 +95,17 @@ CREATE TABLE IF NOT EXISTS terminal_sessions (
     updated_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS agent_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    approval_policy TEXT NOT NULL DEFAULT '',
+    thinking_level TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_routing_decisions_session_key ON routing_decisions(session_key);
 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_account_id ON quota_snapshots(account_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_accounts_account_id ON workspace_accounts(account_id);
