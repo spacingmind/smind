@@ -20,6 +20,9 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
+use super::checksums;
+use super::release::{ReleaseError, ReleaseUrls};
+
 #[derive(Debug, Clone)]
 pub struct Layout {
     pub bin_path: PathBuf,
@@ -110,6 +113,52 @@ pub fn kill_process(pid: u32) -> io::Result<()> {
     }
 }
 
+/// download_and_verify fetches `urls.checksums`, then `urls.tarball`, and
+/// verifies the tarball's SHA-256 against the checksums file -- the only
+/// place raw release bytes are downloaded directly in-process (the WSL2
+/// path downloads with `curl` inside the distro instead, per AC4, and
+/// verifies via `sha256sum` there so the tarball's bytes never cross the
+/// `wsl.exe` boundary).
+pub async fn download_and_verify(client: &reqwest::Client, urls: &ReleaseUrls) -> Result<Vec<u8>, ReleaseError> {
+    let checksums_resp = client.get(&urls.checksums).send().await.map_err(|e| ReleaseError::Network(e.to_string()))?;
+    if checksums_resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ReleaseError::NoRelease { version: urls.asset_name.clone() });
+    }
+    let checksums_resp = checksums_resp.error_for_status().map_err(|e| ReleaseError::Network(e.to_string()))?;
+    let checksums_text = checksums_resp.text().await.map_err(|e| ReleaseError::Network(e.to_string()))?;
+    let map = checksums::parse(&checksums_text);
+    let Some(expected_hex) = map.get(&urls.asset_name) else {
+        return Err(ReleaseError::NoAsset { version: urls.asset_name.clone(), asset: urls.asset_name.clone() });
+    };
+
+    let tarball_resp = client.get(&urls.tarball).send().await.map_err(|e| ReleaseError::Network(e.to_string()))?;
+    if tarball_resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Err(ReleaseError::NoAsset { version: urls.asset_name.clone(), asset: urls.asset_name.clone() });
+    }
+    let tarball_resp = tarball_resp.error_for_status().map_err(|e| ReleaseError::Network(e.to_string()))?;
+    let bytes = tarball_resp.bytes().await.map_err(|e| ReleaseError::Network(e.to_string()))?.to_vec();
+
+    if !checksums::verify(&bytes, expected_hex) {
+        return Err(ReleaseError::ChecksumMismatch { asset: urls.asset_name.clone() });
+    }
+    Ok(bytes)
+}
+
+/// install_from_release downloads, verifies, and installs a release
+/// tarball in one call, writing it to a temp file under `layout`'s
+/// directory before extracting (so `install_binary`'s existing argv-only
+/// `tar` step is reused unchanged).
+pub async fn install_from_release(client: &reqwest::Client, urls: &ReleaseUrls, layout: &Layout) -> Result<(), ReleaseError> {
+    let bytes = download_and_verify(client, urls).await?;
+    let bin_dir = layout.bin_path.parent().expect("smind desktop: bin_path always has a parent");
+    fs::create_dir_all(bin_dir).map_err(|e| ReleaseError::Io(e.to_string()))?;
+    let tarball_path = bin_dir.join("download.tar.gz");
+    fs::write(&tarball_path, &bytes).map_err(|e| ReleaseError::Io(e.to_string()))?;
+    let result = install_binary(&tarball_path, layout).map_err(|e| ReleaseError::Io(e.to_string()));
+    let _ = fs::remove_file(&tarball_path);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +244,85 @@ mod tests {
         let _ = child.wait();
         std::thread::sleep(std::time::Duration::from_millis(100));
         assert!(!is_pid_alive(pid));
+    }
+
+    async fn serve_fixture(tarball: Vec<u8>, checksums_text: String, asset_name: String) -> (String, tokio::task::JoinHandle<()>) {
+        use axum::routing::get;
+        use axum::Router;
+
+        let checksums_text2 = checksums_text.clone();
+        let tarball2 = tarball.clone();
+        let app = Router::new()
+            .route("/checksums.txt", get(move || { let t = checksums_text2.clone(); async move { t } }))
+            .route(&format!("/{asset_name}"), get(move || { let b = tarball2.clone(); async move { b } }));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[tokio::test]
+    async fn install_from_release_downloads_verifies_and_installs() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path());
+
+        let src_dir = dir.path().join("src");
+        fs::create_dir_all(&src_dir).unwrap();
+        let fake_bin = src_dir.join("smind");
+        fs::write(&fake_bin, "#!/bin/sh\nexec sleep 30\n").unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&fake_bin, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let tarball_path = dir.path().join("fixture.tar.gz");
+        let status = Command::new("tar").arg("-C").arg(&src_dir).arg("-czf").arg(&tarball_path).arg("smind").status().unwrap();
+        assert!(status.success());
+        let tarball_bytes = fs::read(&tarball_path).unwrap();
+
+        let mut hasher = sha2::Sha256::new();
+        use sha2::Digest;
+        hasher.update(&tarball_bytes);
+        let hex: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
+        let asset_name = "smind_0.7.0_linux_amd64.tar.gz".to_string();
+        let checksums_text = format!("{hex}  {asset_name}\n");
+
+        let (base, _handle) = serve_fixture(tarball_bytes, checksums_text, asset_name.clone()).await;
+        let urls = ReleaseUrls { tarball: format!("{base}/{asset_name}"), checksums: format!("{base}/checksums.txt"), asset_name };
+
+        let client = reqwest::Client::new();
+        install_from_release(&client, &urls, &layout).await.unwrap();
+        assert!(layout.bin_path.exists());
+    }
+
+    #[tokio::test]
+    async fn download_and_verify_rejects_bad_checksum() {
+        let dir = tempfile::tempdir().unwrap();
+        let asset_name = "smind_0.7.0_linux_amd64.tar.gz".to_string();
+        let checksums_text = format!("{}  {asset_name}\n", "0".repeat(64));
+        let (base, _handle) = serve_fixture(b"not the real bytes".to_vec(), checksums_text, asset_name.clone()).await;
+        let urls = ReleaseUrls { tarball: format!("{base}/{asset_name}"), checksums: format!("{base}/checksums.txt"), asset_name };
+
+        let client = reqwest::Client::new();
+        let err = download_and_verify(&client, &urls).await.unwrap_err();
+        assert!(matches!(err, ReleaseError::ChecksumMismatch { .. }));
+        let _ = dir;
+    }
+
+    #[tokio::test]
+    async fn download_and_verify_no_asset_for_this_platform() {
+        let checksums_text = format!("{}  smind_0.7.0_linux_arm64.tar.gz\n", "1".repeat(64));
+        let (base, _handle) = serve_fixture(vec![], checksums_text, "smind_0.7.0_linux_arm64.tar.gz".to_string()).await;
+        let urls = ReleaseUrls {
+            tarball: format!("{base}/smind_0.7.0_linux_amd64.tar.gz"),
+            checksums: format!("{base}/checksums.txt"),
+            asset_name: "smind_0.7.0_linux_amd64.tar.gz".to_string(),
+        };
+
+        let client = reqwest::Client::new();
+        let err = download_and_verify(&client, &urls).await.unwrap_err();
+        assert!(matches!(err, ReleaseError::NoAsset { .. }));
     }
 }
