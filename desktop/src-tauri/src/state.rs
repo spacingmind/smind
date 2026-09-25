@@ -25,4 +25,7 @@ pub struct DesktopState {
     /// The daemon-client watcher task following the selected connection
     /// (AC7). Replaced (old one aborted) on every `connections_select`.
     pub client_task: Mutex<Option<JoinHandle<()>>>,
+    /// The default WSL distro name, detected once and cached (ADR-0013
+    /// part D2) -- see `daemon_manager::resolve_distro`.
+    pub daemon_manager_distro: Mutex<Option<String>>,
 }

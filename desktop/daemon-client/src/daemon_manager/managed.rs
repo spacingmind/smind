@@ -23,7 +23,8 @@ pub struct ManagedRecord {
 
 /// ManagedState is the decision-table's output: what the UI should show
 /// and which actions are valid.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum ManagedState {
     /// Nothing is answering on the configured port (or a recorded managed
     /// process died without anything else taking the port). Offer Install.

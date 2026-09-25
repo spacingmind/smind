@@ -3836,7 +3836,7 @@ checksum = "ba467056f1b547ed52077911161fc86985becbc60e8e1857c8a144dab0def891"
 
 [[package]]
 name = "smind-daemon-client"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -3845,6 +3845,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tokio-tungstenite 0.30.0",
  "url",
@@ -3852,11 +3853,14 @@ dependencies = [
 
 [[package]]
 name = "smind-desktop"
-version = "0.1.0"
+version = "0.7.0"
 dependencies = [
+ "base64 0.23.1",
  "log",
  "notify-rust",
+ "reqwest 0.12.28",
  "rust-embed",
+ "serde",
  "serde_json",
  "smind-daemon-client",
  "tauri",

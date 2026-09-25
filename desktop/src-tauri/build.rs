@@ -12,6 +12,12 @@ fn main() {
             "connections_select",
             "connections_get_current",
             "open_external",
+            "daemon_status",
+            "daemon_install",
+            "daemon_update",
+            "daemon_restart",
+            "take_over_daemon",
+            "connection_version",
         ]),
     );
     tauri_build::try_build(attributes).expect("smind desktop: tauri_build::try_build failed");

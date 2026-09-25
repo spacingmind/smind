@@ -20,6 +20,7 @@ use smind_daemon_client::Config;
 mod assets;
 mod client_watch;
 mod commands;
+mod daemon_manager;
 mod deeplink;
 mod menu;
 mod notify;
@@ -80,6 +81,12 @@ pub fn run() {
             commands::connections_select,
             commands::connections_get_current,
             commands::open_external,
+            daemon_manager::daemon_status,
+            daemon_manager::daemon_install,
+            daemon_manager::daemon_update,
+            daemon_manager::daemon_restart,
+            daemon_manager::take_over_daemon,
+            daemon_manager::connection_version,
         ])
         .setup(|app| {
             // AC4: the built-in `local` entry always tracks
@@ -209,6 +216,7 @@ pub fn run() {
                 cache,
                 tray,
                 client_task: Mutex::new(Some(client_task)),
+                daemon_manager_distro: Mutex::new(None),
             });
 
             Ok(())
