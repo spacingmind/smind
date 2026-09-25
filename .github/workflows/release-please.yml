@@ -10,25 +10,190 @@
 #   - once that release PR is itself merged, creates the vX.Y.Z git tag
 #     and a GitHub Release.
 #
-# This intentionally stops at "tag + GitHub Release + changelog" -- it does
-# not attach cross-platform binaries (that's a separate, not-yet-built
-# distribution task; see docs/decisions/ for the eventual GitHub Releases +
-# install-script plan modeled on refs/cliproxyapi's release workflow).
+# When it does create a release, the jobs below build cross-platform smind
+# daemon binaries (linux/darwin x amd64/arm64, CGO_ENABLED=0, web UI
+# embedded) and the Windows desktop installers (by calling
+# desktop-windows.yml as a reusable workflow), package everything with a
+# SHA-256 checksums.txt, and attach it all to that Release. No
+# signing/notarization (out of scope); no native Windows daemon binary yet
+# (blocked on internal/terminal, see ADR-0013). Modeled on
+# refs/cliproxyapi's release workflow, adapted to release-please already
+# owning tag/Release creation.
+#
+# workflow_dispatch runs the exact same build+package+checksum steps as a
+# dry run: it never touches a Release, it only publishes the results as
+# workflow artifacts. Used to prove the pipeline out on a branch -- see
+# docs/plans/completed/release-binaries.md's Validation section for a
+# recorded run.
 name: release-please
 
 on:
   push:
     branches: [master]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
+      - id: release
+        uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Computes the version/commit to stamp into binaries, and gates every job
+  # below on "this is either a real release, or a workflow_dispatch dry
+  # run" -- `always()` is required because release-please above is itself
+  # skipped on workflow_dispatch (it only runs on push).
+  prepare:
+    needs: release-please
+    if: |
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      commit: ${{ steps.v.outputs.commit }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - id: v
+        run: |
+          set -euo pipefail
+          commit="$(git rev-parse --short HEAD)"
+          if [ "${{ needs.release-please.outputs.release_created }}" = "true" ]; then
+            version="${{ needs.release-please.outputs.tag_name }}"
+            version="${version#v}"
+          else
+            version="$(jq -r '.["."]' .release-please-manifest.json)-dev+$commit"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  build-binaries:
+    name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: prepare
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install Task
+        run: sh -c "$(curl -fsSL https://taskfile.dev/install.sh)" -- -d -b /usr/local/bin
+
+      - name: Build web UI
+        run: task build:web
+
+      - name: Build and package
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          name="smind_${VERSION}_${GOOS}_${GOARCH}"
+          archive_dir="dist/${name}/archive"
+          mkdir -p "$archive_dir"
+
+          go build -buildvcs=false \
+            -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$VERSION -X github.com/spacingmind/smind/internal/version.Commit=$COMMIT" \
+            -o "$archive_dir/smind" ./cmd/smind
+
+          cp LICENSE "$archive_dir/"
+          tar -C "$archive_dir" -czf "dist/${name}.tar.gz" smind LICENSE
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smind_${{ needs.prepare.outputs.version }}_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  build-desktop-windows:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-windows.yml
+
+  # Collects every build's artifact, computes one checksums.txt over all of
+  # them, and (on a real release only) attaches everything to the Release.
+  # `always()` is required for the same reason as in `prepare`: on a
+  # workflow_dispatch dry run, `release-please` is skipped, and by default
+  # a skipped dependency would skip this job too.
+  publish:
+    needs: [release-please, prepare, build-binaries, build-desktop-windows]
+    if: |
+      always() &&
+      needs.build-binaries.result == 'success' &&
+      needs.build-desktop-windows.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(*.tar.gz *.exe *.msi)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "expected release artifacts, found none" >&2
+            exit 1
+          fi
+          sha256sum "${files[@]}" | sort -k2 > checksums.txt
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smind_${{ needs.prepare.outputs.version }}_release
+          path: |
+            dist/*.tar.gz
+            dist/*.exe
+            dist/*.msi
+            dist/checksums.txt
+          if-no-files-found: error
+
+      - name: Upload to Release
+        if: needs.release-please.outputs.release_created == 'true'
+        working-directory: dist
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(*.tar.gz *.exe *.msi checksums.txt)
+          gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"

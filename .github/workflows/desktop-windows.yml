@@ -2,7 +2,10 @@ name: desktop-windows
 
 # Builds the Tauri desktop thin client for Windows (NSIS .exe + .msi) and
 # uploads the installers as a workflow artifact. Unsigned; no release is
-# published. See docs/plans/active/desktop-tauri-shell.md.
+# published here -- release-please.yml calls this as a reusable workflow
+# (workflow_call) to attach the installers to an actual GitHub Release. See
+# docs/plans/active/desktop-tauri-shell.md and
+# docs/plans/completed/release-binaries.md.
 on:
   push:
     paths:
@@ -10,6 +13,7 @@ on:
       - "web/packages/ui/**"
       - ".github/workflows/desktop-windows.yml"
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
