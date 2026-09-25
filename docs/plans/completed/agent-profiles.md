@@ -209,9 +209,77 @@ pattern)**
 - 2026-09-25: ADR-0014 and this plan authored (Phase 1).
 - 2026-09-25: ADR-0014 reviewed and accepted; `model` dropped from v1 scope
   entirely. ADR status set to Accepted. Implementation (Phase 2) starting.
+- 2026-09-25: Phase 2 complete -- store table + `internal/profiles.Registry`,
+  `profile.*` wsapi methods + lifecycle events, `smind profile add|ls|rm`,
+  Settings → Profiles, and the composer Profiles picker all landed (one
+  commit per AC group on `feat/agent-profiles`). `task test`, `task lint`,
+  the web test suite, and `tsc -b` all green.
 
 ## Validation
 
-Not started. Once implementation lands, map each Acceptance Criterion above
-to the specific test(s) or manual check that confirmed it, per this repo's
-`plan` skill convention -- not just "tests pass."
+All 16 acceptance criteria confirmed:
+
+1. `internal/store/schema.sql`'s `agent_profiles` table, no `migrate.go`
+   entry -- confirmed by reading the diff; `TestOpen`/`TestStore_Reopen
+   ExistingDatabase` (unmodified) still pass against a schema that includes
+   it.
+2. `internal/store/agent_profiles.go`'s five methods -- `TestStore_Agent
+   Profiles`, `TestStore_ListAgentProfilesOrdering`, `TestStore_ListAgent
+   ProfilesEmpty`, `TestStore_UpdateAgentProfile`, `TestStore_UpdateAgent
+   ProfileMissing`, `TestStore_DeleteAgentProfile`, `TestStore_DeleteAgent
+   ProfileMissing` (`internal/store/agent_profiles_test.go`).
+3. `store.AgentProfile`'s plain-`string` fields, no `internal/taskrunner`
+   import -- confirmed by `go build ./...`/`go vet ./...` passing with
+   `internal/store`'s import graph unchanged (only `internal/profiles`
+   imports `taskrunner`).
+4. `internal/profiles.Registry`'s validation -- `TestRegistry_CreateRejects
+   EmptyName`, `...UnknownProvider`, `...InvalidApprovalPolicy`,
+   `...InvalidThinkingLevel`, `...AcceptsOmittedApprovalPolicyAndThinking
+   Level`, `TestRegistry_UpdateAppliesSameValidation`
+   (`internal/profiles/registry_test.go`).
+5. `Registry`'s `Notifier`/`SetNotifier` -- `TestRegistry_NotifierFiresOn
+   Mutation`, `TestRegistry_NilNotifierIsNoop`,
+   `TestRegistry_NilRegistrySetNotifierIsNoop`.
+6. `profile.create/list/get/update/delete` wsapi methods -- `TestProfile_
+   CreateGetRoundTrip`, `TestProfile_ListOrdering`, `TestProfile_UpdateVisi
+   bleFromSecondConnection`, `TestProfile_DeleteThenGetErrors`, `TestProfile_
+   CreateMissingNameIsInvalidParamsError`, `TestProfile_CreateUnknownProvid
+   erErrors` (`internal/wsapi/profile_test.go`).
+7. `profile.created`/`updated`/`deleted` topics + `busProfileNotifier` --
+   `TestEvents_ProfileCreatedSubscribeAndReceive`, `...ReachesASecondClient`,
+   `TestEvents_ProfileUpdatedSubscribeAndReceive`, `TestEvents_ProfileDeleted
+   SubscribeAndReceive` (`internal/wsapi/lifecycle_events_test.go`).
+8. Cross-client delivery -- `TestProfile_UpdateVisibleFromSecondConnection`
+   (two connections, one mutates, the other reads) and `TestEvents_Profile
+   CreatedReachesASecondClient` (two connections, one mutates, the other's
+   *subscription* receives the event) together cover both the RPC and event
+   paths.
+9. `smind profile add|ls|rm` -- `TestRunProfileAddPrintsCreatedRow`,
+   `TestRunProfileAddInvalidProviderExitsNonzero`, `TestRunProfileLsLists
+   AddedProfile`, `TestRunProfileRmRemovesProfile`
+   (`cmd/smind/profile_test.go`), against a real `wsapi.Handler`-backed test
+   daemon, matching `account_test.go`'s own pattern.
+10. Settings → Profiles CRUD -- `profiles-section.test.tsx`'s create/edit/
+    delete/empty-state tests; `src/test/no-hardcoded-colors.test.ts` and
+    `token-presence.test.ts` pass with the new file included (ran directly
+    to confirm, not just via the full suite).
+11. Live event reflection -- `profiles-section.test.tsx`'s "reflects a
+    profile.created event..." and "...profile.deleted event..." tests, using
+    a fake `DaemonEvents` that fires a topic without going through the
+    component's own mutation path.
+12. Composer Profiles picker, one-click seed -- `"selecting a profile seeds
+    provider/approvalPolicy/thinkingLevel in one click"`
+    (`composer.test.tsx`).
+13. Fields stay editable after applying -- `"the Profiles trigger always
+    shows its placeholder..."` and `"a field changed after applying a
+    profile is not reverted by anything"` (`composer.test.tsx`).
+14. Zero-profiles regression -- `"does not render when profile.list resolves
+    empty"` and `"does not render while profile.list is still pending, and
+    every other control works as before"` (`composer.test.tsx`); the latter
+    submits a prompt and asserts the exact pre-feature payload shape.
+15. Existing `composer.test.tsx` suite -- all 25 pre-existing tests pass
+    with zero modifications to their bodies (only 5 new tests appended);
+    confirmed by running the file before and after the composer.tsx change.
+16. `task.prompt` wire shape unchanged -- full `internal/wsapi` suite
+    (including `run_test.go`/`task_test.go`) passes unmodified; `task test`
+    (Go + web) and `task lint` both green on the final tree.
