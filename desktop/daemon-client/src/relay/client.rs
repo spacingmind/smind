@@ -146,12 +146,17 @@ pub async fn dial(native_addr: &str, fingerprint_hex: &str) -> Result<GrpcChanne
         fingerprint,
         provider: provider.clone(),
     });
-    let tls_config = rustls::ClientConfig::builder_with_provider(provider)
+    let mut tls_config = rustls::ClientConfig::builder_with_provider(provider)
         .with_protocol_versions(&[&rustls::version::TLS13])
         .map_err(|e| format!("relay client: tls config: {e}"))?
         .dangerous()
         .with_custom_certificate_verifier(verifier)
         .with_no_client_auth();
+    // grpc-go's server-side transport credentials require ALPN "h2" to
+    // pick HTTP/2 -- without it the TLS handshake completes but the
+    // server closes the connection as soon as we speak HTTP/2 on it
+    // (observed as a broken-pipe error on the very first RPC).
+    tls_config.alpn_protocols = vec![b"h2".to_vec()];
     let connector = tokio_rustls::TlsConnector::from(Arc::new(tls_config));
 
     let host = native_addr
@@ -256,6 +261,7 @@ pub enum DataTransportError {
     Closed,
     Status(tonic::Status),
     Frame(FrameError),
+    Open(String),
 }
 
 impl std::fmt::Display for DataTransportError {
@@ -264,6 +270,7 @@ impl std::fmt::Display for DataTransportError {
             DataTransportError::Closed => write!(f, "relay client: data stream closed"),
             DataTransportError::Status(s) => write!(f, "relay client: data stream: {s}"),
             DataTransportError::Frame(e) => write!(f, "{e}"),
+            DataTransportError::Open(e) => write!(f, "{e}"),
         }
     }
 }
@@ -287,15 +294,19 @@ pub struct DataFrameTransport {
 }
 
 impl DataFrameTransport {
-    async fn write_raw(&mut self, payload: Vec<u8>) -> Result<(), DataTransportError> {
-        let frame = Frame {
+    fn build_frame(&self, seq: u64, payload: Vec<u8>) -> Frame {
+        Frame {
             workspace_id: self.workspace_id.clone(),
             session_id: self.session_id.clone(),
             device_id: self.device_id.clone(),
             direction: self.direction as i32,
-            sequence: self.seq,
+            sequence: seq,
             payload,
-        };
+        }
+    }
+
+    async fn write_raw(&mut self, payload: Vec<u8>) -> Result<(), DataTransportError> {
+        let frame = self.build_frame(self.seq, payload);
         self.seq += 1;
         self.tx
             .send(frame)
@@ -303,26 +314,49 @@ impl DataFrameTransport {
             .map_err(|_| DataTransportError::Closed)
     }
 
-    /// register sends the routing frame the relay requires as a stream's
-    /// first frame (payload empty — the e2ee handshake follows as
-    /// ordinary frames), mirroring `frameConn.register` (Go).
-    async fn register(&mut self) -> Result<(), DataTransportError> {
-        self.write_raw(Vec::new()).await
-    }
-
-    /// reopen swaps the underlying stream after a transport drop,
-    /// keeping `seq` (relay buffer ordering) and re-registering the
-    /// route — mirrors `frameConn.reopen` (Go). The e2ee `Channel`
-    /// wrapping this transport is untouched by a caller doing this (see
+    /// reopen re-dials `OpenData` under `admission_id` and swaps in the
+    /// fresh stream, keeping `seq` running (relay buffer ordering) —
+    /// mirrors `frameConn.reopen` (Go). The e2ee `Channel` wrapping this
+    /// transport is untouched by a caller doing this (see
     /// `Channel::transport_mut`), so its session/counters survive.
+    ///
+    /// The registration frame (the relay derives a stream's route from
+    /// its first frame) is sent *concurrently* with dispatching the
+    /// `OpenData` call, not after it resolves: a gRPC server for a
+    /// streaming RPC typically doesn't send response headers until it
+    /// has sent (or, here, received) its first message, so awaiting
+    /// `open_data` to completion before ever writing to the request body
+    /// would deadlock -- the relay's own `OpenData` handler blocks on its
+    /// first `Recv` to learn the route before doing anything else.
     pub async fn reopen(
         &mut self,
-        tx: mpsc::Sender<Frame>,
-        rx: tonic::Streaming<Frame>,
+        grpc: &mut GrpcRelayClient<GrpcChannel>,
+        admission_id: &str,
     ) -> Result<(), DataTransportError> {
+        let registration = self.build_frame(self.seq, Vec::new());
+        self.seq += 1;
+        let (tx, rx) = open_data_stream(grpc, admission_id, registration)
+            .await
+            .map_err(DataTransportError::Open)?;
         self.tx = tx;
         self.rx = rx;
-        self.register().await
+        Ok(())
+    }
+
+    /// drop_transport ends this transport's outbound stream half only
+    /// (drops the sender, so the `OpenData` request body it feeds yields
+    /// `None` and the server sees a clean half-close) -- the model of a
+    /// network drop, mirroring `frameConn.drop`/`DataConn.DropTransport`
+    /// (Go)'s `stream.CloseSend()`. It deliberately leaves the inbound
+    /// response stream (`self.rx`) untouched: dropping a tonic
+    /// `Streaming<T>` response reader before it's naturally exhausted
+    /// sends an HTTP/2 `RST_STREAM`, which cancels the *whole* bidi
+    /// stream, including whatever this side had already enqueued to
+    /// send but not yet flushed onto the wire -- silently discarding it
+    /// instead of letting it complete as a graceful half-close.
+    pub fn drop_transport(&mut self) {
+        let (dead_tx, _unused_rx) = mpsc::channel(1);
+        self.tx = dead_tx;
     }
 }
 
@@ -337,29 +371,57 @@ impl FrameTransport for DataFrameTransport {
 
     async fn recv_frame(&mut self) -> Result<(u8, Vec<u8>), Self::Error> {
         use tonic::codegen::tokio_stream::StreamExt;
-        let frame = self
-            .rx
-            .next()
-            .await
-            .ok_or(DataTransportError::Closed)?
-            .map_err(DataTransportError::Status)?;
-        let (typ, payload) = decode_frame(&frame.payload).map_err(DataTransportError::Frame)?;
-        Ok((typ, payload.to_vec()))
+        loop {
+            let rx = &mut self.rx;
+            let frame = rx
+                .next()
+                .await
+                .ok_or(DataTransportError::Closed)?
+                .map_err(DataTransportError::Status)?;
+            // The peer's own empty-payload registration frame (relay
+            // routing plumbing, not e2ee content) also arrives on this
+            // stream, since the relay forwards every frame -- including
+            // registration ones -- to the opposite side unconditionally.
+            // Go's client absorbs this transparently because it reads a
+            // byte *stream* (`io.ReadFull` just retries on a zero-byte
+            // read); this transport is message-oriented instead, so it
+            // has to skip an empty payload explicitly rather than trying
+            // to decode it as a wire frame.
+            if frame.payload.is_empty() {
+                continue;
+            }
+            let (typ, payload) = decode_frame(&frame.payload).map_err(DataTransportError::Frame)?;
+            return Ok((typ, payload.to_vec()));
+        }
     }
 }
 
-/// open_data opens a fresh `OpenData` stream under `admission_id` for
-/// (workspace, session, device), returning the raw `(sender, receiver)`
-/// pair for the caller to either wrap fresh (`open_data`) or feed into
-/// an existing `DataFrameTransport::reopen` (a transport-level resume,
-/// which needs a fresh stream but must NOT touch the workspace/session/
-/// device/sequence state already stored on the transport it's resuming).
+/// open_data_stream opens a fresh `OpenData` stream under `admission_id`
+/// and sends `first_frame` on it (the relay derives a stream's route
+/// from its first frame — a bare registration frame on a fresh
+/// `DataFrameTransport`, or the next frame in sequence when resuming an
+/// existing one), returning the raw `(sender, receiver)` pair for the
+/// caller to wrap or swap in.
+///
+/// `first_frame` is sent *concurrently* with `grpc.open_data(req)`
+/// itself, not after it resolves: awaiting the RPC to complete before
+/// ever writing anything to its request body would deadlock, since a
+/// streaming RPC's response headers are typically not sent by the
+/// server until it has processed a first inbound message (here, the
+/// relay's `OpenData` handler blocks on its own first `Recv` to learn
+/// the route before sending anything back). `mpsc::Sender::send` on an
+/// empty-enough channel completes as soon as the item is buffered, not
+/// waiting for the receiving end to be polled, so running the two
+/// concurrently (rather than the sender being read first) is safe and
+/// resolves both.
+///
 /// Exposed as a public building block for anyone driving the handshake/
 /// reconnect steps manually (e.g. the mandatory harness interop test)
 /// rather than through the full `spawn`-managed reconnect loop.
 pub async fn open_data_stream(
     grpc: &mut GrpcRelayClient<GrpcChannel>,
     admission_id: &str,
+    first_frame: Frame,
 ) -> Result<(mpsc::Sender<Frame>, tonic::Streaming<Frame>), String> {
     let (tx, rx) = mpsc::channel::<Frame>(FRAME_CHANNEL_CAPACITY);
     let mut req = Request::new(ReceiverStream::new(rx));
@@ -368,6 +430,16 @@ pub async fn open_data_stream(
         MetadataValue::try_from(admission_id)
             .map_err(|e| format!("relay client: admission metadata: {e}"))?,
     );
+    // Send before awaiting the RPC's own resolution, not after: a
+    // streaming RPC's response headers are typically not sent by the
+    // server until it has processed a first inbound message (the relay's
+    // `OpenData` handler blocks on its own first `Recv` to learn the
+    // route), so awaiting `open_data` to completion first would deadlock.
+    // The send itself only needs buffer space, not an active reader, so
+    // it resolves immediately regardless of `open_data`'s progress.
+    tx.send(first_frame)
+        .await
+        .map_err(|_| "relay client: send first frame: channel closed immediately".to_string())?;
     let stream = grpc
         .open_data(req)
         .await
@@ -388,18 +460,24 @@ pub async fn open_data(
     device_id: &str,
 ) -> Result<DataFrameTransport, String> {
     let direction = Direction::DeviceToDaemon; // this client always plays the device (mobile) role
-    let (tx, rx) = open_data_stream(grpc, admission_id).await?;
-    let mut transport = DataFrameTransport {
+    let registration = Frame {
+        workspace_id: workspace_id.to_string(),
+        session_id: session_id.as_bytes().to_vec(),
+        device_id: device_id.to_string(),
+        direction: direction as i32,
+        sequence: 0,
+        payload: Vec::new(),
+    };
+    let (tx, rx) = open_data_stream(grpc, admission_id, registration).await?;
+    Ok(DataFrameTransport {
         tx,
         rx,
         workspace_id: workspace_id.to_string(),
         session_id: session_id.as_bytes().to_vec(),
         device_id: device_id.to_string(),
         direction,
-        seq: 0,
-    };
-    transport.register().await.map_err(|e| e.to_string())?;
-    Ok(transport)
+        seq: 1,
+    })
 }
 
 // --- The reconnect loop: connect/admit/handshake, resume-first on drop ---
@@ -552,16 +630,12 @@ async fn run(
 
             let mut resumed = false;
             if let Some(existing) = data.as_mut() {
-                // A fresh stream, not a fresh transport: `reopen` sends
-                // its own registration frame, so building a throwaway
-                // `DataFrameTransport` here (via `open_data`) would send
-                // it twice.
-                match open_data_stream(grpc.as_mut().unwrap(), &admission_id).await {
-                    Ok((tx, rx)) => {
-                        if existing.transport_mut().reopen(tx, rx).await.is_ok() {
-                            resumed = true;
-                        }
-                    }
+                match existing
+                    .transport_mut()
+                    .reopen(grpc.as_mut().unwrap(), &admission_id)
+                    .await
+                {
+                    Ok(()) => resumed = true,
                     Err(e) => eprintln!("smind desktop: relay resume: open data: {e}"),
                 }
             }

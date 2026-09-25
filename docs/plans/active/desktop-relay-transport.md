@@ -309,22 +309,75 @@ milestone-1 fixed-IDs limitation above are already decided.)*
   rather than opening a new relay data session per browser tab. This
   matches the bundled UI's single-window architecture; multi-tab fanout
   is out of scope.
+- **Registration-frame ordering (AC3/AC4):** the relay's `OpenData`
+  handler blocks on its own first `Recv` before doing anything else
+  (including sending response headers), so a client that awaits
+  `grpc.open_data(req)` to completion *before* ever writing to the
+  request body deadlocks. `open_data_stream` sends the registration
+  frame first (a plain bounded-channel `send`, which needs no reader to
+  complete) and only then awaits the RPC's own resolution.
+- **`drop_transport` must not touch the response reader:** initially
+  `drop_transport` replaced both the sender and set the response
+  `Streaming<Frame>` to `None`, modeled on "a real drop kills both
+  directions." In practice this made every resume attempt hang: dropping
+  a tonic `Streaming<T>` before it's exhausted sends an HTTP/2
+  `RST_STREAM`, which cancels the *whole* bidi stream — including
+  whatever the client had already enqueued to send (the request that
+  triggers the buffered response the test is trying to observe) — before
+  it was ever flushed onto the wire. Root-caused with temporary
+  server-side `log.Printf` instrumentation (never committed; reverted
+  before finishing) showing the relay's `attachRoute`/send-pump behaving
+  correctly on both connections while the reconnect's queue stayed
+  permanently empty. Fix: `drop_transport` only replaces the sender,
+  leaving the response reader alive until `reopen` replaces it — a true
+  half-close, matching Go's `stream.CloseSend()` semantics exactly
+  (client stops sending; the response direction is untouched).
 
 ## Progress
 
-- [ ] AC1 pairing URL parsing/validation + `ConnectionKind::Relay` +
+- [x] AC1 pairing URL parsing/validation + `ConnectionKind::Relay` +
       native-address derivation
-- [ ] AC2 pairing/device-key persistence (0600, delete-on-remove)
-- [ ] AC3 handshake + framing (crypto module, cross-checked against Go/TS
+- [x] AC2 pairing/device-key persistence (0600, delete-on-remove)
+- [x] AC3 handshake + framing (crypto module, cross-checked against Go/TS
       fixtures)
-- [ ] AC4 gRPC client (tonic, pinned TLS), admission, reconnect/backoff,
+- [x] AC4 gRPC client (tonic, pinned TLS), admission, reconnect/backoff,
       resume
-- [ ] AC5 proxy `/ws` + `/api/token` bridging for `relay` kind
-- [ ] AC6 IPC: `connections_add_relay` + existing commands handle `Relay`
-- [ ] AC7 `client_watch` works over relay
+- [x] AC5 proxy `/ws` + `/api/token` bridging for `relay` kind
+- [x] AC6 IPC: `connections_add_relay` + existing commands handle `Relay`
+- [x] AC7 `client_watch` works over relay
 - [ ] AC8 regressions + Windows CI
 
 ## Validation
 
-*(Filled in once each AC lands: test counts, interop run output, live
-WSLg walkthrough, Windows CI run link.)*
+- **Crypto/framing cross-language fixtures** (`relay::crypto` unit
+  tests): X25519 keypair derivation from the Go fixture seeds, HKDF
+  salt/info, ChaCha20-Poly1305 ciphertexts at counter 0 in both
+  directions, and the hello-frame wire bytes all match
+  `internal/relay/e2ee/fixture_test.go`'s pinned hex literals
+  byte-for-byte. Tamper and replay cases rejected as expected.
+- **Pairing fixture**: `Offer::parse_url`/`encode_payload` round-trip the
+  exact fixture URL from `internal/relay/pairing/fixture_test.go`.
+- **Admission HMAC transcript**: reproduces
+  `admission_test.go`'s `TestComputeHMACCanonicalForm` inputs; confirms
+  length-prefixing prevents a nonce/string-boundary collision.
+- **Handshake state machine**: pin-mismatch rejection, same-key retry
+  tolerated, different-key rotation rejected (before and after
+  establishment) — all as in-memory-pipe unit tests, no network needed.
+- **`cargo test -p smind-daemon-client` (unit + integration)**: 122
+  unit tests + 1 proxy integration test, all green.
+- **Mandatory interop test, against the real Go harness**
+  (`desktop/daemon-client/tests/relay_harness_interop.rs`, run via
+  `go run ./internal/relay/bridge/harness`): pairs from the printed
+  READY URL, admits, completes the pinned E2EE handshake, round-trips a
+  real `workspace.list` JSON-RPC call, then drops the transport
+  mid-flight (graceful half-close only, response reader intact — see the
+  Decisions entry above), reconnects with a fresh dial+admit, resumes
+  the same e2ee session via `reopen`, and confirms the buffered response
+  is delivered before continuing with a third live round trip. Passes
+  reliably (~0.5s per run). No Go changes needed to make it pass;
+  temporary debug logging used to diagnose the resume bug was reverted
+  (confirmed via `git diff --stat -- internal/`).
+- **`cargo test -p smind-desktop`**: 0/0 by design (all logic lives in
+  `daemon-client`), `cargo build` clean.
+- *(Still to fill in: `task test`/`task lint`, live WSLg run, Windows CI
+  run link.)*
