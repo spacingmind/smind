@@ -129,3 +129,24 @@ type TerminalSession struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
+
+// AgentProfile is a named, daemon-global bundle of per-run settings
+// (docs/decisions/0014-agent-profiles.md): a provider plus the
+// ApprovalPolicy/ThinkingLevel values a composer would otherwise ask a
+// user to pick every time. Provider/ApprovalPolicy/ThinkingLevel are plain
+// strings, not internal/taskrunner types, for the same reason Run's fields
+// of the same name are -- internal/store does not import internal/
+// taskrunner (see Run's doc comment above). ApprovalPolicy/ThinkingLevel
+// may be "" (unset): the composer's own default applies in that case, same
+// as an omitted task.prompt field does today. Not scoped to any workspace
+// -- see the ADR's Scope section.
+type AgentProfile struct {
+	ID             int64
+	Name           string
+	Provider       string
+	ApprovalPolicy string
+	ThinkingLevel  string
+	Notes          string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
