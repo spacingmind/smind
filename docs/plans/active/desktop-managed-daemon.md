@@ -404,6 +404,30 @@ relationship with the daemon.
   also requires an exe-identity match (`ps -o args=` on macOS, `readlink
   -f /proc/<pid>/exe` on WSL2) against the binary this app actually
   manages. See Validation for the full breakdown.
+- **Merge from develop (681fc90):** develop gained #199 (the Rust relay
+  transport -- `connections_add_relay`, `smind_daemon_client::relay`,
+  the pairing store, `tonic`/`prost` deps) while this branch was in
+  flight. Merged (not rebased) via `git merge origin/develop`. Most
+  conflicts were mechanical unions: `capabilities/proxy.json`'s
+  permissions array and `lib.rs`'s `invoke_handler!`/command list had
+  *already* auto-merged cleanly (both sides' commands were present with
+  no marker), leaving only prose (`proxy.json`'s `description`) and one
+  real structural conflict (the final `DesktopState { .. }` literal in
+  `lib.rs`, since develop's `client_watch::spawn_initial` now returns
+  `(client_task, relay_task)` instead of this branch's single-task
+  `spawn`) to resolve by hand -- kept both `relay_task` and
+  `daemon_manager_distro` fields (`state.rs`), and threaded develop's
+  tuple return through instead of my own now-superseded `Some(...)`
+  wrapping. `daemon-client/Cargo.toml`'s dependency conflict was just a
+  duplicate `sha2` key at two different versions (mine `"0.10"`, develop's
+  `"0.11.0"` for its crypto stack) -- kept develop's version, dropped
+  mine, since nothing in this plan's code pins to 0.10 specifically.
+  Both `Cargo.lock` files and all four `gen/schemas/*.json` files were
+  *not* hand-merged -- `git checkout --theirs` cleared the conflict
+  markers as a starting point, then `cargo generate-lockfile` (both
+  crates) and `cargo build` (which reruns `tauri-build`'s schema/ACL
+  codegen) regenerated them from the merged `Cargo.toml`/`build.rs`/
+  capabilities as the real source of truth.
 
 ## Progress
 
@@ -677,6 +701,22 @@ relationship with the daemon.
     and the full web suite both green; no Go files touched.
   - **Windows CI re-run**: [36117374799](https://github.com/spacingmind/smind/actions/runs/36117374799)
     -- green in 3m37s.
+- **Merge from develop (#199, relay transport), verification:**
+  `cargo test` in `daemon-client` -- **178** unit tests (this plan's 133
+  plus #199's ~45 relay tests, all green together) + 2 integration tests
+  (`proxy_integration`'s own, and #199's `relay_harness_interop`, which
+  actually spins up a Go relay + bridges a handshake -- both green).
+  `cargo build` (and `--release`) for `src-tauri` clean, no warnings,
+  with the merged dependency set (`tonic`/`prost`/`x25519-dalek`/etc.
+  alongside this plan's own). Web: `bun run --filter '@smind/ui'
+  typecheck` clean, `test` 1264/1264 (unaffected by the merge -- #199 is
+  Rust/Tauri-only). `task lint` clean. `go test ./...` clean (#199 also
+  touched `internal/relay/bridge/harness/main.go`, unrelated to this
+  plan, no failures). **Windows CI**:
+  [36118677250](https://github.com/spacingmind/smind/actions/runs/36118677250)
+  -- green in 8m10s (longer than the usual ~4m, consistent with the
+  newly-merged `tonic-prost-build`/`protoc-bin-vendored` build-dependency
+  compiling for the first time on that runner).
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
