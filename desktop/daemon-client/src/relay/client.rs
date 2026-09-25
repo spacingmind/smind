@@ -444,6 +444,35 @@ impl RelayHandle {
     }
 }
 
+#[cfg(test)]
+pub(crate) type TestHandleParts = (
+    RelayHandle,
+    mpsc::Receiver<Vec<u8>>,
+    broadcast::Sender<Vec<u8>>,
+    watch::Sender<Status>,
+);
+
+#[cfg(test)]
+/// for_test builds a `RelayHandle` wired to caller-controlled channels,
+/// bypassing `spawn`'s real dial/admit/handshake -- for exercising code
+/// that only depends on the `RelayHandle` surface (e.g.
+/// `proxy::server::bridge_relay`) without a real relay.
+pub(crate) fn test_handle() -> TestHandleParts {
+    let (outbound_tx, outbound_rx) = mpsc::channel(FRAME_CHANNEL_CAPACITY);
+    let (inbound_tx, _) = broadcast::channel(FRAME_CHANNEL_CAPACITY);
+    let (status_tx, status_rx) = watch::channel(Status::Connected);
+    (
+        RelayHandle {
+            outbound_tx,
+            inbound_tx: inbound_tx.clone(),
+            status_rx,
+        },
+        outbound_rx,
+        inbound_tx,
+        status_tx,
+    )
+}
+
 /// spawn starts the background reconnect loop for `pairing` and returns
 /// a handle to it. The loop runs until the returned handle (and every
 /// clone/subscriber) is dropped.
