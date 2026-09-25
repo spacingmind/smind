@@ -44,12 +44,23 @@ The user approved a **small, additive** daemon change: no new endpoint, and no c
 
 ## Progress
 
-- [ ] AC1 internal/version
-- [ ] AC2 Taskfile stamping
-- [ ] AC3 --version / version
-- [ ] AC4 /healthz field
-- [ ] AC5/AC6 regressions, test + lint
+- [x] AC1 internal/version (8fd165b)
+- [x] AC2 Taskfile stamping (0aae715)
+- [x] AC3 --version / version (e373b7b)
+- [x] AC4 /healthz field (8fd165b)
+- [x] AC5/AC6 regressions, test + lint
 
 ## Validation
 
-To be filled in.
+Verified 2026-09-25 by the coordinator on a rebased branch (on develop at 2c9a511).
+
+- **AC1:** `internal/version` exposes `Version` (default `"dev"`) and `Commit`. Both are set with `-X`, and the package has no imports.
+- **AC2:** `task build` on a clean tree printed `building smind 0.7.0-dev+cbd86bd (cbd86bd)`. After touching a tracked file it printed `0.7.0-dev+cbd86bd.dirty`. The release-tag branch (`v<manifest>` exact match) gives the bare manifest version, per the Taskfile logic. That path wasn't exercised because there is no local release tag at HEAD. A plain `go build` / `go test` still reports `dev`.
+- **AC3:** `./bin/smind --version` and `./bin/smind version` both printed `smind 0.7.0-dev+cbd86bd.dirty (cbd86bd)` with no daemon running. There is also a CLI test in `cmd/smind`.
+- **AC4:** a live daemon on a temp `SMIND_HOME` and port 4702 answered `GET /healthz` with `{"service":"smind","status":"ok","version":"0.7.0-dev+cbd86bd.dirty"}`. A handler test asserts all three fields.
+- **AC5:**
+  - The diff touches only `internal/version`, `internal/server/server.go` (one field), `cmd/smind` (the version subcommand) and `Taskfile.yml`. There is no new endpoint and no change to wsapi, `/api/token`, `/ws` or `web/`.
+  - The existing `/healthz` consumers only read `status`: the web UI reconnect probe and `desktop/daemon-client`.
+- **AC6:**
+  - `task lint` is green.
+  - `task test` is green except `internal/relay/client` `TestIntegrationMobileDisconnectReconnectDeliversBufferedFrames`. That test failed once and passed 2 of 3 isolated reruns, and this change doesn't touch relay code, so it is a pre-existing timing flake, in the same family as the known CI wsapi flakes.
