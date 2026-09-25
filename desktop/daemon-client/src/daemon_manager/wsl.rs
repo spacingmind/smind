@@ -94,6 +94,18 @@ pub fn parse_sha256sum_output(stdout: &str) -> Option<String> {
     stdout.split_whitespace().next().map(str::to_string)
 }
 
+/// write_file_base64_argv writes small app-generated content (the
+/// `managed.json` state file) inside the distro without ever embedding the
+/// content itself into shell syntax: the content is base64-encoded first
+/// (an alphabet with no shell metacharacters at all), so even though a
+/// shell is used for the redirect, nothing about the *data* can change the
+/// shape of the command -- only `distro` and `relpath` (both app-
+/// controlled, never user input) are structural.
+pub fn write_file_base64_argv(distro: &str, relpath: &str, base64_content: &str) -> Vec<String> {
+    let script = format!("printf '%s' '{base64_content}' | base64 -d > \"$HOME/{relpath}\"");
+    vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "sh".into(), "-c".into(), script]
+}
+
 /// tar_extract_argv extracts just the `smind` binary member from the
 /// downloaded tarball straight into the managed bin dir.
 pub fn tar_extract_argv(distro: &str, tarball_relpath: &str) -> Vec<String> {
@@ -243,6 +255,16 @@ mod tests {
     fn parse_ss_pid_extracts_pid() {
         let line = "LISTEN 0 4096 127.0.0.1:4648 0.0.0.0:*  users:((\"smind\",pid=1234,fd=8))\n";
         assert_eq!(parse_ss_pid(line), Some(1234));
+    }
+
+    #[test]
+    fn write_file_base64_argv_embeds_no_raw_content() {
+        let argv = write_file_base64_argv("Ubuntu", STATE_SUBPATH, "eyJwaWQiOjF9");
+        assert_eq!(argv[0], WSL_EXE);
+        let script = argv.last().unwrap();
+        assert!(script.contains("base64 -d"));
+        assert!(script.contains(STATE_SUBPATH));
+        assert!(script.contains("eyJwaWQiOjF9"));
     }
 
     #[test]
