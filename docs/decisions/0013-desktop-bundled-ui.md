@@ -106,12 +106,29 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   `app/src/desktop/components/desktop-updates-section.tsx`.
   - Remote, tunneled and relay daemons are not the app's to update, so
     for them it only shows a notice.
-  - **Prerequisite, still open:** smind has no version signal today.
-    There is no `--version`, no build-time version stamp, and
-    `/healthz` returns only `{status, service}`. Paseo's flow depends on
-    the daemon reporting its version. How smind gets one (and how the
-    app replaces and restarts a daemon running inside WSL) must be
-    settled before this flow is built.
+  - **Version signal (user, 2026-09-25: approved).** This is a small
+    additive daemon change and does not change the architecture. The
+    version is stamped at build time via `-ldflags`, exposed as
+    `smind --version`, and added as a `version` field in the
+    `/healthz` JSON. The existing `status`/`service` fields are
+    unchanged and no new endpoint is added.
+  - **App-managed local daemon (user, 2026-09-25: approved, all three
+    hosts).** The app may install, update and restart the *local*
+    daemon it manages. There are three hosts:
+    - **Windows + WSL2:** runs `wsl.exe` to fetch the Linux binary
+      from the GitHub Release, replace it, and restart `smind serve`.
+    - **macOS native:** runs the darwin binary as an app-managed
+      process, e.g. a launchd agent or a sidecar.
+    - **Windows native:** runs a windows binary directly. **Blocked
+      today:** `GOOS=windows go build ./cmd/smind` fails in
+      `internal/terminal` (`syscall.Kill`; `creack/pty` has no ConPTY
+      support). A native-Windows daemon needs a Windows terminal
+      backend first, which is its own plan.
+
+    This is where ADR-0012's deferred "sidecar mode" lands.
+    Remote/tunneled/relay daemons are never updated by the app. They
+    only get a "daemon is older than this app" notice.
+
 - **Proxy port: random port + per-launch secret**, exchanged for an
   `HttpOnly; SameSite=Strict` cookie as described in Security notes.
 
