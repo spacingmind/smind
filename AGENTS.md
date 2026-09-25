@@ -13,6 +13,9 @@ See [README.md](README.md) for what smind is and how to build/run it.
 - `internal/server` — HTTP server: API routes + embedded web UI (`internal/server/dist`).
 - `web/` — bun workspace root for the web UI (`web/packages/ui`, React + Vite).
 - `docs/` — architecture notes, ADRs (`docs/decisions/`), and active/completed plans (`docs/plans/`).
+  New research notes (competitor/reference studies, pplx findings) go in
+  `docs/research/local/` — gitignored, never committed; plans may cite
+  them as local-only.
 - `refs/` — read-only reference clones of other projects for pattern lookup (see below).
 
 ## Workflow rules
@@ -53,6 +56,11 @@ repo's history.
 - `refs/deepseek-harness` — DeepSeek's agent harness (`dsh`,
   everything-is-a-plugin architecture on Cordis) — UI/plugin-system
   reference for agent-harness patterns.
+- `refs/zcode` — Z.ai's ZCode AI coding workbench
+  (https://github.com/zai-org/ZCode): Electron desktop + browser UI +
+  terminal agent (`apps/zcode-cli`), pnpm monorepo (`packages/{desktop,
+  web,ui,server,rpc,provider}`), plugin store — reference for
+  desktop/web workbench UX and GLM-native agent/provider wiring.
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading

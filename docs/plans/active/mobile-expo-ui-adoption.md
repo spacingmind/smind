@@ -292,3 +292,18 @@ directly rather than trust secondhand paraphrase.
   compose enables Send only for non-whitespace; a failed connect keeps
   the pasted URL for retry; a failed send restores the drafted text into
   the field; both fields accept multiline input.
+
+### Post-landing finding: root `<Host>` was the wrong shape (2026-09-24)
+
+The web smoke test (docs/plans/active/mobile-web-smoke-test.md) caught a
+layout bug introduced by this plan's adoption: wrapping the whole RN app
+in a single root `@expo/ui` `<Host>` squeezed the app into a ~347px
+corner panel on web (Host renders a plain View with no flex there) and
+was also wrong for native — RN children inside a SwiftUI/Compose Host
+must be wrapped in `RNHostView`
+(.agents/skills/expo-ui/references/swift-ui.md). Fixed in the
+mobile-web-smoke-test branch by removing the root Host and wrapping each
+`@expo/ui` subtree (`Button`/`TextInput` in all three screens) in its
+own `<Host matchContents>` via `src/ui/UiHost.tsx`; the smoke test now
+asserts full-viewport width + edge-to-edge background in both color
+schemes as a regression guard.

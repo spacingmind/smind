@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
-import { Columns2 } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Columns2, Copy, Pencil } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -15,7 +15,6 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { ShortcutsDialog } from "@/components/shortcuts-dialog";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
@@ -23,6 +22,13 @@ import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
@@ -49,11 +55,13 @@ import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
+import { formatTabTitle } from "@/lib/tab-title";
 import { resolveSplitDropPosition, type SplitDropZonePosition } from "@/lib/split-drop-zone";
 import { cn } from "@/lib/utils";
 import {
@@ -64,6 +72,7 @@ import {
   MIN_SPLIT_SIZE,
   type SplitNode,
 } from "@/lib/split-tree";
+import { findAdjacentPane, type PaneDirection } from "@/lib/split-navigation";
 import type { ThemePreference } from "@/lib/theme";
 import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
@@ -137,7 +146,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>("connecting");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // Which settings section a fresh mount of SettingsScreen should land on --
+  // `shortcuts.help` deep-links to "shortcuts" (AC5: the old Shift+? dialog
+  // is now a Settings section, not a separate surface); every other path
+  // into Settings clears this back to null (the screen's own default).
+  const [settingsInitialSectionId, setSettingsInitialSectionId] = useState<string | null>(null);
   // Every task across the tree, handed up by AppSidebar (the one component
   // that already fetches it) so the shell can walk it for task.prev/next.
   const [allTasks, setAllTasks] = useState<Task[]>([]);
@@ -162,9 +175,42 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // owns.
   const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
 
-  const { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup } = useTaskTabs();
+  const {
+    tabsByTask,
+    ensureTask,
+    openTab,
+    closeTab,
+    activate,
+    moveTab,
+    splitTab,
+    resizeGroup,
+    focusPane,
+    closePane,
+    splitPaneEmpty,
+    moveTabToNextPane,
+    closeOtherTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    renameTab,
+  } = useTaskTabs();
   const events = useDaemonEvents(client);
   const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  // null until the tree's first successful load (treeLoaded), so an
+  // archived/deleted task can be pruned from `unread` without an empty
+  // *initial* task list wiping out a persisted unread set before the real
+  // fetch even lands -- see useUnreadTasks' own doc comment.
+  const liveTaskIds = useMemo(
+    () => (treeLoaded ? new Set(allTasks.map((t) => t.ID)) : null),
+    [treeLoaded, allTasks],
+  );
+  const { unread, markUnread } = useUnreadTasks(attention, selectedTask?.ID ?? null, liveTaskIds);
+
+  // AC2: the tab title mirrors the sidebar's own unread count live -- a
+  // plain effect, not a ref, since document.title has no React-owned
+  // counterpart to diff against.
+  useEffect(() => {
+    if (typeof document !== "undefined") document.title = formatTabTitle("smind", unread.size);
+  }, [unread]);
 
   // The sidebar's user-resized width (px), persisted across reloads -- see
   // the plan's Item 6. react-resizable-panels' Panel API takes numeric
@@ -314,6 +360,28 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     resizeGroup(selectedTask.ID, groupId, sizes);
   }
 
+  // --- Tab context menu (Item 6: close others/left/right, rename, copy path) ---
+
+  function closeOtherTabsForTask(key: string) {
+    if (!selectedTask) return;
+    closeOtherTabs(selectedTask.ID, key);
+  }
+
+  function closeTabsToLeftForTask(key: string) {
+    if (!selectedTask) return;
+    closeTabsToLeft(selectedTask.ID, key);
+  }
+
+  function closeTabsToRightForTask(key: string) {
+    if (!selectedTask) return;
+    closeTabsToRight(selectedTask.ID, key);
+  }
+
+  function renameTabForTask(key: string, title: string) {
+    if (!selectedTask) return;
+    renameTab(selectedTask.ID, key, title);
+  }
+
   // --- Drag-to-split (Item 8) -------------------------------------------
   //
   // Every tab in a pane's strip is draggable (PaneTabStrip's TabsTrigger,
@@ -325,6 +393,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const [dragOverPaneId, setDragOverPaneId] = useState<string | null>(null);
   const [dropPosition, setDropPosition] = useState<SplitDropZonePosition | null>(null);
   const [isDragActive, setIsDragActive] = useState(false);
+
+  /** Which pane's "+" menu the `tab.new` keyboard action popped open, if any -- see PaneTabStrip's NewTabButton. */
+  const [openNewTabPaneId, setOpenNewTabPaneId] = useState<string | null>(null);
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, {
@@ -399,7 +470,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   );
 
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
-  const defaultPane = taskState ? findPaneById(taskState.root, DEFAULT_PANE_ID) : null;
   const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
   const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
 
@@ -474,7 +544,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // rather than the shell -- `composer.focus`, `run.interrupt` -- are
   // deliberately absent here; the composer claims them itself.
 
-  useActionHandler("shortcuts.help", () => setShortcutsOpen(true));
+  useActionHandler("shortcuts.help", () => {
+    setSettingsInitialSectionId("shortcuts");
+    setActiveView("settings");
+  });
 
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
@@ -486,32 +559,125 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     setPreference(next);
   });
 
-  // Both bindings are scoped to the default pane -- Item 6 adds no
-  // "which pane has keyboard focus" concept (Paseo's pane.focus.*
-  // actions were already out of scope for Item 4's binding table), so
-  // Ctrl+W/Ctrl+Alt+<digit> reach the default pane's tabs only. Every
-  // other pane's tabs stay mouse/palette-operable.
+  // Both bindings target the *focused* pane -- the last one the user
+  // interacted with (click, tab switch, or a pane-focus action below), not
+  // always the default one. See the plan's Decisions ("Tab actions target
+  // the focused pane, not just the default one").
   useActionHandler(
     "tab.close",
     () => {
-      if (!selectedTask || !defaultPane?.activeKey) return;
-      const active = defaultPane.tabs.find((t) => t.key === defaultPane.activeKey);
+      if (!selectedTask || !focusedPane?.activeKey) return;
+      const active = focusedPane.tabs.find((t) => t.key === focusedPane.activeKey);
       // Every tab is closable (Item 3), but the shortcut still mirrors
       // the strip: no active tab (everything closed) means nothing to do.
       if (!active?.closable) return;
       closeTab(selectedTask.ID, active.key);
     },
-    { enabled: Boolean(selectedTask && defaultPane?.activeKey) },
+    { enabled: Boolean(selectedTask && focusedPane?.activeKey) },
   );
 
   useActionHandler(
     "tab.jump",
     (payload) => {
-      if (!selectedTask || !defaultPane || payload === null) return;
-      const entry = defaultPane.tabs[payload.digit - 1];
+      if (!selectedTask || !focusedPane || payload === null) return;
+      const entry = focusedPane.tabs[payload.digit - 1];
       if (entry) activate(selectedTask.ID, entry.key);
     },
-    { enabled: Boolean(selectedTask && defaultPane) },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+
+  /** Steps the focused pane's active tab by delta, wrapping -- shared by tab.next/tab.prev. */
+  const stepFocusedTab = useCallback(
+    (delta: 1 | -1) => {
+      if (!selectedTask || !focusedPane || focusedPane.tabs.length === 0) return;
+      const current = focusedPane.tabs.findIndex((t) => t.key === focusedPane.activeKey);
+      const next = current === -1 ? 0 : (current + delta + focusedPane.tabs.length) % focusedPane.tabs.length;
+      const entry = focusedPane.tabs[next];
+      if (entry) activate(selectedTask.ID, entry.key);
+    },
+    [selectedTask, focusedPane, activate],
+  );
+  useActionHandler("tab.next", () => stepFocusedTab(1), {
+    enabled: Boolean(selectedTask && focusedPane && focusedPane.tabs.length > 1),
+  });
+  useActionHandler("tab.prev", () => stepFocusedTab(-1), {
+    enabled: Boolean(selectedTask && focusedPane && focusedPane.tabs.length > 1),
+  });
+
+  useActionHandler(
+    "tab.new",
+    () => {
+      if (!focusedPane) return;
+      setOpenNewTabPaneId(focusedPane.id);
+    },
+    { enabled: Boolean(focusedPane) },
+  );
+
+  useActionHandler(
+    "pane.split.right",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      splitPaneEmpty(selectedTask.ID, focusedPane.id, "right");
+    },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+  useActionHandler(
+    "pane.split.down",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      splitPaneEmpty(selectedTask.ID, focusedPane.id, "down");
+    },
+    { enabled: Boolean(selectedTask && focusedPane) },
+  );
+
+  useActionHandler(
+    "pane.close",
+    () => {
+      if (!selectedTask || !focusedPane) return;
+      closePane(selectedTask.ID, focusedPane.id);
+    },
+    { enabled: Boolean(selectedTask && focusedPane && paneCount > 1) },
+  );
+
+  useActionHandler(
+    "pane.move-tab.next",
+    () => {
+      if (!selectedTask || !focusedPane?.activeKey) return;
+      moveTabToNextPane(selectedTask.ID, focusedPane.activeKey, focusedPane.id);
+    },
+    { enabled: Boolean(selectedTask && focusedPane?.activeKey && paneCount > 1) },
+  );
+
+  const focusAdjacentPane = useCallback(
+    (direction: PaneDirection) => {
+      if (!selectedTask || !taskState || !focusedPane) return;
+      const adjacent = findAdjacentPane(taskState.root, focusedPane.id, direction);
+      if (adjacent) focusPane(selectedTask.ID, adjacent);
+    },
+    [selectedTask, taskState, focusedPane, focusPane],
+  );
+  // `enabled` here only gates "is there a pane tree to navigate at all" --
+  // whether the *default* combo is blocked in a text field (and lifted
+  // once the user rebinds it) is `editableWhenRebound` in the binding
+  // table (`keyboard/shortcuts.ts`), not something this handler decides.
+  useActionHandler("pane.focus.left", () => focusAdjacentPane("left"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.right", () => focusAdjacentPane("right"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.up", () => focusAdjacentPane("up"), { enabled: paneCount > 1 });
+  useActionHandler("pane.focus.down", () => focusAdjacentPane("down"), { enabled: paneCount > 1 });
+
+  useActionHandler("settings.open", () => {
+    setSettingsInitialSectionId(null);
+    setActiveView("settings");
+  });
+
+  useActionHandler(
+    "sidebar.task-jump",
+    (payload) => {
+      if (payload === null) return;
+      const task = allTasks[payload.digit - 1];
+      if (task) selectTask(task);
+    },
+    { enabled: allTasks.length > 0 },
   );
 
   const stepTask = useCallback(
@@ -542,13 +708,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onSelectTask={selectTask}
       attention={attention}
       runStatus={runStatus}
+      unread={unread}
+      onMarkUnread={markUnread}
       events={events}
       onTasksChange={setAllTasks}
       onWorkspacesChange={(workspaces) => {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
-      onOpenSettings={() => setActiveView("settings")}
+      onOpenSettings={() => {
+        setSettingsInitialSectionId(null);
+        setActiveView("settings");
+      }}
     />
   );
 
@@ -595,11 +766,17 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onOpenFileToSide={openFileTabToSide}
       onActivate={(key) => activate(selectedTask.ID, key)}
       onClose={(key) => closeTab(selectedTask.ID, key)}
+      onCloseOthers={closeOtherTabsForTask}
+      onCloseLeft={closeTabsToLeftForTask}
+      onCloseRight={closeTabsToRightForTask}
+      onRenameTab={renameTabForTask}
       onSplit={() => {}}
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
       showMoveAffordance={false}
+      newTabMenuOpen={openNewTabPaneId === DEFAULT_PANE_ID}
+      onNewTabMenuOpenChange={(open) => setOpenNewTabPaneId(open ? DEFAULT_PANE_ID : null)}
     />
   );
 
@@ -611,7 +788,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const mainContentElement = (
     <div className="flex-1 min-h-0">
       {activeView === "settings" ? (
-        <SettingsScreen client={client} onNavigateBack={() => setActiveView("workspace")} />
+        <SettingsScreen
+          client={client}
+          onNavigateBack={() => setActiveView("workspace")}
+          initialSectionId={settingsInitialSectionId ?? undefined}
+        />
       ) : selectedTask && taskState ? (
         isMobile ? (
           compactPrimaryStrip
@@ -649,6 +830,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               onOpenFileToSide={openFileTabToSide}
               onActivate={(key) => activate(selectedTask.ID, key)}
               onClose={(key) => closeTab(selectedTask.ID, key)}
+              onCloseOthers={closeOtherTabsForTask}
+              onCloseLeft={closeTabsToLeftForTask}
+              onCloseRight={closeTabsToRightForTask}
+              onRenameTab={renameTabForTask}
               onSplitTab={splitPaneTab}
               onResizeGroup={resizePaneGroup}
               onRevealInDiff={revealInDiff}
@@ -657,6 +842,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               dragOverPaneId={dragOverPaneId}
               dropPosition={dropPosition}
               isDragActive={isDragActive}
+              focusedPaneId={taskState.focusedPaneId}
+              onFocusPane={(paneId) => focusPane(selectedTask.ID, paneId)}
+              openNewTabPaneId={openNewTabPaneId}
+              onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
             />
           </DndContext>
         )
@@ -688,7 +877,6 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
        * its own parent mounts.
        */}
       <SidebarToggleAction />
-      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <CommandPalette />
       <ShellCommands
         client={client}
@@ -973,6 +1161,12 @@ interface SplitPaneCallbacks {
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  /** Item 6's tab context menu: close every other closable tab in key's pane, or every closable tab to its left/right. */
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  /** Item 6's "Rename" (terminal tabs only -- see DraggableTabTrigger). */
+  onRenameTab: (key: string, title: string) => void;
   /** Splits `key`'s tab off of `paneId` in `direction` -- Item 3's affordance, threaded down so each pane can bind its own id at the point it's rendered. */
   onSplitTab: (paneId: string, key: string, direction: SplitDirection) => void;
   /** Persists a resize handle drag's new sizes for the group with `groupId`. */
@@ -987,6 +1181,13 @@ interface SplitPaneCallbacks {
   dropPosition: SplitDropZonePosition | null;
   /** Whether a tab drag is in progress at all -- panes stay droppable-but-invisible until one starts. */
   isDragActive: boolean;
+  /** Which pane keyboard actions (tab.close, pane.focus.*, ...) target -- Item 6's focused-pane concept. Drives the visible ring below. */
+  focusedPaneId: string | null;
+  /** Moves keyboard focus to a pane -- bound to a click/pointerdown anywhere in it, same as clicking a pane in most split-pane editors. */
+  onFocusPane: (paneId: string) => void;
+  /** The pane whose "+" menu `tab.new` popped open, if any -- see NewTabButton's controlled open/onOpenChange. */
+  openNewTabPaneId: string | null;
+  onOpenNewTabPaneIdChange: (paneId: string | null) => void;
 }
 
 function splitNodeId(node: SplitNode): string {
@@ -1026,6 +1227,10 @@ function SplitTreeView({
         onOpenFileToSide={shared.onOpenFileToSide}
         onActivate={shared.onActivate}
         onClose={shared.onClose}
+        onCloseOthers={shared.onCloseOthers}
+        onCloseLeft={shared.onCloseLeft}
+        onCloseRight={shared.onCloseRight}
+        onRenameTab={shared.onRenameTab}
         onSplit={(key, direction) => shared.onSplitTab(node.pane.id, key, direction)}
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
@@ -1033,6 +1238,10 @@ function SplitTreeView({
         dragOverPaneId={shared.dragOverPaneId}
         dropPosition={shared.dropPosition}
         isDragActive={shared.isDragActive}
+        focused={shared.focusedPaneId === node.pane.id}
+        onFocusPane={() => shared.onFocusPane(node.pane.id)}
+        newTabMenuOpen={shared.openNewTabPaneId === node.pane.id}
+        onNewTabMenuOpenChange={(open) => shared.onOpenNewTabPaneIdChange(open ? node.pane.id : null)}
       />
     );
   }
@@ -1101,6 +1310,10 @@ function PaneTabStrip({
   onOpenFileToSide,
   onActivate,
   onClose,
+  onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
+  onRenameTab,
   onSplit,
   onRevealInDiff,
   onNewTerminal,
@@ -1109,6 +1322,10 @@ function PaneTabStrip({
   dragOverPaneId = null,
   dropPosition = null,
   isDragActive = false,
+  focused = false,
+  onFocusPane,
+  newTabMenuOpen = false,
+  onNewTabMenuOpenChange,
 }: {
   paneId: PaneId;
   tabs: TabEntry[];
@@ -1123,6 +1340,10 @@ function PaneTabStrip({
   onOpenFileToSide: (path: string) => void;
   onActivate: (key: string) => void;
   onClose: (key: string) => void;
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  onRenameTab: (key: string, title: string) => void;
   onSplit: (key: string, direction: SplitDirection) => void;
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
@@ -1134,6 +1355,12 @@ function PaneTabStrip({
   dragOverPaneId?: string | null;
   dropPosition?: SplitDropZonePosition | null;
   isDragActive?: boolean;
+  /** Item 6: whether this is the pane keyboard actions currently target -- drives the visible ring. Compact mode (a single merged strip) never sets this; there's nothing to distinguish it from. */
+  focused?: boolean;
+  /** Moves keyboard focus here -- bound to a pointerdown anywhere in the pane. */
+  onFocusPane?: () => void;
+  newTabMenuOpen?: boolean;
+  onNewTabMenuOpenChange?: (open: boolean) => void;
 }) {
   // Item 8: the whole pane (tab strip + content) is one drop target --
   // `data` carries just the pane id, which `App.tsx`'s onDragMove/onDragEnd
@@ -1142,7 +1369,15 @@ function PaneTabStrip({
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
 
   return (
-    <div ref={setDroppableRef} className="relative h-full">
+    <div
+      ref={setDroppableRef}
+      // A ring rather than a border: a border would shift every pane's
+      // content by its width when focus moves, and only means anything
+      // once there's more than one pane to tell apart.
+      className={cn("relative h-full", focused && paneCount > 1 && "ring-1 ring-inset ring-ring")}
+      data-testid={focused ? "pane-focused" : undefined}
+      onPointerDownCapture={onFocusPane}
+    >
       <Tabs
         key={`${task.ID}:${paneId}`}
         // The fixed `primary-pane`/`side-pane` testids only tell the two
@@ -1158,7 +1393,7 @@ function PaneTabStrip({
         <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
           {tabs.length > 0 && (
             <TabsList className="w-fit">
-              {tabs.map((entry) => (
+              {tabs.map((entry, index) => (
                 <DraggableTabTrigger
                   key={entry.key}
                   entry={entry}
@@ -1166,11 +1401,22 @@ function PaneTabStrip({
                   showMoveAffordance={showMoveAffordance}
                   onSplit={onSplit}
                   onClose={onClose}
+                  onCloseOthers={onCloseOthers}
+                  onCloseLeft={onCloseLeft}
+                  onCloseRight={onCloseRight}
+                  onRenameTab={onRenameTab}
+                  hasOtherClosableTabs={tabs.some((t) => t.key !== entry.key && t.closable)}
+                  hasClosableTabsToLeft={tabs.slice(0, index).some((t) => t.closable)}
+                  hasClosableTabsToRight={tabs.slice(index + 1).some((t) => t.closable)}
                 />
               ))}
             </TabsList>
           )}
-          <NewTabButton onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
+          <NewTabButton
+            onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
+            open={newTabMenuOpen}
+            onOpenChange={onNewTabMenuOpenChange}
+          />
         </div>
         {tabs.length === 0 && (
           <TabsEmptyState onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
@@ -1223,13 +1469,36 @@ function DraggableTabTrigger({
   showMoveAffordance,
   onSplit,
   onClose,
+  onCloseOthers,
+  onCloseLeft,
+  onCloseRight,
+  onRenameTab,
+  hasOtherClosableTabs,
+  hasClosableTabsToLeft,
+  hasClosableTabsToRight,
 }: {
   entry: TabEntry;
   paneId: string;
   showMoveAffordance: boolean;
   onSplit: (key: string, direction: SplitDirection) => void;
   onClose: (key: string) => void;
+  onCloseOthers: (key: string) => void;
+  onCloseLeft: (key: string) => void;
+  onCloseRight: (key: string) => void;
+  onRenameTab: (key: string, title: string) => void;
+  hasOtherClosableTabs: boolean;
+  hasClosableTabsToLeft: boolean;
+  hasClosableTabsToRight: boolean;
 }) {
+  // Rename (terminal tabs only -- their title is arbitrary already, unlike
+  // a file/diff/chat tab's, which is derived from real identity a cosmetic
+  // override would just make misleading) swaps the trigger for a plain
+  // input in the same slot rather than trying to nest one inside
+  // TabsTrigger's own <button> -- same reasoning as the close "×" below
+  // being a span, not a button, but an <input> genuinely can't go inside
+  // one at all.
+  const [renaming, setRenaming] = useState(false);
+  const cancelledRenameRef = useRef(false);
   // Every tab is draggable, not just movable kinds -- dropping a Chat/Files
   // tab onto another pane's center still moves it there (Item 8's scope);
   // only *splitting* (an edge drop, handled in App.tsx's onDragEnd) is
@@ -1248,15 +1517,44 @@ function DraggableTabTrigger({
     data: { tabKey: entry.key, sourcePaneId: paneId, kind: entry.kind } satisfies DraggedTabData,
   });
 
+  if (renaming) {
+    return (
+      <input
+        autoFocus
+        defaultValue={entry.title}
+        aria-label={`Rename ${entry.title}`}
+        data-testid="workspace-tab-rename-input"
+        className="h-7 max-w-48 shrink-0 rounded border border-ring bg-transparent px-2 text-sm outline-none"
+        onFocus={(e) => e.currentTarget.select()}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+          } else if (e.key === "Escape") {
+            cancelledRenameRef.current = true;
+            setRenaming(false);
+          }
+        }}
+        onBlur={(e) => {
+          if (!cancelledRenameRef.current) onRenameTab(entry.key, e.currentTarget.value);
+          cancelledRenameRef.current = false;
+          setRenaming(false);
+        }}
+      />
+    );
+  }
+
   return (
-    <TabsTrigger
-      ref={setNodeRef}
-      value={entry.key}
-      data-testid={`workspace-tab-${entry.kind}`}
-      className="max-w-48 gap-1.5"
-      {...listeners}
-    >
-      <TabLabel entry={entry} />
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <TabsTrigger
+          ref={setNodeRef}
+          value={entry.key}
+          data-testid={`workspace-tab-${entry.kind}`}
+          className="max-w-48 gap-1.5"
+          {...listeners}
+        >
+          <TabLabel entry={entry} />
       {isMovableKind(entry.kind) && showMoveAffordance && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1324,7 +1622,78 @@ function DraggableTabTrigger({
           <span aria-hidden="true">×</span>
         </span>
       )}
-    </TabsTrigger>
+        </TabsTrigger>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="workspace-tab-context-menu" data-tab-key={entry.key}>
+        <ContextMenuItem
+          disabled={!entry.closable}
+          onSelect={() => onClose(entry.key)}
+          data-testid="workspace-tab-menu-close"
+        >
+          Close
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasOtherClosableTabs}
+          onSelect={() => onCloseOthers(entry.key)}
+          data-testid="workspace-tab-menu-close-others"
+        >
+          Close others
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasClosableTabsToLeft}
+          onSelect={() => onCloseLeft(entry.key)}
+          data-testid="workspace-tab-menu-close-left"
+        >
+          Close to the left
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!hasClosableTabsToRight}
+          onSelect={() => onCloseRight(entry.key)}
+          data-testid="workspace-tab-menu-close-right"
+        >
+          Close to the right
+        </ContextMenuItem>
+        {(entry.kind === "terminal" || (entry.kind === "file" && entry.path)) && <ContextMenuSeparator />}
+        {entry.kind === "terminal" && (
+          <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
+            <Pencil />
+            Rename
+          </ContextMenuItem>
+        )}
+        {entry.kind === "file" && entry.path && (
+          <ContextMenuItem
+            onSelect={() => {
+              void navigator.clipboard?.writeText(entry.path!).catch(() => {});
+            }}
+            data-testid="workspace-tab-menu-copy-path"
+          >
+            <Copy />
+            Copy path
+          </ContextMenuItem>
+        )}
+        {isMovableKind(entry.kind) && showMoveAffordance && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "left")} data-testid="workspace-tab-menu-split-left">
+              <Columns2 />
+              Split left
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "right")} data-testid="workspace-tab-menu-split-right">
+              <Columns2 />
+              Split right
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "up")} data-testid="workspace-tab-menu-split-up">
+              <Columns2 />
+              Split up
+            </ContextMenuItem>
+            <ContextMenuItem onSelect={() => onSplit(entry.key, "down")} data-testid="workspace-tab-menu-split-down">
+              <Columns2 />
+              Split down
+            </ContextMenuItem>
+          </>
+        )}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 

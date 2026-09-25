@@ -465,3 +465,22 @@
 html {
   font-size: calc(16px * var(--font-scale-interface));
 }
+
+/*
+ * Chat Find's match highlighting (components/timeline/chat-find-dom.ts),
+ * via the CSS Custom Highlight API rather than inserted <mark> elements --
+ * a Highlight is a pure paint overlay, registered against live Range
+ * objects, that never touches the DOM tree React's own fibers reference
+ * (see that file's doc comment for the corruption/crash this replaced).
+ * `::highlight()` only supports a small property subset (color,
+ * background-color, text-decoration, ...) -- no `opacity` -- hence
+ * `color-mix` for the non-active tier's translucency, the same technique
+ * diff2html's overrides above already use.
+ */
+::highlight(smind-chat-find) {
+  background-color: color-mix(in oklch, var(--status-warning) 35%, transparent);
+}
+::highlight(smind-chat-find-active) {
+  background-color: var(--status-warning);
+  color: var(--surface-0);
+}

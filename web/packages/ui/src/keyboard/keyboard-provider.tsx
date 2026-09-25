@@ -19,9 +19,12 @@ import {
   writeStoredOverrides,
 } from "@/keyboard/overrides";
 import {
-  matchShortcut,
+  CHORD_TIMEOUT_MS,
+  INITIAL_CHORD_STATE,
   resolveBindings,
+  resolveChordStep,
   SHORTCUT_BINDINGS,
+  type ChordState,
   type ResolvedBinding,
   type ShortcutOverrides,
 } from "@/keyboard/shortcuts";
@@ -174,25 +177,67 @@ export function KeyboardProvider({
   const isMacRef = useRef(isMac);
   isMacRef.current = isMac;
 
+  // A chord attempt lives in refs, not state: it must survive a re-render
+  // between two chord steps (a class of bug in Paseo's own history) without
+  // the listener itself being torn down and re-added.
+  const chordStateRef = useRef<ChordState>(INITIAL_CHORD_STATE);
+  const chordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
+    function resetChord() {
+      if (chordTimeoutRef.current !== null) {
+        clearTimeout(chordTimeoutRef.current);
+        chordTimeoutRef.current = null;
+      }
+      chordStateRef.current = INITIAL_CHORD_STATE;
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       const scope = resolveFocusScope(event.target, modalOpenRef.current);
-      const match = matchShortcut(bindingsRef.current, event, {
-        isMac: isMacRef.current,
-        scope,
-      });
-      if (!match) return;
+      const resolution = resolveChordStep(
+        bindingsRef.current,
+        event,
+        { isMac: isMacRef.current, scope },
+        chordStateRef.current,
+      );
+      chordStateRef.current = resolution.nextChordState;
+
+      if (resolution.nextChordState.step === 0) {
+        // The attempt finished, cancelled, or a bare keydown never started
+        // one -- either way nothing is pending any more.
+        if (chordTimeoutRef.current !== null) {
+          clearTimeout(chordTimeoutRef.current);
+          chordTimeoutRef.current = null;
+        }
+      } else if (resolution.pending) {
+        // Advanced to (or started) a new step: restart the window. A bare
+        // modifier keydown mid-chord also leaves step > 0 but is not
+        // `pending` -- it changes nothing, so its existing timeout is left
+        // running rather than restarted here.
+        if (chordTimeoutRef.current !== null) clearTimeout(chordTimeoutRef.current);
+        chordTimeoutRef.current = setTimeout(resetChord, CHORD_TIMEOUT_MS);
+      }
+
+      if (resolution.pending) {
+        // A chord's non-final key(s) must not reach the page (or a focused
+        // textarea) even though no action has fired yet.
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      if (!resolution.match) return;
 
       // preventDefault only once a handler actually took the event: a
       // binding with nobody listening (no task selected, so nothing claims
       // `tab.close`) must leave the browser's own Cmd+W alone rather than
       // swallowing it into a no-op.
-      const stack = handlers.current.get(match.action);
+      const stack = handlers.current.get(resolution.match.action);
       if (!stack?.some((entry) => entry.enabled)) return;
 
       event.preventDefault();
       event.stopPropagation();
-      runAction(match.action, match.payload);
+      runAction(resolution.match.action, resolution.match.payload);
     }
 
     // Capture phase: xterm and CodeMirror both attach their own keydown
@@ -201,7 +246,10 @@ export function KeyboardProvider({
     // composer. Capture sees it first; `resolveFocusScope` is what decides
     // whether it's ours to take, not listener ordering.
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      if (chordTimeoutRef.current !== null) clearTimeout(chordTimeoutRef.current);
+    };
   }, [runAction]);
 
   const rebind = useCallback(

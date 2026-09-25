@@ -93,7 +93,8 @@ export function CommandPalette() {
     // the toggle rebinding-aware without reopening the whole registry to
     // a surface that owns its keyboard.
     const paletteBinding = bindings.find((b) => b.action === "palette.open");
-    if (paletteBinding?.parsed && matchCombo(paletteBinding.parsed, event, isMac)) {
+    const paletteCombo = paletteBinding?.parsed?.length === 1 ? paletteBinding.parsed[0] : undefined;
+    if (paletteCombo && matchCombo(paletteCombo, event, isMac)) {
       event.preventDefault();
       setOpen(false);
       return;

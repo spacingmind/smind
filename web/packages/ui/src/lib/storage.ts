@@ -26,6 +26,10 @@ export const STORAGE_KEYS = {
   shortcutOverrides: "smind:shortcut-overrides",
   taskTabs: "smind:task-tabs",
   sidePaneWidth: "smind:side-pane-width",
+  pinnedTasks: "smind:pinned-tasks",
+  unreadTasks: "smind:unread-tasks",
+  sidebarGroupMode: "smind:sidebar-group-mode",
+  notificationSound: "smind:notification-sound",
 } as const;
 
 /**

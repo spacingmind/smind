@@ -28,9 +28,23 @@ export type ActionId =
   | "run.interrupt"
   | "tab.close"
   | "tab.jump"
+  | "tab.new"
+  | "tab.next"
+  | "tab.prev"
   | "task.prev"
   | "task.next"
-  | "quick-open.open";
+  | "quick-open.open"
+  | "pane.find"
+  | "settings.open"
+  | "sidebar.task-jump"
+  | "pane.split.right"
+  | "pane.split.down"
+  | "pane.close"
+  | "pane.focus.left"
+  | "pane.focus.right"
+  | "pane.focus.up"
+  | "pane.focus.down"
+  | "pane.move-tab.next";
 
 /**
  * Where keyboard focus is, as far as shortcut routing cares.

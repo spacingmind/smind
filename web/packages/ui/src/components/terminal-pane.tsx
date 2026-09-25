@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ClipboardPaste, Copy, Plus } from "lucide-react";
 import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 
+import { FindBar, type FindBarHandle } from "@/components/find/find-bar";
+import { usePaneFocusWithin } from "@/components/find/use-pane-focus-within";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PaneHeader } from "@/components/ui/pane-header";
 import { useTheme } from "@/hooks/use-theme";
+import { useActionHandler } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { loadTerminalScrollback } from "@/lib/terminal-prefs";
 import {
@@ -18,7 +22,7 @@ import {
   terminalIdsBoundElsewhere,
   unbindTerminal,
 } from "@/lib/terminal-sessions";
-import { resolveTerminalTheme } from "@/lib/terminal-theme";
+import { resolveSearchDecorations, resolveTerminalTheme } from "@/lib/terminal-theme";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   Task,
@@ -58,13 +62,30 @@ export interface TerminalHandle {
   getSelection?(): string;
   /** Fires whenever the selection changes, so Copy can be disabled when there's nothing to copy. A handle that can't report this leaves Copy enabled -- a silent no-op beats a permanently-dead button. */
   onSelectionChange?(callback: () => void): { dispose(): void };
+  /** Find over the scrollback (AC3, `@xterm/addon-search`). Optional so FakeTerminalHandle (this file's own test suite) doesn't need it -- a handle without `find` never shows the Find affordance at all, never a dead shortcut. */
+  find?: TerminalFindHandle;
   dispose(): void;
+}
+
+/** What `@xterm/addon-search`'s `onDidChangeResults` reports: the active match's 0-based index, or -1 while nothing is selected, and the total count. */
+export interface TerminalFindResult {
+  resultIndex: number;
+  resultCount: number;
+}
+
+export interface TerminalFindHandle {
+  /** Searches forward (default) or backward for `term`; an empty `term` clears the search instead of running it (xterm's own findNext/findPrevious no-op on "", which would leave stale decorations on screen). */
+  search(term: string, direction?: "next" | "previous"): void;
+  clear(): void;
+  onDidChangeResults(callback: (result: TerminalFindResult) => void): { dispose(): void };
 }
 
 function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHandle {
   const term = new Terminal({ convertEol: true, cursorBlink: true, scrollback });
   const fit = new FitAddon();
   term.loadAddon(fit);
+  const search = new SearchAddon();
+  term.loadAddon(search);
   return {
     open: (container) => term.open(container),
     onData: (callback) => term.onData(callback),
@@ -76,6 +97,19 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     },
     getSelection: () => term.getSelection(),
     onSelectionChange: (callback) => term.onSelectionChange(callback),
+    find: {
+      search: (query, direction) => {
+        if (!query) {
+          search.clearDecorations();
+          return;
+        }
+        const options = { decorations: resolveSearchDecorations() };
+        if (direction === "previous") search.findPrevious(query, options);
+        else search.findNext(query, options);
+      },
+      clear: () => search.clearDecorations(),
+      onDidChangeResults: (callback) => search.onDidChangeResults(callback),
+    },
     dispose: () => term.dispose(),
   };
 }
@@ -165,6 +199,18 @@ export function TerminalPane({
   const [hasSelection, setHasSelection] = useState(false);
   const [selectionReportable, setSelectionReportable] = useState(false);
   const [pasteError, setPasteError] = useState<string | null>(null);
+
+  // Find (AC3): open/query/result live here (not a child component) so
+  // every hook that touches termRef stays inside this component's own
+  // effect ordering -- a separate `TerminalFindBar` subscribing to
+  // `termRef.current?.find` would run its first effect *before* this
+  // component's own terminal-creation effect (children's effects commit
+  // before their parent's), and see a still-null handle.
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findResult, setFindResult] = useState<TerminalFindResult>({ resultIndex: -1, resultCount: 0 });
+  const findBarRef = useRef<FindBarHandle>(null);
+  const { focused: findFocused, onFocus: onFindFocus, onBlur: onFindBlur } = usePaneFocusWithin();
 
   // Read at data-arrival time rather than captured by the attach closure,
   // which is created once per session and would otherwise pin whichever
@@ -423,6 +469,49 @@ export function TerminalPane({
     return () => disposable.dispose();
   }, [createTerminal]);
 
+  // Find (AC3): subscribes to the addon's own result-count/index reporting.
+  // Declared after the terminal-creation effect above, so on first mount
+  // termRef.current is already set by the time this one runs (React runs
+  // one component's own effects in source order).
+  useEffect(() => {
+    const disposable = termRef.current?.find?.onDidChangeResults(setFindResult);
+    return () => disposable?.dispose();
+  }, [createTerminal]);
+
+  const openFind = useCallback(() => {
+    if (!termRef.current?.find) return;
+    setFindOpen(true);
+  }, []);
+  useActionHandler("pane.find", openFind, { enabled: findFocused });
+
+  useEffect(() => {
+    if (findOpen) findBarRef.current?.focus();
+  }, [findOpen]);
+
+  const searchFind = useCallback((text: string, direction?: "next" | "previous") => {
+    setFindQuery(text);
+    termRef.current?.find?.search(text, direction);
+  }, []);
+  const nextFind = useCallback(() => searchFind(findQuery, "next"), [searchFind, findQuery]);
+  const previousFind = useCallback(() => searchFind(findQuery, "previous"), [searchFind, findQuery]);
+  const closeFind = useCallback(() => {
+    termRef.current?.find?.clear();
+    setFindOpen(false);
+    setFindQuery("");
+    setFindResult({ resultIndex: -1, resultCount: 0 });
+    containerRef.current?.querySelector("textarea")?.focus();
+  }, []);
+
+  let findStatus = "";
+  if (findQuery) {
+    findStatus =
+      findResult.resultCount === 0
+        ? "No matches"
+        : findResult.resultIndex < 0
+          ? `${findResult.resultCount}`
+          : `${findResult.resultIndex + 1}/${findResult.resultCount}`;
+  }
+
   /**
    * Copy/paste without relying on the browser's own terminal-unfriendly
    * defaults (Ctrl+C is an interrupt in a shell, not a copy).
@@ -481,7 +570,7 @@ export function TerminalPane({
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" onFocus={onFindFocus} onBlur={onFindBlur}>
       <PaneHeader
         title={
           <span data-testid="terminal-status" className="font-normal text-foreground-muted">
@@ -564,7 +653,23 @@ export function TerminalPane({
           paste failed: {pasteError}
         </p>
       )}
-      <div ref={containerRef} data-testid="terminal-container" className="min-h-0 flex-1" />
+      <div className="relative min-h-0 flex-1">
+        <div ref={containerRef} data-testid="terminal-container" className="h-full" />
+        {findOpen && (
+          <div className="absolute top-2 right-3 z-10">
+            <FindBar
+              ref={findBarRef}
+              query={findQuery}
+              status={findStatus}
+              canNavigate={findResult.resultCount > 0}
+              onQueryChange={(text) => searchFind(text)}
+              onNext={nextFind}
+              onPrevious={previousFind}
+              onClose={closeFind}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -3,12 +3,15 @@ import { useCallback, useState } from "react";
 import { baseTabForKind, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
 import {
+  canDismissPaneInLayout,
+  closePaneInLayout,
   collectAllPanes,
   collectAllTabs,
   DEFAULT_PANE_ID,
   detachTabFromTree,
   findPaneById,
   findPaneContainingTab,
+  focusPaneInLayout,
   focusTabInLayout,
   MAX_TREE_DEPTH,
   moveTabToPaneInLayout,
@@ -271,6 +274,101 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
+  /** Closes every one of `keys` in turn, recomputing the sole-pane/preserve-empty guard fresh before each -- the same rule `closeTab` applies to a single key. */
+  function closeManyFromLayout(layout: TaskLayout, keys: readonly string[]): TaskLayout {
+    let root = layout.root;
+    for (const key of keys) {
+      const pane = findPaneContainingTab(root, key);
+      if (!pane) continue;
+      const isSolePane = collectAllPanes(root).length === 1;
+      root = detachTabFromTree(root, { tabKey: key, preserveEmptyPaneId: isSolePane ? pane.id : null }).root;
+    }
+    const focusedPaneId = findPaneById(root, layout.focusedPaneId)
+      ? layout.focusedPaneId
+      : (collectAllPanes(root)[0]?.id ?? null);
+    return { root, focusedPaneId };
+  }
+
+  /** Closes every closable tab in key's pane except key itself -- the tab context menu's "Close others" (Item 6). */
+  const closeOtherTabs = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const targets = pane.tabs.filter((t) => t.key !== key && t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Closes every closable tab to the left of key within its own pane -- "Close to the left". */
+  const closeTabsToLeft = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const index = pane.tabs.findIndex((t) => t.key === key);
+        if (index <= 0) return prev;
+        const targets = pane.tabs.slice(0, index).filter((t) => t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Closes every closable tab to the right of key within its own pane -- "Close to the right". */
+  const closeTabsToRight = useCallback(
+    (taskId: number, key: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const index = pane.tabs.findIndex((t) => t.key === key);
+        if (index === -1) return prev;
+        const targets = pane.tabs.slice(index + 1).filter((t) => t.closable).map((t) => t.key);
+        if (targets.length === 0) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closeManyFromLayout(layout, targets));
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Overrides key's displayed title -- the tab context menu's "Rename" (terminal tabs only, App.tsx). A blank title is a no-op rather than clearing it to empty. */
+  const renameTab = useCallback(
+    (taskId: number, key: string, title: string): void => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const root = updatePaneInTree(layout.root, {
+          paneId: pane.id,
+          updater: (p) => ({ ...p, tabs: p.tabs.map((t) => (t.key === key ? { ...t, title: trimmed } : t)) }),
+        });
+        const next = new Map(prev);
+        next.set(taskId, { ...layout, root });
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
   /** Makes key the active tab of whichever pane it's open in (a no-op if it isn't open anywhere). */
   const activate = useCallback(
     (taskId: number, key: string): void => {
@@ -344,5 +442,102 @@ export function useTaskTabs() {
     [setTabsByTask],
   );
 
-  return { tabsByTask, ensureTask, openTab, closeTab, activate, moveTab, splitTab, resizeGroup };
+  /** Moves keyboard/tab-action focus to paneId -- a no-op if it's already focused or doesn't exist. */
+  const focusPane = useCallback(
+    (taskId: number, paneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const focused = focusPaneInLayout({ layout, paneId });
+        if (!focused) return prev;
+        const next = new Map(prev);
+        next.set(taskId, focused);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Removes paneId outright, tabs and all -- a no-op for the tree's last remaining pane (canDismissPaneInLayout). */
+  const closePane = useCallback(
+    (taskId: number, paneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout || !canDismissPaneInLayout(layout, paneId)) return prev;
+        const closed = closePaneInLayout({ layout, paneId });
+        if (!closed) return prev;
+        const next = new Map(prev);
+        next.set(taskId, closed);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Splits targetPaneId in `direction` with a fresh, tab-less pane -- the keyboard/palette split action, which (unlike splitTab) has no particular tab to carry across. A no-op past `MAX_TREE_DEPTH`. */
+  const splitPaneEmpty = useCallback(
+    (taskId: number, targetPaneId: string, direction: SplitDirection): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const result = splitPaneEmptyInLayout({
+          layout,
+          targetPaneId,
+          position: SPLIT_DIRECTION_TO_POSITION[direction],
+          createNodeId,
+          maxTreeDepth: MAX_TREE_DEPTH,
+        });
+        if (!result) return prev;
+        const next = new Map(prev);
+        next.set(taskId, result.layout);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /**
+   * Moves key's tab from fromPaneId into whichever pane follows it in tree
+   * order (wrapping past the last back to the first) -- the keyboard
+   * action's "next pane", not a specific direction. A no-op with only one
+   * pane in the tree.
+   */
+  const moveTabToNextPane = useCallback(
+    (taskId: number, key: string, fromPaneId: string): void => {
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const panes = collectAllPanes(layout.root);
+        if (panes.length < 2) return prev;
+        const fromIndex = panes.findIndex((pane) => pane.id === fromPaneId);
+        if (fromIndex === -1) return prev;
+        const toPaneId = panes[(fromIndex + 1) % panes.length]!.id;
+        const moved = moveTabToPaneInLayout({ layout, tabKey: key, toPaneId });
+        if (!moved) return prev;
+        const next = new Map(prev);
+        next.set(taskId, moved);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  return {
+    tabsByTask,
+    ensureTask,
+    openTab,
+    closeTab,
+    activate,
+    moveTab,
+    splitTab,
+    resizeGroup,
+    focusPane,
+    closePane,
+    splitPaneEmpty,
+    moveTabToNextPane,
+    closeOtherTabs,
+    closeTabsToLeft,
+    closeTabsToRight,
+    renameTab,
+  };
 }

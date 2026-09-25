@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button, TextInput as ExpoTextInput, useNativeState } from '@expo/ui';
+import { UiHost } from '../ui/UiHost';
 import { listRunsForTask, RunSummary } from '../api';
 import { sendFollowUpPrompt, RunTail } from '../followUpPrompt';
 import { feedPermissionEvent, PermissionBoard, PermissionRequestState, respondToPermission } from '../permissionRequests';
@@ -208,7 +209,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.back}>
-        <Button variant="text" label="&larr; Back" onPress={onBack} />
+        <UiHost>
+          <Button variant="text" label="&larr; Back" onPress={onBack} />
+        </UiHost>
       </View>
       <Text style={styles.title}>{taskTitle}</Text>
 
@@ -258,9 +261,9 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                 {req.status === 'pending' ? (
                   <View style={styles.permissionOptions}>
                     {req.options.map((opt) => (
-                      <View key={opt.id} style={styles.permissionButton}>
+                      <UiHost key={opt.id} style={styles.permissionButton}>
                         <Button label={opt.label} onPress={() => handlePermissionTap(req.requestId, opt.id)} />
-                      </View>
+                      </UiHost>
                     ))}
                   </View>
                 ) : (
@@ -275,7 +278,7 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
           })}
           {sendError !== null && <Text style={styles.sendError}>Couldn't send: {sendError}</Text>}
           <View style={styles.composeRow}>
-            <View style={styles.composeWrap}>
+            <UiHost style={styles.composeWrap}>
               <ExpoTextInput
                 style={styles.composeField}
                 textStyle={styles.composeText}
@@ -288,8 +291,10 @@ export function TaskDetailScreen({ conn, taskId, taskTitle, onBack }: Props) {
                 placeholderTextColor={theme.foregroundMuted}
                 multiline
               />
-            </View>
-            <Button label="Send" onPress={handleSend} disabled={!canSend} />
+            </UiHost>
+            <UiHost style={styles.sendHost}>
+              <Button label="Send" onPress={handleSend} disabled={!canSend} />
+            </UiHost>
           </View>
         </>
       )}
@@ -461,6 +466,9 @@ function makeStyles(theme: AppTheme) {
       flex: 1,
       maxHeight: 120,
       marginRight: theme.spacing[2],
+    },
+    sendHost: {
+      alignSelf: 'flex-end',
     },
     composeField: {
       width: '100%',

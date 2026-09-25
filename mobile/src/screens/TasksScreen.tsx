@@ -15,9 +15,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button } from '@expo/ui';
+import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
-import { PendingApprovalSet, sortTasksByAttention, subscribeToPendingApprovals } from '../taskAttention';
+import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttention';
+import { buildTaskSections } from '../taskSections';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
@@ -93,29 +95,25 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
       <View style={styles.centered}>
         <Text style={styles.errorTitle}>Couldn't load the workspace</Text>
         <Text style={styles.errorDetail}>{state.message}</Text>
-        <Button label="Retry" onPress={load} />
+        <UiHost style={styles.retryHost}>
+          <Button label="Retry" onPress={load} />
+        </UiHost>
       </View>
     );
   }
 
   const { workspace, spaces, tasks } = state;
-  const ungrouped = tasks.filter((t) => t.SpaceID === null);
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.header}>{workspace.Title}</Text>
-        <Button variant="text" label="Disconnect" onPress={onDisconnect} />
+        <UiHost>
+          <Button variant="text" label="Disconnect" onPress={onDisconnect} />
+        </UiHost>
       </View>
       <FlatList
-        data={[
-          { kind: 'ungrouped' as const, tasks: sortTasksByAttention(ungrouped, pendingTaskIds) },
-          ...spaces.map((s) => ({
-            kind: 'grouped' as const,
-            space: s,
-            tasks: sortTasksByAttention(tasks.filter((t) => t.SpaceID === s.ID), pendingTaskIds),
-          })),
-        ]}
+        data={buildTaskSections(spaces, tasks, pendingTaskIds)}
         keyExtractor={(item) => (item.kind === 'ungrouped' ? 'ungrouped' : `space-${item.space.ID}`)}
         refreshControl={
           <RefreshControl
@@ -207,6 +205,10 @@ function makeStyles(theme: AppTheme) {
       fontWeight: theme.type.sectionTitle.fontWeight,
       color: theme.foreground,
       flex: 1,
+    },
+    retryHost: {
+      alignSelf: 'center',
+      marginTop: theme.spacing[2],
     },
     section: {
       marginBottom: theme.spacing[6],

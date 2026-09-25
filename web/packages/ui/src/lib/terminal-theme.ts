@@ -1,4 +1,5 @@
 import type { ITheme } from "@xterm/xterm";
+import type { ISearchDecorationOptions } from "@xterm/addon-search";
 
 /**
  * Resolves a CSS custom property (as currently applied to `<html>`, i.e.
@@ -41,5 +42,26 @@ export function resolveTerminalTheme(): ITheme {
     cursor: resolveCssColor("--foreground"),
     cursorAccent: resolveCssColor("--background"),
     selectionBackground: resolveCssColor("--accent"),
+  };
+}
+
+/**
+ * `@xterm/addon-search`'s match/active-match decoration colors (AC3),
+ * resolved the same way as {@link resolveTerminalTheme} -- the addon wants
+ * literal color strings, not live `var()` references, so this is called
+ * fresh on every search rather than cached, which is what makes a theme
+ * toggle mid-search show the new colors on the very next keystroke with no
+ * extra wiring.
+ */
+export function resolveSearchDecorations(): ISearchDecorationOptions {
+  const match = resolveCssColor("--status-warning");
+  const active = resolveCssColor("--accent");
+  return {
+    matchBackground: match,
+    matchBorder: match,
+    matchOverviewRuler: match,
+    activeMatchBackground: active,
+    activeMatchBorder: active,
+    activeMatchColorOverviewRuler: active,
   };
 }

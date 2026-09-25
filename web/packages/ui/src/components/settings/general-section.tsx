@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
-import { Button } from "@/components/ui/button";
 import { useDefaultRunPreferences } from "@/hooks/use-default-run-preferences";
-import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
 import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
 
 const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
@@ -11,26 +9,12 @@ const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
   { id: "auto-safe", label: "Auto-safe" },
 ];
 
-/** Mirrors the notifications toggle's former home (app-sidebar.tsx's header bell), moved here per Item 13 -- see that file's history for the pre-move version. */
-const NOTIFICATION_LABEL: Record<NotificationPermissionState, string> = {
-  default: "Enable out-of-tab notifications",
-  granted: "Notifications enabled",
-  denied: "Notifications blocked -- allow them in your browser's site settings",
-  unsupported: "Notifications aren't supported in this browser",
-};
-
-const NOTIFICATION_DESCRIPTION: Record<NotificationPermissionState, string> = {
-  default: "Get a browser notification when a backgrounded task finishes or needs a decision.",
-  granted: "You'll get a browser notification when a backgrounded task finishes or needs a decision.",
-  denied: "Notifications were blocked. Allow them in your browser's site settings to re-enable.",
-  unsupported: "This browser doesn't support notifications.",
-};
-
 /**
  * Item 13's General section: the composer's two defaults
  * (`hooks/use-default-run-preferences.ts` -- read by the composer itself,
- * Track B's file, not this one) and the out-of-tab notifications control
- * that used to be the sidebar header's bell button.
+ * Track B's file, not this one). The out-of-tab notifications control that
+ * used to live here moved to its own Notifications section
+ * (notifications-section.tsx) per the web-sidebar-attention plan's AC3.
  *
  * "No preference" (both selects' first, unlabeled option) is a real,
  * distinct state from picking a provider/policy: it means "let the
@@ -42,7 +26,6 @@ export function GeneralSection({ client }: SettingsSectionContext) {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const { defaultProvider, setDefaultProvider, defaultApprovalPolicy, setDefaultApprovalPolicy } =
     useDefaultRunPreferences();
-  const { permission, requestPermission } = useNotificationPermission();
 
   useEffect(() => {
     if (!client) return;
@@ -96,23 +79,6 @@ export function GeneralSection({ client }: SettingsSectionContext) {
             ))}
           </select>
         </label>
-      </section>
-
-      <section className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium text-foreground">Notifications</h3>
-        <div className="flex items-center justify-between gap-4">
-          <p className="max-w-sm text-sm text-muted-foreground">{NOTIFICATION_DESCRIPTION[permission]}</p>
-          <Button
-            variant="outline"
-            size="sm"
-            aria-label={NOTIFICATION_LABEL[permission]}
-            data-testid="settings-notifications-toggle"
-            disabled={permission !== "default"}
-            onClick={requestPermission}
-          >
-            {permission === "granted" ? "Enabled" : "Enable"}
-          </Button>
-        </div>
       </section>
     </div>
   );

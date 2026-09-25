@@ -77,9 +77,15 @@ export function ToolCallCard({
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Icon className="size-3 shrink-0 text-foreground-muted" />
-          <span className="shrink-0 font-medium">{name}</span>
+          <span className="shrink-0 font-medium" data-chat-find-text="true">
+            {name}
+          </span>
           {line && !onOpenPath && (
-            <span className="min-w-0 flex-1 truncate text-foreground-muted" data-testid="tool-call-summary">
+            <span
+              className="min-w-0 flex-1 truncate text-foreground-muted"
+              data-testid="tool-call-summary"
+              data-chat-find-text="true"
+            >
               {line}
             </span>
           )}
@@ -94,7 +100,9 @@ export function ToolCallCard({
             data-testid="tool-call-open-path"
             className="min-w-0 flex-1 truncate text-left text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
           >
-            <span data-testid="tool-call-summary">{line}</span>
+            <span data-testid="tool-call-summary" data-chat-find-text="true">
+              {line}
+            </span>
           </button>
         )}
 
