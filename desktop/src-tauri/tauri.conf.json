@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "smind",
+  "version": "0.1.0",
+  "identifier": "dev.spacingmind.desktop",
+  "build": {
+    "frontendDist": "../ui",
+    "beforeBuildCommand": {
+      "script": "bun install && bun run --filter @smind/ui build:desktop",
+      "cwd": "../../web"
+    },
+    "beforeDevCommand": {
+      "script": "bun install && bun run --filter @smind/ui build:desktop",
+      "cwd": "../../web"
+    }
+  },
+  "app": {
+    "security": {
+      "csp": null
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["smind"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "deb",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

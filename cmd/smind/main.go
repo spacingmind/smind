@@ -41,6 +41,8 @@ func run(args []string) int {
 		return cmdSpace(args[1:])
 	case "task":
 		return cmdTask(args[1:])
+	case "version", "--version", "-v":
+		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
 		printUsage(os.Stdout)
 		return 0

@@ -186,9 +186,12 @@ async function pairAndAssertTasks(page, pairingUrl) {
   await page.fill('textarea, input[type="text"]', pairingUrl);
   await page.getByRole('button', { name: 'Connect' }).click();
   // TasksScreen's post-connect states: 'ready' always renders a Disconnect
-  // button (even for a workspace-less daemon -- its FlatList always has an
-  // "ungrouped" section, so the ListEmptyComponent's "No workspaces yet"
-  // never actually renders); 'error' renders "Couldn't load the workspace".
+  // button; 'error' renders "Couldn't load the workspace". When ready, the
+  // harness daemon tracks no workspaces (its EnrollWorkspace only creates a
+  // relay-level admission secret, not a store row), so the task list is
+  // empty and FlatList's ListEmptyComponent -- "No workspaces yet" --
+  // must actually render (it couldn't before the empty-state fix: the
+  // ungrouped section made the data array never empty).
   const ready = page.getByRole('button', { name: 'Disconnect' });
   const errored = page.getByText("Couldn't load the workspace");
   const loaded = ready.or(errored).first();
@@ -202,6 +205,13 @@ async function pairAndAssertTasks(page, pairingUrl) {
     const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '(unknown)');
     fail(`tasks screen rendered the error state: ${bodyText}`);
     return false;
+  }
+  // The harness has no tasks, so the ready state must show the empty state.
+  const emptyState = page.getByText('No workspaces yet', { exact: true });
+  try {
+    await emptyState.waitFor({ timeout: 5_000 });
+  } catch {
+    fail('tasks screen empty state (\"No workspaces yet\") not shown for the task-less harness workspace');
   }
   return true;
 }
