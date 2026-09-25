@@ -413,6 +413,15 @@ milestone-1 fixed-IDs limitation above are already decided.)*
   clean for the full `smind-desktop` binary (including `assets.rs`'s
   `rust-embed` wiring), so nothing in the IPC/proxy layer fails to
   compile or link.
-- **Windows CI (`desktop-windows` workflow)**: not yet triggered — this
-  branch has not been pushed as of this note. To be confirmed after
-  pushing per the task's final step.
+- **Windows CI (`desktop-windows` workflow)**: pushed and green after one
+  fix-forward. The first push
+  ([36115304360](https://github.com/spacingmind/smind/actions/runs/36115304360))
+  failed: the Windows runner has no system `protoc`, and
+  `tonic-prost-build` shells out to one — this plan's own Decisions
+  section already called for a vendored `protoc` but it was never
+  actually wired up. Fixed by pointing `build.rs`'s `PROTOC` env var at
+  `protoc-bin-vendored`'s bundled binary (verified locally too, by
+  hiding the system `protoc` from `PATH` and rebuilding clean). Re-run
+  [36116119053](https://github.com/spacingmind/smind/actions/runs/36116119053)
+  succeeded in 6m42s, producing both the NSIS `.exe` and MSI `.msi`
+  installers.
