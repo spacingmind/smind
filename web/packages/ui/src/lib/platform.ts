@@ -18,7 +18,36 @@ export interface Connection {
   baseUrl: string;
 }
 
-/** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5), one method per command. */
+/** The app-managed local daemon's status (ADR-0013 part D2), mirroring the Rust `DaemonStatus` DTO. */
+export interface DaemonStatus {
+  platform: "wsl2" | "macos" | "unsupported";
+  reachable: boolean;
+  daemonVersion: string | null;
+  appVersion: string;
+  comparison: "older" | "same" | "newer" | "unknown";
+  managedState: "notRunning" | "managed" | "unmanaged";
+  pid: number | null;
+  installedPath: string | null;
+  logPath: string | null;
+  /** Whether the managed binary exists on disk right now -- distinct from `managedState`, since a bare take-over (no prior Install/Update) can be "managed" with nothing installed. Restart is disabled unless this is true. */
+  binaryInstalled: boolean;
+}
+
+/** A progress update emitted while `daemonInstall`/`daemonUpdate`/`daemonRestart` run. */
+export interface DaemonProgress {
+  stage: "downloading" | "verifying" | "installing" | "starting" | "stopping";
+  message: string;
+}
+
+/** Version skew for *any* saved connection (not just local) -- the loopback proxy doesn't forward `/healthz`, so this probes directly. */
+export interface ConnectionVersionInfo {
+  reachable: boolean;
+  daemonVersion: string | null;
+  appVersion: string;
+  comparison: "older" | "same" | "newer" | "unknown";
+}
+
+/** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
   addConnection(label: string, url: string): Promise<Connection>;
@@ -27,6 +56,15 @@ export interface DesktopApi {
   getCurrentConnection(): Promise<Connection>;
   /** Opens an http(s) URL in the OS's default browser -- Rust validates the scheme (AC5); this is the only escape hatch a bundled-UI link needs, since in-window navigation is restricted to the proxy origin (AC3). */
   openExternal(url: string): Promise<void>;
+  /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
+  daemonStatus(): Promise<DaemonStatus>;
+  daemonInstall(): Promise<DaemonStatus>;
+  daemonUpdate(): Promise<DaemonStatus>;
+  daemonRestart(): Promise<DaemonStatus>;
+  takeOverDaemon(): Promise<DaemonStatus>;
+  connectionVersion(id: string): Promise<ConnectionVersionInfo>;
+  /** Subscribes to progress events during a long-running daemon operation; returns an unsubscribe function. */
+  onDaemonProgress(cb: (progress: DaemonProgress) => void): () => void;
 }
 
 /** True only in a build made with `VITE_SMIND_DESKTOP=1`. */
@@ -42,6 +80,13 @@ function unavailable(): DesktopApi {
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
     openExternal: () => reject(),
+    daemonStatus: () => reject(),
+    daemonInstall: () => reject(),
+    daemonUpdate: () => reject(),
+    daemonRestart: () => reject(),
+    takeOverDaemon: () => reject(),
+    connectionVersion: () => reject(),
+    onDaemonProgress: () => () => {},
   };
 }
 
@@ -76,6 +121,47 @@ function realDesktopApi(): DesktopApi {
     async openExternal(url) {
       const invoke = await loadInvoke();
       await invoke("open_external", { url });
+    },
+    async daemonStatus() {
+      const invoke = await loadInvoke();
+      return invoke<DaemonStatus>("daemon_status");
+    },
+    async daemonInstall() {
+      const invoke = await loadInvoke();
+      return invoke<DaemonStatus>("daemon_install");
+    },
+    async daemonUpdate() {
+      const invoke = await loadInvoke();
+      return invoke<DaemonStatus>("daemon_update");
+    },
+    async daemonRestart() {
+      const invoke = await loadInvoke();
+      return invoke<DaemonStatus>("daemon_restart");
+    },
+    async takeOverDaemon() {
+      const invoke = await loadInvoke();
+      return invoke<DaemonStatus>("take_over_daemon");
+    },
+    async connectionVersion(id) {
+      const invoke = await loadInvoke();
+      return invoke<ConnectionVersionInfo>("connection_version", { id });
+    },
+    onDaemonProgress(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<DaemonProgress>("daemon-progress", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
     },
   };
 }
