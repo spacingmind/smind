@@ -13,18 +13,25 @@ copying its fields into the client's launch settings
 The user decided (2026-09-25) that smind gets agent profiles, stored **in
 the daemon** so web, desktop, mobile, and CLI clients share one list and a
 future orchestrating agent can read them over RPC. `docs/decisions/
-0014-agent-profiles.md` records the data model, storage, wsapi surface,
-apply mechanism, and CLI surface this plan implements. This plan covers
-**Phase 2 only: implementation** -- Phase 1 (this document plus the ADR) is
-research and design, no code.
+0014-agent-profiles.md` (**Accepted, 2026-09-25**) records the data model,
+storage, wsapi surface, apply mechanism, and CLI surface this plan
+implements. This plan covers **Phase 2: implementation** -- Phase 1 (the
+ADR plus this document) was research and design, no code.
+
+Following the ADR's 2026-09-25 review, `model` is out of v1 entirely (not
+in the schema, not on any RPC, not in the CLI, not in the UI) -- deferred
+until `task.prompt` gains a real per-run model parameter end to end. `icon`,
+`color`, `featureValues`, and `systemPrompt` remain excluded per the ADR's
+original argument. No inert fields ship in this plan's implementation.
 
 ## Acceptance Criteria
 
 **Store and migration**
 
 1. `internal/store/schema.sql` gains an `agent_profiles` table (`id`,
-   `name`, `provider`, `model`, `approval_policy`, `thinking_level`,
-   `notes`, `created_at`, `updated_at`), created via
+   `name`, `provider`, `approval_policy`, `thinking_level`,
+   `notes`, `created_at`, `updated_at` -- no `model` column, per the ADR's
+   2026-09-25 review), created via
    `CREATE TABLE IF NOT EXISTS` -- no `internal/store/migrate.go` entry,
    since this is a new table, not a new column on an existing one.
 2. `internal/store` exposes `CreateAgentProfile`, `GetAgentProfile`,
@@ -89,21 +96,17 @@ research and design, no code.
 13. After selecting a profile, every field remains independently editable
     (selecting a profile is a one-time seed, not a locked mode) -- matches
     Paseo's "still editable before sending" behavior.
-14. The profile's `model` field is not sent anywhere on submit (documented
-    limitation, ADR-0014) -- this AC exists so the gap is verified, not
-    accidentally "fixed" by wiring `model` into a param `task.prompt`
-    doesn't have.
 
 **Regression**
 
-15. With zero profiles in the store, the composer's Profiles control
+14. With zero profiles in the store, the composer's Profiles control
     renders nothing (or an inert empty affordance) and every other
     composer behavior -- default provider (`claude-native`), default
     approval policy (`manual`), default thinking level (unset) -- is
     byte-for-byte unchanged from before this feature.
-16. The existing composer test suite (`composer.test.tsx`) passes
+15. The existing composer test suite (`composer.test.tsx`) passes
     unmodified (only new tests added, no existing assertions changed).
-17. `task.prompt`'s wire shape and existing tests (`internal/wsapi`'s
+16. `task.prompt`'s wire shape and existing tests (`internal/wsapi`'s
     `run_test.go`/`task_test.go` and equivalents) pass unmodified --
     confirms the feature is additive-only, per ADR-0014's Compatibility
     section.
@@ -174,9 +177,7 @@ pattern)**
   composer does not revert it back to the profile's value.
 - With `profile.list` returning `[]`, the Profiles control does not render
   (or renders disabled/empty), and submitting a prompt behaves exactly as
-  it does today (regression -- covers AC15).
-- A profile with `model` set does not add a `model` field to the
-  `task.prompt` call the composer makes on submit (covers AC14).
+  it does today (regression -- covers AC14).
 
 **Regression**
 
@@ -197,16 +198,17 @@ pattern)**
 - CLI verbs `add`/`ls`/`rm` (not `create`/`ls`/`delete`): matches
   `internal/accounts`' CLI precedent per ADR-0014's CLI surface section.
   No `edit` subcommand in v1 (web Settings covers it).
-- `model`'s current inertness (stored and editable, but not sent on
-  `task.prompt`) is a deliberate, documented v1 gap -- ADR-0014's "Known
-  limitation" section -- not something this plan's implementation should
-  try to route around (e.g. by inventing an undocumented client-side-only
-  send path).
+- `model` is dropped from v1 entirely (schema, RPC, CLI, UI) per the ADR's
+  2026-09-25 review -- ADR-0014's "Deferred: `model`" section. This plan's
+  implementation must not carry a `model` field anywhere (no inert column,
+  no inert RPC field, no inert form input); add it back only alongside a
+  real end-to-end `task.prompt` model parameter, as its own future plan.
 
 ## Progress
 
-- 2026-09-25: ADR-0014 and this plan authored (Phase 1). Implementation
-  (Phase 2) not started.
+- 2026-09-25: ADR-0014 and this plan authored (Phase 1).
+- 2026-09-25: ADR-0014 reviewed and accepted; `model` dropped from v1 scope
+  entirely. ADR status set to Accepted. Implementation (Phase 2) starting.
 
 ## Validation
 

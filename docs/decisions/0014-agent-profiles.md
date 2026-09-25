@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-09-25)
 
 ## Context
 
@@ -42,11 +42,23 @@ A new persisted record, `store.AgentProfile`:
 | `id` | `int64` | yes | store-assigned (`AUTOINCREMENT`) |
 | `name` | `string` | yes | non-empty; a label, not a key -- uniqueness is not enforced, matching Paseo (profiles are referenced by `id`, never by name) |
 | `provider` | `string` | yes | must be one of `taskrunner.SupportedProviders()`'s ids at write time (`create`/`update`); stored as a plain string, not `taskrunner.Provider`, for the same reason `store.Run.Provider`/`ApprovalPolicy` are plain strings -- `internal/store` does not import `internal/taskrunner` (see `internal/store/types.go:81-84`'s doc comment) |
-| `model` | `string` | no, defaults to `""` | free text; see "Known limitation: `model` has no apply path yet" below |
 | `approvalPolicy` | `string` | no, defaults to `""` (meaning "unset"; the composer's own default of `manual` applies when a profile leaves this unset) | when non-empty, must satisfy `taskrunner.ApprovalPolicy.IsValid()` |
 | `thinkingLevel` | `string` | no, defaults to `""` (`taskrunner.ThinkingLevelUnspecified`) | when non-empty, must satisfy `taskrunner.ThinkingLevel.IsValid()`; meaningful only when `provider` is `claude-native`, same as today's per-run field |
 | `notes` | `string` | no, defaults to `""` | free text, human-facing today; shaped to double as the LLM-legible field Paseo's `list_profiles` exposes to an orchestrating agent, if/when smind grows that RPC |
 | `createdAt` / `updatedAt` | `time.Time` | yes | store-stamped, matching every other `store` record |
+
+**Deferred: `model`.** The original draft of this ADR included an optional
+`model` field. Dropped from v1 entirely (schema, RPC shapes, CLI, UI) after
+review on 2026-09-25: `task.prompt` (`internal/wsapi/handlers.go:705-735`)
+has no `model` parameter, and no runner backend (`claude-agent-sdk-go`,
+ACP, Codex) is wired for per-run model selection today, so a stored `model`
+value would be a field with nothing to apply it to or render it against --
+an inert column, which this ADR's own "no inert fields" stance (see the
+excluded fields below) argues against keeping. Add `model` back to this
+schema in the same additive way (a new nullable column, a new optional RPC
+field, a new CLI flag) once `task.prompt` -- or its successor -- gains a
+real `model` parameter end to end; until then there is nothing for a
+profile's `model` to mean.
 
 **Deliberately excluded**, each for a reason specific to smind's current
 surface (not carried over just because Paseo has them):
@@ -71,20 +83,6 @@ surface (not carried over just because Paseo has them):
   `thinkingLevel`, which is a genuine pre-run field. A profile applied
   before a run starts has nothing to copy `featureValues` into yet. Out of
   scope until a pre-run feature-default surface exists.
-
-**Known limitation: `model` has no apply path yet.** `task.prompt`
-(`internal/wsapi/handlers.go:705-735`) takes `taskId`, `provider`, `prompt`,
-`approvalPolicy`, and `thinkingLevel` -- there is no `model` parameter
-anywhere in the wire protocol, and no runner backend (`claude-agent-sdk-go`,
-ACP, Codex) is wired for per-run model selection today. `model` is included
-in the profile schema per this ADR's requirement and because Paseo's
-experience shows it's a natural field to want once model selection lands,
-but until `task.prompt` (or its successor) gains a `model` param, applying a
-profile with `model` set has no observable runtime effect -- the composer's
-Profiles picker still round-trips the value (so create/edit/list all work
-today), it just sends nothing extra on submit. This is a known, accepted gap
-for v1, not a silent drop: the plan (`docs/plans/active/agent-profiles.md`)
-calls it out explicitly rather than treating "model" as if it already works.
 
 ### Scope: global per daemon, not per workspace
 
@@ -138,10 +136,10 @@ following the `space.*`/`task.*` naming and error-wrapping convention
 
 | Method | Params | Result | Notes |
 | --- | --- | --- | --- |
-| `profile.create` | `{name, provider, model?, approvalPolicy?, thinkingLevel?, notes?}` | the created `store.AgentProfile`, marshalled verbatim (no `json:` tags, same convention as `task.get`/`space.get`) | errors: invalid params (unmarshal failure), empty `name`, unknown `provider`, invalid `approvalPolicy`/`thinkingLevel` |
+| `profile.create` | `{name, provider, approvalPolicy?, thinkingLevel?, notes?}` | the created `store.AgentProfile`, marshalled verbatim (no `json:` tags, same convention as `task.get`/`space.get`) | errors: invalid params (unmarshal failure), empty `name`, unknown `provider`, invalid `approvalPolicy`/`thinkingLevel` |
 | `profile.list` | none | `[]store.AgentProfile`, ordered by `id` | matches `ListTasks`/`ListSpacesByWorkspace`'s ordering convention |
 | `profile.get` | `{id}` | the profile | not-found is a clear wrapped error, matching `GetSpace`/`GetWorkspace` |
-| `profile.update` | `{id, name, provider, model?, approvalPolicy?, thinkingLevel?, notes?}` | the updated profile | full-record replace, not a partial patch -- no existing smind mutation RPC does field-level PATCH semantics (`task.move`/`task.archive` are each a dedicated single-purpose operation, not a generic patch) |
+| `profile.update` | `{id, name, provider, approvalPolicy?, thinkingLevel?, notes?}` | the updated profile | full-record replace, not a partial patch -- no existing smind mutation RPC does field-level PATCH semantics (`task.move`/`task.archive` are each a dedicated single-purpose operation, not a generic patch) |
 | `profile.delete` | `{id}` | `{}` | no `deleteSummaryResult`-shaped body: nothing references a profile row from another table, so there is nothing to cascade or report |
 
 Validation is shared by `create` and `update`, reusing the exact validators
@@ -209,11 +207,6 @@ param on `task.prompt`.
   `docs/research/local/paseo-skills-profiles-2026-09.md`'s §b). The
   copy-once approach gets "editable after applying" for free: it's just
   ordinary Select state once copied.
-- It also sidesteps the `model` limitation above symmetrically: a
-  server-side `profileId` apply couldn't honor `model` either, since
-  `task.prompt` has nowhere to put it -- so `profileId` buys no advantage
-  even for the one field client-side copying can't fully honor yet.
-
 ### CLI surface
 
 Cheap; add `smind profile add|ls|rm`, matching `internal/accounts`'
@@ -221,8 +214,8 @@ Cheap; add `smind profile add|ls|rm`, matching `internal/accounts`'
 `create`/`ls`, since a profile is a labeled, addable "thing referenced by
 id" like an account, not an editable container like a workspace:
 
-- `smind profile add <name> <provider> [--model=] [--approval-policy=] [--thinking-level=] [--notes=]` -- prints the created row (tabwriter, matching `cmdSpaceCreate`).
-- `smind profile ls` -- tabwriter table: `ID NAME PROVIDER MODEL APPROVAL THINKING`.
+- `smind profile add <name> <provider> [--approval-policy=] [--thinking-level=] [--notes=]` -- prints the created row (tabwriter, matching `cmdSpaceCreate`).
+- `smind profile ls` -- tabwriter table: `ID NAME PROVIDER APPROVAL THINKING`.
 - `smind profile rm <id>` -- calls `profile.delete`.
 
 No `smind profile edit` in v1: web Settings covers editing, and a CLI edit
@@ -234,11 +227,11 @@ criteria.
 
 Purely additive: a new table, five new wsapi methods, three new event
 topics, one new CLI subcommand group. `task.prompt`'s wire shape is
-untouched -- no client sends `model`, and no existing field's meaning
-changes. A daemon with zero profiles behaves identically to today for every
-existing client: the composer's own `provider`/`approvalPolicy`/
-`thinkingLevel` defaults (`composer.tsx:201-215`) are unchanged and remain
-the fallback whenever no profile is selected.
+untouched -- no existing field's meaning changes. A daemon with zero
+profiles behaves identically to today for every existing client: the
+composer's own `provider`/`approvalPolicy`/`thinkingLevel` defaults
+(`composer.tsx:201-215`) are unchanged and remain the fallback whenever no
+profile is selected.
 
 ## Alternatives considered
 
@@ -257,9 +250,11 @@ the fallback whenever no profile is selected.
   Rejected in favor of client-side field copying -- see "How a profile is
   applied" above.
 - **Carrying Paseo's full schema verbatim** (`icon`, `color`,
-  `featureValues`, `systemPrompt`). Rejected per-field in "Deliberately
-  excluded" above -- each needs a smind-side consumer that doesn't exist
-  yet; adding the field without one would be dead weight on the wire.
+  `featureValues`, `systemPrompt`), and keeping `model` in the v1 schema as
+  an inert field. Both rejected for the same reason: each needs a
+  smind-side consumer that doesn't exist yet ("Deliberately excluded" and
+  "Deferred: `model`" above); adding a field without one is dead weight on
+  the wire, not future-proofing.
 
 ## Rationale
 
