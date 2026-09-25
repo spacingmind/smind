@@ -102,4 +102,57 @@ Branching and release model (see memory/CONTRIBUTING):
 
 ## Validation
 
-To be filled in once the AC5 dry run has been pushed and run on this branch.
+Dry run (workflow_dispatch on this branch): three runs while iterating;
+the last one is clean end to end.
+
+- Run 1, https://github.com/spacingmind/smind/actions/runs/36098303607 --
+  green, but only `prepare` actually ran; `build-binaries`,
+  `build-desktop-windows`, and `publish` were all skipped. Root cause:
+  GitHub's default `needs:` condition skips a job when *any* job in its
+  transitive dependency chain was skipped, not just its direct needs --
+  `prepare` needs `release-please` (skipped on `workflow_dispatch`), so
+  everything downstream of `prepare` inherited that skip by default even
+  though `prepare` itself had succeeded. Fixed in commit `b4a7a02` by
+  giving every job downstream of `prepare` the same
+  `always() && needs.<X>.result == 'success'` pattern.
+- Run 2, https://github.com/spacingmind/smind/actions/runs/36098452878 --
+  all jobs green, all 6 expected artifacts present, but the merged release
+  bundle (`smind_<version>_release`) and `checksums.txt` only had the 4
+  daemon tarballs, no Windows installers. Root cause: `desktop-windows.yml`
+  uploaded the NSIS/MSI files straight from their `nsis/`/`msi/` build
+  subdirectories, so the artifact preserved those two subdirectories;
+  `publish`'s flat `*.exe`/`*.msi` glob (after `merge-multiple`) found
+  nothing. Fixed in commit `0d6dca1` by staging both files into a flat
+  `dist/` dir before upload.
+- Run 3, https://github.com/spacingmind/smind/actions/runs/36099320274 --
+  clean. `prepare`, all 4 `build-binaries` matrix legs, `build-desktop-windows`,
+  and `publish` all green. Artifacts: `smind_0.7.0-dev+0d6dca1_{darwin,linux}_{amd64,arm64}`,
+  `smind-desktop-windows`, and the merged `smind_0.7.0-dev+0d6dca1_release`.
+
+Test Scenarios, checked against run 3's merged `smind_0.7.0-dev+0d6dca1_release` artifact:
+
+- [x] Dry-run job green; artifacts include 4 tarballs, `checksums.txt`, and
+  the Windows installers (`smind_0.7.0_x64-setup.exe`, `smind_0.7.0_x64_en-US.msi`).
+- [x] `sha256sum -c checksums.txt` -- all 6 files `OK`.
+- [x] `tar -xzf smind_0.7.0-dev+0d6dca1_linux_amd64.tar.gz && ./smind --version`
+  -> `smind 0.7.0-dev+0d6dca1 (0d6dca1)`, not `dev` (this is a
+  workflow_dispatch dry run, not an actual tag, hence the `-dev+<sha>`
+  suffix -- a real release build would print a bare `0.7.0`).
+- [x] `file` on each daemon binary: linux/amd64 and linux/arm64 are
+  `ELF 64-bit ... x86-64` / `... ARM aarch64`; darwin/amd64 and
+  darwin/arm64 are `Mach-O 64-bit x86_64 executable` / `Mach-O 64-bit
+  arm64 executable`.
+- [x] Version-sync check (`task check:versions` /
+  `scripts/check-version-sync.sh`): passes at `0.7.0`; verified locally it
+  fails (non-zero exit, `::error::` line naming the field) when
+  `desktop/package.json`'s version is edited to `0.1.0`, and passes again
+  once reverted.
+- [x] `release-please-config.json` extra-files syntax confirmed against
+  release-please's own `docs/customizing.md` (fetched 2026-09-25; see
+  Decisions). Release-please's own tag/Release/changelog behavior is
+  otherwise untouched -- only `extra-files` was added.
+
+`task test` and `task lint` both pass (one `internal/taskrunner` subtest
+flaked on a full `go test ./...` run once, unrelated to this change --
+passed on immediate rerun both in isolation and as part of the full
+suite).
