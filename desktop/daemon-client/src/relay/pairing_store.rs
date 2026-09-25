@@ -124,9 +124,39 @@ pub fn save(app_data_dir: &Path, connection_id: &str, pairing: &RelayPairing) ->
     std::fs::create_dir_all(&dir)?;
     let data = serde_json::to_string(&pairing.to_persisted())
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    restrict_dir(&dir)?;
     let path = pairing_path(app_data_dir, connection_id);
-    std::fs::write(&path, data)?;
+    write_private(&path, data.as_bytes())?;
+    // Also covers a pre-existing file created before this was 0600-at-birth.
     set_restrictive_permissions(&path)?;
+    Ok(())
+}
+
+/// write_private creates (or truncates) `path` with mode 0600 at creation
+/// time on unix, so the key material is never briefly readable by other
+/// users between write and chmod.
+#[cfg(unix)]
+fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
+    f.write_all(data)?;
+    f.sync_all()
+}
+
+#[cfg(not(unix))]
+fn write_private(path: &Path, data: &[u8]) -> io::Result<()> {
+    std::fs::write(path, data)
+}
+
+#[cfg(unix)]
+fn restrict_dir(dir: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn restrict_dir(_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
