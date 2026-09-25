@@ -5,12 +5,14 @@ import "@/components/settings/appearance-section";
 import "@/components/settings/connections-section";
 import "@/components/settings/general-section";
 import "@/components/settings/notifications-section";
+import "@/components/settings/profiles-section";
 import "@/components/settings/shortcuts-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PaneHeader } from "@/components/ui/pane-header";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -40,10 +42,13 @@ import type { WsClient } from "@/lib/ws-client";
  */
 export function SettingsScreen({
   client,
+  events = null,
   onNavigateBack,
   initialSectionId,
 }: {
   client: WsClient | null;
+  /** The app's shared events.subscribe surface, forwarded to each section's render context -- optional (defaults null) so existing callers/tests that don't care about live updates need no change. */
+  events?: DaemonEvents | null;
   /** Returns to the view the settings screen was opened from (back button / Escape). */
   onNavigateBack: () => void;
   /** Which section a fresh mount opens to, if it exists in the registry -- `shortcuts.help` (AC5) deep-links to "shortcuts" this way. Defaults to the first registered section, same as before this prop existed. */
@@ -124,7 +129,7 @@ export function SettingsScreen({
           </ul>
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          {active ? active.render({ client }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
+          {active ? active.render({ client, events }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
         </div>
       </div>
     </div>

@@ -792,6 +792,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       {activeView === "settings" ? (
         <SettingsScreen
           client={client}
+          events={events}
           onNavigateBack={() => setActiveView("workspace")}
           initialSectionId={settingsInitialSectionId ?? undefined}
         />

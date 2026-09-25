@@ -1,10 +1,13 @@
 import type { ReactNode } from "react";
 
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClient } from "@/lib/ws-client";
 
-/** What a registered section's render function receives -- the live daemon connection, so a section (Items 14/15's Accounts/Quota) can make its own RPC calls without SettingsScreen needing to know what those calls are. */
+/** What a registered section's render function receives -- the live daemon connection, so a section (Items 14/15's Accounts/Quota) can make its own RPC calls without SettingsScreen needing to know what those calls are, plus the app's shared events.subscribe surface (ADR-0014's Profiles section uses this for live profile.* updates). */
 export interface SettingsSectionContext {
   client: WsClient | null;
+  /** The app's single events.subscribe surface (useDaemonEvents), for a section that wants live topic updates (e.g. Profiles reflecting profile.created/updated/deleted) rather than a manual refresh. Optional (absent/undefined for a caller that predates this field, null until the app's own client/events are ready) -- a section that doesn't need it can ignore it entirely. */
+  events?: DaemonEvents | null;
 }
 
 /** One entry in the settings screen's section list (audit-paseo.md §4's list+detail shape). */

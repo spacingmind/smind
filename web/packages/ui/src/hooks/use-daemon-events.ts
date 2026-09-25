@@ -3,10 +3,14 @@ import { useEffect, useMemo, useRef } from "react";
 import type { DaemonNotification, WsClient } from "@/lib/ws-client";
 import { LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
 
+/** ADR 0014's three agent-profile lifecycle topics -- not part of LIFECYCLE_TOPICS (workspace-tree.ts), since a profile isn't part of the workspace/space/task tree that constant describes. */
+const PROFILE_TOPICS = ["profile.created", "profile.updated", "profile.deleted"];
+
 /**
- * The topics the UI subscribes to -- ADR 0005's initial three plus ADR
- * 0009's eight workspace/space/task lifecycle topics -- in one
- * events.subscribe per connection, covering every consumer.
+ * The topics the UI subscribes to -- ADR 0005's initial three, ADR 0009's
+ * eight workspace/space/task lifecycle topics, and ADR 0014's three
+ * profile.* topics -- in one events.subscribe per connection, covering
+ * every consumer.
  *
  * `event.dropped` is deliberately not here: the daemon's per-connection
  * pump synthesises it on queue overflow rather than publishing it, and
@@ -14,7 +18,7 @@ import { LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
  * It still arrives as an ordinary notification, so it dispatches to
  * `subscribe("event.dropped", ...)` listeners like any other topic.
  */
-const TOPICS = ["task.status", "run.status", "permission.pending", ...LIFECYCLE_TOPICS];
+const TOPICS = ["task.status", "run.status", "permission.pending", ...LIFECYCLE_TOPICS, ...PROFILE_TOPICS];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
 export interface DaemonEvents {

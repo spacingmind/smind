@@ -38,6 +38,26 @@ export interface Space {
   UpdatedAt: string;
 }
 
+// Mirrors internal/store.AgentProfile field-for-field (ADR-0014, "docs/
+// decisions/0014-agent-profiles.md") -- same no-json-tags, PascalCase-on-
+// the-wire convention as Workspace/Task/Space above. A named, daemon-global
+// bundle of per-run settings (Provider/ApprovalPolicy/ThinkingLevel), not
+// scoped to any workspace. ApprovalPolicy/ThinkingLevel may be "" (unset):
+// the composer's own default applies in that case, same as an omitted
+// task.prompt field does today. No `Model` field -- dropped from v1 per the
+// ADR's 2026-09-25 review (task.prompt has no model parameter to apply it
+// to).
+export interface AgentProfile {
+  ID: number;
+  Name: string;
+  Provider: string;
+  ApprovalPolicy: string;
+  ThinkingLevel: string;
+  Notes: string;
+  CreatedAt: string;
+  UpdatedAt: string;
+}
+
 // internal/taskrunner.Provider values, carried over the wire as their
 // underlying strings. The authoritative list is served dynamically by the
 // daemon's provider.list method (see ProviderListResult); this union just
