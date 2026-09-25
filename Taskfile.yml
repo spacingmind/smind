@@ -92,6 +92,11 @@ tasks:
       - go vet ./...
       - test -z "$(gofmt -l $(git ls-files '*.go'))"
 
+  check:versions:
+    desc: Verify the four desktop version fields match the release manifest
+    cmds:
+      - ./scripts/check-version-sync.sh
+
   tidy:
     desc: go mod tidy
     cmds:
