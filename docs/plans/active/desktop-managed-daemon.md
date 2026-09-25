@@ -657,7 +657,8 @@ relationship with the daemon.
     own flow (install, *then* kill-and-start) does not hit it. Flagging
     for a future decision on whether to gate Restart or nudge the UI
     toward Update-first for a purely-adopted, never-installed record.
-  - **Windows CI re-run**: pushed; see below.
+  - **Windows CI re-run**: [36116346544](https://github.com/spacingmind/smind/actions/runs/36116346544)
+    -- green in 4m4s.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
