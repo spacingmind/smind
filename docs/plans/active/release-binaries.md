@@ -74,9 +74,14 @@ Branching and release model (see memory/CONTRIBUTING):
   `prepare` job gates every downstream job on "release just got created, or
   this is a manual dispatch" using `always()` + an explicit condition,
   since `release-please`'s own job only runs `on: push` and is otherwise
-  skipped (and skipped `needs` block downstream jobs by default). The
-  `publish` job re-applies the same `always()` pattern so it still runs
-  (and uploads workflow artifacts) when `release-please` was skipped.
+  skipped (and skipped `needs` block downstream jobs by default).
+  Confirmed empirically (first dry run, 2026-09-25) that this skip
+  propagates *transitively*: `build-binaries`/`build-desktop-windows` only
+  declare `needs: prepare`, but were still skipped when `release-please`
+  (prepare's own dependency, two hops up) was skipped, even though
+  `prepare` itself had succeeded. Every job downstream of `prepare` now
+  repeats the same `always() && needs.<X>.result == 'success'` pattern
+  rather than relying on the bare default `needs:` condition.
 - AC3 (`extra-files` syntax): confirmed against release-please's own docs
   (`docs/customizing.md` in `googleapis/release-please`, fetched
   2026-09-25). JSON files use `{"type": "json", "path": ..., "jsonpath": "$.version"}`.

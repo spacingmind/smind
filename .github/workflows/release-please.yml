@@ -84,6 +84,11 @@ jobs:
   build-binaries:
     name: build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: prepare
+    # Skip cascades transitively through `needs` by default (prepare
+    # itself needs release-please, which is skipped on workflow_dispatch),
+    # even though prepare succeeded -- always() + an explicit check breaks
+    # that cascade the same way it does for prepare and publish below.
+    if: always() && needs.prepare.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -140,6 +145,7 @@ jobs:
 
   build-desktop-windows:
     needs: prepare
+    if: always() && needs.prepare.result == 'success'
     permissions:
       contents: read
     uses: ./.github/workflows/desktop-windows.yml
