@@ -130,5 +130,18 @@ func run() error {
 	// stdout/stderr is diagnostic only.
 	fmt.Println("READY " + url)
 
+	// The offer's Relay field is the grpc-web address (mobile-only,
+	// see cmd/smind/relay.go's cmdRelayOffer) -- the desktop Rust client
+	// (ADR-0007 amendment, 2026-09-25) dials the relay's *native* gRPC
+	// listener instead, whose address production code derives from the
+	// grpc-web one by a fixed port convention that doesn't hold here
+	// (nativeLis/webLis above are two independent ephemeral ports, not
+	// adjacent ones). Printing it directly lets the Rust interop test
+	// (desktop/daemon-client/tests/relay_harness_interop.rs) dial the
+	// right port without that convention; it's an additive diagnostic
+	// line, not a protocol change -- the mobile-side integration tests
+	// only ever match the "READY " line and ignore any other output.
+	fmt.Println("NATIVE " + nativeLis.Addr().String())
+
 	select {} // block until the parent test process kills us.
 }
