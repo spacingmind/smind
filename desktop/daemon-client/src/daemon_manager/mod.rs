@@ -14,6 +14,7 @@ pub mod checksums;
 pub mod managed;
 pub mod release;
 pub mod version;
+pub mod wsl;
 
 pub use managed::{ManagedRecord, ManagedState};
 pub use release::{ReleaseError, ReleaseUrls};
