@@ -511,12 +511,43 @@ relationship with the daemon.
     (`cfg(target_os = "macos")`'s real path) is unverified beyond
     `cargo build` type-checking correctly for the logic it shares with
     the tested `native` module.
-- **Windows CI**: not run from this session -- pushing to
-  `feat/desktop-managed-daemon` and watching `desktop-windows` is the
-  next step (see the task's own instructions); this plan doesn't change
-  anything `desktop-windows.yml` builds differently (same
-  `beforeBuildCommand`/`cargo build` shape as the prior desktop plans),
-  so no workflow file changes were needed.
+- **Windows CI**: pushed to `feat/desktop-managed-daemon`.
+  - Run [36103682288](https://github.com/spacingmind/smind/actions/runs/36103682288)
+    **failed** at "Build installers": `smind-daemon-client` doesn't
+    compile for the `windows` target because `daemon_manager::native`
+    unconditionally imported `std::os::unix::process::CommandExt` and
+    called `.process_group(0)` -- both unix-only. This module has no
+    target_os cfg of its own (by design, per AC5's decision -- it's
+    exercised live on Linux with a temp dir standing in for the real
+    macOS path), so it still has to *compile* cleanly cross-platform
+    even though `spawn_detached`'s real callers are never reached on
+    Windows (`detect_platform()` only returns `Platform::Macos` when
+    `cfg!(target_os = "macos")`). This one call was the sole gap --
+    `install_binary`'s own unix-only bit (`PermissionsExt`/`set_mode`)
+    was already correctly `#[cfg(unix)]`-gated from the start.
+  - Fixed by gating both the `use std::os::unix::process::CommandExt`
+    import and the `cmd.process_group(0)` call behind `#[cfg(unix)]`,
+    with no other change to `spawn_detached`'s behavior on unix (macOS
+    still gets the real detach-into-its-own-process-group call; Windows
+    just skips a call it would never reach at runtime anyway).
+  - Re-scanned the whole `desktop/daemon-client`/`desktop/src-tauri`
+    tree for other unix-only surface (`std::os::unix::*`, `libc::`,
+    `nix::`, `PermissionsExt`, `MetadataExt`, `OsStrExt`, `FileExt`,
+    `process_group`): the only other hits are three `PermissionsExt`
+    uses inside `#[cfg(test)] mod tests` (the install/download
+    integration tests build a real unix-executable fixture with
+    `chmod`-equivalent bits). Confirmed these don't affect the Windows
+    build: `desktop-windows.yml`'s only Rust step is `npx tauri build`
+    (a release build), which never compiles `#[cfg(test)]` code, and no
+    workflow in this repo runs `cargo test` on a Windows runner
+    (`ci.yml` is `ubuntu-latest` only). Left them as-is rather than
+    gating code that's never actually built there.
+  - Re-run [36113216793](https://github.com/spacingmind/smind/actions/runs/36113216793)
+    **succeeded** in 9m47s: `Build installers` (`npx tauri build`) built
+    the release binary and both installers, `Stage installers` and the
+    artifact upload both completed. `desktop-daemon-client`'s own test
+    suite (116 tests) was re-run locally after pulling this fix and is
+    still green.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
