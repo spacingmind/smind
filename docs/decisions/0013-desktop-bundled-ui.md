@@ -91,44 +91,29 @@ Origin allowlist, no new endpoints — and the desktop app ships a
   surface for a heavier runtime — no capability model at all without
   hand-rolling one.
 
-## Open sub-decisions
+## Sub-decisions (user, 2026-09-25)
 
-- **Relay transport: Rust-side or TS-side.**
-  (a) Rust commands wrapping `mobile`-compatible pairing/crypto and
-  bridging to the loopback proxy — crypto stays audited Rust, the
-  bundled UI stays transport-agnostic; cost: a second protocol
-  implementation surface in `desktop/`.
-  (b) TS client reusing the mobile pairing code
-  (`mobile/src/relay/*`) compiled into the UI — one code path with
-  mobile; cost: E2EE keys live in webview JS and the WS relay must
-  still satisfy same-origin via the proxy.
-  *Recommendation: (a) Rust-side* — key material stays out of the
-  webview, and `daemon-client` already proves the pattern.
-- **Version skew: bundled UI vs older/newer daemons, without daemon
-  changes.**
-  (a) Feature-detect at startup (probe endpoints/events the UI needs,
-  degrade gracefully).
-  (b) Fall back to loading the daemon-served UI (the ADR-0012 path)
-  when feature detection fails. Note `/healthz` returns only
-  `{status, service}` — there is no version field, and adding one is a
-  daemon change, which is ruled out — so any version signal has to be
-  inferred client-side (RPC/event probes failing, or the served UI's
-  asset manifest).
-  *Recommendation: (a) feature-detect as the default, keep (b) as the
-  escape hatch for "old daemon, new app"*, since (b) re-introduces the
-  ADR-0012 path one release behind.
-- **Proxy port choice and its security.** Any local process can hit
-  the loopback proxy once it's up (it inherits the daemon's
-  unauthenticated `/api/token` posture, and the daemon already trusts
-  loopback). Fixed port = predictable target; random ephemeral port =
-  discovery cost only. *Recommendation: random port + per-launch
-  secret*: Rust opens the window at `http://127.0.0.1:<port>/?k=<secret>`,
-  the proxy swaps it for an `HttpOnly; SameSite=Strict` cookie and
-  redirects; every other request without the cookie is rejected. The
-  secret must never be obtainable from an unauthenticated first
-  request, or any local process could fetch it the same way. Not a
-  strong boundary — defense against casual local probing, not a
-  malicious same-machine process.
+- **Relay transport: Rust-side.** Rust holds the E2EE keys and bridges
+  `/ws` JSON-RPC frames onto the relay channel, answering `/api/token`
+  itself. The bundled UI stays transport-agnostic, and key material
+  never enters the webview.
+- **Version skew: feature-detect, with a daemon update flow like
+  Paseo's.** The UI feature-detects what it needs and degrades
+  gracefully. When the app is **newer** than a daemon it can manage,
+  the UI offers "update daemon and restart". This is modeled on Paseo's
+  `desktop/src/daemon/daemon-manager.ts` (`shouldRestartForVersion`:
+  app version vs the `daemonVersion` the daemon reports) and
+  `app/src/desktop/components/desktop-updates-section.tsx`.
+  - Remote, tunneled and relay daemons are not the app's to update, so
+    for them it only shows a notice.
+  - **Prerequisite, still open:** smind has no version signal today.
+    There is no `--version`, no build-time version stamp, and
+    `/healthz` returns only `{status, service}`. Paseo's flow depends on
+    the daemon reporting its version. How smind gets one (and how the
+    app replaces and restarts a daemon running inside WSL) must be
+    settled before this flow is built.
+- **Proxy port: random port + per-launch secret**, exchanged for an
+  `HttpOnly; SameSite=Strict` cookie as described in Security notes.
 
 ## Consequences
 
