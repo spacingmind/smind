@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Accepted (2026-09-25)
 
 Supersedes the "the webview loads the daemon's web UI" commitment of
 ADR-0012 (`docs/decisions/0012-desktop-thin-client.md`); the rest of
