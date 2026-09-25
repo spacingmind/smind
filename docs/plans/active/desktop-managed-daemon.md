@@ -644,21 +644,38 @@ relationship with the daemon.
     from an unused convenience wrapper, removed); `task lint` and the
     full web suite (1263/1263, unaffected) both green; no Go files
     touched.
-  - **Residual gap noted, not fixed (out of scope for this ask):**
-    `restart()` always starts the *managed* binary
-    (`start_detached_argv`/`spawn_detached` never target the adopted
-    path), regardless of the record's own `exe_path`. If a user does
-    Take-over and then clicks Restart *without ever having clicked
-    Install/Update first*, the pre-kill guard now correctly kills the
-    adopted process (as designed), but there is no managed binary on
-    disk yet for the restart to start -- leaving nothing running. This
-    is a availability/UX gap, not a wrong-process-killed safety bug (the
-    process identity checks are exactly what's intended), and Update's
-    own flow (install, *then* kill-and-start) does not hit it. Flagging
-    for a future decision on whether to gate Restart or nudge the UI
-    toward Update-first for a purely-adopted, never-installed record.
   - **Windows CI re-run**: [36116346544](https://github.com/spacingmind/smind/actions/runs/36116346544)
     -- green in 4m4s.
+- **Follow-up fix (7e84066): closed the residual availability gap.** The
+  gap flagged above -- Restart right after a bare Take-over (no prior
+  Install/Update) correctly kills the adopted process per the identity
+  guard, but `restart()`'s own start step only ever execs the *managed*
+  binary, which doesn't exist on disk yet -- was not acceptable to ship.
+  Fixed with a precondition checked before any kill:
+  - `managed::assert_restartable(binary_present)` (pure, tested
+    directly) refuses with "no app-managed daemon binary is installed
+    yet -- use Update/Install first" when there's nothing to restart
+    into.
+  - `binary_present` is resolved per platform: `layout.bin_path.exists()`
+    on macOS; `wsl::test_executable_argv` (`test -x`, argv-only, exit
+    status is the whole answer) inside the distro for WSL2. A shared
+    `binary_installed(app, platform, distro)` dispatcher backs both
+    `restart`'s precondition and `compute_status`'s new
+    `DaemonStatus.binary_installed` field.
+  - Settings -> Daemon disables the Restart button (with an explanatory
+    `title`) whenever `binaryInstalled` is false; Update stays enabled,
+    since Update always installs before it ever kills anything, so it
+    never hits this gap.
+  - **New tests**: `daemon-client` 131 -> **133**
+    (`assert_restartable_refuses_without_a_binary_on_disk` in `managed`,
+    `test_executable_argv_checks_the_managed_bin_via_argv_only` in
+    `wsl`). Web suite 1263 -> **1264**
+    (`disables Restart (but not Update) after a bare take-over with no
+    managed binary installed`, asserting the button is present-but-
+    disabled and a click never calls `daemonRestart`). All pass; `cargo
+    build`/`--release` clean for `src-tauri`, no warnings; `task lint`
+    and the full web suite both green; no Go files touched.
+  - **Windows CI re-run**: pushed; see below.
 - **Not done / explicitly deferred:**
   - A full live WSL2 end-to-end run (see above) -- stopped for safety
     once the sandbox's `wsl.exe` isolation gap surfaced.
