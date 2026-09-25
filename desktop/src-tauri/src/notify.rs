@@ -23,7 +23,12 @@ use crate::MAIN_WINDOW;
 pub struct ClickContext {
     pub app: AppHandle,
     pub cache: WorkspaceCache,
-    pub daemon_url: Url,
+    /// AC7: routes navigate within the loopback proxy's own origin
+    /// (`http://127.0.0.1:<port>/#/workspace/.../task/.../<kind>`), not
+    /// the selected connection's real (and possibly remote) base URL --
+    /// fixed for the process's lifetime, unlike the selected connection
+    /// itself.
+    pub proxy_url: Url,
 }
 
 /// show displays an OS notification for `task_id`, wiring up a click
@@ -47,7 +52,7 @@ pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
 pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
     let app = ctx.app.clone();
     let cache = ctx.cache.clone();
-    let daemon_url = ctx.daemon_url.clone();
+    let proxy_url = ctx.proxy_url.clone();
     let _ = ctx.app.run_on_main_thread(move || {
         use tauri::Manager;
         let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
@@ -56,7 +61,7 @@ pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
         let _ = win.show();
         let _ = win.set_focus();
         if let Some(workspace_id) = cache.get(task_id) {
-            let url = route::task_route_url(&daemon_url, workspace_id, task_id, route::DEFAULT_KIND);
+            let url = route::task_route_url(&proxy_url, workspace_id, task_id, route::DEFAULT_KIND);
             if let Ok(url) = url.parse() {
                 let _ = win.navigate(url);
             }

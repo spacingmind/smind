@@ -29,7 +29,7 @@ pub struct Tray {
     item: MenuItem<Wry>,
 }
 
-pub fn build(app: &AppHandle, cache: WorkspaceCache, daemon_url: Url) -> tauri::Result<Arc<Tray>> {
+pub fn build(app: &AppHandle, cache: WorkspaceCache, proxy_url: Url) -> tauri::Result<Arc<Tray>> {
     let state = Arc::new(Mutex::new(Attention::new()));
 
     let item = MenuItem::with_id(app, ID_ATTENTION, attention::label(0), false, None::<&str>)?;
@@ -53,7 +53,7 @@ pub fn build(app: &AppHandle, cache: WorkspaceCache, daemon_url: Url) -> tauri::
                     let ctx = ClickContext {
                         app: app.clone(),
                         cache: cache.clone(),
-                        daemon_url: daemon_url.clone(),
+                        proxy_url: proxy_url.clone(),
                     };
                     notify::navigate_to_task(&ctx, task_id);
                 }
