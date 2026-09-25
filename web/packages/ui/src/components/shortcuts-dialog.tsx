@@ -110,25 +110,25 @@ function ShortcutRow({
       data-binding-id={row.id}
     >
       <div className="min-w-0">
-        <div className="truncate text-ui-sm">{row.label}</div>
-        {row.note && <div className="truncate text-ui-xs text-foreground-muted">{row.note}</div>}
+        <div className="truncate text-ui-base">{row.label}</div>
+        {row.note && <div className="truncate text-ui-sm text-foreground-muted">{row.note}</div>}
         {conflictLabel && (
-          <div className="text-ui-xs text-warning" data-testid="shortcut-conflict">
+          <div className="text-ui-sm text-warning" data-testid="shortcut-conflict">
             Also used by {conflictLabel}
           </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {capturing === "chord" ? (
-          <span className="text-ui-xs text-foreground-muted" data-testid="shortcut-capturing">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Recording a chord… (Enter to save, Esc to cancel)
           </span>
         ) : capturing === "single" ? (
-          <span className="text-ui-xs text-foreground-muted" data-testid="shortcut-capturing">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-capturing">
             Press a key… (Esc to cancel)
           </span>
         ) : row.keys === null ? (
-          <span className="text-ui-xs text-foreground-muted" data-testid="shortcut-unassigned">
+          <span className="text-ui-sm text-foreground-muted" data-testid="shortcut-unassigned">
             Unassigned
           </span>
         ) : (
@@ -189,7 +189,7 @@ export function ShortcutRows({ query = "" }: { query?: string } = {}) {
   return (
     <div className="flex flex-col gap-4">
       {sections.length === 0 ? (
-        <p className="text-ui-sm text-foreground-muted" data-testid="shortcut-sections-empty">
+        <p className="text-ui-base text-foreground-muted" data-testid="shortcut-sections-empty">
           No shortcuts match "{query}".
         </p>
       ) : (

@@ -43,7 +43,7 @@ export const RunTimeline = memo(function RunTimeline({
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-xs text-foreground-muted">
+      <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-sm text-foreground-muted">
         <span className="truncate">{run.provider}</span>
         <span className="flex shrink-0 items-center gap-1.5">
           <StatusDot status={RUN_STATUS_DOT[run.status]} />
@@ -54,7 +54,7 @@ export const RunTimeline = memo(function RunTimeline({
       </div>
 
       <div className="px-3 py-2">
-        <p className="text-ui-sm font-medium whitespace-pre-wrap" data-testid="run-prompt">
+        <p className="text-ui-base font-medium whitespace-pre-wrap" data-testid="run-prompt">
           {run.prompt}
         </p>
 
@@ -72,7 +72,7 @@ export const RunTimeline = memo(function RunTimeline({
 
         {run.err && (
           <div className="mt-2 flex items-center gap-2">
-            <p className="text-ui-xs text-destructive" data-testid="run-error">
+            <p className="text-ui-sm text-destructive" data-testid="run-error">
               {run.err}
             </p>
             {onRetry && canRetryWithHigherEffort(run) && (
@@ -90,7 +90,7 @@ export const RunTimeline = memo(function RunTimeline({
         )}
       </div>
 
-      <div className="flex items-center gap-2 border-t px-3 py-1 text-ui-xs text-foreground-muted" data-testid="run-footer">
+      <div className="flex items-center gap-2 border-t px-3 py-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
         {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
         {run.stopReason && <span data-testid="run-stop-reason">{run.stopReason}</span>}
         <CopyTurnButton run={run} />

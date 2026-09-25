@@ -31,7 +31,7 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
           data-testid="tool-group-toggle"
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui-xs outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Layers className="size-3 shrink-0 text-foreground-muted" />

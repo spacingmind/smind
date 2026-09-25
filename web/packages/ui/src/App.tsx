@@ -727,14 +727,14 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
       <SidebarTrigger />
       <Separator orientation="vertical" className="h-4" />
-      <span className="text-ui-sm text-muted-foreground" data-testid="app-connection-status">
+      <span className="text-ui-base text-muted-foreground" data-testid="app-connection-status">
         {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
       </span>
     </header>
   );
 
   const emptyStateElement = (
-    <div data-testid="app-empty-state" className="flex h-full items-center justify-center text-ui-sm text-muted-foreground">
+    <div data-testid="app-empty-state" className="flex h-full items-center justify-center text-ui-base text-muted-foreground">
       Select a task to get started.
     </div>
   );
@@ -1524,7 +1524,7 @@ function DraggableTabTrigger({
         defaultValue={entry.title}
         aria-label={`Rename ${entry.title}`}
         data-testid="workspace-tab-rename-input"
-        className="h-7 max-w-48 shrink-0 rounded border border-ring bg-transparent px-2 text-ui-sm outline-none"
+        className="h-7 max-w-48 shrink-0 rounded border border-ring bg-transparent px-2 text-ui-base outline-none"
         onFocus={(e) => e.currentTarget.select()}
         onKeyDown={(e) => {
           e.stopPropagation();
@@ -1568,7 +1568,7 @@ function DraggableTabTrigger({
                 e.stopPropagation();
                 e.preventDefault();
               }}
-              className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+              className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
             >
               {/* aria-hidden: this span's own aria-label already names it; without
                   hiding the icon too, it would be announced a second time as
@@ -1617,7 +1617,7 @@ function DraggableTabTrigger({
             e.preventDefault();
             onClose(entry.key);
           }}
-          className="rounded px-1 text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+          className="rounded px-1 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
         >
           <span aria-hidden="true">×</span>
         </span>

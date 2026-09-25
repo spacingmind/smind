@@ -36,7 +36,7 @@ export function PaneHeader({
     >
       <div className="min-w-0">
         <h2 className="truncate text-ui-base font-medium">{title}</h2>
-        {subtitle && <div className="mt-0.5 flex items-center gap-2 text-ui-xs text-foreground-muted">{subtitle}</div>}
+        {subtitle && <div className="mt-0.5 flex items-center gap-2 text-ui-sm text-foreground-muted">{subtitle}</div>}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>

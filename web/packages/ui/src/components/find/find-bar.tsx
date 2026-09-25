@@ -121,10 +121,10 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
             autoCorrect="off"
             spellCheck={false}
             data-testid="find-input"
-            className="h-full min-w-0 flex-1 bg-transparent text-ui-sm outline-none placeholder:text-foreground-muted"
+            className="h-full min-w-0 flex-1 bg-transparent text-ui-base outline-none placeholder:text-foreground-muted"
           />
           <span
-            className="shrink-0 text-ui-xs text-foreground-muted"
+            className="shrink-0 text-ui-sm text-foreground-muted"
             role="status"
             aria-live="polite"
             data-testid="find-status"
@@ -170,7 +170,7 @@ export const FindBar = forwardRef<FindBarHandle, FindBarProps>(function FindBar(
             autoCorrect="off"
             spellCheck={false}
             data-testid="find-replace-input"
-            className="h-7 min-w-0 flex-1 rounded-md bg-surface px-2 text-ui-sm outline-none placeholder:text-foreground-muted"
+            className="h-7 min-w-0 flex-1 rounded-md bg-surface px-2 text-ui-base outline-none placeholder:text-foreground-muted"
           />
           <Button
             type="button"

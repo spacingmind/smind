@@ -107,7 +107,7 @@ export function FilePreview({ kind, content, path }: { kind: PreviewKind; conten
 function EmptyPreview({ icon }: { icon: ReactNode }) {
   return (
     <div
-      className="flex flex-1 items-center justify-center gap-1.5 text-ui-sm text-muted-foreground"
+      className="flex flex-1 items-center justify-center gap-1.5 text-ui-base text-muted-foreground"
       data-testid="preview-empty"
     >
       {icon}

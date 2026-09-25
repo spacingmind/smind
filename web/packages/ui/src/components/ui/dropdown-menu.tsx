@@ -69,7 +69,7 @@ function DropdownMenuItem({
       data-slot="dropdown-menu-item"
       data-inset={inset}
       className={cn(
-        "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
+        "relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
         className
       )}
       {...props}
@@ -88,7 +88,7 @@ function DropdownMenuLabel({
     <DropdownMenuPrimitive.Label
       data-slot="dropdown-menu-label"
       data-inset={inset}
-      className={cn("px-2 py-1.5 text-ui-sm font-medium data-[inset]:pl-8", className)}
+      className={cn("px-2 py-1.5 text-ui-base font-medium data-[inset]:pl-8", className)}
       {...props}
     />
   )
@@ -113,7 +113,7 @@ function DropdownMenuSubTrigger({
       data-slot="dropdown-menu-sub-trigger"
       data-inset={inset}
       className={cn(
-        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm outline-hidden select-none focus:bg-menu-hover data-[state=open]:bg-menu-hover data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none focus:bg-menu-hover data-[state=open]:bg-menu-hover data-[inset]:pl-8 [&>svg]:size-4 [&>svg]:shrink-0",
         className
       )}
       {...props}

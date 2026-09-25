@@ -144,7 +144,7 @@ function QuestionField({
 
   return (
     <fieldset data-testid="question-field" className="flex flex-col gap-1">
-      <legend className="text-ui-xs font-medium">{question.prompt}</legend>
+      <legend className="text-ui-sm font-medium">{question.prompt}</legend>
 
       {question.kind !== "free_text" && (
         <div className="flex flex-wrap gap-1.5" role="group" aria-label={question.prompt}>

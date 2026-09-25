@@ -44,7 +44,7 @@ function ContextMenuItem({
     <ContextMenuPrimitive.Item
       data-slot="context-menu-item"
       className={cn(
-        "focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-sm outline-hidden select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
         className,
       )}
       {...props}

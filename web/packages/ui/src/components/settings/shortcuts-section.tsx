@@ -23,7 +23,7 @@ export function ShortcutsSection() {
         data-testid="settings-shortcuts-search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="h-8 w-full max-w-sm rounded-lg border border-input bg-transparent px-2 text-ui-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="h-8 w-full max-w-sm rounded-lg border border-input bg-transparent px-2 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
       />
       <ShortcutRows query={query} />
     </div>

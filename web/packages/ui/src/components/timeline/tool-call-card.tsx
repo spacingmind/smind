@@ -66,7 +66,7 @@ export function ToolCallCard({
       data-status={item.status}
       className="rounded-lg border bg-card"
     >
-      <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-xs">
+      <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-sm">
         <button
           type="button"
           aria-expanded={open}
@@ -113,7 +113,7 @@ export function ToolCallCard({
       </div>
 
       {open && (
-        <div className="border-t px-2.5 py-2 text-ui-xs" data-testid="tool-call-detail">
+        <div className="border-t px-2.5 py-2 text-ui-sm" data-testid="tool-call-detail">
           {children}
         </div>
       )}

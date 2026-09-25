@@ -119,7 +119,7 @@ function DialogDescription({
   return (
     <SheetPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-ui-sm text-muted-foreground", className)}
+      className={cn("text-ui-base text-muted-foreground", className)}
       {...props}
     />
   )
