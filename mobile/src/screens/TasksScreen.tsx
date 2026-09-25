@@ -18,7 +18,8 @@ import { Button } from '@expo/ui';
 import { UiHost } from '../ui/UiHost';
 import { fetchOverview, Space, Task, Workspace } from '../api';
 import { RelayConnection } from '../relay/RelayConnection';
-import { PendingApprovalSet, sortTasksByAttention, subscribeToPendingApprovals } from '../taskAttention';
+import { PendingApprovalSet, subscribeToPendingApprovals } from '../taskAttention';
+import { buildTaskSections } from '../taskSections';
 import { AppTheme } from '../theme';
 import { useAppTheme } from '../theme/ThemeProvider';
 
@@ -102,7 +103,6 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
   }
 
   const { workspace, spaces, tasks } = state;
-  const ungrouped = tasks.filter((t) => t.SpaceID === null);
 
   return (
     <View style={styles.container}>
@@ -113,14 +113,7 @@ export function TasksScreen({ conn, onOpenTask, onDisconnect }: Props) {
         </UiHost>
       </View>
       <FlatList
-        data={[
-          { kind: 'ungrouped' as const, tasks: sortTasksByAttention(ungrouped, pendingTaskIds) },
-          ...spaces.map((s) => ({
-            kind: 'grouped' as const,
-            space: s,
-            tasks: sortTasksByAttention(tasks.filter((t) => t.SpaceID === s.ID), pendingTaskIds),
-          })),
-        ]}
+        data={buildTaskSections(spaces, tasks, pendingTaskIds)}
         keyExtractor={(item) => (item.kind === 'ungrouped' ? 'ungrouped' : `space-${item.space.ID}`)}
         refreshControl={
           <RefreshControl
