@@ -357,6 +357,12 @@
           "markdownDescription": "Enables the connections_add command without any pre-configured scope."
         },
         {
+          "description": "Enables the connections_add_relay command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-add-relay",
+          "markdownDescription": "Enables the connections_add_relay command without any pre-configured scope."
+        },
+        {
           "description": "Enables the connections_get_current command without any pre-configured scope.",
           "type": "string",
           "const": "allow-connections-get-current",
@@ -427,6 +433,12 @@
           "type": "string",
           "const": "deny-connections-add",
           "markdownDescription": "Denies the connections_add command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_add_relay command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-add-relay",
+          "markdownDescription": "Denies the connections_add_relay command without any pre-configured scope."
         },
         {
           "description": "Denies the connections_get_current command without any pre-configured scope.",

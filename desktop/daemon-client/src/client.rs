@@ -26,7 +26,12 @@ const RESOLVE_TIMEOUT: Duration = Duration::from_secs(3);
 /// healthz_ok reports whether the daemon answers GET /healthz.
 pub async fn healthz_ok(cfg: &Config) -> bool {
     let client = reqwest::Client::new();
-    match client.get(cfg.healthz_url()).timeout(HTTP_TIMEOUT).send().await {
+    match client
+        .get(cfg.healthz_url())
+        .timeout(HTTP_TIMEOUT)
+        .send()
+        .await
+    {
         Ok(resp) => resp.status().is_success(),
         Err(_) => false,
     }
@@ -98,7 +103,11 @@ pub enum ClientEvent {
 /// -- see `crate::cache`). Reconnects with exponential backoff (reset
 /// after a stable connection), refetching the token and resubscribing
 /// on every attempt.
-pub async fn run(cfg: Config, cache: WorkspaceCache, on_event: impl Fn(ClientEvent) + Send + Sync + 'static) {
+pub async fn run(
+    cfg: Config,
+    cache: WorkspaceCache,
+    on_event: impl Fn(ClientEvent) + Send + Sync + 'static,
+) {
     let client = reqwest::Client::new();
     let mut backoff = Backoff::default();
     loop {
@@ -199,6 +208,88 @@ async fn try_run_once(
                         return Ok(stable);
                     }
                 }
+            }
+        }
+    }
+}
+
+/// run_over_relay is `run`'s counterpart for a `relay`-kind connection
+/// (AC7): the relay transport (`crate::relay::client::spawn`) already
+/// owns reconnect/backoff/resume internally, so this just (re)subscribes
+/// on every transition to `Connected` (each one is a fresh logical
+/// wsapi connection daemon-side, exactly like a fresh `/ws` upgrade --
+/// see `crate::relay::client::run`'s doc comment) and parses inbound
+/// messages the same way `try_run_once` does. Kept as a short, separate
+/// function rather than unified with the WS path: the two transports'
+/// reconnection ownership differs enough (this one is entirely internal
+/// to `handle`) that sharing one generic loop would need more
+/// abstraction than the ~30 lines it would save.
+pub async fn run_over_relay(
+    handle: crate::relay::client::RelayHandle,
+    cache: WorkspaceCache,
+    on_event: impl Fn(ClientEvent) + Send + Sync + 'static,
+) {
+    let mut status_rx = handle.status();
+    let mut inbound = handle.subscribe();
+    loop {
+        tokio::select! {
+            changed = status_rx.changed() => {
+                if changed.is_err() {
+                    return; // every RelayHandle sender dropped
+                }
+                if *status_rx.borrow() == crate::relay::client::Status::Connected {
+                    let sub = subscribe_message().to_string();
+                    if handle.send(sub.into_bytes()).await.is_err() {
+                        return;
+                    }
+                    on_event(ClientEvent::Reconnected);
+                }
+            }
+            msg = inbound.recv() => {
+                match msg {
+                    Ok(bytes) => {
+                        let Ok(text) = String::from_utf8(bytes) else { continue };
+                        handle_relay_message(&text, &cache, &on_event, &handle).await;
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
+                }
+            }
+        }
+    }
+}
+
+/// handle_relay_message mirrors `try_run_once`'s inner per-message match
+/// (see that function's comments for the rationale of each branch), with
+/// `handle.send` standing in for the WS `tx.send`.
+async fn handle_relay_message(
+    text: &str,
+    cache: &WorkspaceCache,
+    on_event: &impl Fn(ClientEvent),
+    handle: &crate::relay::client::RelayHandle,
+) {
+    let Some(parsed) = protocol::parse_server_message(text) else {
+        return;
+    };
+    if let Some(event) = parsed.event {
+        if let Some(n) = protocol::notification_for(&event) {
+            let req_id = protocol::task_get_request_id(n.task_id);
+            let req = protocol::task_get_message(&req_id, n.task_id).to_string();
+            let _ = handle.send(req.into_bytes()).await;
+            on_event(ClientEvent::Notification(n));
+        } else if event.topic == "run.status" {
+            if let Some(rs) = protocol::run_status(&event.payload) {
+                if rs.status == "running" {
+                    on_event(ClientEvent::RunRunning {
+                        task_id: rs.task_id,
+                    });
+                }
+            }
+        }
+    } else if let (Some(id), Some(result)) = (parsed.id, parsed.result) {
+        if let Some(task_id) = protocol::task_get_response_task_id(&id) {
+            if let Some(workspace_id) = protocol::task_get_workspace_id(&result) {
+                cache.insert(task_id, workspace_id);
             }
         }
     }

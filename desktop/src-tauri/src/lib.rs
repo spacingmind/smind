@@ -77,6 +77,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::connections_list,
             commands::connections_add,
+            commands::connections_add_relay,
             commands::connections_remove,
             commands::connections_select,
             commands::connections_get_current,
@@ -103,7 +104,8 @@ pub fn run() {
 
             // AC3: a fresh secret every launch.
             let secret = dclient::proxy::secret::generate_secret();
-            let proxy_state = ProxyState::new(secret.clone(), registry, Box::new(assets::EmbeddedAssets));
+            let proxy_state =
+                ProxyState::new(secret.clone(), registry, Box::new(assets::EmbeddedAssets));
 
             // AC2: bind the loopback proxy and start serving before the
             // window is built, so its initial URL can name the real
@@ -113,30 +115,38 @@ pub fn run() {
             // later, the way ADR-0012's fallback page did) keeps this
             // simple and avoids ever showing a page with no `?k=` to
             // exchange.
-            let (port, server_fut) = tauri::async_runtime::block_on(dclient::proxy::serve(proxy_state.clone()))?;
+            let (port, server_fut) =
+                tauri::async_runtime::block_on(dclient::proxy::serve(proxy_state.clone()))?;
             tauri::async_runtime::spawn(server_fut);
 
-            let proxy_url: Url = format!("http://127.0.0.1:{port}").parse().expect("smind desktop: proxy URL is well-formed");
-            let initial_url: Url =
-                format!("http://127.0.0.1:{port}/?k={secret}").parse().expect("smind desktop: initial URL is well-formed");
+            let proxy_url: Url = format!("http://127.0.0.1:{port}")
+                .parse()
+                .expect("smind desktop: proxy URL is well-formed");
+            let initial_url: Url = format!("http://127.0.0.1:{port}/?k={secret}")
+                .parse()
+                .expect("smind desktop: initial URL is well-formed");
 
             // AC3: navigation is restricted to the proxy's own origin --
             // any other URL (an http(s) link inside the bundled UI, e.g.
             // "smind on GitHub") opens in the OS browser instead of
             // navigating the window away from the app.
             let nav_origin = proxy_url.origin();
-            let win = WebviewWindowBuilder::new(app, MAIN_WINDOW, tauri::WebviewUrl::External(initial_url))
-                .title("smind")
-                .inner_size(1280.0, 800.0)
-                .on_navigation(move |url| {
-                    if url.origin() == nav_origin {
-                        true
-                    } else {
-                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
-                        false
-                    }
-                })
-                .build()?;
+            let win = WebviewWindowBuilder::new(
+                app,
+                MAIN_WINDOW,
+                tauri::WebviewUrl::External(initial_url),
+            )
+            .title("smind")
+            .inner_size(1280.0, 800.0)
+            .on_navigation(move |url| {
+                if url.origin() == nav_origin {
+                    true
+                } else {
+                    let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                    false
+                }
+            })
+            .build()?;
 
             // quick-wins AC2: restore the persisted zoom level.
             let _ = win.set_zoom(zoom_store::load(app.handle()));
@@ -164,7 +174,11 @@ pub fn run() {
 
                 fn current_cfg(proxy: &ProxyState) -> Config {
                     let base_url = proxy.registry.lock().unwrap().current().base_url.clone();
-                    Config { daemon_url: base_url.parse().expect("smind desktop: saved connection URL is well-formed") }
+                    Config {
+                        daemon_url: base_url
+                            .parse()
+                            .expect("smind desktop: saved connection URL is well-formed"),
+                    }
                 }
 
                 let handle = app.handle().clone();
@@ -173,7 +187,13 @@ pub fn run() {
                 let open_proxy_url = proxy_url.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
-                        deeplink::handle(&handle, open_cache.clone(), current_cfg(&open_proxy_state), open_proxy_url.clone(), url.as_str());
+                        deeplink::handle(
+                            &handle,
+                            open_cache.clone(),
+                            current_cfg(&open_proxy_state),
+                            open_proxy_url.clone(),
+                            url.as_str(),
+                        );
                     }
                 });
 
@@ -184,7 +204,13 @@ pub fn run() {
                 if let Ok(Some(urls)) = app.deep_link().get_current() {
                     let cfg = current_cfg(&proxy_state);
                     for url in urls {
-                        deeplink::handle(app.handle(), cache.clone(), cfg.clone(), proxy_url.clone(), url.as_str());
+                        deeplink::handle(
+                            app.handle(),
+                            cache.clone(),
+                            cfg.clone(),
+                            proxy_url.clone(),
+                            url.as_str(),
+                        );
                     }
                 }
             }
@@ -202,12 +228,19 @@ pub fn run() {
             app.global_shortcut().register(TOGGLE_SHORTCUT)?;
 
             // AC7: start the daemon-client watcher (tray pending count,
-            // OS notifications) against whichever connection is
-            // currently selected; connections_select restarts it.
-            let initial_daemon_url: Url =
-                proxy_state.registry.lock().unwrap().current().base_url.parse().expect("smind desktop: saved connection URL is well-formed");
-            let client_task =
-                client_watch::spawn(app.handle(), tray.clone(), cache.clone(), proxy_url.clone(), Config { daemon_url: initial_daemon_url });
+            // OS notifications) -- and, for a relay-kind connection, the
+            // relay transport itself -- against whichever connection is
+            // currently selected; connections_select restarts both.
+            let initial_conn = proxy_state.registry.lock().unwrap().current().clone();
+            let (client_task, relay_task) = client_watch::spawn_initial(
+                app.handle(),
+                &proxy_state,
+                tray.clone(),
+                cache.clone(),
+                proxy_url.clone(),
+                &initial_conn,
+                &connections_path,
+            );
 
             app.manage(DesktopState {
                 proxy: proxy_state,
@@ -215,7 +248,8 @@ pub fn run() {
                 proxy_url,
                 cache,
                 tray,
-                client_task: Mutex::new(Some(client_task)),
+                client_task: Mutex::new(client_task),
+                relay_task: Mutex::new(relay_task),
                 daemon_manager_distro: Mutex::new(None),
             });
 

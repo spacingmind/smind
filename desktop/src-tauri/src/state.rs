@@ -28,4 +28,12 @@ pub struct DesktopState {
     /// The default WSL distro name, detected once and cached (ADR-0013
     /// part D2) -- see `daemon_manager::resolve_distro`.
     pub daemon_manager_distro: Mutex<Option<String>>,
+    /// The relay transport's own background reconnect-loop task (see
+    /// `smind_daemon_client::relay::client::spawn`), when the selected
+    /// connection is `relay`-kind. Distinct from `client_task`: this one
+    /// owns the shared tunnel itself (which `proxy.relay` and
+    /// `client_task` both then read/write via a cloned `RelayHandle`),
+    /// so it's stopped separately, only on an actual connection switch
+    /// away from this relay pairing -- not on every watcher restart.
+    pub relay_task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
