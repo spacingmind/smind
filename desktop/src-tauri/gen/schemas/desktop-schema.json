@@ -345,6 +345,78 @@
       "description": "Permission identifier",
       "oneOf": [
         {
+          "description": "Enables the connections_add command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-add",
+          "markdownDescription": "Enables the connections_add command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connections_get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-get-current",
+          "markdownDescription": "Enables the connections_get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connections_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-list",
+          "markdownDescription": "Enables the connections_list command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connections_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-remove",
+          "markdownDescription": "Enables the connections_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the connections_select command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-connections-select",
+          "markdownDescription": "Enables the connections_select command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_external command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-external",
+          "markdownDescription": "Enables the open_external command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_add command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-add",
+          "markdownDescription": "Denies the connections_add command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_get_current command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-get-current",
+          "markdownDescription": "Denies the connections_get_current command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-list",
+          "markdownDescription": "Denies the connections_list command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_remove command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-remove",
+          "markdownDescription": "Denies the connections_remove command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the connections_select command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-connections-select",
+          "markdownDescription": "Denies the connections_select command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_external command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-external",
+          "markdownDescription": "Denies the open_external command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",

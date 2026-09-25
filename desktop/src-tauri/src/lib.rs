@@ -1,23 +1,37 @@
-//! smind desktop thin-client shell (ADR-0012): the main window just
-//! displays the daemon's web UI; every native feature is driven from
-//! the Rust side. A second instance only focuses the existing window.
+//! smind desktop shell: ADR-0013 bundled UI + loopback proxy. The main
+//! window loads `http://127.0.0.1:<port>/` (a Rust-side proxy serving
+//! the bundled `web/packages/ui` build and reverse-proxying `/api/*` +
+//! `/ws` to whichever connection is selected), not the daemon's own
+//! page (ADR-0012, superseded in part -- see the ADR). Every native
+//! feature (tray, notifications, deep links, shortcuts) is still driven
+//! from the Rust side, unaffected.
 
-use tauri::Manager;
+use std::sync::Mutex;
+
 use tauri::webview::WebviewWindowBuilder;
+use tauri::Manager;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
+use url::Url;
 
 use smind_daemon_client as dclient;
-use smind_daemon_client::{ClientEvent, Config};
+use smind_daemon_client::proxy::{ProxyState, Registry};
+use smind_daemon_client::Config;
 
+mod assets;
+mod client_watch;
+mod commands;
 mod deeplink;
 mod menu;
 mod notify;
+mod state;
 mod tray;
 mod zoom_store;
 
+use state::DesktopState;
+
 const MAIN_WINDOW: &str = "main";
 const TOGGLE_SHORTCUT: &str = "CommandOrControl+Shift+S";
-const HEALTHZ_POLL: std::time::Duration = std::time::Duration::from_secs(2);
+const CONNECTIONS_FILE: &str = "connections.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -59,27 +73,63 @@ pub fn run() {
         // tauri-plugin-single-instance's deep-link feature (registered
         // above), which is why single-instance is set up first.
         .plugin(tauri_plugin_deep_link::init())
+        .invoke_handler(tauri::generate_handler![
+            commands::connections_list,
+            commands::connections_add,
+            commands::connections_remove,
+            commands::connections_select,
+            commands::connections_get_current,
+            commands::open_external,
+        ])
         .setup(|app| {
-            let cfg = Config {
-                daemon_url: dclient::config::daemon_url().unwrap_or_else(|e| {
-                    eprintln!("smind desktop: {e}; using default");
-                    dclient::config::daemon_url_from("").unwrap()
-                }),
-            };
+            // AC4: the built-in `local` entry always tracks
+            // SMIND_DAEMON_URL/the default, re-derived from the current
+            // env on every launch (see Registry::load) rather than
+            // trusted from a possibly-stale saved file.
+            let local_base_url = dclient::config::daemon_url().unwrap_or_else(|e| {
+                eprintln!("smind desktop: {e}; using default");
+                dclient::config::daemon_url_from("").unwrap()
+            });
 
-            // AC1: start on the local fallback page, then switch to the
-            // daemon UI once /healthz answers. The tauri.conf.json window
-            // entry is only a fallback for config-driven creation; we
-            // create the window here so startup never races the plugin
-            // setup order.
-            let win = WebviewWindowBuilder::new(
-                app,
-                MAIN_WINDOW,
-                tauri::WebviewUrl::App(FALLBACK_PAGE.into()),
-            )
-            .title("smind")
-            .inner_size(1280.0, 800.0)
-            .build()?;
+            let connections_path = app.path().app_data_dir()?.join(CONNECTIONS_FILE);
+            let registry = Registry::load(&connections_path, &local_base_url);
+
+            // AC3: a fresh secret every launch.
+            let secret = dclient::proxy::secret::generate_secret();
+            let proxy_state = ProxyState::new(secret.clone(), registry, Box::new(assets::EmbeddedAssets));
+
+            // AC2: bind the loopback proxy and start serving before the
+            // window is built, so its initial URL can name the real
+            // port. Binding a random TCP port is effectively
+            // instantaneous, so blocking setup() briefly here (rather
+            // than starting the window on a placeholder and navigating
+            // later, the way ADR-0012's fallback page did) keeps this
+            // simple and avoids ever showing a page with no `?k=` to
+            // exchange.
+            let (port, server_fut) = tauri::async_runtime::block_on(dclient::proxy::serve(proxy_state.clone()))?;
+            tauri::async_runtime::spawn(server_fut);
+
+            let proxy_url: Url = format!("http://127.0.0.1:{port}").parse().expect("smind desktop: proxy URL is well-formed");
+            let initial_url: Url =
+                format!("http://127.0.0.1:{port}/?k={secret}").parse().expect("smind desktop: initial URL is well-formed");
+
+            // AC3: navigation is restricted to the proxy's own origin --
+            // any other URL (an http(s) link inside the bundled UI, e.g.
+            // "smind on GitHub") opens in the OS browser instead of
+            // navigating the window away from the app.
+            let nav_origin = proxy_url.origin();
+            let win = WebviewWindowBuilder::new(app, MAIN_WINDOW, tauri::WebviewUrl::External(initial_url))
+                .title("smind")
+                .inner_size(1280.0, 800.0)
+                .on_navigation(move |url| {
+                    if url.origin() == nav_origin {
+                        true
+                    } else {
+                        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
+                        false
+                    }
+                })
+                .build()?;
 
             // quick-wins AC2: restore the persisted zoom level.
             let _ = win.set_zoom(zoom_store::load(app.handle()));
@@ -89,56 +139,34 @@ pub fn run() {
             app.set_menu(win_menu)?;
             app.on_menu_event(|app, event| menu::handle_event(app, event.id().0.as_str()));
 
-            // quick-wins AC5: live retry state on the offline page,
-            // pushed via `eval` on every failed /healthz poll (not a
-            // re-navigate: the local asset origin differs by platform,
-            // `tauri://localhost` vs `http://tauri.localhost`, so this
-            // avoids depending on that -- see
-            // `smind_daemon_client::offline`).
-            let watch_cfg = cfg.clone();
-            let watch_win = win.clone();
-            let offline_win = win.clone();
-            let offline_daemon_url = cfg.daemon_url.to_string();
-            tauri::async_runtime::spawn(async move {
-                watch_daemon_and_navigate(
-                    &watch_cfg,
-                    || {
-                        let _ = watch_win.navigate(watch_cfg.daemon_url.clone());
-                    },
-                    move |attempt| {
-                        let state = dclient::offline::OfflineState {
-                            daemon_url: offline_daemon_url.clone(),
-                            attempt,
-                            next_retry_secs: HEALTHZ_POLL.as_secs(),
-                        };
-                        let js = format!(
-                            "window.__smindOfflineUpdate && window.__smindOfflineUpdate({:?})",
-                            state.to_query_string()
-                        );
-                        let _ = offline_win.eval(js);
-                    },
-                )
-                .await;
-            });
-
             // AC3/quick-wins AC4: tray icon with Open / Quit plus a
             // pending-approvals indicator (tooltip, first menu item,
-            // taskbar badge).
+            // taskbar badge). Its "open most recent waiting task" click
+            // navigates within the proxy origin (AC7), same as a
+            // notification click.
             let cache = dclient::WorkspaceCache::new();
-            let tray = tray::build(app.handle(), cache.clone(), cfg.daemon_url.clone())?;
+            let tray = tray::build(app.handle(), cache.clone(), proxy_url.clone())?;
 
             // quick-wins AC6: deep links, both at launch (get_current)
             // and while running (on_open_url, fed by single-instance's
-            // deep-link feature for a second launch).
+            // deep-link feature for a second launch). Uses whichever
+            // connection is currently selected to resolve an unknown
+            // task's workspaceId, and navigates within the proxy origin.
             {
                 use tauri_plugin_deep_link::DeepLinkExt;
 
+                fn current_cfg(proxy: &ProxyState) -> Config {
+                    let base_url = proxy.registry.lock().unwrap().current().base_url.clone();
+                    Config { daemon_url: base_url.parse().expect("smind desktop: saved connection URL is well-formed") }
+                }
+
                 let handle = app.handle().clone();
                 let open_cache = cache.clone();
-                let open_cfg = cfg.clone();
+                let open_proxy_state = proxy_state.clone();
+                let open_proxy_url = proxy_url.clone();
                 app.deep_link().on_open_url(move |event| {
                     for url in event.urls() {
-                        deeplink::handle(&handle, open_cache.clone(), open_cfg.clone(), url.as_str());
+                        deeplink::handle(&handle, open_cache.clone(), current_cfg(&open_proxy_state), open_proxy_url.clone(), url.as_str());
                     }
                 });
 
@@ -147,8 +175,9 @@ pub fn run() {
                 }
 
                 if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    let cfg = current_cfg(&proxy_state);
                     for url in urls {
-                        deeplink::handle(app.handle(), cache.clone(), cfg.clone(), url.as_str());
+                        deeplink::handle(app.handle(), cache.clone(), cfg.clone(), proxy_url.clone(), url.as_str());
                     }
                 }
             }
@@ -165,27 +194,21 @@ pub fn run() {
             // AC5: register the toggle shortcut.
             app.global_shortcut().register(TOGGLE_SHORTCUT)?;
 
-            // AC4/quick-wins AC3+AC4: daemon events -> OS notifications
-            // (click -> focus + navigate) and the tray's pending-
-            // approvals indicator, both fed by the same event stream.
-            let notify_cfg = cfg.clone();
-            let notify_cache = cache.clone();
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                dclient::client::run(cfg, cache, move |event| match event {
-                    ClientEvent::Notification(n) => {
-                        tray.on_permission_pending(n.task_id, &n.request_id);
-                        let ctx = notify::ClickContext {
-                            app: handle.clone(),
-                            cache: notify_cache.clone(),
-                            daemon_url: notify_cfg.daemon_url.clone(),
-                        };
-                        notify::show(ctx, n.title, n.body, n.task_id);
-                    }
-                    ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
-                    ClientEvent::Reconnected => tray.on_reconnected(),
-                })
-                .await;
+            // AC7: start the daemon-client watcher (tray pending count,
+            // OS notifications) against whichever connection is
+            // currently selected; connections_select restarts it.
+            let initial_daemon_url: Url =
+                proxy_state.registry.lock().unwrap().current().base_url.parse().expect("smind desktop: saved connection URL is well-formed");
+            let client_task =
+                client_watch::spawn(app.handle(), tray.clone(), cache.clone(), proxy_url.clone(), Config { daemon_url: initial_daemon_url });
+
+            app.manage(DesktopState {
+                proxy: proxy_state,
+                connections_path,
+                proxy_url,
+                cache,
+                tray,
+                client_task: Mutex::new(Some(client_task)),
             });
 
             Ok(())
@@ -193,8 +216,6 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running smind desktop");
 }
-
-const FALLBACK_PAGE: &str = "offline.html";
 
 fn toggle_main(app: &tauri::AppHandle) {
     if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
@@ -215,23 +236,4 @@ fn show_main(app: &tauri::AppHandle) {
 fn show_main_window(win: &tauri::WebviewWindow) {
     let _ = win.show();
     let _ = win.set_focus();
-}
-
-/// Polls GET /healthz until the daemon answers, then navigates the main
-/// window to the daemon UI exactly once. Calls update_offline(attempt)
-/// (starting at 0, before the first check) so the fallback page can show
-/// live retry state (quick-wins AC5).
-async fn watch_daemon_and_navigate(cfg: &Config, navigate: impl Fn(), update_offline: impl Fn(u32)) {
-    let mut attempt: u32 = 0;
-    update_offline(attempt);
-    loop {
-        if dclient::client::healthz_ok(cfg).await {
-            eprintln!("smind desktop: /healthz ok, switching to daemon UI");
-            navigate();
-            return;
-        }
-        attempt += 1;
-        update_offline(attempt);
-        tokio::time::sleep(HEALTHZ_POLL).await;
-    }
 }

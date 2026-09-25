@@ -4,7 +4,15 @@
   "version": "0.1.0",
   "identifier": "dev.spacingmind.desktop",
   "build": {
-    "frontendDist": "../ui"
+    "frontendDist": "../ui",
+    "beforeBuildCommand": {
+      "script": "bun install && bun run --filter @smind/ui build:desktop",
+      "cwd": "../../web"
+    },
+    "beforeDevCommand": {
+      "script": "bun install && bun run --filter @smind/ui build:desktop",
+      "cwd": "../../web"
+    }
   },
   "app": {
     "security": {

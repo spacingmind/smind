@@ -14,6 +14,7 @@ import {
 
 import { AppSidebar } from "@/components/app-sidebar";
 import { CommandPalette } from "@/components/command-palette";
+import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
@@ -59,6 +60,7 @@ import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
+import { isDesktop } from "@/lib/platform";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
@@ -792,6 +794,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           client={client}
           onNavigateBack={() => setActiveView("workspace")}
           initialSectionId={settingsInitialSectionId ?? undefined}
+        />
+      ) : isDesktop && connectionStatus === "disconnected" ? (
+        // AC6: replaces offline.html's job for the bundled flow -- shown
+        // only for the "initial connect never succeeded" case (see
+        // ConnectionStatus's own comment in reconnect.ts: an established
+        // connection dropping goes through the automatic reconnect loop
+        // and its own header status text instead, never this).
+        <DesktopUnreachable
+          onSwitchConnection={() => {
+            setSettingsInitialSectionId("connections");
+            setActiveView("settings");
+          }}
         />
       ) : selectedTask && taskState ? (
         isMobile ? (

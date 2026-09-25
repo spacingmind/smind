@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - "desktop/**"
+      - "web/packages/ui/**"
       - ".github/workflows/desktop-windows.yml"
   workflow_dispatch:
 
@@ -22,6 +23,10 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+
+      # AC1: beforeBuildCommand builds web/packages/ui (VITE_SMIND_DESKTOP=1)
+      # with bun before rust-embed embeds it into the binary.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
 
