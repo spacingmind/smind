@@ -29,6 +29,8 @@ export interface DaemonStatus {
   pid: number | null;
   installedPath: string | null;
   logPath: string | null;
+  /** Whether the managed binary exists on disk right now -- distinct from `managedState`, since a bare take-over (no prior Install/Update) can be "managed" with nothing installed. Restart is disabled unless this is true. */
+  binaryInstalled: boolean;
 }
 
 /** A progress update emitted while `daemonInstall`/`daemonUpdate`/`daemonRestart` run. */

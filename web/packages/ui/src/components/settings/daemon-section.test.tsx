@@ -26,6 +26,7 @@ function baseStatus(overrides: Partial<Record<string, unknown>> = {}) {
     pid: 123,
     installedPath: "/tmp/smind/bin/smind",
     logPath: "/tmp/smind/smind.log",
+    binaryInstalled: true,
     ...overrides,
   };
 }
@@ -78,6 +79,26 @@ describe("daemon-section (desktop build)", () => {
     await renderSection({ daemonStatus: () => Promise.resolve(baseStatus({ comparison: "older", daemonVersion: "0.6.0" })) });
     expect(screen.getByTestId("daemon-update")).toBeInTheDocument();
     expect(screen.getByTestId("daemon-restart")).toBeInTheDocument();
+  });
+
+  it("disables Restart (but not Update) after a bare take-over with no managed binary installed", async () => {
+    // The exact scenario the binary_installed precondition guards
+    // against: take-over records the adopted pid as "managed" before any
+    // Install/Update ever ran, so there is no managed binary on disk yet.
+    const daemonRestart = vi.fn();
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ binaryInstalled: false, comparison: "older", daemonVersion: "0.6.0" })),
+      daemonRestart,
+    });
+
+    const restart = screen.getByTestId("daemon-restart");
+    expect(restart).toBeInTheDocument();
+    expect(restart).toBeDisabled();
+    expect(screen.getByTestId("daemon-update")).not.toBeDisabled();
+
+    fireEvent.click(restart);
+    await flush();
+    expect(daemonRestart).not.toHaveBeenCalled();
   });
 
   it("offers Install when not running", async () => {

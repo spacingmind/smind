@@ -113,7 +113,14 @@ function DaemonSection() {
           </Button>
         )}
         {status.managedState === "managed" && (
-          <Button variant="outline" size="sm" data-testid="daemon-restart" onClick={() => run(() => desktop.daemonRestart())} disabled={busy}>
+          <Button
+            variant="outline"
+            size="sm"
+            data-testid="daemon-restart"
+            onClick={() => run(() => desktop.daemonRestart())}
+            disabled={busy || !status.binaryInstalled}
+            title={status.binaryInstalled ? undefined : "No app-managed daemon binary is installed yet -- use Update/Install first"}
+          >
             Restart
           </Button>
         )}

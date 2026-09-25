@@ -71,6 +71,24 @@ pub fn assert_safe_to_install(record: Option<&ManagedRecord>, port_owner: Option
     Ok(())
 }
 
+/// assert_restartable refuses `restart` outright, before any process is
+/// signalled, when there is no managed binary on disk to start in place
+/// of whatever gets killed. This is the exact gap a bare take-over (no
+/// prior Install/Update) leaves: a take-over records the *adopted*
+/// process's pid, which correctly passes the pre-kill identity check
+/// (see `safe_to_kill`) -- but `restart`'s own start step only ever execs
+/// the *managed* binary, never the adopted one, so without this check
+/// restart would kill the user's daemon and have nothing to replace it
+/// with. `binary_present` is resolved by the caller (a plain file-exists
+/// check on macOS, `test -x` inside the distro for WSL2), so this
+/// decision itself needs no OS access to test.
+pub fn assert_restartable(binary_present: bool) -> Result<(), String> {
+    if !binary_present {
+        return Err("no app-managed daemon binary is installed yet -- use Update/Install first".to_string());
+    }
+    Ok(())
+}
+
 /// safe_to_kill decides whether it's safe to signal `record.pid` before a
 /// fresh start (install/update's own restart, and `restart` itself): the
 /// live port owner must still be exactly this pid (closes the same
@@ -201,6 +219,18 @@ mod tests {
         assert!(assert_safe_to_install(None, None, 4648).is_ok());
         assert!(assert_safe_to_install(Some(&record(123)), None, 4648).is_ok());
         assert!(assert_safe_to_install(Some(&record(123)), Some(123), 4648).is_ok());
+    }
+
+    #[test]
+    fn assert_restartable_refuses_without_a_binary_on_disk() {
+        // The exact regression this guards against: a bare take-over (no
+        // prior Install/Update) records an adopted pid that would pass
+        // the pre-kill identity check, but there is no managed binary to
+        // start in its place -- restart must refuse before killing
+        // anything, not discover this only after the kill.
+        let err = assert_restartable(false).unwrap_err();
+        assert!(err.contains("Update/Install"), "{err}");
+        assert!(assert_restartable(true).is_ok());
     }
 
     #[test]

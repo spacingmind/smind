@@ -127,6 +127,15 @@ pub fn chmod_x_argv(distro: &str) -> Vec<String> {
     vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "chmod".into(), "+x".into(), format!("$HOME/{BIN_SUBPATH}")]
 }
 
+/// test_executable_argv checks whether the managed binary exists and is
+/// executable -- `restart`'s precondition (`managed::assert_restartable`)
+/// before it signals anything. Argv-only, no shell: `test`'s exit status
+/// alone is the answer (0 = executable, nonzero = missing or not), there
+/// is no output to parse.
+pub fn test_executable_argv(distro: &str) -> Vec<String> {
+    vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "test".into(), "-x".into(), format!("$HOME/{BIN_SUBPATH}")]
+}
+
 /// start_detached_argv is the one place a shell is used: detaching a
 /// process from its controlling session and redirecting its output to a
 /// log file both need shell syntax (`&`, `>>`), and there is no argv-only
@@ -269,6 +278,7 @@ mod tests {
             port_owner_argv("Ubuntu", 4648),
             kill_argv("Ubuntu", 123),
             exe_path_argv("Ubuntu", 123),
+            test_executable_argv("Ubuntu"),
         ] {
             assert_eq!(v[0], WSL_EXE);
             assert_eq!(v[1], "-d");
@@ -284,6 +294,12 @@ mod tests {
         assert!(script.contains(BIN_SUBPATH));
         assert!(script.contains(LOG_SUBPATH));
         assert!(script.contains("setsid nohup"));
+    }
+
+    #[test]
+    fn test_executable_argv_checks_the_managed_bin_via_argv_only() {
+        let argv = test_executable_argv("Ubuntu");
+        assert_eq!(argv, vec![WSL_EXE, "-d", "Ubuntu", "--", "test", "-x", &format!("$HOME/{BIN_SUBPATH}")]);
     }
 
     #[test]

@@ -56,7 +56,7 @@ describe("platform in a desktop build", () => {
         case "daemon_update":
         case "daemon_restart":
         case "take_over_daemon":
-          return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log" };
+          return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log", binaryInstalled: true };
         case "connection_version":
           return { reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" };
         default:

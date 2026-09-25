@@ -40,6 +40,12 @@ pub struct DaemonStatus {
     pub pid: Option<u32>,
     pub installed_path: Option<String>,
     pub log_path: Option<String>,
+    /// Whether the *managed* binary exists (and, on WSL2, is executable)
+    /// on disk right now -- distinct from `managed_state`, since a bare
+    /// take-over (no prior Install/Update) can be `Managed` with no
+    /// managed binary installed at all. Drives whether the UI's Restart
+    /// action is enabled (`managed::assert_restartable`'s precondition).
+    pub binary_installed: bool,
 }
 
 /// ConnectionVersionInfo is the banner's data source for a connection that
@@ -211,6 +217,13 @@ fn wsl_start(distro: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// wsl_binary_installed answers `restart`'s precondition (and
+/// `compute_status`'s `binary_installed` field) for WSL2 -- `test -x`'s
+/// exit status alone, no output to parse.
+fn wsl_binary_installed(distro: &str) -> bool {
+    wsl::run(&wsl::test_executable_argv(distro)).map(|o| o.status.success()).unwrap_or(false)
+}
+
 // ---------------------------------------------------------------------------
 // Shared: port ownership, status, and the four commands
 // ---------------------------------------------------------------------------
@@ -224,6 +237,18 @@ fn find_port_owner(platform: Platform, distro: Option<&str>, port: u16) -> Optio
             wsl::parse_ss_pid(&String::from_utf8_lossy(&out.stdout))
         }
         Platform::Unsupported => None,
+    }
+}
+
+/// binary_installed answers "is the managed binary on disk (and, on
+/// WSL2, executable) right now" -- `restart`'s precondition
+/// (`managed::assert_restartable`) and `compute_status`'s
+/// `binary_installed` field share this one check.
+fn binary_installed(app: &AppHandle, platform: Platform, distro: Option<&str>) -> bool {
+    match platform {
+        Platform::Macos => macos_layout(app).ok().map(|l| l.bin_path.exists()).unwrap_or(false),
+        Platform::Wsl2 => distro.map(wsl_binary_installed).unwrap_or(false),
+        Platform::Unsupported => false,
     }
 }
 
@@ -293,6 +318,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
         pid: port_owner,
         installed_path: record.as_ref().map(|r| r.exe_path.clone()),
         log_path: log_path_display(app, platform, distro.as_deref()),
+        binary_installed: binary_installed(app, platform, distro.as_deref()),
     }
 }
 
@@ -432,6 +458,14 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     let Some(record) = record else {
         return Err("no managed daemon to restart -- install it first".to_string());
     };
+
+    // Precondition, checked before touching any process: a bare take-over
+    // (no prior Install/Update) records an adopted pid that passes the
+    // identity check below, but there is no managed binary on disk for
+    // this function's own start step (which only ever execs the managed
+    // bin) to start in its place -- refuse rather than kill the adopted
+    // daemon and leave nothing running.
+    managed::assert_restartable(binary_installed(app, platform, distro.as_deref()))?;
 
     // Re-check immediately before signalling: refuse unless the recorded
     // pid is still the real port owner (closes a PID-reuse race) *and*
