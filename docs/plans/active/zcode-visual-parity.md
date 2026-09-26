@@ -312,7 +312,7 @@ Per-phase scenarios:
 
 - [x] P1 — design system: tokens, `text-ui-*` scale, guards, NOTICE
 - [ ] P2 — app shell + sidebar
-- [ ] P3 — chat timeline + composer + tool/permission/question cards
+- [x] P3 — chat timeline + composer + tool/permission/question cards
 - [ ] P4 — panes: diff/git, terminal, files, settings
 - [ ] P5 — desktop-only chrome (blocked on ADR-0013)
 
@@ -508,3 +508,149 @@ file `appearance-section.test.tsx` with 2 cases, +1 new case in
 `task test` (Go suite) green, unaffected (web-only change). Playwright
 screenshots (`home`/`task`/`settings` × light/dark, 1440×900) confirmed
 all four defects gone before commit.
+
+### P3 — chat timeline + composer + tool/permission/question cards
+
+Commits (`feat/zcode-p3-chat`, oldest first): `1884acc` (timeline rows +
+markdown scale), `6d76cde` (tool-call cards), `595117b` (composer input
+shell), `77c2049` (permission card + confirmation badge), `a3a0467`
+(dark-mode disabled-button fix, found in the composer screenshot pass).
+
+- **Markdown type scale** — `1884acc`. `timeline-markdown.tsx` now
+  matches `refs/zcode/DESIGN.md`'s Markdown type scale exactly: h1
+  `text-ui-xl`, h2 `text-ui-lg`, h3–h6 share `text-ui-base` and are
+  distinguished by weight only (h3/h4 `font-semibold`, h5 `font-medium`,
+  h6 `font-normal`), inline code `font-mono text-ui-sm`. This is the
+  "not yet adopting ZCode's actual h1/h2 sizing" gap `docs/design.md`
+  §12 flagged as P3 scope at the end of P1.
+- **Message containers / chat-bubble radius** — `1884acc`. The user
+  bubble (`timeline-row.tsx`) moved to `rounded-xl rounded-tr-sm border
+  bg-surface px-4 py-3`, matching ZCode's `ConversationRowView.tsx` user
+  bubble (`rounded-xl rounded-tr-xs border ... px-4 py-3`) — `rounded-tr-
+  sm` is the closest floor Tailwind's stock radius scale has to ZCode's
+  own custom `xs` step (`docs/design.md` §13: "no `--radius-*` override").
+  The run-turn frame (`run-timeline.tsx`'s `<li>`) and the thinking/
+  unrecognised-event boxes moved to the same `rounded-xl` tier: read as
+  DESIGN.md's own "layout region... does not count as a radius level"
+  carve-out applied to smind's turn-card wrapper (a structure ZCode has
+  no equivalent of at all), so the bubble, tool cards, and the turn frame
+  are peers at the container hierarchy's first level, not three nested
+  tiers.
+- **Tool-call cards** — `6d76cde`. `tool-call-card.tsx` and
+  `tool-group-row.tsx`'s outer containers moved `rounded-lg` →
+  `rounded-xl` (same "first container" reasoning above); every nested
+  detail preview (`tool-call-detail.tsx`'s terminal/diff/generic-IN-OUT/
+  search-matches panels, `tool-read-preview.tsx`) steps down to
+  `rounded-lg`, replacing the bare `rounded` utility `docs/design.md`
+  §14 forbids (worth noting: these were pre-existing violations, not
+  introduced by P3 — the guard test only scans `text-ui-*`/hardcoded
+  colors, not radius). Summary/path text and payload dumps go
+  `font-mono`, per DESIGN.md's "paths, hashes, and commands... bias
+  toward monospace" — `tool-call-card.tsx`'s summary line, `ToolPayload`.
+- **Composer input shell** — `595117b`. `composer.tsx`'s
+  `composer-card` wrapper moved from `rounded-xl border-transparent
+  bg-surface` (border only appearing on focus) to `rounded-2xl
+  border-input-border bg-input`, with `hover:border-input-border-hover`
+  and `focus-within:bg-input-focused` added alongside the pre-existing
+  `focus-within:border-input-border-focused` — matching both the
+  approved `rounded-2xl` main-composer exception (`docs/design.md` §13)
+  and ZCode's "calm and integrated, not glowing by default" input
+  philosophy (an always-visible, low-alpha resting border, not
+  border-on-focus-only). Send/Stop and the provider/approval/thinking
+  selects are unchanged Button/Select primitive consumers (already
+  tokenized in P1); `RunConfigToolbar`'s behavior (agent/Custom/↺,
+  per-task persistence) is untouched, restyle-only per the phase's file-
+  ownership note.
+- **Permission/question cards** — `77c2049`. `permission-card.tsx`'s
+  outer shell moved `rounded-lg` → `rounded-2xl`, matching
+  `PermissionDialog.tsx`/`ElicitationDialog.tsx`'s dialog-shell radius.
+  A new "Waiting for your response" badge
+  (`bg-interaction-confirmation-surface`/
+  `text-interaction-confirmation-foreground`) sits above the three
+  variants, per `TaskInteractionBadge.tsx`'s rule that every blocking
+  request — permission, question, plan — reads as the same green
+  confirmation state, never a recolored `--color-success`. The three
+  variants' own behavior (options/plan-review/question-form, mid-run
+  approval switching) is untouched. **Accepted trade-off, not fixed:**
+  the shared `Alert` primitive (`components/ui/alert.tsx`, outside this
+  phase's file ownership) is hardcoded `rounded-lg` at every call site
+  app-wide; DESIGN.md's Dialogs section says a dialog shell's *first*
+  nested content container should restart at `rounded-xl`, which would
+  put the permission card's `Alert` one tier higher than it actually
+  renders at. Recoloring `Alert` per-call-site would touch a primitive
+  every other Alert consumer (connection-lost banners, inline errors)
+  shares, well outside "restyle the permission cards" scope.
+- **Dark-mode disabled Send button** — `a3a0467`, found reviewing the
+  composer screenshots (flagged by a second reviewer mid-pass): the
+  `execute` button variant's disabled state still resolved to a
+  translucent warning-orange in dark mode (computed
+  `oklab(0.749 0.103 0.137 / 0.2)`, reading brown), not the neutral
+  `bg-muted` P1's own Validation note says it fixed — Tailwind v4 sorts
+  the `dark:` and `disabled:` variants independently of source order, so
+  `dark:bg-warning/20` won the cascade over the bare `disabled:bg-muted`
+  once both the `.dark` ancestor and `:disabled` applied together (P1's
+  fix only closed the gap for light mode). Explicit
+  `dark:disabled:bg-muted`/`dark:disabled:text-muted-foreground` rules
+  close it; verified via a computed-style probe against the live app
+  before and after (`bg` now resolves to exactly `bg-muted`'s
+  `oklch(0.269 0 0)` in both themes).
+- **Find** — no change needed. P1 already ported
+  `--color-find-highlight`/`-active` and `index.css`'s
+  `::highlight(smind-chat-find[-active])` rules; `find-bar.tsx` already
+  reads only ZCode-derived tokens. Verified Mod+F still opens the bar,
+  navigates, and highlights over the restyled timeline DOM (screenshot
+  below) with no code change.
+
+**Seeding the screenshots.** `docs/decisions/0008-structured-run-
+events.md`'s event shapes were written directly into a temp
+`$SMIND_HOME/smind.db` (workspace → task → two runs → `run_events` rows,
+via a throwaway `internal/store`-backed Go program, deleted before this
+commit history was finalized — never part of any commit) covering: a
+finished Claude-native run with rich markdown (all six heading levels,
+inline code, a fenced block, an ordered list), a `Read`/`Edit`/`Bash`
+tool-call sequence, and a resolved permission's inline trace; and a
+`glm`-provider run ending on an unresolved `permission_request` (the
+"options" card, `status: "stopped"` since a genuinely `"running"` row
+gets reconciled to `"interrupted"` by `internal/runs.Registry.New`'s
+one-time startup pass, same as a real daemon restart would — see that
+reconciliation's own doc comment). **The plan-review and question-form
+variants have no real producer to seed against**: `lib/types.ts`'s
+`PermissionRequestEventParams.plan`/`.questions` doc comments already
+say "no provider on either wire path produces this shape today", and
+neither `taskrunner.Event` nor `internal/wsapi`'s
+`permissionRequestParams`/`toRunLogEvent` carry those fields at all — so
+no JSON written to `run_events.event_data` could reach the wire
+regardless of what the DB row says. The test-only seam used instead: a
+throwaway Vite entry (`zzharness.html` + `src/zzharness-main.tsx`,
+deleted before finalizing, never committed) mounting `PermissionCard`
+directly with a crafted `pending` prop — the same seam
+`permission-card.test.tsx` already exercises in jsdom, just in a real
+browser for a pixel-accurate screenshot.
+
+Playwright screenshots (light + dark, 1440×900): timeline scrolled to
+the seeded transcript's top (markdown scale, inline code, tool calls,
+resolved-permission trace) and to its live end (user-message bubble,
+thinking, a collapsed tool card, the STOPPED status dot); a tool card
+expanded; composer idle and focused (confirming
+`border-input-border-focused` and the now-neutral disabled Send
+button); Mod+F with a live query showing `--color-find-highlight`/
+`-active`; and the three permission-card variants via the harness above
+(confirming the confirmation-green badge and dialog-shell radius in
+both themes). One pre-existing, out-of-scope observation from the
+light-mode Find screenshot: `--find-highlight`'s ported light value
+(`#fff4eb`) is faint enough against a white page that only the *active*
+match (`--find-highlight-active`) reads clearly — this is P1's own
+faithfully-ported, fixture-tested ZCode value, not something this phase
+introduced or should silently retune.
+
+**Verification:** `bun run --filter '@smind/ui' test` — 105 test files,
+1317 tests, all green (+1 case: `permission-card.test.tsx`'s
+confirmation-badge assertion; every other P3 change is covered by
+existing `data-testid`-keyed assertions that don't pin exact class
+strings, so nothing else needed updating); `bun run --filter '@smind/ui'
+typecheck` green; `task test` (Go suite) and `task lint` green,
+unaffected (web-only change). `internal/server/dist/.gitkeep` restored
+after the verification build.
+
+**Not done in P3** (deferred, not scope creep left behind): P4 still
+owns diff/git, terminal, files, and settings surfaces.
