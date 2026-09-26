@@ -4,16 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { readStoredDefaultApprovalPolicy, readStoredDefaultProvider } from "@/lib/settings-preferences";
 import { readStoredThemePreference } from "@/lib/theme";
 import { FakeWsClient } from "@/test/fake-ws-client";
-
-const PROVIDERS = {
-  providers: [
-    { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
-    { id: "glm", label: "GLM", kind: "cli" },
-  ],
-};
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -198,44 +190,17 @@ describe("SettingsScreen Appearance section", () => {
 });
 
 describe("SettingsScreen General section", () => {
-  function openGeneral(client = new FakeWsClient()) {
-    renderScreen(client);
+  // The old default-provider/default-approval-policy controls moved to
+  // Settings -> Agents' ★ default agent (run-config IA plan) -- General
+  // keeps a pointer rather than going blank or landing on the next
+  // section silently. profiles-section.test.tsx covers the ★ control
+  // itself.
+  it("points to Settings -> Agents instead of the removed default-provider/policy controls", () => {
+    renderScreen();
     fireEvent.click(screen.getByTestId("settings-nav-general"));
-    return client;
-  }
 
-  it("fetches and lists providers for the default-provider picker", async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    const select = screen.getByTestId("settings-default-provider");
-    expect(within(select).getByText("Claude Code")).toBeInTheDocument();
-    expect(within(select).getByText("GLM")).toBeInTheDocument();
-  });
-
-  it("persists the chosen default provider and approval policy", async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "glm" } });
-    fireEvent.change(screen.getByTestId("settings-default-approval-policy"), { target: { value: "auto-safe" } });
-
-    expect(readStoredDefaultProvider()).toBe("glm");
-    expect(readStoredDefaultApprovalPolicy()).toBe("auto-safe");
-  });
-
-  it('clearing back to "No preference" removes the stored value, not just blanks it visually', async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "glm" } });
-    expect(readStoredDefaultProvider()).toBe("glm");
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "" } });
-    expect(readStoredDefaultProvider()).toBeNull();
+    expect(screen.getByTestId("settings-section-general")).toHaveTextContent("Settings → Agents");
+    expect(screen.queryByTestId("settings-default-provider")).not.toBeInTheDocument();
   });
 });
 

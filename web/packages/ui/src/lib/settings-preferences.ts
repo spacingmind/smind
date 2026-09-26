@@ -9,8 +9,6 @@
  * the plan's Decisions section. Nothing here talks to the daemon.
  */
 
-import type { ApprovalPolicy, Provider } from "@/lib/types";
-
 export type FontSizeStep = "small" | "medium" | "large";
 
 /** The three font-size axes Item 13 ships (audit-paseo.md §4's Appearance section): interface chrome, chat/content prose, and code. */
@@ -23,8 +21,7 @@ export interface FontSizes {
 export const DEFAULT_FONT_SIZES: FontSizes = { interface: "medium", content: "medium", code: "medium" };
 
 const FONT_SIZE_STORAGE_KEY = "smind:settings:fontSizes";
-const DEFAULT_PROVIDER_STORAGE_KEY = "smind:settings:defaultProvider";
-const DEFAULT_APPROVAL_POLICY_STORAGE_KEY = "smind:settings:defaultApprovalPolicy";
+const DEFAULT_AGENT_STORAGE_KEY = "smind:settings:defaultAgentId";
 
 function isFontSizeStep(v: unknown): v is FontSizeStep {
   return v === "small" || v === "medium" || v === "large";
@@ -69,45 +66,31 @@ export function applyFontSizes(sizes: FontSizes): void {
   root.style.setProperty("--font-scale-code", String(FONT_SCALE[sizes.code]));
 }
 
-/** Reads the persisted default-provider preference, or null if unset/corrupt/thrown. null means "no preference" -- callers fall back to whatever they'd otherwise choose (e.g. the daemon's own default), not to a hardcoded provider. */
-export function readStoredDefaultProvider(): Provider | null {
+/**
+ * The run-config IA plan's ★ default agent (Settings -> Agents): which
+ * profile a brand-new task's composer toolbar seeds itself from. Replaces
+ * this file's old default-provider/default-approval-policy pair -- see the
+ * plan's Decisions section for why having both would have been two sources
+ * of truth for the same "what does a new task start with" question.
+ *
+ * Stores the profile's id as a string (AgentProfile.ID is a number on the
+ * wire, but every client-side lookup here already compares against
+ * String(profile.ID), matching run-config-toolbar.tsx's own baseAgentId).
+ */
+export function readStoredDefaultAgentId(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem(DEFAULT_PROVIDER_STORAGE_KEY);
-    if (raw === "claude-native" || raw === "glm" || raw === "kimi" || raw === "codex-native") return raw;
-    return null;
+    return window.localStorage.getItem(DEFAULT_AGENT_STORAGE_KEY) || null;
   } catch {
     return null;
   }
 }
 
-export function writeStoredDefaultProvider(provider: Provider | null): void {
+export function writeStoredDefaultAgentId(id: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    if (provider === null) window.localStorage.removeItem(DEFAULT_PROVIDER_STORAGE_KEY);
-    else window.localStorage.setItem(DEFAULT_PROVIDER_STORAGE_KEY, provider);
-  } catch {
-    // Best-effort only.
-  }
-}
-
-/** Reads the persisted default-approval-policy preference, or null if unset/corrupt/thrown ("no preference" -- same contract as readStoredDefaultProvider). */
-export function readStoredDefaultApprovalPolicy(): ApprovalPolicy | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(DEFAULT_APPROVAL_POLICY_STORAGE_KEY);
-    if (raw === "manual" || raw === "auto-safe") return raw;
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export function writeStoredDefaultApprovalPolicy(policy: ApprovalPolicy | null): void {
-  if (typeof window === "undefined") return;
-  try {
-    if (policy === null) window.localStorage.removeItem(DEFAULT_APPROVAL_POLICY_STORAGE_KEY);
-    else window.localStorage.setItem(DEFAULT_APPROVAL_POLICY_STORAGE_KEY, policy);
+    if (id === null) window.localStorage.removeItem(DEFAULT_AGENT_STORAGE_KEY);
+    else window.localStorage.setItem(DEFAULT_AGENT_STORAGE_KEY, id);
   } catch {
     // Best-effort only.
   }

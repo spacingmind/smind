@@ -3,11 +3,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyFontSizes,
   DEFAULT_FONT_SIZES,
-  readStoredDefaultApprovalPolicy,
-  readStoredDefaultProvider,
+  readStoredDefaultAgentId,
   readStoredFontSizes,
-  writeStoredDefaultApprovalPolicy,
-  writeStoredDefaultProvider,
+  writeStoredDefaultAgentId,
   writeStoredFontSizes,
 } from "@/lib/settings-preferences";
 
@@ -45,32 +43,20 @@ describe("font sizes", () => {
   });
 });
 
-describe("default provider / approval policy preferences", () => {
-  it("default to null (no preference) when nothing is stored", () => {
-    expect(readStoredDefaultProvider()).toBeNull();
-    expect(readStoredDefaultApprovalPolicy()).toBeNull();
+describe("default agent id preference (run-config IA's star-default)", () => {
+  it("defaults to null (no default agent) when nothing is stored", () => {
+    expect(readStoredDefaultAgentId()).toBeNull();
   });
 
-  it("round-trip a written value", () => {
-    writeStoredDefaultProvider("glm");
-    expect(readStoredDefaultProvider()).toBe("glm");
-
-    writeStoredDefaultApprovalPolicy("auto-safe");
-    expect(readStoredDefaultApprovalPolicy()).toBe("auto-safe");
+  it("round-trips a written value", () => {
+    writeStoredDefaultAgentId("7");
+    expect(readStoredDefaultAgentId()).toBe("7");
   });
 
   it('writing null clears the stored value rather than storing the literal string "null"', () => {
-    writeStoredDefaultProvider("glm");
-    writeStoredDefaultProvider(null);
-    expect(readStoredDefaultProvider()).toBeNull();
-    expect(window.localStorage.getItem("smind:settings:defaultProvider")).toBeNull();
-  });
-
-  it("falls back to null for a corrupt/unrecognized stored value", () => {
-    window.localStorage.setItem("smind:settings:defaultProvider", "not-a-real-provider");
-    expect(readStoredDefaultProvider()).toBeNull();
-
-    window.localStorage.setItem("smind:settings:defaultApprovalPolicy", "yolo");
-    expect(readStoredDefaultApprovalPolicy()).toBeNull();
+    writeStoredDefaultAgentId("7");
+    writeStoredDefaultAgentId(null);
+    expect(readStoredDefaultAgentId()).toBeNull();
+    expect(window.localStorage.getItem("smind:settings:defaultAgentId")).toBeNull();
   });
 });

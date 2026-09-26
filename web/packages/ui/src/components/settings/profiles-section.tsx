@@ -1,11 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
+import { MoreHorizontal, Star } from "lucide-react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { approvalPolicies } from "@/lib/approval-policies";
-import type { AgentProfile, ProviderInfo, ProviderListResult } from "@/lib/types";
+import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
+import { useDefaultAgentId } from "@/hooks/use-default-agent";
+import { approvalPolicies, approvalPolicyLabel } from "@/lib/approval-policies";
+import { thinkingLevelLabel } from "@/lib/thinking-levels";
+import type { AgentProfile, ApprovalPolicy, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
+import type { WsClient } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails), same fallback composer.tsx uses -- this form must never be unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
@@ -15,8 +21,7 @@ const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm"
 // shared vocabulary in lib/approval-policies.ts. Claude-native here
 // because full-access's label is provider-specific and this form shows
 // one list for whichever provider is selected above -- a mismatch only
-// ever cosmetic, and only until the RunConfigToolbar's inline edit takes
-// this form over.
+// ever cosmetic.
 const APPROVAL_POLICIES = [
   { id: "", label: "Composer default" },
   ...approvalPolicies("claude-native"),
@@ -29,7 +34,7 @@ const THINKING_LEVELS = [
   { id: "extended", label: "Extended" },
 ];
 
-/** The add/edit form's field state -- shared by the "new profile" form and an in-place row edit (formId identifies which, or null for the add form). */
+/** The add/edit form's field state -- shared by the bottom "New agent" form and each row's own inline edit instance. */
 interface ProfileFormState {
   name: string;
   provider: string;
@@ -54,14 +59,28 @@ function formFromProfile(p: AgentProfile): ProfileFormState {
  * Live-updates via profile.created/updated/deleted (ctx.events, ADR 0009's
  * shape) in addition to the initial profile.list fetch, so a profile added
  * from a second tab or the CLI appears here without a manual reload.
+ *
+ * Edit opens inline in the row (run-config IA plan), not a dialog and not
+ * a shared bottom form repurposed into "edit mode" -- `editingId` just
+ * picks which row renders its own <ProfileForm> instance below its
+ * summary line, so the bottom section stays a plain, always-in-"new"-mode
+ * add form.
  */
 function ProfilesSection({ client, events }: SettingsSectionContext) {
   const [profiles, setProfiles] = useState<AgentProfile[] | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
-  const [form, setForm] = useState<ProfileFormState>(EMPTY_FORM);
+  const [newForm, setNewForm] = useState<ProfileFormState>(EMPTY_FORM);
+  const [newPending, setNewPending] = useState(false);
+  const [newError, setNewError] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
+  const [editForm, setEditForm] = useState<ProfileFormState>(EMPTY_FORM);
+  const [editPending, setEditPending] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  // The run-config IA plan's ★ default agent: which profile a brand-new
+  // task's composer toolbar starts from (run-config-toolbar.tsx reads the
+  // same stored id). Replaces General's old "Defaults for new tasks"
+  // control -- see the plan's Decisions section.
+  const { defaultAgentId, setDefaultAgentId } = useDefaultAgentId();
 
   useEffect(() => {
     if (!client) return;
@@ -71,7 +90,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
       .then((list) => {
         if (!cancelled) setProfiles(list ?? []);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setNewError(err instanceof Error ? err.message : String(err)));
     return () => {
       cancelled = true;
     };
@@ -117,57 +136,78 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
 
   function startEdit(p: AgentProfile) {
     setEditingId(p.ID);
-    setForm(formFromProfile(p));
-    setError(null);
+    setEditForm(formFromProfile(p));
+    setEditError(null);
   }
 
   function cancelEdit() {
     setEditingId(null);
-    setForm(EMPTY_FORM);
-    setError(null);
+    setEditError(null);
   }
 
-  async function handleSubmit(e: FormEvent<HTMLFormElement>) {
+  async function handleCreate(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!client || !form.name.trim()) return;
-    setPending(true);
-    setError(null);
+    if (!client || !newForm.name.trim()) return;
+    setNewPending(true);
+    setNewError(null);
     try {
-      const params = {
-        name: form.name.trim(),
-        provider: form.provider,
-        approvalPolicy: form.approvalPolicy,
-        thinkingLevel: form.thinkingLevel,
-        notes: form.notes,
-      };
+      const saved = await client.call<AgentProfile>("profile.create", {
+        name: newForm.name.trim(),
+        provider: newForm.provider,
+        approvalPolicy: newForm.approvalPolicy,
+        thinkingLevel: newForm.thinkingLevel,
+        notes: newForm.notes,
+      });
       // Upsert from the RPC's own returned profile rather than waiting for
-      // the profile.created/updated event: the mutation's own tab must show
-      // the result immediately even when events is null (not yet connected)
-      // or when this same-tab event arrives after this promise already
-      // resolved -- upsertProfile dedupes by ID, so a later event for the
-      // same mutation is a harmless no-op re-set, not a duplicate row.
-      const saved =
-        editingId === null
-          ? await client.call<AgentProfile>("profile.create", params)
-          : await client.call<AgentProfile>("profile.update", { id: editingId, ...params });
+      // profile.created: the mutation's own tab must show the result
+      // immediately even when events is null (not yet connected) or when
+      // that event arrives after this promise already resolved --
+      // upsertProfile dedupes by ID, so a later event is a harmless no-op.
+      setProfiles((prev) => (prev ? upsertProfile(prev, saved) : [saved]));
+      setNewForm(EMPTY_FORM);
+    } catch (err) {
+      setNewError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setNewPending(false);
+    }
+  }
+
+  async function handleSaveEdit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!client || editingId === null || !editForm.name.trim()) return;
+    setEditPending(true);
+    setEditError(null);
+    try {
+      const saved = await client.call<AgentProfile>("profile.update", {
+        id: editingId,
+        name: editForm.name.trim(),
+        provider: editForm.provider,
+        approvalPolicy: editForm.approvalPolicy,
+        thinkingLevel: editForm.thinkingLevel,
+        notes: editForm.notes,
+      });
       setProfiles((prev) => (prev ? upsertProfile(prev, saved) : [saved]));
       cancelEdit();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setEditError(err instanceof Error ? err.message : String(err));
     } finally {
-      setPending(false);
+      setEditPending(false);
     }
   }
 
   async function handleDelete(id: number) {
     if (!client) return;
-    setError(null);
     try {
       await client.call("profile.delete", { id });
       setProfiles((prev) => (prev ? prev.filter((p) => p.ID !== id) : prev));
       if (editingId === id) cancelEdit();
+      // A deleted default agent can't stay ★ -- a stale id would silently
+      // stop seeding new tasks (run-config-toolbar.tsx's lookup just fails
+      // to find it), which reads as "the default stopped working" rather
+      // than the honest "there is no default agent anymore".
+      if (defaultAgentId === String(id)) setDefaultAgentId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      console.error("profile.delete failed", err);
     }
   }
 
@@ -184,110 +224,276 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
-            {profiles.map((p) => (
-              <li
-                key={p.ID}
-                data-testid={`profile-row-${p.ID}`}
-                className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
-                  <span className="truncate text-ui-sm text-muted-foreground">
-                    {providerLabel(providers, p.Provider)}
-                    {p.ApprovalPolicy && ` · ${p.ApprovalPolicy}`}
-                    {p.ThinkingLevel && ` · ${p.ThinkingLevel}`}
-                  </span>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <Button variant="outline" size="xs" data-testid={`profile-edit-${p.ID}`} onClick={() => startEdit(p)}>
-                    Edit
-                  </Button>
-                  <Button variant="ghost" size="xs" data-testid={`profile-delete-${p.ID}`} onClick={() => void handleDelete(p.ID)}>
-                    Delete
-                  </Button>
-                </div>
-              </li>
-            ))}
+            {profiles.map((p) => {
+              const isDefault = defaultAgentId === String(p.ID);
+              const editing = editingId === p.ID;
+              return (
+                <li key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 rounded-md border px-2 py-1.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="shrink-0 text-foreground-subtlest data-[default=true]:text-warning"
+                      data-default={isDefault}
+                      data-testid={`profile-default-${p.ID}`}
+                      aria-pressed={isDefault}
+                      aria-label={isDefault ? `${p.Name} is the default agent` : `Set ${p.Name} as the default agent`}
+                      title={isDefault ? "Default agent for new tasks — click to clear" : "Set as default agent for new tasks"}
+                      onClick={() => setDefaultAgentId(isDefault ? null : String(p.ID))}
+                    >
+                      <Star aria-hidden fill={isDefault ? "currentColor" : "none"} />
+                    </Button>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                      <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
+                      <span className="truncate text-ui-sm text-muted-foreground">{profileMetaLine(p, providers)}</span>
+                      {p.Notes && <span className="truncate text-ui-sm text-foreground-subtlest">{p.Notes}</span>}
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={`${p.Name} actions`}
+                          data-testid={`profile-menu-${p.ID}`}
+                          className="shrink-0"
+                        >
+                          <MoreHorizontal aria-hidden />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem
+                          data-testid={`profile-edit-${p.ID}`}
+                          onSelect={() => (editing ? cancelEdit() : startEdit(p))}
+                        >
+                          {editing ? "Close" : "Edit"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem data-testid={`profile-delete-${p.ID}`} onSelect={() => void handleDelete(p.ID)}>
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                  {editing && (
+                    <ProfileForm
+                      idPrefix={`profile-edit-form-${p.ID}`}
+                      form={editForm}
+                      setForm={setEditForm}
+                      providers={providers}
+                      client={client}
+                      showProviderHealth
+                      onSubmit={handleSaveEdit}
+                      onCancel={cancelEdit}
+                      pending={editPending}
+                      error={editError}
+                      submitLabel={editPending ? "Saving…" : "Save"}
+                    />
+                  )}
+                </li>
+              );
+            })}
           </ul>
         )}
       </section>
 
       <section className="flex flex-col gap-2 border-t pt-4">
-        <p className="text-ui-base font-medium">{editingId === null ? "New agent" : "Edit agent"}</p>
-        <form className="flex flex-col gap-2" onSubmit={handleSubmit}>
-          <Input
-            aria-label="Agent name"
-            data-testid="profile-form-name"
-            placeholder="Name (e.g. Quick Fixes)"
-            value={form.name}
-            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <Select value={form.provider} onValueChange={(value) => setForm((f) => ({ ...f, provider: value }))}>
-              <SelectTrigger aria-label="Provider" data-testid="profile-form-provider">
-                <SelectValue placeholder="Select provider" />
-              </SelectTrigger>
-              <SelectContent>
-                {providers.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.label ?? p.id}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={form.approvalPolicy} onValueChange={(value) => setForm((f) => ({ ...f, approvalPolicy: value }))}>
-              <SelectTrigger aria-label="Approval policy" data-testid="profile-form-approval-policy">
-                <SelectValue placeholder="Approval policy" />
-              </SelectTrigger>
-              <SelectContent>
-                {APPROVAL_POLICIES.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {form.provider === "claude-native" && (
-            <Select value={form.thinkingLevel} onValueChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}>
-              <SelectTrigger aria-label="Thinking level" data-testid="profile-form-thinking-level" className="w-full">
-                <SelectValue placeholder="Thinking level" />
-              </SelectTrigger>
-              <SelectContent>
-                {THINKING_LEVELS.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <textarea
-            aria-label="Notes"
-            data-testid="profile-form-notes"
-            className="h-16 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            placeholder="Notes (optional) — when to use this agent."
-            value={form.notes}
-            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-          />
-          {error && (
-            <p role="alert" data-testid="profile-form-error" className="text-ui-base text-destructive">
-              {error}
-            </p>
-          )}
-          <div className="flex justify-end gap-2">
-            {editingId !== null && (
-              <Button type="button" variant="ghost" size="sm" data-testid="profile-form-cancel" onClick={cancelEdit}>
-                Cancel
-              </Button>
-            )}
-            <Button type="submit" size="sm" disabled={pending || !form.name.trim()} data-testid="profile-form-submit">
-              {pending ? "Saving…" : editingId === null ? "Add agent" : "Save agent"}
-            </Button>
-          </div>
-        </form>
+        <p className="text-ui-base font-medium">New agent</p>
+        <ProfileForm
+          idPrefix="profile-form"
+          form={newForm}
+          setForm={setNewForm}
+          providers={providers}
+          client={client}
+          onSubmit={handleCreate}
+          pending={newPending}
+          error={newError}
+          submitLabel={newPending ? "Saving…" : "Add agent"}
+        />
       </section>
     </div>
+  );
+}
+
+/**
+ * The Name/Provider/Approval/Thinking/Notes fields, reused by the bottom
+ * "New agent" form and each row's inline edit (run-config IA's "Edit
+ * opens inline in the row" AC) -- `idPrefix` keeps their data-testids
+ * distinct since both kinds of form can be mounted at once.
+ */
+function ProfileForm({
+  idPrefix,
+  form,
+  setForm,
+  providers,
+  client,
+  showProviderHealth,
+  onSubmit,
+  onCancel,
+  pending,
+  error,
+  submitLabel,
+}: {
+  idPrefix: string;
+  form: ProfileFormState;
+  setForm: (updater: (f: ProfileFormState) => ProfileFormState) => void;
+  providers: ProviderInfo[];
+  client: WsClient | null;
+  /** Only for an existing agent's inline edit -- a not-yet-created profile has no backing account to check yet. */
+  showProviderHealth?: boolean;
+  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  onCancel?: () => void;
+  pending: boolean;
+  error: string | null;
+  submitLabel: string;
+}) {
+  return (
+    <form className="flex flex-col gap-2" onSubmit={onSubmit}>
+      <Input
+        aria-label="Agent name"
+        data-testid={`${idPrefix}-name`}
+        placeholder="Name (e.g. Quick Fixes)"
+        value={form.name}
+        onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex items-center gap-1.5">
+          <Select value={form.provider} onValueChange={(value) => setForm((f) => ({ ...f, provider: value }))}>
+            <SelectTrigger aria-label="Provider" data-testid={`${idPrefix}-provider`} className="flex-1">
+              <SelectValue placeholder="Select provider" />
+            </SelectTrigger>
+            <SelectContent>
+              {providers.map((p) => (
+                <SelectItem key={p.id} value={p.id}>
+                  {p.label ?? p.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {showProviderHealth && (
+            <ProviderHealthDot client={client} provider={form.provider} providers={providers} testId={`${idPrefix}-provider-health`} />
+          )}
+        </div>
+        <Select value={form.approvalPolicy} onValueChange={(value) => setForm((f) => ({ ...f, approvalPolicy: value }))}>
+          <SelectTrigger aria-label="Approval policy" data-testid={`${idPrefix}-approval-policy`}>
+            <SelectValue placeholder="Approval policy" />
+          </SelectTrigger>
+          <SelectContent>
+            {APPROVAL_POLICIES.map((o) => (
+              <SelectItem key={o.id} value={o.id} title={o.id ? approvalPolicies("claude-native").find((a) => a.id === o.id)?.help : undefined}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {form.provider === "claude-native" && (
+        <Select value={form.thinkingLevel} onValueChange={(value) => setForm((f) => ({ ...f, thinkingLevel: value }))}>
+          <SelectTrigger aria-label="Thinking level" data-testid={`${idPrefix}-thinking-level`} className="w-full">
+            <SelectValue placeholder="Thinking level" />
+          </SelectTrigger>
+          <SelectContent>
+            {THINKING_LEVELS.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      <textarea
+        aria-label="Notes"
+        data-testid={`${idPrefix}-notes`}
+        className="h-16 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        placeholder="Notes (optional) — when to use this agent."
+        value={form.notes}
+        onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+      />
+      {error && (
+        <p role="alert" data-testid={`${idPrefix}-error`} className="text-ui-base text-destructive">
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end gap-2">
+        {onCancel && (
+          <Button type="button" variant="ghost" size="sm" data-testid={`${idPrefix}-cancel`} onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
+        <Button type="submit" size="sm" disabled={pending || !form.name.trim()} data-testid={`${idPrefix}-submit`}>
+          {submitLabel}
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The inline edit form's provider health dot (run-config IA AC: "Provider
+ * (with a health indicator for its backing account, reusing whatever the
+ * accounts dialog already computes for account health)") -- same
+ * provider.test RPC and the same ok/failed/untested -> StatusDot mapping
+ * as accounts-dialog.tsx's own StatusDot, run independently here rather
+ * than sharing that dialog's transient testResults state (this section
+ * already fetches its own copies of profile.list/provider.list for the
+ * same reason -- see ProfilesSection's doc comment).
+ *
+ * provider.test's `provider` param is accounts-vocabulary
+ * (internal/accounts' anthropic/openai/... ids) for a credential-backed
+ * provider, but taskrunner-vocabulary (ProviderInfo.id) for a cli-kind one
+ * -- accountHealthTestKey resolves AgentProfile.Provider (always
+ * taskrunner-vocab) to whichever id provider.test actually expects, per
+ * ProviderInfo.accountProvider's own doc comment in lib/types.ts.
+ */
+function accountHealthTestKey(providerId: string, providers: ProviderInfo[]): string {
+  const info = providers.find((p) => p.id === providerId);
+  if (!info || info.kind === "cli") return providerId;
+  return info.accountProvider ?? providerId;
+}
+
+function ProviderHealthDot({
+  client,
+  provider,
+  providers,
+  testId,
+}: {
+  client: WsClient | null;
+  provider: string;
+  providers: ProviderInfo[];
+  testId: string;
+}) {
+  const testKey = accountHealthTestKey(provider, providers);
+  const [result, setResult] = useState<ProviderTestResult | undefined>(undefined);
+
+  useEffect(() => {
+    setResult(undefined);
+    if (!client || !testKey) return;
+    let cancelled = false;
+    client
+      .call<ProviderTestResult>("provider.test", { provider: testKey })
+      .then((r) => {
+        if (!cancelled) setResult(r);
+      })
+      .catch((err) => {
+        if (!cancelled) setResult({ ok: false, detail: err instanceof Error ? err.message : String(err) });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, testKey]);
+
+  const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
+  const status = state === "ok" ? "success" : state === "failed" ? "danger" : "neutral";
+  const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
+  return (
+    <SharedStatusDot
+      status={status}
+      className="size-2 shrink-0"
+      title={label}
+      aria-label={label}
+      data-testid={testId}
+      data-status={state}
+    />
   );
 }
 
@@ -301,6 +507,14 @@ function upsertProfile(list: AgentProfile[], p: AgentProfile): AgentProfile[] {
 
 function providerLabel(providers: ProviderInfo[], id: string): string {
   return providers.find((p) => p.id === id)?.label ?? id;
+}
+
+/** The card's one metadata line ("<provider> · <approval> · <thinking>", run-config IA): the shared approval-policies.ts/thinking-levels.ts vocabulary, not the raw stored strings -- "auto-safe" reads as "Auto-safe", not the wire id. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
+function profileMetaLine(p: AgentProfile, providers: ProviderInfo[]): string {
+  const parts = [providerLabel(providers, p.Provider)];
+  if (p.ApprovalPolicy) parts.push(approvalPolicyLabel(p.ApprovalPolicy as ApprovalPolicy));
+  if (p.Provider === "claude-native" && p.ThinkingLevel) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
+  return parts.join(" · ");
 }
 
 registerSettingsSection({
