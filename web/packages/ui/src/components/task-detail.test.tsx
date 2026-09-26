@@ -1,10 +1,18 @@
 import { act } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { TaskDetailPane } from "@/components/task-detail";
-import type { ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+import { runConfigPillLabel, TaskDetailPane } from "@/components/task-detail";
+import type { RunConfigState } from "@/components/composer/run-config-toolbar";
+import type { AgentProfile, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+
+// The run-config IA plan persists RunConfigToolbar's state per task id
+// (docs/design.md §9) -- most tests below share TASK_A.ID, so a leftover
+// value from one test would otherwise leak into the next.
+afterEach(() => {
+  window.localStorage.clear();
+});
 
 const TASK_A: Task = {
   ID: 1,
@@ -640,6 +648,9 @@ describe("TaskDetailPane", () => {
     // surface for it at all (see ThinkingLevel's own doc comment).
     expect(client.calls.some((c) => c.method === "run.listConfigOptions")).toBe(true);
     expect(client.calls.filter((c) => c.method === "run.listConfigOptions")).toHaveLength(1);
+    // run-config IA: GLM/Kimi's live options render inside the composer's
+    // RunConfigToolbar row, not a separate control elsewhere in the pane.
+    expect(within(screen.getByTestId("composer-toolbar-row")).getByLabelText("Thinking Level")).toBeInTheDocument();
   });
 
   it("omits the config-options control entirely for a Claude run", async () => {
@@ -882,5 +893,101 @@ describe("TaskDetailPane", () => {
     await flush();
 
     expect(screen.queryByTestId("run-retry-higher-effort")).not.toBeInTheDocument();
+  });
+});
+
+describe("run-config pill (run-config IA)", () => {
+  it("summarizes the toolbar's current state and clicking it focuses the toolbar row", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([]);
+    // Both task-detail.tsx (the pill's own label lookup) and composer.tsx
+    // fetch provider.list independently -- resolve both.
+    const providersResult: ProviderListResult = {
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM" },
+      ],
+    };
+    client.nth("provider.list", 0).resolve(providersResult);
+    client.nth("provider.list", 1).resolve(providersResult);
+    await flush();
+
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Manual approval · Standard");
+
+    fireEvent.click(screen.getByLabelText("Provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+
+    // GLM has no thinking-level segment (mirrors the toolbar's own Thinking
+    // control being omitted for non-Claude providers).
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · GLM · Manual approval");
+    expect(screen.getByTestId("task-run-config-pill")).not.toHaveTextContent("Standard");
+
+    fireEvent.click(screen.getByTestId("task-run-config-pill"));
+    expect(screen.getByTestId("composer-toolbar-row")).toHaveFocus();
+  });
+
+  it("shows the agent's name once one is picked from the toolbar", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} />);
+
+    client.nth("run.list", 0).resolve([]);
+    const profile: AgentProfile = {
+      ID: 1,
+      Name: "Quick Fixes",
+      Provider: "claude-native",
+      ApprovalPolicy: "manual",
+      ThinkingLevel: "",
+      Notes: "",
+      CreatedAt: "2026-09-25T00:00:00Z",
+      UpdatedAt: "2026-09-25T00:00:00Z",
+    };
+    // Both task-detail.tsx (the pill's own agent-name lookup) and
+    // composer.tsx fetch profile.list independently -- resolve both.
+    client.nth("profile.list", 0).resolve([profile]);
+    client.nth("profile.list", 1).resolve([profile]);
+    await flush();
+
+    fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
+    await flush();
+
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("Quick Fixes ·");
+  });
+});
+
+describe("runConfigPillLabel", () => {
+  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" };
+  const providerLabels = { "claude-native": "Claude Code", glm: "GLM" };
+
+  it("names the agent when one is applied", () => {
+    const profiles: AgentProfile[] = [
+      {
+        ID: 1,
+        Name: "Quick Fixes",
+        Provider: "claude-native",
+        ApprovalPolicy: "manual",
+        ThinkingLevel: "",
+        Notes: "",
+        CreatedAt: "",
+        UpdatedAt: "",
+      },
+    ];
+    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1" }, profiles, providerLabels)).toBe(
+      "Quick Fixes · Claude Code · Manual approval · Standard",
+    );
+  });
+
+  it('says "Custom" when hand-edited, and "No agent" when nothing was ever picked', () => {
+    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1", custom: true }, [], providerLabels)).toBe(
+      "Custom · Claude Code · Manual approval · Standard",
+    );
+    expect(runConfigPillLabel(BASE, [], providerLabels)).toBe("No agent · Claude Code · Manual approval · Standard");
+  });
+
+  it("omits the thinking segment for a non-Claude provider", () => {
+    expect(runConfigPillLabel({ ...BASE, provider: "glm" }, [], providerLabels)).toBe("No agent · GLM · Manual approval");
   });
 });

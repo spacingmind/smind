@@ -3,10 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
-import type { Space, Task, Workspace } from "@/lib/types";
+import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -1008,10 +1009,165 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
-    // The old Accounts-settings gear now opens Settings -> Providers
-    // (providers-settings plan Item 3): one entry surface, deep-linked.
-    fireEvent.click(screen.getByTestId("sidebar-providers-button"));
+    // Accounts moved to the footer's Providers shortcut (run-config IA
+    // plan) -- still reachable from the sidebar, just no longer a header
+    // gear that users mistake for Settings.
+    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
+  });
+});
+
+describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)", () => {
+  const PROFILE: AgentProfile = {
+    ID: 7,
+    Name: "Quick Fixes",
+    Provider: "claude-native",
+    ApprovalPolicy: "manual",
+    ThinkingLevel: "standard",
+    Notes: "",
+    CreatedAt: "2024-01-01T00:00:00Z",
+    UpdatedAt: "2024-01-01T00:00:00Z",
+  };
+
+  it("Providers row deep-links to Settings -> Providers; Agents row deep-links to Settings -> Agents", async () => {
+    const onOpenSettings = vi.fn();
+    const client = new FakeWsClient();
+    render(
+      <PaletteProvider>
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
+        </SidebarProvider>
+      </PaletteProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await flush();
+
+    // ADR-0015's real Providers section, via the direct onOpenSettings
+    // callback -- this footer row has direct prop access, so it doesn't
+    // need the window-event indirection the composer's toolbar (outside
+    // the sidebar's tree) uses for the same "land on a specific settings
+    // section" problem.
+    fireEvent.click(screen.getByTestId("sidebar-footer-providers"));
     expect(onOpenSettings).toHaveBeenCalledWith("providers");
+
+    // Deep-links via the same window-event channel the toolbar's own
+    // "Manage agents…" entry uses for its cross-tree navigation
+    // (run-config IA: "each deep-links straight into the matching
+    // Settings section").
+    const openSettingsListener = vi.fn();
+    window.addEventListener("smind:open-settings", openSettingsListener);
+    fireEvent.click(screen.getByTestId("sidebar-footer-agents"));
+    window.removeEventListener("smind:open-settings", openSettingsListener);
+    expect(openSettingsListener).toHaveBeenCalledTimes(1);
+    expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+  });
+
+  it("Agents row shows the profile count", async () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    client.nth("profile.list", 0).resolve([PROFILE]);
+    await flush();
+
+    expect(screen.getByTestId("sidebar-footer-agents")).toHaveTextContent("1");
+  });
+
+  it("Providers row shows a health dot + healthy count from provider.test, tested once (not per render)", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await flush();
+
+    // No dot/count until provider.list answers.
+    expect(screen.queryByTestId("sidebar-footer-providers-health-dot")).not.toBeInTheDocument();
+
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM", kind: "cli" },
+      ],
+    });
+    await flush();
+
+    expect(client.nth("provider.test", 0).params).toEqual({ provider: "claude-native" });
+    expect(client.nth("provider.test", 1).params).toEqual({ provider: "glm" });
+
+    await act(async () => {
+      client.nth("provider.test", 0).resolve({ ok: true, detail: "ok" });
+      client.nth("provider.test", 1).resolve({ ok: false, detail: "no binary" });
+    });
+
+    const dot = screen.getByTestId("sidebar-footer-providers-health-dot");
+    expect(dot).toHaveAttribute("data-status", "warning");
+    expect(screen.getByTestId("sidebar-footer-providers")).toHaveTextContent("1 healthy");
+
+    // Re-rendering the same client doesn't re-test.
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await flush();
+    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(2);
+  });
+
+  it("registers Settings/Agents palette entries and Use agent: <name> per profile", async () => {
+    const onOpenSettings = vi.fn();
+    const client = new FakeWsClient();
+    const useAgentListener = vi.fn();
+    const openSettingsListener = vi.fn();
+    window.addEventListener("smind:use-agent", useAgentListener);
+    window.addEventListener("smind:open-settings", openSettingsListener);
+    // useRegisteredCommands is a hook; a probe component inside the same
+    // PaletteProvider captures the registry where the test can read it.
+    let commands: ReturnType<typeof useRegisteredCommands> = [];
+    function Probe() {
+      commands = useRegisteredCommands();
+      return null;
+    }
+    render(
+      <PaletteProvider>
+        <Probe />
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
+        </SidebarProvider>
+      </PaletteProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    client.nth("profile.list", 0).resolve([PROFILE]);
+    await flush();
+    const byTitle = new Map(commands.map((c) => [c.title, c]));
+    expect(byTitle.has("Settings: Agents")).toBe(true);
+    expect(byTitle.has("Settings: Providers")).toBe(true);
+    expect(byTitle.has("New agent…")).toBe(true);
+    expect(byTitle.has("Use agent: Quick Fixes")).toBe(true);
+
+    // The Agents entries deep-link via the window event (this composer-
+    // toolbar-shared channel); Settings -> Providers (ADR-0015) is now a
+    // real section, reached via the direct onOpenSettings(sectionId)
+    // callback this command already has prop access to.
+    byTitle.get("Settings: Agents")!.run();
+    expect(openSettingsListener).toHaveBeenCalledTimes(1);
+    expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+    byTitle.get("New agent…")!.run();
+    expect(openSettingsListener).toHaveBeenCalledTimes(2);
+    expect((openSettingsListener.mock.calls[1]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+
+    byTitle.get("Settings: Providers")!.run();
+    expect(onOpenSettings).toHaveBeenCalledWith("providers");
+
+    byTitle.get("Use agent: Quick Fixes")!.run();
+    expect(useAgentListener).toHaveBeenCalledTimes(1);
+    expect((useAgentListener.mock.calls[0]![0] as CustomEvent).detail).toEqual(PROFILE);
+    window.removeEventListener("smind:use-agent", useAgentListener);
+    window.removeEventListener("smind:open-settings", openSettingsListener);
   });
 });
 
@@ -1041,7 +1197,7 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
     expect(screen.getByTestId("sidebar-expanded-header").className).toContain("group-data-[collapsible=icon]:hidden");
     expect(within(stack).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
     expect(within(stack).getByTestId("sidebar-settings-button-collapsed")).toBeInTheDocument();
-    expect(within(stack).getByTestId("sidebar-providers-button-collapsed")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
   });
 
   it("the collapsed stack's settings button still opens settings", () => {

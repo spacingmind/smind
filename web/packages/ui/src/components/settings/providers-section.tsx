@@ -828,9 +828,16 @@ function FormError({ message }: { message: string | null }) {
   return <p className="text-ui-base text-destructive">{message}</p>;
 }
 
+// Nests under "Agents & providers" (run-config IA plan) alongside Agents
+// (order 175) -- order 180 keeps it immediately after Agents, matching
+// the plan's "sub-items: Agents, Providers" sequence. This section used
+// to be a top-level nav entry on develop (before that plan's nav regroup
+// existed); joining the group is this merge's own resolution, not part
+// of ADR-0015 itself.
 registerSettingsSection({
   id: "providers",
   label: "Providers",
-  order: 165,
+  groupLabel: "Agents & providers",
+  order: 180,
   render: (ctx) => <ProvidersSection {...ctx} />,
 });

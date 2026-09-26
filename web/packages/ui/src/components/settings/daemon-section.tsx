@@ -149,6 +149,7 @@ if (isDesktop) {
   registerSettingsSection({
     id: "daemon",
     label: "Daemon",
+    groupLabel: "Connection",
     order: 160,
     render: () => <DaemonSection />,
   });

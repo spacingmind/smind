@@ -13,12 +13,16 @@ function currentValueText(value: unknown): string {
 }
 
 /**
- * The live ACP session's config-option row (GLM/Kimi's thinking level, and
- * whatever else a given agent advertises) -- see use-run-config-options'
- * doc comment for why this only ever exists once a session is live, and
- * task-detail.tsx for where it's mounted. Renders nothing when there's
- * nothing to show and no error to report, so an idle/non-ACP run leaves no
- * trace in the layout.
+ * The live ACP session's config-option controls (GLM/Kimi's thinking
+ * level, and whatever else a given agent advertises) -- see
+ * use-run-config-options' doc comment for why this only ever exists once
+ * a session is live. Renders inline inside the composer's RunConfigToolbar
+ * row (run-config IA plan: these used to be a separate full-width bar
+ * above the composer; the AC now wants them "in the same row, not a
+ * separate control elsewhere"), so this renders no outer width/padding of
+ * its own -- the toolbar row already provides that. Renders nothing when
+ * there's nothing to show and no error to report, so an idle/non-ACP run
+ * leaves no trace in the layout.
  */
 export function RunConfigOptions({
   options,
@@ -32,10 +36,7 @@ export function RunConfigOptions({
   if (options.length === 0 && !error) return null;
 
   return (
-    <div
-      data-testid="run-config-options"
-      className="mx-auto flex w-full max-w-3xl shrink-0 flex-wrap items-center gap-2 px-4 py-1.5"
-    >
+    <div data-testid="run-config-options" className="flex flex-wrap items-center gap-2">
       {options.map((option) => (
         <ConfigOptionControl key={option.configId} option={option} onSetOption={onSetOption} />
       ))}

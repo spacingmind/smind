@@ -46,6 +46,22 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
   });
 
+  it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([])} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-entry")).toHaveTextContent("claude-native");
+
+    rerender(
+      <ul>
+        <RunTimeline run={run([])} providerLabels={{ "claude-native": "Claude Code" }} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-entry")).toHaveTextContent("Claude Code");
+  });
+
   it.each([
     ["human", "You approved"],
     ["auto_safe", "Auto-approved"],

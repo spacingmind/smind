@@ -21,13 +21,22 @@ import {
   Plus,
   Search,
   Settings,
-  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { accountHealthTestKey } from "@/lib/provider-health";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import type {
+  AgentProfile,
+  ProviderListResult,
+  ProviderTestResult,
+  Space,
+  Task,
+  TaskStat,
+  TaskStatusEventPayload,
+  Workspace,
+} from "@/lib/types";
 import {
   applyLifecycleEvent,
   buildWorkspaceTree,
@@ -76,6 +85,7 @@ import { toast } from "@/components/ui/toast";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -405,6 +415,59 @@ export function AppSidebar({
   }, [workspaces, onWorkspacesChange]);
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+
+  // Profiles feed the footer's agent count and the palette's "Use agent:"
+  // entries. The composer fetches its own copy (its picker seeds on it);
+  // sharing one fetch would couple the two surfaces for the sake of one
+  // RPC that the daemon answers from its store. Failures fall back to an
+  // empty list -- both consumers already handle zero profiles.
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<AgentProfile[]>("profile.list")
+      .then((list) => {
+        if (!cancelled) setProfiles(list ?? []);
+      })
+      .catch((err) => console.error("profile.list failed, hiding agent palette entries", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  // The footer's Providers row health dot + "N healthy" count (run-config
+  // IA plan) -- reuses the provider.test-based pattern profiles-section.tsx
+  // built for its own per-agent health dot (accountHealthTestKey resolves
+  // each provider's id to whichever vocabulary provider.test expects).
+  // Fetched (and tested) once per client, not on every render or on a
+  // polling interval -- `providerHealth` is the cache this effect fills,
+  // and the deps array of just `[client]` is what keeps it from re-testing
+  // on unrelated re-renders.
+  const [providerHealth, setProviderHealth] = useState<{ healthy: number; total: number } | null>(null);
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then(async (result) => {
+        if (cancelled) return;
+        const providers = result.providers;
+        const oks = await Promise.all(
+          providers.map((p) =>
+            client
+              .call<ProviderTestResult>("provider.test", { provider: accountHealthTestKey(p.id, providers) })
+              .then((r) => r.ok)
+              .catch(() => false),
+          ),
+        );
+        if (!cancelled) setProviderHealth({ healthy: oks.filter(Boolean).length, total: providers.length });
+      })
+      .catch((err) => console.error("provider.list failed, hiding the footer's provider health count", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's
@@ -453,7 +516,37 @@ export function AppSidebar({
         keywords: ["providers", "accounts", "credentials", "login", "oauth"],
         run: () => onOpenSettings?.("providers"),
       },
+      {
+        id: "settings-agents",
+        group: "Settings",
+        title: "Settings: Agents",
+        keywords: ["profiles", "agents"],
+        action: "settings.open",
+        run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
+      },
+      {
+        id: "new-agent",
+        group: "Settings",
+        title: "New agent…",
+        keywords: ["create", "profile", "agent"],
+        run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
+      },
     ];
+    // "Use agent: <name>" seeds the active composer with that profile's
+    // config, exactly as picking it from the composer's own picker does
+    // (ADR-0014's client-side apply mechanism). Dispatched as a window
+    // event because the composer is not a child of the sidebar -- the
+    // shell would otherwise have to thread a ref through task panes for
+    // this one interaction.
+    for (const p of profiles) {
+      commands.push({
+        id: `use-agent-${p.ID}`,
+        group: "Agents",
+        title: `Use agent: ${p.Name}`,
+        keywords: ["agent", "profile", p.Provider],
+        run: () => window.dispatchEvent(new CustomEvent("smind:use-agent", { detail: p })),
+      });
+    }
     // "New task" needs a workspace to create the task in. With exactly one
     // workspace the choice is unambiguous; with several, picking one for
     // the user would be a guess, so the entry is per workspace instead.
@@ -470,7 +563,7 @@ export function AppSidebar({
       });
     }
     return commands;
-  }, [workspaces, onOpenSettings]);
+  }, [workspaces, profiles, onOpenSettings]);
   useCommands("sidebar:actions", 5, paletteCommands);
   // The just-created workspace is expanded on landing; existing ones start
   // collapsed until first refresh happens (empty state -> created).
@@ -540,15 +633,6 @@ export function AppSidebar({
               data-testid="sidebar-settings-button"
               onClick={() => onOpenSettings?.()}
             >
-              <SlidersHorizontal />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Providers settings"
-              data-testid="sidebar-providers-button"
-              onClick={() => onOpenSettings?.("providers")}
-            >
               <Settings />
             </Button>
           </div>
@@ -564,15 +648,6 @@ export function AppSidebar({
             aria-label="Settings"
             data-testid="sidebar-settings-button-collapsed"
             onClick={() => onOpenSettings?.()}
-          >
-            <SlidersHorizontal />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Providers settings"
-            data-testid="sidebar-providers-button-collapsed"
-            onClick={() => onOpenSettings?.("providers")}
           >
             <Settings />
           </Button>
@@ -726,6 +801,55 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {/*
+       * Footer shortcuts (run-config IA plan): Providers and Agents are
+       * where account/agent management lives -- both deep-link straight
+       * into their Settings section (ADR-0015 gave Providers a real
+       * section; the old Accounts-dialog shim is gone).
+       */}
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-testid="sidebar-footer-providers"
+              onClick={() => onOpenSettings?.("providers")}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="text-ui-sm text-foreground-subtle">Providers</span>
+                {providerHealth && providerHealth.total > 0 && (
+                  <span className="ml-auto flex items-center gap-1.5 text-ui-sm tabular-nums text-foreground-subtlest">
+                    <StatusDot
+                      status={
+                        providerHealth.healthy === providerHealth.total
+                          ? "success"
+                          : providerHealth.healthy > 0
+                            ? "warning"
+                            : "danger"
+                      }
+                      data-testid="sidebar-footer-providers-health-dot"
+                    />
+                    {providerHealth.healthy} healthy
+                  </span>
+                )}
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-testid="sidebar-footer-agents"
+              onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
+            >
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="text-ui-sm text-foreground-subtle">Agents</span>
+                <span className="ml-auto text-ui-sm tabular-nums text-foreground-subtlest">
+                  {profiles.length}
+                </span>
+              </span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
 
       {client && (
         <>

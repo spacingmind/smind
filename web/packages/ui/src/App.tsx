@@ -552,6 +552,21 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     setActiveView("settings");
   });
 
+  // RunConfigToolbar's "Manage agents…" entry (run-config-toolbar.tsx) is
+  // several component layers below the shell -- a window event rather
+  // than threading a callback down through Composer/task-detail.tsx,
+  // matching how app-sidebar.tsx's AccountsDialog already deep-links from
+  // the Settings screen's Providers stub via `smind:open-accounts`.
+  useEffect(() => {
+    const onOpenSettings = (e: Event) => {
+      const sectionId = (e as CustomEvent<{ sectionId?: string }>).detail?.sectionId;
+      setSettingsInitialSectionId(sectionId ?? null);
+      setActiveView("settings");
+    };
+    window.addEventListener("smind:open-settings", onOpenSettings);
+    return () => window.removeEventListener("smind:open-settings", onOpenSettings);
+  }, []);
+
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
 
