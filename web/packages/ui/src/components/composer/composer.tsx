@@ -481,8 +481,8 @@ export function Composer({
            */}
           {profiles.length > 0 && (
             <Select value="" onValueChange={applyProfile} disabled={inactive}>
-              <SelectTrigger aria-label="Profiles" data-testid="composer-profile-select" className={SELECT_TRIGGER_CLASS}>
-                <SelectValue placeholder="Profiles" />
+              <SelectTrigger aria-label="Agents" data-testid="composer-agent-select" className={SELECT_TRIGGER_CLASS}>
+                <SelectValue placeholder="Agents" />
               </SelectTrigger>
               <SelectContent>
                 {profiles.map((p) => (

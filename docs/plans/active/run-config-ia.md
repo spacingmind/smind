@@ -142,6 +142,8 @@ rule (d) rather than deciding unilaterally)
 
 ## Progress
 
+- [x] Settings → Profiles renamed to "Agents" (section label/id, empty-state copy, form copy, composer picker label). RPCs/testids stay `profile.*`/`profile-*` per the plan's display-name-only rule.
+
 - [x] Sidebar gear icon opens Settings, not Accounts (sliders icon and header Accounts button removed; Accounts entry moved to the sidebar footer).
 - [x] Sidebar footer shortcuts: "Providers" (opens the existing accounts dialog until Settings has a Providers section) and "Agents" (opens Settings). Health dot / counts deferred to the RunConfigToolbar pass so they read the same hooks the toolbar will.
 - [x] Command palette: "Settings: Agents", "Settings: Providers", "Use agent: <name>" per profile (dispatched to the composer via a `smind:use-agent` window event), and "New agent…". Desktop-only "Settings: Daemon server"/"Settings: Daemon" deferred until the Connection regroup lands.

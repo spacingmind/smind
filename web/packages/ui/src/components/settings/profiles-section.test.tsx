@@ -45,7 +45,7 @@ function fakeDaemonEvents(): DaemonEvents & { fire(topic: string, payload: unkno
 }
 
 function renderSection(client: FakeWsClient, events?: DaemonEvents) {
-  const section = listSettingsSections().find((s) => s.id === "profiles");
+  const section = listSettingsSections().find((s) => s.id === "agents");
   if (!section) throw new Error("profiles section did not register");
   render(<>{section.render({ client: client as never, events })}</>);
 }

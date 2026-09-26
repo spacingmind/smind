@@ -168,13 +168,13 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-profiles">
       <section className="flex flex-col gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Agent profiles</h3>
+        <h3 className="text-ui-base font-medium text-foreground">Agents</h3>
         {profiles === null ? (
           <p className="text-ui-base text-muted-foreground">Loading…</p>
         ) : profiles.length === 0 ? (
           <p className="text-ui-base text-muted-foreground" data-testid="profiles-empty-state">
-            No agent profiles yet — create one below to reuse a provider/approval/thinking bundle from the composer's
-            Profiles picker.
+            No agents yet — create one below to reuse a provider/approval/thinking bundle from the composer's
+            Agents picker.
           </p>
         ) : (
           <ul className="flex flex-col gap-1">
@@ -207,12 +207,12 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
       </section>
 
       <section className="flex flex-col gap-2 border-t pt-4">
-        <p className="text-ui-base font-medium">{editingId === null ? "New profile" : "Edit profile"}</p>
+        <p className="text-ui-base font-medium">{editingId === null ? "New agent" : "Edit agent"}</p>
         <form className="flex flex-col gap-2" onSubmit={handleSubmit}>
           <Input
-            aria-label="Profile name"
+            aria-label="Agent name"
             data-testid="profile-form-name"
-            placeholder="Name (e.g. UI work)"
+            placeholder="Name (e.g. Quick Fixes)"
             value={form.name}
             onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
           />
@@ -260,7 +260,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
             aria-label="Notes"
             data-testid="profile-form-notes"
             className="h-16 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-            placeholder="Notes (optional) — when to use this profile."
+            placeholder="Notes (optional) — when to use this agent."
             value={form.notes}
             onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
           />
@@ -276,7 +276,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
               </Button>
             )}
             <Button type="submit" size="sm" disabled={pending || !form.name.trim()} data-testid="profile-form-submit">
-              {pending ? "Saving…" : editingId === null ? "Add profile" : "Save profile"}
+              {pending ? "Saving…" : editingId === null ? "Add agent" : "Save agent"}
             </Button>
           </div>
         </form>
@@ -298,8 +298,8 @@ function providerLabel(providers: ProviderInfo[], id: string): string {
 }
 
 registerSettingsSection({
-  id: "profiles",
-  label: "Profiles",
+  id: "agents",
+  label: "Agents",
   order: 175,
   render: (ctx) => <ProfilesSection {...ctx} />,
 });

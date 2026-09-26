@@ -534,7 +534,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       client.nth("profile.list", 0).resolve([]);
       await flush();
 
-      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
     });
 
     it("does not render while profile.list is still pending, and every other control works as before", async () => {
@@ -543,7 +543,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       // profile.list is left unresolved -- mirrors a daemon predating this
       // feature just as well as one that's merely slow to answer.
-      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
 
       fireEvent.change(textarea(), { target: { value: "still works" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -576,7 +576,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(screen.getByLabelText("Agents"));
       fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
       await flush();
 
@@ -602,11 +602,11 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(screen.getByLabelText("Agents"));
       fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
       await flush();
 
-      expect(screen.getByLabelText("Profiles")).toHaveTextContent("Profiles");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("Agents");
     });
 
     it("a field changed after applying a profile is not reverted by anything", async () => {
@@ -627,7 +627,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Profiles"));
+      fireEvent.click(screen.getByLabelText("Agents"));
       fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
       await flush();
       expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
