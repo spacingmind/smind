@@ -64,7 +64,7 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="rounded-lg border bg-card"
+      className="rounded-xl border bg-card"
     >
       <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-sm">
         <button
@@ -82,7 +82,7 @@ export function ToolCallCard({
           </span>
           {line && !onOpenPath && (
             <span
-              className="min-w-0 flex-1 truncate text-foreground-muted"
+              className="min-w-0 flex-1 truncate font-mono text-foreground-muted"
               data-testid="tool-call-summary"
               data-chat-find-text="true"
             >
@@ -98,7 +98,7 @@ export function ToolCallCard({
             type="button"
             onClick={onOpenPath}
             data-testid="tool-call-open-path"
-            className="min-w-0 flex-1 truncate text-left text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="min-w-0 flex-1 truncate text-left font-mono text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <span data-testid="tool-call-summary" data-chat-find-text="true">
               {line}
@@ -125,7 +125,7 @@ export function ToolPayload({ label, body, testId }: { label: string; body: stri
   return (
     <div className="mt-1 first:mt-0">
       <p className="text-ui-sm font-medium tracking-wide uppercase text-foreground-muted">{label}</p>
-      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded bg-surface p-2 whitespace-pre-wrap">
+      <pre data-testid={testId} className="mt-0.5 overflow-x-auto rounded-lg bg-surface p-2 font-mono whitespace-pre-wrap">
         {body}
       </pre>
     </div>

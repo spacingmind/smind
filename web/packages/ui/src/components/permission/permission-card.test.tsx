@@ -71,6 +71,16 @@ describe("PermissionCard: options variant", () => {
     expect(outer.className).toContain("shadow-lg");
   });
 
+  // zcode-visual-parity P3: every blocking request reads as the same
+  // "waiting" state, in ZCode's one green confirmation treatment --
+  // never the generic success color.
+  it("carries the confirmation-tone waiting badge", () => {
+    render(<PermissionCard runId="run-1" pending={pending()} onRespond={vi.fn()} onChat={vi.fn()} />);
+    const badge = screen.getByTestId("permission-waiting-badge");
+    expect(badge.className).toContain("bg-interaction-confirmation-surface");
+    expect(badge.className).toContain("text-interaction-confirmation-foreground");
+  });
+
   // Item 21: touch targets need a stated minimum below the compact
   // breakpoint -- jsdom has no layout, so this asserts the class list
   // carries both the 44px compact rule and the `md:`-scoped revert to the

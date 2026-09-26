@@ -39,7 +39,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-user" data-item-kind="user" className="flex justify-end">
           <div
             data-chat-find-text="true"
-            className="max-w-[85%] rounded-lg bg-surface px-2.5 py-1.5 text-ui-base whitespace-pre-wrap"
+            className="max-w-[85%] rounded-xl rounded-tr-sm border bg-surface px-4 py-3 text-ui-base whitespace-pre-wrap"
           >
             {item.text}
           </div>
@@ -57,7 +57,7 @@ export const TimelineRow = memo(function TimelineRow({
       return (
         <li data-testid="timeline-thinking" data-item-kind="thinking">
           {/* Collapsed by default (Item 8): reasoning is available, not in the way. */}
-          <details className="rounded-lg border border-dashed">
+          <details className="rounded-xl border border-dashed">
             <summary className="cursor-pointer px-2.5 py-1 text-ui-sm text-foreground-muted select-none">
               Thinking
             </summary>
@@ -99,7 +99,7 @@ export const TimelineRow = memo(function TimelineRow({
       return (
         <li data-testid="timeline-unknown" data-item-kind="unknown">
           {item.rawKind ? (
-            <details className="rounded-lg border border-dashed">
+            <details className="rounded-xl border border-dashed">
               <summary className="flex cursor-pointer items-center gap-1.5 px-2.5 py-1 text-ui-sm text-foreground-muted select-none">
                 <CircleHelp className="size-3 shrink-0" />
                 Unrecognised event: {item.rawKind}
@@ -109,7 +109,7 @@ export const TimelineRow = memo(function TimelineRow({
               </pre>
             </details>
           ) : (
-            <p className="flex items-center gap-1.5 rounded-lg border border-dashed px-2.5 py-1 text-ui-sm text-foreground-muted">
+            <p className="flex items-center gap-1.5 rounded-xl border border-dashed px-2.5 py-1 text-ui-sm text-foreground-muted">
               <CircleHelp className="size-3 shrink-0" />
               Unrecognised event: {item.eventType}
             </p>

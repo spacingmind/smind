@@ -76,7 +76,7 @@ export function ToolCallDetail({ item, intent }: { item: TimelineToolCallItem; i
     const diff = inlineDiff(input);
     if (diff.length > 0) {
       return (
-        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded bg-surface p-2 font-mono text-ui-sm font-medium">
+        <div data-testid="tool-detail-diff" className="overflow-x-auto rounded-lg bg-surface p-2 font-mono text-ui-sm font-medium">
           {diff.map((line, index) => (
             <div
               key={index}
@@ -139,7 +139,7 @@ function TerminalCommand({ body }: { body: string }) {
       <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Command</p>
       <pre
         data-testid="tool-detail-command"
-        className="mt-0.5 overflow-x-auto rounded border bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
+        className="mt-0.5 overflow-x-auto rounded-lg border bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
       >
         {body}
       </pre>
@@ -178,7 +178,7 @@ function TerminalOutput({ output, failed }: { output: string; failed: boolean })
         ref={preRef}
         data-testid="tool-detail-output"
         className={cn(
-          "mt-0.5 overflow-auto rounded border bg-background p-2 font-mono text-foreground whitespace-pre-wrap",
+          "mt-0.5 overflow-auto rounded-lg border bg-background p-2 font-mono text-foreground whitespace-pre-wrap",
           failed ? "max-h-48" : "max-h-64",
         )}
       >
@@ -208,7 +208,7 @@ function SearchMatches({ output }: { output: string }) {
   return (
     <div className="mt-1 first:mt-0">
       <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Matches</p>
-      <pre data-testid="tool-detail-output" className="mt-0.5 max-h-64 overflow-auto rounded bg-surface p-2 whitespace-pre-wrap">
+      <pre data-testid="tool-detail-output" className="mt-0.5 max-h-64 overflow-auto rounded-lg bg-surface p-2 font-mono whitespace-pre-wrap">
         {visible.join("\n")}
       </pre>
       {bounded && (
@@ -237,7 +237,7 @@ function GenericBody({ item }: { item: TimelineToolCallItem }) {
   const result = stringifyToolPayload(item.result);
   if (!input && !result) return <p className="text-foreground-muted">No detail recorded</p>;
   return (
-    <div className="divide-y divide-border overflow-hidden rounded border">
+    <div className="divide-y divide-border overflow-hidden rounded-lg border">
       {input && <ToolSection label="IN" body={input} testId="tool-call-input" />}
       {result && <ToolSection label="OUT" body={result} testId="tool-call-result" />}
     </div>
