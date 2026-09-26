@@ -107,7 +107,7 @@ func TestAccount_UpdateCredentialNeverEchoesCredential(t *testing.T) {
 
 	// oauth swap (type changes), then api_key swap with a baseUrl.
 	sendRequest(t, ws, "swap", "account.updateCredential", map[string]any{
-		"id": created.ID,
+		"id":         created.ID,
 		"credential": `{"access_token":"access-new","refresh_token":"refresh-new","expires_at":"2030-01-01T00:00:00Z"}`,
 	})
 	resp := readEnvelopeFor(t, ws, "swap", 5*time.Second)
