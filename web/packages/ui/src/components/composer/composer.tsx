@@ -5,10 +5,19 @@ import { GitCompare } from "lucide-react";
 import { resolveNextApprovalPolicy } from "@/components/composer/approval-policy-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
-import { RunConfigToolbar, type RunConfigContextValue } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
+import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { type DiffStat } from "@/lib/diff-stat";
-import type { AgentProfile, ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
+import type {
+  AgentProfile,
+  ApprovalPolicy,
+  ConfigOptionParams,
+  Provider,
+  ProviderInfo,
+  ProviderListResult,
+  ThinkingLevel,
+} from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
@@ -89,6 +98,9 @@ export function Composer({
   onSubmit,
   onStop,
   textareaRef,
+  toolbarRef,
+  onRunConfigChange,
+  configOptions,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -109,6 +121,16 @@ export function Composer({
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /** Exposes the run-config toolbar row's DOM node -- what the task header's run-config pill (task-detail.tsx) focuses when clicked. */
+  toolbarRef?: Ref<HTMLDivElement>;
+  /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
+  onRunConfigChange?: (state: RunConfigState) => void;
+  /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
+  configOptions?: {
+    options: ConfigOptionParams[];
+    error: string | null;
+    onSetOption: (configId: string, value: string) => Promise<void>;
+  };
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
@@ -346,16 +368,32 @@ export function Composer({
          * independent Selects that each carried their own state here.
          */}
         <RunConfigToolbar
+          taskId={taskId}
           profiles={profiles}
           providers={providers}
           disabled={inactive}
-          onChange={setRunConfig}
+          onChange={(value) => {
+            setRunConfig(value);
+            onRunConfigChange?.(value.state);
+          }}
         >
-          <div className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
+          <div
+            ref={toolbarRef}
+            tabIndex={-1}
+            data-testid="composer-toolbar-row"
+            className="flex flex-wrap items-center gap-1.5 rounded-md border-t border-border/60 px-2 py-1.5 focus-visible:ring-3 focus-visible:ring-ring/50"
+          >
             <RunConfigToolbar.Agent />
             <RunConfigToolbar.Provider />
             <RunConfigToolbar.Approval />
             <RunConfigToolbar.Thinking />
+            {configOptions && (
+              <RunConfigOptions
+                options={configOptions.options}
+                error={configOptions.error}
+                onSetOption={configOptions.onSetOption}
+              />
+            )}
           <div className="ml-auto flex items-center gap-2">
             {formError && <span className="text-ui-sm text-destructive">{formError}</span>}
             {running && (
