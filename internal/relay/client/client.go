@@ -306,15 +306,31 @@ func (f *frameConn) reopen(stream relaypb.Relay_OpenDataClient) {
 }
 
 // drop kills the stream (network-drop model): the adapter stays resumable
-// (not closed), unlike Close. CloseSend makes the server see EOF, so its
-// pump detaches and the route's queues start buffering.
+// (not closed), unlike Close. CloseSend makes the server see EOF, which is
+// what makes its OpenData handler return and its send pump get cancelled
+// (server.attachRoute) -- but that is asynchronous relative to this call,
+// and a caller that immediately pushes traffic through the peer and
+// reconnects can otherwise win a race against it: the relay's pump for
+// this side is still live in that gap, so it can pop and "deliver" the
+// caller's buffered frames onto this already-abandoned stream (a
+// send into a half-closed-for-send-only stream still succeeds -- the
+// peer just never reads it) before the relay ever notices the drop,
+// losing them silently. Draining Recv() to its own error return blocks
+// until the relay's handler has actually returned and its pump is
+// confirmed dead, closing that window instead of hoping CloseSend
+// propagates fast enough.
 func (f *frameConn) drop() {
 	f.sendMu.Lock()
 	f.recvMu.Lock()
 	st := f.stream
-	f.recvMu.Unlock()
 	f.sendMu.Unlock()
 	_ = st.CloseSend()
+	for {
+		if _, err := st.Recv(); err != nil {
+			break
+		}
+	}
+	f.recvMu.Unlock()
 }
 
 func (f *frameConn) isClosed() bool {
