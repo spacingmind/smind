@@ -282,3 +282,46 @@ describe("providers-section actions", () => {
     expect(screen.queryByTestId("provider-row-1")).not.toBeInTheDocument();
   });
 });
+
+describe("providers-section connect flows", () => {
+  it("Connect account disclosure opens the shared ConnectAccountPanel and adds through it", async () => {
+    const client = await renderLoaded([account(1, "anthropic", "work-claude")]);
+
+    // Collapsed by default -- the grouped list is the primary content.
+    expect(screen.queryByTestId("accounts-connect-anthropic")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("providers-connect-toggle"));
+    expect(screen.getByTestId("accounts-connect-anthropic")).toBeInTheDocument();
+
+    // The shared panel's manual-add path works from here: open the paste
+    // form, fill it, submit -- account.add fires with accountProvider.
+    fireEvent.click(screen.getByTestId("accounts-manual-toggle"));
+    fireEvent.change(document.getElementById("account-label")!, { target: { value: "alt" } });
+    fireEvent.change(document.getElementById("account-credential")!, { target: { value: "sk-new" } });
+    fireEvent.click(screen.getByTestId("accounts-add-submit"));
+    expect(client.nth("account.add").params).toMatchObject({
+      provider: "anthropic",
+      label: "alt",
+      credential: "sk-new",
+    });
+
+    client.nth("account.add").resolve(account(2, "anthropic", "alt"));
+    await flush();
+    // onConnected refreshes via a second account.list -- answer it with
+    // the list including the new account, the way the daemon would.
+    client.nth("account.list", 1).resolve([
+      account(1, "anthropic", "work-claude"),
+      account(2, "anthropic", "alt"),
+    ]);
+    await flush();
+    expect(screen.getByText("alt")).toBeInTheDocument();
+  });
+
+  it("a not-connected row's Connect opens the shared panel", async () => {
+    await renderLoaded([account(1, "anthropic", "work-claude")]);
+
+    fireEvent.click(screen.getByTestId("provider-connect-kimi"));
+    await flush();
+    expect(screen.getByTestId("providers-connect-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+});
