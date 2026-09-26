@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -378,6 +379,64 @@ func TestProxy_StreamingPassthrough(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for second chunk")
+	}
+}
+
+// TestProxy_UpstreamStreamBreakAbortsDownstream exercises copyResponse's
+// error path (proxy.go): if the upstream connection breaks mid-stream,
+// after status and some body bytes have already reached the client, the
+// proxy must abort the downstream response rather than let net/http finish
+// it normally -- otherwise the client sees what looks like a complete,
+// successful stream with the tail silently missing.
+func TestProxy_UpstreamStreamBreakAbortsDownstream(t *testing.T) {
+	t.Parallel()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("chunk1\n"))
+		w.(http.Flusher).Flush()
+
+		// Simulate an upstream connection dying mid-stream: hijack and
+		// close the raw conn instead of finishing the response normally,
+		// so the client never sees a clean chunked terminator.
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Log("upstream ResponseWriter does not support hijacking")
+			return
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Logf("Hijack() error = %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	defer upstream.Close()
+
+	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
+
+	proxySrv := httptest.NewServer(http.HandlerFunc(p.handleAnthropic))
+	defer proxySrv.Close()
+
+	req, err := http.NewRequest(http.MethodPost, proxySrv.URL+"/v1/messages", strings.NewReader(`{"stream":true}`))
+	if err != nil {
+		t.Fatalf("NewRequest() error = %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("Do() error = %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err == nil {
+		t.Fatalf("ReadAll() = %q, nil error; want the truncated stream to surface as an error", body)
+	}
+	if errors.Is(err, io.EOF) {
+		t.Fatalf("ReadAll() error = %v, want anything but a clean io.EOF (that would mean the truncation was hidden from the client)", err)
 	}
 }
 
