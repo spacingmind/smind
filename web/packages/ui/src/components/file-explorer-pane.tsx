@@ -191,8 +191,8 @@ function DirChildren({
               depth={depth}
               icon={
                 <>
-                  <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-                  {expanded ? <FolderOpen className="size-3.5" /> : <Folder className="size-3.5" />}
+                  <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
+                  {expanded ? <FolderOpen aria-hidden="true" className="size-3.5" /> : <Folder aria-hidden="true" className="size-3.5" />}
                 </>
               }
               label={entry.name}

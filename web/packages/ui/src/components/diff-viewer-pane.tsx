@@ -615,6 +615,7 @@ function FileRow({
           data-testid={`diff-file-header-${file.path}`}
         >
           <ChevronRight
+            aria-hidden="true"
             className={cn("size-3.5 shrink-0 text-foreground-subtle transition-transform", !collapsed && "rotate-90")}
           />
           <span className="min-w-0 flex-1 truncate">{file.path}</span>
