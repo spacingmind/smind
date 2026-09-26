@@ -743,7 +743,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   const headerElement = (
     <>
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+      {/* h-12/border-b/p-2 matches ZCode's WorkspaceHeader.tsx (zcode-visual-parity plan P2). */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b p-2">
         <SidebarTrigger />
         <Separator orientation="vertical" className="h-4" />
         <span className="text-ui-base text-muted-foreground" data-testid="app-connection-status">
@@ -828,61 +829,68 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           }}
         />
       ) : selectedTask && taskState ? (
-        isMobile ? (
-          compactPrimaryStrip
-        ) : (
-          // The split tree (pane-split-tree plan): an arbitrary number of
-          // panes, each its own Radix Tabs root. Splitting or moving a
-          // tab between panes is a plain data move in useTaskTabs -- the
-          // pane component underneath *does* fully unmount from one root
-          // and mount in another, which is fine because every such
-          // component already tolerates ADR 0004's "switching tabs
-          // unmounts inactive content" and reattaches to its server-side
-          // session rather than recreating it (see use-task-tabs.ts's doc
-          // comment).
-          //
-          // DndContext (Item 8) only wraps this desktop/split branch, not
-          // compactPrimaryStrip above -- compact mode has nowhere to drop
-          // a split into, same reasoning as showMoveAffordance={false}
-          // already gating the Split menu off there.
-          <DndContext
-            sensors={dndSensors}
-            onDragStart={handleDragStart}
-            onDragMove={handleDragOver}
-            onDragOver={handleDragOver}
-            onDragEnd={handleDragEnd}
-            onDragCancel={handleDragCancel}
-          >
-            <SplitTreeView
-              node={taskState.root}
-              paneCount={paneCount}
-              task={selectedTask}
-              client={client}
-              connectionStatus={connectionStatus}
-              events={events}
-              onOpenFile={openFileTab}
-              onOpenFileToSide={openFileTabToSide}
-              onActivate={(key) => activate(selectedTask.ID, key)}
-              onClose={(key) => closeTab(selectedTask.ID, key)}
-              onCloseOthers={closeOtherTabsForTask}
-              onCloseLeft={closeTabsToLeftForTask}
-              onCloseRight={closeTabsToRightForTask}
-              onRenameTab={renameTabForTask}
-              onSplitTab={splitPaneTab}
-              onResizeGroup={resizePaneGroup}
-              onRevealInDiff={revealInDiff}
-              onNewTerminal={openTerminalTab}
-              onOpenBase={openBaseTab}
-              dragOverPaneId={dragOverPaneId}
-              dropPosition={dropPosition}
-              isDragActive={isDragActive}
-              focusedPaneId={taskState.focusedPaneId}
-              onFocusPane={(paneId) => focusPane(selectedTask.ID, paneId)}
-              openNewTabPaneId={openNewTabPaneId}
-              onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
-            />
-          </DndContext>
-        )
+        // p-1 (4px) gives the frame(s) below the same gap against the
+        // header/sidebar/window edges that ResizableHandle's own 4px width
+        // already gives adjoining panes (zcode-visual-parity plan P2) --
+        // one consistent gap on every side of every frame, whether there's
+        // one pane or several.
+        <div className="h-full p-1">
+          {isMobile ? (
+            compactPrimaryStrip
+          ) : (
+            // The split tree (pane-split-tree plan): an arbitrary number of
+            // panes, each its own Radix Tabs root. Splitting or moving a
+            // tab between panes is a plain data move in useTaskTabs -- the
+            // pane component underneath *does* fully unmount from one root
+            // and mount in another, which is fine because every such
+            // component already tolerates ADR 0004's "switching tabs
+            // unmounts inactive content" and reattaches to its server-side
+            // session rather than recreating it (see use-task-tabs.ts's doc
+            // comment).
+            //
+            // DndContext (Item 8) only wraps this desktop/split branch, not
+            // compactPrimaryStrip above -- compact mode has nowhere to drop
+            // a split into, same reasoning as showMoveAffordance={false}
+            // already gating the Split menu off there.
+            <DndContext
+              sensors={dndSensors}
+              onDragStart={handleDragStart}
+              onDragMove={handleDragOver}
+              onDragOver={handleDragOver}
+              onDragEnd={handleDragEnd}
+              onDragCancel={handleDragCancel}
+            >
+              <SplitTreeView
+                node={taskState.root}
+                paneCount={paneCount}
+                task={selectedTask}
+                client={client}
+                connectionStatus={connectionStatus}
+                events={events}
+                onOpenFile={openFileTab}
+                onOpenFileToSide={openFileTabToSide}
+                onActivate={(key) => activate(selectedTask.ID, key)}
+                onClose={(key) => closeTab(selectedTask.ID, key)}
+                onCloseOthers={closeOtherTabsForTask}
+                onCloseLeft={closeTabsToLeftForTask}
+                onCloseRight={closeTabsToRightForTask}
+                onRenameTab={renameTabForTask}
+                onSplitTab={splitPaneTab}
+                onResizeGroup={resizePaneGroup}
+                onRevealInDiff={revealInDiff}
+                onNewTerminal={openTerminalTab}
+                onOpenBase={openBaseTab}
+                dragOverPaneId={dragOverPaneId}
+                dropPosition={dropPosition}
+                isDragActive={isDragActive}
+                focusedPaneId={taskState.focusedPaneId}
+                onFocusPane={(paneId) => focusPane(selectedTask.ID, paneId)}
+                openNewTabPaneId={openNewTabPaneId}
+                onOpenNewTabPaneIdChange={setOpenNewTabPaneId}
+              />
+            </DndContext>
+          )}
+        </div>
       ) : (
         emptyStateElement
       )}
@@ -980,7 +988,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
            * any `data-testid` passed directly -- so the only way to control
            * the rendered data-testid here is via `id`, not `data-testid`.
            */}
-          <ResizableHandle withHandle id="sidebar-resize-handle" />
+          <ResizableHandle id="sidebar-resize-handle" />
           <ResizablePanel minSize={30} className="min-w-0">
             {/*
              * Panel's own box gets its height from the group's flex-stretch,
@@ -1314,7 +1322,7 @@ function SplitGroupView({
     >
       {node.group.children.map((child, index) => (
         <Fragment key={splitNodeId(child)}>
-          {index > 0 && <ResizableHandle withHandle />}
+          {index > 0 && <ResizableHandle />}
           <ResizablePanel id={splitNodeId(child)} minSize={`${MIN_SPLIT_SIZE * 100}%`} className="min-w-0">
             <SplitTreeView node={child} paneCount={paneCount} {...shared} />
           </ResizablePanel>
@@ -1405,10 +1413,17 @@ function PaneTabStrip({
   return (
     <div
       ref={setDroppableRef}
-      // A ring rather than a border: a border would shift every pane's
-      // content by its width when focus moves, and only means anything
-      // once there's more than one pane to tell apart.
-      className={cn("relative h-full", focused && paneCount > 1 && "ring-1 ring-inset ring-ring")}
+      // Each pane is its own bg-panel/border frame (zcode-visual-parity
+      // plan P2: WorkspaceShellLayout's independent conversation/terminal/
+      // side-pane frames), with the 4px ResizableHandle width providing
+      // the gap between adjoining frames. The focus ring composes with
+      // that border rather than replacing it: a border would shift every
+      // pane's content by its width when focus moves, and only means
+      // anything once there's more than one pane to tell apart.
+      className={cn(
+        "relative flex h-full flex-col overflow-hidden rounded-lg border bg-panel",
+        focused && paneCount > 1 && "ring-1 ring-inset ring-ring",
+      )}
       data-testid={focused ? "pane-focused" : undefined}
       onPointerDownCapture={onFocusPane}
     >
