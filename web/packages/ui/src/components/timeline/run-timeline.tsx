@@ -37,14 +37,21 @@ export const RunTimeline = memo(function RunTimeline({
   worktreePath,
   onOpenFile,
   onRetry,
-}: { run: RunEntry; detailLevel?: DetailLevel; onRetry?: (run: RunEntry) => void } & TimelineRowContext) {
+  providerLabels,
+}: {
+  run: RunEntry;
+  detailLevel?: DetailLevel;
+  onRetry?: (run: RunEntry) => void;
+  /** provider.list's id→label map ("label ?? id", run-config IA); omitted leaves raw ids. */
+  providerLabels?: Record<string, string>;
+} & TimelineRowContext) {
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-lg border">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-sm text-foreground-muted">
-        <span className="truncate">{run.provider}</span>
+        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
         <span className="flex shrink-0 items-center gap-1.5">
           <StatusDot status={RUN_STATUS_DOT[run.status]} />
           <span className="uppercase" data-testid="run-status">

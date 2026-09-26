@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { ApprovalPolicyControl } from "@/components/approval-policy-control";
@@ -19,7 +19,7 @@ import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { Task } from "@/lib/types";
+import type { Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /**
@@ -50,6 +50,26 @@ export function TaskDetailPane({
     client,
     task.ID,
   );
+  // provider.list's id→label map for the run headers ("label ?? id",
+  // run-config IA): run entries carry only the wire provider id, and the
+  // header should say "Claude Code", not "claude-native". Empty until the
+  // fetch resolves -- RunTimeline falls back to the raw id, its exact
+  // pre-existing behavior.
+  const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then((result) => {
+        if (cancelled) return;
+        setProviderLabels(Object.fromEntries(result.providers.map((p) => [p.id, p.label ?? p.id])));
+      })
+      .catch((err) => console.error("provider.list failed, keeping raw provider ids in run headers", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
   // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
   // same task.diff this is -- the same hook the diff pane itself uses, so
   // the pill and the pane's header stat can't disagree and no extra RPC
@@ -183,6 +203,7 @@ export function TaskDetailPane({
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={retryWithHigherEffort}
+                    providerLabels={providerLabels}
                   />
                 ))}
               </ul>
