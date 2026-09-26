@@ -136,9 +136,13 @@ that already exists.
 
 ## Decisions
 
-(none yet — fill in as implementation surfaces choices; if any choice
-touches the daemon/wire or public API shape, stop and ask per AGENTS.md
-rule (d) rather than deciding unilaterally)
+- **RunConfigState gained `baseAgentId`/`custom` instead of a plain `agent` field.** `baseAgentId` is sticky (stays set once an agent is picked, even after a hand-edit); `custom` is a dirty flag cleared by `applyProfile`/`resetToAgent`. This is what lets the Agent trigger show "Custom · from <name>" and the ↺ control restore exactly that agent's values, per AC.
+- **The toolbar's run-config is persisted per task** (`smind:run-config:<taskId>`, `components/composer/run-config-preference.ts`), the same per-task-key `localStorage` pattern `use-composer-draft.ts` already established (docs/design.md §9). This is what makes the task header's run-config pill "durable" rather than a snapshot of in-memory-only state, and what survives a closed/reopened tab or a reload.
+- **★ default agent replaces General's "Defaults for new tasks" control**, per the AC's own instruction — `general-section.tsx` now points at Settings → Agents instead of re-implementing the same choice with a narrower (provider+approval only, no thinking, no agent binding) mechanism. `useDefaultRunPreferences`/the old `defaultProvider`/`defaultApprovalPolicy` storage functions were deleted outright (no other caller referenced them) rather than left dead.
+- **Agent menu is a DropdownMenu, not a Select.** The AC's row shape (per-profile provider/approval/thinking metadata, a "No agent" entry, a separator, "Manage agents…") doesn't fit Select's single-line SelectItem/SelectValue pairing; DropdownMenu already had every primitive needed except `DropdownMenuSeparator`, added to `ui/dropdown-menu.tsx`.
+- **"Manage agents…" (and the sidebar footer's "Agents" row, and the "Settings: Agents"/"New agent…" palette commands) deep-link via a new `smind:open-settings` window event** (`{ sectionId }`), listened to once in `App.tsx`, mirroring the existing `smind:open-accounts`/`smind:use-agent` cross-tree channel this codebase already uses for exactly this "the composer isn't a child of the sidebar/settings screen" problem. Previously these three call sites just opened Settings at its default section; now they land on Agents specifically, closing a gap the AC asked for ("each deep-links straight into the matching Settings section").
+- **Settings → Agents' Provider health dot reuses `provider.test` + `ui/status-dot.tsx`'s `StatusDot`, not the AccountsDialog's own transient `testResults` state.** Sharing that state would couple two independent surfaces for the sake of one RPC the daemon answers statelessly; the inline edit form fetches its own `provider.test` result when it opens, same rationale this codebase already uses for profiles/providers being fetched independently in the composer, the sidebar, and this section.
+- **A credential-backed profile's health check resolves through `ProviderInfo.accountProvider`, not the raw taskrunner provider id** — `provider.test`'s `provider` param is accounts-vocabulary (e.g. `anthropic`) for anything not `kind: "cli"`, per `internal/wsapi/handlers.go`'s `handleProviderTest`; `accountHealthTestKey` in `profiles-section.tsx` does that lookup.
 
 ## Progress
 
@@ -148,11 +152,33 @@ rule (d) rather than deciding unilaterally)
 - [x] Settings nav regrouped: General · Appearance · group "Agents & providers" (Agents, Providers) · group "Connection" (Daemon server = renamed Connections, Daemon; desktop-only) · Notifications · Shortcuts. Providers is a nav stub on this branch (dispatches `smind:open-accounts`); ADR-0015's branch registers the real `providers` section and replaces it at merge.
 
 - [x] Sidebar gear icon opens Settings, not Accounts (sliders icon and header Accounts button removed; Accounts entry moved to the sidebar footer).
-- [x] Sidebar footer shortcuts: "Providers" (opens the existing accounts dialog until Settings has a Providers section) and "Agents" (opens Settings). Health dot / counts deferred to the RunConfigToolbar pass so they read the same hooks the toolbar will.
-- [x] Command palette: "Settings: Agents", "Settings: Providers", "Use agent: <name>" per profile (dispatched to the composer via a `smind:use-agent` window event), and "New agent…". Desktop-only "Settings: Daemon server"/"Settings: Daemon" deferred until the Connection regroup lands.
+- [x] Sidebar footer "Agents" row and the "Settings: Agents"/"New agent…" palette commands now deep-link straight to Settings → Agents (`smind:open-settings`, see Decisions) — no longer just the settings screen's default landing section.
+- [ ] Sidebar footer "Providers" row's health dot + healthy-count (AC: "● 2 healthy") — **not done this pass**. It still opens the accounts dialog but shows no dot/count; this was deferred to "the RunConfigToolbar pass" by an earlier session and remained out of scope for the explicit remaining-work list this pass picked up from. `accountHealthTestKey`/the `provider.test` pattern this pass built for the Agents inline edit's health dot is directly reusable here.
+- [x] Command palette: "Settings: Agents", "Settings: Providers", "Use agent: <name>" per profile (dispatched to the composer via a `smind:use-agent` window event), and "New agent…".
+- [ ] Desktop-only "Settings: Daemon server"/"Settings: Daemon" palette entries — **not done**, deferred until the Connection regroup lands (out of scope for this pass; no desktop-only work was touched).
+
+- [x] `RunConfigToolbar` behavior: picking an agent applies provider/approval/thinking; hand-editing a field flips the Agent selector to "Custom · from <agent>" with a ↺ reset; the override never writes back to the stored profile; Thinking is hidden for non-Claude providers (existing `=== "claude-native"` check, which already mirrors `thinking.go`); GLM/Kimi's live ACP options render inside the same row (`composer.tsx`'s `configOptions` prop, `RunConfigOptions` now rendered without its own outer width/padding wrapper). Tests: `composer.test.tsx`'s "run-config persistence and the ★ default agent" and "Profiles picker" describe blocks, `task-detail.test.tsx`'s config-options and run-config-pill describes.
+- [x] Task header run-config pill: "<Agent|Custom|No agent> · <Provider> · <Approval> · <Thinking, Claude-only>", persisted per task (see Decisions), clicking it focuses the composer's toolbar row (`composer-toolbar-row`, `tabIndex={-1}` + `.focus()`). Tests: `task-detail.test.tsx`'s "run-config pill" and `runConfigPillLabel` describes.
+- [x] ★ default agent in Settings → Agents: client-side (`lib/settings-preferences.ts`'s `readStoredDefaultAgentId`/`writeStoredDefaultAgentId`), a new task's toolbar seeds from it once `profile.list` resolves, clearing when its agent is deleted. General's old defaults control replaced (see Decisions). Tests: `profiles-section.test.tsx`'s "★ default agent" describe, `composer.test.tsx`'s "starts from the ★ default agent" test.
+- [x] Settings → Agents card list: name, one metadata line, notes muted underneath, "⋯" menu (Edit/Delete) replacing the two always-visible buttons; Edit expands inline in the row (Name, Provider + health dot, Approval, Thinking, Notes, Cancel/Save) instead of repurposing the bottom form, which now stays a plain "New agent" add-only form. Tests: `profiles-section.test.tsx`'s rewritten edit/delete tests plus the new health-dot describe.
+- [x] Command palette additions (from an earlier session in this plan, confirmed still passing): "Settings: Agents", "Settings: Providers", "Use agent: <name>", "New agent…".
+- [x] Approval-policy labels unified (confirmed unchanged by this pass; still one `lib/approval-policies.ts` vocabulary everywhere).
 
 ## Validation
 
-(fill in once every acceptance criterion above is confirmed working,
-citing the test run/screenshots that proved it, then move this file to
-docs/plans/completed/)
+Confirmed via `task test` (Go `go test ./...` all green, web `bun run --filter '@smind/ui' test` 1292/1292 passing including every test listed above), `bun run --filter '@smind/ui' typecheck` (clean), and `task lint` (go vet + gofmt clean).
+
+Screenshots (desktop 1440×900, light + dark, against a temp daemon at a temp `SMIND_HOME` on :4706 seeded with one workspace/space/2 tasks/2 agent profiles/1 demo account) saved to `Downloads\smind-run-config-ia\` and reviewed by hand against ZCode's density:
+- `01-home` — sidebar footer's Providers/Agents shortcuts.
+- `02-task-toolbar` — closed toolbar + header pill ("No agent · Claude Code · Manual approval · Standard").
+- `03-agent-menu-open` — agent menu (No agent / per-profile metadata rows / Manage agents…⌘,).
+- `04-toolbar-custom` — Custom · from <agent> + ↺, header pill reflecting the hand-edit.
+- `05-header-pill` — pill after a provider change (thinking segment correctly omitted for GLM).
+- `06-settings-nav-agents` — regrouped nav + Agents card list with the ★ star.
+- `07-palette` — command palette open.
+- `08-settings-general` — General's pointer copy replacing the removed defaults control.
+- `09-agents-inline-edit` — inline expand-in-row edit, provider health dot both red (no credential) and green (after adding one).
+
+A `web-design-guidelines` review pass over the changed files found and fixed: three icon-only buttons missing `aria-hidden` on their glyph, an unbounded-width agent-menu item (added `max-w-sm` + truncate, re-verified by screenshot it doesn't clip the common case), a focused-but-`outline-none` toolbar row (swapped for `focus-visible:ring`), and two "--" instances in rendered copy (should be "—" per docs/design.md's own house style).
+
+**Not satisfied — see Progress's two unchecked items**: the sidebar footer's Providers health dot/count, and the desktop-only Daemon-server/Daemon palette entries. Both are explicitly out of scope for what this session's remaining-work list asked for (footer health/count was previously deferred by an earlier session to "the RunConfigToolbar pass" but wasn't actually in this session's handoff instructions; the daemon palette entries are gated on the not-yet-done Connection nav regroup). Leaving this plan in `active/` rather than moving it to `completed/` until those are picked up — every other acceptance criterion in this file is confirmed working per the test run and screenshots above.
