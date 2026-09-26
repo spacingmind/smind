@@ -4,16 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
-import { readStoredDefaultApprovalPolicy, readStoredDefaultProvider } from "@/lib/settings-preferences";
 import { readStoredThemePreference } from "@/lib/theme";
 import { FakeWsClient } from "@/test/fake-ws-client";
-
-const PROVIDERS = {
-  providers: [
-    { id: "claude-native", label: "Claude Code", credentialKind: "oauth", accountProvider: "anthropic" },
-    { id: "glm", label: "GLM", kind: "cli" },
-  ],
-};
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -22,8 +14,14 @@ async function flush(): Promise<void> {
   });
 }
 
-function renderScreen(client = new FakeWsClient()) {
-  render(<SettingsScreen client={client as never} onNavigateBack={() => {}} />);
+function renderScreen(client = new FakeWsClient(), initialSectionId?: string) {
+  render(
+    <SettingsScreen
+      client={client as never}
+      onNavigateBack={() => {}}
+      initialSectionId={initialSectionId}
+    />,
+  );
   return client;
 }
 
@@ -34,13 +32,50 @@ afterEach(() => {
 });
 
 describe("SettingsScreen shell", () => {
-  it("renders the built-in Appearance and General sections, Appearance active by default", () => {
+  it("renders the built-in General and Appearance sections, General active by default (nav regroup puts it first)", () => {
     renderScreen();
 
     expect(screen.getByTestId("settings-nav-appearance")).toBeInTheDocument();
     expect(screen.getByTestId("settings-nav-general")).toBeInTheDocument();
-    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
-    expect(screen.queryByTestId("settings-section-general")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-appearance")).not.toBeInTheDocument();
+  });
+
+  it("groups the nav per the run-config IA regroup: Agents & providers, and Connection (desktop only)", () => {
+    renderScreen();
+
+    // Agents & providers group: heading once, then its two members.
+    expect(screen.getAllByText("Agents & providers").length).toBe(1);
+    expect(screen.getByTestId("settings-nav-agents")).toHaveTextContent("Agents");
+    expect(screen.getByTestId("settings-nav-providers")).toHaveTextContent("Providers");
+
+    // Connection is desktop-only; in a web test neither entry renders.
+    expect(screen.queryByText("Connection")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-nav-connections")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
+
+    // Order: General · Appearance · Agents & providers · Notifications ·
+    // Shortcuts (desktop inserts Connection between the group and
+    // Notifications).
+    const ids = screen
+      .getAllByRole("listitem")
+      .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
+      .filter(Boolean);
+    expect(ids).toEqual([
+      "settings-nav-general",
+      "settings-nav-appearance",
+      "settings-nav-agents",
+      "settings-nav-providers",
+      "settings-nav-notifications",
+      "settings-nav-shortcuts",
+    ]);
+  });
+
+  it("the Providers nav entry renders ADR-0015's real Providers section, not the old open-accounts stub", () => {
+    renderScreen();
+
+    fireEvent.click(screen.getByTestId("settings-nav-providers"));
+    expect(screen.getByTestId("settings-section-providers")).toBeInTheDocument();
   });
 
   it("gives the active and inactive nav items the same text-ui-* size (tailwind-merge font-size group regression, see lib/utils.ts's cn() comment)", () => {
@@ -92,7 +127,7 @@ describe("SettingsScreen shell", () => {
   it("an unknown initialSectionId falls back to the first registered section instead of blanking the screen", () => {
     render(<SettingsScreen client={null} onNavigateBack={() => {}} initialSectionId="does-not-exist" />);
 
-    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
   });
 
   it("registering a new section in the test makes it appear without editing the shell", () => {
@@ -117,7 +152,7 @@ describe("SettingsScreen shell", () => {
 
 describe("SettingsScreen Appearance section", () => {
   it("changing the theme updates the document and persists", () => {
-    renderScreen();
+    renderScreen(undefined, "appearance");
     const appearance = within(screen.getByTestId("settings-section-appearance"));
 
     fireEvent.click(appearance.getByTestId("settings-theme-dark"));
@@ -127,7 +162,7 @@ describe("SettingsScreen Appearance section", () => {
   });
 
   it("changing a font-size axis updates its CSS custom property and persists", () => {
-    renderScreen();
+    renderScreen(undefined, "appearance");
     const appearance = within(screen.getByTestId("settings-section-appearance"));
 
     fireEvent.click(appearance.getByTestId("settings-font-size-interface-large"));
@@ -136,12 +171,12 @@ describe("SettingsScreen Appearance section", () => {
 
     // Persisted across a remount.
     const client2 = new FakeWsClient();
-    render(<SettingsScreen client={client2 as never} onNavigateBack={() => {}} />);
+    render(<SettingsScreen client={client2 as never} onNavigateBack={() => {}} initialSectionId="appearance" />);
     expect(screen.getAllByTestId("settings-font-size-interface-large")[1]).toHaveAttribute("aria-pressed", "true");
   });
 
   it("each font-size axis is independent -- changing content does not touch interface", () => {
-    renderScreen();
+    renderScreen(undefined, "appearance");
     const appearance = within(screen.getByTestId("settings-section-appearance"));
 
     fireEvent.click(appearance.getByTestId("settings-font-size-content-small"));
@@ -152,44 +187,17 @@ describe("SettingsScreen Appearance section", () => {
 });
 
 describe("SettingsScreen General section", () => {
-  function openGeneral(client = new FakeWsClient()) {
-    renderScreen(client);
+  // The old default-provider/default-approval-policy controls moved to
+  // Settings -> Agents' ★ default agent (run-config IA plan) -- General
+  // keeps a pointer rather than going blank or landing on the next
+  // section silently. profiles-section.test.tsx covers the ★ control
+  // itself.
+  it("points to Settings -> Agents instead of the removed default-provider/policy controls", () => {
+    renderScreen();
     fireEvent.click(screen.getByTestId("settings-nav-general"));
-    return client;
-  }
 
-  it("fetches and lists providers for the default-provider picker", async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    const select = screen.getByTestId("settings-default-provider");
-    expect(within(select).getByText("Claude Code")).toBeInTheDocument();
-    expect(within(select).getByText("GLM")).toBeInTheDocument();
-  });
-
-  it("persists the chosen default provider and approval policy", async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "glm" } });
-    fireEvent.change(screen.getByTestId("settings-default-approval-policy"), { target: { value: "auto-safe" } });
-
-    expect(readStoredDefaultProvider()).toBe("glm");
-    expect(readStoredDefaultApprovalPolicy()).toBe("auto-safe");
-  });
-
-  it('clearing back to "No preference" removes the stored value, not just blanks it visually', async () => {
-    const client = openGeneral();
-    client.nth("provider.list", 0).resolve(PROVIDERS);
-    await flush();
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "glm" } });
-    expect(readStoredDefaultProvider()).toBe("glm");
-
-    fireEvent.change(screen.getByTestId("settings-default-provider"), { target: { value: "" } });
-    expect(readStoredDefaultProvider()).toBeNull();
+    expect(screen.getByTestId("settings-section-general")).toHaveTextContent("Settings → Agents");
+    expect(screen.queryByTestId("settings-default-provider")).not.toBeInTheDocument();
   });
 });
 

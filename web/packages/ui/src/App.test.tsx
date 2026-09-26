@@ -685,7 +685,8 @@ describe("App keyboard shortcuts", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    // General is the default section since the run-config IA nav regroup.
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section-shortcuts")).not.toBeInTheDocument();
   });
 });
@@ -719,7 +720,7 @@ describe("App command palette", () => {
     // no tab entries yet, but the sidebar's own registered actions are there.
     expect(titles).toContain(WORKSPACE.Title);
     expect(titles).toContain("New workspace");
-    expect(titles).toContain("Open accounts");
+    expect(titles).toContain("Settings: Providers");
     expect(titles).toContain("Cycle theme");
   });
 

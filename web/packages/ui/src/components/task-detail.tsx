@@ -1,11 +1,11 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { ApprovalPolicyControl } from "@/components/approval-policy-control";
 import { Composer } from "@/components/composer/composer";
+import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { PermissionCard } from "@/components/permission/permission-card";
-import { RunConfigOptions } from "@/components/run-config-options";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -18,9 +18,24 @@ import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
+import { approvalPolicyLabel } from "@/lib/approval-policies";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import type { Task } from "@/lib/types";
+import { thinkingLevelLabel } from "@/lib/thinking-levels";
+import type { AgentProfile, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
+
+/** The task header's run-config pill text (AC's "<Agent> · <Provider> · <Approval> · <Thinking>" format) -- pure so it can be unit-tested without mounting the whole pane. */
+export function runConfigPillLabel(
+  state: RunConfigState,
+  profiles: AgentProfile[],
+  providerLabels: Record<string, string>,
+): string {
+  const agent = state.baseAgentId ? profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
+  const agentSegment = agent ? agent.Name : state.custom ? "Custom" : "No agent";
+  const parts = [agentSegment, providerLabels[state.provider] ?? state.provider, approvalPolicyLabel(state.approvalPolicy)];
+  if (state.provider === "claude-native") parts.push(thinkingLevelLabel(state.thinkingLevel));
+  return parts.join(" · ");
+}
 
 /**
  * The main-content pane for a selected task: identity header, a chat-log
@@ -50,6 +65,50 @@ export function TaskDetailPane({
     client,
     task.ID,
   );
+  // provider.list's id→label map for the run headers ("label ?? id",
+  // run-config IA): run entries carry only the wire provider id, and the
+  // header should say "Claude Code", not "claude-native". Empty until the
+  // fetch resolves -- RunTimeline falls back to the raw id, its exact
+  // pre-existing behavior.
+  const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then((result) => {
+        if (cancelled) return;
+        setProviderLabels(Object.fromEntries(result.providers.map((p) => [p.id, p.label ?? p.id])));
+      })
+      .catch((err) => console.error("provider.list failed, keeping raw provider ids in run headers", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+  // Feeds the header run-config pill's agent-name lookup (run-config IA) --
+  // the composer fetches its own copy too (its picker seeds on it); see
+  // app-sidebar.tsx's identical duplicate-fetch rationale for why sharing
+  // one fetch isn't worth coupling these two surfaces together.
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<AgentProfile[]>("profile.list")
+      .then((result) => {
+        if (!cancelled) setProfiles(result ?? []);
+      })
+      .catch((err) => console.error("profile.list failed, hiding the agent name in the header pill", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+  // Mirrors RunConfigToolbar's own shared state (run-config IA): the
+  // header pill is "display-only, derived from the same state the toolbar
+  // reads" -- this is that read, not a second source of truth. Null until
+  // the composer's first onChange fires (its own mount effect, near-
+  // immediate).
+  const [runConfigState, setRunConfigState] = useState<RunConfigState | null>(null);
   // The composer's diff-stat pill (web-ui-dogfood-polish Item 5) reads the
   // same task.diff this is -- the same hook the diff pane itself uses, so
   // the pill and the pane's header stat can't disagree and no extra RPC
@@ -115,6 +174,12 @@ export function TaskDetailPane({
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
+  // The header pill's click target (AC: "clicking it moves focus to the
+  // composer toolbar"). tabIndex=-1 on the row itself (composer.tsx) is
+  // what makes a plain div a valid .focus() target.
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const focusToolbar = useCallback(() => toolbarRef.current?.focus(), []);
+
   return (
     <div className="flex h-full flex-col">
       <PaneHeader
@@ -123,6 +188,16 @@ export function TaskDetailPane({
           <>
             <span className="uppercase">{task.Status}</span>
             {task.Branch && <span className="truncate">{task.Branch}</span>}
+            {runConfigState && (
+              <button
+                type="button"
+                data-testid="task-run-config-pill"
+                onClick={focusToolbar}
+                className="truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
+              >
+                {runConfigPillLabel(runConfigState, profiles, providerLabels)}
+              </button>
+            )}
           </>
         }
         actions={
@@ -183,6 +258,7 @@ export function TaskDetailPane({
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={retryWithHigherEffort}
+                    providerLabels={providerLabels}
                   />
                 ))}
               </ul>
@@ -251,12 +327,6 @@ export function TaskDetailPane({
         />
       )}
 
-      <RunConfigOptions
-        options={configOptions.options}
-        error={configOptions.error}
-        onSetOption={configOptions.setOption}
-      />
-
       <Composer
         client={client}
         taskId={task.ID}
@@ -267,6 +337,9 @@ export function TaskDetailPane({
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}
+        toolbarRef={toolbarRef}
+        onRunConfigChange={setRunConfigState}
+        configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
       />
     </div>
   );

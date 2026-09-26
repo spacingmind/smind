@@ -72,6 +72,7 @@ Usage:
                                                            register an account (credential from stdin)
   smind account ls                                        list accounts
   smind account login <provider> <label>                  browser OAuth login (anthropic, openai)
+  smind account rm <id>                                    remove an account (cascades routing/quota/workspace links)
   smind account test <provider>                           check whether a provider looks ready to run
 
   smind space create <workspaceId> <title>                create a space within a workspace

@@ -28,7 +28,7 @@ type accountResult struct {
 
 func cmdAccount(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login|test> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login|rm|test> ...")
 		return 2
 	}
 	switch args[0] {
@@ -38,6 +38,8 @@ func cmdAccount(args []string) int {
 		return cmdAccountList(args[1:])
 	case "login":
 		return cmdAccountLogin(args[1:])
+	case "rm":
+		return cmdAccountRemove(args[1:])
 	case "test":
 		return cmdAccountTest(args[1:])
 	default:
@@ -222,6 +224,35 @@ func cmdAccountTest(args []string) int {
 	}
 	fmt.Println(result.Detail)
 	return 1
+}
+
+// cmdAccountRemove removes an account by id (account.remove): a hard
+// delete cascading the account's routing affinity, quota snapshots, and
+// workspace links. Prints nothing on success beyond exit 0, matching
+// `profile rm`'s terseness (ADR-0015).
+func cmdAccountRemove(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: smind account rm <id>")
+		return 2
+	}
+	id, err := parseInt64(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "account rm: invalid id %q: %v\n", args[0], err)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	if err := client.Call(context.Background(), "account.remove", map[string]any{"id": id}, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "account rm: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // openBrowser best-effort opens url in the local system browser. Failure is

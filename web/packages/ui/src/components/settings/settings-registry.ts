@@ -15,6 +15,13 @@ export interface SettingsSection {
   /** Stable identity: the list's key, and what a later re-registration under the same id replaces rather than duplicates. */
   id: string;
   label: string;
+  /**
+   * Optional group heading this section nests under in the settings nav
+   * (run-config IA plan): sections sharing a groupLabel render under one
+   * non-clickable heading, after all ungrouped sections that sort earlier
+   * by `order`. Absent = a top-level entry, as every section was before.
+   */
+  groupLabel?: string;
   icon?: ReactNode;
   /** Lower renders first. Built-in sections use round numbers (100, 200, ...) leaving room for a section to insert itself between two others; ties break by registration order. */
   order: number;

@@ -1,12 +1,13 @@
 import { useState } from "react";
 
+import { liveSwitchablePolicies } from "@/lib/approval-policies";
+
 import { Button } from "@/components/ui/button";
 import type { ApprovalPolicy } from "@/lib/types";
 
-const LIVE_SWITCHABLE_POLICIES: { value: ApprovalPolicy; label: string }[] = [
-  { value: "manual", label: "Manual" },
-  { value: "auto-safe", label: "Auto-safe" },
-];
+// Shared vocabulary (lib/approval-policies.ts) -- "Manual approval"
+// everywhere, not "Manual" here and "Manual approval" in the composer.
+const LIVE_SWITCHABLE_POLICIES = liveSwitchablePolicies().map((p) => ({ value: p.id, label: p.label }));
 
 /**
  * Live control for switching a running task's approvalPolicy between

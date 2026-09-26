@@ -534,7 +534,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       client.nth("profile.list", 0).resolve([]);
       await flush();
 
-      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
     });
 
     it("does not render while profile.list is still pending, and every other control works as before", async () => {
@@ -543,7 +543,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       // profile.list is left unresolved -- mirrors a daemon predating this
       // feature just as well as one that's merely slow to answer.
-      expect(screen.queryByLabelText("Profiles")).not.toBeInTheDocument();
+      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
 
       fireEvent.change(textarea(), { target: { value: "still works" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -576,40 +576,18 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Profiles"));
-      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
+      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
       await flush();
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
       expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      // The trigger now shows the applied agent's own name (run-config IA:
+      // the toolbar tracks which agent is active, not just a one-time seed).
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
     });
 
-    it("the Profiles trigger always shows its placeholder, not the last-applied profile's name (one-time seed, not a locked mode)", async () => {
-      const client = new FakeWsClient();
-      renderComposer({ client });
-
-      client.nth("profile.list", 0).resolve([
-        {
-          ID: 1,
-          Name: "UI work",
-          Provider: "claude-native",
-          ApprovalPolicy: "auto-safe",
-          ThinkingLevel: "",
-          Notes: "",
-          CreatedAt: "2026-09-25T00:00:00Z",
-          UpdatedAt: "2026-09-25T00:00:00Z",
-        },
-      ]);
-      await flush();
-
-      fireEvent.click(screen.getByLabelText("Profiles"));
-      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
-      await flush();
-
-      expect(screen.getByLabelText("Profiles")).toHaveTextContent("Profiles");
-    });
-
-    it("a field changed after applying a profile is not reverted by anything", async () => {
+    it("hand-editing a field after applying a profile flips the trigger to Custom · from <name>, and ↺ restores the agent's values", async () => {
       const client = new FakeWsClient();
       const { submissions } = renderComposer({ client });
 
@@ -627,21 +605,159 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Profiles"));
-      fireEvent.click(await screen.findByRole("option", { name: "UI work" }));
+      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
       await flush();
       expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+      expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
 
       fireEvent.click(screen.getByLabelText("Approval policy"));
       fireEvent.click(await screen.findByRole("option", { name: "Manual approval" }));
       await flush();
       expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Manual approval");
+      // Hand-editing flips the Agent trigger to a "Custom · from <name>"
+      // hint -- the change is a per-run override, not written back to the
+      // stored profile (nothing here calls profile.update).
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("Custom · from UI work");
+      expect(client.calls.some((c) => c.method === "profile.update")).toBe(false);
 
+      // Sending still submits the hand-edited value -- the toolbar never
+      // silently reverts an override the user made.
       fireEvent.change(textarea(), { target: { value: "go" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
       await flush();
-
       expect(submissions).toEqual([{ provider: "claude-native", prompt: "go", approvalPolicy: "manual" }]);
+
+      // The ↺ reset restores the picked agent's own stored values.
+      fireEvent.click(screen.getByTestId("composer-agent-reset"));
+      await flush();
+      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+      expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
+    });
+
+    it('the agent menu offers "No agent" and "Manage agents…", the latter opening Settings -> Agents', async () => {
+      const client = new FakeWsClient();
+      renderComposer({ client });
+
+      client.nth("profile.list", 0).resolve([
+        {
+          ID: 1,
+          Name: "UI work",
+          Provider: "claude-native",
+          ApprovalPolicy: "auto-safe",
+          ThinkingLevel: "",
+          Notes: "",
+          CreatedAt: "2026-09-25T00:00:00Z",
+          UpdatedAt: "2026-09-25T00:00:00Z",
+        },
+      ]);
+      await flush();
+
+      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
+      await flush();
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+
+      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("agent-menu-no-agent"));
+      await flush();
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
+
+      const onOpenSettings = vi.fn();
+      window.addEventListener("smind:open-settings", onOpenSettings);
+      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
+      fireEvent.click(await screen.findByTestId("agent-menu-manage"));
+      window.removeEventListener("smind:open-settings", onOpenSettings);
+
+      expect(onOpenSettings).toHaveBeenCalledTimes(1);
+      expect((onOpenSettings.mock.calls[0][0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+    });
+  });
+
+  // run-config IA: the toolbar's state is persisted per task
+  // (docs/design.md §9), and a task that's never had one persisted starts
+  // from the ★ default agent (Settings -> Agents).
+  describe("run-config persistence and the ★ default agent (run-config IA)", () => {
+    const PROFILE = {
+      ID: 1,
+      Name: "UI work",
+      Provider: "glm",
+      ApprovalPolicy: "auto-safe",
+      ThinkingLevel: "",
+      Notes: "",
+      CreatedAt: "2026-09-25T00:00:00Z",
+      UpdatedAt: "2026-09-25T00:00:00Z",
+    };
+
+    it("keeps a per-task run-config across a task switch, persisted to storage", async () => {
+      const client = new FakeWsClient();
+      const { rerender } = renderComposer({ client, taskId: 1 });
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Provider"));
+      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+      await flush();
+      expect(window.localStorage.getItem("smind:run-config:1")).toContain('"provider":"glm"');
+
+      // Task 2 has never had a run-config persisted -- starts from the
+      // plain EMPTY_STATE default, not task 1's GLM pick.
+      rerender({ taskId: 2 });
+      await flush();
+      expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
+
+      // Switching back to task 1 reads its own persisted config back.
+      rerender({ taskId: 1 });
+      await flush();
+      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+    });
+
+    it("a task with no persisted run-config starts from the ★ default agent", async () => {
+      window.localStorage.setItem("smind:settings:defaultAgentId", "1");
+      const client = new FakeWsClient();
+      renderComposer({ client, taskId: 5 });
+
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      client.nth("profile.list", 0).resolve([PROFILE]);
+      await flush();
+
+      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+    });
+
+    it("a task that already has a persisted run-config is not overridden by the ★ default agent", async () => {
+      window.localStorage.setItem("smind:settings:defaultAgentId", "1");
+      window.localStorage.setItem(
+        "smind:run-config:5",
+        JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" }),
+      );
+      const client = new FakeWsClient();
+      renderComposer({ client, taskId: 5 });
+
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      client.nth("profile.list", 0).resolve([PROFILE]);
+      await flush();
+
+      expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
     });
   });
 });

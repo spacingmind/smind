@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import "@/components/settings/appearance-section";
@@ -7,6 +7,7 @@ import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/profiles-section";
+import "@/components/settings/providers-section";
 import "@/components/settings/shortcuts-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
@@ -110,23 +111,37 @@ export function SettingsScreen({
       <div className="flex min-h-0 flex-1">
         <nav aria-label="Settings sections" className="w-44 shrink-0 overflow-y-auto border-r p-2">
           <ul className="flex flex-col gap-0.5">
-            {sections.map((section) => (
-              <li key={section.id}>
-                <button
-                  type="button"
-                  aria-current={section.id === activeId}
-                  data-testid={`settings-nav-${section.id}`}
-                  onClick={() => setActiveId(section.id)}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-base text-foreground hover:bg-hover",
-                    section.id === activeId && "bg-selected font-medium",
+            {sections.map((section, index) => {
+              // A group heading renders once, above its first member --
+              // non-clickable, so a group is organization, not a
+              // destination of its own.
+              const firstOfGroup = section.groupLabel && sections[index - 1]?.groupLabel !== section.groupLabel;
+              return (
+                <Fragment key={section.id}>
+                  {firstOfGroup && (
+                    <li aria-hidden="true" className="px-2 pt-3 pb-1 text-ui-sm text-foreground-subtle">
+                      {section.groupLabel}
+                    </li>
                   )}
-                >
-                  {section.icon}
-                  {section.label}
-                </button>
-              </li>
-            ))}
+                  <li>
+                    <button
+                      type="button"
+                      aria-current={section.id === activeId}
+                      data-testid={`settings-nav-${section.id}`}
+                      onClick={() => setActiveId(section.id)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-base text-foreground hover:bg-hover",
+                        section.groupLabel && "pl-5",
+                        section.id === activeId && "bg-selected font-medium",
+                      )}
+                    >
+                      {section.icon}
+                      {section.label}
+                    </button>
+                  </li>
+                </Fragment>
+              );
+            })}
           </ul>
         </nav>
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
