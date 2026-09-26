@@ -142,11 +142,37 @@ User sign-off on ADR-0015's open questions, 2026-09-25 — ADR flipped to
      session stays pinned to the deleted account.
 3. **CLI rename:** no CLI rename/edit in v1; editing is only via web
    Settings. (`smind account rm <id>` still ships, per the ADR.)
+4. **Running-task count for the Remove warning (2026-09-26): no new RPC.**
+   Runs carry a runner `provider`, never an account id (ADR-0015 fact 1:
+   routing is per-request), so "how many running tasks use this account"
+   is honestly answerable only at provider level -- which the warning copy
+   already reflects ("N running tasks will switch to another account" /
+   "will fail: this is the last `<provider>` account"). The UI computes
+   both branches from data the Providers section already loads:
+   `run.list` (running runs + their provider), `provider.list`
+   (`accountProvider` maps claude-native→anthropic, kimi→kimi,
+   codex-native→openai), and `account.list` (sibling count for the
+   last-account branch). ADR-0015's rejected-alternatives section already
+   declines `account.remove`-side readiness info, and an `account.usage`
+   RPC would add wire surface for a join three existing responses already
+   give. Revisit only if the confirmation needs per-account precision
+   (which today's daemon cannot even represent).
 
 ## Progress
 
 - 2026-09-25: ADR-0015 written, open questions answered (above), ADR
   Accepted. Step 1+ unblocked.
+- 2026-09-26 (chunk 1, backend): store/registry rename +
+  credential-swap (type may change) + hard-delete cascade
+  (routing/session-affinity, quota snapshots, workspace links), with
+  `account.updated`/`account.removed` notifier events; wsapi
+  `account.rename`/`account.updateCredential`/`account.remove` wired
+  (credential parsing shared with `account.add` via
+  `accounts.Registry.ParseCredential`); `smind account rm <id>` CLI.
+  Tests cover not-found, empty label, credential-never-echoed (RPC result
+  and event payload), and the affinity-cascade guarantee.
+- 2026-09-26 (chunk 1, usage warning): decided client-side from existing
+  RPCs -- see Decisions 4.
 
 ## Validation
 
