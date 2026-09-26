@@ -7,6 +7,7 @@ import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/profiles-section";
+import "@/components/settings/providers-section";
 import "@/components/settings/shortcuts-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
