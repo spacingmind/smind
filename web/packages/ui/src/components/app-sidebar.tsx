@@ -57,7 +57,6 @@ import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-p
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
-import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -341,9 +340,11 @@ export function AppSidebar({
    * Opens the settings screen. Settings is a full-pane view owned by the
    * shell (App.tsx), so the sidebar just forwards the click -- see
    * SettingsScreen's doc comment for why the screen lives above this
-   * component.
+   * component. The optional section id deep-links the screen (App.tsx's
+   * settingsInitialSectionId) -- the Providers entry points pass
+   * "providers".
    */
-  onOpenSettings?: () => void;
+  onOpenSettings?: (sectionId?: string) => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -414,18 +415,7 @@ export function AppSidebar({
   }, [workspaces, onWorkspacesChange]);
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
-  const [accountsOpen, setAccountsOpen] = useState(false);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-
-  // The Settings nav's Providers stub (run-config IA: this branch has no
-  // Providers section; ADR-0015's branch replaces the stub) deep-links to
-  // the accounts surface through the same window-event channel the
-  // palette uses -- the sidebar owns the AccountsDialog.
-  useEffect(() => {
-    const onOpenAccounts = () => setAccountsOpen(true);
-    window.addEventListener("smind:open-accounts", onOpenAccounts);
-    return () => window.removeEventListener("smind:open-accounts", onOpenAccounts);
-  }, []);
 
   // Profiles feed the footer's agent count and the palette's "Use agent:"
   // entries. The composer fetches its own copy (its picker seeds on it);
@@ -522,9 +512,9 @@ export function AppSidebar({
       {
         id: "accounts",
         group: "Actions",
-        title: "Open accounts",
-        keywords: ["providers", "credentials", "login", "oauth"],
-        run: () => setAccountsOpen(true),
+        title: "Settings: Providers",
+        keywords: ["providers", "accounts", "credentials", "login", "oauth"],
+        run: () => onOpenSettings?.("providers"),
       },
       {
         id: "settings-agents",
@@ -533,13 +523,6 @@ export function AppSidebar({
         keywords: ["profiles", "agents"],
         action: "settings.open",
         run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
-      },
-      {
-        id: "settings-providers",
-        group: "Settings",
-        title: "Settings: Providers",
-        keywords: ["accounts", "providers", "credentials"],
-        run: () => setAccountsOpen(true),
       },
       {
         id: "new-agent",
@@ -648,7 +631,7 @@ export function AppSidebar({
               size="icon-sm"
               aria-label="Settings"
               data-testid="sidebar-settings-button"
-              onClick={onOpenSettings}
+              onClick={() => onOpenSettings?.()}
             >
               <Settings />
             </Button>
@@ -664,7 +647,7 @@ export function AppSidebar({
             size="icon-sm"
             aria-label="Settings"
             data-testid="sidebar-settings-button-collapsed"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings?.()}
           >
             <Settings />
           </Button>
@@ -821,16 +804,16 @@ export function AppSidebar({
 
       {/*
        * Footer shortcuts (run-config IA plan): Providers and Agents are
-       * where account/agent management lives. Providers deep-links to the
-       * accounts surface (the Accounts dialog, until ADR-0015's Providers
-       * Settings section lands); Agents opens Settings.
+       * where account/agent management lives -- both deep-link straight
+       * into their Settings section (ADR-0015 gave Providers a real
+       * section; the old Accounts-dialog shim is gone).
        */}
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
               data-testid="sidebar-footer-providers"
-              onClick={() => setAccountsOpen(true)}
+              onClick={() => onOpenSettings?.("providers")}
             >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="text-ui-sm text-foreground-subtle">Providers</span>
@@ -937,7 +920,6 @@ export function AppSidebar({
               onDeleted={refresh}
             />
           )}
-          <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
         </>
       )}
     </Sidebar>

@@ -720,7 +720,7 @@ describe("App command palette", () => {
     // no tab entries yet, but the sidebar's own registered actions are there.
     expect(titles).toContain(WORKSPACE.Title);
     expect(titles).toContain("New workspace");
-    expect(titles).toContain("Open accounts");
+    expect(titles).toContain("Settings: Providers");
     expect(titles).toContain("Cycle theme");
   });
 

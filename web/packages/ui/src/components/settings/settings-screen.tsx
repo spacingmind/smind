@@ -7,6 +7,7 @@ import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/profiles-section";
+import "@/components/settings/providers-section";
 import "@/components/settings/shortcuts-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
@@ -138,27 +139,6 @@ export function SettingsScreen({
                       {section.label}
                     </button>
                   </li>
-                  {/*
-                   * Providers has no section on this branch -- the parallel
-                   * ADR-0015 branch registers section id "providers" with a
-                   * real renderer, and this stub is what it replaces at
-                   * merge. Until then the entry deep-links to the accounts
-                   * surface (the Accounts dialog, owned by the sidebar) via
-                   * the same window-event channel the palette's "Use
-                   * agent" entry uses.
-                   */}
-                  {section.id === "agents" && (
-                    <li>
-                      <button
-                        type="button"
-                        data-testid="settings-nav-providers"
-                        onClick={() => window.dispatchEvent(new CustomEvent("smind:open-accounts"))}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-base text-foreground hover:bg-hover pl-5"
-                      >
-                        Providers
-                      </button>
-                    </li>
-                  )}
                 </Fragment>
               );
             })}

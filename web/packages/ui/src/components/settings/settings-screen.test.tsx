@@ -71,14 +71,11 @@ describe("SettingsScreen shell", () => {
     ]);
   });
 
-  it("the Providers nav stub dispatches smind:open-accounts (no section on this branch; ADR-0015 replaces it)", () => {
+  it("the Providers nav entry renders ADR-0015's real Providers section, not the old open-accounts stub", () => {
     renderScreen();
-    const listener = vi.fn();
-    window.addEventListener("smind:open-accounts", listener);
 
     fireEvent.click(screen.getByTestId("settings-nav-providers"));
-    expect(listener).toHaveBeenCalledTimes(1);
-    window.removeEventListener("smind:open-accounts", listener);
+    expect(screen.getByTestId("settings-section-providers")).toBeInTheDocument();
   });
 
   it("gives the active and inactive nav items the same text-ui-* size (tailwind-merge font-size group regression, see lib/utils.ts's cn() comment)", () => {

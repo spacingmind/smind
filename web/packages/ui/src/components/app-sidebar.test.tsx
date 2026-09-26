@@ -998,11 +998,12 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("is a distinct entry point from Accounts settings, not a replacement for it", async () => {
+  it("the Providers button deep-links Settings to the providers section", async () => {
+    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
       <SidebarProvider>
-        <AppSidebar client={client as never} selectedTaskId={null} />
+        <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
       </SidebarProvider>,
     );
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
@@ -1027,30 +1028,37 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     UpdatedAt: "2024-01-01T00:00:00Z",
   };
 
-  it("Providers row opens the accounts dialog; Agents row deep-links to Settings -> Agents", async () => {
+  it("Providers row deep-links to Settings -> Providers; Agents row deep-links to Settings -> Agents", async () => {
+    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
       <PaletteProvider>
         <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} />
+          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
         </SidebarProvider>
       </PaletteProvider>,
     );
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await flush();
 
+    // ADR-0015's real Providers section, via the direct onOpenSettings
+    // callback -- this footer row has direct prop access, so it doesn't
+    // need the window-event indirection the composer's toolbar (outside
+    // the sidebar's tree) uses for the same "land on a specific settings
+    // section" problem.
     fireEvent.click(screen.getByTestId("sidebar-footer-providers"));
-    expect(await screen.findByRole("dialog", { name: "Accounts" })).toBeInTheDocument();
+    expect(onOpenSettings).toHaveBeenCalledWith("providers");
 
-    // Deep-links via the same window-event channel Settings' Providers
-    // stub already uses for its own cross-tree dialog open (run-config IA:
-    // "each deep-links straight into the matching Settings section").
-    const onOpenSettings = vi.fn();
-    window.addEventListener("smind:open-settings", onOpenSettings);
+    // Deep-links via the same window-event channel the toolbar's own
+    // "Manage agents…" entry uses for its cross-tree navigation
+    // (run-config IA: "each deep-links straight into the matching
+    // Settings section").
+    const openSettingsListener = vi.fn();
+    window.addEventListener("smind:open-settings", openSettingsListener);
     fireEvent.click(screen.getByTestId("sidebar-footer-agents"));
-    window.removeEventListener("smind:open-settings", onOpenSettings);
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
-    expect((onOpenSettings.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+    window.removeEventListener("smind:open-settings", openSettingsListener);
+    expect(openSettingsListener).toHaveBeenCalledTimes(1);
+    expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
   });
 
   it("Agents row shows the profile count", async () => {
@@ -1111,6 +1119,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
   });
 
   it("registers Settings/Agents palette entries and Use agent: <name> per profile", async () => {
+    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     const useAgentListener = vi.fn();
     const openSettingsListener = vi.fn();
@@ -1127,7 +1136,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
       <PaletteProvider>
         <Probe />
         <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} />
+          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
         </SidebarProvider>
       </PaletteProvider>,
     );
@@ -1140,8 +1149,10 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     expect(byTitle.has("New agent…")).toBe(true);
     expect(byTitle.has("Use agent: Quick Fixes")).toBe(true);
 
-    // Both deep-link straight to Settings -> Agents (run-config IA), not
-    // just the settings screen's own default landing section.
+    // The Agents entries deep-link via the window event (this composer-
+    // toolbar-shared channel); Settings -> Providers (ADR-0015) is now a
+    // real section, reached via the direct onOpenSettings(sectionId)
+    // callback this command already has prop access to.
     byTitle.get("Settings: Agents")!.run();
     expect(openSettingsListener).toHaveBeenCalledTimes(1);
     expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
@@ -1150,7 +1161,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     expect((openSettingsListener.mock.calls[1]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
 
     byTitle.get("Settings: Providers")!.run();
-    expect(await screen.findByRole("dialog", { name: "Accounts" })).toBeInTheDocument();
+    expect(onOpenSettings).toHaveBeenCalledWith("providers");
 
     byTitle.get("Use agent: Quick Fixes")!.run();
     expect(useAgentListener).toHaveBeenCalledTimes(1);

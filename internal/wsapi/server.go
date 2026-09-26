@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
@@ -94,6 +95,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	reg.SetNotifier(busRunNotifier{bus: bus})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
 
+	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, coord)
 	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
@@ -156,6 +158,27 @@ func (b busWorkspaceNotifier) NotifyTaskArchived(t store.Task) {
 
 func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *int64) {
 	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
+}
+
+// busAccountNotifier adapts the shared event bus to accounts.Notifier,
+// translating each Registry lifecycle notification into its ADR-0015 wire
+// payload -- the accountResult snapshot for account.updated (never a bare
+// store.Account, so no credential_data can ride along), just the id for
+// account.removed.
+type busAccountNotifier struct {
+	bus *eventBus
+}
+
+func (b busAccountNotifier) NotifyAccountUpdated(a store.Account) {
+	result := accountResult{
+		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType,
+		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
+	}
+	b.bus.Publish(Event{Topic: TopicAccountUpdated, Payload: accountUpdatedPayload{Account: result}})
+}
+
+func (b busAccountNotifier) NotifyAccountRemoved(id int64) {
+	b.bus.Publish(Event{Topic: TopicAccountRemoved, Payload: accountRemovedPayload{ID: id}})
 }
 
 // busProfileNotifier adapts the shared event bus to profiles.Notifier,

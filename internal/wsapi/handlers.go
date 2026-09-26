@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
@@ -23,57 +22,60 @@ import (
 // bound to wm, runner, reg, treg, profReg, and coord.
 func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, coord *accounts.LoginCoordinator) map[string]handlerFunc {
 	return map[string]handlerFunc{
-		"account.add":           handleAccountAdd(acctReg),
-		"account.oauthStart":    handleAccountOAuthStart(coord),
-		"provider.list":         handleProviderList(),
-		"provider.test":         handleProviderTest(acctReg),
-		"account.list":          handleAccountList(acctReg),
-		"workspace.create":      handleWorkspaceCreate(wm),
-		"workspace.list":        handleWorkspaceList(wm),
-		"workspace.get":         handleWorkspaceGet(wm),
-		"workspace.delete":      handleWorkspaceDelete(wm),
-		"space.create":          handleSpaceCreate(wm),
-		"space.list":            handleSpaceList(wm),
-		"space.get":             handleSpaceGet(wm),
-		"space.delete":          handleSpaceDelete(wm),
-		"task.create":           handleTaskCreate(wm),
-		"task.list":             handleTaskList(wm),
-		"task.get":              handleTaskGet(wm),
-		"task.archive":          handleTaskArchive(wm),
-		"task.move":             handleTaskMove(wm),
-		"task.diff":             handleTaskDiff(wm),
-		"task.files":            handleTaskFiles(wm),
-		"task.fileDiff":         handleTaskFileDiff(wm),
-		"task.searchIndex":      handleTaskSearchIndex(wm),
-		"task.stage":            handleTaskStage(wm),
-		"task.commit":           handleTaskCommit(wm),
-		"task.createPr":         handleTaskCreatePR(wm),
-		"task.prompt":           handleTaskPrompt(wm, runner, reg),
-		"run.start":             handleRunStart(wm, runner, reg),
-		"run.list":              handleRunList(reg),
-		"run.attach":            handleRunAttach(reg),
-		"run.logs":              handleRunLogs(reg),
-		"run.stop":              handleRunStop(reg),
-		"run.respondPermission": handleRunRespondPermission(reg),
-		"run.setApprovalPolicy": handleRunSetApprovalPolicy(reg),
-		"run.listConfigOptions": handleRunListConfigOptions(reg),
-		"run.setConfigOption":   handleRunSetConfigOption(reg),
-		"terminal.create":       handleTerminalCreate(wm, treg),
-		"terminal.attach":       handleTerminalAttach(treg),
-		"terminal.write":        handleTerminalWrite(treg),
-		"terminal.resize":       handleTerminalResize(treg),
-		"terminal.close":        handleTerminalClose(treg),
-		"terminal.list":         handleTerminalList(treg),
-		"task.stats":            handleTaskStats(wm),
-		"file.list":             handleFileList(wm),
-		"file.read":             handleFileRead(wm),
-		"file.write":            handleFileWrite(wm),
-		"fs.listDir":            handleFsListDir(),
-		"profile.create":        handleProfileCreate(profReg),
-		"profile.list":          handleProfileList(profReg),
-		"profile.get":           handleProfileGet(profReg),
-		"profile.update":        handleProfileUpdate(profReg),
-		"profile.delete":        handleProfileDelete(profReg),
+		"account.add":              handleAccountAdd(acctReg),
+		"account.oauthStart":       handleAccountOAuthStart(coord),
+		"provider.list":            handleProviderList(),
+		"provider.test":            handleProviderTest(acctReg),
+		"account.list":             handleAccountList(acctReg),
+		"account.rename":           handleAccountRename(acctReg),
+		"account.updateCredential": handleAccountUpdateCredential(acctReg),
+		"account.remove":           handleAccountRemove(acctReg),
+		"workspace.create":         handleWorkspaceCreate(wm),
+		"workspace.list":           handleWorkspaceList(wm),
+		"workspace.get":            handleWorkspaceGet(wm),
+		"workspace.delete":         handleWorkspaceDelete(wm),
+		"space.create":             handleSpaceCreate(wm),
+		"space.list":               handleSpaceList(wm),
+		"space.get":                handleSpaceGet(wm),
+		"space.delete":             handleSpaceDelete(wm),
+		"task.create":              handleTaskCreate(wm),
+		"task.list":                handleTaskList(wm),
+		"task.get":                 handleTaskGet(wm),
+		"task.archive":             handleTaskArchive(wm),
+		"task.move":                handleTaskMove(wm),
+		"task.diff":                handleTaskDiff(wm),
+		"task.files":               handleTaskFiles(wm),
+		"task.fileDiff":            handleTaskFileDiff(wm),
+		"task.searchIndex":         handleTaskSearchIndex(wm),
+		"task.stage":               handleTaskStage(wm),
+		"task.commit":              handleTaskCommit(wm),
+		"task.createPr":            handleTaskCreatePR(wm),
+		"task.prompt":              handleTaskPrompt(wm, runner, reg),
+		"run.start":                handleRunStart(wm, runner, reg),
+		"run.list":                 handleRunList(reg),
+		"run.attach":               handleRunAttach(reg),
+		"run.logs":                 handleRunLogs(reg),
+		"run.stop":                 handleRunStop(reg),
+		"run.respondPermission":    handleRunRespondPermission(reg),
+		"run.setApprovalPolicy":    handleRunSetApprovalPolicy(reg),
+		"run.listConfigOptions":    handleRunListConfigOptions(reg),
+		"run.setConfigOption":      handleRunSetConfigOption(reg),
+		"terminal.create":          handleTerminalCreate(wm, treg),
+		"terminal.attach":          handleTerminalAttach(treg),
+		"terminal.write":           handleTerminalWrite(treg),
+		"terminal.resize":          handleTerminalResize(treg),
+		"terminal.close":           handleTerminalClose(treg),
+		"terminal.list":            handleTerminalList(treg),
+		"task.stats":               handleTaskStats(wm),
+		"file.list":                handleFileList(wm),
+		"file.read":                handleFileRead(wm),
+		"file.write":               handleFileWrite(wm),
+		"fs.listDir":               handleFsListDir(),
+		"profile.create":           handleProfileCreate(profReg),
+		"profile.list":             handleProfileList(profReg),
+		"profile.get":              handleProfileGet(profReg),
+		"profile.update":           handleProfileUpdate(profReg),
+		"profile.delete":           handleProfileDelete(profReg),
 	}
 }
 
@@ -114,20 +116,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			return nil, fmt.Errorf("account.add: provider, label, and credential are required")
 		}
 
-		var oauth accounts.OAuthCredential
-		if err := json.Unmarshal([]byte(p.Credential), &oauth); err == nil && oauth.RefreshToken != "" {
-			created, err := registry.AddOAuth(p.Provider, p.Label, oauth)
-			if err != nil {
-				return nil, fmt.Errorf("account.add: %w", err)
-			}
-			account, err := registry.Get(created.ID)
-			if err != nil {
-				return nil, fmt.Errorf("account.add: %w", err)
-			}
-			return accountResultFrom(account), nil
-		}
-
-		created, err := registry.AddAPIKeyWithBaseURL(p.Provider, p.Label, strings.TrimSpace(p.Credential), strings.TrimSpace(p.BaseURL))
+		created, err := registry.AddWithCredential(p.Provider, p.Label, p.Credential, p.BaseURL)
 		if err != nil {
 			return nil, fmt.Errorf("account.add: %w", err)
 		}
@@ -136,6 +125,92 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			return nil, fmt.Errorf("account.add: %w", err)
 		}
 		return accountResultFrom(account), nil
+	}
+}
+
+// handleAccountRename relabels an account (ADR-0015). An empty label is
+// rejected and an unknown id surfaces as the registry's not-found error --
+// the same conventions as UpdateAgentProfile's path.
+func handleAccountRename(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.rename: accounts registry is unavailable")
+		}
+		var p struct {
+			ID    int64  `json:"id"`
+			Label string `json:"label"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.rename: invalid params: %w", err)
+		}
+		if p.Label == "" {
+			return nil, fmt.Errorf("account.rename: label is required")
+		}
+		updated, err := registry.Rename(p.ID, p.Label)
+		if err != nil {
+			return nil, fmt.Errorf("account.rename: %w", err)
+		}
+		account, err := registry.Get(updated.ID)
+		if err != nil {
+			return nil, fmt.Errorf("account.rename: %w", err)
+		}
+		return accountResultFrom(account), nil
+	}
+}
+
+// handleAccountUpdateCredential swaps an account's credential in place
+// (ADR-0015). The credential is parsed exactly the way account.add parses
+// it (accounts.Registry.ParseCredential -- one shared parser); a swap may
+// change credential_type, replacing both credential_data and
+// credential_type. The credential is write-only: the result is the same
+// credential-free accountResult account.add/account.list return.
+func handleAccountUpdateCredential(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.updateCredential: accounts registry is unavailable")
+		}
+		var p struct {
+			ID         int64  `json:"id"`
+			Credential string `json:"credential"`
+			BaseURL    string `json:"baseUrl,omitempty"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.updateCredential: invalid params: %w", err)
+		}
+		if p.Credential == "" {
+			return nil, fmt.Errorf("account.updateCredential: credential is required")
+		}
+		updated, err := registry.ReplaceCredential(p.ID, p.Credential, p.BaseURL)
+		if err != nil {
+			return nil, fmt.Errorf("account.updateCredential: %w", err)
+		}
+		account, err := registry.Get(updated.ID)
+		if err != nil {
+			return nil, fmt.Errorf("account.updateCredential: %w", err)
+		}
+		return accountResultFrom(account), nil
+	}
+}
+
+// handleAccountRemove hard-deletes an account and its cascade (routing
+// decisions including session affinity, quota snapshots, workspace links
+// -- see store.DeleteAccount, ADR-0015). No deleteSummaryResult-shaped
+// body: the cascaded child counts aren't user-meaningful.
+func handleAccountRemove(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.remove: accounts registry is unavailable")
+		}
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.remove: invalid params: %w", err)
+		}
+		if err := registry.Delete(p.ID); err != nil {
+			return nil, fmt.Errorf("account.remove: %w", err)
+		}
+		return struct{}{}, nil
 	}
 }
 
