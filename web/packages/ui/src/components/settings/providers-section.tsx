@@ -1,16 +1,33 @@
 import { useEffect, useState } from "react";
+import { MoreHorizontal } from "lucide-react";
 
 import {
   registerSettingsSection,
   type SettingsSectionContext,
 } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
 import type {
   Account,
   ProviderInfo,
   ProviderListResult,
   ProviderTestResult,
+  RunSummary,
 } from "@/lib/types";
 
 /**
@@ -31,9 +48,13 @@ import type {
  * known-gap note) fall through to the "Other accounts" group rather than
  * being silently hidden.
  *
- * This first pass renders rows and the provider.test diagnostic only;
- * the ⋯ actions (rename / update credential / remove, ADR-0015) and the
- * Connect flows land in the plan's next steps.
+ * Row actions (ADR-0015): ⋯ offers Rename (inline edit), Update
+ * credential (a small inline form reusing account.add's credential
+ * input shape), and Remove (a confirm dialog whose warning is computed
+ * client-side per the plan's Decision 4 -- run.list's running runs plus
+ * provider.list's accountProvider bridge, since runs carry a runner
+ * provider, never an account id). account.updated/account.removed
+ * events keep the list live without a manual refresh.
  */
 
 /** One runtime-provider group: the ProviderInfo row plus the accounts mapped to it (empty => the group renders its not-connected row). */
@@ -63,11 +84,39 @@ export function groupAccountsByProvider(
   return { groups, other: accounts.filter((a) => !mapped.has(a.provider)) };
 }
 
+/**
+ * The Remove-confirmation warning (ADR-0015's accepted condition 1, the
+ * plan's Decision 4): how many running runs sit on the account's runtime
+ * provider, and whether a sibling account exists to fail over to. Runs
+ * carry a runner provider -- never an account id -- so the count is
+ * provider-level by construction, which is exactly what the accepted
+ * warning copy states. Exported for the warning tests.
+ */
+export function removeWarning(
+  account: Account,
+  providers: ProviderInfo[],
+  accounts: Account[],
+  runs: RunSummary[],
+): { runningCount: number; lastAccount: boolean; providerLabel: string } {
+  const label =
+    providers.find((p) => p.accountProvider === account.provider)?.label ?? account.provider;
+  const siblings = accounts.filter((a) => a.provider === account.provider).length;
+  const runnerIds = providers
+    .filter((p) => p.accountProvider === account.provider)
+    .map((p) => p.id);
+  const runningCount = runs.filter(
+    (r) => r.Status === "running" && runnerIds.includes(r.Provider),
+  ).length;
+  return { runningCount, lastAccount: siblings <= 1, providerLabel: label };
+}
+
 function authTypeLabel(credentialType: string): string {
   return credentialType === "oauth" ? "OAuth" : "API key";
 }
 
-function ProvidersSection({ client }: SettingsSectionContext) {
+type RowAction = { kind: "rename" | "credential" | "remove"; account: Account };
+
+function ProvidersSection({ client, events }: SettingsSectionContext) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -75,6 +124,7 @@ function ProvidersSection({ client }: SettingsSectionContext) {
   // accounts-dialog.tsx uses: undefined = never tested (neutral dot).
   const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
+  const [action, setAction] = useState<RowAction | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -104,6 +154,36 @@ function ProvidersSection({ client }: SettingsSectionContext) {
     };
   }, [client]);
 
+  // Live updates (ADR-0009 shape): a rename/credential swap from a second
+  // tab or the CLI arrives as account.updated, a removal as
+  // account.removed -- no manual refresh needed. The acting tab applies
+  // mutations through its own optimistic upsert too (see each action's
+  // handler), so a null events surface never blocks the flow.
+  useEffect(() => {
+    if (!events) return;
+    const offUpdated = events.subscribe("account.updated", (payload) => {
+      const a = (payload as { account?: Account } | undefined)?.account;
+      if (!a) return;
+      setAccounts((prev) => {
+        if (!prev) return prev;
+        const index = prev.findIndex((existing) => existing.id === a.id);
+        if (index === -1) return [...prev, a];
+        const next = prev.slice();
+        next[index] = a;
+        return next;
+      });
+    });
+    const offRemoved = events.subscribe("account.removed", (payload) => {
+      const id = (payload as { id?: number } | undefined)?.id;
+      if (id === undefined) return;
+      setAccounts((prev) => (prev ? prev.filter((a) => a.id !== id) : prev));
+    });
+    return () => {
+      offUpdated();
+      offRemoved();
+    };
+  }, [events]);
+
   async function testProvider(providerId: string) {
     if (!client) return;
     setTesting((t) => ({ ...t, [providerId]: true }));
@@ -118,6 +198,22 @@ function ProvidersSection({ client }: SettingsSectionContext) {
     } finally {
       setTesting((t) => ({ ...t, [providerId]: false }));
     }
+  }
+
+  /** Applies a mutation's result immediately (the event may lag or events be null) -- upsert-by-id, mirroring profiles-section's handler. */
+  function upsertAccount(a: Account) {
+    setAccounts((prev) => {
+      if (!prev) return [a];
+      const index = prev.findIndex((existing) => existing.id === a.id);
+      if (index === -1) return [...prev, a];
+      const next = prev.slice();
+      next[index] = a;
+      return next;
+    });
+  }
+
+  function dropAccount(id: number) {
+    setAccounts((prev) => (prev ? prev.filter((a) => a.id !== id) : prev));
   }
 
   const { groups, other } = groupAccountsByProvider(providers, accounts ?? []);
@@ -173,56 +269,19 @@ function ProvidersSection({ client }: SettingsSectionContext) {
                 </div>
               ) : (
                 <ul className="flex flex-col gap-1">
-                  {groupAccounts.map((account) => {
-                    const result = testResults[account.provider];
-                    const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
-                    return (
-                      <li
-                        key={account.id}
-                        className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-hover"
-                        data-testid={`provider-row-${account.id}`}
-                      >
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <StatusDot
-                            status={state === "ok" ? "success" : state === "failed" ? "danger" : "neutral"}
-                            className="size-2"
-                            title={
-                              state === "ok"
-                                ? "Connection ok"
-                                : state === "failed"
-                                  ? "Connection failed"
-                                  : "Not tested yet"
-                            }
-                            data-testid={`provider-row-dot-${account.id}`}
-                            data-status={state}
-                          />
-                          <span className="min-w-0 truncate text-ui-base font-medium text-foreground">
-                            {account.label}
-                          </span>
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-                            {authTypeLabel(account.credentialType)}
-                          </span>
-                        </span>
-                        <span className="flex shrink-0 items-center gap-2">
-                          {result && (
-                            <span
-                              className={`max-w-48 truncate text-ui-sm ${
-                                result.ok ? "text-success" : "text-destructive"
-                              }`}
-                              data-testid={`provider-row-test-result-${account.id}`}
-                            >
-                              {result.detail}
-                            </span>
-                          )}
-                          <TestButton
-                            providerId={account.provider}
-                            testing={testing[account.provider]}
-                            onTest={testProvider}
-                          />
-                        </span>
-                      </li>
-                    );
-                  })}
+                  {groupAccounts.map((account) => (
+                    <AccountRow
+                      key={account.id}
+                      account={account}
+                      testResult={testResults[account.provider]}
+                      testing={testing[account.provider]}
+                      onTest={testProvider}
+                      action={action?.account.id === account.id ? action : null}
+                      onAction={setAction}
+                      onUpsert={upsertAccount}
+                      client={client}
+                    />
+                  ))}
                 </ul>
               )}
             </section>
@@ -241,30 +300,35 @@ function ProvidersSection({ client }: SettingsSectionContext) {
               </h4>
               <ul className="flex flex-col gap-1">
                 {other.map((account) => (
-                  <li
+                  <AccountRow
                     key={account.id}
-                    className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-hover"
-                    data-testid={`provider-other-row-${account.id}`}
-                  >
-                    <span className="flex min-w-0 items-center gap-1.5">
-                      <span className="min-w-0 truncate text-ui-base font-medium text-foreground">
-                        {account.label}
-                      </span>
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
-                        {account.provider} · {authTypeLabel(account.credentialType)}
-                      </span>
-                    </span>
-                    <TestButton
-                      providerId={account.provider}
-                      testing={testing[account.provider]}
-                      onTest={testProvider}
-                    />
-                  </li>
+                    account={account}
+                    testResult={testResults[account.provider]}
+                    testing={testing[account.provider]}
+                    onTest={testProvider}
+                    action={action?.account.id === account.id ? action : null}
+                    onAction={setAction}
+                    onUpsert={upsertAccount}
+                    client={client}
+                  />
                 ))}
               </ul>
             </section>
           )}
         </div>
+      )}
+      {action?.kind === "remove" && (
+        <RemoveAccountDialog
+          client={client}
+          account={action.account}
+          providers={providers}
+          accounts={accounts ?? []}
+          onRemoved={() => {
+            dropAccount(action.account.id);
+            setAction(null);
+          }}
+          onOpenChange={(open) => !open && setAction(null)}
+        />
       )}
     </div>
   );
@@ -291,6 +355,393 @@ function TestButton({
       {testing ? "Testing…" : "Test"}
     </Button>
   );
+}
+
+function AccountRow({
+  account,
+  testResult,
+  testing,
+  onTest,
+  action,
+  onAction,
+  onUpsert,
+  client,
+}: {
+  account: Account;
+  testResult: ProviderTestResult | undefined;
+  testing: boolean | undefined;
+  onTest: (providerId: string) => void;
+  action: RowAction | null;
+  onAction: (action: RowAction | null) => void;
+  onUpsert: (account: Account) => void;
+  client: SettingsSectionContext["client"];
+}) {
+  const state = testResult === undefined ? "unknown" : testResult.ok ? "ok" : "failed";
+  return (
+    <li
+      className="flex flex-col gap-1 rounded-lg px-2 py-1.5 hover:bg-hover"
+      data-testid={`provider-row-${account.id}`}
+    >
+      {action?.kind === "rename" ? (
+        <RenameForm
+          account={account}
+          client={client}
+          onSaved={(updated) => {
+            onUpsert(updated);
+            onAction(null);
+          }}
+          onCancel={() => onAction(null)}
+        />
+      ) : (
+        <>
+          <div className="flex items-center justify-between gap-2">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <StatusDot
+                status={state === "ok" ? "success" : state === "failed" ? "danger" : "neutral"}
+                className="size-2"
+                title={
+                  state === "ok"
+                    ? "Connection ok"
+                    : state === "failed"
+                      ? "Connection failed"
+                      : "Not tested yet"
+                }
+                data-testid={`provider-row-dot-${account.id}`}
+                data-status={state}
+              />
+              <span className="min-w-0 truncate text-ui-base font-medium text-foreground">
+                {account.label}
+              </span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-ui-xs text-muted-foreground">
+                {authTypeLabel(account.credentialType)}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              {testResult && (
+                <span
+                  className={`max-w-48 truncate text-ui-sm ${
+                    testResult.ok ? "text-success" : "text-destructive"
+                  }`}
+                  data-testid={`provider-row-test-result-${account.id}`}
+                >
+                  {testResult.detail}
+                </span>
+              )}
+              <TestButton providerId={account.provider} testing={testing} onTest={onTest} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Account actions for ${account.label}`}
+                    data-testid={`provider-row-menu-${account.id}`}
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    data-testid={`provider-row-rename-${account.id}`}
+                    onSelect={() => onAction({ kind: "rename", account })}
+                  >
+                    Rename
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    data-testid={`provider-row-update-credential-${account.id}`}
+                    onSelect={() => onAction({ kind: "credential", account })}
+                  >
+                    Update credential
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className="text-destructive focus:bg-menu-hover"
+                    data-testid={`provider-row-remove-${account.id}`}
+                    onSelect={() => onAction({ kind: "remove", account })}
+                  >
+                    Remove
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          </div>
+          {action?.kind === "credential" && (
+            <UpdateCredentialForm
+              account={account}
+              client={client}
+              onSaved={(updated) => {
+                onUpsert(updated);
+                onAction(null);
+              }}
+              onCancel={() => onAction(null)}
+            />
+          )}
+        </>
+      )}
+    </li>
+  );
+}
+
+/** Inline label edit (sketch §4's "edit opens inline in the row"): one input + Save/Cancel, saving via account.rename. */
+function RenameForm({
+  account,
+  client,
+  onSaved,
+  onCancel,
+}: {
+  account: Account;
+  client: SettingsSectionContext["client"];
+  onSaved: (updated: Account) => void;
+  onCancel: () => void;
+}) {
+  const [label, setLabel] = useState(account.label);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!client || !label.trim()) return;
+    setPending(true);
+    setError(null);
+    try {
+      const updated = await client.call<Account>("account.rename", { id: account.id, label: label.trim() });
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1" data-testid={`provider-rename-form-${account.id}`}>
+      <div className="flex items-center gap-2">
+        <Input
+          autoFocus
+          aria-label="Account label"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") onCancel();
+          }}
+          data-testid={`provider-rename-input-${account.id}`}
+          className="h-6"
+        />
+        <Button
+          size="xs"
+          disabled={pending || !label.trim()}
+          data-testid={`provider-rename-save-${account.id}`}
+          onClick={() => void save()}
+        >
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={pending}
+          data-testid={`provider-rename-cancel-${account.id}`}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The credential-swap form: the same credential textarea (JSON blob or
+ * bare API key) and optional base_url account.add's manual form uses --
+ * pasted into a row's ⋯ menu instead of a new-account dialog. Sent
+ * verbatim via account.updateCredential; the daemon parses it exactly
+ * like account.add (ADR-0015), and the response never contains the
+ * credential back.
+ */
+function UpdateCredentialForm({
+  account,
+  client,
+  onSaved,
+  onCancel,
+}: {
+  account: Account;
+  client: SettingsSectionContext["client"];
+  onSaved: (updated: Account) => void;
+  onCancel: () => void;
+}) {
+  const [credential, setCredential] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function save() {
+    if (!client || !credential.trim()) return;
+    setPending(true);
+    setError(null);
+    try {
+      const updated = await client.call<Account>("account.updateCredential", {
+        id: account.id,
+        credential: credential.trim(),
+        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      });
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5 pl-3.5" data-testid={`provider-credential-form-${account.id}`}>
+      <textarea
+        aria-label="New credential"
+        placeholder="Paste the new credential JSON (or API key) — replaces the current one"
+        value={credential}
+        onChange={(e) => setCredential(e.target.value)}
+        className="h-16 w-full resize-none rounded-lg border border-input-border bg-input px-2.5 py-1 font-mono text-ui-base outline-none focus-visible:border-input-border-focused focus-visible:bg-input-focused"
+        data-testid={`provider-credential-input-${account.id}`}
+      />
+      <div className="flex items-center gap-2">
+        <Input
+          aria-label="Base URL (optional)"
+          placeholder="Base URL (optional, api-key only)"
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+          className="h-6"
+          data-testid={`provider-credential-base-url-${account.id}`}
+        />
+        <Button
+          size="xs"
+          disabled={pending || !credential.trim()}
+          data-testid={`provider-credential-save-${account.id}`}
+          onClick={() => void save()}
+        >
+          {pending ? "Saving…" : "Save"}
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
+          disabled={pending}
+          data-testid={`provider-credential-cancel-${account.id}`}
+          onClick={onCancel}
+        >
+          Cancel
+        </Button>
+      </div>
+      {error && <p className="text-ui-sm text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * The Remove confirmation (ADR-0015's accepted condition 1): not a
+ * generic confirm -- it states what happens to runs currently on the
+ * account's runtime provider, computed per the plan's Decision 4 from
+ * run.list (fetched when the dialog opens; provider.list/account.list
+ * are already in hand).
+ */
+function RemoveAccountDialog({
+  client,
+  account,
+  providers,
+  accounts,
+  onRemoved,
+  onOpenChange,
+}: {
+  client: SettingsSectionContext["client"];
+  account: Account;
+  providers: ProviderInfo[];
+  accounts: Account[];
+  onRemoved: () => void;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [runs, setRuns] = useState<RunSummary[] | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<RunSummary[]>("run.list")
+      .then((list) => {
+        if (!cancelled) setRuns(list ?? []);
+      })
+      .catch((err) => {
+        if (!cancelled) setRuns([]);
+        console.error("run.list failed, showing the remove warning without a run count", err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
+  const warning =
+    runs === null ? null : removeWarning(account, providers, accounts, runs);
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Remove account?</DialogTitle>
+          <DialogDescription asChild>
+            <div className="flex flex-col gap-1">
+              <span>
+                Removes <span className="font-medium text-foreground">{account.label}</span> and
+                its routing affinity, quota history, and workspace links.
+              </span>
+              {warning === null ? (
+                <span>Checking running tasks…</span>
+              ) : warning.runningCount > 0 ? (
+                warning.lastAccount ? (
+                  <span className="text-warning" data-testid={`provider-remove-warning-${account.id}`}>
+                    {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
+                    fail: this is the last {warning.providerLabel} account
+                  </span>
+                ) : (
+                  <span data-testid={`provider-remove-warning-${account.id}`}>
+                    {warning.runningCount} running {warning.runningCount === 1 ? "task" : "tasks"} will
+                    switch to another account
+                  </span>
+                )
+              ) : (
+                <span>No running tasks use this account.</span>
+              )}
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <FormError message={error} />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={pending}
+            data-testid={`provider-remove-confirm-${account.id}`}
+            onClick={async () => {
+              if (!client) return;
+              setPending(true);
+              setError(null);
+              try {
+                await client.call("account.remove", { id: account.id });
+                onRemoved();
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+                setPending(false);
+              }
+            }}
+          >
+            {pending ? "Removing…" : "Remove"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function FormError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return <p className="text-ui-base text-destructive">{message}</p>;
 }
 
 registerSettingsSection({
