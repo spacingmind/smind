@@ -4,6 +4,7 @@ import { RotateCcw } from "lucide-react";
 
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
+import { cn } from "@/lib/utils";
 import { approvalPolicies as allApprovalPolicies, approvalPolicyLabel, type ApprovalPolicyInfo } from "@/lib/approval-policies";
 import { THINKING_LEVELS, thinkingLevelLabel } from "@/lib/thinking-levels";
 import { Button } from "@/components/ui/button";
@@ -283,11 +284,11 @@ function RunConfigToolbarAgent() {
   if (meta.profiles.length === 0) return null;
 
   const baseAgent = state.baseAgentId ? meta.profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
-  const triggerLabel = !state.baseAgentId
-    ? "Agents"
-    : state.custom
-      ? `Custom · from ${baseAgent?.Name ?? "agent"}`
-      : (baseAgent?.Name ?? "Agents");
+  const noAgent = !state.baseAgentId;
+  // "No agent" (muted) matches the header pill's and the menu's own "No
+  // agent" wording -- it used to just say "Agents" here, reading like a
+  // placeholder rather than a real state.
+  const triggerLabel = noAgent ? "No agent" : state.custom ? `Custom · from ${baseAgent?.Name ?? "agent"}` : (baseAgent?.Name ?? "No agent");
 
   return (
     <div className="flex shrink-0 items-center">
@@ -299,7 +300,7 @@ function RunConfigToolbarAgent() {
             aria-label="Agents"
             data-testid="composer-agent-select"
             disabled={meta.disabled}
-            className={AGENT_TRIGGER_CLASS}
+            className={cn(AGENT_TRIGGER_CLASS, noAgent && "text-foreground-muted")}
           >
             {triggerLabel}
           </Button>

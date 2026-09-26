@@ -663,7 +663,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
       fireEvent.click(await screen.findByTestId("agent-menu-no-agent"));
       await flush();
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("Agents");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
 
       const onOpenSettings = vi.fn();
       window.addEventListener("smind:open-settings", onOpenSettings);
@@ -757,7 +757,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("Agents");
+      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
     });
   });
 });
