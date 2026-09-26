@@ -143,3 +143,55 @@ func withStdin(t *testing.T, value string) func() {
 		_ = read.Close()
 	}
 }
+
+func TestRunAccountRemove(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	registry := accounts.New(s)
+	created, err := registry.AddAPIKey("anthropic", "work", "sk-ant-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	token, err := auth.LoadOrCreateToken(home)
+	if err != nil {
+		t.Fatalf("LoadOrCreateToken() error = %v", err)
+	}
+	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	if err != nil {
+		t.Fatalf("wsapi.Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("server:\n  port: "+u.Port()+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if code := run([]string{"account", "rm", "1"}); code != 0 {
+		t.Fatalf("run(account rm) = %d, want 0 (created account id is 1)", code)
+	}
+
+	if _, err := registry.Get(created.ID); err == nil {
+		t.Fatal("registry.Get() after account rm error = nil, want the account removed")
+	}
+}
+
+func TestRunAccountRemoveBadArgs(t *testing.T) {
+	t.Setenv("SMIND_HOME", t.TempDir())
+
+	if code := run([]string{"account", "rm"}); code != 2 {
+		t.Fatalf("run(account rm) with no id = %d, want 2", code)
+	}
+	if code := run([]string{"account", "rm", "not-a-number"}); code != 2 {
+		t.Fatalf("run(account rm not-a-number) = %d, want 2", code)
+	}
+}

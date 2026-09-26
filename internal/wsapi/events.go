@@ -32,6 +32,8 @@ const (
 	TopicProfileCreated    = "profile.created"
 	TopicProfileUpdated    = "profile.updated"
 	TopicProfileDeleted    = "profile.deleted"
+	TopicAccountUpdated    = "account.updated"
+	TopicAccountRemoved    = "account.removed"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
@@ -51,6 +53,8 @@ var knownTopics = map[string]bool{
 	TopicProfileCreated:    true,
 	TopicProfileUpdated:    true,
 	TopicProfileDeleted:    true,
+	TopicAccountUpdated:    true,
+	TopicAccountRemoved:    true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):
@@ -170,6 +174,23 @@ type profileUpdatedPayload struct {
 
 // profileDeletedPayload is the payload of profile.deleted events: {id}.
 type profileDeletedPayload struct {
+	ID int64 `json:"id"`
+}
+
+// Account lifecycle event payloads (ADR-0015), shaped like the profile
+// payloads above: updated carries the full credential-free accountResult
+// snapshot (the wsapi struct, not a bare store.Account, precisely so no
+// credential_data can ever ride along); removed carries just the id,
+// matching profile.deleted -- an account has no parent entity.
+
+// accountUpdatedPayload is the payload of account.updated events:
+// {account: accountResult}.
+type accountUpdatedPayload struct {
+	Account accountResult `json:"account"`
+}
+
+// accountRemovedPayload is the payload of account.removed events: {id}.
+type accountRemovedPayload struct {
 	ID int64 `json:"id"`
 }
 

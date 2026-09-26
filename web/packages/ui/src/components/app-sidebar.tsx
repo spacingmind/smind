@@ -48,7 +48,6 @@ import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-p
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
-import { AccountsDialog } from "@/components/accounts-dialog";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -331,9 +330,11 @@ export function AppSidebar({
    * Opens the settings screen. Settings is a full-pane view owned by the
    * shell (App.tsx), so the sidebar just forwards the click -- see
    * SettingsScreen's doc comment for why the screen lives above this
-   * component.
+   * component. The optional section id deep-links the screen (App.tsx's
+   * settingsInitialSectionId) -- the Providers entry points pass
+   * "providers".
    */
-  onOpenSettings?: () => void;
+  onOpenSettings?: (sectionId?: string) => void;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -404,7 +405,6 @@ export function AppSidebar({
   }, [workspaces, onWorkspacesChange]);
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
-  const [accountsOpen, setAccountsOpen] = useState(false);
 
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's
@@ -449,9 +449,9 @@ export function AppSidebar({
       {
         id: "accounts",
         group: "Actions",
-        title: "Open accounts",
-        keywords: ["providers", "credentials", "login", "oauth"],
-        run: () => setAccountsOpen(true),
+        title: "Settings: Providers",
+        keywords: ["providers", "accounts", "credentials", "login", "oauth"],
+        run: () => onOpenSettings?.("providers"),
       },
     ];
     // "New task" needs a workspace to create the task in. With exactly one
@@ -470,7 +470,7 @@ export function AppSidebar({
       });
     }
     return commands;
-  }, [workspaces]);
+  }, [workspaces, onOpenSettings]);
   useCommands("sidebar:actions", 5, paletteCommands);
   // The just-created workspace is expanded on landing; existing ones start
   // collapsed until first refresh happens (empty state -> created).
@@ -538,15 +538,16 @@ export function AppSidebar({
               size="icon-sm"
               aria-label="Settings"
               data-testid="sidebar-settings-button"
-              onClick={onOpenSettings}
+              onClick={() => onOpenSettings?.()}
             >
               <SlidersHorizontal />
             </Button>
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label="Accounts settings"
-              onClick={() => setAccountsOpen(true)}
+              aria-label="Providers settings"
+              data-testid="sidebar-providers-button"
+              onClick={() => onOpenSettings?.("providers")}
             >
               <Settings />
             </Button>
@@ -562,15 +563,16 @@ export function AppSidebar({
             size="icon-sm"
             aria-label="Settings"
             data-testid="sidebar-settings-button-collapsed"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings?.()}
           >
             <SlidersHorizontal />
           </Button>
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Accounts settings"
-            onClick={() => setAccountsOpen(true)}
+            aria-label="Providers settings"
+            data-testid="sidebar-providers-button-collapsed"
+            onClick={() => onOpenSettings?.("providers")}
           >
             <Settings />
           </Button>
@@ -794,7 +796,6 @@ export function AppSidebar({
               onDeleted={refresh}
             />
           )}
-          <AccountsDialog client={client} open={accountsOpen} onOpenChange={setAccountsOpen} />
         </>
       )}
     </Sidebar>

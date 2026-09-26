@@ -27,7 +27,8 @@ func (s *Store) CreateAccount(a Account) (Account, error) {
 }
 
 // UpdateAccountCredential replaces an account's credential_data, stamping a
-// new updated_at, and returns the updated account.
+// new updated_at, and returns the updated account. Used by EnsureFresh's
+// refresh path, where the credential type cannot change.
 func (s *Store) UpdateAccountCredential(id int64, credentialData string) (Account, error) {
 	now := time.Now().UTC()
 	_, err := s.db.Exec(
@@ -38,6 +39,67 @@ func (s *Store) UpdateAccountCredential(id int64, credentialData string) (Accoun
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
 	return s.GetAccount(id)
+}
+
+// RenameAccount relabels the account with the given id, stamping a new
+// updated_at. Renaming a nonexistent id is a clear not-found error (via
+// GetAccount), never a silent no-op -- matching UpdateAgentProfile's
+// convention.
+func (s *Store) RenameAccount(id int64, label string) (Account, error) {
+	if _, err := s.GetAccount(id); err != nil {
+		return Account{}, fmt.Errorf("rename account %d: %w", id, err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE accounts SET label = ?, updated_at = ? WHERE id = ?`,
+		label, time.Now().UTC(), id,
+	); err != nil {
+		return Account{}, fmt.Errorf("rename account %d: %w", id, err)
+	}
+	return s.GetAccount(id)
+}
+
+// ReplaceAccountCredential swaps both credential_data and credential_type of
+// the account with the given id (a swap may change the type -- an api_key
+// account replaced by an OAuth credential, or vice versa), stamping a new
+// updated_at. Unlike UpdateAccountCredential, which only replaces
+// credential_data on the refresh path, this is the account.updateCredential
+// RPC's store call. A nonexistent id is a clear not-found error.
+func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialData string) (Account, error) {
+	if _, err := s.GetAccount(id); err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE accounts SET credential_type = ?, credential_data = ?, updated_at = ? WHERE id = ?`,
+		credentialType, credentialData, time.Now().UTC(), id,
+	); err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	return s.GetAccount(id)
+}
+
+// DeleteAccount permanently removes the account with the given id and every
+// row referencing it, in FK-safe child-before-parent order: routing
+// decisions (including the session-affinity rows -- no session stays pinned
+// to the deleted account), quota snapshots, workspace account links, then
+// the accounts row itself (ADR-0015). Deleting a nonexistent id is a clear
+// not-found error (via GetAccount), never a silent no-op.
+func (s *Store) DeleteAccount(id int64) error {
+	if _, err := s.GetAccount(id); err != nil {
+		return fmt.Errorf("delete account %d: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM routing_decisions WHERE account_id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: delete routing decisions: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM quota_snapshots WHERE account_id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: delete quota snapshots: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM workspace_accounts WHERE account_id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: delete workspace accounts: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM accounts WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: %w", id, err)
+	}
+	return nil
 }
 
 // GetAccount returns the account with the given id.

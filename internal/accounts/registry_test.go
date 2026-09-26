@@ -230,3 +230,190 @@ func TestRegistry_AddAPIKeyWithBaseURL_Validation(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistry_Rename(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "old", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+
+	updated, err := r.Rename(created.ID, "work-claude")
+	if err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if updated.Label != "work-claude" {
+		t.Fatalf("Rename() Label = %q, want work-claude", updated.Label)
+	}
+}
+
+func TestRegistry_RenameEmptyLabelRejected(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "old", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	for _, label := range []string{"", "   "} {
+		if _, err := r.Rename(created.ID, label); err == nil {
+			t.Fatalf("Rename(%q) error = nil, want rejected", label)
+		}
+	}
+}
+
+func TestRegistry_RenameMissing(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	if _, err := r.Rename(999, "x"); err == nil {
+		t.Fatal("Rename(999) error = nil, want a not-found error")
+	}
+}
+
+func TestRegistry_ReplaceCredential(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "work", "sk-old")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+
+	// api_key -> oauth swap changes both credential_data and credential_type.
+	updated, err := r.ReplaceCredential(created.ID,
+		`{"access_token":"a","refresh_token":"r","expires_at":"2030-01-01T00:00:00Z"}`, "")
+	if err != nil {
+		t.Fatalf("ReplaceCredential(oauth) error = %v", err)
+	}
+	if updated.CredentialType != CredentialTypeOAuth {
+		t.Fatalf("ReplaceCredential(oauth) CredentialType = %q, want oauth", updated.CredentialType)
+	}
+	got, err := r.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.OAuth == nil || got.OAuth.RefreshToken != "r" {
+		t.Fatalf("Get() OAuth = %+v, want the swapped refresh credential", got.OAuth)
+	}
+
+	// oauth -> api_key swap, with a base_url exactly like account.add's.
+	updated, err = r.ReplaceCredential(created.ID, "sk-new", "http://127.0.0.1:8080")
+	if err != nil {
+		t.Fatalf("ReplaceCredential(api_key) error = %v", err)
+	}
+	if updated.CredentialType != CredentialTypeAPIKey {
+		t.Fatalf("ReplaceCredential(api_key) CredentialType = %q, want api_key", updated.CredentialType)
+	}
+	got, err = r.Get(created.ID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.APIKey == nil || got.APIKey.Key != "sk-new" || got.APIKey.BaseURL != "http://127.0.0.1:8080" {
+		t.Fatalf("Get() APIKey = %+v, want sk-new with the loopback base_url", got.APIKey)
+	}
+}
+
+func TestRegistry_ReplaceCredentialEmptyRejected(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "work", "sk-old")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	if _, err := r.ReplaceCredential(created.ID, "  ", ""); err == nil {
+		t.Fatal("ReplaceCredential(empty) error = nil, want rejected")
+	}
+}
+
+func TestRegistry_ReplaceCredentialMissing(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	if _, err := r.ReplaceCredential(999, "sk-x", ""); err == nil {
+		t.Fatal("ReplaceCredential(999) error = nil, want a not-found error")
+	}
+}
+
+func TestRegistry_Delete(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "work", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	// Give the cascade something to clear: an affinity row pinned to this
+	// account (ADR-0015 condition b).
+	if _, err := r.store.CreateRoutingDecision(store.RoutingDecision{
+		SessionKey: "sess-a", AccountID: created.ID, Policy: "affinity",
+		DecidedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("CreateRoutingDecision() error = %v", err)
+	}
+
+	if err := r.Delete(created.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if _, err := r.Get(created.ID); err == nil {
+		t.Fatal("Get() after delete error = nil, want a not-found error")
+	}
+	decisions, err := r.store.ListRoutingDecisions()
+	if err != nil {
+		t.Fatalf("ListRoutingDecisions() error = %v", err)
+	}
+	if len(decisions) != 0 {
+		t.Fatalf("ListRoutingDecisions() after delete = %+v, want no affinity row still pointing at the removed account", decisions)
+	}
+}
+
+func TestRegistry_DeleteMissing(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	if err := r.Delete(999); err == nil {
+		t.Fatal("Delete(999) error = nil, want a not-found error")
+	}
+}
+
+func TestRegistry_NotifierLifecycle(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddAPIKey("anthropic", "work", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+
+	rec := &recordingNotifier{}
+	r.SetNotifier(rec)
+
+	if _, err := r.Rename(created.ID, "renamed"); err != nil {
+		t.Fatalf("Rename() error = %v", err)
+	}
+	if _, err := r.ReplaceCredential(created.ID, "sk-new", ""); err != nil {
+		t.Fatalf("ReplaceCredential() error = %v", err)
+	}
+	if err := r.Delete(created.ID); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if len(rec.updated) != 2 || rec.updated[0].Label != "renamed" || rec.updated[1].CredentialType != CredentialTypeAPIKey {
+		t.Fatalf("updated notifications = %+v, want renamed then swapped", rec.updated)
+	}
+	if len(rec.removed) != 1 || rec.removed[0] != created.ID {
+		t.Fatalf("removed notifications = %+v, want [%d]", rec.removed, created.ID)
+	}
+}
+
+type recordingNotifier struct {
+	updated []store.Account
+	removed []int64
+}
+
+func (n *recordingNotifier) NotifyAccountUpdated(a store.Account) { n.updated = append(n.updated, a) }
+func (n *recordingNotifier) NotifyAccountRemoved(id int64)        { n.removed = append(n.removed, id) }

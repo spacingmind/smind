@@ -997,21 +997,21 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("is a distinct entry point from Accounts settings, not a replacement for it", async () => {
+  it("the Providers button deep-links Settings to the providers section", async () => {
+    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
       <SidebarProvider>
-        <AppSidebar client={client as never} selectedTaskId={null} />
+        <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
       </SidebarProvider>,
     );
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
-    // Both header variants stay in the DOM (Tailwind's group-data-*
-    // classes hide one of them in CSS; jsdom loads no stylesheets), so
-    // "the button is reachable" is asserted as "at least one instance"
-    // rather than uniqueness.
-    expect(screen.getAllByRole("button", { name: "Accounts settings" }).length).toBeGreaterThan(0);
+    // The old Accounts-settings gear now opens Settings -> Providers
+    // (providers-settings plan Item 3): one entry surface, deep-linked.
+    fireEvent.click(screen.getByTestId("sidebar-providers-button"));
+    expect(onOpenSettings).toHaveBeenCalledWith("providers");
   });
 });
 
@@ -1041,7 +1041,7 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
     expect(screen.getByTestId("sidebar-expanded-header").className).toContain("group-data-[collapsible=icon]:hidden");
     expect(within(stack).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
     expect(within(stack).getByTestId("sidebar-settings-button-collapsed")).toBeInTheDocument();
-    expect(within(stack).getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
+    expect(within(stack).getByTestId("sidebar-providers-button-collapsed")).toBeInTheDocument();
   });
 
   it("the collapsed stack's settings button still opens settings", () => {
