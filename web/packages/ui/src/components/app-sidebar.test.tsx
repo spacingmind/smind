@@ -1007,11 +1007,10 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
-    // Both header variants stay in the DOM (Tailwind's group-data-*
-    // classes hide one of them in CSS; jsdom loads no stylesheets), so
-    // "the button is reachable" is asserted as "at least one instance"
-    // rather than uniqueness.
-    expect(screen.getAllByRole("button", { name: "Accounts settings" }).length).toBeGreaterThan(0);
+    // Accounts moved to the footer's Providers shortcut (run-config IA
+    // plan) -- still reachable from the sidebar, just no longer a header
+    // gear that users mistake for Settings.
+    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
   });
 });
 
@@ -1041,7 +1040,7 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
     expect(screen.getByTestId("sidebar-expanded-header").className).toContain("group-data-[collapsible=icon]:hidden");
     expect(within(stack).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
     expect(within(stack).getByTestId("sidebar-settings-button-collapsed")).toBeInTheDocument();
-    expect(within(stack).getByRole("button", { name: "Accounts settings" })).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
   });
 
   it("the collapsed stack's settings button still opens settings", () => {

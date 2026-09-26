@@ -142,7 +142,9 @@ rule (d) rather than deciding unilaterally)
 
 ## Progress
 
-(none yet)
+- [x] Sidebar gear icon opens Settings, not Accounts (sliders icon and header Accounts button removed; Accounts entry moved to the sidebar footer).
+- [x] Sidebar footer shortcuts: "Providers" (opens the existing accounts dialog until Settings has a Providers section) and "Agents" (opens Settings). Health dot / counts deferred to the RunConfigToolbar pass so they read the same hooks the toolbar will.
+- [ ] Command palette: "Settings: Agents", "Settings: Providers", "Use agent: <name>", "New agent…".
 
 ## Validation
 

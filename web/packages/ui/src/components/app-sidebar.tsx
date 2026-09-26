@@ -21,7 +21,6 @@ import {
   Plus,
   Search,
   Settings,
-  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 
@@ -77,6 +76,7 @@ import { toast } from "@/components/ui/toast";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -540,14 +540,6 @@ export function AppSidebar({
               data-testid="sidebar-settings-button"
               onClick={onOpenSettings}
             >
-              <SlidersHorizontal />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Accounts settings"
-              onClick={() => setAccountsOpen(true)}
-            >
               <Settings />
             </Button>
           </div>
@@ -563,14 +555,6 @@ export function AppSidebar({
             aria-label="Settings"
             data-testid="sidebar-settings-button-collapsed"
             onClick={onOpenSettings}
-          >
-            <SlidersHorizontal />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Accounts settings"
-            onClick={() => setAccountsOpen(true)}
           >
             <Settings />
           </Button>
@@ -724,6 +708,30 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {/*
+       * Footer shortcuts (run-config IA plan): Providers and Agents are
+       * where account/agent management lives. Providers deep-links to the
+       * accounts surface (the Accounts dialog, until ADR-0015's Providers
+       * Settings section lands); Agents opens Settings.
+       */}
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              data-testid="sidebar-footer-providers"
+              onClick={() => setAccountsOpen(true)}
+            >
+              <span className="text-ui-sm text-foreground-subtle">Providers</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton data-testid="sidebar-footer-agents" onClick={onOpenSettings}>
+              <span className="text-ui-sm text-foreground-subtle">Agents</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
 
       {client && (
         <>
