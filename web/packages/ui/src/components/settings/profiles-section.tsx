@@ -4,16 +4,22 @@ import { registerSettingsSection, type SettingsSectionContext } from "@/componen
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { approvalPolicies } from "@/lib/approval-policies";
 import type { AgentProfile, ProviderInfo, ProviderListResult } from "@/lib/types";
 
 /** Used until provider.list answers (and kept if it fails), same fallback composer.tsx uses -- this form must never be unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
+// "Composer default" (the empty id -- inherit whatever the composer is
+// set to) is this form's own entry; the three real tiers come from the
+// shared vocabulary in lib/approval-policies.ts. Claude-native here
+// because full-access's label is provider-specific and this form shows
+// one list for whichever provider is selected above -- a mismatch only
+// ever cosmetic, and only until the RunConfigToolbar's inline edit takes
+// this form over.
 const APPROVAL_POLICIES = [
   { id: "", label: "Composer default" },
-  { id: "manual", label: "Manual approval" },
-  { id: "auto-safe", label: "Auto-safe" },
-  { id: "full-access", label: "Full access" },
+  ...approvalPolicies("claude-native"),
 ];
 
 const THINKING_LEVELS = [

@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
+import { liveSwitchablePolicies } from "@/lib/approval-policies";
 import { useDefaultRunPreferences } from "@/hooks/use-default-run-preferences";
 import type { ApprovalPolicy, Provider, ProviderInfo, ProviderListResult } from "@/lib/types";
 
-const APPROVAL_POLICIES: { id: ApprovalPolicy; label: string }[] = [
-  { id: "manual", label: "Manual approval" },
-  { id: "auto-safe", label: "Auto-safe" },
-];
+// Shared vocabulary (lib/approval-policies.ts), run-config IA's unified
+// label requirement -- identical strings to the composer and agent form.
+const APPROVAL_POLICIES = liveSwitchablePolicies().map((p) => ({ id: p.id, label: p.label }));
 
 /**
  * Item 13's General section: the composer's two defaults

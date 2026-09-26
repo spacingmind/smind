@@ -143,6 +143,7 @@ rule (d) rather than deciding unilaterally)
 ## Progress
 
 - [x] Settings → Profiles renamed to "Agents" (section label/id, empty-state copy, form copy, composer picker label). RPCs/testids stay `profile.*`/`profile-*` per the plan's display-name-only rule.
+- [x] Approval-policy labels unified in `lib/approval-policies.ts` (one `{id, label, help}` vocabulary): composer Select, agent form, General's "Defaults for new tasks", and the mid-run control (was "Manual", now "Manual approval"). Full-access keeps its per-provider vocabulary per the earlier user decision, recorded in the module's doc comment.
 - [x] Settings nav regrouped: General · Appearance · group "Agents & providers" (Agents, Providers) · group "Connection" (Daemon server = renamed Connections, Daemon; desktop-only) · Notifications · Shortcuts. Providers is a nav stub on this branch (dispatches `smind:open-accounts`); ADR-0015's branch registers the real `providers` section and replaces it at merge.
 
 - [x] Sidebar gear icon opens Settings, not Accounts (sliders icon and header Accounts button removed; Accounts entry moved to the sidebar footer).

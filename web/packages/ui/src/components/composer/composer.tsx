@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { GitCompare } from "lucide-react";
 
 import { resolveNextApprovalPolicy } from "@/components/composer/approval-policy-cycle";
+import { approvalPolicies, type ApprovalPolicyInfo } from "@/lib/approval-policies";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { Button } from "@/components/ui/button";
@@ -20,56 +21,13 @@ import type { WsClientLike } from "@/lib/ws-client";
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
-/** One entry in the approval-policy Select, per provider -- see approvalPolicyOptions. */
-interface ApprovalPolicyOption {
-  id: ApprovalPolicy;
-  label: string;
-  /** Per-option tooltip (SelectItem's `title`), and -- for the current selection -- the trigger's own `title` too. */
-  help: string;
-}
-
-const MANUAL_HELP = "Every action needs your approval before it runs.";
-const AUTO_SAFE_HELP =
-  "Auto-safe auto-approves allowlisted read-only verification commands (e.g. gofmt, go vet, go test); everything else still needs human approval.";
-
-/**
- * "manual" and "auto-safe" behave identically across every provider (a
- * decider smind installs itself), but "full-access" doesn't -- it installs
- * no decider at all and hands the provider its own native "auto-approve
- * everything" mechanism instead, a different mechanism per provider (see
- * internal/taskrunner/runner.go's runClaudeNative/runCodexNative/runACP).
- * The user explicitly rejected one shared generic label for that tier (see
- * docs/plans/active/task-move-approval-thinking.md's Context), so its
- * label/help here is that provider's own real vocabulary, not smind's own
- * words: Codex's and GLM's copied verbatim from Paseo's real provider
- * metadata, Claude's from Claude Code's own CLI mode name.
- */
-const FULL_ACCESS_BY_PROVIDER: Record<Provider, { label: string; help: string }> = {
-  "claude-native": {
-    label: "Bypass",
-    help: "Skip all permission prompts (use with caution).",
-  },
-  "codex-native": {
-    label: "Full Access",
-    help: "Edit files, run commands, and access the network without additional prompts.",
-  },
-  glm: {
-    label: "Bypass all permissions",
-    help: "Edits and commands run without prompting.",
-  },
-  kimi: {
-    label: "Bypass all permissions",
-    help: "Edits and commands run without prompting.",
-  },
-};
+// The tier vocabulary itself now lives in lib/approval-policies.ts, shared
+// with the agent form, General's defaults and the mid-run control
+// (run-config IA: one label set, not four).
+type ApprovalPolicyOption = ApprovalPolicyInfo;
 
 function approvalPolicyOptions(provider: Provider): ApprovalPolicyOption[] {
-  const fullAccess = FULL_ACCESS_BY_PROVIDER[provider] ?? FULL_ACCESS_BY_PROVIDER["claude-native"];
-  return [
-    { id: "manual", label: "Manual approval", help: MANUAL_HELP },
-    { id: "auto-safe", label: "Auto-safe", help: AUTO_SAFE_HELP },
-    { id: "full-access", label: fullAccess.label, help: fullAccess.help },
-  ];
+  return approvalPolicies(provider);
 }
 
 /**
