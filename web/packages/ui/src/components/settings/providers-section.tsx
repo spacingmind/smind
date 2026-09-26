@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
+import { Info, MoreHorizontal, Plus } from "lucide-react";
 
 import { ConnectAccountPanel, useProviderTest } from "@/components/accounts-dialog";
 import {
@@ -23,6 +23,12 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type {
   Account,
   ProviderInfo,
@@ -226,7 +232,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
           data-testid="providers-connect-toggle"
           onClick={() => setConnecting((v) => !v)}
         >
-          {connecting ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          <Plus className="size-3.5" />
           Connect account
         </Button>
       </div>
@@ -315,12 +321,23 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
             <section className="flex flex-col gap-1 border-t pt-3" data-testid="provider-other-group">
               <h4 className="flex items-center gap-1 text-ui-sm font-medium text-foreground-subtle">
                 Other accounts
-                <span
-                  className="cursor-help text-ui-sm text-muted-foreground"
-                  title="These accounts' providers have no agent runner mapped yet — they are kept for routing but no agent uses them today."
-                >
-                  ⓘ
-                </span>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        aria-label="About other accounts"
+                        className="flex items-center text-foreground-subtle"
+                      >
+                        <Info className="size-3.5" />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      These accounts' providers have no agent runner mapped yet — they are kept
+                      for routing but no agent uses them today.
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </h4>
               <ul className="flex flex-col gap-1">
                 {other.map((account) => (
