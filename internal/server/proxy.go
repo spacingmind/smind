@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -153,7 +154,20 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 	}
 	defer resp.Body.Close()
 
-	copyResponse(w, resp)
+	if err := copyResponse(w, resp); err != nil {
+		// Status and headers (and possibly part of the body) have already
+		// reached the client by this point, so there's no clean JSON error
+		// response left to fall back to: letting the handler return
+		// normally here would finish the chunked response as if it were
+		// complete, silently truncating whatever the client already
+		// received -- for LLM streaming output, that reads as a normal,
+		// finished reply with the tail quietly missing. Aborting resets the
+		// connection (net/http turns http.ErrAbortHandler into a connection
+		// reset for HTTP/1.1, RST_STREAM for HTTP/2) so the client sees an
+		// error instead of a truncated success.
+		log.Printf("proxy: warn: upstream stream for %s account %d broke mid-response, aborting downstream: %v", provider, account.ID, err)
+		panic(http.ErrAbortHandler)
+	}
 }
 
 // injectCredentials sets outReq's auth headers for account, refreshing an
@@ -252,11 +266,12 @@ var hopByHopResponseHeaders = map[string]bool{
 	"Trailer":           true,
 }
 
-// copyResponse copies resp's status, headers, and body to w. The body is
-// streamed via io.Copy through a flushing writer so both regular JSON
-// responses and SSE streaming responses reach the client incrementally,
-// without copyResponse needing to know which kind resp is.
-func copyResponse(w http.ResponseWriter, resp *http.Response) {
+// copyResponse copies resp's status, headers, and body to w, returning any
+// error hit while streaming the body. The body is streamed via io.Copy
+// through a flushing writer so both regular JSON responses and SSE
+// streaming responses reach the client incrementally, without copyResponse
+// needing to know which kind resp is.
+func copyResponse(w http.ResponseWriter, resp *http.Response) error {
 	for k, vv := range resp.Header {
 		if hopByHopResponseHeaders[k] {
 			continue
@@ -271,7 +286,8 @@ func copyResponse(w http.ResponseWriter, resp *http.Response) {
 	if f, ok := w.(http.Flusher); ok {
 		fw.f = f
 	}
-	_, _ = io.Copy(fw, resp.Body)
+	_, err := io.Copy(fw, resp.Body)
+	return err
 }
 
 type flushWriter struct {
