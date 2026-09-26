@@ -282,6 +282,25 @@ export function Composer({
     [profiles],
   );
 
+  // The command palette's "Use agent: <name>" entry lands here (the
+  // sidebar owns the palette entry; the composer owns the state). The
+  // event carries the full AgentProfile the sidebar fetched -- profiles
+  // may differ between the two fetches, so it is matched by ID and
+  // re-looked-up in this composer's own list, falling back to the
+  // dispatched copy so a just-created profile still applies.
+  useEffect(() => {
+    const onUseAgent = (e: Event) => {
+      const dispatched = (e as CustomEvent<AgentProfile>).detail;
+      if (!dispatched) return;
+      const p = profiles.find((candidate) => candidate.ID === dispatched.ID) ?? dispatched;
+      setProvider(p.Provider as Provider);
+      if (p.ApprovalPolicy) setApprovalPolicy(p.ApprovalPolicy as ApprovalPolicy);
+      if (p.ThinkingLevel) setThinkingLevel(p.ThinkingLevel as ThinkingLevel);
+    };
+    window.addEventListener("smind:use-agent", onUseAgent);
+    return () => window.removeEventListener("smind:use-agent", onUseAgent);
+  }, [profiles]);
+
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
   const hasChanges =

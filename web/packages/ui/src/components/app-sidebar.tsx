@@ -26,7 +26,7 @@ import {
 
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
-import type { Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import type { AgentProfile, Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
 import {
   applyLifecycleEvent,
   buildWorkspaceTree,
@@ -405,6 +405,26 @@ export function AppSidebar({
 
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [accountsOpen, setAccountsOpen] = useState(false);
+  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+
+  // Profiles feed the footer's agent count and the palette's "Use agent:"
+  // entries. The composer fetches its own copy (its picker seeds on it);
+  // sharing one fetch would couple the two surfaces for the sake of one
+  // RPC that the daemon answers from its store. Failures fall back to an
+  // empty list -- both consumers already handle zero profiles.
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<AgentProfile[]>("profile.list")
+      .then((list) => {
+        if (!cancelled) setProfiles(list ?? []);
+      })
+      .catch((err) => console.error("profile.list failed, hiding agent palette entries", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
 
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's
@@ -453,7 +473,44 @@ export function AppSidebar({
         keywords: ["providers", "credentials", "login", "oauth"],
         run: () => setAccountsOpen(true),
       },
+      {
+        id: "settings-agents",
+        group: "Settings",
+        title: "Settings: Agents",
+        keywords: ["profiles", "agents"],
+        action: "settings.open",
+        run: () => onOpenSettings?.(),
+      },
+      {
+        id: "settings-providers",
+        group: "Settings",
+        title: "Settings: Providers",
+        keywords: ["accounts", "providers", "credentials"],
+        run: () => setAccountsOpen(true),
+      },
+      {
+        id: "new-agent",
+        group: "Settings",
+        title: "New agent…",
+        keywords: ["create", "profile", "agent"],
+        run: () => onOpenSettings?.(),
+      },
     ];
+    // "Use agent: <name>" seeds the active composer with that profile's
+    // config, exactly as picking it from the composer's own picker does
+    // (ADR-0014's client-side apply mechanism). Dispatched as a window
+    // event because the composer is not a child of the sidebar -- the
+    // shell would otherwise have to thread a ref through task panes for
+    // this one interaction.
+    for (const p of profiles) {
+      commands.push({
+        id: `use-agent-${p.ID}`,
+        group: "Agents",
+        title: `Use agent: ${p.Name}`,
+        keywords: ["agent", "profile", p.Provider],
+        run: () => window.dispatchEvent(new CustomEvent("smind:use-agent", { detail: p })),
+      });
+    }
     // "New task" needs a workspace to create the task in. With exactly one
     // workspace the choice is unambiguous; with several, picking one for
     // the user would be a guess, so the entry is per workspace instead.
@@ -470,7 +527,7 @@ export function AppSidebar({
       });
     }
     return commands;
-  }, [workspaces]);
+  }, [workspaces, profiles, onOpenSettings]);
   useCommands("sidebar:actions", 5, paletteCommands);
   // The just-created workspace is expanded on landing; existing ones start
   // collapsed until first refresh happens (empty state -> created).
@@ -727,7 +784,12 @@ export function AppSidebar({
           </SidebarMenuItem>
           <SidebarMenuItem>
             <SidebarMenuButton data-testid="sidebar-footer-agents" onClick={onOpenSettings}>
-              <span className="text-ui-sm text-foreground-subtle">Agents</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="text-ui-sm text-foreground-subtle">Agents</span>
+                <span className="ml-auto text-ui-sm tabular-nums text-foreground-subtlest">
+                  {profiles.length}
+                </span>
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
