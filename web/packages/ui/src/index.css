@@ -597,6 +597,27 @@
 }
 
 /*
+ * diff-render.tsx's other import, highlight.js's `github.css` theme, has
+ * no CSS-var API of its own (unlike diff2html above) -- it's a fixed
+ * light theme, and its `.hljs` base rule hardcodes a white background
+ * and near-black text on every line of code, painting a solid white bar
+ * across every diff line regardless of this app's theme (zcode-visual-
+ * parity plan, P4 screenshot pass -- glaring in dark mode). Only the
+ * base rule is neutralized here: `background: transparent` lets the
+ * diff2html row underneath show through (context lines fall back to the
+ * pane's own background; +/- lines keep their `--d2h-ins/del-bg-color`),
+ * and `color: inherit` lets un-highlighted characters follow the app's
+ * `--foreground`. Every `.hljs-*` token-specific rule (keywords,
+ * strings, ...) is untouched -- per-token dark-mode syntax colors are a
+ * separate concern this phase doesn't take on (docs/design.md: syntax
+ * highlighting is its own static token set, left alone).
+ */
+.hljs {
+  background: transparent !important;
+  color: inherit !important;
+}
+
+/*
  * Font-size scale (ui-redesign-parity plan, Item 13's Appearance
  * section) -- three independent step variables the settings screen
  * writes (lib/settings-preferences.ts's applyFontSizes), following
