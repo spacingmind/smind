@@ -87,6 +87,8 @@ export function GeneralSection({ client }: SettingsSectionContext) {
 registerSettingsSection({
   id: "general",
   label: "General",
-  order: 200,
+  // First in the nav (run-config IA regroup: General · Appearance ·
+  // Agents & providers · Connection · Notifications · Shortcuts).
+  order: 50,
   render: (ctx) => <GeneralSection client={ctx.client} />,
 });

@@ -300,6 +300,7 @@ function providerLabel(providers: ProviderInfo[], id: string): string {
 registerSettingsSection({
   id: "agents",
   label: "Agents",
+  groupLabel: "Agents & providers",
   order: 175,
   render: (ctx) => <ProfilesSection {...ctx} />,
 });

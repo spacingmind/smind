@@ -156,7 +156,8 @@ function ConnectionsSection() {
 if (isDesktop) {
   registerSettingsSection({
     id: "connections",
-    label: "Connections",
+    label: "Daemon server",
+    groupLabel: "Connection",
     order: 150,
     render: () => <ConnectionsSection />,
   });

@@ -407,6 +407,16 @@ export function AppSidebar({
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
 
+  // The Settings nav's Providers stub (run-config IA: this branch has no
+  // Providers section; ADR-0015's branch replaces the stub) deep-links to
+  // the accounts surface through the same window-event channel the
+  // palette uses -- the sidebar owns the AccountsDialog.
+  useEffect(() => {
+    const onOpenAccounts = () => setAccountsOpen(true);
+    window.addEventListener("smind:open-accounts", onOpenAccounts);
+    return () => window.removeEventListener("smind:open-accounts", onOpenAccounts);
+  }, []);
+
   // Profiles feed the footer's agent count and the palette's "Use agent:"
   // entries. The composer fetches its own copy (its picker seeds on it);
   // sharing one fetch would couple the two surfaces for the sake of one

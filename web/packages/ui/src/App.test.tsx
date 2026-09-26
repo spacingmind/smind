@@ -685,7 +685,8 @@ describe("App keyboard shortcuts", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    // General is the default section since the run-config IA nav regroup.
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
     expect(screen.queryByTestId("settings-section-shortcuts")).not.toBeInTheDocument();
   });
 });
