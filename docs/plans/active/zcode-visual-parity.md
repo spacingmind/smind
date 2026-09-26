@@ -311,7 +311,7 @@ Per-phase scenarios:
 ## Progress
 
 - [x] P1 — design system: tokens, `text-ui-*` scale, guards, NOTICE
-- [ ] P2 — app shell + sidebar
+- [x] P2 — app shell + sidebar
 - [ ] P3 — chat timeline + composer + tool/permission/question cards
 - [ ] P4 — panes: diff/git, terminal, files, settings
 - [ ] P5 — desktop-only chrome (blocked on ADR-0013)
@@ -508,3 +508,107 @@ file `appearance-section.test.tsx` with 2 cases, +1 new case in
 `task test` (Go suite) green, unaffected (web-only change). Playwright
 screenshots (`home`/`task`/`settings` × light/dark, 1440×900) confirmed
 all four defects gone before commit.
+
+### P2 — app shell + sidebar
+
+Commits (`feat/zcode-p2-shell`, oldest first): `9bb7d72` (shell frames:
+panel bg/border, resize-handle restyle), `9abd692` (sidebar hover/
+selected tokens + task-row over-indent fix), `66cf979` (sidebar footer
+icons for the icon-collapsed rail).
+
+- **The shell layout matches `app-shell/WorkspaceShellLayout.tsx`** —
+  `9bb7d72`. Every split-tree pane (`PaneTabStrip`'s root, `App.tsx`) is
+  now its own `bg-panel`/`border`/`rounded-lg` frame; `components/ui/
+  resizable.tsx`'s `ResizableHandle` is a transparent 4px hit area
+  (`w-1`) with a 2px `bg-foreground-subtlest/50` `::after` indicator,
+  rounded (`rounded-full`), that only appears on hover (after the
+  existing 150ms delay), focus-visible, or an active drag — never a
+  permanent line. A `p-1` wrapper around the split-tree area gives every
+  frame the same 4px gap against the header/sidebar/window edges that
+  the handle already gives adjoining panes. smind has no fixed
+  conversation/terminal/side-pane roles the way ZCode does (`side dock`
+  placement can put any tab kind in either pane) — the frame treatment
+  applies uniformly to whichever pane(s) the split tree currently holds,
+  which is the equivalent for smind's architecture. The `withHandle`
+  prop/nub-dot decoration is gone (ZCode's handle has no center grab
+  dot); `ResizableHandle`'s two call sites (`App.tsx`) updated to match.
+  Existing split/resize-persistence tests (`resizable.test.tsx`,
+  `App.test.tsx`) are green unchanged — only classNames moved.
+- **Sidebar matches `WorkspaceSidebar.tsx`/`WorkspaceSidebarItem.tsx`**
+  — `9abd692`, `66cf979`. `--color-sidebar` background was already
+  correct from P1 (no change needed); `sidebarMenuButtonVariants`/
+  `SidebarMenuSubButton` (`components/ui/sidebar.tsx`) now hover/select
+  onto ZCode's own `bg-hover`/`bg-selected` tokens instead of the static
+  shadcn `sidebar-accent` pair, matching every other interactive surface
+  in the app. Row titles were already `text-ui-base` with `min-w-0
+  truncate` (pre-existing, P1-migrated). The footer's Providers/Agents
+  rows (`#203`) gained `KeyRound`/`Bot` icons so the icon-collapsed rail
+  shows a glyph instead of clipped text, without stripping the row's
+  accessible name in that state (no `hidden` on the label span — it
+  clips to icon-only the same way every other row already does, via
+  `SidebarMenuButton`'s own `overflow-hidden` + fixed collapsed size).
+- **Known P2 issue fixed: sidebar task rows indented far too deep
+  relative to their group header** — `9abd692`. Root cause: a task row
+  nested under a Space (or the "Ungrouped" bucket) picked up *two* full
+  `SidebarMenuSub` indent steps (`mx-3.5` + `border-l` + `px-2.5`, each)
+  because that list is the *second* `SidebarMenuSub` nesting level under
+  its workspace (workspace → space → task), while the space's own row
+  only ever gets one step. Fixed by flushing that inner list
+  (`mx-0 border-l-0 px-1` override in `SpaceLikeItem`, `app-sidebar.tsx`)
+  — task rows now align close under the space header they belong to,
+  instead of a compounding second indent/guide-line. Pinned-section and
+  status-grouped-view task lists (single nesting level) are unaffected.
+- **ZCode branding absent** — unchanged; smind's own `logo.png` +
+  "smind" wordmark are the only mark, no billing/plan/usage footer
+  widgets were added.
+- **Attention/unread/pins, keyboard/chords, Find, split panes, drag-to-
+  split all keep working** — none of these behaviors were touched, only
+  the classNames/structure around them; the full pre-existing test
+  suite (below) is green with zero test edits required.
+
+**Verification:** `bun run --filter '@smind/ui' typecheck` green;
+`bun run --filter '@smind/ui' test` — 105 test files, 1316 tests, all
+green (no test file added or edited — every P2 change was visual/
+structural against already-passing behavior coverage). `go test ./...`
+green (34 packages, unaffected — web-only change). `task lint` green
+(`go vet` + `gofmt`, no Go changes).
+
+Playwright screenshots (1440×900, light+dark) against a temp daemon
+(port 4711, seeded with 2 workspaces/2 spaces/6 tasks/2 agent profiles/
+1 pinned task, one task's real `claude-native` run left unread for an
+attention dot) — `sidebar-states-{light,dark}.png` (selected + pinned +
+hover + attention together), `shell-split-{light,dark}.png` (chat pane
+split right into a terminal pane), `sidebar-collapsed-{light,dark}.png`
+(icon rail) — saved to
+`/mnt/c/Users/ADMIN/Downloads/smind-zcode-p2/`. Reviewed by hand;
+one real defect found and fixed before the final pass (the footer icon/
+a11y issue above, first found as clipped footer text, then a second
+look at the fix itself caught the `hidden`-vs-accessible-name issue).
+
+**Web Interface Guidelines review** (P2 Step 5): the guidelines
+source's `command.md` returned only its own tool-usage blurb this run
+(no fetchable rule list), so the pass fell back to applying the same
+concrete rules P1's review already established for this codebase
+(explicit-property transitions, not `transition-all`; a real focus-
+visible replacement for `outline-none`) plus a fresh manual accessibility
+check of every new/changed interactive element. One real finding, fixed
+before commit: the footer icon fix's first draft hid the label span via
+`hidden` (`display:none`) in icon-collapsed mode, which removes it from
+the accessible tree rather than merely clipping it — changed to rely on
+`SidebarMenuButton`'s existing `overflow-hidden`+fixed-size clip instead
+(see above), matching how every pre-existing collapsed row already
+avoids this.
+
+**Not done / deferred, in scope for a later phase, not left behind**:
+the workspace-header equivalent (task-detail.tsx's `PaneHeader` usage)
+was left on its existing `px-4 py-2.5` padding scale rather than
+ZCode's `h-12`/`p-2` — that scale is a P1-documented, cross-cutting
+convention (`docs/design.md` §4) shared by every `PaneHeader` consumer,
+including P4-owned panes (diff/terminal/file-editor); changing it here
+would reach outside this phase's file ownership for a padding
+difference of a few px, not a defect. The sidebar's theme toggle stays
+in the sidebar header (not relocated to the main header's action
+section) — smind has no billing/plan widget to make room for and no
+UX problem with the current placement; moving it would be a judgment
+call with test/behavior risk and no corresponding benefit the AC
+requires.
