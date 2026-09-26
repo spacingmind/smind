@@ -70,11 +70,22 @@ describe("profiles-section", () => {
     expect(screen.getByText("UI work")).toBeInTheDocument();
   });
 
-  it("creating a profile through the form makes it appear in the list", async () => {
+  it("the header's + New agent button opens the add card at the top of the list, and creating a profile through it appears below", async () => {
     const client = new FakeWsClient();
     renderSection(client);
-    client.nth("profile.list").resolve([]);
+    client.nth("profile.list").resolve([PROFILE]);
     await flush();
+
+    expect(screen.queryByTestId("profile-form-name")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+
+    // The add card renders as the list's own first item, above the
+    // existing profile rows -- not a separate section below them.
+    const list = screen.getByRole("list");
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows[0]).toHaveAttribute("data-testid", "profile-new-form");
+    expect(within(rows[0]).getByTestId("profile-form-name")).toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "New profile" } });
     fireEvent.click(screen.getByTestId("profile-form-submit"));
@@ -86,6 +97,47 @@ describe("profiles-section", () => {
     await flush();
 
     expect(within(screen.getByTestId("profile-row-2")).getByText("New profile")).toBeInTheDocument();
+    // The card closes on save.
+    expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
+  });
+
+  it("Cancel closes the add card without creating anything, and opening Edit on a row closes an open add card", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-form-cancel"));
+    expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
+    expect(client.calls.some((c) => c.method === "profile.create")).toBe(false);
+
+    // Only one card is ever open -- opening a row's Edit while the add
+    // card is open closes the add card.
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
+
+    fireEvent.pointerDown(screen.getByTestId("profile-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("profile-edit-1"));
+    await flush();
+    expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
+    expect(within(screen.getByTestId("profile-row-1")).getByTestId("profile-edit-form-1-name")).toBeInTheDocument();
+  });
+
+  it("empty state shows a sentence and its own + New agent button", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([]);
+    await flush();
+
+    expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profiles-empty-new-button"));
+    await flush();
+
+    expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
+    expect(screen.queryByTestId("profiles-empty-state")).not.toBeInTheDocument();
   });
 
   // run-config IA: Edit/Delete moved behind a "⋯" menu (profile-menu-{id}),
@@ -101,10 +153,10 @@ describe("profiles-section", () => {
     fireEvent.click(await screen.findByTestId("profile-edit-1"));
     await flush();
 
-    // Inline, inside the row -- not the bottom "New agent" form, which
-    // keeps its own separate (still-empty) fields.
+    // Inline, inside the row -- not the header's "+ New agent" card, which
+    // isn't open at all right now.
     expect(within(screen.getByTestId("profile-row-1")).getByTestId("profile-edit-form-1-name")).toHaveValue("UI work");
-    expect(screen.getByTestId("profile-form-name")).toHaveValue("");
+    expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId("profile-edit-form-1-name"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByTestId("profile-edit-form-1-submit"));
