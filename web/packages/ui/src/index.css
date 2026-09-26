@@ -563,11 +563,12 @@
  * juggling at all -- the library's own selectors already read these var
  * names, so this is the whole integration.
  *
- * The +/- pairs read the diff family (`--diff-addition/--deletion`,
- * Item 5's third color family), not status-success/danger -- the diff
- * tier is more saturated by design (line-scannable), so a future
- * non-diff2html diff surface reuses the same named tokens and gets the
- * same look for free.
+ * The +/- pairs read the diff family (`--diff-added/--diff-removed`,
+ * ZCode's own diff token names -- P4 repoints this off the retired
+ * `--diff-addition/--deletion` aliases directly onto them), not
+ * status-success/danger -- the diff tier is more saturated by design
+ * (line-scannable), so a future non-diff2html diff surface reuses the
+ * same named tokens and gets the same look for free.
  */
 :root {
   --d2h-bg-color: var(--card);
@@ -579,16 +580,16 @@
   --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
   --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
-  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-addition) 15%, transparent);
-  --d2h-ins-border-color: color-mix(in oklch, var(--diff-addition) 40%, transparent);
-  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-addition) 30%, transparent);
-  --d2h-ins-label-color: var(--diff-addition);
-  --d2h-del-bg-color: color-mix(in oklch, var(--diff-deletion) 12%, transparent);
-  --d2h-del-border-color: color-mix(in oklch, var(--diff-deletion) 40%, transparent);
-  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-deletion) 30%, transparent);
-  --d2h-del-label-color: var(--diff-deletion);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added) 30%, transparent);
+  --d2h-ins-label-color: var(--diff-added);
+  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed) 30%, transparent);
+  --d2h-del-label-color: var(--diff-removed);
   --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
-  --d2h-change-ins-color: color-mix(in oklch, var(--diff-addition) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added) 20%, transparent);
   --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
   --d2h-change-label-color: var(--warning);

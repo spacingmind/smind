@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronRight } from "lucide-react";
 
 import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
+import { FileStatusMarker } from "@/components/file-status-marker";
 import { ReviewComments, type PendingComment } from "@/components/review-comments";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import { cn } from "@/lib/utils";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { suggestCommitMessage } from "@/lib/commit-suggestion";
 import { formatDiffStat } from "@/lib/diff-stat";
@@ -332,8 +335,16 @@ export function DiffViewerPane({
       <PaneHeader
         title="Diff"
         subtitle={
-          <span data-testid="diff-stat" data-files={wholeDiff.stat.files} data-additions={wholeDiff.stat.additions} data-deletions={wholeDiff.stat.deletions}>
-            {formatDiffStat(wholeDiff.stat)}
+          <span
+            data-testid="diff-stat"
+            data-files={wholeDiff.stat.files}
+            data-additions={wholeDiff.stat.additions}
+            data-deletions={wholeDiff.stat.deletions}
+            title={formatDiffStat(wholeDiff.stat)}
+          >
+            {wholeDiff.stat.files} file{wholeDiff.stat.files === 1 ? "" : "s"}{" "}
+            <span className="text-diff-added">+{wholeDiff.stat.additions}</span>{" "}
+            <span className="text-diff-removed">−{wholeDiff.stat.deletions}</span>
           </span>
         }
         actions={
@@ -501,7 +512,7 @@ export function DiffViewerPane({
 
       <div className="border-t px-4 py-3" data-testid="commit-bar">
         {lastCommit && (
-          <p className="mb-2 text-ui-base text-muted-foreground" data-testid="commit-success">
+          <p className="mb-2 text-ui-base text-foreground-subtle" data-testid="commit-success">
             Committed {lastCommit.subject} ({lastCommit.commit.slice(0, 8)}) — {lastCommit.files} file
             {lastCommit.files === 1 ? "" : "s"}
           </p>
@@ -581,8 +592,13 @@ function FileRow({
   const diff = state?.diff ?? null;
 
   return (
-    <div className="mb-2" data-testid={`diff-file-${file.path}`}>
-      <div className="flex items-center gap-2">
+    <div className="mb-1 rounded-lg" data-testid={`diff-file-${file.path}`}>
+      <div
+        className={cn(
+          "flex h-8 items-center gap-2 rounded-lg px-2 transition-colors hover:bg-surface-hover",
+          !collapsed && "bg-surface-hover",
+        )}
+      >
         <input
           type="checkbox"
           checked={file.staged}
@@ -593,13 +609,18 @@ function FileRow({
         />
         <button
           type="button"
-          className="flex-1 text-left text-ui-base font-medium"
+          aria-expanded={!collapsed}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-ui-base"
           onClick={onToggleCollapse}
           data-testid={`diff-file-header-${file.path}`}
         >
-          {collapsed ? "▸" : "▾"} {file.path} <span className="text-muted-foreground">({file.status})</span>
+          <ChevronRight
+            className={cn("size-3.5 shrink-0 text-foreground-subtle transition-transform", !collapsed && "rotate-90")}
+          />
+          <span className="min-w-0 flex-1 truncate">{file.path}</span>
+          <FileStatusMarker status={file.status} />
         </button>
-        <label className="flex items-center gap-1 text-ui-sm text-muted-foreground">
+        <label className="flex shrink-0 items-center gap-1 text-ui-sm text-foreground-subtle">
           <input
             type="checkbox"
             checked={state?.viewed ?? false}
@@ -612,9 +633,9 @@ function FileRow({
       {!collapsed && (
         <div className="mt-1">
           {diff === null ? (
-            <p className="text-ui-base text-muted-foreground">Loading…</p>
+            <p className="text-ui-base text-foreground-subtle">Loading…</p>
           ) : diff === "" ? (
-            <p className="text-ui-base text-muted-foreground">No changes</p>
+            <p className="text-ui-base text-foreground-subtle">No changes</p>
           ) : (
             <DiffRender
               diff={diff}
@@ -663,7 +684,7 @@ function SegmentedToggle<T extends string>({
       aria-label={label}
       data-testid={testId}
       data-value={value}
-      className="flex h-7 items-center rounded-lg border border-input p-0.5"
+      className="flex h-7 items-center rounded-lg border border-input-border p-0.5"
     >
       {options.map((option) => (
         <button
