@@ -48,17 +48,17 @@ import type { WsClient } from "@/lib/ws-client";
  */
 
 /** Providers with a credential row at all (kind is unset) -- feeds the manual-add dropdown. */
-function credentialProviders(providers: ProviderInfo[]): ProviderInfo[] {
+export function credentialProviders(providers: ProviderInfo[]): ProviderInfo[] {
   return providers.filter((p) => p.credentialKind);
 }
 
 /** Friendly display label for an accounts-vocabulary provider id (Account.provider), falling back to the raw id for anything provider.list didn't describe (see the gap noted above). */
-function providerLabel(providers: ProviderInfo[], id: string): string {
+export function providerLabel(providers: ProviderInfo[], id: string): string {
   return providers.find((p) => p.accountProvider === id)?.label ?? id;
 }
 
 /** A small connection-status dot: green once provider.test reports ok, red once it reports not-ok, neutral (gray) until tested at all -- deepseek-harness's credential-configured-dot pattern, now on the shared StatusDot primitive (ui-redesign-parity plan, Item 2). */
-function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
+export function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
   const state = result === undefined ? "unknown" : result.ok ? "ok" : "failed";
   const status = state === "ok" ? "success" : state === "failed" ? "danger" : "neutral";
   const label = state === "ok" ? "Connection ok" : state === "failed" ? "Connection failed" : "Not tested yet";
@@ -75,34 +75,29 @@ function StatusDot({ result }: { result: ProviderTestResult | undefined }) {
 }
 
 /**
- * Accounts settings dialog: list (account.list), a cancellable "Connect"
- * OAuth login per known provider (account.oauthStart, Item 14's
- * start/show-URL/poll/cancel state machine), and a manual-paste form
- * (account.add) for everything else.
+ * ConnectAccountPanel is the shared connect/login + manual-paste flow
+ * (providers-settings plan Item 3): the OAuth Connect buttons with their
+ * start/show-URL/poll/cancel state machine (account.oauthStart), and the
+ * collapsible "Paste a credential instead" manual form (account.add) with
+ * its provider dropdown, optional base_url, and per-state validation.
+ * Extracted verbatim from the Accounts dialog so Settings -> Providers
+ * embeds the same flows without duplication; the dialog is now a thin
+ * wrapper over this panel plus the account list.
  *
- * No edit/disable/remove/status-richness this pass (ui-redesign-parity
- * Item 14's fuller `audit-cliproxyapi.md` §2 row model): `store.Account`
- * (internal/store/types.go) has no status/disabled/last_refresh/
- * next_retry_after/counters columns, and there is no `account.remove` or
- * `account.disable`/`account.update` RPC -- adding any of it is a wire/
- * data-model change gated on AGENTS.md rule (d), not a Track D UI change.
+ * props.providers is provider.list's result (each row derives from it --
+ * see the file's top doc comment for the accountProvider indirection).
+ * onConnected fires after a successful connect/add so the host can
+ * refresh its account list (or rely on the account.updated event).
  */
-export function AccountsDialog({
+export function ConnectAccountPanel({
   client,
-  open,
-  onOpenChange,
+  providers,
+  onConnected,
 }: {
   client: WsClient | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
+  providers: ProviderInfo[];
+  onConnected: () => void;
 }) {
-  const [accounts, setAccounts] = useState<Account[] | null>(null);
-  // The daemon's full provider catalog (internal/taskrunner.SupportedProviders,
-  // served by provider.list) -- every row this dialog renders (managed-
-  // externally, Connect buttons, manual-add dropdown) derives from this,
-  // rather than a hand-maintained frontend constant. See the doc comment
-  // above for the accountProvider indirection and its known gap.
-  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [provider, setProvider] = useState<string>("");
   const [label, setLabel] = useState("");
   const [credential, setCredential] = useState("");
@@ -134,11 +129,269 @@ export function AccountsDialog({
   // primary Connect flow isn't competing with a full form for attention.
   const [showManual, setShowManual] = useState(false);
 
-  // provider.test results/pending-state per row, keyed by provider id --
-  // account rows and "managed externally" rows both key on the same
-  // provider id space provider.test accepts, so a single map covers both.
-  // Undefined means "never tested" (neutral dot); present but pending means
-  // a request is in flight for that row.
+  const manualProviders = credentialProviders(providers);
+  const oauthProviders = manualProviders.filter((p) => p.credentialKind === "oauth");
+  const isAPIKeyProvider =
+    manualProviders.find((p) => p.accountProvider === provider)?.credentialKind === "api-key";
+
+  // Keep the manual-add dropdown's selection valid as provider.list loads
+  // in (it starts empty until the caller's fetch resolves): default to the
+  // first credential-bearing provider, and only reset it if the current
+  // selection stops being one of the options.
+  useEffect(() => {
+    setProvider((current) => {
+      const options = credentialProviders(providers);
+      if (options.length === 0) return current;
+      if (options.some((p) => p.accountProvider === current)) return current;
+      return options[0].accountProvider ?? current;
+    });
+  }, [providers]);
+
+  async function add() {
+    if (!provider || !label.trim() || !credential.trim()) {
+      setError("Provider, label, and credential are all required.");
+      return;
+    }
+    setPending(true);
+    setError(null);
+    try {
+      await client!.call("account.add", {
+        provider,
+        label: label.trim(),
+        credential: credential.trim(),
+        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
+      });
+      setLabel("");
+      setCredential("");
+      setBaseUrl("");
+      onConnected();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function connect(providerId: string) {
+    if (!oauthLabel.trim()) {
+      setOauthError("Label is required.");
+      return;
+    }
+    setOauthError(null);
+    setAuthorizeUrl(null);
+    setConnecting(providerId);
+    const controller = new AbortController();
+    connectAbortRef.current = controller;
+    try {
+      await client!.callStream(
+        "account.oauthStart",
+        { provider: providerId, label: oauthLabel.trim() },
+        (event, params) => {
+          if (event !== "authorizeUrl") return;
+          const url = (params as { url?: string } | undefined)?.url;
+          if (url) setAuthorizeUrl(url);
+        },
+        { signal: controller.signal },
+      );
+      setOauthLabel("");
+      setAuthorizeUrl(null);
+      onConnected();
+    } catch (err) {
+      // A user-initiated cancel already reflects itself in the UI by
+      // clearing `connecting` below -- surfacing the resulting "cancelled"
+      // error on top of that would read as a failure the user didn't cause.
+      if (!controller.signal.aborted) {
+        setOauthError(err instanceof Error ? err.message : String(err));
+      }
+    } finally {
+      setConnecting(null);
+      connectAbortRef.current = null;
+    }
+  }
+
+  /** Cancels the in-flight OAuth login -- the "cancel" step of the start/show-URL/poll/cancel state machine. */
+  function cancelConnect() {
+    connectAbortRef.current?.abort();
+  }
+
+  return (
+    <>
+        <div className="grid gap-3 border-t pt-4">
+          <p className="text-ui-base font-medium">Connect an account</p>
+          <div className="grid gap-1">
+            <label htmlFor="account-oauth-label" className="text-ui-base font-medium">
+              Label
+            </label>
+            <Input
+              id="account-oauth-label"
+              value={oauthLabel}
+              onChange={(e) => setOauthLabel(e.target.value)}
+              placeholder="e.g. work, personal — however you'll tell accounts apart"
+            />
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {oauthProviders.map((p) => (
+              <Button
+                key={p.accountProvider}
+                variant="outline"
+                disabled={connecting !== null}
+                data-testid={`accounts-connect-${p.accountProvider}`}
+                onClick={() => void connect(p.accountProvider!)}
+              >
+                {connecting === p.accountProvider ? "Connecting…" : `Connect ${p.label ?? p.accountProvider}`}
+              </Button>
+            ))}
+          </div>
+          <p className="text-ui-sm text-muted-foreground">
+            Adding a second account for a provider you're already signed into in this
+            browser may just reconnect the same one — sign out first, or use a private
+            window, to pick a different account.
+          </p>
+          {oauthError && (
+            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-ui-base text-destructive">
+              {oauthError}
+            </p>
+          )}
+          {connecting && (
+            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
+              <p>
+                {authorizeUrl ? (
+                  <>
+                    Waiting for login — if a browser didn't open automatically,{" "}
+                    <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
+                      open the login page
+                    </a>
+                    .
+                  </>
+                ) : (
+                  "Starting login…"
+                )}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="shrink-0"
+                data-testid="accounts-connect-cancel"
+                onClick={cancelConnect}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t pt-4">
+          <button
+            type="button"
+            aria-expanded={showManual}
+            data-testid="accounts-manual-toggle"
+            onClick={() => setShowManual((v) => !v)}
+            className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
+          >
+            {showManual ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            Paste a credential instead
+          </button>
+          <p className="mt-1 pl-4.5 text-ui-sm text-muted-foreground">
+            For providers with no Connect flow yet, or to paste a credential
+            obtained elsewhere.
+          </p>
+
+          {showManual && (
+            <div className="mt-3 grid gap-3">
+              {error && <p className="text-ui-base text-destructive">{error}</p>}
+              <div className="grid gap-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="grid gap-1">
+                    <label htmlFor="account-provider" className="text-ui-base font-medium">
+                      Provider
+                    </label>
+                    <Select value={provider} onValueChange={setProvider}>
+                      <SelectTrigger id="account-provider" className="w-full">
+                        <SelectValue placeholder="Select provider" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {manualProviders.map((p) => (
+                          <SelectItem key={p.accountProvider} value={p.accountProvider!}>
+                            {p.label ?? p.accountProvider}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1">
+                    <label htmlFor="account-label" className="text-ui-base font-medium">
+                      Label
+                    </label>
+                    <Input
+                      id="account-label"
+                      value={label}
+                      onChange={(e) => setLabel(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <label htmlFor="account-credential" className="text-ui-base font-medium">
+                  Credential
+                </label>
+                <textarea
+                  id="account-credential"
+                  className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  placeholder="Paste the credential JSON (or API key) — same blob the CLI reads on stdin."
+                  value={credential}
+                  onChange={(e) => setCredential(e.target.value)}
+                />
+              </div>
+
+              {isAPIKeyProvider && (
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={showBaseUrl}
+                    data-testid="accounts-base-url-toggle"
+                    onClick={() => setShowBaseUrl((v) => !v)}
+                    className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
+                  >
+                    {showBaseUrl ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                    Base URL (optional)
+                  </button>
+                  {showBaseUrl && (
+                    <div className="mt-2 grid gap-1 pl-4.5">
+                      <Input
+                        id="account-base-url"
+                        aria-label="Base URL (optional)"
+                        placeholder="e.g. http://localhost:8080"
+                        value={baseUrl}
+                        onChange={(e) => setBaseUrl(e.target.value)}
+                      />
+                      <p className="text-ui-sm text-muted-foreground">
+                        Override the upstream endpoint for this account — advanced, for
+                        self-hosted or local proxy endpoints only.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
+                  {pending ? "Adding…" : "Add account"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+    </>
+  );
+}
+
+/**
+ * useProviderTest runs the provider.test diagnostic on demand and tracks
+ * per-provider results/pending state -- the shared "Test" flow behind both
+ * the old Accounts dialog's rows and Settings -> Providers' rows. Returns
+ * the call function plus the two maps (undefined result = never tested,
+ * the neutral dot).
+ */
+export function useProviderTest(client: WsClient | null) {
   const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
   const [testing, setTesting] = useState<Record<string, boolean>>({});
 
@@ -158,11 +411,36 @@ export function AccountsDialog({
     }
   }
 
+  return { testResults, testing, testProvider };
+}
+
+/**
+ * Accounts settings dialog -- now a thin wrapper (providers-settings plan
+ * Item 3): the account list and managed-externally rows plus the shared
+ * ConnectAccountPanel, all extracted so Settings -> Providers embeds the
+ * same flows. No entry point opens this dialog anymore; it stays for
+ * direct callers and its tests until those migrate.
+ */
+export function AccountsDialog({
+  client,
+  open,
+  onOpenChange,
+}: {
+  client: WsClient | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const [accounts, setAccounts] = useState<Account[] | null>(null);
+  // The daemon's full provider catalog (internal/taskrunner.SupportedProviders,
+  // served by provider.list) -- every row this dialog renders (managed-
+  // externally, Connect buttons, manual-add dropdown) derives from this,
+  // rather than a hand-maintained frontend constant. See the doc comment
+  // above for the accountProvider indirection and its known gap.
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const { testResults, testing, testProvider } = useProviderTest(client);
+
   const externalProviders = providers.filter((p) => p.kind === "cli");
-  const manualProviders = credentialProviders(providers);
-  const oauthProviders = manualProviders.filter((p) => p.credentialKind === "oauth");
-  const isAPIKeyProvider =
-    manualProviders.find((p) => p.accountProvider === provider)?.credentialKind === "api-key";
 
   async function refresh() {
     if (!client) return;
@@ -197,86 +475,6 @@ export function AccountsDialog({
       cancelled = true;
     };
   }, [open, client]);
-
-  // Keep the manual-add dropdown's selection valid as provider.list loads
-  // in (it starts empty until the RPC above resolves): default to the first
-  // credential-bearing provider, and only reset it if the current selection
-  // stops being one of the options.
-  useEffect(() => {
-    setProvider((current) => {
-      const options = credentialProviders(providers);
-      if (options.length === 0) return current;
-      if (options.some((p) => p.accountProvider === current)) return current;
-      return options[0].accountProvider ?? current;
-    });
-  }, [providers]);
-
-  async function add() {
-    if (!provider || !label.trim() || !credential.trim()) {
-      setError("Provider, label, and credential are all required.");
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      await client!.call("account.add", {
-        provider,
-        label: label.trim(),
-        credential: credential.trim(),
-        ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}),
-      });
-      setLabel("");
-      setCredential("");
-      setBaseUrl("");
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function connect(providerId: string) {
-    if (!oauthLabel.trim()) {
-      setOauthError("Label is required.");
-      return;
-    }
-    setOauthError(null);
-    setAuthorizeUrl(null);
-    setConnecting(providerId);
-    const controller = new AbortController();
-    connectAbortRef.current = controller;
-    try {
-      await client!.callStream(
-        "account.oauthStart",
-        { provider: providerId, label: oauthLabel.trim() },
-        (event, params) => {
-          if (event !== "authorizeUrl") return;
-          const url = (params as { url?: string } | undefined)?.url;
-          if (url) setAuthorizeUrl(url);
-        },
-        { signal: controller.signal },
-      );
-      setOauthLabel("");
-      setAuthorizeUrl(null);
-      await refresh();
-    } catch (err) {
-      // A user-initiated cancel already reflects itself in the UI by
-      // clearing `connecting` below -- surfacing the resulting "cancelled"
-      // error on top of that would read as a failure the user didn't cause.
-      if (!controller.signal.aborted) {
-        setOauthError(err instanceof Error ? err.message : String(err));
-      }
-    } finally {
-      setConnecting(null);
-      connectAbortRef.current = null;
-    }
-  }
-
-  /** Cancels the in-flight OAuth login -- the "cancel" step of the start/show-URL/poll/cancel state machine. */
-  function cancelConnect() {
-    connectAbortRef.current?.abort();
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -383,169 +581,11 @@ export function AccountsDialog({
           </div>
         )}
 
-        <div className="grid gap-3 border-t pt-4">
-          <p className="text-ui-base font-medium">Connect an account</p>
-          <div className="grid gap-1">
-            <label htmlFor="account-oauth-label" className="text-ui-base font-medium">
-              Label
-            </label>
-            <Input
-              id="account-oauth-label"
-              value={oauthLabel}
-              onChange={(e) => setOauthLabel(e.target.value)}
-              placeholder="e.g. work, personal — however you'll tell accounts apart"
-            />
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {oauthProviders.map((p) => (
-              <Button
-                key={p.accountProvider}
-                variant="outline"
-                disabled={connecting !== null}
-                data-testid={`accounts-connect-${p.accountProvider}`}
-                onClick={() => void connect(p.accountProvider!)}
-              >
-                {connecting === p.accountProvider ? "Connecting…" : `Connect ${p.label ?? p.accountProvider}`}
-              </Button>
-            ))}
-          </div>
-          <p className="text-ui-sm text-muted-foreground">
-            Adding a second account for a provider you're already signed into in this
-            browser may just reconnect the same one — sign out first, or use a private
-            window, to pick a different account.
-          </p>
-          {oauthError && (
-            <p className="rounded-md border border-destructive/30 bg-destructive/10 px-2.5 py-1.5 text-ui-base text-destructive">
-              {oauthError}
-            </p>
-          )}
-          {connecting && (
-            <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-ui-base text-muted-foreground">
-              <p>
-                {authorizeUrl ? (
-                  <>
-                    Waiting for login — if a browser didn't open automatically,{" "}
-                    <a href={authorizeUrl} target="_blank" rel="noreferrer" className="underline">
-                      open the login page
-                    </a>
-                    .
-                  </>
-                ) : (
-                  "Starting login…"
-                )}
-              </p>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                className="shrink-0"
-                data-testid="accounts-connect-cancel"
-                onClick={cancelConnect}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </div>
-
-        <div className="border-t pt-4">
-          <button
-            type="button"
-            aria-expanded={showManual}
-            data-testid="accounts-manual-toggle"
-            onClick={() => setShowManual((v) => !v)}
-            className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
-          >
-            {showManual ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-            Paste a credential instead
-          </button>
-          <p className="mt-1 pl-4.5 text-ui-sm text-muted-foreground">
-            For providers with no Connect flow yet, or to paste a credential
-            obtained elsewhere.
-          </p>
-
-          {showManual && (
-            <div className="mt-3 grid gap-3">
-              <div className="grid gap-2">
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="grid gap-1">
-                    <label htmlFor="account-provider" className="text-ui-base font-medium">
-                      Provider
-                    </label>
-                    <Select value={provider} onValueChange={setProvider}>
-                      <SelectTrigger id="account-provider" className="w-full">
-                        <SelectValue placeholder="Select provider" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {manualProviders.map((p) => (
-                          <SelectItem key={p.accountProvider} value={p.accountProvider!}>
-                            {p.label ?? p.accountProvider}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="grid gap-1">
-                    <label htmlFor="account-label" className="text-ui-base font-medium">
-                      Label
-                    </label>
-                    <Input
-                      id="account-label"
-                      value={label}
-                      onChange={(e) => setLabel(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <label htmlFor="account-credential" className="text-ui-base font-medium">
-                  Credential
-                </label>
-                <textarea
-                  id="account-credential"
-                  className="h-24 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
-                  placeholder="Paste the credential JSON (or API key) — same blob the CLI reads on stdin."
-                  value={credential}
-                  onChange={(e) => setCredential(e.target.value)}
-                />
-              </div>
-
-              {isAPIKeyProvider && (
-                <div>
-                  <button
-                    type="button"
-                    aria-expanded={showBaseUrl}
-                    data-testid="accounts-base-url-toggle"
-                    onClick={() => setShowBaseUrl((v) => !v)}
-                    className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
-                  >
-                    {showBaseUrl ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-                    Base URL (optional)
-                  </button>
-                  {showBaseUrl && (
-                    <div className="mt-2 grid gap-1 pl-4.5">
-                      <Input
-                        id="account-base-url"
-                        aria-label="Base URL (optional)"
-                        placeholder="e.g. http://localhost:8080"
-                        value={baseUrl}
-                        onChange={(e) => setBaseUrl(e.target.value)}
-                      />
-                      <p className="text-ui-sm text-muted-foreground">
-                        Override the upstream endpoint for this account — advanced, for
-                        self-hosted or local proxy endpoints only.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="flex justify-end">
-                <Button onClick={add} disabled={pending} data-testid="accounts-add-submit">
-                  {pending ? "Adding…" : "Add account"}
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
+        <ConnectAccountPanel
+          client={client}
+          providers={providers}
+          onConnected={() => void refresh()}
+        />
       </DialogContent>
     </Dialog>
   );

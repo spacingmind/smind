@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react";
 
+import { ConnectAccountPanel, useProviderTest } from "@/components/accounts-dialog";
 import {
   registerSettingsSection,
   type SettingsSectionContext,
@@ -120,11 +121,23 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [error, setError] = useState<string | null>(null);
-  // provider.test results/pending per provider id -- the same map shape
-  // accounts-dialog.tsx uses: undefined = never tested (neutral dot).
-  const [testResults, setTestResults] = useState<Record<string, ProviderTestResult>>({});
-  const [testing, setTesting] = useState<Record<string, boolean>>({});
+  // The connect/login + manual-paste flows live in the shared
+  // ConnectAccountPanel (accounts-dialog.tsx) -- the same flows the old
+  // dialog hosted -- shown behind the header's "Connect account"
+  // disclosure so the grouped list stays the surface's primary content.
+  const [connecting, setConnecting] = useState(false);
   const [action, setAction] = useState<RowAction | null>(null);
+  const { testResults, testing, testProvider } = useProviderTest(client);
+
+  async function refreshAccounts() {
+    if (!client) return;
+    try {
+      const list = (await client.call<Account[]>("account.list")) ?? [];
+      setAccounts(list);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
 
   useEffect(() => {
     if (!client) return;
@@ -184,22 +197,6 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
     };
   }, [events]);
 
-  async function testProvider(providerId: string) {
-    if (!client) return;
-    setTesting((t) => ({ ...t, [providerId]: true }));
-    try {
-      const result = await client.call<ProviderTestResult>("provider.test", { provider: providerId });
-      setTestResults((r) => ({ ...r, [providerId]: result }));
-    } catch (err) {
-      setTestResults((r) => ({
-        ...r,
-        [providerId]: { ok: false, detail: err instanceof Error ? err.message : String(err) },
-      }));
-    } finally {
-      setTesting((t) => ({ ...t, [providerId]: false }));
-    }
-  }
-
   /** Applies a mutation's result immediately (the event may lag or events be null) -- upsert-by-id, mirroring profiles-section's handler. */
   function upsertAccount(a: Account) {
     setAccounts((prev) => {
@@ -220,7 +217,26 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-providers">
-      <h3 className="text-ui-base font-medium text-foreground">Providers</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-ui-base font-medium text-foreground">Providers</h3>
+        <Button
+          variant="outline"
+          size="sm"
+          aria-expanded={connecting}
+          data-testid="providers-connect-toggle"
+          onClick={() => setConnecting((v) => !v)}
+        >
+          {connecting ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+          Connect account
+        </Button>
+      </div>
+      {connecting && (
+        <ConnectAccountPanel
+          client={client}
+          providers={providers}
+          onConnected={() => void refreshAccounts()}
+        />
+      )}
       {error && (
         <p role="alert" className="text-ui-base text-destructive">
           {error}
@@ -266,6 +282,14 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                     <StatusDot status="neutral" className="size-2" />
                     Not connected
                   </span>
+                  <Button
+                    variant="ghost"
+                    size="xs"
+                    data-testid={`provider-connect-${info.id}`}
+                    onClick={() => setConnecting(true)}
+                  >
+                    Connect
+                  </Button>
                 </div>
               ) : (
                 <ul className="flex flex-col gap-1">

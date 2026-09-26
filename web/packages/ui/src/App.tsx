@@ -719,8 +719,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
-      onOpenSettings={() => {
-        setSettingsInitialSectionId(null);
+      onOpenSettings={(sectionId) => {
+        setSettingsInitialSectionId(sectionId ?? null);
         setActiveView("settings");
       }}
     />
