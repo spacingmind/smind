@@ -1330,7 +1330,15 @@ function SpaceLikeItem({
       </SidebarMenuSubButton>
       {children}
       {open && (
-        <SidebarMenuSub>
+        // Flush, not another full mx-3.5/border-l/px-2.5 indent step: this
+        // list is already the *second* SidebarMenuSub nesting level (a
+        // space/ungrouped bucket inside a workspace's own SidebarMenuSub),
+        // and compounding the default indent+guide-line at both levels
+        // pushed task rows far deeper than their own group (space) header
+        // -- a known P2 visual bug (zcode-visual-parity plan). The space
+        // row's own icon+indent already conveys the hierarchy; task rows
+        // here align close under it instead of adding a second full step.
+        <SidebarMenuSub className="mx-0 border-l-0 px-1">
           <TaskRows
             tasks={tasks}
             selectedTaskId={selectedTaskId}
