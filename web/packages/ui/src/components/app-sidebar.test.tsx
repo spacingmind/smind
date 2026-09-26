@@ -1067,6 +1067,49 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     expect(screen.getByTestId("sidebar-footer-agents")).toHaveTextContent("1");
   });
 
+  it("Providers row shows a health dot + healthy count from provider.test, tested once (not per render)", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+    await flush();
+
+    // No dot/count until provider.list answers.
+    expect(screen.queryByTestId("sidebar-footer-providers-health-dot")).not.toBeInTheDocument();
+
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { id: "claude-native", label: "Claude Code" },
+        { id: "glm", label: "GLM", kind: "cli" },
+      ],
+    });
+    await flush();
+
+    expect(client.nth("provider.test", 0).params).toEqual({ provider: "claude-native" });
+    expect(client.nth("provider.test", 1).params).toEqual({ provider: "glm" });
+
+    await act(async () => {
+      client.nth("provider.test", 0).resolve({ ok: true, detail: "ok" });
+      client.nth("provider.test", 1).resolve({ ok: false, detail: "no binary" });
+    });
+
+    const dot = screen.getByTestId("sidebar-footer-providers-health-dot");
+    expect(dot).toHaveAttribute("data-status", "warning");
+    expect(screen.getByTestId("sidebar-footer-providers")).toHaveTextContent("1 healthy");
+
+    // Re-rendering the same client doesn't re-test.
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await flush();
+    expect(client.calls.filter((c) => c.method === "provider.test")).toHaveLength(2);
+  });
+
   it("registers Settings/Agents palette entries and Use agent: <name> per profile", async () => {
     const client = new FakeWsClient();
     const useAgentListener = vi.fn();

@@ -25,8 +25,18 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { accountHealthTestKey } from "@/lib/provider-health";
 import type { WsClient } from "@/lib/ws-client";
-import type { AgentProfile, Space, Task, TaskStat, TaskStatusEventPayload, Workspace } from "@/lib/types";
+import type {
+  AgentProfile,
+  ProviderListResult,
+  ProviderTestResult,
+  Space,
+  Task,
+  TaskStat,
+  TaskStatusEventPayload,
+  Workspace,
+} from "@/lib/types";
 import {
   applyLifecycleEvent,
   buildWorkspaceTree,
@@ -436,6 +446,39 @@ export function AppSidebar({
     };
   }, [client]);
 
+  // The footer's Providers row health dot + "N healthy" count (run-config
+  // IA plan) -- reuses the provider.test-based pattern profiles-section.tsx
+  // built for its own per-agent health dot (accountHealthTestKey resolves
+  // each provider's id to whichever vocabulary provider.test expects).
+  // Fetched (and tested) once per client, not on every render or on a
+  // polling interval -- `providerHealth` is the cache this effect fills,
+  // and the deps array of just `[client]` is what keeps it from re-testing
+  // on unrelated re-renders.
+  const [providerHealth, setProviderHealth] = useState<{ healthy: number; total: number } | null>(null);
+  useEffect(() => {
+    if (!client) return;
+    let cancelled = false;
+    client
+      .call<ProviderListResult>("provider.list")
+      .then(async (result) => {
+        if (cancelled) return;
+        const providers = result.providers;
+        const oks = await Promise.all(
+          providers.map((p) =>
+            client
+              .call<ProviderTestResult>("provider.test", { provider: accountHealthTestKey(p.id, providers) })
+              .then((r) => r.ok)
+              .catch(() => false),
+          ),
+        );
+        if (!cancelled) setProviderHealth({ healthy: oks.filter(Boolean).length, total: providers.length });
+      })
+      .catch((err) => console.error("provider.list failed, hiding the footer's provider health count", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [client]);
+
   /**
    * Moving a task has no confirmation dialog (unlike archive/delete -- it's
    * reversible, just another move away), so it's a direct RPC call from the
@@ -789,7 +832,24 @@ export function AppSidebar({
               data-testid="sidebar-footer-providers"
               onClick={() => setAccountsOpen(true)}
             >
-              <span className="text-ui-sm text-foreground-subtle">Providers</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="text-ui-sm text-foreground-subtle">Providers</span>
+                {providerHealth && providerHealth.total > 0 && (
+                  <span className="ml-auto flex items-center gap-1.5 text-ui-sm tabular-nums text-foreground-subtlest">
+                    <StatusDot
+                      status={
+                        providerHealth.healthy === providerHealth.total
+                          ? "success"
+                          : providerHealth.healthy > 0
+                            ? "warning"
+                            : "danger"
+                      }
+                      data-testid="sidebar-footer-providers-health-dot"
+                    />
+                    {providerHealth.healthy} healthy
+                  </span>
+                )}
+              </span>
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
