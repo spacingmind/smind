@@ -348,7 +348,7 @@ export function Composer({
        */}
       <div
         data-testid="composer-card"
-        className="flex flex-col rounded-xl border border-transparent bg-surface focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50"
+        className="flex flex-col rounded-xl border border-transparent bg-surface focus-within:border-input-border-focused"
       >
         <PromptTextarea
           ref={textareaRef}
