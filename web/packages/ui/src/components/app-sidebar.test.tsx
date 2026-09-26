@@ -1027,13 +1027,12 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     UpdatedAt: "2024-01-01T00:00:00Z",
   };
 
-  it("Providers row opens the accounts dialog; Agents row opens settings", async () => {
-    const onOpenSettings = vi.fn();
+  it("Providers row opens the accounts dialog; Agents row deep-links to Settings -> Agents", async () => {
     const client = new FakeWsClient();
     render(
       <PaletteProvider>
         <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
+          <AppSidebar client={client as never} selectedTaskId={null} />
         </SidebarProvider>
       </PaletteProvider>,
     );
@@ -1043,8 +1042,15 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     fireEvent.click(screen.getByTestId("sidebar-footer-providers"));
     expect(await screen.findByRole("dialog", { name: "Accounts" })).toBeInTheDocument();
 
+    // Deep-links via the same window-event channel Settings' Providers
+    // stub already uses for its own cross-tree dialog open (run-config IA:
+    // "each deep-links straight into the matching Settings section").
+    const onOpenSettings = vi.fn();
+    window.addEventListener("smind:open-settings", onOpenSettings);
     fireEvent.click(screen.getByTestId("sidebar-footer-agents"));
+    window.removeEventListener("smind:open-settings", onOpenSettings);
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect((onOpenSettings.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
   });
 
   it("Agents row shows the profile count", async () => {
@@ -1062,10 +1068,11 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
   });
 
   it("registers Settings/Agents palette entries and Use agent: <name> per profile", async () => {
-    const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
-    const listener = vi.fn();
-    window.addEventListener("smind:use-agent", listener);
+    const useAgentListener = vi.fn();
+    const openSettingsListener = vi.fn();
+    window.addEventListener("smind:use-agent", useAgentListener);
+    window.addEventListener("smind:open-settings", openSettingsListener);
     // useRegisteredCommands is a hook; a probe component inside the same
     // PaletteProvider captures the registry where the test can read it.
     let commands: ReturnType<typeof useRegisteredCommands> = [];
@@ -1077,7 +1084,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
       <PaletteProvider>
         <Probe />
         <SidebarProvider>
-          <AppSidebar client={client as never} selectedTaskId={null} onOpenSettings={onOpenSettings} />
+          <AppSidebar client={client as never} selectedTaskId={null} />
         </SidebarProvider>
       </PaletteProvider>,
     );
@@ -1090,15 +1097,23 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     expect(byTitle.has("New agent…")).toBe(true);
     expect(byTitle.has("Use agent: Quick Fixes")).toBe(true);
 
+    // Both deep-link straight to Settings -> Agents (run-config IA), not
+    // just the settings screen's own default landing section.
     byTitle.get("Settings: Agents")!.run();
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    expect(openSettingsListener).toHaveBeenCalledTimes(1);
+    expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+    byTitle.get("New agent…")!.run();
+    expect(openSettingsListener).toHaveBeenCalledTimes(2);
+    expect((openSettingsListener.mock.calls[1]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+
     byTitle.get("Settings: Providers")!.run();
     expect(await screen.findByRole("dialog", { name: "Accounts" })).toBeInTheDocument();
 
     byTitle.get("Use agent: Quick Fixes")!.run();
-    expect(listener).toHaveBeenCalledTimes(1);
-    expect((listener.mock.calls[0]![0] as CustomEvent).detail).toEqual(PROFILE);
-    window.removeEventListener("smind:use-agent", listener);
+    expect(useAgentListener).toHaveBeenCalledTimes(1);
+    expect((useAgentListener.mock.calls[0]![0] as CustomEvent).detail).toEqual(PROFILE);
+    window.removeEventListener("smind:use-agent", useAgentListener);
+    window.removeEventListener("smind:open-settings", openSettingsListener);
   });
 });
 

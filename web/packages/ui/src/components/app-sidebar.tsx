@@ -489,7 +489,7 @@ export function AppSidebar({
         title: "Settings: Agents",
         keywords: ["profiles", "agents"],
         action: "settings.open",
-        run: () => onOpenSettings?.(),
+        run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
       {
         id: "settings-providers",
@@ -503,7 +503,7 @@ export function AppSidebar({
         group: "Settings",
         title: "New agent…",
         keywords: ["create", "profile", "agent"],
-        run: () => onOpenSettings?.(),
+        run: () => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } })),
       },
     ];
     // "Use agent: <name>" seeds the active composer with that profile's
@@ -793,7 +793,10 @@ export function AppSidebar({
             </SidebarMenuButton>
           </SidebarMenuItem>
           <SidebarMenuItem>
-            <SidebarMenuButton data-testid="sidebar-footer-agents" onClick={onOpenSettings}>
+            <SidebarMenuButton
+              data-testid="sidebar-footer-agents"
+              onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
+            >
               <span className="flex min-w-0 items-center gap-2">
                 <span className="text-ui-sm text-foreground-subtle">Agents</span>
                 <span className="ml-auto text-ui-sm tabular-nums text-foreground-subtlest">
