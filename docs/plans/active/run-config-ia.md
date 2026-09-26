@@ -153,7 +153,7 @@ that already exists.
 
 - [x] Sidebar gear icon opens Settings, not Accounts (sliders icon and header Accounts button removed; Accounts entry moved to the sidebar footer).
 - [x] Sidebar footer "Agents" row and the "Settings: Agents"/"New agent…" palette commands now deep-link straight to Settings → Agents (`smind:open-settings`, see Decisions) — no longer just the settings screen's default landing section.
-- [ ] Sidebar footer "Providers" row's health dot + healthy-count (AC: "● 2 healthy") — **not done this pass**. It still opens the accounts dialog but shows no dot/count; this was deferred to "the RunConfigToolbar pass" by an earlier session and remained out of scope for the explicit remaining-work list this pass picked up from. `accountHealthTestKey`/the `provider.test` pattern this pass built for the Agents inline edit's health dot is directly reusable here.
+- [x] Sidebar footer "Providers" row's health dot + healthy-count (AC: "● 2 healthy") — done in the polish pass: `accountHealthTestKey` moved to a shared `lib/provider-health.ts`, app-sidebar.tsx fetches `provider.list` + one `provider.test` per provider once per client and renders "● N healthy" (dot color success/warning/danger by how many are healthy).
 - [x] Command palette: "Settings: Agents", "Settings: Providers", "Use agent: <name>" per profile (dispatched to the composer via a `smind:use-agent` window event), and "New agent…".
 - [ ] Desktop-only "Settings: Daemon server"/"Settings: Daemon" palette entries — **not done**, deferred until the Connection regroup lands (out of scope for this pass; no desktop-only work was touched).
 
@@ -164,21 +164,30 @@ that already exists.
 - [x] Command palette additions (from an earlier session in this plan, confirmed still passing): "Settings: Agents", "Settings: Providers", "Use agent: <name>", "New agent…".
 - [x] Approval-policy labels unified (confirmed unchanged by this pass; still one `lib/approval-policies.ts` vocabulary everywhere).
 
+### Polish pass (user screenshot review)
+
+- [x] Settings → Agents' "New agent" form redesigned: a header "+ New agent" button (top-right, `app-sidebar.tsx`'s "+ New workspace" pattern) opens the same inline `<ProfileForm>` card Edit uses, at the top of the list; Provider/Approval/Thinking are one 3-column equal grid (a non-Claude provider gets an empty grid cell, not a dead Thinking control); the empty state shows a sentence plus its own copy of the button.
+- [x] Agent trigger reads "No agent" (muted `text-foreground-muted`), not "Agents", matching the header pill and the agent menu's own wording for that state.
+- [x] Composer focus ring: `focus-within:border-input-border-focused` (no ring/glow), matching every Select/Input's own focus treatment and ZCode's "calm, not glowing" input style — the old `border-ring` + `ring-3 ring-ring/50` read as a bright double border in dark mode (`--ring` is near-white there).
+- [x] Sidebar footer "Providers" health dot + "N healthy" (see Progress above).
+
 ## Validation
 
-Confirmed via `task test` (Go `go test ./...` all green, web `bun run --filter '@smind/ui' test` 1292/1292 passing including every test listed above), `bun run --filter '@smind/ui' typecheck` (clean), and `task lint` (go vet + gofmt clean).
+Confirmed via `task test` (Go `go test ./...` all green, web `bun run --filter '@smind/ui' test` 1295/1295 passing including every test listed above), `bun run --filter '@smind/ui' typecheck` (clean), and `task lint` (go vet + gofmt clean).
 
 Screenshots (desktop 1440×900, light + dark, against a temp daemon at a temp `SMIND_HOME` on :4706 seeded with one workspace/space/2 tasks/2 agent profiles/1 demo account) saved to `Downloads\smind-run-config-ia\` and reviewed by hand against ZCode's density:
-- `01-home` — sidebar footer's Providers/Agents shortcuts.
-- `02-task-toolbar` — closed toolbar + header pill ("No agent · Claude Code · Manual approval · Standard").
+- `01-home` — sidebar footer's Providers (health dot + count)/Agents shortcuts.
+- `02-task-toolbar` — closed toolbar (Agent trigger reads "No agent", muted) + header pill.
 - `03-agent-menu-open` — agent menu (No agent / per-profile metadata rows / Manage agents…⌘,).
 - `04-toolbar-custom` — Custom · from <agent> + ↺, header pill reflecting the hand-edit.
 - `05-header-pill` — pill after a provider change (thinking segment correctly omitted for GLM).
-- `06-settings-nav-agents` — regrouped nav + Agents card list with the ★ star.
+- `06-settings-nav-agents` — regrouped nav + Agents card list with the ★ star + header "+ New agent" button.
 - `07-palette` — command palette open.
 - `08-settings-general` — General's pointer copy replacing the removed defaults control.
-- `09-agents-inline-edit` — inline expand-in-row edit, provider health dot both red (no credential) and green (after adding one).
+- `09-agents-inline-edit` — inline expand-in-row edit, 3-column grid, provider health dot both red (no credential) and green (after adding one).
+- `10-composer-focus` — focused composer shell, subtle border in both themes, no glow.
+- `11-agents-new-card` — "+ New agent" card open at the top of the list, disabled "Add agent" until a name is entered.
 
-A `web-design-guidelines` review pass over the changed files found and fixed: three icon-only buttons missing `aria-hidden` on their glyph, an unbounded-width agent-menu item (added `max-w-sm` + truncate, re-verified by screenshot it doesn't clip the common case), a focused-but-`outline-none` toolbar row (swapped for `focus-visible:ring`), and two "--" instances in rendered copy (should be "—" per docs/design.md's own house style).
+A `web-design-guidelines` review pass over the changed files (first pass) found and fixed: three icon-only buttons missing `aria-hidden` on their glyph, an unbounded-width agent-menu item (`max-w-sm` + truncate), a focused-but-`outline-none` toolbar row (swapped for `focus-visible:ring`), and two "--" instances in rendered copy (should be "—").
 
-**Not satisfied — see Progress's two unchecked items**: the sidebar footer's Providers health dot/count, and the desktop-only Daemon-server/Daemon palette entries. Both are explicitly out of scope for what this session's remaining-work list asked for (footer health/count was previously deferred by an earlier session to "the RunConfigToolbar pass" but wasn't actually in this session's handoff instructions; the daemon palette entries are gated on the not-yet-done Connection nav regroup). Leaving this plan in `active/` rather than moving it to `completed/` until those are picked up — every other acceptance criterion in this file is confirmed working per the test run and screenshots above.
+**Still not satisfied**: the desktop-only "Settings: Daemon server"/"Settings: Daemon" palette entries (Progress's one remaining unchecked item) — gated on the not-yet-done Connection nav regroup, out of scope for both this session and the polish pass. Every other acceptance criterion in this file, including the sidebar footer's Providers health dot the polish pass added, is confirmed working. Plan stays in `active/` — both for that one remaining item and because this branch still needs to merge `develop` (PR #202's real Providers section) per the user's explicit next step.
