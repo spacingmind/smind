@@ -54,7 +54,7 @@ export function ToolReadPreview({ content, startLine = 1, testId }: { content: s
     <div
       ref={containerRef}
       data-testid={testId}
-      className="mt-0.5 max-h-64 overflow-auto rounded border text-ui-sm font-medium [&_.cm-editor]:h-full"
+      className="mt-0.5 max-h-64 overflow-auto rounded-lg border text-ui-sm font-medium [&_.cm-editor]:h-full"
     />
   );
 }

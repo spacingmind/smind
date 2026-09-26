@@ -25,7 +25,7 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
 
   return (
     <li data-testid="timeline-tool-group" data-item-kind="tool-group" data-count={items.length}>
-      <div className="rounded-lg border bg-card">
+      <div className="rounded-xl border bg-card">
         <button
           type="button"
           aria-expanded={open}
