@@ -57,8 +57,21 @@ export function PermissionCard({
       role="group"
       aria-label={pending.summary}
       data-testid="permission-card"
-      className="rounded-lg bg-card shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex flex-col gap-2 rounded-2xl bg-card p-2 shadow-lg outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     >
+      {/*
+       * A blocking request is one of ZCode's "waiting badges"
+       * (TaskInteractionBadge.tsx) -- the one green confirmation
+       * treatment every waiting state shares, never a recolored
+       * `--color-success` (zcode-visual-parity P3, refs/zcode/DESIGN.md's
+       * Blocking interaction colors).
+       */}
+      <span
+        data-testid="permission-waiting-badge"
+        className="inline-flex w-fit items-center rounded-full bg-interaction-confirmation-surface px-2 py-0.5 text-ui-xs font-medium text-interaction-confirmation-foreground"
+      >
+        Waiting for your response
+      </span>
       {pending.plan ? (
         <PlanReviewCard runId={runId} pending={{ ...pending, plan: pending.plan }} onRespond={onRespond} onChat={onChat} />
       ) : pending.questions && pending.questions.length > 0 ? (

@@ -345,10 +345,16 @@ export function Composer({
        * the border/focus ring; the textarea and toolbar controls inside
        * are chrome-less, which is why the selects are aria-labelled
        * rather than sitting under visible <label> text anymore.
+       *
+       * `rounded-2xl`/`bg-input`/`border-input-border` (zcode-visual-parity
+       * P3): the main chat input shell is one of DESIGN.md's three
+       * approved `rounded-2xl` exceptions, and a visible resting border
+       * (not just on focus) is ZCode's own "calm and integrated, not
+       * glowing by default" input philosophy.
        */}
       <div
         data-testid="composer-card"
-        className="flex flex-col rounded-xl border border-transparent bg-surface focus-within:border-input-border-focused"
+        className="flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
       >
         <PromptTextarea
           ref={textareaRef}
