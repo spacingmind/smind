@@ -39,7 +39,6 @@ function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
 const usePanelRef = ResizablePrimitive.usePanelRef
 
 function ResizableHandle({
-  withHandle,
   className,
   onPointerEnter,
   onPointerLeave,
@@ -47,9 +46,7 @@ function ResizableHandle({
   onPointerUp,
   onPointerCancel,
   ...props
-}: ResizablePrimitive.SeparatorProps & {
-  withHandle?: boolean
-}) {
+}: ResizablePrimitive.SeparatorProps) {
   const [highlighted, setHighlighted] = useState(false)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -95,20 +92,19 @@ function ResizableHandle({
         // this separator, and react-resizable-panels' own occlusion check
         // (correctly) refuses to treat that as a resize gesture, leaving a
         // dead zone along part of the drag handle.
-        "relative z-20 flex w-px items-center justify-center bg-border ring-offset-background after:absolute after:inset-y-0 after:left-1/2 after:w-1 after:-translate-x-1/2 after:bg-transparent focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden data-[highlighted]:after:bg-hover aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:h-1 aria-[orientation=horizontal]:after:w-full aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2 [&[aria-orientation=horizontal]>div]:rotate-90",
+        //
+        // Matches ZCode's WorkspaceShellLayout resize handle (zcode-visual-
+        // parity plan P2): the separator itself is a transparent 4px hit
+        // area (`w-1`); the visible thing is a 2px `::after` indicator,
+        // rounded at both ends, that only appears on hover (after the
+        // delay above), focus, or an active drag -- never a permanent
+        // line, so idle panel frames read as plain adjoining panels rather
+        // than gridlines.
+        "relative z-20 flex w-1 items-center justify-center bg-transparent ring-offset-background after:absolute after:inset-y-1 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-transparent after:transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden focus-visible:after:bg-foreground-subtlest/50 data-[highlighted]:after:bg-foreground-subtlest/50 aria-[orientation=horizontal]:h-1 aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:inset-x-1 aria-[orientation=horizontal]:after:inset-y-auto aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:top-1/2 aria-[orientation=horizontal]:after:h-0.5 aria-[orientation=horizontal]:after:w-auto aria-[orientation=horizontal]:after:translate-x-0 aria-[orientation=horizontal]:after:-translate-y-1/2",
         className
       )}
       {...props}
-    >
-      {withHandle && (
-        <div
-          className={cn(
-            "z-10 flex h-6 w-1 shrink-0 rounded-lg bg-border transition-colors",
-            highlighted && "bg-hover"
-          )}
-        />
-      )}
-    </ResizablePrimitive.Separator>
+    />
   )
 }
 
