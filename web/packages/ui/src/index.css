@@ -638,3 +638,21 @@ html {
   background-color: var(--color-find-highlight-active);
   color: var(--color-background);
 }
+
+/*
+ * xterm.js's own viewport picks up the browser's native scrollbar,
+ * showing a second, independent scrollbar down the terminal pane's
+ * right edge next to the app's own chrome (zcode-visual-parity plan,
+ * P4, porting `.terminal-xterm-shell .xterm-viewport` from
+ * refs/zcode/packages/ui/src/styles.css). Scrolling still works --
+ * this only hides the redundant native indicator; xterm keeps handling
+ * scroll itself.
+ */
+.terminal-xterm-shell .xterm-viewport {
+  scrollbar-width: none;
+}
+.terminal-xterm-shell .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}

@@ -27,22 +27,54 @@ function resolveCssColor(varName: string): string {
 }
 
 /**
- * The terminal's chrome (background/foreground/cursor/selection) pulled
- * from the app's own tokens, so xterm no longer defaults to a fixed
- * light-mode palette regardless of the app's theme (audit-smind-current.md
- * §6's "no terminal ANSI palette tied to theme" finding -- chrome only;
- * ANSI colors 0-15 are left at xterm's own defaults for this item, a
- * fuller ANSI palette being a design decision of its own, deferred to the
- * plan's Item 20 terminal v2).
+ * xterm field -> the `--color-terminal-*` custom property it reads
+ * (zcode-visual-parity plan, P4 -- ZCode's own
+ * `terminal/terminalTheme.ts` token map, ported onto this file's
+ * existing computed-style probe rather than xterm's own `css.toColor`,
+ * which doesn't understand `color-mix()`/`var()`). The 16-color ANSI
+ * set was ported into index.css in P1 but left unused until now
+ * (audit-smind-current.md §6's "no terminal ANSI palette tied to
+ * theme" finding).
+ */
+const TERMINAL_THEME_TOKENS = {
+  background: "--color-terminal-bg",
+  foreground: "--color-terminal-fg",
+  cursor: "--color-terminal-cursor",
+  cursorAccent: "--color-terminal-cursor-accent",
+  selectionBackground: "--color-terminal-selection",
+  selectionInactiveBackground: "--color-terminal-selection-inactive",
+  black: "--color-terminal-black",
+  red: "--color-terminal-red",
+  green: "--color-terminal-green",
+  yellow: "--color-terminal-yellow",
+  blue: "--color-terminal-blue",
+  magenta: "--color-terminal-magenta",
+  cyan: "--color-terminal-cyan",
+  white: "--color-terminal-white",
+  brightBlack: "--color-terminal-bright-black",
+  brightRed: "--color-terminal-bright-red",
+  brightGreen: "--color-terminal-bright-green",
+  brightYellow: "--color-terminal-bright-yellow",
+  brightBlue: "--color-terminal-bright-blue",
+  brightMagenta: "--color-terminal-bright-magenta",
+  brightCyan: "--color-terminal-bright-cyan",
+  brightWhite: "--color-terminal-bright-white",
+} satisfies Partial<Record<keyof ITheme, string>>;
+
+/**
+ * The terminal's full chrome + 16-color ANSI palette, pulled from the
+ * app's own `--color-terminal-*` tokens so xterm no longer defaults to
+ * a fixed palette regardless of the app's theme.
  */
 export function resolveTerminalTheme(): ITheme {
-  return {
-    background: resolveCssColor("--background"),
-    foreground: resolveCssColor("--foreground"),
-    cursor: resolveCssColor("--foreground"),
-    cursorAccent: resolveCssColor("--background"),
-    selectionBackground: resolveCssColor("--accent"),
-  };
+  const theme: ITheme = {};
+  for (const [field, varName] of Object.entries(TERMINAL_THEME_TOKENS) as [
+    keyof typeof TERMINAL_THEME_TOKENS,
+    string,
+  ][]) {
+    theme[field] = resolveCssColor(varName);
+  }
+  return theme;
 }
 
 /**
