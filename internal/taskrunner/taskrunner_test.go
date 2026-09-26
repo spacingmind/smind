@@ -305,6 +305,21 @@ func runFakeClaudeCLI() {
 		os.Exit(1)
 	}
 
+	// Block until the real client closes its side (transport.close's
+	// stdin.Close() is always its first shutdown step, ahead of any
+	// SIGTERM/SIGKILL escalation) instead of exiting right after the last
+	// write: claude-agent-sdk-go reaps this process (cmd.Wait, which closes
+	// the stdout pipe once the process has exited) and drains its stdout
+	// scanner in two independent, concurrently-started goroutines, so a CLI
+	// that exits immediately races them -- Wait can win and have the pipe
+	// closed before the scanner reads the already-written "result" line,
+	// discarding it even though this process exited cleanly (exit 0).
+	// Waiting for stdin EOF here guarantees the client already read every
+	// line (Client.Close, which triggers the stdin close, only runs once
+	// RunPrompt's Prompt call has returned) before this process -- and
+	// therefore Wait -- can complete.
+	for stdin.Scan() {
+	}
 	os.Exit(0)
 }
 
