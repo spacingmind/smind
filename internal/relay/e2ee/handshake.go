@@ -289,19 +289,21 @@ func (c *Channel) fail(err error) error {
 
 // closeOnCancel closes the connection when ctx is done, returning a stop
 // function that tears the watcher down.
+//
+// This uses context.AfterFunc rather than a home-rolled
+// select-on-ctx.Done()-or-done-channel, because that pattern races: when the
+// caller cancels ctx right after Handshake returns (the common
+// ctx, cancel := ...; defer cancel() idiom our own callers use), a plain
+// select has no ordering guarantee between the two now-ready cases and can
+// still fire Close() on an already-established channel. AfterFunc's stop
+// deregisters under ctx's own lock, so a stop() that happens-before cancel()
+// is guaranteed to suppress the callback.
 func (c *Channel) closeOnCancel(ctx context.Context) func() {
 	if ctx == nil || ctx.Done() == nil {
 		return func() {}
 	}
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = c.Close()
-		case <-done:
-		}
-	}()
-	return func() { close(done) }
+	stop := context.AfterFunc(ctx, func() { _ = c.Close() })
+	return func() { stop() }
 }
 
 func (c *Channel) writeHello() error {
