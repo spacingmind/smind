@@ -35,7 +35,7 @@ default wrong:
   `account.list`) must never include the credential value — same
   constraint the existing `account.create`/`.list` already honor.
 - **What happens to an account's in-flight run(s) on remove.** Proposed
-  default: removing an account does not stop or affect any run already in
+  default: removing an account does not stop or fail any run already in
   progress on it (routing already picked a session); it only stops future
   routing from selecting it. State this explicitly rather than leaving it
   implicit.
@@ -61,10 +61,10 @@ reply, then flip to Accepted.
 
 ## Acceptance Criteria (Step 1+, after ADR-0015 is Accepted)
 
-- **Daemon:** implement `account.update`/`account.remove` (+ events) in
-  `internal/accounts` and `internal/wsapi` exactly as decided in
-  ADR-0015. Unit tests for both, including the credential-never-returned
-  and in-flight-run-unaffected behaviors.
+- **Daemon:** implement `account.rename`/`account.updateCredential`/
+  `account.remove` (+ events) in `internal/accounts` and `internal/wsapi`
+  exactly as decided in ADR-0015. Unit tests for both, including the
+  credential-never-returned and in-flight-run-unaffected behaviors.
 - **CLI:** `smind account rm <id>` (and `edit` only if ADR-0015 decided to
   include it).
 - **Settings → Providers section** (replaces the standalone Accounts
@@ -86,7 +86,9 @@ reply, then flip to Accepted.
   - Each row: health dot, label, credential-type badge, quota bar (where
     known), `[Test]` button (existing `account.test` RPC), `[⋯]` menu
     with Rename / Update credential / Remove (new RPCs from Step 0),
-    Remove asks for confirmation.
+    Remove asks for confirmation **with the ADR-0015 remove-warning copy
+    (running-task count / last-account callout) when runs are using the
+    account**.
   - A provider with zero accounts shows "○ not connected [Connect]"
     instead of an empty section.
   - Accounts whose provider has no runner mapped (e.g. xai, antigravity
@@ -101,34 +103,50 @@ reply, then flip to Accepted.
 
 1. `smind account rm <id>` removes the account; `smind account ls` no
    longer lists it; a run already attached to that account's session
-   keeps running to completion.
+   keeps running to completion (per ADR-0015: via failover to a sibling
+   account; if it was the provider's last account the next proxied
+   request 503s — test both branches).
 2. Settings → Providers: accounts render grouped under their runtime
    provider headers, in the same provider order the composer/toolbar
    uses elsewhere.
 3. Click `[⋯]` → Rename on an account → label updates in the list
    immediately (via the `account.updated` event, not a manual refetch).
-4. Click `[⋯]` → Remove → confirmation appears → confirm → account
+4. Click `[⋯]` → Remove → confirmation appears (**with the
+   running-task warning when applicable**) → confirm → account
    disappears from the list and from any "Use provider" pickers
    elsewhere in the app.
 5. A provider with no accounts shows the "not connected" row with a
    working `[Connect]` action (opens the existing add-account flow).
 6. An account whose provider has no runner (xai/antigravity) appears
    under "Other accounts", not mixed into the grouped provider sections.
-7. Credential value is never present in any `account.list`/`.update`
-   network response (check via browser devtools/network tab against the
-   temp daemon).
+7. Credential value is never present in any `account.list`/`.rename`/
+   `.updateCredential` network response (check via browser devtools/
+   network tab against the temp daemon).
 8. Light/dark screenshots of the full Providers section, the ⋯ menu open,
    and the remove-confirmation state.
 
 ## Decisions
 
-(none yet — record the user's sign-off on ADR-0015's open RPC/behavior
-questions here once given, then flip the ADR to Accepted before starting
-Step 1)
+User sign-off on ADR-0015's open questions, 2026-09-25 — ADR flipped to
+**Accepted** the same day:
+
+1. **RPC split:** two RPCs — `account.rename` + `account.updateCredential`
+   (not one PATCH-y `account.update`). Both emit `account.updated`.
+2. **In-flight semantics on remove:** hard delete with explicit cascade.
+   In-flight runs fall over to another account of the same provider, or
+   fail with 503 if it was the last one. Two conditions:
+   - (a) The Remove confirmation in the UI must warn when runs are
+     currently using the account ("N running tasks will switch to another
+     account" / "will fail: this is the last `<provider>` account").
+   - (b) The cascade must also clear routing session-affinity rows, so no
+     session stays pinned to the deleted account.
+3. **CLI rename:** no CLI rename/edit in v1; editing is only via web
+   Settings. (`smind account rm <id>` still ships, per the ADR.)
 
 ## Progress
 
-(none yet)
+- 2026-09-25: ADR-0015 written, open questions answered (above), ADR
+  Accepted. Step 1+ unblocked.
 
 ## Validation
 
