@@ -7,11 +7,13 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import {
   AlertCircle,
   Archive,
+  Bot,
   ChevronRight,
   Circle,
   FolderGit2,
   FolderTree,
   GitBranch,
+  KeyRound,
   Layers,
   ListChecks,
   Loader2,
@@ -815,6 +817,17 @@ export function AppSidebar({
               data-testid="sidebar-footer-providers"
               onClick={() => onOpenSettings?.("providers")}
             >
+              {/*
+               * An icon (rather than bare text) is what the icon-collapsed
+               * rail actually renders -- every other row in this sidebar
+               * leads with one (see WorkspaceItem's FolderGit2), the same
+               * way: no `hidden` on the label span, since that would strip
+               * it from the accessible tree (not just the icon-collapsed
+               * rail's clipped-to-32px visual). SidebarMenuButton's own
+               * `overflow-hidden` + fixed collapsed size already clips the
+               * label down to just the icon, the same as every other row.
+               */}
+              <KeyRound />
               <span className="flex min-w-0 items-center gap-2">
                 <span className="text-ui-sm text-foreground-subtle">Providers</span>
                 {providerHealth && providerHealth.total > 0 && (
@@ -840,6 +853,7 @@ export function AppSidebar({
               data-testid="sidebar-footer-agents"
               onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
             >
+              <Bot />
               <span className="flex min-w-0 items-center gap-2">
                 <span className="text-ui-sm text-foreground-subtle">Agents</span>
                 <span className="ml-auto text-ui-sm tabular-nums text-foreground-subtlest">
