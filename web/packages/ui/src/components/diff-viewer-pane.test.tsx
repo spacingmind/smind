@@ -407,14 +407,14 @@ describe("DiffViewerPane reveal-in-diff (Item 17)", () => {
 
     fireEvent.click(screen.getByTestId("diff-file-header-file.txt"));
     await flush();
-    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveTextContent("▸");
+    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveAttribute("aria-expanded", "false");
 
     act(() => {
       requestDiffReveal(TASK.ID, "file.txt");
     });
     await flush();
 
-    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveTextContent("▾");
+    expect(screen.getByTestId("diff-file-header-file.txt")).toHaveAttribute("aria-expanded", "true");
   });
 });
 

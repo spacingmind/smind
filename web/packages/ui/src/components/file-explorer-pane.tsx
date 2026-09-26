@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ComponentProps, CSSProperties, ReactNode } from "react";
 import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2, PanelRight } from "lucide-react";
 
 import { FileStatusMarker } from "@/components/file-status-marker";
@@ -152,7 +152,7 @@ function DirChildren({
     // Sentence case, no parens/period -- docs/design.md's copy convention
     // (ui-redesign-parity plan, Item 2), same rule applied to every other
     // pane's empty/loading/error strings.
-    return <TreeRow depth={depth} label="Empty" className="text-muted-foreground" />;
+    return <TreeRow depth={depth} label="Empty" className="text-foreground-subtle" />;
   }
 
   return (
@@ -191,8 +191,8 @@ function DirChildren({
               depth={depth}
               icon={
                 <>
-                  <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
-                  {expanded ? <FolderOpen className="size-3.5" /> : <Folder className="size-3.5" />}
+                  <ChevronRight aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} />
+                  {expanded ? <FolderOpen aria-hidden="true" className="size-3.5" /> : <Folder aria-hidden="true" className="size-3.5" />}
                 </>
               }
               label={entry.name}
@@ -282,6 +282,20 @@ function RowContextMenu({
   );
 }
 
+/**
+ * The dashed vertical guide line under each depth level (ported from
+ * ZCode's `workspace-file-tree/hierarchyGuides.ts`), so a deeply nested
+ * row's ancestry is readable at a glance instead of relying on
+ * indentation alone.
+ */
+const HIERARCHY_GUIDE_BACKGROUND =
+  "repeating-linear-gradient(to right, transparent 0 calc(0.375rem - 1px), var(--color-border) calc(0.375rem - 1px) 0.375rem, transparent 0.375rem 0.75rem)";
+
+function hierarchyGuideStyle(depth: number): CSSProperties | undefined {
+  if (depth <= 0) return undefined;
+  return { width: `calc(${depth} * 0.75rem)`, backgroundImage: HIERARCHY_GUIDE_BACKGROUND };
+}
+
 function TreeRow({
   depth,
   icon,
@@ -326,14 +340,17 @@ function TreeRow({
           : undefined
       }
       className={cn(
-        "flex w-full items-center gap-1.5 truncate px-2 py-1 text-left text-ui-base",
-        onClick && "cursor-pointer hover:bg-hover",
+        "relative flex h-7 w-full items-center gap-1.5 truncate rounded-lg pr-2 text-left text-ui-base",
+        onClick && "cursor-pointer hover:bg-surface-hover",
         active && "bg-selected font-medium",
         className,
       )}
-      style={{ paddingLeft: `${depth * 14 + 8}px` }}
+      style={{ paddingLeft: `calc(${depth} * 0.75rem + 0.5rem)` }}
       {...props}
     >
+      {depth > 0 && (
+        <span aria-hidden="true" className="pointer-events-none absolute -inset-y-px left-2" style={hierarchyGuideStyle(depth)} />
+      )}
       <span className="flex shrink-0 items-center gap-1.5">{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {status && <FileStatusMarker status={status} />}

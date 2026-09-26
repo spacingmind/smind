@@ -563,11 +563,12 @@
  * juggling at all -- the library's own selectors already read these var
  * names, so this is the whole integration.
  *
- * The +/- pairs read the diff family (`--diff-addition/--deletion`,
- * Item 5's third color family), not status-success/danger -- the diff
- * tier is more saturated by design (line-scannable), so a future
- * non-diff2html diff surface reuses the same named tokens and gets the
- * same look for free.
+ * The +/- pairs read the diff family (`--diff-added/--diff-removed`,
+ * ZCode's own diff token names -- P4 repoints this off the retired
+ * `--diff-addition/--deletion` aliases directly onto them), not
+ * status-success/danger -- the diff tier is more saturated by design
+ * (line-scannable), so a future non-diff2html diff surface reuses the
+ * same named tokens and gets the same look for free.
  */
 :root {
   --d2h-bg-color: var(--card);
@@ -579,20 +580,41 @@
   --d2h-empty-placeholder-bg-color: var(--surface);
   --d2h-empty-placeholder-border-color: var(--border);
   --d2h-selected-color: color-mix(in oklch, var(--warning) 15%, transparent);
-  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-addition) 15%, transparent);
-  --d2h-ins-border-color: color-mix(in oklch, var(--diff-addition) 40%, transparent);
-  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-addition) 30%, transparent);
-  --d2h-ins-label-color: var(--diff-addition);
-  --d2h-del-bg-color: color-mix(in oklch, var(--diff-deletion) 12%, transparent);
-  --d2h-del-border-color: color-mix(in oklch, var(--diff-deletion) 40%, transparent);
-  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-deletion) 30%, transparent);
-  --d2h-del-label-color: var(--diff-deletion);
+  --d2h-ins-bg-color: color-mix(in oklch, var(--diff-added) 15%, transparent);
+  --d2h-ins-border-color: color-mix(in oklch, var(--diff-added) 40%, transparent);
+  --d2h-ins-highlight-bg-color: color-mix(in oklch, var(--diff-added) 30%, transparent);
+  --d2h-ins-label-color: var(--diff-added);
+  --d2h-del-bg-color: color-mix(in oklch, var(--diff-removed) 12%, transparent);
+  --d2h-del-border-color: color-mix(in oklch, var(--diff-removed) 40%, transparent);
+  --d2h-del-highlight-bg-color: color-mix(in oklch, var(--diff-removed) 30%, transparent);
+  --d2h-del-label-color: var(--diff-removed);
   --d2h-change-del-color: color-mix(in oklch, var(--warning) 20%, transparent);
-  --d2h-change-ins-color: color-mix(in oklch, var(--diff-addition) 20%, transparent);
+  --d2h-change-ins-color: color-mix(in oklch, var(--diff-added) 20%, transparent);
   --d2h-info-bg-color: var(--surface);
   --d2h-info-border-color: var(--border);
   --d2h-change-label-color: var(--warning);
   --d2h-moved-label-color: var(--warning);
+}
+
+/*
+ * diff-render.tsx's other import, highlight.js's `github.css` theme, has
+ * no CSS-var API of its own (unlike diff2html above) -- it's a fixed
+ * light theme, and its `.hljs` base rule hardcodes a white background
+ * and near-black text on every line of code, painting a solid white bar
+ * across every diff line regardless of this app's theme (zcode-visual-
+ * parity plan, P4 screenshot pass -- glaring in dark mode). Only the
+ * base rule is neutralized here: `background: transparent` lets the
+ * diff2html row underneath show through (context lines fall back to the
+ * pane's own background; +/- lines keep their `--d2h-ins/del-bg-color`),
+ * and `color: inherit` lets un-highlighted characters follow the app's
+ * `--foreground`. Every `.hljs-*` token-specific rule (keywords,
+ * strings, ...) is untouched -- per-token dark-mode syntax colors are a
+ * separate concern this phase doesn't take on (docs/design.md: syntax
+ * highlighting is its own static token set, left alone).
+ */
+.hljs {
+  background: transparent !important;
+  color: inherit !important;
 }
 
 /*
@@ -636,4 +658,22 @@ html {
 ::highlight(smind-chat-find-active) {
   background-color: var(--color-find-highlight-active);
   color: var(--color-background);
+}
+
+/*
+ * xterm.js's own viewport picks up the browser's native scrollbar,
+ * showing a second, independent scrollbar down the terminal pane's
+ * right edge next to the app's own chrome (zcode-visual-parity plan,
+ * P4, porting `.terminal-xterm-shell .xterm-viewport` from
+ * refs/zcode/packages/ui/src/styles.css). Scrolling still works --
+ * this only hides the redundant native indicator; xterm keeps handling
+ * scroll itself.
+ */
+.terminal-xterm-shell .xterm-viewport {
+  scrollbar-width: none;
+}
+.terminal-xterm-shell .xterm-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }

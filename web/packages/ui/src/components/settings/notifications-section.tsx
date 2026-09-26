@@ -85,7 +85,7 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
           data-testid="settings-notifications-sound-toggle"
           onClick={() => setSoundEnabled(!soundEnabled)}
           className={cn(
-            "h-5 w-9 shrink-0 rounded-full border border-input transition-colors",
+            "h-5 w-9 shrink-0 rounded-full border border-input-border transition-colors",
             soundEnabled ? "bg-primary" : "bg-transparent",
           )}
         >

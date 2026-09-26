@@ -83,12 +83,12 @@ function ConnectionsSection() {
     <div className="flex flex-col gap-6" data-testid="settings-section-connections">
       <section className="flex flex-col gap-2">
         <h3 className="text-ui-base font-medium text-foreground">Daemon connections</h3>
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
           {connections.map((c) => (
             <li
               key={c.id}
               data-testid={`connection-row-${c.id}`}
-              className="flex items-center justify-between gap-2 rounded-md border px-2 py-1.5"
+              className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5 hover:bg-hover"
             >
               <div className="flex min-w-0 flex-col">
                 <span className="text-ui-base text-foreground">

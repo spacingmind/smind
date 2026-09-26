@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { ShortcutRows } from "@/components/shortcuts-dialog";
+import { Input } from "@/components/ui/input";
 
 /**
  * AC5 of `docs/plans/active/web-keyboard-tabs.md`: rebinding's permanent
@@ -16,14 +17,14 @@ export function ShortcutsSection() {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-shortcuts">
-      <input
+      <Input
         type="search"
         aria-label="Search shortcuts"
         placeholder="Search shortcuts…"
         data-testid="settings-shortcuts-search"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
-        className="h-8 w-full max-w-sm rounded-lg border border-input bg-transparent px-2 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="w-full max-w-sm"
       />
       <ShortcutRows query={query} />
     </div>

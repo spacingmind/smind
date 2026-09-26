@@ -230,9 +230,9 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
               </div>
             )}
             {(profiles.length > 0 || openCard === "new") && (
-              <ul className="flex flex-col gap-1">
+              <ul className="flex flex-col gap-1 rounded-xl border bg-card p-3">
                 {openCard === "new" && (
-                  <li data-testid="profile-new-form" className="rounded-md border px-2 py-1.5">
+                  <li data-testid="profile-new-form" className="rounded-lg px-2 py-1.5">
                     <ProfileForm
                       idPrefix="profile-form"
                       form={form}
@@ -251,7 +251,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
                   const isDefault = defaultAgentId === String(p.ID);
                   const editing = openCard === p.ID;
                   return (
-                    <li key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 rounded-md border px-2 py-1.5">
+                    <li key={p.ID} data-testid={`profile-row-${p.ID}`} className="flex flex-col gap-2 rounded-lg px-2 py-1.5 hover:bg-hover">
                       <div className="flex items-center justify-between gap-2">
                         <Button
                           type="button"
@@ -419,7 +419,7 @@ function ProfileForm({
       <textarea
         aria-label="Notes"
         data-testid={`${idPrefix}-notes`}
-        className="h-16 w-full resize-none rounded-lg border border-input bg-transparent px-2.5 py-1 text-ui-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+        className="h-16 w-full resize-none rounded-lg border border-input-border bg-input px-2.5 py-1 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
         placeholder="Notes (optional) — when to use this agent."
         value={form.notes}
         onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}

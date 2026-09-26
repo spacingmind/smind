@@ -282,7 +282,7 @@ export function FileEditorPane({
         actions={
           <>
             {kind && (
-              <div className="flex h-7 items-center rounded-lg border border-input p-0.5" data-testid="preview-toggle">
+              <div className="flex h-7 items-center rounded-lg border border-input-border p-0.5" data-testid="preview-toggle">
                 <button
                   type="button"
                   onClick={() => setMode("edit")}

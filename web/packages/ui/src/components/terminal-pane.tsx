@@ -639,7 +639,7 @@ export function TerminalPane({
         />
       )}
       {endedStatus === "interrupted" && (
-        <p className="px-3 py-1 text-ui-sm text-muted-foreground" data-testid="terminal-ended">
+        <p className="px-3 py-1 text-ui-sm text-foreground-subtle" data-testid="terminal-ended">
           session ended: daemon restarted
         </p>
       )}
@@ -654,7 +654,7 @@ export function TerminalPane({
         </p>
       )}
       <div className="relative min-h-0 flex-1">
-        <div ref={containerRef} data-testid="terminal-container" className="h-full" />
+        <div ref={containerRef} data-testid="terminal-container" className="terminal-xterm-shell h-full" />
         {findOpen && (
           <div className="absolute top-2 right-3 z-10">
             <FindBar
