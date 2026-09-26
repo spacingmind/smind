@@ -173,9 +173,51 @@ User sign-off on ADR-0015's open questions, 2026-09-25 — ADR flipped to
   and event payload), and the affinity-cascade guarantee.
 - 2026-09-26 (chunk 1, usage warning): decided client-side from existing
   RPCs -- see Decisions 4.
+- 2026-09-26 (chunk 3, review pass): fixed the "Other accounts" heading's
+  tofu-box ⓘ glyph (lucide `Info` in a `Tooltip`) and the Connect-account
+  button's stale chevron (`Plus`). Checked internal/server/proxy.go,
+  internal/routing, and internal/taskrunner/acp directly for grouping
+  honesty: the /v1 proxy only routes `anthropic`/`openai` accounts (its
+  two hardcoded provider constants); no task runner (GLM/Kimi/Claude
+  Code/Codex) reads an account credential at all. Added `providerConsumer`,
+  a small pure function (with unit tests) classifying an account-provider
+  string as `"proxy"` or `"none"`; proxy-consumed groups (Claude Code,
+  Codex) now show "Used by smind's /v1 proxy, not by a task runner", the
+  GLM row explains its key comes from its own CLI login (not from any
+  account added here), and "Other accounts" stays reserved for kinds with
+  no consumer at all (xai, antigravity, and a stray `glm`-provider
+  account, since GLM's own ProviderInfo never maps one to a credential
+  row). Re-verified against a fresh temp daemon (`/tmp/smind-prov` on
+  :4707, 5 seeded accounts) with light/dark 1440x900 screenshots of the
+  section, the ⋯ menu, inline Rename, Update credential, and the Remove
+  confirm dialog; a web-interface-guidelines pass over the changed
+  regions caught and fixed one more issue (the info tooltip's bare
+  `<button>` had no focus-visible ring -- swapped to the shared `Button`
+  component, matching sidebar.tsx's TooltipTrigger convention).
 
 ## Validation
 
-(fill in once every acceptance criterion above is confirmed working,
-citing the test run/screenshots that proved it, then move this file to
-docs/plans/completed/)
+All acceptance criteria confirmed working as of 2026-09-26:
+
+- Daemon RPCs/CLI/events (`account.rename`/`.updateCredential`/`.remove`,
+  `account.updated`/`.removed`, `smind account rm`) landed in chunk 1;
+  covered by `go test ./internal/accounts/... ./internal/wsapi/...`
+  (not-found, empty-label, credential-never-echoed, affinity-cascade).
+- Settings -> Providers section, ⋯ actions, connect flows: covered by
+  `web/packages/ui/src/components/settings/providers-section.test.tsx`
+  (21 tests, including `providerConsumer`'s dedicated unit tests) --
+  grouping, not-connected rows, the CLI row, Other-accounts bucketing,
+  remove warning (switch/fail-last-account branches), rename/update-
+  credential/remove round-trips, and the live account.updated/removed
+  event path.
+- Full suite green: `task test` (105 web test files / 1297 tests, all Go
+  packages) and `task lint` (go vet + gofmt), both run 2026-09-26 on this
+  branch's final commit.
+- Screenshots (light + dark, 1440x900, temp daemon with 5 seeded
+  accounts across anthropic/glm/xai/antigravity, one disconnected
+  provider (Kimi/Codex)) of the full section, the ⋯ menu open, inline
+  Rename, Update credential, and the Remove confirm dialog: saved to
+  `/mnt/c/Users/ADMIN/Downloads/smind-providers/`, self-reviewed against
+  ZCode/Paseo density, then checked against a fetched
+  web-interface-guidelines pass (one finding fixed, see Progress above).
+
