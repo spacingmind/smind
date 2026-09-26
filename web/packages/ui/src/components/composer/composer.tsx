@@ -3,60 +3,16 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import { GitCompare } from "lucide-react";
 
 import { resolveNextApprovalPolicy } from "@/components/composer/approval-policy-cycle";
-import { approvalPolicies, type ApprovalPolicyInfo } from "@/lib/approval-policies";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
+import { RunConfigToolbar, type RunConfigContextValue } from "@/components/composer/run-config-toolbar";
 import { Button } from "@/components/ui/button";
 import { type DiffStat } from "@/lib/diff-stat";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { AgentProfile, ApprovalPolicy, Provider, ProviderInfo, ProviderListResult, ThinkingLevel } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
-
-// The tier vocabulary itself now lives in lib/approval-policies.ts, shared
-// with the agent form, General's defaults and the mid-run control
-// (run-config IA: one label set, not four).
-type ApprovalPolicyOption = ApprovalPolicyInfo;
-
-function approvalPolicyOptions(provider: Provider): ApprovalPolicyOption[] {
-  return approvalPolicies(provider);
-}
-
-/**
- * Claude's own thinking-level tiers (internal/taskrunner.ThinkingLevel;
- * "" is the unset default, deliberately not offered as its own option --
- * choosing a tier is opt-in, and "Standard" already IS today's ordinary
- * behavior in effect, just via the adaptive Option instead of no Option at
- * all). Only ever shown when provider === "claude-native" (see the
- * composer's provider !== "claude-native" && null guard below) -- GLM/
- * Kimi's thinking-level control is a different, live-session-scoped
- * mechanism (see the chat view, not this composer), and Codex has none.
- */
-const THINKING_LEVELS: { id: ThinkingLevel; label: string; help: string }[] = [
-  { id: "off", label: "Off", help: "No extended thinking -- responds immediately." },
-  { id: "standard", label: "Standard", help: "The model adapts how much it thinks to the turn." },
-  { id: "extended", label: "Extended", help: "A large fixed thinking budget, for turns that need to reason at length before acting." },
-];
-
-// Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
-// the original dense sizing at `md:` and above -- see
-// COMPACT_TOUCH_BUTTON_CLASS's doc comment for why this is plain
-// responsive Tailwind rather than a threaded `isMobile` prop.
-//
-// Label-less, per web-ui-dogfood-polish Item 5: the selects sit inside the
-// input card's bottom toolbar, so their visible chrome is nothing -- the
-// card is the border, and cn()'s tailwind-merge strips SelectTrigger's
-// own border/background halves in favour of these.
-const SELECT_TRIGGER_CLASS =
-  "h-11 shrink-0 border-0 bg-transparent px-2 text-ui-base hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
 
 const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-ui-base md:h-7 md:px-2.5 md:text-ui-sm";
 
@@ -163,21 +119,15 @@ export function Composer({
   // pre-profiles defaults are exactly what an empty-profiles daemon still
   // gets (AC15's regression requirement).
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-  const [provider, setProvider] = useState<Provider>("claude-native");
-  const [approvalPolicy, setApprovalPolicy] = useState<ApprovalPolicy>("manual");
-  const approvalPolicies = approvalPolicyOptions(provider);
-  // Claude-only (see THINKING_LEVELS' doc comment) -- kept in state
-  // regardless of the current provider (switching away and back preserves
-  // the choice), but only ever sent on the wire when provider is actually
-  // claude-native, so a GLM/Codex run never carries a stray leftover value.
-  // "" (untouched) is never itself sent -- same omit-the-default-value
-  // convention approvalPolicy already uses (see submitPrompt's doc
-  // comment): a Claude run submitted without ever touching this selector
-  // sends the exact same run.start payload as before this selector
-  // existed. The Select's displayed value falls back to "standard" purely
-  // visually (see its `value` prop below) so the control never shows
-  // "nothing selected".
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel>("");
+  // The run config itself lives in RunConfigToolbar's shared context
+  // (run-config IA); this mirror is what the composer's own submit and
+  // Shift+Tab cycle read, updated by the toolbar's onChange.
+  const [runConfig, setRunConfig] = useState<RunConfigContextValue | null>(null);
+  const { provider, approvalPolicy, thinkingLevel } = runConfig?.state ?? {
+    provider: "claude-native" as Provider,
+    approvalPolicy: "manual" as ApprovalPolicy,
+    thinkingLevel: "" as ThinkingLevel,
+  };
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -220,44 +170,6 @@ export function Composer({
       cancelled = true;
     };
   }, [client]);
-
-  // Applies profileId's provider/approvalPolicy/thinkingLevel to this
-  // composer's own state, per ADR-0014's "client copies the fields" apply
-  // mechanism -- a plain client-side seed, no task.prompt wire change.
-  // Deliberately not stored as "the selected profile": the Select below
-  // always shows its placeholder (AC13 -- selecting a profile is a
-  // one-time seed, not a locked mode a later field edit needs to break out
-  // of), so picking the same or a different profile again always re-seeds
-  // cleanly with nothing to reconcile.
-  const applyProfile = useCallback(
-    (profileId: string) => {
-      const p = profiles.find((candidate) => String(candidate.ID) === profileId);
-      if (!p) return;
-      setProvider(p.Provider as Provider);
-      if (p.ApprovalPolicy) setApprovalPolicy(p.ApprovalPolicy as ApprovalPolicy);
-      if (p.ThinkingLevel) setThinkingLevel(p.ThinkingLevel as ThinkingLevel);
-    },
-    [profiles],
-  );
-
-  // The command palette's "Use agent: <name>" entry lands here (the
-  // sidebar owns the palette entry; the composer owns the state). The
-  // event carries the full AgentProfile the sidebar fetched -- profiles
-  // may differ between the two fetches, so it is matched by ID and
-  // re-looked-up in this composer's own list, falling back to the
-  // dispatched copy so a just-created profile still applies.
-  useEffect(() => {
-    const onUseAgent = (e: Event) => {
-      const dispatched = (e as CustomEvent<AgentProfile>).detail;
-      if (!dispatched) return;
-      const p = profiles.find((candidate) => candidate.ID === dispatched.ID) ?? dispatched;
-      setProvider(p.Provider as Provider);
-      if (p.ApprovalPolicy) setApprovalPolicy(p.ApprovalPolicy as ApprovalPolicy);
-      if (p.ThinkingLevel) setThinkingLevel(p.ThinkingLevel as ThinkingLevel);
-    };
-    window.addEventListener("smind:use-agent", onUseAgent);
-    return () => window.removeEventListener("smind:use-agent", onUseAgent);
-  }, [profiles]);
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
@@ -355,10 +267,10 @@ export function Composer({
     // Select re-rendering with the new value *is* the visible feedback --
     // no separate indicator to keep in sync.
     if (e.key === "Tab" && e.shiftKey && !inactive) {
-      const next = resolveNextApprovalPolicy(approvalPolicies, approvalPolicy);
+      const next = resolveNextApprovalPolicy(runConfig?.meta.approvalPolicies ?? [], approvalPolicy);
       if (next) {
         e.preventDefault();
-        setApprovalPolicy(next);
+        runConfig?.actions.setApprovalPolicy(next);
       }
     }
   }
@@ -428,107 +340,22 @@ export function Composer({
           className="rounded-none border-0 bg-transparent px-3 py-2.5 focus-visible:border-transparent focus-visible:ring-0"
         />
 
-        <div className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
-          {/*
-           * shadcn/Radix rather than a native <select>: the closed state
-           * was already styled to match, but the *open* list was OS chrome
-           * -- square, light-mode-only, ignoring bg-popover/text-popover-
-           * foreground like every other menu in the app. The accessible
-           * name survives the move into the toolbar via aria-label, since
-           * there is no visible <label> beside it anymore.
-           */}
-          {profiles.length > 0 && (
-            <Select value="" onValueChange={applyProfile} disabled={inactive}>
-              <SelectTrigger aria-label="Agents" data-testid="composer-agent-select" className={SELECT_TRIGGER_CLASS}>
-                <SelectValue placeholder="Agents" />
-              </SelectTrigger>
-              <SelectContent>
-                {profiles.map((p) => (
-                  <SelectItem key={p.ID} value={String(p.ID)} title={p.Notes || undefined}>
-                    {p.Name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          <Select
-            value={provider}
-            onValueChange={(value) => setProvider(value as Provider)}
-            disabled={inactive}
-          >
-            <SelectTrigger aria-label="Provider" className={SELECT_TRIGGER_CLASS}>
-              <SelectValue placeholder="Select provider" />
-            </SelectTrigger>
-            <SelectContent>
-              {providers.map((p) => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.label ?? p.id}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select
-            value={approvalPolicy}
-            onValueChange={(value) => setApprovalPolicy(value as ApprovalPolicy)}
-            disabled={inactive}
-          >
-            {/* The help text stays a plain `title` -- a hover tooltip on the
-                trigger, exactly where it was on the native select. Reflects
-                the *current* selection's own help (each option gets its own
-                too, in the open list below), since the three tiers no
-                longer share one description now that full-access differs
-                per provider. */}
-            <SelectTrigger
-              aria-label="Approval policy"
-              title={approvalPolicies.find((p) => p.id === approvalPolicy)?.help}
-              className={SELECT_TRIGGER_CLASS}
-            >
-              <SelectValue placeholder="Select policy" />
-            </SelectTrigger>
-            <SelectContent>
-              {approvalPolicies.map((p) => (
-                <SelectItem key={p.id} value={p.id} title={p.help}>
-                  {p.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {/*
-           * Claude-only, pre-run control (see THINKING_LEVELS' doc
-           * comment) -- omitted entirely, not just disabled, for every
-           * other provider: no dead control sitting in the toolbar for a
-           * provider that can't act on it. GLM/Kimi's own thinking-level
-           * control lives in the chat view instead, once a live session
-           * exists (see run-config-options in task-detail), since that
-           * option list is only ever known after ACP's NewSession
-           * responds.
-           */}
-          {provider === "claude-native" && (
-            <Select
-              value={thinkingLevel || "standard"}
-              onValueChange={(value) => setThinkingLevel(value as ThinkingLevel)}
-              disabled={inactive}
-            >
-              <SelectTrigger
-                aria-label="Thinking level"
-                title={THINKING_LEVELS.find((t) => t.id === (thinkingLevel || "standard"))?.help}
-                className={SELECT_TRIGGER_CLASS}
-              >
-                <SelectValue placeholder="Select thinking level" />
-              </SelectTrigger>
-              <SelectContent>
-                {THINKING_LEVELS.map((t) => (
-                  <SelectItem key={t.id} value={t.id} title={t.help}>
-                    {t.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
+        {/*
+         * The run-config toolbar (run-config IA): one compound component
+         * whose four parts share a single context, replacing the four
+         * independent Selects that each carried their own state here.
+         */}
+        <RunConfigToolbar
+          profiles={profiles}
+          providers={providers}
+          disabled={inactive}
+          onChange={setRunConfig}
+        >
+          <div className="flex items-center gap-1.5 border-t border-border/60 px-2 py-1.5">
+            <RunConfigToolbar.Agent />
+            <RunConfigToolbar.Provider />
+            <RunConfigToolbar.Approval />
+            <RunConfigToolbar.Thinking />
           <div className="ml-auto flex items-center gap-2">
             {formError && <span className="text-ui-sm text-destructive">{formError}</span>}
             {running && (
@@ -555,7 +382,8 @@ export function Composer({
               {running ? "Queue" : "Send"}
             </Button>
           </div>
-        </div>
+          </div>
+        </RunConfigToolbar>
       </div>
     </form>
   );
