@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   groupAccountsByProvider,
+  providerConsumer,
   removeWarning,
 } from "@/components/settings/providers-section";
 import { listSettingsSections } from "@/components/settings/settings-registry";
@@ -123,7 +124,20 @@ describe("providers-section", () => {
   it("renders the CLI provider's managed-externally row, not a not-connected row", async () => {
     await renderLoaded([]);
     expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("Managed externally");
+    expect(screen.getByTestId("provider-external-glm")).toHaveTextContent("own CLI login");
     expect(screen.queryByTestId("provider-not-connected-glm")).not.toBeInTheDocument();
+  });
+
+  it("notes the proxy-only groups (Claude Code, Codex) but not Kimi or GLM", async () => {
+    await renderLoaded([]);
+    expect(screen.getByTestId("provider-group-note-claude-native")).toHaveTextContent(
+      "smind's /v1 proxy, not by a task runner",
+    );
+    expect(screen.getByTestId("provider-group-note-codex-native")).toHaveTextContent(
+      "smind's /v1 proxy, not by a task runner",
+    );
+    expect(screen.queryByTestId("provider-group-note-kimi")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("provider-group-note-glm")).not.toBeInTheDocument();
   });
 
   it("renders unmapped-provider accounts in the Other accounts group", async () => {
@@ -151,6 +165,20 @@ describe("providers-section", () => {
 
     expect(screen.getByTestId("provider-row-test-result-1")).toHaveTextContent("work-claude");
     expect(screen.getByTestId("provider-row-dot-1")).toHaveAttribute("data-status", "ok");
+  });
+});
+
+describe("providerConsumer", () => {
+  it("reports the two proxy-routed account providers as proxy-consumed", () => {
+    expect(providerConsumer("anthropic")).toBe("proxy");
+    expect(providerConsumer("openai")).toBe("proxy");
+  });
+
+  it("reports every other provider string as having no consumer", () => {
+    expect(providerConsumer("kimi")).toBe("none");
+    expect(providerConsumer("xai")).toBe("none");
+    expect(providerConsumer("antigravity")).toBe("none");
+    expect(providerConsumer("glm")).toBe("none");
   });
 });
 

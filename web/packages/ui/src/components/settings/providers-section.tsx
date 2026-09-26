@@ -50,10 +50,16 @@ import type {
  * whichever ProviderInfo has accountProvider === that string. Providers
  * with no matching account render a "not connected" row instead of an
  * empty group; kind:"cli" providers (GLM) have no credential rows at all
- * and render their "managed externally" row; accounts whose provider no
- * ProviderInfo maps (xai, antigravity today -- see accounts-dialog.tsx's
- * known-gap note) fall through to the "Other accounts" group rather than
- * being silently hidden.
+ * and render their "managed externally" row regardless of any accounts
+ * that happen to share their id -- account.add has no enum validation, so
+ * a "glm"-labeled account is possible but has no ProviderInfo.accountProvider
+ * to match against and falls through to "Other accounts" like any other
+ * unmapped provider (xai, antigravity today -- see accounts-dialog.tsx's
+ * known-gap note), rather than being silently hidden. providerConsumer
+ * distinguishes, for the groups that do exist, whether the mapped
+ * provider is actually read by smind's /v1 proxy today (anthropic,
+ * openai) or by nothing at all (kimi is mapped but not yet wired to
+ * either the proxy or a task runner) -- see its doc comment.
  *
  * Row actions (ADR-0015): ⋯ offers Rename (inline edit), Update
  * credential (a small inline form reusing account.add's credential
@@ -119,6 +125,28 @@ export function removeWarning(
 
 function authTypeLabel(credentialType: string): string {
   return credentialType === "oauth" ? "OAuth" : "API key";
+}
+
+export type ProviderConsumer = "proxy" | "none";
+
+/**
+ * Which real consumer, if any, reads an internal/accounts provider kind's
+ * credential today. internal/server/proxy.go hardcodes exactly two routed
+ * account.provider strings (its providerAnthropic/providerOpenAI
+ * constants -- the only ones POST /v1/messages and /v1/chat/completions
+ * serve, per proxy.serve's exact-match filter). No internal/taskrunner
+ * backend reads an account credential at all -- acp.GLMCommand/KimiCommand
+ * spawn bare subprocesses with no credential injection, and Claude
+ * Code/Codex's native backends use their own out-of-band CLI logins -- so
+ * nothing is runner-consumed. Anything outside the proxy-routed set (kimi,
+ * xai, antigravity, or any other account.add-able string, including a
+ * "glm"-labeled account, which the backend's own ProviderInfo never maps
+ * to a credential row at all) has no consumer.
+ */
+const PROXY_ROUTED_PROVIDERS = new Set(["anthropic", "openai"]);
+
+export function providerConsumer(accountProvider: string): ProviderConsumer {
+  return PROXY_ROUTED_PROVIDERS.has(accountProvider) ? "proxy" : "none";
 }
 
 type RowAction = { kind: "rename" | "credential" | "remove"; account: Account };
@@ -261,6 +289,14 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
               <h4 className="text-ui-sm font-medium text-foreground-subtle">
                 {(info.label ?? info.id).toUpperCase()}
               </h4>
+              {info.accountProvider && providerConsumer(info.accountProvider) === "proxy" && (
+                <p
+                  className="text-ui-xs text-muted-foreground"
+                  data-testid={`provider-group-note-${info.id}`}
+                >
+                  Used by smind's /v1 proxy, not by a task runner
+                </p>
+              )}
               {info.kind === "cli" ? (
                 // A cli-kind provider runs as a subprocess and handles its
                 // own login -- no credential row can exist for it, so its
@@ -270,8 +306,14 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                   className="flex items-center justify-between gap-2 rounded-lg px-2 py-1.5"
                   data-testid={`provider-external-${info.id}`}
                 >
-                  <span className="text-ui-base text-muted-foreground">
-                    Managed externally via CLI
+                  <span className="flex flex-col gap-0.5">
+                    <span className="text-ui-base text-muted-foreground">
+                      Managed externally via CLI
+                    </span>
+                    <span className="text-ui-xs text-muted-foreground">
+                      Authenticates itself via its own CLI login — accounts added here aren't
+                      read by it.
+                    </span>
                   </span>
                   <TestButton
                     providerId={info.id}
@@ -333,8 +375,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                       </button>
                     </TooltipTrigger>
                     <TooltipContent>
-                      These accounts' providers have no agent runner mapped yet — they are kept
-                      for routing but no agent uses them today.
+                      These accounts' providers have no smind consumer — no agent runner and no proxy endpoint uses them today.
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
