@@ -313,7 +313,7 @@ Per-phase scenarios:
 - [x] P1 — design system: tokens, `text-ui-*` scale, guards, NOTICE
 - [x] P2 — app shell + sidebar
 - [ ] P3 — chat timeline + composer + tool/permission/question cards
-- [ ] P4 — panes: diff/git, terminal, files, settings
+- [x] P4 — panes: diff/git, terminal, files, settings
 - [ ] P5 — desktop-only chrome (blocked on ADR-0013)
 
 ## Validation
@@ -612,3 +612,115 @@ section) — smind has no billing/plan widget to make room for and no
 UX problem with the current placement; moving it would be a judgment
 call with test/behavior risk and no corresponding benefit the AC
 requires.
+
+### P4 — panes: diff/git, terminal, files, settings
+
+Commits (`feat/zcode-p4-panes`, oldest first): `df4baaf` (git/diff pane),
+`b587f46` (terminal 16-color ANSI + hidden scrollbar), `36592d8` (file
+explorer row density + hierarchy guides), `2cdb9b9` (file editor
+preview-toggle border token), `a0f3b5e` (settings sections card system),
+`be8129f` (Web Interface Guidelines fix: decorative chevrons
+`aria-hidden`), `36d2e77` (fix: highlight.js's hardcoded white diff
+background). Merged `origin/develop` (P2 #207, app shell + sidebar
+frames) on top with no conflicts — that merge touched only
+`App.tsx`/`app-sidebar.tsx`/`resizable.tsx`/`sidebar.tsx`, none of which
+P4 owns, so no re-screenshot was needed for this phase's panes.
+
+- **Diff/git pane matches `GitPane.tsx`/`GitPaneChangeCard.tsx`** —
+  `df4baaf`. diff2html's variable overrides repointed from the retired
+  `--diff-addition`/`-deletion` aliases onto ZCode's own
+  `--diff-added`/`-removed` tokens; `FileStatusMarker` (shared with the
+  file explorer) colors A/M/D off the git-status token family instead of
+  generic success/warning/destructive per DESIGN.md. Per-file rows get a
+  hover/expanded surface, a rotating chevron (no more `▸`/`▾` glyphs),
+  and a colored +/- diff stat; staging/commit flow untouched. Confirmed
+  in `diff-pane-{light,dark}.png`: three seeded files (added/deleted/
+  changed) show green `A`/red `D`/orange `M` markers and colored diff
+  stats, +/- line backgrounds use the diff tokens (dark mode: green add,
+  red delete rows over the panel background, not generic success/error
+  hues).
+- **Terminal pane matches `Terminal.tsx`/`terminalTheme.ts`** —
+  `b587f46`. `resolveTerminalTheme()` now wires all 16 `--color-terminal-*`
+  ANSI slots plus cursor/selection/selection-inactive into xterm's
+  `ITheme` (tokens landed in `index.css` back in P1, unused until now);
+  `.terminal-xterm-shell` hides xterm's own viewport scrollbar (scroll
+  behavior unaffected). Confirmed in `terminal-{light,dark}.png`: `git
+  log --color` output shows yellow commit hash, cyan `HEAD ->` ref, blue
+  prompt path — distinct ANSI hues in both themes, not a single
+  foreground color.
+- **File explorer matches `workspace-file-tree/`** — `36592d8`. Rows
+  moved to ZCode's 28px height and `depth*12px+8px` indent (was ad hoc
+  14px/depth); a dashed vertical guide line renders per depth level
+  (ported from `hierarchyGuides.ts`); hover uses `bg-surface-hover`
+  (was generic `bg-hover`); git status markers share `FileStatusMarker`
+  with the diff pane. Selection keeps smind's existing `bg-selected`
+  fill per DESIGN.md's "use `bg-selected` for selected list rows" rule
+  rather than porting ZCode's own selection treatment. Confirmed in
+  `file-explorer-{light,dark}.png` (flat seed: `.git`, `added.txt` green
+  `A`, `keep.txt` orange `M`, selected-row highlight) plus code
+  inspection of `file-explorer-pane.tsx`'s `hierarchyGuideStyle()`/
+  `TreeRow` (depth-based indent + guide recursion) and the existing
+  `file-explorer-pane.test.tsx` nested-status-rollup case, since the
+  seed script used for this screenshot pass didn't include a nested
+  subfolder — the depth>0 code path is exercised by that test, not
+  pixel-checked here; no defect found in either.
+- **Settings matches `SettingsPage.tsx`'s visual system** — `a0f3b5e`.
+  Agents (`profiles-section.tsx`) and Daemon server
+  (`connections-section.tsx`) now wrap their rows in the same
+  `rounded-xl border bg-card p-3` card Providers already established
+  (`#202`/`#203`), rows stepping down to `rounded-lg` per DESIGN.md's
+  radius nesting; theme/font-size steppers, sound-notification toggle,
+  and agent notes textarea moved off the pre-P1 `border-input` onto
+  `border-input-border`. Confirmed in `settings-{general,appearance,
+  providers,agents,notifications,shortcuts}-{light,dark}.png` — one
+  consistent card system across all six sections in both themes.
+- **File editor / preview pane chrome follows ZCode's treatments** —
+  `2cdb9b9`. `file-editor-pane.tsx`'s Edit/Preview segmented control
+  moved off the pre-P1 `border-input` onto `border-input-border`,
+  matching the diff pane's own segmented toggle; CodeMirror's chrome
+  theme (`code-mirror-editor.tsx`) already resolved off app tokens from
+  the pre-P1 pass, untouched; syntax colors unchanged per scope.
+  Confirmed in `file-editor-{light,dark}.png`.
+
+**Web Interface Guidelines review** (P4 Step 7): one real finding, fixed
+in `be8129f` — the diff pane's and file explorer's expand/collapse
+chevron icons carry state visually but duplicate an already-exposed
+`aria-expanded` (file rows) or are purely decorative next to a folder
+icon (directory rows); marked `aria-hidden="true"` rather than left as
+unlabeled meaningful icons.
+
+**Screenshot-pass fix, not in the original plan text but found and
+fixed before landing:** `36d2e77` — a full screenshot review of the diff
+pane found every code line painted a solid white background with
+near-black text in dark mode regardless of diff2html's token overrides.
+Root cause: `diff-render.tsx`'s other CSS import, highlight.js's
+`github.css` syntax theme, is a fixed light theme with no CSS-var API —
+its `.hljs` base rule hardcodes `background: #fff; color: #24292e` on
+every line's code content, painting over diff2html's own theme-aware
+row backgrounds. `.hljs { background: transparent; color: inherit }`
+lets context lines fall back to the pane background and +/- lines keep
+their diff-token tints; re-screenshotted (`diff-pane-{light,dark}.png`
+above already reflect the fix) to confirm.
+
+**Verification:** `bun run --filter '@smind/ui' typecheck` green;
+`bun run --filter '@smind/ui' test` — 105 test files, 1316 tests, all
+green (no test file added/edited this phase — every P4 change was
+visual/structural against already-passing behavior coverage, same
+pattern as P2). `go test ./...` green (34 packages, unaffected —
+web-only change). `task lint` green (`go vet` + `gofmt`, no Go changes).
+Playwright screenshots (1440×900 unless noted, light+dark) against a
+temp daemon (port 4713, seeded with a task workspace holding a small git
+repo: added/deleted/modified files, and terminal history from `git log
+--color`) — `diff-pane-`, `terminal-`, `file-explorer-`,
+`file-editor-`, `settings-{general,appearance,providers,agents,
+notifications,shortcuts}-{light,dark}.png` — saved to
+`/mnt/c/Users/ADMIN/Downloads/smind-zcode-p4/`. Reviewed by hand; the
+highlight.js defect above was the one real issue found, fixed and
+re-verified before this Validation was written.
+
+**Not done / deferred, not left behind:** no doc/PDF/office preview
+surfaces were added to the file explorer or editor (explicitly excluded
+by the AC); no marketplace, automation/workflow, or billing settings
+sections were added (explicitly excluded by the AC) — Settings scope
+stayed to the sections smind actually has (theme, shortcuts, accounts,
+agents, daemon connections).
