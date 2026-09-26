@@ -260,7 +260,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
           data-testid="providers-connect-toggle"
           onClick={() => setConnecting((v) => !v)}
         >
-          <Plus className="size-3.5" />
+          <Plus aria-hidden className="size-3.5" />
           Connect account
         </Button>
       </div>
@@ -366,13 +366,15 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
+                        size="icon-xs"
                         aria-label="About other accounts"
-                        className="flex items-center text-foreground-subtle"
+                        className="text-foreground-subtle"
                       >
-                        <Info className="size-3.5" />
-                      </button>
+                        <Info aria-hidden className="size-3.5" />
+                      </Button>
                     </TooltipTrigger>
                     <TooltipContent>
                       These accounts' providers have no smind consumer — no agent runner and no proxy endpoint uses them today.
