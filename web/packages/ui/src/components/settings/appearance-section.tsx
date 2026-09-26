@@ -37,7 +37,7 @@ function StepGroup<T extends string>({
   groupLabel: string;
 }) {
   return (
-    <div role="group" aria-label={groupLabel} className="inline-flex rounded-lg border border-input p-0.5">
+    <div role="group" aria-label={groupLabel} className="inline-flex rounded-lg border border-input-border p-0.5">
       {options.map((opt) => (
         <Button
           key={opt.value}
