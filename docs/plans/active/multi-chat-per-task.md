@@ -119,13 +119,14 @@ Each phase ships as its own PR.
 - Every task always has >=1 chat: `workspace.Manager.CreateTask` creates a default chat ("Chat", provider NULL) the same way the migration backfills one for pre-existing tasks, so `DefaultChat` always has something to resolve to and no lazy-create branch is needed elsewhere.
 - `runs.Registry.Start`'s chat concurrency guard ("no running run per chat") and its per-chat run registration happen under one lock (not check-then-insert as two steps), closing a race two simultaneous `Start` calls for the same chat would otherwise hit.
 - `run.logs` does not gain a `chatId` filter, despite P1.4's AC bullet listing it alongside `run.list`: `run.logs` already takes an unambiguous `runId`, so a `chatId` filter on it would be a parameter with nothing to filter -- ADR-0016 §5's own wire table only lists the filter on `run.list`, and no Test Scenario names a `run.logs` filter.
+- P2 landed (PR #211) keyed by task ID -- its own `SessionStore`/`MemorySessionStore` abstraction was designed with chats not yet existing, doc-commented "once chats land, the key becomes chat ID". Integrating the two branches (this merge) rekeys every `sessionStore.Get`/`Set` call in `internal/taskrunner/runner.go` from `taskID` to `chatID`, and adds `ChatSessionStore` (`internal/taskrunner/chat_session_store.go`), a `chats.agent_session`-backed store keyed by chat ID, wired in at the daemon (`cmd/smind/serve.go`) alongside `MemorySessionStore` (kept for tests) -- see the P2 integration Validation entry below.
 
 ## Progress
 
 - [x] P1 backend
-- [ ] P2 session resume
+- [x] P2 session resume (branch `feat/agent-session-resume`, merged into this branch and rekeyed by chat id)
 - [x] P3 web
-- [ ] P4 CLI + mobile
+- [x] P4 CLI (mobile stays compatible on the default chat -- no changes needed, per the plan's "out of scope" note)
 
 ## Validation
 
@@ -142,6 +143,80 @@ All P1 acceptance criteria (P1.1-P1.6) and Test Scenarios are implemented and co
 
 Not done in P1 (explicitly out of scope, per the task that drove this phase): session resume itself (P2 owns it); `web/`, `mobile/`, and CLI wiring (P3/P4 own those) -- P1 only adds the `chats.agent_session` column plus `store.GetChat`/`SetChatAgentSession` for P2 to call.
 
+### P2 session resume
+
+- **P2.1 (SessionHandle/SessionStore).** Added `taskrunner.SessionHandle`
+  {Provider, SessionID, NativeHandle, Metadata} and a `SessionStore`
+  interface, with `MemorySessionStore` wired in as `Runner`'s default,
+  keyed by task ID (the same key the pre-existing in-memory ACP session
+  map used). `TestMemorySessionStore` covers the get/set/replace contract.
+- **P2.2 (claude-native).** `runClaudeNative` now resumes via the vendored
+  SDK's `claudecode.WithResume(sessionID)`, storing the next handle from
+  `ResultMessage.SessionID` after each successful turn.
+  `TestRunner_RunPrompt_ClaudeNative_ResumesSessionAcrossRuns` proves the
+  second run passes `--resume=<id>` and the first doesn't.
+- **P2.3 (ACP).** Verified live 2026-09-27 against the real
+  `glm-acp-agent@1.3.0` binary: its `initialize` response advertises
+  `{loadSession: true, sessionCapabilities: {resume, list, fork, close}}`.
+  `newOrResumeACPSession` tries `session/load` first, falls back to
+  `session/resume`, then to a fresh `session/new` with a surfaced
+  `EventTypeSessionNote` if neither is offered.
+  `TestRunner_RunPrompt_GLM_ResumeCapabilityMatrix` covers all four
+  combinations (loadSession, resume, both, neither) against an
+  extended fake ACP agent.
+- **P2.4 (Codex).** Added `codex.Client.ResumeSession`: checks
+  `thread/loaded/list` first, then `thread/resume`, retrying once via
+  `thread/unarchive` on the archived-thread error. `TestClient_ResumeSession`
+  covers not-loaded/already-loaded/archived-then-unarchived/unknown-id.
+  Verified live 2026-09-27 against the real `codex app-server` 0.149.1
+  binary: `thread/start`, `thread/loaded/list`, `thread/resume`,
+  `thread/archive`, and `thread/unarchive` all behave as documented,
+  including the exact `"no rollout found for thread id ..."` /
+  `"no archived rollout found for thread id ..."` error wording.
+- **P2.5 (fallback).** Every runner falls back to a fresh session on a
+  resume failure (stale/unknown id) instead of failing the prompt, logging
+  and emitting `EventTypeSessionNote` first.
+  `TestRunner_RunPrompt_{GLM,ClaudeNative,CodexNative}_StaleSessionFallsBackWithNote`
+  cover all three providers.
+
+**Live check, against the real daemon** (temp `SMIND_HOME`, port 4714,
+never touching `127.0.0.1:4648` or the real `~/.spacingmind`; reused the
+existing logged-in `claude`/`glm-acp-agent` CLIs read-only):
+
+- **GLM:** prompt 1 ("Remember this secret word: purplecatapult42...")
+  then prompt 2 ("what exactly did I ask you in my previous message?") on
+  the same task correctly answered "Your previous message asked me to
+  remember the secret word 'purplecatapult42' and to reply with just
+  'OK'." No fallback note logged -- `session/load` succeeded.
+- **claude-native:** same two-prompt pattern (secret word
+  "tangerinefalcon77"); the follow-up correctly recalled it. No fallback
+  note logged -- `WithResume` succeeded.
+- **codex-native:** not fully verifiable live -- `thread/start` succeeded,
+  but the first turn itself failed with the CLI's own
+  `"You've hit your usage limit ... try again at Oct 7th, 2026"` (an
+  account-level quota, not a protocol or code issue). The resume mechanics
+  (`thread/loaded/list`, `thread/resume`, `thread/archive`/`thread/unarchive`)
+  were separately verified against the same real binary outside the
+  daemon (see P2.4 above and `TestClient_ResumeSession`), and covered
+  end-to-end (including the fallback path) by
+  `TestRunner_RunPrompt_CodexNative_ResumesSessionAcrossRuns` and
+  `TestRunner_RunPrompt_CodexNative_StaleSessionFallsBackWithNote` against
+  the fake app-server. A full live prompt-resume-followup round trip for
+  Codex remains to be confirmed once the account's quota resets
+  (2026-10-07) or against a different account.
+
+`go test -race ./internal/taskrunner/... ./internal/acp/... ./internal/codex/...`
+and `task lint` both pass.
+
+### P2 integration onto P1 (this merge)
+
+PR #211 landed keyed by task ID, since chats didn't exist on `develop` yet -- its own doc comments anticipated this and said so explicitly. Integrating it onto P1:
+
+- Every `sessionStore.Get`/`Set` call in `internal/taskrunner/runner.go` (`runACP`/`newOrResumeACPSession`, `runClaudeNative`/`newClaudeClientWithResume`, `runCodexNative`/`newOrResumeCodexThread`) is rekeyed from `taskID` to `chatID` -- git's line-based merge combined P1's `chatID`-only `runACP`/`runClaudeNative`/`runCodexNative` signatures with P2's newly-added body lines that still referenced the now-nonexistent `taskID` local; this needed a manual pass function by function (compile errors pointed at exactly the two spots the auto-merge couldn't reconcile).
+- `MemorySessionStore` (kept, unchanged, still `Runner`'s default and still used by every test that doesn't need persistence) is joined by `ChatSessionStore` (`internal/taskrunner/chat_session_store.go`), a `chats.agent_session`-backed `SessionStore` keyed by chat ID: `Get`/`Set` serialize/deserialize `SessionHandle` as JSON through `store.GetChat`/`SetChatAgentSession`. `cmd/smind/serve.go` wires it in via `taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db))`, so the real daemon persists across restarts; nothing else about `New`'s defaults changed. A chat whose stored handle's `Provider` doesn't match the chat's own bound `provider` column is treated as "no handle" (never used to resume) -- on top of the identical check every `RunPrompt` resume call site already does against the handle's self-reported `Provider` (which is what actually prevents a live mismatch; this store-level check is defense in depth against `chats.agent_session` and `chats.provider` ever drifting apart, which nothing in this codebase does today).
+- Covered (`internal/taskrunner/chat_session_store_test.go`): `TestChatSessionStore_GetSet_RoundTrips` (a handle written after run 1 is read at run 2 of the same chat, at the store layer); `TestChatSessionStore_TwoChatsOfOneTask_KeepSeparateHandles`; `TestChatSessionStore_HandleSurvivesStoreReopen` (a fresh `store.Open` at the same path, simulating a daemon restart); `TestChatSessionStore_MigratedDefaultChat_StartsWithNoHandle` (a chat with `agent_session` NULL reports no handle, so its next run starts fresh); `TestChatSessionStore_Get_ProviderMismatchAgainstBoundChat_IsIgnored`. `TestRunner_RunPrompt_WithChatSessionStore_ResumesAcrossRunsAndRestart` proves the same three properties end to end through the real `Runner.RunPrompt` path against a fake GLM ACP agent: run 1 is `session/new`, run 2 (same chat) is `session/load`, and a third run against a brand-new `Runner`/`workspace.Manager` built on a reopened store is also `session/load` -- the handle survived the simulated restart.
+- `go test -race ./internal/...`, `task test`, and `task lint` all pass post-merge.
+
 ### P3 — web
 
 All P3 acceptance criteria are implemented and covered by tests; `task test` (1329 web tests, all Go packages) and `task lint` both pass.
@@ -154,3 +229,12 @@ All P3 acceptance criteria are implemented and covered by tests; `task test` (13
 - **Two real bugs found and fixed along the way** (not test-only issues): (1) `App.tsx`'s hash-sync effect defaulted to `{kind:"files"}` for "no active tab yet" (the async gap before a task's chats load), which self-triggered a route-restore round trip that opened a Files tab and permanently pre-empted the default-chat seeding -- fixed by not writing a hash at all until a real tab exists. (2) `hooks/use-task-chats.ts` didn't reset `chats` to `null` on a `taskId` change, so a fast double task-switch could seed the *new* task's default-chat tab with the *previous* task's chat id (a real cross-task chat-identity mixup) -- fixed by resetting synchronously, plus a defensive `chats[0].TaskID === selectedTask.ID` guard in `App.tsx`. (3) Radix's `Select` fires a spurious `onValueChange("")` of its own (not from any user interaction) once a `disabled` select's value settles, which blanked `RunConfigToolbar`'s bound-provider state right after it was correctly set -- fixed by ignoring falsy values in the handler, with regression coverage in `composer.test.tsx`.
 
 Not done in P3 (out of scope per the task, deferred to P4): CLI (`--chat`, `task chat` subcommands) and mobile (chat picker) wiring.
+
+### P4 — CLI
+
+All P4 CLI acceptance criteria are implemented and tested in `cmd/smind/task_chat_test.go`, which runs against the same fake-agent-backed daemon the config-option tests use. `go test ./cmd/smind/...`, `task lint` and `task test` all pass. `smind task logs`/`attach` are unchanged because they take a runId, and a runId already identifies exactly one chat. Mobile keeps working on the default chat with no changes.
+
+- `task send --chat`: passes chatId through to `run.start`. When the flag is omitted, the default chat is used. Tests: `TestTaskSend_ChatFlagRoutesRunToThatChat`, `TestTaskSend_OmittedChatLandsOnDefaultChat`.
+- `task chat ls|new|rename|archive`: `ls` prints ID/TITLE/PROVIDER/ARCHIVED, and `--all` includes archived chats. When the daemon refuses to archive a chat with a running run, or an id is unknown, its error is printed verbatim and the command exits non-zero.
+- `task runs <taskId> [--chat <chatId>]`: `run.list`, newest first, with the chatId filter.
+- The usage text in `cmd/smind/main.go` documents all of the above.

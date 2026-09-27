@@ -95,6 +95,23 @@ func runFakeClaudeCLI() {
 		scenario = strings.TrimSpace(string(data))
 	}
 
+	if scenario == "resume-fails" {
+		for _, a := range os.Args[1:] {
+			if strings.HasPrefix(a, "--resume=") {
+				// Simulate a stale/unknown session id: exit before even
+				// acknowledging the initialize control_request -- matching
+				// the real `claude` CLI's observed live behavior (probed
+				// 2026-09-27 with a bogus --resume value): the SDK's own
+				// New() fails with "connection closed", before any prompt
+				// is ever sent.
+				os.Exit(1)
+			}
+		}
+		// No --resume flag: behaves exactly like "reply" -- proving the
+		// runner's own fallback retry (without WithResume) succeeds.
+		scenario = "reply"
+	}
+
 	stdin := bufio.NewScanner(os.Stdin)
 	stdin.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
@@ -189,9 +206,10 @@ func runFakeClaudeCLI() {
 			},
 		})
 		writeLine(map[string]any{
-			"type":    "result",
-			"subtype": "success",
-			"result":  "ok",
+			"type":       "result",
+			"subtype":    "success",
+			"session_id": "sess-1",
+			"result":     "ok",
 		})
 
 	case "permission":

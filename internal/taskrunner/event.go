@@ -75,6 +75,15 @@ const (
 	// RawPayload carry the original wire kind and payload; no other field
 	// is populated.
 	EventTypeRaw
+
+	// EventTypeSessionNote is a non-fatal, human-readable note about this
+	// turn's session continuity, populated in Text: the run proceeded (a
+	// fresh session was started), but a stored session handle could not be
+	// resumed -- either because the provider doesn't support resume at all,
+	// or because resuming the stored id itself failed (a stale/unknown
+	// session). Never sent instead of EventTypeDone, only before it -- see
+	// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.5.
+	EventTypeSessionNote
 )
 
 // Unified ToolStatus values for Event.ToolStatus, spanning both providers'
