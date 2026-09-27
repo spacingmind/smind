@@ -400,12 +400,19 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if chat.ArchivedAt != nil {
 		return "", fmt.Errorf("runs: start: chat %d is archived", chat.ID)
 	}
-	switch {
-	case chat.Provider == nil:
+	if chat.Provider == nil {
 		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
 			return "", fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
 		}
-	case *chat.Provider != string(provider):
+	}
+	// Re-checked against chat as BindChatProvider actually left it, not
+	// just the pre-bind read above: store.BindChatProvider is a
+	// write-if-still-NULL, so two concurrent first prompts to the same
+	// unbound chat with different providers both reach this point seeing
+	// Provider == nil, but only one of them actually wins the bind -- the
+	// other's write silently no-ops and must still be rejected here rather
+	// than proceeding as if it had bound its own value.
+	if *chat.Provider != string(provider) {
 		return "", fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
 	}
 	chatID = chat.ID

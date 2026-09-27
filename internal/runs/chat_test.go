@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -202,6 +203,57 @@ func TestRegistry_Start_TwoChatsOfSameTask_RunConcurrently(t *testing.T) {
 
 	waitForStatus(t, reg, runA, StatusRunning, 2*time.Second)
 	waitForStatus(t, reg, runB, StatusRunning, 2*time.Second)
+}
+
+// TestRegistry_Start_ConcurrentFirstPromptsWithDifferentProviders_OnlyOneBinds
+// proves the race window in provider-binding a never-run chat: two
+// concurrent Start calls both observe Provider == nil and both attempt to
+// bind, but store.BindChatProvider's write-if-still-NULL means only one
+// actually wins -- the other must be rejected as a provider mismatch
+// against whichever provider won, not silently proceed as if it had bound
+// its own.
+func TestRegistry_Start_ConcurrentFirstPromptsWithDifferentProviders_OnlyOneBinds(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	reg := newTestRegistry(t, st)
+
+	def, err := wm.DefaultChat(task.ID)
+	if err != nil {
+		t.Fatalf("DefaultChat() error = %v", err)
+	}
+
+	var wg sync.WaitGroup
+	results := make([]error, 2)
+	providers := []taskrunner.Provider{taskrunner.ProviderGLM, taskrunner.ProviderCodexNative}
+	for i := range 2 {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, providers[i], "hi", taskrunner.ApprovalPolicyManual, "")
+			results[i] = err
+		}(i)
+	}
+	wg.Wait()
+
+	succeeded := 0
+	for _, err := range results {
+		if err == nil {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("results = %v, want exactly one of the two concurrent binds to succeed", results)
+	}
+
+	bound, err := wm.GetChat(def.ID)
+	if err != nil {
+		t.Fatalf("GetChat() error = %v", err)
+	}
+	if bound.Provider == nil {
+		t.Fatal("GetChat() Provider = nil, want bound to whichever provider won")
+	}
 }
 
 // TestRegistry_List_FiltersByChatID proves run.list's additive chatId
