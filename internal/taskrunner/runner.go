@@ -26,6 +26,8 @@ type acpBackend interface {
 	SupportsLoadSession() bool
 	SupportsResumeSession() bool
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
+	SessionModes(sessionID string) (acp.SessionModeState, bool)
+	SetSessionMode(ctx context.Context, sessionID, modeID string) error
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	Close() error
 }
@@ -158,6 +160,13 @@ type Runner struct {
 	acpSessions map[int64]*acpSessionState
 	sessionMu   sync.Mutex
 
+	// acpModes caches each ACP provider's discovered permission modes
+	// (see acp_modes.go), guarded by modeMu. acpModeProbe enables
+	// background discovery probes (WithACPModeProbe).
+	acpModes     map[Provider]acpModeCacheEntry
+	modeMu       sync.Mutex
+	acpModeProbe bool
+
 	// sessionStore holds the resumable SessionHandle each provider's
 	// RunPrompt call reads before a turn and writes after one, keyed by
 	// chat ID -- see SessionHandle/SessionStore's doc comments. Defaults to
@@ -180,6 +189,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
 		wm:           wm,
 		acpSessions:  map[int64]*acpSessionState{},
+		acpModes:     map[Provider]acpModeCacheEntry{},
 		sessionStore: NewMemorySessionStore(),
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
@@ -314,6 +324,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	}
 	r.trackACPSession(chatID, sessionID, client, configOptions)
 	defer r.endACPTurn(chatID)
+	r.recordSessionModes(provider, client, sessionID, configOptions)
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})

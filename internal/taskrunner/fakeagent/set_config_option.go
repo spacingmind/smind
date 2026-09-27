@@ -10,7 +10,7 @@ import "encoding/json"
 // The sentinel config id "no-such-option" gets an invalid-params error,
 // so tests can prove an agent-side rejection surfaces as a Go error (and
 // through wsapi/CLI as a printed message) rather than a silent no-op.
-func handleSetConfigOption(msg message) {
+func handleSetConfigOption(msg message, cwd string) {
 	var req struct {
 		SessionID string `json:"sessionId"`
 		ConfigID  string `json:"configId"`
@@ -25,6 +25,9 @@ func handleSetConfigOption(msg message) {
 			Error:   &rpcError{Code: -32602, Message: "no such config option"},
 		})
 		return
+	}
+	if req.ConfigID == "mode" {
+		recordSessionMode(cwd, "set_config_option:"+req.Value)
 	}
 	respond(msg.ID, map[string]any{
 		"configOptions": []map[string]any{{

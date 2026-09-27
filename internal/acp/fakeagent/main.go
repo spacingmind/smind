@@ -123,6 +123,15 @@ func handle(msg message, sessionCwd *string) {
 		// shapes, including a select's Options list, intact and in order.
 		respond(msg.ID, map[string]any{
 			"sessionId": sessionID,
+			// Mirrors GLM's user-reported advertised modes (ADR-0019).
+			"modes": map[string]any{
+				"currentModeId": "default",
+				"availableModes": []map[string]any{
+					{"id": "default", "name": "Default"},
+					{"id": "accept_edits", "name": "Accept Edits", "description": "Edits run without prompting"},
+					{"id": "bypass_permissions", "name": "Bypass Permissions"},
+				},
+			},
 			"configOptions": []map[string]any{
 				{
 					"configId":     "thinking-level",
@@ -169,6 +178,18 @@ func handle(msg message, sessionCwd *string) {
 		})
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)
+	case msg.Method == "session/set_mode":
+		var params struct {
+			SessionID string `json:"sessionId"`
+			ModeID    string `json:"modeId"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		switch params.ModeID {
+		case "default", "accept_edits", "bypass_permissions":
+			respond(msg.ID, map[string]any{})
+		default:
+			writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{Code: -32602, Message: "unknown mode: " + params.ModeID}})
+		}
 	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
 	case msg.Method == "_test/release":

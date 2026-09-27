@@ -116,8 +116,32 @@ type newSessionParams struct {
 }
 
 type newSessionResult struct {
-	SessionID     string         `json:"sessionId"`
-	ConfigOptions []ConfigOption `json:"configOptions"`
+	SessionID     string            `json:"sessionId"`
+	ConfigOptions []ConfigOption    `json:"configOptions"`
+	Modes         *SessionModeState `json:"modes"`
+}
+
+// SessionModeState mirrors ACP's SessionModeState: the session modes an
+// agent advertises in a session/new (or session/load/resume) response --
+// the agent's own permission/behavior modes (e.g. GLM's
+// default/accept_edits/bypass_permissions), switched with session/set_mode
+// (see SetSessionMode). ADR-0019 surfaces these verbatim as the provider's
+// permission mode catalog.
+type SessionModeState struct {
+	CurrentModeID  string        `json:"currentModeId"`
+	AvailableModes []SessionMode `json:"availableModes"`
+}
+
+// SessionMode is one entry of SessionModeState.AvailableModes.
+type SessionMode struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type setSessionModeParams struct {
+	SessionID string `json:"sessionId"`
+	ModeID    string `json:"modeId"`
 }
 
 // loadSessionParams is ACP's LoadSessionRequest: session/load requires
@@ -144,7 +168,8 @@ type resumeSessionParams struct {
 // sessionId back (the caller already supplied it), but both carry the same
 // configOptions field this package surfaces.
 type resumeResult struct {
-	ConfigOptions []ConfigOption `json:"configOptions"`
+	ConfigOptions []ConfigOption    `json:"configOptions"`
+	Modes         *SessionModeState `json:"modes"`
 }
 
 // agentCapabilityFlags decodes just the two AgentCapabilities fields this
@@ -249,9 +274,10 @@ type Client struct {
 	policy    PermissionPolicy
 	logWriter io.Writer
 
-	mu         sync.Mutex
-	sessionCwd map[string]string
-	updateSubs map[string]*updateSub
+	mu           sync.Mutex
+	sessionCwd   map[string]string
+	sessionModes map[string]SessionModeState
+	updateSubs   map[string]*updateSub
 
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
@@ -278,10 +304,11 @@ func WithPermissionPolicy(p PermissionPolicy) Option {
 // else.
 func New(command []string, opts ...Option) (*Client, error) {
 	c := &Client{
-		policy:     AutoApprovePolicy{},
-		logWriter:  io.Discard,
-		sessionCwd: make(map[string]string),
-		updateSubs: make(map[string]*updateSub),
+		policy:       AutoApprovePolicy{},
+		logWriter:    io.Discard,
+		sessionCwd:   make(map[string]string),
+		sessionModes: make(map[string]SessionModeState),
+		updateSubs:   make(map[string]*updateSub),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -341,10 +368,7 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOp
 		return "", nil, fmt.Errorf("acp: session/new: decode response: %w", err)
 	}
 
-	c.mu.Lock()
-	c.sessionCwd[res.SessionID] = cwd
-	c.mu.Unlock()
-
+	c.recordSession(res.SessionID, cwd, res.Modes)
 	return res.SessionID, res.ConfigOptions, nil
 }
 
@@ -368,10 +392,7 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]Conf
 		return nil, fmt.Errorf("acp: session/load: decode response: %w", err)
 	}
 
-	c.mu.Lock()
-	c.sessionCwd[sessionID] = cwd
-	c.mu.Unlock()
-
+	c.recordSession(sessionID, cwd, res.Modes)
 	return res.ConfigOptions, nil
 }
 
@@ -390,11 +411,49 @@ func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string) ([]Co
 		return nil, fmt.Errorf("acp: session/resume: decode response: %w", err)
 	}
 
-	c.mu.Lock()
-	c.sessionCwd[sessionID] = cwd
-	c.mu.Unlock()
-
+	c.recordSession(sessionID, cwd, res.Modes)
 	return res.ConfigOptions, nil
+}
+
+// recordSession stores a created/resumed session's cwd (the fs boundary)
+// and, when the agent advertised any, its session modes.
+func (c *Client) recordSession(sessionID, cwd string, modes *SessionModeState) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessionCwd[sessionID] = cwd
+	if modes != nil {
+		c.sessionModes[sessionID] = *modes
+	}
+}
+
+// SessionModes returns the session modes the agent advertised for
+// sessionID when it was created or resumed, with CurrentModeID updated by
+// any later successful SetSessionMode. ok is false when the agent
+// advertised none.
+func (c *Client) SessionModes(sessionID string) (SessionModeState, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	m, ok := c.sessionModes[sessionID]
+	if ok {
+		m.AvailableModes = append([]SessionMode(nil), m.AvailableModes...)
+	}
+	return m, ok
+}
+
+// SetSessionMode switches sessionID to modeID via ACP's session/set_mode.
+// An agent-side JSON-RPC error (e.g. an unknown mode id) comes back as a
+// non-nil error.
+func (c *Client) SetSessionMode(ctx context.Context, sessionID, modeID string) error {
+	if _, err := c.conn.call(ctx, "session/set_mode", setSessionModeParams{SessionID: sessionID, ModeID: modeID}); err != nil {
+		return fmt.Errorf("acp: session/set_mode: %w", err)
+	}
+	c.mu.Lock()
+	if m, ok := c.sessionModes[sessionID]; ok {
+		m.CurrentModeID = modeID
+		c.sessionModes[sessionID] = m
+	}
+	c.mu.Unlock()
+	return nil
 }
 
 // SetSessionConfigOption sets one config option on a live session via ACP

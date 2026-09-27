@@ -47,6 +47,17 @@ const sessionID = "fake-session-1"
 // else (neither -- the "this agent can't resume at all" fallback path).
 var capsMode string
 
+// modesMode is set from a "modes:<kind>" argument: "modes:session"
+// advertises ACP SessionModeState in session/new (GLM-shaped
+// default/accept_edits/bypass_permissions), "modes:config" advertises the
+// same modes as a category-"mode" select config option instead; unset
+// advertises no modes at all. session/set_mode (and a set_config_option
+// on the "mode" config id) records the applied mode to a "session-mode"
+// file in the session's cwd, so tests can observe it.
+var modesMode string
+
+var fakeModeIDs = []string{"default", "accept_edits", "bypass_permissions"}
+
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -108,8 +119,12 @@ func call(method string, params any) message {
 }
 
 func main() {
-	if len(os.Args) > 1 {
-		capsMode = os.Args[1]
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "modes:") {
+			modesMode = strings.TrimPrefix(a, "modes:")
+		} else {
+			capsMode = a
+		}
 	}
 
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
@@ -153,14 +168,33 @@ func handle(msg message, sessionCwd *string) {
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
 		recordSessionInitMethod(params.Cwd, "session/new")
-		respond(msg.ID, map[string]any{
+		result := map[string]any{
 			"sessionId":     sessionID,
 			"configOptions": defaultConfigOptions(),
-		})
+		}
+		if modesMode == "session" {
+			available := make([]map[string]any, len(fakeModeIDs))
+			for i, id := range fakeModeIDs {
+				available[i] = map[string]any{"id": id, "name": "Mode " + id}
+			}
+			result["modes"] = map[string]any{"currentModeId": "default", "availableModes": available}
+		}
+		respond(msg.ID, result)
+	case msg.Method == "session/set_mode":
+		var params struct {
+			ModeID string `json:"modeId"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		if !knownFakeMode(params.ModeID) {
+			writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{Code: -32602, Message: "unknown mode: " + params.ModeID}})
+			return
+		}
+		recordSessionMode(*sessionCwd, "set_mode:"+params.ModeID)
+		respond(msg.ID, map[string]any{})
 	case msg.Method == "session/load" || msg.Method == "session/resume":
 		handleResumeSession(msg, sessionCwd)
 	case msg.Method == "session/set_config_option":
-		handleSetConfigOption(msg)
+		handleSetConfigOption(msg, *sessionCwd)
 	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
 	case msg.Method == "" && len(msg.ID) > 0:
@@ -184,7 +218,7 @@ func handle(msg message, sessionCwd *string) {
 // wsapi tests can drive a real config-option round trip end to end rather
 // than asserting only against the non-ACP "not supported" path.
 func defaultConfigOptions() []map[string]any {
-	return []map[string]any{{
+	opts := []map[string]any{{
 		"configId":     "thinking-level",
 		"name":         "Thinking Level",
 		"type":         "select",
@@ -196,6 +230,44 @@ func defaultConfigOptions() []map[string]any {
 			{"value": "high", "name": "High"},
 		},
 	}}
+	if modesMode == "config" {
+		choices := make([]map[string]any, len(fakeModeIDs))
+		for i, id := range fakeModeIDs {
+			choices[i] = map[string]any{"value": id, "name": "Mode " + id}
+		}
+		opts = append(opts, map[string]any{
+			"configId":     "mode",
+			"name":         "Mode",
+			"category":     "mode",
+			"type":         "select",
+			"currentValue": "default",
+			"options":      choices,
+		})
+	}
+	return opts
+}
+
+func knownFakeMode(id string) bool {
+	for _, m := range fakeModeIDs {
+		if m == id {
+			return true
+		}
+	}
+	return false
+}
+
+// recordSessionMode appends how a mode was applied to "session-mode" in
+// cwd (one line per call).
+func recordSessionMode(cwd, line string) {
+	if cwd == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "session-mode"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(line + "\n")
 }
 
 // recordSessionInitMethod writes the method that started/resumed this

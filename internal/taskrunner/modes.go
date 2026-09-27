@@ -192,7 +192,21 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 // provider.list and for run-start validation. It never blocks on
 // discovery.
 func (r *Runner) ProviderCatalog() []ProviderInfo {
-	return SupportedProviders()
+	providers := SupportedProviders()
+	for i, p := range providers {
+		if !acpProvider(p.ID) {
+			continue
+		}
+		c, ok := r.acpCatalog(p.ID)
+		if !ok {
+			r.maybeProbeACPModes(p.ID)
+			continue
+		}
+		providers[i].Modes = append([]ModeInfo(nil), c.modes...)
+		providers[i].DefaultMode = c.defaultMode
+		providers[i].ModesDiscovered = true
+	}
+	return providers
 }
 
 // ProviderCatalogFor returns ProviderCatalog's entry for provider, and

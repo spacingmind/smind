@@ -63,7 +63,7 @@ func cmdServe(args []string) int {
 	wm := workspace.New(db)
 	wm.SetMaxDepth(cfg.Orchestration.MaxDepth)
 
-	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db))}
+	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe()}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {
 		// Testing-only hook: lets a manual/integration test point
 		// ProviderGLM turns at a fake ACP agent binary (see
