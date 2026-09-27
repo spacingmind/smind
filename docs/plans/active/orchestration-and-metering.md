@@ -163,7 +163,7 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
   MCP server (ADR-0018), so a peer can read sibling tasks. Peers still
   get no approve/deny tool (ADR-0017 decision 1).
 
-### ADR-M — smind runs through the proxy (draft; the ADR decides)
+### ADR-M — smind runs through the proxy ([ADR-0020](../../decisions/0020-runs-through-proxy.md), Proposed)
 - `task.prompt` gains an opt-in per-run `viaProxy` knob, default off,
   stored on `runs`. When on, the daemon mints a per-run bearer token
   (revoked when the run ends) and spawns:
@@ -194,7 +194,7 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
   disables some claude.ai-only features when `ANTHROPIC_AUTH_TOKEN` is
   set.
 
-### ADR-O — per-chat prompt queue (draft; the ADR decides)
+### ADR-O — per-chat prompt queue ([ADR-0021](../../decisions/0021-per-chat-prompt-queue.md), Proposed)
 - `task.prompt`/`run.start` to a chat with a running run takes
   `whenBusy`:
   - `reject` keeps today's behavior and stays the default for old
@@ -205,8 +205,12 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
     resumed session (depends on O1).
 - The queue is persisted in SQLite and survives a daemon restart.
   Paseo's restart data loss is the counter-example.
-- MCP `task_send` defaults to `queue`. `task_wait` on a chat returns
-  early when a message is queued to it, so a lead sees peer escalations.
+- MCP `task_send` defaults to `queue`. A lead that is a smind chat gets
+  peer escalations as its next turn. An external lead sees peer results
+  through `task_wait` on the peer's run; no `task_wait` change
+  (ADR-0021 §10).
+- After a daemon restart the queue is paused until a human resumes it,
+  and each chat holds at most 20 queued items (ADR-0021 §5, §7).
 - The web composer's client-side queue moves to the server queue.
   Queued items are visible, and cancellable, in every client.
 
@@ -314,8 +318,10 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [ ] O1: run provenance
 - [ ] O1: stop/resume keeps the session
 - [ ] O2: MCP parent params + guards + guide
-- [ ] ADR-M written and accepted
-- [ ] ADR-O written and accepted
+- [x] ADR-M drafted as ADR-0020 (Proposed)
+- [ ] ADR-0020 accepted
+- [x] ADR-O drafted as ADR-0021 (Proposed)
+- [ ] ADR-0021 accepted
 - [ ] ADR-M implemented
 - [ ] ADR-O implemented
 - [ ] Step 3 dogfood + gap log
