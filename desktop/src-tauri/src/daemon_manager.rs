@@ -79,16 +79,23 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
 /// configured has none either) -- see the plan's Decisions for why this
 /// also happens to make the WSL2 path exercisable outside a literal
 /// Windows target.
-fn detect_platform() -> Platform {
+///
+/// Cached in `state.daemon_manager_platform` for the app's lifetime, same
+/// as `resolve_distro` caches the distro name: it's spawning `wsl.exe`
+/// (once per call, uncached) that made every `daemon_status` poll flash a
+/// console window on Windows.
+fn detect_platform(state: &DesktopState) -> Platform {
     if cfg!(target_os = "macos") {
         return Platform::Macos;
     }
-    let has_wsl = wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false);
-    if has_wsl {
-        Platform::Wsl2
-    } else {
-        Platform::Unsupported
+    let mut cache = state.daemon_manager_platform.lock().unwrap();
+    if let Some(p) = *cache {
+        return p;
     }
+    let has_wsl = wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false);
+    let platform = if has_wsl { Platform::Wsl2 } else { Platform::Unsupported };
+    *cache = Some(platform);
+    platform
 }
 
 fn app_version_string(app: &AppHandle) -> String {
@@ -288,7 +295,7 @@ fn log_path_display(app: &AppHandle, platform: Platform, distro: Option<&str>) -
 }
 
 async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
-    let platform = detect_platform();
+    let platform = detect_platform(state);
     let app_version = app_version_string(app);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
@@ -323,7 +330,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
 }
 
 async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform();
+    let platform = detect_platform(state);
     let app_version = app_version_string(app);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
@@ -445,7 +452,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
 }
 
 async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform();
+    let platform = detect_platform(state);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
@@ -545,7 +552,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
 }
 
 async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform();
+    let platform = detect_platform(state);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
     let distro = if platform == Platform::Wsl2 { Some(resolve_distro(state)?) } else { None };
