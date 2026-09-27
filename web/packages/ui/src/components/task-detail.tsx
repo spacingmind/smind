@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { ApprovalPolicyControl } from "@/components/approval-policy-control";
+import { PermissionModeControl } from "@/components/permission-mode-control";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
@@ -18,21 +18,18 @@ import { PaneHeader } from "@/components/ui/pane-header";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { approvalPolicyLabel } from "@/lib/approval-policies";
+import { describePermission, effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, Chat, Provider, Task, ProviderListResult } from "@/lib/types";
+import type { AgentProfile, Chat, Provider, ProviderInfo, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
-/** The task header's run-config pill text (AC's "<Agent> · <Provider> · <Approval> · <Thinking>" format) -- pure so it can be unit-tested without mounting the whole pane. */
-export function runConfigPillLabel(
-  state: RunConfigState,
-  profiles: AgentProfile[],
-  providerLabels: Record<string, string>,
-): string {
+/** The task header's run-config pill text ("<Agent> · <Provider> · <Mode> · <Thinking>", the mode in the provider's own words -- ADR-0019) -- pure so it can be unit-tested without mounting the whole pane. */
+export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile[], providers: ProviderInfo[]): string {
   const agent = state.baseAgentId ? profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
   const agentSegment = agent ? agent.Name : state.custom ? "Custom" : "No agent";
-  const parts = [agentSegment, providerLabels[state.provider] ?? state.provider, approvalPolicyLabel(state.approvalPolicy)];
+  const providerLabel = providers.find((p) => p.id === state.provider)?.label ?? state.provider;
+  const parts = [agentSegment, providerLabel, describePermission(providers, state.provider, state.permissionMode, state.autoAccept)];
   if (state.provider === "claude-native") parts.push(thinkingLevelLabel(state.thinkingLevel));
   return parts.join(" · ");
 }
@@ -73,7 +70,7 @@ export function TaskDetailPane({
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
 }) {
-  const { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort } = useRunTimeline(
+  const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort } = useRunTimeline(
     client,
     task.ID,
     chat.ID,
@@ -83,7 +80,8 @@ export function TaskDetailPane({
   // header should say "Claude Code", not "claude-native". Empty until the
   // fetch resolves -- RunTimeline falls back to the raw id, its exact
   // pre-existing behavior.
-  const [providerLabels, setProviderLabels] = useState<Record<string, string>>({});
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const providerLabels = useMemo(() => Object.fromEntries(providers.map((p) => [p.id, p.label ?? p.id])), [providers]);
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
@@ -91,7 +89,7 @@ export function TaskDetailPane({
       .call<ProviderListResult>("provider.list")
       .then((result) => {
         if (cancelled) return;
-        setProviderLabels(Object.fromEntries(result.providers.map((p) => [p.id, p.label ?? p.id])));
+        setProviders(result.providers);
       })
       .catch((err) => console.error("provider.list failed, keeping raw provider ids in run headers", err));
     return () => {
@@ -208,7 +206,7 @@ export function TaskDetailPane({
                 onClick={focusToolbar}
                 className="truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
               >
-                {runConfigPillLabel(runConfigState, profiles, providerLabels)}
+                {runConfigPillLabel(runConfigState, profiles, providers)}
               </button>
             )}
           </>
@@ -333,10 +331,13 @@ export function TaskDetailPane({
         </div>
       )}
 
-      {runningRun && (runningRun.approvalPolicy === "manual" || runningRun.approvalPolicy === "auto-safe") && (
-        <ApprovalPolicyControl
-          policy={runningRun.approvalPolicy}
-          onChange={(policy) => setApprovalPolicy(runningRun.id, policy)}
+      {runningRun && supportsLiveModeSwitch(providers, runningRun.provider) && (
+        <PermissionModeControl
+          modes={providerModes(providers, runningRun.provider)}
+          mode={effectiveMode(providers, runningRun.provider, runningRun.permissionMode)}
+          autoAccept={runningRun.autoAccept}
+          showAutoAccept={supportsAutoAccept(providers, runningRun.provider)}
+          onChange={(change) => setPermissionMode(runningRun.id, change)}
         />
       )}
 

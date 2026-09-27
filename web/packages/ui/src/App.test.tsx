@@ -426,7 +426,7 @@ describe("App", () => {
       FinishedAt: "2024-01-01T00:01:00Z",
       StopReason: "",
       Err: "boom",
-      ApprovalPolicy: "manual",
+      PermissionMode: "", AutoAccept: false,
       ThinkingLevel: "",
     };
     // run.list #0 is useTaskAttention's (fired on connect, before any selection).
@@ -468,7 +468,7 @@ describe("App", () => {
         FinishedAt: null,
         StopReason: "",
         Err: "",
-        ApprovalPolicy: "manual",
+        PermissionMode: "", AutoAccept: false,
         ThinkingLevel: "",
       } satisfies RunSummary,
     ]);
@@ -1326,7 +1326,7 @@ describe("App splits (Item 6)", () => {
       FinishedAt: "2024-01-01T00:00:05Z",
       StopReason: "end_turn",
       Err: "",
-      ApprovalPolicy: "manual",
+      PermissionMode: "", AutoAccept: false,
       ThinkingLevel: "",
     };
     // run.list #0 is useTaskAttention's (on connect); #1 is the first,

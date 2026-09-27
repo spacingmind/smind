@@ -5,7 +5,9 @@ import type { PermissionResolutionReason } from "@/lib/types";
  * How a resolved permission's `reason` (ADR 0008 / task-permission-ux.md
  * Item 2) reads inline: a short label plus which `StatusBadge` tone it
  * gets. `human` reads as the calm, expected case (a person decided);
- * `auto_safe` as informational (the policy decided, not a person);
+ * `auto_accept` as informational (the run's own Auto-accept setting
+ * decided, not a person -- ADR-0019); `auto_safe` is legacy (smind's
+ * removed allowlist) and only ever comes from an older daemon;
  * `timeout` and `provider_cancellation` as worth a second look (nobody
  * decided in time, or the request vanished out from under the decider
  * before anyone could -- see
@@ -16,7 +18,8 @@ import type { PermissionResolutionReason } from "@/lib/types";
  */
 export const PERMISSION_REASON_LABEL: Partial<Record<PermissionResolutionReason, { label: string; status: StatusBadgeStatus }>> = {
   human: { label: "You approved", status: "success" },
-  auto_safe: { label: "Auto-approved", status: "running" },
+  auto_accept: { label: "Auto-accepted", status: "running" },
+  auto_safe: { label: "Auto-approved (legacy)", status: "running" },
   timeout: { label: "Timed out", status: "warning" },
   provider_cancellation: { label: "Cancelled by provider", status: "warning" },
 };

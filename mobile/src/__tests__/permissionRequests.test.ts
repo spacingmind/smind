@@ -65,7 +65,7 @@ describe('PermissionBoard (event/reducer behavior)', () => {
     expect(board.list()).toHaveLength(1);
   });
 
-  it('a permission_resolved event resolves an unanswered request regardless of origin (concurrent auto-safe resolution)', () => {
+  it('a permission_resolved event resolves an unanswered request regardless of origin (concurrent auto-accept resolution)', () => {
     const board = new PermissionBoard();
     board.requestReceived('run-1', REQ);
     expect(board.list()[0].status).toBe('pending');
@@ -87,7 +87,7 @@ describe('PermissionBoard (event/reducer behavior)', () => {
     board.choose('perm-1', 'allow'); // the tap
     feedPermissionEvent(board, 'run-1', 'permission_resolved', {
       requestId: 'perm-1',
-      optionId: 'deny', // an auto-safe timeout landed first server-side
+      optionId: 'deny', // a timeout landed first server-side
       reason: 'timeout',
     });
     expect(board.list()[0].resolvedWith).toEqual({ optionId: 'deny', by: 'event' });

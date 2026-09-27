@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 
 import { GitCompare } from "lucide-react";
 
-import { resolveNextApprovalPolicy } from "@/components/composer/approval-policy-cycle";
+import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
@@ -11,8 +11,8 @@ import { Button } from "@/components/ui/button";
 import { type DiffStat } from "@/lib/diff-stat";
 import type {
   AgentProfile,
-  ApprovalPolicy,
   ConfigOptionParams,
+  PermissionSettings,
   Provider,
   ProviderInfo,
   ProviderListResult,
@@ -74,7 +74,7 @@ function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
  * The task composer (ui-redesign-parity Item 10, reshaped to the input
  * card anatomy by web-ui-dogfood-polish Item 5): one rounded card whose
  * top is the autogrowing prompt textarea and whose bottom edge is the
- * toolbar (compact provider/approval-policy selects, Stop/Send), with the
+ * toolbar (compact provider/permission-mode selects, Stop/Send), with the
  * task's diff-stat pill sitting above the card. The only affordances
  * shown are ones that work -- no attachment "+" placeholder until
  * attachments exist.
@@ -124,7 +124,7 @@ export function Composer({
   onSubmit: (
     provider: Provider,
     prompt: string,
-    approvalPolicy: ApprovalPolicy,
+    permission: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
   ) => Promise<void>;
   onStop: (runId: string) => Promise<void>;
@@ -143,7 +143,7 @@ export function Composer({
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
-  // ADR-0014's Profiles picker: a named provider/approvalPolicy/
+  // ADR-0014's Profiles picker: a named provider/permissionMode/
   // thinkingLevel bundle a user applies in one click. Empty when the
   // daemon has none (a fresh install, or client.call failing) -- the
   // control below renders nothing in that case, so the composer's
@@ -154,9 +154,10 @@ export function Composer({
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.
   const [runConfig, setRunConfig] = useState<RunConfigContextValue | null>(null);
-  const { provider, approvalPolicy, thinkingLevel } = runConfig?.state ?? {
+  const { provider, permissionMode, autoAccept, thinkingLevel } = runConfig?.state ?? {
     provider: "claude-native" as Provider,
-    approvalPolicy: "manual" as ApprovalPolicy,
+    permissionMode: "",
+    autoAccept: false,
     thinkingLevel: "" as ThinkingLevel,
   };
   const [submitting, setSubmitting] = useState(false);
@@ -214,7 +215,12 @@ export function Composer({
       setSubmitting(true);
       setFormError(null);
       try {
-        await onSubmit(provider, text, approvalPolicy, provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined);
+        await onSubmit(
+          provider,
+          text,
+          { permissionMode, autoAccept },
+          provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined,
+        );
         return true;
       } catch (err) {
         setFormError(err instanceof Error ? err.message : String(err));
@@ -223,7 +229,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, approvalPolicy, thinkingLevel],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel],
   );
 
   // draft is a fresh object every render (it closes over the current
@@ -294,14 +300,14 @@ export function Composer({
     }
     // AC7 of docs/plans/active/web-keyboard-tabs.md, ported from Paseo's
     // Shift+Tab mode cycle (composer/agent-controls/mode.ts): cycles the
-    // same approvalPolicy the toolbar's own Select controls, so the
+    // same permission mode the toolbar's own Select controls, so the
     // Select re-rendering with the new value *is* the visible feedback --
     // no separate indicator to keep in sync.
     if (e.key === "Tab" && e.shiftKey && !inactive) {
-      const next = resolveNextApprovalPolicy(runConfig?.meta.approvalPolicies ?? [], approvalPolicy);
+      const next = resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
       if (next) {
         e.preventDefault();
-        runConfig?.actions.setApprovalPolicy(next);
+        runConfig?.actions.setPermissionMode(next);
       }
     }
   }
@@ -403,7 +409,7 @@ export function Composer({
           >
             <RunConfigToolbar.Agent />
             <RunConfigToolbar.Provider />
-            <RunConfigToolbar.Approval />
+            <RunConfigToolbar.Mode />
             <RunConfigToolbar.Thinking />
             {configOptions && (
               <RunConfigOptions

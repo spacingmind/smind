@@ -1,5 +1,5 @@
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { ApprovalPolicy, Provider, ThinkingLevel } from "@/lib/types";
+import type { Provider, ThinkingLevel } from "@/lib/types";
 
 /** localStorage key for one chat's run-config toolbar state (ADR-0016 P3: `smind:run-config:${taskId}:${chatId}`, replacing the old per-task-only key) -- same per-key shape as use-composer-draft.ts's draftStorageKey (docs/design.md §9). */
 export function runConfigStorageKey(taskId: number, chatId: number): string {
@@ -12,19 +12,35 @@ function legacyRunConfigStorageKey(taskId: number): string {
 }
 
 const PROVIDERS: readonly Provider[] = ["claude-native", "glm", "kimi", "codex-native"];
-const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ["manual", "auto-safe", "full-access"];
 const THINKING_LEVEL_VALUES: readonly ThinkingLevel[] = ["", "off", "standard", "extended"];
 
-function isRunConfigState(value: unknown): value is RunConfigState {
-  if (typeof value !== "object" || value === null) return false;
+/**
+ * Validates a stored value, migrating the pre-ADR-0019 shape on the way:
+ * a legacy `approvalPolicy` (manual/auto-safe/full-access) is dropped, and
+ * the state loads with the provider's own default mode ("") and
+ * autoAccept off -- never mapped, since a stale choice can only narrow
+ * back to asking a human, never widen (W2). Any other invalid field still
+ * rejects the whole value.
+ */
+function toRunConfigState(value: unknown): RunConfigState | null {
+  if (typeof value !== "object" || value === null) return null;
   const v = value as Record<string, unknown>;
-  return (
+  const legacy = "approvalPolicy" in v;
+  const valid =
     (v.baseAgentId === null || typeof v.baseAgentId === "string") &&
     typeof v.custom === "boolean" &&
     PROVIDERS.includes(v.provider as Provider) &&
-    APPROVAL_POLICIES.includes(v.approvalPolicy as ApprovalPolicy) &&
-    THINKING_LEVEL_VALUES.includes(v.thinkingLevel as ThinkingLevel)
-  );
+    THINKING_LEVEL_VALUES.includes(v.thinkingLevel as ThinkingLevel) &&
+    (legacy || (typeof v.permissionMode === "string" && typeof v.autoAccept === "boolean"));
+  if (!valid) return null;
+  return {
+    baseAgentId: v.baseAgentId as string | null,
+    custom: v.custom as boolean,
+    provider: v.provider as Provider,
+    permissionMode: legacy ? "" : (v.permissionMode as string),
+    autoAccept: legacy ? false : (v.autoAccept as boolean),
+    thinkingLevel: v.thinkingLevel as ThinkingLevel,
+  };
 }
 
 function readKey(key: string): RunConfigState | null {
@@ -32,7 +48,7 @@ function readKey(key: string): RunConfigState | null {
     const raw = window.localStorage.getItem(key);
     if (raw === null) return null;
     const parsed: unknown = JSON.parse(raw);
-    return isRunConfigState(parsed) ? parsed : null;
+    return toRunConfigState(parsed);
   } catch {
     return null;
   }

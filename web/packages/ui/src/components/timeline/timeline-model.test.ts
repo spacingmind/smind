@@ -102,7 +102,7 @@ describe("appendTimelineEvent", () => {
   });
 
   describe("permission_resolved", () => {
-    it.each(["human", "auto_safe", "timeout"] as const)("records reason %s as its own permission item", (reason) => {
+    it.each(["human", "auto_accept", "auto_safe", "timeout"] as const)("records reason %s as its own permission item", (reason) => {
       const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason }]);
 
       expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "r1", optionId: "allow-1", reason }]);

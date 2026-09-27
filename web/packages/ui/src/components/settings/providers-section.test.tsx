@@ -64,7 +64,7 @@ async function chooseMenuItem(rowId: number, name: string) {
 }
 
 function run(id: string, provider: string, status: RunSummary["Status"]): RunSummary {
-  return { ID: id, TaskID: 0, ChatID: 0, Provider: provider as RunSummary["Provider"], Prompt: "", Status: status, StartedAt: "", FinishedAt: null, StopReason: "", Err: "", ApprovalPolicy: "manual", ThinkingLevel: "" };
+  return { ID: id, TaskID: 0, ChatID: 0, Provider: provider as RunSummary["Provider"], Prompt: "", Status: status, StartedAt: "", FinishedAt: null, StopReason: "", Err: "", PermissionMode: "", AutoAccept: false, ThinkingLevel: "" };
 }
 
 /** Renders the section with account.list and provider.list already resolved, so structure assertions need no extra flushing. */
