@@ -133,19 +133,21 @@ agent (small, independently reviewable steps; each should end with
 3. **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
    confirms the run actually started.
-4. **`task_wait`**: the one genuinely new piece of logic -- implements
+4. [x] **`task_wait`**: the one genuinely new piece of logic -- implements
    the blocking-with-timeout/early-return-on-permission behavior
    client-side in the `smind mcp serve` process (no new `wsapi` RPC). Tests:
    the three `task_wait` scenarios above (happy path, early return on
-   permission, timeout).
-5. **`task_stop`**: thin wrapper, one test.
+   permission, timeout): `TestMCPTools_TaskWait_HappyPath`,
+   `TestMCPTools_TaskWait_EarlyReturnOnPendingPermission`,
+   `TestMCPTools_TaskWait_Timeout`.
+5. [x] **`task_stop`**: thin wrapper, one test: `TestMCPTools_TaskStop`.
 6. [x] ~~Config flag + gated approval tools~~ -- dropped (ADR-0017
    resolved decision 1). Instead: `TestMCPTools_NoApprovalToolInCatalog`
    asserts `tools/list` contains the seven read-only/simple tools and no
    approve/deny/respondPermission tool.
-7. **MCP protocol round-trip test**: add the end-to-end stdio test
+7. [x] **MCP protocol round-trip test**: add the end-to-end stdio test
    scenario once enough tools exist to make it meaningful (after step 3
-   or 4).
+   or 4). `TestMCPServe_StdioRoundTrip`.
 8. **Docs**: update `AGENTS.md`'s workspace map / README if `smind mcp serve`
    needs a one-line mention for discoverability (does not need its own
    doc page beyond the ADR + this plan).
@@ -153,8 +155,8 @@ agent (small, independently reviewable steps; each should end with
 ## Validation
 
 Steps 1-2 (the read-only/simple tool set) validated as follows; the
-task_send/task_wait/task_stop scenarios (AC3's remaining rows) land with
-steps 3-5:
+task_wait/task_stop scenarios (AC3's remaining rows, task_send excepted --
+deferred to ADR-0019) land with steps 4-5:
 
 - AC1 (subcommand starts over stdio, blocks until stdin closes/signal):
   `cmdMcpServe` runs the SDK's stdio transport under a signal context;
@@ -184,10 +186,35 @@ steps 3-5:
 - AC6 (`task test`/`task lint` green): confirmed on this branch's
   commit (feat(cli): add `smind mcp serve` with read-only MCP tools).
 - AC7 (no approval tool in `tools/list`):
-  `TestMCPTools_NoApprovalToolInCatalog`.
+  `TestMCPTools_NoApprovalToolInCatalog` (now also asserting `task_wait`/
+  `task_stop` are present, alongside the original seven).
+
+Steps 4-5 (`task_wait`/`task_stop`) validated against AC3's remaining
+`task_wait`/`task_stop` rows -- runs started directly via `run.start` (not
+`task_send`, which is deferred to ADR-0019) on the same fake-agent-backed
+test daemon:
+
+- `task_wait` happy path (run finishes normally within the timeout, no
+  pending permission, `timedOut: false`, `task_logs` afterward shows the
+  same finished transcript): `TestMCPTools_TaskWait_HappyPath`.
+- `task_wait` early return on pending permission (a "permission" scenario
+  run raises a real request; `task_wait` returns well before its 10s
+  timeout with `pendingPermission` populated and a non-terminal status;
+  `task_permissions` on the same `runId` shows the same request):
+  `TestMCPTools_TaskWait_EarlyReturnOnPendingPermission`.
+- `task_wait` timeout (a "hang" scenario run never finishes; `task_wait`
+  with `timeoutSeconds: 1` returns `{timedOut: true}` with no error,
+  bounded well under the tool's real 120s default):
+  `TestMCPTools_TaskWait_Timeout`.
+- `task_stop` (stopping a "hang" scenario run's still-running turn; a
+  subsequent `task_status` shows the terminal `stopped` status):
+  `TestMCPTools_TaskStop`.
 
 MCP protocol round-trip (initialize -> tools/list -> tools/call): every
-test above drives the SDK's real client session against the real server
-implementation over an in-memory transport, which is the same
-framing/schema path the stdio transport uses; the dedicated stdio
-subprocess round-trip test is still step 7.
+test above (and every earlier-steps test) drives the SDK's real client
+session against the real server implementation over an in-memory
+transport, which is the same framing/schema path the stdio transport uses.
+Step 7's dedicated test runs the actual compiled `smind mcp serve` binary
+as a subprocess over real stdio (the SDK's `CommandTransport`) against the
+same fake-agent-backed daemon, exercising `initialize` -> `tools/list` ->
+one `tools/call` (`task_new`) end to end: `TestMCPServe_StdioRoundTrip`.
