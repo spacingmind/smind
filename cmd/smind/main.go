@@ -81,6 +81,12 @@ Usage:
   smind task new <workspaceId> <title> [--space <id>]     create a task, optionally scoped to a space
   smind task ls <workspaceId>                              list a workspace's tasks
   smind task send <taskId> <provider> <prompt>            start a run, stream it (Ctrl+C to detach)
+                                                           [--chat <chatId>] [--approval-policy manual|auto-safe]
+  smind task runs <taskId> [--chat <chatId>]              list a task's runs, optionally per chat
+  smind task chat ls <taskId> [--all]                     list a task's chats (ID, title, provider, archived)
+  smind task chat new <taskId> [title]                    create a chat
+  smind task chat rename <chatId> <title>                 rename a chat
+  smind task chat archive <chatId>                        archive a chat
   smind task attach <runId>                                stream a run (Ctrl+C to detach)
   smind task logs <runId> [-f|--follow] [--tail N]        show (or follow) a run's history
   smind task stop <runId>                                  stop a running run

@@ -145,7 +145,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|attach|logs|stop|permissions|approve|options|set-option|chat> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|options|set-option|chat> ...")
 		return 2
 	}
 	switch args[0] {
@@ -155,6 +155,8 @@ func cmdTask(args []string) int {
 		return cmdTaskList(args[1:])
 	case "send":
 		return cmdTaskSend(args[1:])
+	case "runs":
+		return cmdTaskRuns(args[1:])
 	case "attach":
 		return cmdTaskAttach(args[1:])
 	case "logs":
@@ -1139,5 +1141,99 @@ func cmdTaskChatArchive(args []string) int {
 		return 1
 	}
 	fmt.Printf("chat %d archived\n", chat.ID)
+	return 0
+}
+
+// cmdTaskRunsUsage is printed on any argument error in cmdTaskRuns.
+const cmdTaskRunsUsage = "usage: smind task runs <taskId> [--chat <chatId>]"
+
+// runSummaryRow is one entry of a run.list result -- the CLI-side mirror
+// of runs.RunSummary's wire shape (bare Go field names, same convention
+// as chatRow; see internal/wsapi/chat_test.go's runStatusForTest).
+type runSummaryRow struct {
+	ID         string
+	TaskID     int64
+	ChatID     int64
+	Provider   string
+	Prompt     string
+	Status     string
+	StartedAt  time.Time
+	StopReason string
+}
+
+// cmdTaskRuns lists a task's runs, most recent first (run.list's own
+// ordering). --chat narrows it to one chat of the task. run.list filters
+// server-side by chatId only, so the taskId restriction is applied here,
+// client-side, over the same single response -- with --chat given, the
+// chat already belongs to exactly one task, so the two filters agree.
+func cmdTaskRuns(args []string) int {
+	var taskIDArg, chatArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--chat":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskRunsUsage)
+				return 2
+			}
+			i++
+			chatArg = args[i]
+		case strings.HasPrefix(a, "--chat="):
+			chatArg = strings.TrimPrefix(a, "--chat=")
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "task runs: unknown flag %q\n", a)
+			fmt.Fprintln(os.Stderr, cmdTaskRunsUsage)
+			return 2
+		case taskIDArg == "":
+			taskIDArg = a
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskRunsUsage)
+			return 2
+		}
+	}
+	if taskIDArg == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskRunsUsage)
+		return 2
+	}
+	taskID, err := parseInt64(taskIDArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task runs: invalid taskId %q: %v\n", taskIDArg, err)
+		return 2
+	}
+	var chatID int64
+	if chatArg != "" {
+		chatID, err = parseInt64(chatArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task runs: invalid --chat value %q: %v\n", chatArg, err)
+			return 2
+		}
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	params := map[string]any{}
+	if chatID != 0 {
+		params["chatId"] = chatID
+	}
+	var all []runSummaryRow
+	if err := client.Call(context.Background(), "run.list", params, &all); err != nil {
+		fmt.Fprintf(os.Stderr, "task runs: %v\n", err)
+		return 1
+	}
+
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tCHAT\tPROVIDER\tSTATUS")
+	for _, r := range all {
+		if r.TaskID != taskID {
+			continue
+		}
+		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, r.Status)
+	}
+	tw.Flush()
 	return 0
 }

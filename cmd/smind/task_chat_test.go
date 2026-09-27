@@ -323,3 +323,69 @@ func TestTaskChat_ErrorSurfacesDaemonRejection(t *testing.T) {
 func collapseSpaces(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
+
+// TestTaskRuns_ListsAndFiltersByChat proves `task runs <taskId>` lists
+// the task's runs (all chats) and `--chat <id>` narrows to that chat --
+// run.list's P1.4 filter surfaced in the CLI.
+func TestTaskRuns_ListsAndFiltersByChat(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+
+	client := dialTestClient(t, srvURL)
+	taskID := newTestRepoTask(t, client)
+
+	var second chatForTest
+	if err := client.Call(context.Background(), "chat.create", map[string]any{"taskId": taskID, "title": "Second"}, &second); err != nil {
+		t.Fatalf("chat.create: %v", err)
+	}
+	// One run on each chat.
+	if code := runTaskSend(t, taskID, 0); code != 0 {
+		t.Fatalf("send to default chat = %d, want 0", code)
+	}
+	if code := runTaskSend(t, taskID, second.ID); code != 0 {
+		t.Fatalf("send to second chat = %d, want 0", code)
+	}
+
+	taskArg := strconv.FormatInt(taskID, 10)
+	code, out := runCaptured(t, []string{"task", "runs", taskArg})
+	if code != 0 {
+		t.Fatalf("run(task runs) = %d, want 0", code)
+	}
+	rows := collapseSpaces(out)
+	if want := "ID CHAT PROVIDER STATUS"; !strings.Contains(rows, want) {
+		t.Fatalf("task runs output = %q, want header %q", out, want)
+	}
+	// Run ids are bare hex; count data rows by provider mentions instead
+	// (the header and both rows carry "glm").
+	if got := strings.Count(rows, "glm"); got != 2 {
+		t.Fatalf("task runs = %q, want 2 run rows (got %d glm mentions)", out, got)
+	}
+
+	secondArg := "--chat=" + strconv.FormatInt(second.ID, 10)
+	code, out = runCaptured(t, []string{"task", "runs", taskArg, secondArg})
+	if code != 0 {
+		t.Fatalf("run(task runs --chat) = %d, want 0", code)
+	}
+	rows = collapseSpaces(out)
+	if got := strings.Count(rows, "glm"); got != 1 {
+		t.Fatalf("task runs --chat = %q, want 1 run row (got %d glm mentions)", out, got)
+	}
+	if !strings.Contains(rows, strconv.FormatInt(second.ID, 10)) {
+		t.Fatalf("task runs --chat = %q, want the second chat's id in its row", out)
+	}
+}
+
+// TestTaskRuns_BadArgs pins the usage/exit-code contract.
+func TestTaskRuns_BadArgs(t *testing.T) {
+	for _, args := range [][]string{
+		{"task", "runs"},
+		{"task", "runs", "not-a-number"},
+		{"task", "runs", "1", "--chat", "not-a-number"},
+	} {
+		if code, _ := runCaptured(t, args); code != 2 {
+			t.Errorf("run(%v) = %d, want 2", args, code)
+		}
+	}
+}
