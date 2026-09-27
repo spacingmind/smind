@@ -26,8 +26,20 @@ ruleset), forcing squash promotions that blind release-please.
   fast-forward-master must not be blocked.
 - Default branch: `develop` (if not already).
 
-## Validation
+## Validation (done)
 
-- YAML parses; release PR opened by release-please on the next develop
-  push (expected: release v0.8.0 covering the 187 stuck commits, with
-  binaries attached for the first time) is the end-to-end proof.
+- PR #218 merged; first develop push after it: release-please opened
+  PR #219 `chore(develop): release 0.8.0` covering all 187 stuck
+  commits with a full changelog + 4-file desktop version bump.
+- Default branch changed master -> develop (the action reads config
+  from the default branch; while it was master the run still targeted
+  `master`).
+- PR #219's CI needed a manual workflow approve (`action_required` —
+  bot-authored PR), then merged: tag v0.8.0 + GitHub Release with all
+  7 assets (4 tar.gz, setup.exe, msi, checksums.txt) — the first
+  release in repo history to ship binaries.
+- fast-forward-master initially failed on the old master ruleset
+  (linear history + PR-only: develop's merge commits can never satisfy
+  it); ruleset reduced to deletion + non_fast_forward, then master
+  fast-forwarded to v0.8.0 by hand. Subsequent releases exercise the
+  job unattended.
