@@ -17,25 +17,30 @@ before opening a PR.
 
 ## Branching model
 
-- **`master` is release-only.** It only receives merges via PR from
-  `develop`, and those merges trigger `release-please` (version bump +
-  changelog from Conventional Commits) and a GitHub Release. Don't open
-  PRs directly against `master`.
-- **`develop` is the integration branch.** Base your feature/fix branch on
-  `develop` and open your PR against `develop`.
-- **After every release, `master`'s release-please commit (version bump +
-  `CHANGELOG.md`) gets synced back into `develop` automatically**
-  (`.github/workflows/sync-develop.yml`, triggered on push to `master`) —
-  it opens a `chore: sync develop with master after vX.Y.Z release` PR
-  against `develop` for a maintainer to merge (a real merge commit, not
-  squash/rebase, so the two branches keep verifiable shared history).
-  **Merge that PR before doing the next `develop -> master` promotion.**
-  Skipping it is exactly what caused a real incident (v0.6.0 -> v0.7.0:
-  the promotion silently reverted the previous release's manifest/
-  changelog, see PR #135/#136/#137) — `ci.yml`'s
-  `check-release-metadata.sh` step now fails a `develop -> master` PR
-  outright if its manifest version or changelog would regress master's,
-  as a second line of defense.
+- **`develop` is the single integration branch.** Base your feature/fix
+  branch on `develop` and open your PR against `develop`.
+- **Releases happen on `develop`.** release-please opens
+  `chore(develop): release X.Y.Z` PRs against `develop` (version bump +
+  changelog from Conventional Commits); merging one creates the `vX.Y.Z`
+  tag + GitHub Release, builds the binaries, and attaches them.
+- **`master` is a read-only pointer to the latest release** — the
+  release workflow fast-forwards it to each release tag. Never open PRs
+  against it and never push to it directly.
+- Don't push tags by hand; the release PR is the only path to a tag.
+
+### History (why this shape)
+
+The earlier model — a release-only `master` promoted from `develop`,
+synced back by a workflow — broke twice for real: the v0.6.0→v0.7.0
+metadata clobber (PR #135/#136/#137), and then a structural stall:
+sync-develop's own merge commits made `develop` impossible to
+rebase-merge onto master (whose ruleset only allowed rebase), forcing a
+125-commit squash promotion that left release-please blind ("No user
+facing commits") with 187 commits stuck unreleased. The guards that
+existed only patched the first failure. Single-branch releases remove
+the failure mode instead of guarding it: the release commit lands on
+`develop` and can't be clobbered by a promotion that no longer exists.
+Full analysis: `docs/release-model-review.md`.
 
 ## Conventional Commits
 
@@ -51,7 +56,8 @@ must follow [Conventional Commits](https://www.conventionalcommits.org/):
   release-please excludes from the changelog
 
 Individual commits on your feature branch don't need to follow this
-strictly, but the PR title does.
+strictly, but the PR title does — it feeds the release PR's version
+bump and the changelog.
 
 ## Plan docs for nontrivial changes
 

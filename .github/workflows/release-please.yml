@@ -1,14 +1,19 @@
-# Runs on every push to `master` -- which, under this repo's branching
-# model, only happens when a `develop` -> `master` release PR is merged
-# (feature work lands on `develop` via PR first; `master` is release-only,
-# see CONTRIBUTING.md).
+# Runs on every push to `develop`, the single integration branch (see
+# CONTRIBUTING.md and docs/release-model-review.md for why the old
+# release-only `master` + sync-back model was dropped: it stalled the
+# pipeline for real -- sync-develop's own merge commits made develop
+# un-rebaseable, forcing a 125-commit squash promotion that left
+# release-please blind, "No user facing commits", 187 commits stuck).
 #
 # release-please inspects Conventional Commits (feat:/fix:/BREAKING CHANGE)
 # accumulated since the last release, and either:
-#   - opens/updates a "chore(master): release X.Y.Z" PR containing the
-#     version bump + CHANGELOG.md, if there's nothing to release yet, or
-#   - once that release PR is itself merged, creates the vX.Y.Z git tag
-#     and a GitHub Release.
+#   - opens/updates a "chore(develop): release X.Y.Z" PR against `develop`
+#     containing the version bump + CHANGELOG.md, or
+#   - once that release PR is merged, creates the vX.Y.Z git tag and a
+#     GitHub Release -- both on `develop`, where the commits live.
+#     The release commit can't be clobbered by a later promotion (there
+#     are no promotions anymore), which is why sync-develop.yml and
+#     ci.yml's release-metadata guard are gone.
 #
 # When it does create a release, the jobs below build cross-platform smind
 # daemon binaries (linux/darwin x amd64/arm64, CGO_ENABLED=0, web UI
@@ -29,7 +34,7 @@ name: release-please
 
 on:
   push:
-    branches: [master]
+    branches: [develop]
   workflow_dispatch:
 
 permissions:
@@ -203,3 +208,35 @@ jobs:
           shopt -s nullglob
           assets=(*.tar.gz *.exe *.msi checksums.txt)
           gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
+
+  # Keeps `master` meaningful as "the code that has been released": after
+  # a real release's assets are attached, fast-forward master to the tag.
+  # `master` is never a merge target anymore (that was the old model's
+  # fatal coupling), so there is nothing to sync back -- this pointer is
+  # the whole job. Refuses to move master if it has diverged from the
+  # tag's history rather than force anything.
+  fast-forward-master:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true' && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Fast-forward master to the release tag
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          if ! git merge-base --is-ancestor origin/master "$TAG"; then
+            echo "::error::origin/master has diverged from $TAG's history -- refusing to move it; resolve by hand"
+            exit 1
+          fi
+          git push origin "$TAG:refs/heads/master"
+          echo "master fast-forwarded to $TAG"

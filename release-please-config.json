@@ -27,7 +27,8 @@
           "type": "generic",
           "path": "desktop/daemon-client/Cargo.toml"
         }
-      ]
+      ],
+      "target-branch": "develop"
     }
   }
 }
