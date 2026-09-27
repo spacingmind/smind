@@ -121,12 +121,12 @@ question is unresolved.
 
 ## Progress
 
-Not started. Suggested step order for a cheaper implementation agent (each
-step should be small enough to review independently; steps 1-4 have no
-open-question dependency and can start as soon as the ADR's data-model
-section is accepted):
+Suggested step order for a cheaper implementation agent (each step should
+be small enough to review independently; steps 1-4 have no open-question
+dependency and can start as soon as the ADR's data-model section is
+accepted):
 
-1. **Store + registry.** `store.McpServer`, `schema.sql`'s `mcp_servers`
+1. [x] **Store + registry.** `store.McpServer`, `schema.sql`'s `mcp_servers`
    table (+ `workspace_mcp_servers`, resolved decision 3),
    `internal/store/mcp_servers.go` CRUD, `internal/mcpservers.Registry`
    with validation, unit tests. No wsapi, no runner wiring yet.
@@ -165,6 +165,31 @@ section is accepted):
 
 ## Validation
 
-Not started — to be filled in per Acceptance Criterion as each is
-satisfied, per the plan skill's convention (which test/manual check
-confirmed it, not just "tests pass").
+- AC1 (store CRUD): `internal/store/mcp_servers_test.go` —
+  `TestStore_McpServers` (stdio + http round-trips incl. args/env/url/
+  headers), `TestStore_ListMcpServersEmpty` (non-nil empty),
+  `TestStore_UpdateMcpServer` (full-record replace, createdAt preserved,
+  updatedAt advanced) + `...Missing`, `TestStore_DeleteMcpServer` (incl.
+  workspace-restriction-row cascade) + `...Missing`,
+  `TestStore_SetMcpServerEnabled` (+`...Missing`, other fields untouched).
+  Name uniqueness is enforced by the `mcp_servers.name UNIQUE` constraint
+  and surfaced as `store.ErrMcpServerNameConflict` (not a raw SQL error):
+  `TestStore_CreateMcpServerDuplicateName`, `TestStore_UpdateMcpServerDuplicateName`.
+  Pre-existing databases get both tables from schema.sql's `CREATE TABLE
+  IF NOT EXISTS` on next Open — `TestOpen_McpServersTableOnPreExistingDatabase`
+  (no migrate.go entry needed; new tables, not new columns — same
+  precedent ADR-0014 recorded). Verified green: `task test`, `task lint`.
+- AC2 (registry validation): `internal/mcpservers/registry_test.go` —
+  rejects empty name / unknown transport / stdio without command / http or
+  sse without url (table test), accepts the ADR's Playwright stdio example
+  and a valid http row, `Update` applies the same validation,
+  duplicate-name create surfaces `store.ErrMcpServerNameConflict`,
+  `SetEnabled` round-trips, disabled rows stay in `List` but vanish from
+  `ListForWorkspace`. Notifier shape (fired on create/update/delete and
+  SetEnabled, silent on nil/failed mutations) mirrors internal/profiles.
+- Workspace-restriction test scenario (schema + filter half; the
+  run-plumbing half lands with step 3):
+  `TestStore_McpServersForWorkspace` — restricted server included only for
+  its workspace, unrestricted server included everywhere, disabled servers
+  never returned, un-restrict makes a server global again.
+- ACs 3-10: not started (steps 2-8).

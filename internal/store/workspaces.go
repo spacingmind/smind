@@ -76,6 +76,9 @@ func (s *Store) DeleteWorkspace(id int64) error {
 	if _, err := s.db.Exec(`DELETE FROM workspace_accounts WHERE workspace_id = ?`, id); err != nil {
 		return fmt.Errorf("delete workspace %d: delete workspace accounts: %w", id, err)
 	}
+	if _, err := s.db.Exec(`DELETE FROM workspace_mcp_servers WHERE workspace_id = ?`, id); err != nil {
+		return fmt.Errorf("delete workspace %d: delete workspace mcp server restrictions: %w", id, err)
+	}
 	spaces, err := s.ListSpacesByWorkspace(id)
 	if err != nil {
 		return fmt.Errorf("delete workspace %d: %w", id, err)
