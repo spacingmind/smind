@@ -29,6 +29,9 @@ const (
 	TopicTaskUpdated       = "task.updated"
 	TopicTaskArchived      = "task.archived"
 	TopicTaskDeleted       = "task.deleted"
+	TopicChatCreated       = "chat.created"
+	TopicChatUpdated       = "chat.updated"
+	TopicChatArchived      = "chat.archived"
 	TopicProfileCreated    = "profile.created"
 	TopicProfileUpdated    = "profile.updated"
 	TopicProfileDeleted    = "profile.deleted"
@@ -50,6 +53,9 @@ var knownTopics = map[string]bool{
 	TopicTaskUpdated:       true,
 	TopicTaskArchived:      true,
 	TopicTaskDeleted:       true,
+	TopicChatCreated:       true,
+	TopicChatUpdated:       true,
+	TopicChatArchived:      true,
 	TopicProfileCreated:    true,
 	TopicProfileUpdated:    true,
 	TopicProfileDeleted:    true,
@@ -152,6 +158,29 @@ type taskDeletedPayload struct {
 	ID          int64  `json:"id"`
 	WorkspaceID int64  `json:"workspaceId"`
 	SpaceID     *int64 `json:"spaceId"`
+}
+
+// Chat lifecycle event payloads (ADR 0016, following ADR 0009's shape):
+// created/updated/archived all carry the full store entity -- a chat is
+// archived, never deleted, so unlike task.deleted there is no delete
+// variant to define.
+
+// chatCreatedPayload is the payload of chat.created events:
+// {chat: store.Chat}.
+type chatCreatedPayload struct {
+	Chat store.Chat `json:"chat"`
+}
+
+// chatUpdatedPayload is the payload of chat.updated events (a rename):
+// {chat: store.Chat}.
+type chatUpdatedPayload struct {
+	Chat store.Chat `json:"chat"`
+}
+
+// chatArchivedPayload is the payload of chat.archived events:
+// {chat: store.Chat}.
+type chatArchivedPayload struct {
+	Chat store.Chat `json:"chat"`
 }
 
 // Agent-profile lifecycle event payloads (ADR 0014), shaped the same way as

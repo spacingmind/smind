@@ -160,6 +160,18 @@ func (b busWorkspaceNotifier) NotifyTaskDeleted(id, workspaceID int64, spaceID *
 	b.bus.Publish(Event{Topic: TopicTaskDeleted, Payload: taskDeletedPayload{ID: id, WorkspaceID: workspaceID, SpaceID: spaceID}})
 }
 
+func (b busWorkspaceNotifier) NotifyChatCreated(c store.Chat) {
+	b.bus.Publish(Event{Topic: TopicChatCreated, Payload: chatCreatedPayload{Chat: c}})
+}
+
+func (b busWorkspaceNotifier) NotifyChatUpdated(c store.Chat) {
+	b.bus.Publish(Event{Topic: TopicChatUpdated, Payload: chatUpdatedPayload{Chat: c}})
+}
+
+func (b busWorkspaceNotifier) NotifyChatArchived(c store.Chat) {
+	b.bus.Publish(Event{Topic: TopicChatArchived, Payload: chatArchivedPayload{Chat: c}})
+}
+
 // busAccountNotifier adapts the shared event bus to accounts.Notifier,
 // translating each Registry lifecycle notification into its ADR-0015 wire
 // payload -- the accountResult snapshot for account.updated (never a bare

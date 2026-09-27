@@ -47,6 +47,14 @@ type Notifier interface {
 	NotifyTaskUpdated(t store.Task)
 	NotifyTaskArchived(t store.Task)
 	NotifyTaskDeleted(id, workspaceID int64, spaceID *int64)
+
+	// Chat lifecycle topics (docs/decisions/0016-multiple-chats-per-task.md,
+	// following ADR 0009's own create/update/archive shape -- a chat, like
+	// a task, is archived rather than deleted, so there is no
+	// NotifyChatDeleted).
+	NotifyChatCreated(c store.Chat)
+	NotifyChatUpdated(c store.Chat)
+	NotifyChatArchived(c store.Chat)
 }
 
 // SetNotifier registers n. Nil-safe: notifications with no notifier

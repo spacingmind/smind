@@ -60,6 +60,19 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string) (s
 		n.NotifyTaskCreated(t)
 	}
 	m.notifyTask(t)
+
+	// Every task needs at least one chat for task.prompt/run.start's
+	// "omitted chatId" resolution (DefaultChat) to find -- see
+	// docs/decisions/0016-multiple-chats-per-task.md. A failure here would
+	// leave a chat-less task behind (the worktree and task row above are
+	// already committed), so it's surfaced rather than swallowed, but
+	// nothing rolls back: the same "no store transactions" tradeoff
+	// CreateWorkspace's own doc comment already documents for this
+	// codebase.
+	if _, err := m.createDefaultChat(t.ID); err != nil {
+		return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
+	}
+
 	return t, nil
 }
 
