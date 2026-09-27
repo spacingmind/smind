@@ -100,14 +100,17 @@ type permissionOptionParams struct {
 // printRunLogs/streamRun at all, so a run would sit waiting for
 // runs.defaultPermissionTimeout (5 minutes) with nothing on screen
 // explaining why. Each option's ID is shown explicitly so it can be pasted
-// straight into `task approve <runId> <requestId> <optionId>`.
-func renderPermissionRequest(requestID, summary string, options []permissionOptionParams) string {
+// straight into `task approve <runId> <requestId> <optionId>`. The hint
+// includes the runId so it is copy-pasteable as-is: cmdTaskApprove's real
+// usage is `smind task approve <runId> [requestId] [optionId]` -- a hint
+// printing only the requestId would paste into nothing.
+func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
-	fmt.Fprintf(&b, "  -> smind task approve %s\n", requestID)
+	fmt.Fprintf(&b, "  -> smind task approve %s %s\n", runID, requestID)
 	return b.String()
 }
 
@@ -523,7 +526,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
 		case "permission_resolved":
 			var p struct {
 				RequestID string `json:"requestId"`
@@ -693,7 +696,7 @@ func printRunLogs(result runLogsResult) {
 		case "raw":
 			fmt.Print(renderRaw(e.rawEventParams))
 		case "permission_request":
-			fmt.Print(renderPermissionRequest(e.RequestID, e.Summary, e.Options))
+			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options))
 		case "permission_resolved":
 			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 		}
@@ -799,7 +802,7 @@ func cmdTaskPermissions(args []string) int {
 		return 0
 	}
 	for _, p := range pending {
-		fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
 	}
 	return 0
 }
