@@ -120,6 +120,72 @@ type newSessionResult struct {
 	ConfigOptions []ConfigOption `json:"configOptions"`
 }
 
+// loadSessionParams is ACP's LoadSessionRequest: session/load requires
+// sessionId, cwd, and mcpServers all present (some agents reject the call
+// if mcpServers is omitted even when empty -- see
+// refs/paseo/packages/server/src/server/agent/providers/acp-agent.ts's
+// initializeResumedSession doc comment).
+type loadSessionParams struct {
+	SessionID  string `json:"sessionId"`
+	Cwd        string `json:"cwd"`
+	McpServers []any  `json:"mcpServers"`
+}
+
+// resumeSessionParams is ACP's ResumeSessionRequest (session/resume): same
+// required fields as loadSessionParams.
+type resumeSessionParams struct {
+	SessionID  string `json:"sessionId"`
+	Cwd        string `json:"cwd"`
+	McpServers []any  `json:"mcpServers"`
+}
+
+// resumeResult is the shared shape of LoadSessionResponse and
+// ResumeSessionResponse: unlike NewSessionResponse, neither echoes
+// sessionId back (the caller already supplied it), but both carry the same
+// configOptions field this package surfaces.
+type resumeResult struct {
+	ConfigOptions []ConfigOption `json:"configOptions"`
+}
+
+// agentCapabilityFlags decodes just the two AgentCapabilities fields this
+// package's resume logic needs out of Client.AgentCapabilities's raw JSON:
+// whether session/load is supported at all, and whether
+// sessionCapabilities.resume is. See ACP's schema (agentCapabilities in
+// InitializeResponse) for the full shape; SessionCapabilities.Resume is
+// only used for a non-nil check -- when present it's always an empty
+// object ({}), never carrying fields this package needs to read.
+type agentCapabilityFlags struct {
+	LoadSession         bool `json:"loadSession"`
+	SessionCapabilities struct {
+		Resume json.RawMessage `json:"resume"`
+	} `json:"sessionCapabilities"`
+}
+
+// capabilityFlags decodes c.AgentCapabilities, ignoring a decode error (an
+// agent that sent malformed or absent capabilities is treated the same as
+// one that advertised none of them -- the safe default of "cannot resume,
+// start fresh").
+func (c *Client) capabilityFlags() agentCapabilityFlags {
+	var flags agentCapabilityFlags
+	_ = json.Unmarshal(c.AgentCapabilities, &flags)
+	return flags
+}
+
+// SupportsLoadSession reports whether the connected agent advertised the
+// loadSession capability during Initialize -- session/load resumes a
+// session with its full conversation history replayed back as
+// session/update notifications.
+func (c *Client) SupportsLoadSession() bool {
+	return c.capabilityFlags().LoadSession
+}
+
+// SupportsResumeSession reports whether the connected agent advertised the
+// sessionCapabilities.resume capability during Initialize -- session/resume
+// resumes a session without replaying its history.
+func (c *Client) SupportsResumeSession() bool {
+	return c.capabilityFlags().SessionCapabilities.Resume != nil
+}
+
 // ConfigOption mirrors ACP v2's SessionConfigOption: one entry of the
 // configOptions list a session/new response may carry. CurrentValue holds
 // the flattened kind's currentValue (a value id for select options, a bool
@@ -280,6 +346,55 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOp
 	c.mu.Unlock()
 
 	return res.SessionID, res.ConfigOptions, nil
+}
+
+// LoadSession resumes an existing session via ACP's session/load, for an
+// agent that advertises the loadSession capability (see
+// SupportsLoadSession). Unlike NewSession, the agent streams the session's
+// entire prior conversation history back as session/update notifications
+// before this call returns -- a caller wanting to observe that replay must
+// have already registered its update subscriber (as Prompt does) before
+// calling LoadSession; this package's own callers don't need the replay
+// and let it go unsubscribed, which handleSessionUpdate silently drops
+// (see its doc comment).
+func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/load", loadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+	if err != nil {
+		return nil, fmt.Errorf("acp: session/load: %w", err)
+	}
+
+	var res resumeResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("acp: session/load: decode response: %w", err)
+	}
+
+	c.mu.Lock()
+	c.sessionCwd[sessionID] = cwd
+	c.mu.Unlock()
+
+	return res.ConfigOptions, nil
+}
+
+// ResumeSession resumes an existing session via ACP's session/resume, for
+// an agent that advertises the sessionCapabilities.resume capability (see
+// SupportsResumeSession) but not loadSession -- the session's own history
+// isn't replayed back to the client, unlike LoadSession.
+func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/resume", resumeSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+	if err != nil {
+		return nil, fmt.Errorf("acp: session/resume: %w", err)
+	}
+
+	var res resumeResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, fmt.Errorf("acp: session/resume: decode response: %w", err)
+	}
+
+	c.mu.Lock()
+	c.sessionCwd[sessionID] = cwd
+	c.mu.Unlock()
+
+	return res.ConfigOptions, nil
 }
 
 // SetSessionConfigOption sets one config option on a live session via ACP

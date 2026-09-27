@@ -3,6 +3,7 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -46,6 +47,19 @@ type threadStartResponse struct {
 type userInput struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+type threadLoadedListResponse struct {
+	Data []string `json:"data"`
+}
+
+type threadResumeParams struct {
+	ThreadID string `json:"threadId"`
+	Cwd      string `json:"cwd,omitempty"`
+}
+
+type threadUnarchiveParams struct {
+	ThreadID string `json:"threadId"`
 }
 
 type turnStartParams struct {
@@ -195,6 +209,79 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
 		return "", fmt.Errorf("codex: thread/start: decode response: %w", err)
 	}
 	return res.Thread.ID, nil
+}
+
+// ResumeSession resumes an existing Codex thread (threadID) rooted at cwd,
+// returning its thread id (always threadID unchanged) once the agent
+// confirms the thread is available for turns again. thread/loaded/list is
+// checked first: a thread the app-server already has loaded in memory
+// (e.g. a concurrent client on the same thread) doesn't need -- and per
+// the real CLI, may reject -- a second thread/resume. If thread/resume
+// itself reports the thread is archived, thread/unarchive is tried once
+// before retrying thread/resume, exactly mirroring
+// refs/paseo/packages/server/src/server/agent/providers/codex-app-server-agent.ts:3955-3990
+// (ensureThreadLoaded). Any other error (e.g. an unknown/stale thread id)
+// is returned as-is for the caller to fall back to a fresh thread.
+func (c *Client) ResumeSession(ctx context.Context, threadID, cwd string) (string, error) {
+	loaded, err := c.threadLoaded(ctx, threadID)
+	if err != nil {
+		return "", fmt.Errorf("codex: thread/loaded/list: %w", err)
+	}
+	if loaded {
+		return threadID, nil
+	}
+
+	if err := c.resumeThread(ctx, threadID, cwd); err != nil {
+		if !isArchivedThreadError(err, threadID) {
+			return "", err
+		}
+		if _, uerr := c.conn.call(ctx, "thread/unarchive", threadUnarchiveParams{ThreadID: threadID}); uerr != nil {
+			return "", fmt.Errorf("codex: thread/unarchive: %w", uerr)
+		}
+		if err := c.resumeThread(ctx, threadID, cwd); err != nil {
+			return "", err
+		}
+	}
+	return threadID, nil
+}
+
+func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error) {
+	raw, err := c.conn.call(ctx, "thread/loaded/list", struct{}{})
+	if err != nil {
+		return false, err
+	}
+	var res threadLoadedListResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return false, fmt.Errorf("decode response: %w", err)
+	}
+	for _, id := range res.Data {
+		if id == threadID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd}); err != nil {
+		return fmt.Errorf("codex: thread/resume: %w", err)
+	}
+	return nil
+}
+
+// isArchivedThreadError reports whether err is the RPC error codex's
+// thread/resume returns for a thread that's been archived -- the exact
+// message format refs/paseo/.../codex-app-server-agent.ts:126-131 matches,
+// verified live 2026-09-27 against codex-cli 0.149.1's "no archived
+// rollout found"/"no rollout found" wording for the sibling not-found
+// cases.
+func isArchivedThreadError(err error, threadID string) bool {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	want := fmt.Sprintf("session %s is archived. Run `codex unarchive %s` to unarchive it first.", threadID, threadID)
+	return rpcErr.Message == want
 }
 
 // Prompt sends text as a single user-input turn on threadID and blocks

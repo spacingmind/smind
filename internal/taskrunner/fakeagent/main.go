@@ -39,6 +39,14 @@ import (
 
 const sessionID = "fake-session-1"
 
+// capsMode is set from os.Args[1] (defaulting to "" -- no resume
+// capability at all) so a test can choose what this agent's initialize
+// response advertises: "loadSession" (session/load supported), "resume"
+// (sessionCapabilities.resume supported), "both" (both, to prove
+// newOrResumeACPSession's loadSession-first priority), or unset/anything
+// else (neither -- the "this agent can't resume at all" fallback path).
+var capsMode string
+
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      json.RawMessage `json:"id,omitempty"`
@@ -100,6 +108,10 @@ func call(method string, params any) message {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		capsMode = os.Args[1]
+	}
+
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
 	var sessionCwd string
 
@@ -120,9 +132,19 @@ func main() {
 func handle(msg message, sessionCwd *string) {
 	switch {
 	case msg.Method == "initialize":
+		caps := map[string]any{}
+		switch capsMode {
+		case "loadSession":
+			caps["loadSession"] = true
+		case "resume":
+			caps["sessionCapabilities"] = map[string]any{"resume": map[string]any{}}
+		case "both":
+			caps["loadSession"] = true
+			caps["sessionCapabilities"] = map[string]any{"resume": map[string]any{}}
+		}
 		respond(msg.ID, map[string]any{
 			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{},
+			"agentCapabilities": caps,
 		})
 	case msg.Method == "session/new":
 		var params struct {
@@ -130,25 +152,13 @@ func handle(msg message, sessionCwd *string) {
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
-		// A select-kind option with its own enumerated choices (mirrors
-		// GLM's real thinking-level tiers), so Runner/Registry/wsapi tests
-		// can drive a real config-option round trip end to end rather than
-		// asserting only against the non-ACP "not supported" path.
+		recordSessionInitMethod(params.Cwd, "session/new")
 		respond(msg.ID, map[string]any{
-			"sessionId": sessionID,
-			"configOptions": []map[string]any{{
-				"configId":     "thinking-level",
-				"name":         "Thinking Level",
-				"type":         "select",
-				"currentValue": "medium",
-				"options": []map[string]any{
-					{"value": "minimal", "name": "Minimal"},
-					{"value": "low", "name": "Low"},
-					{"value": "medium", "name": "Medium"},
-					{"value": "high", "name": "High"},
-				},
-			}},
+			"sessionId":     sessionID,
+			"configOptions": defaultConfigOptions(),
 		})
+	case msg.Method == "session/load" || msg.Method == "session/resume":
+		handleResumeSession(msg, sessionCwd)
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)
 	case msg.Method == "session/prompt":
@@ -167,6 +177,59 @@ func handle(msg message, sessionCwd *string) {
 			}
 		}
 	}
+}
+
+// defaultConfigOptions is a select-kind option with its own enumerated
+// choices (mirrors GLM's real thinking-level tiers), so Runner/Registry/
+// wsapi tests can drive a real config-option round trip end to end rather
+// than asserting only against the non-ACP "not supported" path.
+func defaultConfigOptions() []map[string]any {
+	return []map[string]any{{
+		"configId":     "thinking-level",
+		"name":         "Thinking Level",
+		"type":         "select",
+		"currentValue": "medium",
+		"options": []map[string]any{
+			{"value": "minimal", "name": "Minimal"},
+			{"value": "low", "name": "Low"},
+			{"value": "medium", "name": "Medium"},
+			{"value": "high", "name": "High"},
+		},
+	}}
+}
+
+// recordSessionInitMethod writes the method that started/resumed this
+// session to a "session-init-method" file in cwd, overwriting any prior
+// value -- the only way a test can observe which of session/new,
+// session/load, or session/resume Runner actually called (the wire
+// protocol result looks the same either way).
+func recordSessionInitMethod(cwd, method string) {
+	if cwd == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "session-init-method"), []byte(method), 0o644)
+}
+
+// handleResumeSession answers session/load and session/resume: it
+// succeeds, with the same configOptions shape session/new returns, only
+// for the one session id this agent ever hands out (sessionID) -- any
+// other id (simulating a stale/unknown stored session) gets an RPC error,
+// so a test can drive Runner's stale-session fallback path.
+func handleResumeSession(msg message, sessionCwd *string) {
+	var params struct {
+		SessionID string `json:"sessionId"`
+		Cwd       string `json:"cwd"`
+	}
+	_ = json.Unmarshal(msg.Params, &params)
+	if params.SessionID != sessionID {
+		writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
+			Code: -32000, Message: "unknown session: " + params.SessionID,
+		}})
+		return
+	}
+	*sessionCwd = params.Cwd
+	recordSessionInitMethod(params.Cwd, msg.Method)
+	respond(msg.ID, map[string]any{"configOptions": defaultConfigOptions()})
 }
 
 func sessionUpdate(text string) {
