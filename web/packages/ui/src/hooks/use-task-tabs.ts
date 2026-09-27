@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 
-import { baseTabForKind, type TabEntry, type TabKind } from "@/components/tab-registry";
+import { chatTab, chatTabKey, isLegacyTaskTab, type TabEntry, type TabKind } from "@/components/tab-registry";
 import { readStored, STORAGE_KEYS, writeStored } from "@/lib/storage";
+import type { Chat } from "@/lib/types";
 import {
   canDismissPaneInLayout,
   closePaneInLayout,
@@ -56,18 +57,53 @@ const SPLIT_DIRECTION_TO_POSITION: Record<SplitDirection, "left" | "right" | "to
   down: "bottom",
 };
 
-function seedState(taskId: number): TaskLayout {
-  // First visit seeds just Chat -- Files/Diff/Terminal are one "+" click
-  // or command-palette entry away (both read defaultTabsForTask/
-  // BASE_TAB_KINDS directly) rather than pre-opened clutter. Afterwards
-  // the strip is the user's -- a persisted empty default pane (every
-  // seeded tab closed) rehydrates as empty, not re-seeded, which is why
-  // ensureTask keys off the map rather than off pane emptiness.
-  const tab = baseTabForKind(taskId, "task");
+/**
+ * First visit seeds just the task's default chat -- Files/Diff/Terminal
+ * are one "+" click or command-palette entry away (both read
+ * defaultTabsForTask/BASE_TAB_KINDS directly) rather than pre-opened
+ * clutter. Afterwards the strip is the user's -- a persisted empty default
+ * pane (every seeded tab closed) rehydrates as empty, not re-seeded, which
+ * is why ensureTaskChats keys off the map rather than off pane emptiness.
+ */
+/** A layout with one empty default pane -- the fallback for opening a tab (a file, say) before ensureTaskChats has had a chance to seed the task's real default-chat tab (see openTab's own doc comment). */
+function emptyLayout(): TaskLayout {
+  return { root: { kind: "pane", pane: { id: DEFAULT_PANE_ID, tabs: [], activeKey: null } }, focusedPaneId: DEFAULT_PANE_ID };
+}
+
+function seedState(taskId: number, defaultChat: Pick<Chat, "ID" | "Title">): TaskLayout {
+  const tab = chatTab(taskId, defaultChat);
   return {
     root: { kind: "pane", pane: { id: DEFAULT_PANE_ID, tabs: [tab], activeKey: tab.key } },
     focusedPaneId: DEFAULT_PANE_ID,
   };
+}
+
+/**
+ * Replaces every legacy `kind: "task"` tab in layout (ADR-0016's migration,
+ * plan's P3 AC1: "an old `${taskId}:task` tab maps to the default chat's
+ * tab") with a chat tab for defaultChat, preserving the tab's position and
+ * whether it was the active tab in its pane. A no-op layout (nothing
+ * legacy left) returns the same object identity so callers can skip the
+ * write when nothing changed.
+ */
+function migrateLegacyTaskTabs(layout: TaskLayout, taskId: number, defaultChat: Pick<Chat, "ID" | "Title">): TaskLayout {
+  let changed = false;
+  let root = layout.root;
+  const migrated = chatTab(taskId, defaultChat);
+  for (const pane of collectAllPanes(layout.root)) {
+    const legacyKey = pane.tabs.find((t) => isLegacyTaskTab(t))?.key;
+    if (!legacyKey) continue;
+    changed = true;
+    root = updatePaneInTree(root, {
+      paneId: pane.id,
+      updater: (p) => ({
+        ...p,
+        tabs: p.tabs.map((t) => (t.key === legacyKey ? migrated : t)),
+        activeKey: p.activeKey === legacyKey ? migrated.key : p.activeKey,
+      }),
+    });
+  }
+  return changed ? { ...layout, root } : layout;
 }
 
 // Mints ids for newly-created split/group nodes. Doesn't need to survive
@@ -169,13 +205,53 @@ export function useTaskTabs() {
     [],
   );
 
-  /** Seeds taskId's default tab set if it doesn't have one yet (a no-op otherwise). */
-  const ensureTask = useCallback(
-    (taskId: number): void => {
+/**
+   * Seeds taskId's default tab set (its default chat) if it has no layout
+   * yet, or migrates a persisted pre-ADR-0016 `${taskId}:task` tab to the
+   * same default chat if it does -- a no-op for a task that already has a
+   * layout with no legacy tab in it. `chats` is taskId's own chats
+   * (`chat.list`, oldest -- the default chat -- first); callers only invoke
+   * this once that list has actually loaded (App.tsx's useTaskChats), so
+   * `chats[0]` is always defined here.
+   */
+  const ensureTaskChats = useCallback(
+    (taskId: number, chats: readonly Pick<Chat, "ID" | "Title">[]): void => {
+      const defaultChat = chats[0];
+      if (!defaultChat) return;
       setTabsByTask((prev) => {
-        if (prev.has(taskId)) return prev;
+        const existing = prev.get(taskId);
+        if (!existing) {
+          const next = new Map(prev);
+          next.set(taskId, seedState(taskId, defaultChat));
+          return next;
+        }
+        const migrated = migrateLegacyTaskTabs(existing, taskId, defaultChat);
+        if (migrated === existing) return prev;
         const next = new Map(prev);
-        next.set(taskId, seedState(taskId));
+        next.set(taskId, migrated);
+        return next;
+      });
+    },
+    [setTabsByTask],
+  );
+
+  /** Updates chatId's tab title wherever it's open (a no-op if it isn't) -- keeps a tab's label in sync with a chat.rename that happened elsewhere (another tab, another connection) once the chat.updated event carries the new title back. */
+  const updateChatTabTitle = useCallback(
+    (taskId: number, chatId: number, title: string): void => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      const key = chatTabKey(taskId, chatId);
+      setTabsByTask((prev) => {
+        const layout = prev.get(taskId);
+        if (!layout) return prev;
+        const pane = findPaneContainingTab(layout.root, key);
+        if (!pane) return prev;
+        const root = updatePaneInTree(layout.root, {
+          paneId: pane.id,
+          updater: (p) => ({ ...p, tabs: p.tabs.map((t) => (t.key === key ? { ...t, title: trimmed } : t)) }),
+        });
+        const next = new Map(prev);
+        next.set(taskId, { ...layout, root });
         return next;
       });
     },
@@ -195,12 +271,14 @@ export function useTaskTabs() {
   const openTab = useCallback(
     (taskId: number, entry: TabEntry, placement: TabPlacement = "primary"): void => {
       setTabsByTask((prev) => {
-        // The seed fallback only applies when the task has *no* entry at
-        // all (never selected). A task whose tabs were all closed has an
+        // The empty-layout fallback only applies when the task has *no*
+        // entry at all (never selected, or selected before its chats
+        // finished loading -- ensureTaskChats seeds the real default-chat
+        // tab once they have). A task whose tabs were all closed has an
         // entry with an empty default pane, which rehydrates as empty --
-        // reopening from the empty state must not resurrect the whole
-        // seed set around the reopened tab.
-        const layout = prev.get(taskId) ?? seedState(taskId);
+        // reopening from the empty state must not resurrect a seed set
+        // around the reopened tab.
+        const layout = prev.get(taskId) ?? emptyLayout();
 
         if (findPaneContainingTab(layout.root, entry.key)) {
           const focused = focusTabInLayout({ layout, tabKey: entry.key });
@@ -524,7 +602,8 @@ export function useTaskTabs() {
 
   return {
     tabsByTask,
-    ensureTask,
+    ensureTaskChats,
+    updateChatTabTitle,
     openTab,
     closeTab,
     activate,

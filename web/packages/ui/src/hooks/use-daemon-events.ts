@@ -18,7 +18,17 @@ const PROFILE_TOPICS = ["profile.created", "profile.updated", "profile.deleted"]
  * It still arrives as an ordinary notification, so it dispatches to
  * `subscribe("event.dropped", ...)` listeners like any other topic.
  */
-const TOPICS = ["task.status", "run.status", "permission.pending", ...LIFECYCLE_TOPICS, ...PROFILE_TOPICS];
+/** ADR-0016's three chat lifecycle topics (P3: chat tabs, rename, archive all react to these). */
+const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived"];
+
+const TOPICS = [
+  "task.status",
+  "run.status",
+  "permission.pending",
+  ...LIFECYCLE_TOPICS,
+  ...PROFILE_TOPICS,
+  ...CHAT_TOPICS,
+];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
 export interface DaemonEvents {

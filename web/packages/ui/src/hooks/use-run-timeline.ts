@@ -463,22 +463,22 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
 }
 
 /**
- * Loads taskId's run history and keeps it live. run.list has no
- * server-side filter (see internal/wsapi/handlers.go's handleRunList), so
- * filtering to this task and sorting chronologically happens here. Any run
- * still `running` when the pane opens is followed via streamRun
- * (backfill + live tail) regardless of which connection started it --
- * that cross-connection reattach is this feature's whole point. Already-
- * terminal runs get their full history via a one-shot run.logs.
+ * Loads chatId's run history and keeps it live. run.list's chatId filter
+ * (ADR-0016 P1.4) does the scoping server-side; sorting chronologically
+ * still happens here. Any run still `running` when the pane opens is
+ * followed via streamRun (backfill + live tail) regardless of which
+ * connection started it -- that cross-connection reattach is this
+ * feature's whole point. Already-terminal runs get their full history via
+ * a one-shot run.logs.
  *
- * Switching taskId (or unmounting) aborts any in-flight run.attach
+ * Switching chatId (or unmounting) aborts any in-flight run.attach
  * subscriptions and guards every async continuation via a per-selection
- * Session so a stale fetch from a superseded taskId can never clobber the
+ * Session so a stale fetch from a superseded chatId can never clobber the
  * current selection's view -- the same `cancelled`-flag pattern
  * app-sidebar.tsx's useWorkspaceTree already established, extended here to
  * also cover live subscriptions (not just one-shot fetches).
  */
-export function useRunTimeline(client: WsClientLike | null, taskId: number | null): TimelineState {
+export function useRunTimeline(client: WsClientLike | null, taskId: number | null, chatId: number | null): TimelineState {
   const [runs, setRuns] = useState<RunEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -487,7 +487,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     setRuns(null);
     setError(null);
 
-    if (!client || taskId === null) {
+    if (!client || taskId === null || chatId === null) {
       sessionRef.current = null;
       return;
     }
@@ -496,11 +496,11 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     sessionRef.current = session;
 
     client
-      .call<RunSummary[]>("run.list")
+      .call<RunSummary[]>("run.list", { chatId })
       .then((list) => {
         if (session.cancelled) return;
 
-        const mine = [...list].filter((r) => r.TaskID === taskId).sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
+        const mine = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
 
         const initial: RunEntry[] = mine.map((r) => ({
           id: r.ID,
@@ -547,17 +547,18 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
       session.controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [client, taskId]);
+  }, [client, taskId, chatId]);
 
   const submitPrompt = useCallback(
     async (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy, thinkingLevel?: ThinkingLevel) => {
       const session = sessionRef.current;
-      if (!client || taskId === null || !session) {
-        throw new Error("no task selected");
+      if (!client || taskId === null || chatId === null || !session) {
+        throw new Error("no chat selected");
       }
 
       const { runId } = await client.call<RunStartResult>("run.start", {
         taskId,
+        chatId,
         provider,
         prompt,
         ...(approvalPolicy && approvalPolicy !== "manual" ? { approvalPolicy } : {}),
@@ -579,7 +580,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
 
       streamRun(client, session, setRuns, runId);
     },
-    [client, taskId],
+    [client, taskId, chatId],
   );
 
   const stopRun = useCallback(

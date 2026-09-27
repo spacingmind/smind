@@ -21,7 +21,7 @@ import { useTaskDiff } from "@/hooks/use-task-diff";
 import { approvalPolicyLabel } from "@/lib/approval-policies";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, Task, ProviderListResult } from "@/lib/types";
+import type { AgentProfile, Chat, Provider, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** The task header's run-config pill text (AC's "<Agent> · <Provider> · <Approval> · <Thinking>" format) -- pure so it can be unit-tested without mounting the whole pane. */
@@ -48,12 +48,24 @@ export function runConfigPillLabel(
 export function TaskDetailPane({
   client,
   task,
+  chat,
+  isDefaultChat,
+  otherRunningChat,
+  onJumpToChat,
   connectionStatus = "connected",
   onOpenFile,
   onOpenDiffTab,
 }: {
   client: WsClientLike | null;
   task: Task;
+  /** The chat this pane shows (ADR-0016 P3) -- one tab, one chat: the timeline, composer, and run-config toolbar below are all scoped to chat.ID, never the whole task. */
+  chat: Chat;
+  /** Whether chat is task's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
+  isDefaultChat: boolean;
+  /** Another of this task's chats currently running a run, if any -- drives the concurrency banner ("Another chat is running in this worktree"). */
+  otherRunningChat?: { id: number; title: string } | null;
+  /** Jumps to otherRunningChat's own tab -- the banner's click target. */
+  onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
@@ -64,6 +76,7 @@ export function TaskDetailPane({
   const { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort } = useRunTimeline(
     client,
     task.ID,
+    chat.ID,
   );
   // provider.list's id→label map for the run headers ("label ?? id",
   // run-config IA): run entries carry only the wire provider id, and the
@@ -183,7 +196,7 @@ export function TaskDetailPane({
   return (
     <div className="flex h-full flex-col">
       <PaneHeader
-        title={task.Title}
+        title={`${task.Title} · ${chat.Title || "Chat"}`}
         subtitle={
           <>
             <span className="uppercase">{task.Status}</span>
@@ -327,9 +340,31 @@ export function TaskDetailPane({
         />
       )}
 
+      {/*
+       * ADR-0016 P3's concurrency banner: two chats of the same task share
+       * one worktree, so a run in another chat can touch the same files
+       * this one is looking at -- surfaced, not blocked (ADR-0016 §4).
+       * Sits above the composer, same "pinned, not scrolled away" dock
+       * placement as the pending-permission dock above.
+       */}
+      {otherRunningChat && (
+        <button
+          type="button"
+          data-testid="concurrency-banner"
+          onClick={() => onJumpToChat?.(otherRunningChat.id)}
+          className="mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 py-1.5 text-left text-ui-sm text-foreground-muted transition-colors hover:text-foreground"
+        >
+          <span className="size-1.5 shrink-0 rounded-full bg-warning" />
+          Another chat is running in this worktree — <span className="underline">{otherRunningChat.title}</span>
+        </button>
+      )}
+
       <Composer
         client={client}
         taskId={task.ID}
+        chatId={chat.ID}
+        isDefaultChat={isDefaultChat}
+        boundProvider={chat.Provider as Provider | null}
         connected={client !== null && connectionStatus === "connected"}
         runningRunId={runningRunId}
         diffStat={wholeDiff.stat}

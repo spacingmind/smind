@@ -1,7 +1,7 @@
 import type { TabKind } from "@/components/tab-registry";
 
 /**
- * The URL shape: `#/workspace/<id>/task/<id>/<tabKind>[/<path>]`.
+ * The URL shape: `#/workspace/<id>/task/<id>/<tabKind>[/<path-or-chatId>]`.
  *
  * Hash routing, per the plan: the daemon serves one embedded SPA
  * (`internal/server/web.go`), and a hash never leaves the browser, so no
@@ -10,16 +10,20 @@ import type { TabKind } from "@/components/tab-registry";
  * can name it; restoring a task only ever needs `taskId`, which is
  * globally unique, so a mismatched workspaceId segment is not treated as
  * an error.
+ *
+ * ADR-0016 replaced the bare `task` tab kind with per-chat tabs -- a
+ * `chat` route segment carries the chat's own id (`.../chat/<chatId>`),
+ * mirroring `file`'s own "kind carries an id" shape.
  */
 export interface Route {
   workspaceId: number;
   taskId: number;
-  tab: { kind: Exclude<TabKind, "file"> } | { kind: "file"; path: string };
+  tab: { kind: Exclude<TabKind, "file" | "chat"> } | { kind: "file"; path: string } | { kind: "chat"; chatId: number };
 }
 
-const BASE_KINDS: readonly Exclude<TabKind, "file">[] = ["task", "files", "diff", "terminal"];
+const BASE_KINDS: readonly Exclude<TabKind, "file" | "chat">[] = ["files", "diff", "terminal"];
 
-function isBaseKind(value: string): value is Exclude<TabKind, "file"> {
+function isBaseKind(value: string): value is Exclude<TabKind, "file" | "chat"> {
   return (BASE_KINDS as readonly string[]).includes(value);
 }
 
@@ -27,7 +31,7 @@ function isBaseKind(value: string): value is Exclude<TabKind, "file"> {
 export function parseRoute(hash: string): Route | null {
   const trimmed = hash.replace(/^#/, "");
   const segments = trimmed.split("/").filter((s) => s !== "");
-  // ["workspace", id, "task", id, kind, ...path?]
+  // ["workspace", id, "task", id, kind, ...path-or-chatId?]
   if (segments.length < 5) return null;
   const [workspaceLabel, workspaceIdRaw, taskLabel, taskIdRaw, kindRaw, ...rest] = segments;
   if (workspaceLabel !== "workspace" || taskLabel !== "task") return null;
@@ -45,6 +49,11 @@ export function parseRoute(hash: string): Route | null {
     const path = rest.map(decodeURIComponent).join("/");
     return { workspaceId, taskId, tab: { kind: "file", path } };
   }
+  if (kindRaw === "chat") {
+    const chatId = Number(rest[0]);
+    if (rest.length !== 1 || !Number.isFinite(chatId)) return null;
+    return { workspaceId, taskId, tab: { kind: "chat", chatId } };
+  }
   if (kindRaw === undefined || !isBaseKind(kindRaw) || rest.length > 0) return null;
   return { workspaceId, taskId, tab: { kind: kindRaw } };
 }
@@ -55,6 +64,9 @@ export function formatRoute(route: Route): string {
   if (route.tab.kind === "file") {
     const encoded = route.tab.path.split("/").map(encodeURIComponent).join("/");
     return `${base}/file/${encoded}`;
+  }
+  if (route.tab.kind === "chat") {
+    return `${base}/chat/${route.tab.chatId}`;
   }
   return `${base}/${route.tab.kind}`;
 }

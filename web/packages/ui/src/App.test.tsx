@@ -7,7 +7,7 @@ import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
-import type { RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
+import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -115,6 +115,45 @@ function respondAll(socket: FakeSocket, method: string, result: unknown): void {
   }
 }
 
+/**
+ * The wire shape of task's sole default chat (ADR-0016 P3: selecting a task
+ * now fires chat.list via useTaskChats, and only once it resolves does
+ * App.tsx seed the task's default Chat tab -- see chatTabKey/chatTab in
+ * tab-registry.tsx). None of this file's tests exercise more than one chat
+ * per task, so a single "Chat"-titled row is enough everywhere. The
+ * `taskId * 100 + 1` scheme keeps every fixture task's chat id
+ * collision-free across the file's several tasks (TASK/TASK_A..TASK_F).
+ */
+function defaultChatFor(task: Task): Chat {
+  return {
+    ID: task.ID * 100 + 1,
+    TaskID: task.ID,
+    Title: "Chat",
+    Provider: null,
+    AgentSession: null,
+    CreatedAt: "2024-01-01T00:00:00Z",
+    ArchivedAt: null,
+  };
+}
+
+/**
+ * Resolves task's chat.list with its single default chat -- callers must do
+ * this after every task selection (click, keyboard nav, route restore, or
+ * palette pick), before touching that task's Chat tab/composer/timeline.
+ * Uses respondAll (not an indexed respond), mirroring how this file already
+ * resolves run.list per selection: safe because each selection's chat.list
+ * is answered before the next selection's is ever sent, so there is never
+ * more than one pending chat.list request at a time.
+ */
+function respondChatList(socket: FakeSocket, task: Task): void {
+  respondAll(socket, "chat.list", [defaultChatFor(task)]);
+}
+
+/** TaskDetailPane's h2 heading text once task's default chat tab is active -- `"${task.Title} · ${chat.Title}"` (task-detail.tsx), not the bare task title (ADR-0016 P3: the heading now disambiguates which of a task's several chats is open). */
+function chatHeadingName(task: Task): string {
+  return `${task.Title} · ${defaultChatFor(task).Title}`;
+}
+
 /** Drives AppSidebar's workspace.list -> {space.list, task.list} sequence for a single workspace, plus useTaskAttention's initial run.list (empty). */
 async function resolveSidebar(socket: FakeSocket, tasks: Task[] = [TASK]): Promise<void> {
   await flush();
@@ -129,7 +168,7 @@ async function resolveSidebar(socket: FakeSocket, tasks: Task[] = [TASK]): Promi
   await flush();
 }
 
-/** Clicks task's sidebar row specifically -- its title also appears as TaskDetailPane's h2 heading once selected, so a plain getByText matches both. */
+/** Clicks task's sidebar row specifically. TaskDetailPane's own h2 heading no longer matches task.Title exactly (ADR-0016 P3 appends "· <chat title>" -- see chatHeadingName), so plain getByText/getAllByText calls now only ever match the sidebar row. */
 function clickTaskRow(task: Task): void {
   fireEvent.click(screen.getAllByText(task.Title)[0]!);
 }
@@ -174,6 +213,8 @@ async function splitTabRight(title: string): Promise<void> {
 /** Selects task's row, opens its Files tab, expands nothing, and clicks the README.md row -- the file-open flow the tab registry tests build on. */
 async function openFileInTask(socket: FakeSocket, task: Task, content: string): Promise<void> {
   clickTaskRow(task);
+  await flush();
+  respondChatList(socket, task);
   await flush();
   respondAll(socket, "run.list", []);
   await flush();
@@ -277,21 +318,32 @@ describe("App", () => {
     const row = screen.getByText("Fix the bug");
     fireEvent.click(row);
     await flush();
+    respondChatList(socket1, TASK);
+    await flush();
 
     // TaskDetailPane mounts for the selected task and issues its own
     // run.list against the pre-disconnect client.
     respond(socket1, "run.list", [], 1);
     await flush();
-    expect(screen.getByRole("heading", { name: "Fix the bug" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK) })).toBeInTheDocument();
 
     socket1.emitClose();
     await flush();
     await advanceReconnectTimer();
     await flush();
 
+    // The reconnect swaps in a genuinely new client, so useTaskChats
+    // refetches chat.list against it too (it resets to null on every
+    // client change, same as useRunTimeline's own run.list) -- resolve it
+    // before the pane can re-render.
+    respondChatList(socket2, TASK);
+    await flush();
+    respond(socket2, "run.list", [], 0);
+    await flush();
+
     // The task is still selected/rendered after reconnect, and its pane
     // re-fetched fresh against the new client rather than being unmounted.
-    expect(screen.getByRole("heading", { name: "Fix the bug" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK) })).toBeInTheDocument();
     expect(socket2.sent.some((e) => e.method === "run.list")).toBe(true);
   });
 
@@ -308,6 +360,8 @@ describe("App", () => {
     // Switch to task B: fresh default tab set, no leaked file tab...
     clickTaskRow(TASK_B);
     await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
     expect(screen.queryByRole("tab", { name: /README\.md/ })).not.toBeInTheDocument();
@@ -319,6 +373,8 @@ describe("App", () => {
     // Switch back to A: its README.md tab survived, with A's content once
     // its FileEditorPane remounts (per-task scoping, ADR 0004).
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -362,6 +418,7 @@ describe("App", () => {
     const erroredRun: RunSummary = {
       ID: "run-1",
       TaskID: TASK_B.ID,
+      ChatID: TASK_B.ID,
       Provider: "glm",
       Prompt: "do it",
       Status: "error",
@@ -380,6 +437,8 @@ describe("App", () => {
 
     // Selecting the task snapshots its terminal runs as seen -> dot clears.
     clickTaskRow(TASK_B);
+    await flush();
+    respondChatList(socket, TASK_B);
     await flush();
     // run.list #1 is TaskDetailPane's own fetch for the selected task.
     respond(socket, "run.list", [], 1);
@@ -401,6 +460,7 @@ describe("App", () => {
       {
         ID: "run-2",
         TaskID: TASK_A.ID,
+        ChatID: TASK_A.ID,
         Provider: "glm",
         Prompt: "do it",
         Status: "running",
@@ -559,6 +619,8 @@ describe("App keyboard shortcuts", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
     expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true");
@@ -596,28 +658,32 @@ describe("App keyboard shortcuts", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
-    async function step(key: string, code: string): Promise<void> {
+    async function step(key: string, code: string, nextTask: Task): Promise<void> {
       await act(async () => {
         pressCtrl(key, code);
       });
+      await flush();
+      respondChatList(socket, nextTask);
       await flush();
       respondAll(socket, "run.list", []);
       await flush();
     }
 
-    await step("]", "BracketRight");
-    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+    await step("]", "BracketRight", TASK_B);
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
 
     // Past the end wraps back to the first task.
-    await step("]", "BracketRight");
-    expect(screen.getByRole("heading", { name: TASK_A.Title })).toBeInTheDocument();
+    await step("]", "BracketRight", TASK_A);
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
 
     // ...and backwards wraps the other way.
-    await step("[", "BracketLeft");
-    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+    await step("[", "BracketLeft", TASK_B);
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
   });
 
   it("Ctrl+B toggles the sidebar through the registry (it moved out of the shadcn primitive's own listener)", async () => {
@@ -741,11 +807,13 @@ describe("App command palette", () => {
       fireEvent.keyDown(input, { key: "Enter" });
     });
     await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
   });
 
   it("with a task selected, an Open <tab> entry activates that tab", async () => {
@@ -755,6 +823,8 @@ describe("App command palette", () => {
     await resolveSidebar(socket, [TASK_A]);
 
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -781,6 +851,8 @@ describe("App command palette", () => {
     await resolveSidebar(socket, [TASK_A]);
 
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     // ShellCommands' task.files fetch for the newly selected task.
@@ -815,6 +887,8 @@ describe("App command palette", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     for (const env of socket.sent.filter((e) => e.method === "task.files")) {
       if (env.id) socket.emit({ id: env.id, error: { message: "no worktree" } });
@@ -844,6 +918,8 @@ describe("App routing", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A, TASK_B]);
     // The restore effect's own selectTask -> TaskDetailPane mount fetch.
+    respondChatList(socket, TASK_B);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -865,9 +941,14 @@ describe("App routing", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
+    const defaultChatId = defaultChatFor(TASK_A).ID;
+    expect(window.location.hash).toBe(
+      `#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/chat/${defaultChatId}`,
+    );
 
     // Diff isn't seeded any more (dogfood default-tabs fix); opening it
     // via "+" already updates the URL once...
@@ -880,7 +961,9 @@ describe("App routing", () => {
     chatTab.focus();
     fireEvent.click(chatTab);
     await flush();
-    expect(window.location.hash).toBe(`#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/task`);
+    expect(window.location.hash).toBe(
+      `#/workspace/${WORKSPACE.ID}/task/${TASK_A.ID}/chat/${defaultChatId}`,
+    );
 
     const diffTab = screen.getByRole("tab", { name: "Diff" });
     diffTab.focus();
@@ -909,28 +992,34 @@ describe("App routing", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
     const taskAHash = window.location.hash;
 
     clickTaskRow(TASK_B);
     await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
 
     await act(async () => {
       navigateHash(taskAHash);
     });
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
-    expect(screen.getByRole("heading", { name: TASK_A.Title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
   });
 
   it("a URL naming a task task.list doesn't return lands on the empty state without throwing", async () => {
-    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/999/task`;
+    window.location.hash = `#/workspace/${WORKSPACE.ID}/task/999/chat/1`;
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     expect(() => render(<App connect={connect} />)).not.toThrow();
@@ -947,6 +1036,8 @@ describe("App routing", () => {
     await resolveSidebar(socket, [TASK_A]);
 
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -990,6 +1081,8 @@ describe("App routing", () => {
     const connect2 = vi.fn().mockResolvedValue(new WsClient(socket2));
     render(<App connect={connect2} />);
     await resolveSidebar(socket2, [TASK_A]);
+    respondChatList(socket2, TASK_A);
+    await flush();
     respondAll(socket2, "run.list", []);
     await flush();
     respondAll(socket2, "file.read", { content: "# b.md" });
@@ -1088,6 +1181,8 @@ describe("App quick-open (Item 18)", () => {
 
     clickTaskRow(TASK);
     await flush();
+    respondChatList(socket, TASK);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1134,6 +1229,8 @@ describe("App splits (Item 6)", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1157,6 +1254,8 @@ describe("App splits (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
 
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1192,6 +1291,8 @@ describe("App splits (Item 6)", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     // TaskDetailPane mounts for "Chat" (the default active tab) and fires
     // its own run.list here; left unanswered on purpose -- switching to
     // Files below unmounts it before it resolves, which use-run-timeline's
@@ -1217,6 +1318,7 @@ describe("App splits (Item 6)", () => {
     const doneRun: RunSummary = {
       ID: "run-1",
       TaskID: TASK_A.ID,
+      ChatID: TASK_A.ID,
       Provider: "claude-native",
       Prompt: "read the file",
       Status: "done",
@@ -1270,6 +1372,8 @@ describe("App splits (Item 6)", () => {
 
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1319,6 +1423,8 @@ describe("App splits (Item 6)", () => {
     await resolveSidebar(socket, [TASK_B]);
 
     clickTaskRow(TASK_B);
+    await flush();
+    respondChatList(socket, TASK_B);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1384,6 +1490,8 @@ describe("App splits (Item 6)", () => {
     await resolveSidebar(socket, [TASK_C]);
 
     clickTaskRow(TASK_C);
+    await flush();
+    respondChatList(socket, TASK_C);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1482,6 +1590,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1502,6 +1612,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1549,6 +1661,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1573,6 +1687,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1607,6 +1723,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1625,6 +1743,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1647,6 +1767,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1664,6 +1786,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1691,6 +1815,8 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1739,20 +1865,26 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A, TASK_B, TASK_C]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
     await pressAlt("2", "Digit2");
     await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: TASK_B.Title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
 
     await pressAlt("3", "Digit3");
     await flush();
+    respondChatList(socket, TASK_C);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: TASK_C.Title })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_C) })).toBeInTheDocument();
   });
 });
 
@@ -1788,6 +1920,8 @@ describe("App tab context menu (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1813,6 +1947,8 @@ describe("App tab context menu (Item 6)", () => {
       await resolveSidebar(socket, [TASK_A]);
       clickTaskRow(TASK_A);
       await flush();
+      respondChatList(socket, TASK_A);
+      await flush();
       respondAll(socket, "run.list", []);
       await flush();
       await openFileTabNamed(socket, "README.md");
@@ -1832,6 +1968,8 @@ describe("App tab context menu (Item 6)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -1866,6 +2004,8 @@ describe("App tab context menu (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -1896,6 +2036,8 @@ describe("App tab context menu (Item 6)", () => {
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
     await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
     await openBaseTab("Diff");
@@ -1916,6 +2058,8 @@ describe("App pane focus vs. web-find's per-pane focus-within (rebase interop)",
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
     clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
@@ -2077,6 +2221,8 @@ describe("App drag-to-split (Item 8)", () => {
     await resolveSidebar(socket, [task]);
     clickTaskRow(task);
     await flush();
+    respondChatList(socket, task);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -2175,6 +2321,8 @@ describe("App settings view (dogfood Item 4)", () => {
     await resolveSidebar(socket);
     clickTaskRow(TASK);
     await flush();
+    respondChatList(socket, TASK);
+    await flush();
     respondAll(socket, "run.list", []);
     await flush();
 
@@ -2228,6 +2376,8 @@ describe("App chat column (dogfood Item 2)", () => {
     render(<App connect={connect} />);
     await resolveSidebar(socket);
     clickTaskRow(TASK);
+    await flush();
+    respondChatList(socket, TASK);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();

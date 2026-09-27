@@ -37,6 +37,9 @@ function renderComposer(
   const props: React.ComponentProps<typeof Composer> = {
     client: new FakeWsClient(),
     taskId: 1,
+    chatId: 10,
+    isDefaultChat: true,
+    boundProvider: null,
     connected: true,
     runningRunId: null,
     onSubmit: async (provider, prompt, approvalPolicy, thinkingLevel) => {
@@ -705,7 +708,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.click(screen.getByLabelText("Provider"));
       fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
       await flush();
-      expect(window.localStorage.getItem("smind:run-config:1")).toContain('"provider":"glm"');
+      expect(window.localStorage.getItem("smind:run-config:1:10")).toContain('"provider":"glm"');
 
       // Task 2 has never had a run-config persisted -- starts from the
       // plain EMPTY_STATE default, not task 1's GLM pick.
@@ -741,7 +744,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
     it("a task that already has a persisted run-config is not overridden by the ★ default agent", async () => {
       window.localStorage.setItem("smind:settings:defaultAgentId", "1");
       window.localStorage.setItem(
-        "smind:run-config:5",
+        "smind:run-config:5:10",
         JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" }),
       );
       const client = new FakeWsClient();
@@ -758,6 +761,33 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
       expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
+    });
+  });
+
+  describe("bound provider (ADR-0016 P3: a chat's provider is immutable after its first run)", () => {
+    it("forces the Provider selector to the chat's bound provider, read-only, and keeps it there", async () => {
+      const client = new FakeWsClient();
+      renderComposer({ client, boundProvider: "glm" });
+
+      client.nth("provider.list", 0).resolve({
+        providers: [
+          { id: "claude-native", label: "Claude Code" },
+          { id: "glm", label: "GLM" },
+        ],
+      });
+      await flush();
+
+      const select = screen.getByLabelText("Provider");
+      expect(select).toHaveTextContent("GLM");
+      expect(select).toHaveAttribute("data-disabled");
+      expect(select).toHaveAttribute("title", expect.stringContaining("bound to GLM"));
+
+      // Radix's Select fires a spurious onValueChange("") of its own once
+      // a disabled select's value settles (not from any user click) --
+      // regression coverage for the real bug that surfaced this: it must
+      // never blank out the selector.
+      await flush();
+      expect(select).toHaveTextContent("GLM");
     });
   });
 });

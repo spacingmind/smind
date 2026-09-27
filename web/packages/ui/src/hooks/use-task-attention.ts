@@ -11,7 +11,7 @@ export type AttentionReason = "error" | "finished" | "permission";
 export type TaskAttention = Map<number, Set<AttentionReason>>;
 
 /** Stable "nothing known yet" value, so a client-less mount doesn't hand consumers a fresh object every render. */
-const EMPTY_SIGNAL: TaskSignal = { attention: new Map(), runStatus: new Map() };
+const EMPTY_SIGNAL: TaskSignal = { attention: new Map(), runStatus: new Map(), runningChatsByTask: new Map() };
 
 /**
  * The status of each task's latest run -- "running" if any of the task's
@@ -22,10 +22,12 @@ const EMPTY_SIGNAL: TaskSignal = { attention: new Map(), runStatus: new Map() };
  */
 export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
 
-/** Both per-task signals this hook derives from the one run bookkeeping it keeps. */
+/** Both per-task signals this hook derives from the one run bookkeeping it keeps, plus ADR-0016 P3's per-task running-chats set (the concurrency banner's data source). */
 export interface TaskSignal {
   attention: TaskAttention;
   runStatus: TaskRunStatus;
+  /** Which of each task's chats currently have a running run -- ADR-0016 P3's concurrency banner ("Another chat is running in this worktree") is "this chat's own id is in the set but the set has more than one member". Absent taskId means "no chat of it is running". */
+  runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
 }
 
 /**
@@ -37,7 +39,7 @@ export interface TaskSignal {
  * take order 0, -1, -2...; every live event afterwards takes a positive
  * counter, putting it above the whole snapshot.
  */
-interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "Status"> {
+interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"> {
   order: number;
 }
 
@@ -105,6 +107,7 @@ export function useTaskAttention(
     // still in flight reads as running; otherwise the most recent by
     // `order`.
     const latest = new Map<number, RunLike>();
+    const runningChatsByTask = new Map<number, Set<number>>();
 
     for (const run of runs) {
       if (run.Status !== "running") {
@@ -112,6 +115,10 @@ export function useTaskAttention(
         if (!seen?.has(run.ID)) {
           add(run.TaskID, run.Status === "error" ? "error" : "finished");
         }
+      } else {
+        const chats = runningChatsByTask.get(run.TaskID) ?? new Set<number>();
+        chats.add(run.ChatID);
+        runningChatsByTask.set(run.TaskID, chats);
       }
       const held = latest.get(run.TaskID);
       if (!held || (held.Status !== "running" && (run.Status === "running" || run.order > held.order))) {
@@ -125,6 +132,7 @@ export function useTaskAttention(
     setSignal({
       attention,
       runStatus: new Map([...latest].map(([taskId, run]) => [taskId, run.Status])),
+      runningChatsByTask,
     });
   }, []);
 
@@ -148,6 +156,7 @@ export function useTaskAttention(
           const runs: RunLike[] = (rawRuns ?? []).map((r, index) => ({
             ID: r.ID,
             TaskID: r.TaskID,
+            ChatID: r.ChatID,
             Status: r.Status,
             order: -index,
           }));
@@ -220,14 +229,18 @@ export function useTaskAttention(
 
     const offRunStatus = events.subscribe("run.status", (payload) => {
       if (typeof payload !== "object" || payload === null) return;
-      const p = payload as { runId?: unknown; taskId?: unknown; status?: unknown };
+      const p = payload as { runId?: unknown; taskId?: unknown; chatId?: unknown; status?: unknown };
       if (typeof p.runId !== "string" || typeof p.taskId !== "number" || typeof p.status !== "string") return;
+      // chatId is ADR-0016 P1.4 -- absent only for a payload from a daemon
+      // that predates it, which the concurrency banner then just can't
+      // place on a specific chat (0 is never a real chat id).
+      const chatId = typeof p.chatId === "number" ? p.chatId : 0;
 
       const runs = runsRef.current ?? (runsRef.current = []);
       const idx = runs.findIndex((r) => r.ID === p.runId);
       const order = ++orderRef.current;
-      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, Status: p.status as RunLike["Status"], order };
-      else runs.push({ ID: p.runId, TaskID: p.taskId, Status: p.status as RunLike["Status"], order });
+      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order };
+      else runs.push({ ID: p.runId, TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order });
 
       if (p.status === "running") {
         // A (re)started run un-terminalizes: clear its seen marker and

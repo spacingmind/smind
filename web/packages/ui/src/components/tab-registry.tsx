@@ -9,8 +9,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { Chat } from "@/lib/types";
 
 /**
  * The tab registry: the vocabulary of tab kinds App.tsx's tab strip is
@@ -21,17 +23,22 @@ import {
  * the strip's layout logic.
  *
  * Keys are globally unique *and* task-scoped (docs/decisions/0004-per-task-editor-tabs.md):
- * `${taskId}:task`, `${taskId}:files`, `${taskId}:diff`,
+ * `${taskId}:chat:${chatId}`, `${taskId}:files`, `${taskId}:diff`,
  * `${taskId}:terminal`, `${taskId}:file:${path}` -- so the same file path
  * open in two tasks' tabs never collides, and per-task tab sets fall out
  * of the key structure naturally.
+ *
+ * ADR-0016 (multiple chats per task) replaced the single `${taskId}:task`
+ * kind with one `chat` tab per `store.Chat` row -- a task can have any
+ * number of these open at once, unlike files/diff/terminal has-at-most-one
+ * bare `BASE_TAB_KINDS` entry.
  */
-export type TabKind = "task" | "files" | "file" | "diff" | "terminal";
+export type TabKind = "chat" | "files" | "file" | "diff" | "terminal";
 
-/** The non-file kinds: the ones a task's strip is seeded with and the empty state / "+" menu can (re)open on demand. */
-export type BaseTabKind = Exclude<TabKind, "file">;
+/** The non-file, non-chat kinds: the ones a task's strip is seeded with (Files/Diff/Terminal) and the empty state / "+" menu's base section can (re)open on demand. Chat tabs are opened via `chatTab`/the "+" menu's own chat section instead -- there can be any number of them, so they don't fit a single fixed-kind slot. */
+export type BaseTabKind = Exclude<TabKind, "file" | "chat">;
 
-export const BASE_TAB_KINDS: readonly BaseTabKind[] = ["task", "files", "diff", "terminal"];
+export const BASE_TAB_KINDS: readonly BaseTabKind[] = ["files", "diff", "terminal"];
 
 /** One entry in a task's tab strip. */
 export interface TabEntry {
@@ -44,6 +51,8 @@ export interface TabEntry {
   closable?: boolean;
   /** The worktree-relative path, for `kind: "file"` only -- what the strip's file-type icon is resolved from (it's also recoverable from `key`, but carrying it avoids every consumer re-parsing the key). */
   path?: string;
+  /** The chat's id, for `kind: "chat"` only -- recoverable from `key` too, but carried directly for the same reason `path` is. */
+  chatId?: number;
 }
 
 /**
@@ -61,22 +70,51 @@ export interface TabKindDescriptor {
 }
 
 export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
-  task: { closable: true, defaultTitle: "Chat", icon: MessageSquare },
+  chat: { closable: true, defaultTitle: "Chat", icon: MessageSquare },
   files: { closable: true, defaultTitle: "Files", icon: FolderTree },
   diff: { closable: true, defaultTitle: "Diff", icon: GitCompare },
   terminal: { closable: true, defaultTitle: "Terminal", icon: SquareTerminal },
   file: { closable: true, defaultTitle: "File", icon: File },
 };
 
-/** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Chat/Files/Diff/Terminal" affordance. */
+/** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Files/Diff/Terminal" affordance. */
 export function baseTabForKind(taskId: number, kind: BaseTabKind): TabEntry {
   const descriptor = TAB_KINDS[kind];
   return { kind, key: `${taskId}:${kind}`, taskId, title: descriptor.defaultTitle, closable: descriptor.closable };
 }
 
-/** The base tabs a task's strip is *seeded* with on first visit (ADR 0004's per-task tab set), in strip order. Nothing here is non-closable anymore (Item 3) -- the user can close all of it and reopen via the empty state or the strip's "+". */
+/** The base tabs a task's strip can reopen on demand (ADR 0004's per-task tab set minus Chat, which ADR-0016 replaced with per-chat tabs -- see `chatTab`), in strip order. */
 export function defaultTabsForTask(taskId: number): TabEntry[] {
   return BASE_TAB_KINDS.map((kind) => baseTabForKind(taskId, kind));
+}
+
+/** The tab key for one chat (ADR-0016 P3) -- `${taskId}:chat:${chatId}`, replacing the old single `${taskId}:task` key so a task can have any number of chat tabs open at once. */
+export function chatTabKey(taskId: number, chatId: number): string {
+  return `${taskId}:chat:${chatId}`;
+}
+
+/** A closable tab for one chat -- the tab a "New chat"/reopen-existing-chat action opens, and what a task's first visit seeds with (its default chat). Title mirrors the chat's own title (kept in sync on rename, see use-task-tabs.ts's updateChatTabTitle). */
+export function chatTab(taskId: number, chat: Pick<Chat, "ID" | "Title">): TabEntry {
+  return {
+    kind: "chat",
+    key: chatTabKey(taskId, chat.ID),
+    taskId,
+    title: chat.Title || TAB_KINDS.chat.defaultTitle,
+    closable: true,
+    chatId: chat.ID,
+  };
+}
+
+/**
+ * True for a legacy pre-ADR-0016 tab entry (`kind: "task"`, key
+ * `${taskId}:task`) -- what use-task-tabs.ts's persisted-layout migration
+ * looks for to replace with the task's default chat's tab. Checked on the
+ * raw parsed value, not the (now narrower) `TabEntry` type, since a blob
+ * written before this migration existed still has the old `kind` string on
+ * disk.
+ */
+export function isLegacyTaskTab(entry: { kind: string }): boolean {
+  return entry.kind === "task";
 }
 
 /** The tab key a file path maps to, in one place -- lib/dirty-buffers.ts keys its store by exactly this string, from the editor side, without importing a TabEntry. */
@@ -176,13 +214,34 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
   );
 }
 
+/** Just enough of a Chat for the "+" menu's reopen-existing-chat section (ADR-0016 P3). */
+export interface ChatMenuEntry {
+  id: number;
+  title: string;
+}
+
 /**
  * What a pane shows once the user closes its last tab (Item 3: tabs are
  * user-owned, so "empty" is a real state, not something to prevent). The
- * buttons are the same four base kinds the "+" menu offers, so the way
- * back in is identical from either surface.
+ * base-kind buttons are the same three the "+" menu's own base section
+ * offers, so the way back in is identical from either surface; "New chat"
+ * (and any of the task's other not-currently-open chats) sits alongside
+ * them when the caller supplies chat data (ADR-0016 P3) -- omitted
+ * entirely (no `onNewChat`) for a caller with nothing to offer there.
  */
-export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void }) {
+export function TabsEmptyState({
+  onOpen,
+  chats,
+  onOpenChat,
+  onNewChat,
+}: {
+  onOpen: (kind: BaseTabKind) => void;
+  /** Existing chats not currently open -- clicking one reopens its tab rather than duplicating. */
+  chats?: ChatMenuEntry[];
+  onOpenChat?: (chatId: number) => void;
+  onNewChat?: () => void;
+}) {
+  const ChatIcon = TAB_KINDS.chat.icon;
   return (
     <div
       data-testid="tabs-empty-state"
@@ -190,6 +249,27 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
     >
       <p>No tabs open</p>
       <div className="flex flex-wrap items-center justify-center gap-2">
+        {onNewChat && (
+          <Button type="button" variant="outline" size="sm" data-testid="tabs-empty-new-chat" onClick={onNewChat}>
+            <ChatIcon aria-hidden className="size-3.5" data-icon="inline-start" />
+            New chat
+          </Button>
+        )}
+        {onOpenChat &&
+          (chats ?? []).map((chat) => (
+            <Button
+              key={chat.id}
+              type="button"
+              variant="outline"
+              size="sm"
+              data-testid="tabs-empty-open-chat"
+              data-chat-id={chat.id}
+              onClick={() => onOpenChat(chat.id)}
+            >
+              <ChatIcon aria-hidden className="size-3.5" data-icon="inline-start" />
+              {chat.title || TAB_KINDS.chat.defaultTitle}
+            </Button>
+          ))}
         {BASE_TAB_KINDS.map((kind) => {
           const Icon = TAB_KINDS[kind].icon;
           return (
@@ -213,9 +293,13 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
 }
 
 /**
- * The tab strip's "+" affordance (Item 3): opens any base tab kind. The
- * parent decides open-vs-activate -- it owns the tab state, so a kind
- * that's already open just comes forward rather than duplicating.
+ * The tab strip's "+" affordance (Item 3): a chat section (ADR-0016 P3) --
+ * "New chat" plus any of the task's other not-currently-open chats -- above
+ * the base-kind section (Files/Diff/Terminal). The parent decides
+ * open-vs-activate for base kinds -- it owns the tab state, so a kind
+ * that's already open just comes forward rather than duplicating; a chat
+ * chosen here is always one not already open (the parent filters), so
+ * there's no equivalent activate-instead-of-open case to handle.
  *
  * `open`/`onOpenChange` are optional: omitted, the menu is the ordinary
  * click-to-open Radix default; passed, the keyboard's `tab.new` action
@@ -223,13 +307,21 @@ export function TabsEmptyState({ onOpen }: { onOpen: (kind: BaseTabKind) => void
  */
 export function NewTabButton({
   onOpen,
+  chats,
+  onOpenChat,
+  onNewChat,
   open,
   onOpenChange,
 }: {
   onOpen: (kind: BaseTabKind) => void;
+  /** Existing chats not currently open, for the menu's reopen section. */
+  chats?: ChatMenuEntry[];
+  onOpenChat?: (chatId: number) => void;
+  onNewChat?: () => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }) {
+  const ChatIcon = TAB_KINDS.chat.icon;
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
@@ -245,6 +337,25 @@ export function NewTabButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
+        {onNewChat && (
+          <DropdownMenuItem data-testid="tabs-new-tab-new-chat" onClick={onNewChat}>
+            <ChatIcon aria-hidden className="size-3.5 opacity-70" />
+            New chat
+          </DropdownMenuItem>
+        )}
+        {onOpenChat &&
+          (chats ?? []).map((chat) => (
+            <DropdownMenuItem
+              key={chat.id}
+              data-testid="tabs-new-tab-open-chat"
+              data-chat-id={chat.id}
+              onClick={() => onOpenChat(chat.id)}
+            >
+              <ChatIcon aria-hidden className="size-3.5 opacity-70" />
+              {chat.title || TAB_KINDS.chat.defaultTitle}
+            </DropdownMenuItem>
+          ))}
+        {onNewChat && <DropdownMenuSeparator />}
         {BASE_TAB_KINDS.map((kind) => {
           const Icon = TAB_KINDS[kind].icon;
           return (

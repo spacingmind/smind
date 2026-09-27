@@ -91,6 +91,9 @@ function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
 export function Composer({
   client,
   taskId,
+  chatId,
+  isDefaultChat,
+  boundProvider,
   connected,
   runningRunId,
   diffStat,
@@ -105,6 +108,12 @@ export function Composer({
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
   taskId: number | null;
+  /** The open chat tab's id -- keys RunConfigToolbar's per-chat state (ADR-0016 P3). null alongside taskId when no chat is selected. */
+  chatId: number | null;
+  /** Whether chatId is taskId's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
+  isDefaultChat: boolean;
+  /** The chat's bound provider (chats.Provider), once set -- makes RunConfigToolbar's Provider select read-only. */
+  boundProvider: Provider | null;
   connected: boolean;
   /** The task's currently-running run, or null. Drives Stop and the queue drain. */
   runningRunId: string | null;
@@ -375,6 +384,9 @@ export function Composer({
          */}
         <RunConfigToolbar
           taskId={taskId}
+          chatId={chatId}
+          isDefaultChat={isDefaultChat}
+          boundProvider={boundProvider}
           profiles={profiles}
           providers={providers}
           disabled={inactive}
