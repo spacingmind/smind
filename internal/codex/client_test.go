@@ -2,6 +2,8 @@ package codex
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -239,4 +241,34 @@ func TestClient_ResumeSession(t *testing.T) {
 			t.Fatal("ResumeSession() error = nil, want error for unknown thread id")
 		}
 	})
+}
+
+// TestClient_WithThreadPolicy proves WithThreadPolicy's approvalPolicy and
+// sandbox reach thread/start on the wire under Codex's own field names,
+// and that a Client without it sends neither (Codex keeps its default).
+func TestClient_WithThreadPolicy(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		opts []Option
+		want string
+	}{
+		"full access": {[]Option{WithThreadPolicy("never", "danger-full-access")}, "never danger-full-access"},
+		"unset":       {nil, " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, cwd := newTestClient(t, "", tc.opts...)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := c.NewSession(ctx, cwd); err != nil {
+				t.Fatalf("NewSession() error = %v", err)
+			}
+			got, err := os.ReadFile(filepath.Join(cwd, "thread-policy"))
+			if err != nil {
+				t.Fatalf("read thread-policy: %v", err)
+			}
+			if string(got) != tc.want {
+				t.Fatalf("thread/start policy = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
