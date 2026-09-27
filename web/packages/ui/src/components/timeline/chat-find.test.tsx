@@ -6,7 +6,7 @@ import { FakeWsClient } from "@/test/fake-ws-client";
 import { TaskDetailPane } from "@/components/task-detail";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import { installCssHighlightStub } from "@/test/css-highlight-stub";
-import type { RunLogsResult, RunSummary, Task } from "@/lib/types";
+import type { Chat, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 /**
  * End-to-end coverage for chat Find (AC1): `Mod+F` claimed only while the
@@ -30,10 +30,21 @@ const TASK: Task = {
   ArchivedAt: null,
 };
 
+const CHAT: Chat = {
+  ID: 10,
+  TaskID: TASK.ID,
+  Title: "Chat",
+  Provider: null,
+  AgentSession: null,
+  CreatedAt: "2024-01-01T00:00:00Z",
+  ArchivedAt: null,
+};
+
 function runningRun(): RunSummary {
   return {
     ID: "run-1",
     TaskID: TASK.ID,
+    ChatID: CHAT.ID,
     Provider: "claude-native",
     Prompt: "describe the cat",
     Status: "running",
@@ -50,6 +61,7 @@ function doneRun(): RunSummary {
   return {
     ID: "run-1",
     TaskID: TASK.ID,
+    ChatID: CHAT.ID,
     Provider: "claude-native",
     Prompt: "describe the cat",
     Status: "done",
@@ -75,7 +87,7 @@ async function renderWithTranscript() {
   const client = new FakeWsClient();
   render(
     <KeyboardProvider>
-      <TaskDetailPane client={client} task={TASK} />
+      <TaskDetailPane client={client} task={TASK} chat={CHAT} isDefaultChat />
     </KeyboardProvider>,
   );
 
@@ -178,7 +190,7 @@ describe("chat Find", () => {
     const client = new FakeWsClient();
     render(
       <KeyboardProvider>
-        <TaskDetailPane client={client} task={TASK} />
+        <TaskDetailPane client={client} task={TASK} chat={CHAT} isDefaultChat />
       </KeyboardProvider>,
     );
     client.nth("run.list", 0).resolve([runningRun()]);

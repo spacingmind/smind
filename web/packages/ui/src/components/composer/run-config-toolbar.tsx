@@ -81,6 +81,8 @@ export interface RunConfigContextValue {
     /** The three tiers for the currently selected provider (full-access's label is provider-specific). */
     approvalPolicies: ApprovalPolicyInfo[];
     disabled: boolean;
+    /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the Provider select read-only, since a stored agent session is provider-native. */
+    boundProvider: Provider | null;
   };
 }
 
@@ -106,9 +108,9 @@ function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigSta
   };
 }
 
-/** The initial state for taskId: its own persisted run-config if there is one, else EMPTY_STATE -- the ★ default agent (if any) is seeded separately, once profiles have loaded (see the effect below), since it can't be looked up before profile.list answers. */
-function initialStateFor(taskId: number | null): RunConfigState {
-  return readRunConfigPreference(taskId) ?? EMPTY_STATE;
+/** The initial state for chatId: its own persisted run-config if there is one (falling back to the task's legacy pre-ADR-0016 key for its default chat), else EMPTY_STATE -- the ★ default agent (if any) is seeded separately, once profiles have loaded (see the effect below), since it can't be looked up before profile.list answers. */
+function initialStateFor(taskId: number | null, chatId: number | null, isDefaultChat: boolean): RunConfigState {
+  return readRunConfigPreference(taskId, chatId, isDefaultChat) ?? EMPTY_STATE;
 }
 
 /**
@@ -132,14 +134,23 @@ function initialStateFor(taskId: number | null): RunConfigState {
  */
 export function RunConfigToolbar({
   taskId,
+  chatId,
+  isDefaultChat = false,
+  boundProvider = null,
   profiles,
   providers,
   disabled = false,
   onChange,
   children,
 }: {
-  /** Keys the per-task persisted state and the ★ default-agent seed (a task with no persisted state yet starts from it). null renders with EMPTY_STATE and persists nothing. */
+  /** Keys the per-task legacy-migration lookup only now (ADR-0016 P3 moved the actual persisted state to the chat) -- still needed alongside chatId to form the storage key. null renders with EMPTY_STATE and persists nothing. */
   taskId: number | null;
+  /** Keys the per-chat persisted state and the ★ default-agent seed (a chat with no persisted state yet starts from it). null renders with EMPTY_STATE and persists nothing. */
+  chatId: number | null;
+  /** Whether chatId is taskId's default (oldest) chat -- the only one that migrates the pre-ADR-0016 per-task-only persisted key (see readRunConfigPreference). */
+  isDefaultChat?: boolean;
+  /** The chat's own bound provider (chats.Provider), once its first run has set one -- forces state.provider to match and makes the Provider select read-only (ADR-0016 P3). null (not yet bound) leaves the provider freely selectable, as today. */
+  boundProvider?: Provider | null;
   profiles: AgentProfile[];
   providers: ProviderInfo[];
   disabled?: boolean;
@@ -153,21 +164,36 @@ export function RunConfigToolbar({
   /** The row's parts in layout order, plus any live ACP option controls. */
   children?: ReactNode;
 }) {
-  const [state, setState] = useState<RunConfigState>(() => initialStateFor(taskId));
+  const [state, setState] = useState<RunConfigState>(() => initialStateFor(taskId, chatId, isDefaultChat));
 
   // Render-phase "adjust state when a prop changes" (same pattern as
-  // use-composer-draft.ts's taskId handling): reads the new task's
+  // use-composer-draft.ts's taskId handling): reads the new chat's
   // persisted run-config during the same render that saw the new id, so a
-  // task switch never paints one frame of the previous task's config.
-  const lastTaskId = useRef<number | null>(taskId);
-  const hadPersisted = useRef<boolean>(readRunConfigPreference(taskId) !== null);
+  // chat switch never paints one frame of the previous chat's config.
+  // The storage key is the (taskId, chatId) pair (run-config-preference.ts),
+  // so "did the selection change" must compare both -- chatId alone would
+  // miss a same-chatId-different-task switch (the toolbar's own chatId prop
+  // is never reused across tasks in production, since chat ids are globally
+  // unique, but standalone tests that pin a fixed chatId across a taskId
+  // rerender depend on this being right too).
+  const lastSelection = useRef<{ taskId: number | null; chatId: number | null }>({ taskId, chatId });
+  const hadPersisted = useRef<boolean>(readRunConfigPreference(taskId, chatId, isDefaultChat) !== null);
   const seededFromDefault = useRef(false);
-  if (lastTaskId.current !== taskId) {
-    lastTaskId.current = taskId;
-    hadPersisted.current = readRunConfigPreference(taskId) !== null;
+  if (lastSelection.current.taskId !== taskId || lastSelection.current.chatId !== chatId) {
+    lastSelection.current = { taskId, chatId };
+    hadPersisted.current = readRunConfigPreference(taskId, chatId, isDefaultChat) !== null;
     seededFromDefault.current = false;
-    setState(initialStateFor(taskId));
+    setState(initialStateFor(taskId, chatId, isDefaultChat));
   }
+
+  // A bound provider overrides whatever the persisted/hand-picked state
+  // says the moment it's known (or changes) -- a chat's provider is
+  // immutable after its first run, so the toolbar must never show (or let
+  // the user pick) anything else, regardless of what was seeded above.
+  useEffect(() => {
+    if (!boundProvider) return;
+    setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider }));
+  }, [boundProvider]);
 
   // The ★ default agent (Settings -> Agents): a task that has never had a
   // run-config persisted for it starts from whichever profile is marked
@@ -243,21 +269,21 @@ export function RunConfigToolbar({
     return {
       state,
       actions: { setProvider, setApprovalPolicy, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
-      meta: { profiles, providers, approvalPolicies: policies, disabled },
+      meta: { profiles, providers, approvalPolicies: policies, disabled, boundProvider },
     };
-  }, [state, setProvider, setApprovalPolicy, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled]);
+  }, [state, setProvider, setApprovalPolicy, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
 
   useEffect(() => {
     onChange?.(value);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onChange, value]);
 
-  // Persists on every state change (docs/design.md §9) -- taskId === null
-  // (no task selected) writes nothing, matching use-composer-draft.ts's
-  // own no-op-when-null contract.
+  // Persists on every state change (docs/design.md §9) -- taskId or chatId
+  // === null (no chat selected) writes nothing, matching
+  // use-composer-draft.ts's own no-op-when-null contract.
   useEffect(() => {
-    writeRunConfigPreference(taskId, state);
-  }, [taskId, state]);
+    writeRunConfigPreference(taskId, chatId, state);
+  }, [taskId, chatId, state]);
 
   return <RunConfigContext.Provider value={value}>{children}</RunConfigContext.Provider>;
 }
@@ -352,9 +378,33 @@ function RunConfigToolbarAgent() {
 
 function RunConfigToolbarProvider() {
   const { state, actions, meta } = useRunConfig();
+  // Once a chat's provider is bound (its first run), the selector goes
+  // read-only (ADR-0016 P3: switching providers mid-chat would silently
+  // drop the stored agent session, which is provider-native) -- a tooltip
+  // on the trigger explains why, the same "disabled says why" convention
+  // composerPlaceholder already follows for the composer itself.
+  const boundLabel = meta.boundProvider ? (meta.providers.find((p) => p.id === meta.boundProvider)?.label ?? meta.boundProvider) : null;
   return (
-    <Select value={state.provider} onValueChange={(v) => actions.setProvider(v as Provider)} disabled={meta.disabled}>
-      <SelectTrigger aria-label="Provider" className={SELECT_TRIGGER_CLASS}>
+    <Select
+      value={state.provider}
+      // Radix's Select fires a spurious onValueChange("") of its own --
+      // not from any user interaction -- the moment a `disabled` select's
+      // value settles (observed right after a chat's provider gets bound
+      // and this select flips to read-only). Ignoring the empty string is
+      // what stops that from corrupting `state.provider` to "" -- a real
+      // pick from the list is never itself an empty id.
+      onValueChange={(v) => {
+        if (v) actions.setProvider(v as Provider);
+      }}
+      disabled={meta.disabled || Boolean(meta.boundProvider)}
+    >
+      <SelectTrigger
+        aria-label="Provider"
+        title={boundLabel ? `This chat is bound to ${boundLabel}; start a new chat to switch` : undefined}
+        data-testid="composer-provider-bound"
+        data-bound={boundLabel ? "true" : undefined}
+        className={SELECT_TRIGGER_CLASS}
+      >
         <SelectValue placeholder="Select provider" />
       </SelectTrigger>
       <SelectContent>

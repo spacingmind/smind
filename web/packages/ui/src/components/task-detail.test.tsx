@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { runConfigPillLabel, TaskDetailPane } from "@/components/task-detail";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { AgentProfile, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 // The run-config IA plan persists RunConfigToolbar's state per task id
 // (docs/design.md §9) -- most tests below share TASK_A.ID, so a leftover
@@ -29,10 +29,22 @@ const TASK_A: Task = {
 
 const TASK_B: Task = { ...TASK_A, ID: 2, Title: "Task B", Branch: "task-b" };
 
+const CHAT_A: Chat = {
+  ID: 10,
+  TaskID: TASK_A.ID,
+  Title: "Chat",
+  Provider: null,
+  AgentSession: null,
+  CreatedAt: "2024-01-01T00:00:00Z",
+  ArchivedAt: null,
+};
+const CHAT_B: Chat = { ...CHAT_A, ID: 20, TaskID: TASK_B.ID };
+
 function runningRun(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
     ID: "run-1",
     TaskID: TASK_A.ID,
+    ChatID: CHAT_A.ID,
     Provider: "claude-native",
     Prompt: "do the thing",
     Status: "running",
@@ -50,6 +62,7 @@ function doneRun(overrides: Partial<RunSummary> = {}): RunSummary {
   return {
     ID: "run-1",
     TaskID: TASK_A.ID,
+    ChatID: CHAT_A.ID,
     Provider: "claude-native",
     Prompt: "do the thing",
     Status: "done",
@@ -75,9 +88,9 @@ async function flush(): Promise<void> {
 describe("TaskDetailPane", () => {
   it("selecting a task fetches and renders its run history", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    expect(client.nth("run.list", 0).params).toBeUndefined();
+    expect(client.nth("run.list", 0).params).toEqual({ chatId: CHAT_A.ID });
     client.nth("run.list", 0).resolve([doneRun()]);
     await flush();
 
@@ -103,7 +116,7 @@ describe("TaskDetailPane", () => {
 
   it("streams a running run's live chunks into the timeline as they arrive, not buffered until the terminal event", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -126,7 +139,7 @@ describe("TaskDetailPane", () => {
 
   it("switching to a different task and back doesn't duplicate entries or leak the live subscription", async () => {
     const client = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} />);
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -136,11 +149,11 @@ describe("TaskDetailPane", () => {
 
     // Switch away: the first task's run.attach must be aborted (detached),
     // not left dangling or double-subscribed.
-    rerender(<TaskDetailPane client={client} task={TASK_B} />);
+    rerender(<TaskDetailPane client={client} task={TASK_B} chat={CHAT_B} isDefaultChat />);
     await flush();
     expect(client.nth("run.attach", 0).options?.signal?.aborted).toBe(true);
 
-    expect(client.nth("run.list", 1).params).toBeUndefined();
+    expect(client.nth("run.list", 1).params).toEqual({ chatId: CHAT_B.ID });
     client.nth("run.list", 1).resolve([]);
     await flush();
     expect(screen.getByText(/no runs yet/i)).toBeInTheDocument();
@@ -149,7 +162,7 @@ describe("TaskDetailPane", () => {
     // the time we reselect Task A it shows as finished with its full text
     // -- fetched fresh via run.list + run.logs, not carried over from the
     // earlier live subscription.
-    rerender(<TaskDetailPane client={client} task={TASK_A} />);
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
     await flush();
     client.nth("run.list", 2).resolve([doneRun()]);
     await flush();
@@ -171,7 +184,7 @@ describe("TaskDetailPane", () => {
 
   it("aborts (does not stop) an actively streaming run.attach on unmount", async () => {
     const client = new FakeWsClient();
-    const { unmount } = render(<TaskDetailPane client={client} task={TASK_A} />);
+    const { unmount } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -186,7 +199,7 @@ describe("TaskDetailPane", () => {
 
   it("submits the prompt form via run.start then run.attach, never task.prompt", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     await flush();
@@ -199,7 +212,7 @@ describe("TaskDetailPane", () => {
     expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
 
     // run.attach must not have been issued before run.start resolves.
     expect(client.calls.some((c) => c.method === "run.attach")).toBe(false);
@@ -221,16 +234,16 @@ describe("TaskDetailPane", () => {
 
   it("a rapid double-switch (A -> B -> A) discards task B's now-stale fetch instead of letting it overwrite the re-selected task A view", async () => {
     const client = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} />);
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     // Task A's first run.list is issued but never resolved before we move on.
     const staleListCall = client.nth("run.list", 0);
 
-    rerender(<TaskDetailPane client={client} task={TASK_B} />);
+    rerender(<TaskDetailPane client={client} task={TASK_B} chat={CHAT_B} isDefaultChat />);
     client.nth("run.list", 1).resolve([]);
     await flush();
 
-    rerender(<TaskDetailPane client={client} task={TASK_A} />);
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
     await flush();
 
     // The stale first fetch for A resolves late, after A was reselected --
@@ -262,7 +275,7 @@ describe("TaskDetailPane", () => {
   // run.attach), just against the composer's button.
   it("shows a Stop button in the composer only while a run is live, and clicking it calls run.stop (not an abort)", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -294,7 +307,7 @@ describe("TaskDetailPane", () => {
 
   it("surfaces a run.stop failure without crashing, keeping the Stop button usable", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -311,7 +324,7 @@ describe("TaskDetailPane", () => {
 
   it("renders a pending permission request with a button per option when a permission_request event arrives", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -336,7 +349,7 @@ describe("TaskDetailPane", () => {
 
   it("clicking a permission option calls run.respondPermission with the run/request/option ids", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -365,7 +378,7 @@ describe("TaskDetailPane", () => {
 
   it("clears the pending permission prompt once a matching permission_resolved event arrives from this tab's own click", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -395,7 +408,7 @@ describe("TaskDetailPane", () => {
 
   it("clears the pending permission prompt on a permission_resolved event that did not originate from this tab's own click", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -421,7 +434,7 @@ describe("TaskDetailPane", () => {
 
   it("keeps the pending-permission card outside the scrolling log, pinned above the prompt form, while log chunks keep streaming in", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -458,7 +471,7 @@ describe("TaskDetailPane", () => {
 
   it("surfaces a run.respondPermission failure without crashing, keeping the option buttons usable", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -483,7 +496,7 @@ describe("TaskDetailPane", () => {
 
   it("shows a connection-lost banner while connectionStatus is 'reconnecting', without discarding the currently-shown runs", async () => {
     const client = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat connectionStatus="connected" />);
 
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -492,7 +505,7 @@ describe("TaskDetailPane", () => {
 
     expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
 
-    rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="reconnecting" />);
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat connectionStatus="reconnecting" />);
     await flush();
 
     expect(screen.getByTestId("connection-banner")).toBeInTheDocument();
@@ -500,14 +513,14 @@ describe("TaskDetailPane", () => {
     // already-streamed text) is not thrown away while waiting to resync.
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("hello");
 
-    rerender(<TaskDetailPane client={client} task={TASK_A} connectionStatus="connected" />);
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat connectionStatus="connected" />);
     await flush();
     expect(screen.queryByTestId("connection-banner")).not.toBeInTheDocument();
   });
 
   it("given a new post-reconnect client, re-issues run.list and re-attaches to the same still-running run instead of a fresh run.start", async () => {
     const client1 = new FakeWsClient();
-    const { rerender } = render(<TaskDetailPane client={client1} task={TASK_A} />);
+    const { rerender } = render(<TaskDetailPane client={client1} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client1.nth("run.list", 0).resolve([runningRun()]);
     await flush();
@@ -519,10 +532,10 @@ describe("TaskDetailPane", () => {
     // App.tsx swaps in a genuinely new WsClient instance after a
     // successful reconnect -- the task selection itself is untouched.
     const client2 = new FakeWsClient();
-    rerender(<TaskDetailPane client={client2} task={TASK_A} />);
+    rerender(<TaskDetailPane client={client2} task={TASK_A} chat={CHAT_A} isDefaultChat />);
     await flush();
 
-    expect(client2.nth("run.list", 0).params).toBeUndefined();
+    expect(client2.nth("run.list", 0).params).toEqual({ chatId: CHAT_A.ID });
     client2.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
@@ -539,7 +552,7 @@ describe("TaskDetailPane", () => {
 
   it("renders the provider dropdown from provider.list (3 providers, labels over ids)", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     const listCall = client.nth("provider.list", 0);
     expect(listCall.params).toBeUndefined();
@@ -559,7 +572,7 @@ describe("TaskDetailPane", () => {
 
   it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     client.nth("provider.list", 0).reject(new Error("boom"));
@@ -575,12 +588,12 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
   });
 
   it("defaults the approval-policy selector to manual and omits approvalPolicy from run.start", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     await flush();
@@ -592,12 +605,12 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
   });
 
   it("sends approvalPolicy=auto-safe in run.start when auto-safe is selected", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     await flush();
@@ -611,6 +624,7 @@ describe("TaskDetailPane", () => {
     const startCall = client.nth("run.start", 0);
     expect(startCall.params).toEqual({
       taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
       provider: "claude-native",
       prompt: "do the thing",
       approvalPolicy: "auto-safe",
@@ -619,7 +633,7 @@ describe("TaskDetailPane", () => {
 
   it("fetches and renders GLM's live config options, but never for a Claude run", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
     await flush();
@@ -655,7 +669,7 @@ describe("TaskDetailPane", () => {
 
   it("omits the config-options control entirely for a Claude run", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
     await flush();
@@ -668,7 +682,7 @@ describe("TaskDetailPane", () => {
 
   it("re-fetches config options as the live run streams more events", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "kimi" })]);
     await flush();
@@ -694,7 +708,7 @@ describe("TaskDetailPane", () => {
 
   it("changing a config option calls run.setConfigOption and reflects the new value", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
     await flush();
@@ -743,7 +757,7 @@ describe("TaskDetailPane", () => {
 
   it("surfaces a failed run.setConfigOption as an error instead of silently no-op'ing", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "glm" })]);
     await flush();
@@ -765,7 +779,7 @@ describe("TaskDetailPane", () => {
 
   it("shows the live approval-policy control for a running manual run and switches it via run.setApprovalPolicy", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
     await flush();
@@ -789,7 +803,7 @@ describe("TaskDetailPane", () => {
 
   it("surfaces a failed run.setApprovalPolicy as an error instead of silently no-op'ing", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
     await flush();
@@ -806,7 +820,7 @@ describe("TaskDetailPane", () => {
 
   it("hides the approval-policy control entirely for a full-access run", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "full-access" })]);
     await flush();
@@ -816,7 +830,7 @@ describe("TaskDetailPane", () => {
 
   it("hides the approval-policy control once the run has finished", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([doneRun({ ApprovalPolicy: "manual" })]);
     await flush();
@@ -828,7 +842,7 @@ describe("TaskDetailPane", () => {
 
   it("shows Retry with higher effort for a failed Claude run below extended and resubmits at the next tier", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([
       doneRun({
@@ -850,6 +864,7 @@ describe("TaskDetailPane", () => {
     const startCall = client.nth("run.start", 0);
     expect(startCall.params).toEqual({
       taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
       provider: "claude-native",
       prompt: "do the thing",
       approvalPolicy: "auto-safe",
@@ -859,7 +874,7 @@ describe("TaskDetailPane", () => {
 
   it("shows no Retry with higher effort for a failed run already at extended", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([
       doneRun({ Status: "error", Err: "boom", Provider: "claude-native", ThinkingLevel: "extended" }),
@@ -873,7 +888,7 @@ describe("TaskDetailPane", () => {
 
   it("shows no Retry with higher effort for a failed non-Claude provider's run", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([doneRun({ Status: "error", Err: "boom", Provider: "glm", ThinkingLevel: "off" })]);
     await flush();
@@ -885,7 +900,7 @@ describe("TaskDetailPane", () => {
 
   it("shows no Retry with higher effort for a successful Claude run", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([doneRun({ Provider: "claude-native", ThinkingLevel: "off" })]);
     await flush();
@@ -899,7 +914,7 @@ describe("TaskDetailPane", () => {
 describe("run-config pill (run-config IA)", () => {
   it("summarizes the toolbar's current state and clicking it focuses the toolbar row", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     // Both task-detail.tsx (the pill's own label lookup) and composer.tsx
@@ -931,7 +946,7 @@ describe("run-config pill (run-config IA)", () => {
 
   it("shows the agent's name once one is picked from the toolbar", async () => {
     const client = new FakeWsClient();
-    render(<TaskDetailPane client={client} task={TASK_A} />);
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     const profile: AgentProfile = {

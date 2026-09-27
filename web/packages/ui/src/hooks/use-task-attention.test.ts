@@ -36,10 +36,11 @@ function makeEventsStub() {
   };
 }
 
-function run(id: string, taskId: number, status: RunStatusValue, startedAt: string): RunSummary {
+function run(id: string, taskId: number, status: RunStatusValue, startedAt: string, chatId = taskId): RunSummary {
   return {
     ID: id,
     TaskID: taskId,
+    ChatID: chatId,
     Provider: "glm",
     Prompt: "do it",
     Status: status,
