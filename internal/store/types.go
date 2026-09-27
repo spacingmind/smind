@@ -161,6 +161,34 @@ type AgentProfile struct {
 	UpdatedAt      time.Time
 }
 
+// McpServer is a named, daemon-global MCP server definition (docs/
+// decisions/0018-agent-mcp-servers.md) an agent run may be handed: a
+// stdio subprocess (Playwright MCP) or an http/sse endpoint, optionally
+// restricted to specific workspaces via workspace_mcp_servers (no
+// restriction row = available to every workspace). Name is unique and is
+// the identity every downstream protocol keys a server by (ACP's
+// McpServerStdio.name, Claude's mcpServers map key), unlike
+// AgentProfile.Name, which is only a label. Args/Env are JSON-encoded
+// (array of strings, object of string->string) following the store's
+// existing JSON-in-TEXT convention; Env/Headers are secret-bearing and
+// must be redacted on every read path that leaves the daemon (ADR-0018
+// "Secrets in env/headers"). Transport is a plain string ("stdio"|
+// "http"|"sse") validated by internal/mcpservers, not here, for the same
+// reason AgentProfile.Provider is a plain string.
+type McpServer struct {
+	ID        int64
+	Name      string
+	Transport string
+	Command   string
+	Args      string
+	Env       string
+	URL       string
+	Headers   string
+	Enabled   bool
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // Chat is a conversation thread within a task (docs/decisions/
 // 0016-multiple-chats-per-task.md): the unit a provider binds to and an
 // agent session persists against, sharing its parent task's git worktree

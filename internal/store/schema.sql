@@ -117,9 +117,36 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     updated_at TIMESTAMP NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS mcp_servers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,     -- human label and the wire-identity key on
+                                   -- every backend (ACP's McpServerStdio.name,
+                                   -- Claude's mcpServers map key) -- ADR-0018,
+                                   -- "Name is the join key, not id"
+    transport TEXT NOT NULL,       -- 'stdio' | 'http' | 'sse'
+    command TEXT NOT NULL DEFAULT '',  -- stdio only: absolute path or bare
+                                       -- command to resolve via exec.LookPath
+    args TEXT NOT NULL DEFAULT '[]',   -- stdio only: JSON array of strings
+    env TEXT NOT NULL DEFAULT '{}',    -- stdio only: JSON object, string->string;
+                                       -- secret-bearing (ADR-0018 "Secrets")
+    url TEXT NOT NULL DEFAULT '',      -- http/sse only
+    headers TEXT NOT NULL DEFAULT '{}',-- http/sse only: JSON object,
+                                       -- string->string; secret-bearing
+    enabled INTEGER NOT NULL DEFAULT 1,-- disable without deleting
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS workspace_mcp_servers (
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    mcp_server_id INTEGER NOT NULL REFERENCES mcp_servers(id),
+    PRIMARY KEY (workspace_id, mcp_server_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_routing_decisions_session_key ON routing_decisions(session_key);
 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_account_id ON quota_snapshots(account_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_accounts_account_id ON workspace_accounts(account_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_mcp_servers_mcp_server_id ON workspace_mcp_servers(mcp_server_id);
 CREATE INDEX IF NOT EXISTS idx_spaces_workspace_id ON spaces(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_space_id ON tasks(space_id);
