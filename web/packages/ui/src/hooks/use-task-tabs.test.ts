@@ -1,7 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { baseTabForKind, fileTab } from "@/components/tab-registry";
+import { baseTabForKind, chatTab, fileTab } from "@/components/tab-registry";
 import { useTaskTabs } from "@/hooks/use-task-tabs";
 import { collectAllPanes, DEFAULT_PANE_ID, findPaneById, findPaneContainingTab, type SplitNode } from "@/lib/split-tree";
 import { STORAGE_KEYS } from "@/lib/storage";
@@ -15,11 +15,14 @@ function otherPaneId(root: SplitNode): string | undefined {
   return collectAllPanes(root).find((pane) => pane.id !== DEFAULT_PANE_ID)?.id;
 }
 
+/** Task 1's default (and, in these tests, only) chat -- what ensureTaskChats seeds its first tab from. */
+const DEFAULT_CHATS = [{ ID: 1, Title: "Chat" }];
+
 describe("useTaskTabs persistence", () => {
   it("restores a task's open tabs and active key across a fresh mount", () => {
     const first = renderHook(() => useTaskTabs());
     act(() => {
-      first.result.current.ensureTask(1);
+      first.result.current.ensureTaskChats(1, DEFAULT_CHATS);
       first.result.current.openTab(1, fileTab(1, "src/app.ts"));
     });
     expect(findPaneById(first.result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)?.activeKey).toBe(
@@ -32,14 +35,14 @@ describe("useTaskTabs persistence", () => {
     expect(layout).toBeDefined();
     const primary = findPaneById(layout!.root, DEFAULT_PANE_ID);
     expect(primary?.activeKey).toBe("1:file:src/app.ts");
-    expect(primary?.tabs.map((t) => t.key)).toEqual(["1:task", "1:file:src/app.ts"]);
+    expect(primary?.tabs.map((t) => t.key)).toEqual(["1:chat:1", "1:file:src/app.ts"]);
     expect(collectAllPanes(layout!.root)).toHaveLength(1);
   });
 
   it("persists a close and an activate, not just an open", () => {
     const first = renderHook(() => useTaskTabs());
     act(() => {
-      first.result.current.ensureTask(1);
+      first.result.current.ensureTaskChats(1, DEFAULT_CHATS);
       first.result.current.openTab(1, baseTabForKind(1, "diff"));
       first.result.current.openTab(1, fileTab(1, "a.ts"));
       first.result.current.activate(1, "1:diff");
@@ -49,7 +52,7 @@ describe("useTaskTabs persistence", () => {
     const second = renderHook(() => useTaskTabs());
     const layout = second.result.current.tabsByTask.get(1)!;
     const primary = findPaneById(layout.root, DEFAULT_PANE_ID)!;
-    expect(primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:diff"]);
+    expect(primary.tabs.map((t) => t.key)).toEqual(["1:chat:1", "1:diff"]);
     expect(primary.activeKey).toBe("1:diff");
   });
 
@@ -72,6 +75,7 @@ describe("useTaskTabs persistence", () => {
   it("persists a moved-to-a-second-pane tab and its pane", () => {
     const first = renderHook(() => useTaskTabs());
     act(() => {
+      first.result.current.ensureTaskChats(1, DEFAULT_CHATS);
       first.result.current.openTab(1, fileTab(1, "a.ts"));
       first.result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "right");
     });
@@ -81,7 +85,7 @@ describe("useTaskTabs persistence", () => {
     const layout = second.result.current.tabsByTask.get(1)!;
     const primary = findPaneById(layout.root, DEFAULT_PANE_ID)!;
     const side = findPaneById(layout.root, sidePaneId)!;
-    expect(primary.tabs.map((t) => t.key)).toEqual(["1:task"]);
+    expect(primary.tabs.map((t) => t.key)).toEqual(["1:chat:1"]);
     expect(side.tabs.map((t) => t.key)).toEqual(["1:file:a.ts"]);
     expect(side.activeKey).toBe("1:file:a.ts");
   });
@@ -141,7 +145,7 @@ describe("useTaskTabs persistence", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
       for (let taskId = 1; taskId <= 55; taskId++) {
-        result.current.ensureTask(taskId);
+        result.current.ensureTaskChats(taskId, [{ ID: taskId, Title: "Chat" }]);
       }
     });
 
@@ -159,7 +163,7 @@ describe("useTaskTabs panes", () => {
   it('openTab with placement "side" creates a second pane and leaves the default pane\'s active tab alone', () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.openTab(1, fileTab(1, "a.ts"), "side");
     });
@@ -221,7 +225,7 @@ describe("useTaskTabs panes", () => {
   it("moveTab relocates an open tab into an existing pane and activates it there", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "files"));
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.openTab(1, fileTab(1, "a.ts"), "side"); // creates the second pane
@@ -235,7 +239,7 @@ describe("useTaskTabs panes", () => {
     const layout = result.current.tabsByTask.get(1)!;
     const primary = findPaneById(layout.root, DEFAULT_PANE_ID)!;
     const side = findPaneById(layout.root, sidePaneId)!;
-    expect(primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:files"]);
+    expect(primary.tabs.map((t) => t.key)).toEqual(["1:chat:1", "1:files"]);
     expect(side.tabs.map((t) => t.key)).toEqual(["1:file:a.ts", "1:diff"]);
     expect(side.activeKey).toBe("1:diff");
   });
@@ -243,7 +247,7 @@ describe("useTaskTabs panes", () => {
   it("moving the default pane's active tab activates its neighbor there", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "files"));
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.openTab(1, baseTabForKind(1, "terminal"));
@@ -263,7 +267,7 @@ describe("useTaskTabs panes", () => {
   it("splitTab followed by moveTab back to the original pane is the inverse, and removes the now-empty created pane", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "right");
     });
@@ -314,7 +318,7 @@ describe("useTaskTabs panes", () => {
   it("moveTab is a no-op for a tab that isn't open anywhere", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
     });
     const before = result.current.tabsByTask.get(1);
@@ -328,7 +332,7 @@ describe("useTaskTabs panes", () => {
   it("moveTab is a no-op for a target pane that doesn't exist", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
     });
     const before = result.current.tabsByTask.get(1);
@@ -357,7 +361,7 @@ describe("useTaskTabs panes", () => {
   it("splitTab creates a new pane in the requested direction and lands the tab there", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "down");
     });
@@ -378,7 +382,7 @@ describe("useTaskTabs panes", () => {
   it("splitTab in \"left\" creates a horizontal group with the new pane before the original (Item 7)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "left");
     });
@@ -401,7 +405,7 @@ describe("useTaskTabs panes", () => {
   it("splitTab in \"up\" creates a vertical group with the new pane before the original (Item 7)", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "up");
     });
@@ -422,7 +426,7 @@ describe("useTaskTabs panes", () => {
   it("splitTab is a silent no-op once it would exceed the tree's max depth", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
     });
 
@@ -448,7 +452,7 @@ describe("useTaskTabs panes", () => {
   it("creates a third pane via two splits, each with its own tabs", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
-      result.current.ensureTask(1);
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, baseTabForKind(1, "diff"));
       result.current.openTab(1, baseTabForKind(1, "terminal"));
       result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "right");
@@ -464,7 +468,7 @@ describe("useTaskTabs panes", () => {
     expect(panes).toHaveLength(3);
 
     const thirdPaneId = panes.map((p) => p.id).find((id) => id !== DEFAULT_PANE_ID && id !== secondPaneId)!;
-    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual(["1:task"]);
+    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual(["1:chat:1"]);
     expect(findPaneById(layout.root, secondPaneId)!.tabs.map((t) => t.key)).toEqual(["1:diff"]);
     expect(findPaneById(layout.root, thirdPaneId)!.tabs.map((t) => t.key)).toEqual(["1:terminal"]);
   });
@@ -472,7 +476,7 @@ describe("useTaskTabs panes", () => {
   it("resizeGroup updates a group's sizes, and they hold across a remount", () => {
     const first = renderHook(() => useTaskTabs());
     act(() => {
-      first.result.current.ensureTask(1);
+      first.result.current.ensureTaskChats(1, DEFAULT_CHATS);
       first.result.current.openTab(1, baseTabForKind(1, "diff"));
       first.result.current.splitTab(1, "1:diff", DEFAULT_PANE_ID, "right");
     });
@@ -558,7 +562,10 @@ describe("closePane", () => {
 describe("splitPaneEmpty", () => {
   it("creates a new, tab-less pane and focuses it, without touching the source pane's tabs", () => {
     const { result } = renderHook(() => useTaskTabs());
-    act(() => result.current.openTab(1, fileTab(1, "a.ts")));
+    act(() => {
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
+      result.current.openTab(1, fileTab(1, "a.ts"));
+    });
 
     act(() => result.current.splitPaneEmpty(1, DEFAULT_PANE_ID, "right"));
 
@@ -568,7 +575,7 @@ describe("splitPaneEmpty", () => {
     const newPaneId = otherPaneId(layout.root)!;
     expect(findPaneById(layout.root, newPaneId)!.tabs).toEqual([]);
     expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual([
-      "1:task",
+      "1:chat:1",
       "1:file:a.ts",
     ]);
     expect(layout.focusedPaneId).toBe(newPaneId);
@@ -630,6 +637,7 @@ describe("moveTabToNextPane", () => {
 
 describe("closeOtherTabs / closeTabsToLeft / closeTabsToRight", () => {
   function openThree(result: { current: ReturnType<typeof useTaskTabs> }) {
+    result.current.ensureTaskChats(1, DEFAULT_CHATS);
     result.current.openTab(1, fileTab(1, "a.ts"));
     result.current.openTab(1, fileTab(1, "b.ts"));
     result.current.openTab(1, fileTab(1, "c.ts"));
@@ -662,7 +670,7 @@ describe("closeOtherTabs / closeTabsToLeft / closeTabsToRight", () => {
     act(() => openThree(result));
     const before = result.current.tabsByTask.get(1);
 
-    act(() => result.current.closeTabsToLeft(1, "1:task"));
+    act(() => result.current.closeTabsToLeft(1, "1:chat:1"));
 
     expect(result.current.tabsByTask.get(1)).toBe(before);
   });
@@ -674,7 +682,7 @@ describe("closeOtherTabs / closeTabsToLeft / closeTabsToRight", () => {
     act(() => result.current.closeTabsToRight(1, "1:file:a.ts"));
 
     const primary = findPaneById(result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)!;
-    expect(primary.tabs.map((t) => t.key)).toEqual(["1:task", "1:file:a.ts"]);
+    expect(primary.tabs.map((t) => t.key)).toEqual(["1:chat:1", "1:file:a.ts"]);
   });
 
   it("closeTabsToRight is a no-op for the last tab in its pane", () => {
@@ -690,16 +698,17 @@ describe("closeOtherTabs / closeTabsToLeft / closeTabsToRight", () => {
   it("only ever touches the pane the given tab is in, leaving another pane's tabs alone", () => {
     const { result } = renderHook(() => useTaskTabs());
     act(() => {
+      result.current.ensureTaskChats(1, DEFAULT_CHATS);
       result.current.openTab(1, fileTab(1, "a.ts"));
       result.current.splitTab(1, "1:file:a.ts", DEFAULT_PANE_ID, "right");
     });
     const sidePaneId = otherPaneId(result.current.tabsByTask.get(1)!.root)!;
     act(() => result.current.openTab(1, baseTabForKind(1, "diff"), { pane: sidePaneId }));
 
-    act(() => result.current.closeOtherTabs(1, "1:task"));
+    act(() => result.current.closeOtherTabs(1, "1:chat:1"));
 
     const layout = result.current.tabsByTask.get(1)!;
-    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual(["1:task"]);
+    expect(findPaneById(layout.root, DEFAULT_PANE_ID)!.tabs.map((t) => t.key)).toEqual(["1:chat:1"]);
     expect(findPaneById(layout.root, sidePaneId)!.tabs.map((t) => t.key)).toEqual([
       "1:file:a.ts",
       "1:diff",
@@ -752,6 +761,106 @@ describe("renameTab", () => {
     const before = result.current.tabsByTask.get(1);
 
     act(() => result.current.renameTab(1, "1:terminal", "build"));
+
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+});
+
+describe("ensureTaskChats", () => {
+  it("seeds a task with no layout yet from its default (first) chat", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, [{ ID: 7, Title: "Second brain" }]));
+
+    const primary = findPaneById(result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)!;
+    expect(primary.tabs).toEqual([chatTab(1, { ID: 7, Title: "Second brain" })]);
+    expect(primary.activeKey).toBe("1:chat:7");
+  });
+
+  it("is a no-op for a task that already has a layout with no legacy tab in it", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+    const before = result.current.tabsByTask.get(1);
+
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+
+    expect(result.current.tabsByTask.get(1)).toBe(before);
+  });
+
+  it("migrates a persisted pre-ADR-0016 `${taskId}:task` tab onto the default chat's tab (plan's P3 AC1)", () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.taskTabs,
+      JSON.stringify({
+        "1": {
+          root: {
+            kind: "pane",
+            pane: {
+              id: DEFAULT_PANE_ID,
+              tabs: [
+                { kind: "task", key: "1:task", taskId: 1, title: "Chat", closable: true },
+                { kind: "diff", key: "1:diff", taskId: 1, title: "Diff", closable: true },
+              ],
+              activeKey: "1:task",
+            },
+          },
+          focusedPaneId: DEFAULT_PANE_ID,
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+
+    const primary = findPaneById(result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)!;
+    expect(primary.tabs.map((t) => t.key)).toEqual(["1:chat:1", "1:diff"]);
+    expect(primary.tabs[0]).toEqual(chatTab(1, DEFAULT_CHATS[0]!));
+    expect(primary.activeKey).toBe("1:chat:1");
+  });
+
+  it("running it again after the migration is a no-op", () => {
+    window.localStorage.setItem(
+      STORAGE_KEYS.taskTabs,
+      JSON.stringify({
+        "1": {
+          root: {
+            kind: "pane",
+            pane: {
+              id: DEFAULT_PANE_ID,
+              tabs: [{ kind: "task", key: "1:task", taskId: 1, title: "Chat", closable: true }],
+              activeKey: "1:task",
+            },
+          },
+          focusedPaneId: DEFAULT_PANE_ID,
+        },
+      }),
+    );
+
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+    const migrated = result.current.tabsByTask.get(1);
+
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+
+    expect(result.current.tabsByTask.get(1)).toBe(migrated);
+  });
+});
+
+describe("updateChatTabTitle", () => {
+  it("updates an open chat tab's title", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+
+    act(() => result.current.updateChatTabTitle(1, 1, "Renamed"));
+
+    const primary = findPaneById(result.current.tabsByTask.get(1)!.root, DEFAULT_PANE_ID)!;
+    expect(primary.tabs.find((t) => t.key === "1:chat:1")?.title).toBe("Renamed");
+  });
+
+  it("is a no-op for a chat that isn't open anywhere", () => {
+    const { result } = renderHook(() => useTaskTabs());
+    act(() => result.current.ensureTaskChats(1, DEFAULT_CHATS));
+    const before = result.current.tabsByTask.get(1);
+
+    act(() => result.current.updateChatTabTitle(1, 999, "Renamed"));
 
     expect(result.current.tabsByTask.get(1)).toBe(before);
   });

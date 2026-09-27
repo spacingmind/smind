@@ -58,6 +58,21 @@ export interface AgentProfile {
   UpdatedAt: string;
 }
 
+// Mirrors internal/store.Chat field-for-field (ADR-0016, "docs/decisions/
+// 0016-multiple-chats-per-task.md") -- same no-json-tags, PascalCase-on-
+// the-wire convention as Workspace/Task above. One conversation thread
+// inside a task's shared worktree; Provider is null until the chat's first
+// run binds it (immutable afterwards, see chat.rename/run.start).
+export interface Chat {
+  ID: number;
+  TaskID: number;
+  Title: string;
+  Provider: string | null;
+  AgentSession: string | null;
+  CreatedAt: string;
+  ArchivedAt: string | null;
+}
+
 // internal/taskrunner.Provider values, carried over the wire as their
 // underlying strings. The authoritative list is served dynamically by the
 // daemon's provider.list method (see ProviderListResult); this union just
@@ -147,6 +162,8 @@ export type RunStatusValue = "running" | "done" | "error" | "stopped";
 export interface RunSummary {
   ID: string;
   TaskID: number;
+  /** ADR-0016 P1.4: which chat this run belongs to -- every run has exactly one, the task's default chat when its prompt/run.start omitted chatId. */
+  ChatID: number;
   Provider: Provider;
   Prompt: string;
   Status: RunStatusValue;
@@ -517,19 +534,37 @@ export interface TaskStatusEventPayload {
 export interface RunStatusEventPayload {
   runId: string;
   taskId: number;
+  /** ADR-0016 P1.4. */
+  chatId: number;
   status: RunStatusValue;
   stopReason?: string;
   err?: string;
 }
 
-// Payload of permission.pending: {runId, taskId, requestId, summary,
-// options} -- same option shape as PermissionOption.
+// Payload of permission.pending: {runId, taskId, chatId, requestId,
+// summary, options} -- same option shape as PermissionOption. chatId is
+// ADR-0016 P1.4.
 export interface PermissionPendingEventPayload {
   runId: string;
   taskId: number;
+  chatId: number;
   requestId: string;
   summary: string;
   options: PermissionOption[];
+}
+
+// Payloads of ADR-0016's chat lifecycle events (internal/wsapi/events.go's
+// chatCreatedPayload/chatUpdatedPayload/chatArchivedPayload): a full Chat
+// snapshot each time, no delete -- a chat is archived, never destroyed,
+// matching task.archive's own event shape.
+export interface ChatCreatedEventPayload {
+  chat: Chat;
+}
+export interface ChatUpdatedEventPayload {
+  chat: Chat;
+}
+export interface ChatArchivedEventPayload {
+  chat: Chat;
 }
 
 // One entry in an account.list response (internal/wsapi/handlers.go's

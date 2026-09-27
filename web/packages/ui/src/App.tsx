@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Columns2, Copy, Pencil } from "lucide-react";
+import { Archive, Columns2, Copy, Pencil } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
@@ -38,6 +39,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
   baseTabForKind,
+  chatTab,
+  chatTabKey,
   defaultTabsForTask,
   fileTab,
   filePathFromTabKey,
@@ -46,6 +49,7 @@ import {
   TabLabel,
   TabsEmptyState,
   type BaseTabKind,
+  type ChatMenuEntry,
   type TabEntry,
   type TabKind,
 } from "@/components/tab-registry";
@@ -57,6 +61,7 @@ import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
+import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
@@ -77,7 +82,7 @@ import {
 } from "@/lib/split-tree";
 import { findAdjacentPane, type PaneDirection } from "@/lib/split-navigation";
 import type { ThemePreference } from "@/lib/theme";
-import type { Task, TaskFilesResult, Workspace } from "@/lib/types";
+import type { Chat, Task, TaskFilesResult, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 /** `useDraggable`'s `data` for a tab strip entry (Item 8) -- carries what `onDragEnd` needs to decide move-vs-split without re-deriving it from the tree. */
@@ -180,7 +185,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   const {
     tabsByTask,
-    ensureTask,
+    ensureTaskChats,
+    updateChatTabTitle,
     openTab,
     closeTab,
     activate,
@@ -197,7 +203,26 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     renameTab,
   } = useTaskTabs();
   const events = useDaemonEvents(client);
-  const { attention, runStatus } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  const { attention, runStatus, runningChatsByTask } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  // ADR-0016 P3: the selected task's own chats, live -- the "+" menu's
+  // reopen section, the seed-or-migrate step below, and every chat tab's
+  // authoritative title/provider all read from this one fetch.
+  const { chats } = useTaskChats(client, selectedTask?.ID ?? null, events, (chat) => {
+    updateChatTabTitle(chat.TaskID, chat.ID, chat.Title);
+  });
+  // Seeds a freshly selected task's default-chat tab, or migrates a
+  // persisted pre-ADR-0016 `${taskId}:task` tab onto it, the moment this
+  // task's chats have actually loaded (see ensureTaskChats's own doc
+  // comment for why it can't happen any earlier).
+  useEffect(() => {
+    // The chats[0].TaskID check is a defensive belt-and-suspenders against
+    // useTaskChats ever serving a stale previous-task's chats array again
+    // (it resets to null synchronously on taskId change precisely so this
+    // never happens) -- seeding taskId's tab with a *different* task's
+    // chat would be a real chat-identity mixup, not just a stale render.
+    if (!selectedTask || !chats || chats.length === 0 || chats[0]!.TaskID !== selectedTask.ID) return;
+    ensureTaskChats(selectedTask.ID, chats);
+  }, [selectedTask, chats, ensureTaskChats]);
   // null until the tree's first successful load (treeLoaded), so an
   // archived/deleted task can be pruned from `unread` without an empty
   // *initial* task list wiping out a persisted unread set before the real
@@ -292,13 +317,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     };
   }, [connect]);
 
-  const selectTask = useCallback(
-    (task: Task) => {
-      setSelectedTask(task);
-      ensureTask(task.ID);
-    },
-    [ensureTask],
-  );
+  const selectTask = useCallback((task: Task) => {
+    setSelectedTask(task);
+    // Tab seeding happens once this task's chats load (the effect above) --
+    // useTaskChats is keyed on selectedTask.ID, so setting it here is what
+    // kicks that fetch off.
+  }, []);
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
@@ -351,6 +375,47 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, tabs));
   }
 
+  // --- Chats (ADR-0016 P3) -----------------------------------------------
+
+  /** Opens (or activates) chat's own tab -- the "+" menu's reopen section, the concurrency banner's jump target, and the route restore effect below all funnel through here. */
+  function openChatTab(chat: Pick<Chat, "ID" | "Title">, placement?: TabPlacement) {
+    if (!selectedTask) return;
+    openTab(selectedTask.ID, chatTab(selectedTask.ID, chat), placement ?? "prefer");
+  }
+
+  /** Looks chatId up in the selected task's already-fetched chats and opens it -- what the "+" menu's per-chat items and the concurrency banner (which only knows a chatId, from run.status) actually call. */
+  function openChatById(chatId: number, placement?: TabPlacement) {
+    const chat = chats?.find((c) => c.ID === chatId);
+    if (chat) openChatTab(chat, placement);
+  }
+
+  /** "+" -> "New chat": creates a chat via chat.create and opens its tab immediately (chat.created's own event, subscribed by useTaskChats, updates the `chats` list independently -- no need to wait for it here). */
+  function openNewChat(placement?: TabPlacement) {
+    if (!selectedTask || !client) return;
+    client
+      .call<Chat>("chat.create", { taskId: selectedTask.ID })
+      .then((chat) => openChatTab(chat, placement))
+      .catch((err: unknown) => console.error("chat.create failed", err));
+  }
+
+  /** Inline chat-tab rename (App.tsx's renameTabForTask dispatches here for kind "chat"): updates the tab optimistically, then calls chat.rename -- best-effort, matching this codebase's other fire-and-forget RPC calls (e.g. provider.list's own catch). A failed rename leaves the optimistic title in place rather than reverting to a value the user has already moved past. */
+  function renameChat(chatId: number, title: string) {
+    if (!selectedTask) return;
+    const trimmed = title.trim();
+    if (!trimmed) return;
+    updateChatTabTitle(selectedTask.ID, chatId, trimmed);
+    client?.call("chat.rename", { id: chatId, title: trimmed }).catch((err: unknown) => console.error("chat.rename failed", err));
+  }
+
+  /** Which chat.archive confirmation is open, if any (Item: "Archive is an explicit action with a confirm"). */
+  const [archivingChat, setArchivingChat] = useState<Pick<Chat, "ID" | "Title"> | null>(null);
+
+  /** Detaches the archived chat's tab -- a stale tab into an archived chat has nothing left to do (chat.archive already refused it while running, so this only ever runs for a chat that's genuinely done). */
+  function onChatArchived() {
+    if (!selectedTask || !archivingChat) return;
+    closeTab(selectedTask.ID, chatTabKey(selectedTask.ID, archivingChat.ID));
+  }
+
   /** Splits paneId's tab in `direction` -- the tab-strip's own affordance (Item 3), targeting whichever pane it was clicked from. */
   function splitPaneTab(paneId: string, key: string, direction: SplitDirection) {
     if (!selectedTask) return;
@@ -381,8 +446,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   }
 
   function renameTabForTask(key: string, title: string) {
-    if (!selectedTask) return;
+    if (!selectedTask || !taskState) return;
+    const entry = collectAllTabs(taskState.root).find((t) => t.key === key);
+    if (entry?.kind === "chat" && entry.chatId !== undefined) {
+      renameChat(entry.chatId, title);
+      return;
+    }
     renameTab(selectedTask.ID, key, title);
+  }
+
+  function archiveChatTab(entry: TabEntry) {
+    if (entry.chatId === undefined) return;
+    setArchivingChat({ ID: entry.chatId, Title: entry.title });
   }
 
   // --- Drag-to-split (Item 8) -------------------------------------------
@@ -475,6 +550,19 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const taskState = selectedTask ? tabsByTask.get(selectedTask.ID) : undefined;
   const focusedPane = taskState ? findPaneById(taskState.root, taskState.focusedPaneId) : null;
   const paneCount = taskState ? collectAllPanes(taskState.root).length : 0;
+  // Which of the selected task's chats already have a tab open, anywhere
+  // in its split tree -- the "+" menu's reopen section (ADR-0016 P3) only
+  // ever lists ones that don't, computed once here rather than per-pane
+  // (a chat open in one pane must not also show up in another pane's "+").
+  const openChatIds = useMemo(
+    () =>
+      new Set(
+        (taskState ? collectAllTabs(taskState.root) : [])
+          .filter((t): t is TabEntry & { chatId: number } => t.kind === "chat" && t.chatId !== undefined)
+          .map((t) => t.chatId),
+      ),
+    [taskState],
+  );
 
   // --- Routing (Item 3) ------------------------------------------------
   //
@@ -501,11 +589,20 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       selectTask(match);
       if (pendingRoute.tab.kind === "file") {
         openTab(match.ID, fileTab(match.ID, pendingRoute.tab.path));
-      } else if (pendingRoute.tab.kind !== "task") {
-        // Not just activate(): only Chat is seeded on first visit now, so
-        // a deep link to e.g. .../diff must be able to open that tab, not
-        // just activate an entry that may not exist yet. openTab already
-        // no-ops to a plain activate when the tab is already open.
+      } else if (pendingRoute.tab.kind === "chat") {
+        // The matched task's chats may not have loaded yet (useTaskChats
+        // only starts fetching once selectTask above sets it as
+        // selected) -- wait for them rather than degrading to nothing, so
+        // this effect re-fires once `chats` resolves for this same task.
+        if (chats === null) return;
+        const wantedChatId = pendingRoute.tab.chatId;
+        const targetChat = chats.find((c) => c.ID === wantedChatId);
+        if (targetChat) openTab(match.ID, chatTab(match.ID, targetChat));
+      } else {
+        // Not just activate(): a deep link to e.g. .../diff must be able
+        // to open that tab, not just activate an entry that may not exist
+        // yet. openTab already no-ops to a plain activate when the tab is
+        // already open.
         openTab(match.ID, baseTabForKind(match.ID, pendingRoute.tab.kind));
       }
       setPendingRoute(null);
@@ -515,7 +612,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       // than waiting on a task that will never arrive.
       setPendingRoute(null);
     }
-  }, [pendingRoute, allTasks, treeLoaded, selectTask, openTab, activate]);
+  }, [pendingRoute, allTasks, treeLoaded, chats, selectTask, openTab, activate]);
 
   useEffect(() => {
     if (!selectedTask) return;
@@ -523,10 +620,20 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     // lean on any more -- whichever pane the user last focused is the only
     // rule that generalizes (see the plan's Decisions).
     const activeEntry = focusedPane?.tabs.find((t) => t.key === focusedPane.activeKey);
+    // No tab open yet: the task's chats haven't loaded, so ensureTaskChats
+    // hasn't had a chance to seed the default-chat tab (App.tsx's own
+    // effect above, keyed on `chats`). Writing *any* hash here -- the old
+    // code's "files" fallback included -- would round-trip through the
+    // route-restore effect and openTab a tab that pre-empts that seeding,
+    // permanently starving the task of its real default chat tab. Wait
+    // for a real active tab instead; this effect re-fires once one exists.
+    if (!activeEntry) return;
     const tab: Route["tab"] =
-      activeEntry?.kind === "file"
+      activeEntry.kind === "file"
         ? { kind: "file", path: filePathFromTabKey(activeEntry.key) }
-        : { kind: (activeEntry?.kind ?? "task") as Exclude<TabKind, "file"> };
+        : activeEntry.kind === "chat" && activeEntry.chatId !== undefined
+          ? { kind: "chat", chatId: activeEntry.chatId }
+          : { kind: activeEntry.kind as Exclude<TabKind, "file" | "chat"> };
     const nextHash = formatRoute({ workspaceId: selectedTask.WorkspaceID, taskId: selectedTask.ID, tab });
     // Comparing against the live hash (not a ref of "what we last wrote")
     // is what keeps this idempotent under the hashchange listener above:
@@ -796,6 +903,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onRevealInDiff={revealInDiff}
       onNewTerminal={openTerminalTab}
       onOpenBase={openBaseTab}
+      chats={chats}
+      openChatIds={openChatIds}
+      runningChatsByTask={runningChatsByTask}
+      onNewChat={openNewChat}
+      onOpenChat={openChatById}
+      onArchiveChat={archiveChatTab}
       showMoveAffordance={false}
       newTabMenuOpen={openNewTabPaneId === DEFAULT_PANE_ID}
       onNewTabMenuOpenChange={(open) => setOpenNewTabPaneId(open ? DEFAULT_PANE_ID : null)}
@@ -880,6 +993,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                 onRevealInDiff={revealInDiff}
                 onNewTerminal={openTerminalTab}
                 onOpenBase={openBaseTab}
+                chats={chats}
+                openChatIds={openChatIds}
+                runningChatsByTask={runningChatsByTask}
+                onNewChat={openNewChat}
+                onOpenChat={openChatById}
+                onArchiveChat={archiveChatTab}
                 dragOverPaneId={dragOverPaneId}
                 dropPosition={dropPosition}
                 isDragActive={isDragActive}
@@ -926,9 +1045,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         workspaces={allWorkspaces}
         selectedTask={selectedTask}
         tabs={taskState ? collectAllTabs(taskState.root) : null}
+        chats={chats}
         onSelectTask={selectTask}
         onOpenTab={openTab}
         onActivateTab={activate}
+        onNewChat={() => openNewChat("prefer")}
+        onOpenChat={(chatId) => openChatById(chatId, "prefer")}
       />
       {isMobile ? (
         // Item 21: below the breakpoint, the sidebar-vs-content split
@@ -1014,6 +1136,15 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         onOpenFile={openFileTab}
         events={events}
       />
+      <ArchiveChatDialog
+        client={client}
+        chat={archivingChat}
+        open={archivingChat !== null}
+        onOpenChange={(open) => {
+          if (!open) setArchivingChat(null);
+        }}
+        onArchived={onChatArchived}
+      />
     </SidebarProvider>
   );
 }
@@ -1034,18 +1165,25 @@ function ShellCommands({
   workspaces,
   selectedTask,
   tabs,
+  chats,
   onSelectTask,
   onOpenTab,
   onActivateTab,
+  onNewChat,
+  onOpenChat,
 }: {
   client: WsClient | null;
   tasks: Task[];
   workspaces: Workspace[];
   selectedTask: Task | null;
   tabs: TabEntry[] | null;
+  /** The selected task's chats (ADR-0016 P3), for the palette's "Open chat: <title>" entries. */
+  chats: Chat[] | null;
   onSelectTask: (task: Task) => void;
   onOpenTab: (taskId: number, entry: TabEntry, placement?: TabPlacement) => void;
   onActivateTab: (taskId: number, key: string) => void;
+  onNewChat: () => void;
+  onOpenChat: (chatId: number) => void;
 }) {
   const { preference, setPreference } = useTheme();
 
@@ -1106,6 +1244,31 @@ function ShellCommands({
     }));
   }, [selectedTask, tabs, onOpenTab, onActivateTab]);
   useCommands("shell:tabs", 2, tabCommands);
+
+  const chatCommands = useMemo<Command[]>(() => {
+    if (!selectedTask) return [];
+    const open = new Set((tabs ?? []).filter((t) => t.kind === "chat").map((t) => t.chatId));
+    const reopen: Command[] = (chats ?? [])
+      .filter((c) => !open.has(c.ID))
+      .map((c) => ({
+        id: `chat-${c.ID}`,
+        group: "Chats",
+        title: `Open chat: ${c.Title || "Chat"}`,
+        subtitle: selectedTask.Title,
+        run: () => onOpenChat(c.ID),
+      }));
+    return [
+      {
+        id: "chat-new",
+        group: "Chats",
+        title: "New chat",
+        subtitle: selectedTask.Title,
+        run: onNewChat,
+      },
+      ...reopen,
+    ];
+  }, [selectedTask, tabs, chats, onNewChat, onOpenChat]);
+  useCommands("shell:chats", 2, chatCommands);
 
   const files = useTaskChangedFiles(client, selectedTask);
   const fileCommands = useMemo<Command[]>(() => {
@@ -1217,6 +1380,18 @@ interface SplitPaneCallbacks {
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  /** The task's own chats (ADR-0016 P3), for the "+" menu's reopen-existing-chat section -- null while chat.list is still in flight. */
+  chats: Chat[] | null;
+  /** Which of `chats` already have a tab open somewhere in the task's split tree -- excluded from the "+" menu's reopen section. */
+  openChatIds: ReadonlySet<number>;
+  /** Which chats of each task are currently running (use-task-attention.ts) -- the concurrency banner's data source. */
+  runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
+  /** "+" -> "New chat": creates a chat and opens its tab. */
+  onNewChat: (placement: TabPlacement) => void;
+  /** "+" -> an existing not-open chat: opens its tab. Also the concurrency banner's jump target and a chat tab's own rename/archive dispatch path. */
+  onOpenChat: (chatId: number, placement?: TabPlacement) => void;
+  /** Tab context menu's "Archive chat" (chat tabs only) -- opens the confirm dialog. */
+  onArchiveChat: (entry: TabEntry) => void;
   /** The pane a drag is currently hovering over, if any (Item 8) -- drives which pane renders its drop-zone overlay. */
   dragOverPaneId: string | null;
   /** The zone within `dragOverPaneId` the drag is over -- `null` whenever `dragOverPaneId` is. */
@@ -1230,6 +1405,12 @@ interface SplitPaneCallbacks {
   /** The pane whose "+" menu `tab.new` popped open, if any -- see NewTabButton's controlled open/onOpenChange. */
   openNewTabPaneId: string | null;
   onOpenNewTabPaneIdChange: (paneId: string | null) => void;
+}
+
+/** chats minus openChatIds, as the "+" menu's reopen-section shape (ADR-0016 P3) -- null chats (still loading) renders no section rather than an empty flash. */
+function reopenableChats(chats: Chat[] | null, openChatIds: ReadonlySet<number>): ChatMenuEntry[] | undefined {
+  if (!chats) return undefined;
+  return chats.filter((c) => !openChatIds.has(c.ID)).map((c) => ({ id: c.ID, title: c.Title }));
 }
 
 function splitNodeId(node: SplitNode): string {
@@ -1277,6 +1458,12 @@ function SplitTreeView({
         onRevealInDiff={shared.onRevealInDiff}
         onNewTerminal={shared.onNewTerminal}
         onOpenBase={shared.onOpenBase}
+        chats={shared.chats}
+        openChatIds={shared.openChatIds}
+        runningChatsByTask={shared.runningChatsByTask}
+        onNewChat={shared.onNewChat}
+        onOpenChat={shared.onOpenChat}
+        onArchiveChat={shared.onArchiveChat}
         dragOverPaneId={shared.dragOverPaneId}
         dropPosition={shared.dropPosition}
         isDragActive={shared.isDragActive}
@@ -1360,6 +1547,12 @@ function PaneTabStrip({
   onRevealInDiff,
   onNewTerminal,
   onOpenBase,
+  chats,
+  openChatIds,
+  runningChatsByTask,
+  onNewChat,
+  onOpenChat,
+  onArchiveChat,
   showMoveAffordance = true,
   dragOverPaneId = null,
   dropPosition = null,
@@ -1391,6 +1584,12 @@ function PaneTabStrip({
   onNewTerminal: () => void;
   /** Opens (or activates) one of the base tab kinds -- Item 3's "+" menu and empty-state buttons. */
   onOpenBase: (kind: BaseTabKind, placement: TabPlacement) => void;
+  chats: Chat[] | null;
+  openChatIds: ReadonlySet<number>;
+  runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
+  onNewChat: (placement: TabPlacement) => void;
+  onOpenChat: (chatId: number, placement?: TabPlacement) => void;
+  onArchiveChat: (entry: TabEntry) => void;
   /** Item 21: the split tree is a desktop-only concept -- compact has nowhere for "split" to open a second pane, so it's hidden rather than left to open a split that never renders. */
   showMoveAffordance?: boolean;
   /** Item 8: only set (by the DndContext-wrapped desktop branch) while a tab drag is over *this* pane. Compact mode never passes these -- it has no DndContext ancestor, so `useDraggable`/`useDroppable` below are inert there anyway. */
@@ -1454,6 +1653,7 @@ function PaneTabStrip({
                   onCloseLeft={onCloseLeft}
                   onCloseRight={onCloseRight}
                   onRenameTab={onRenameTab}
+                  onArchiveChat={onArchiveChat}
                   hasOtherClosableTabs={tabs.some((t) => t.key !== entry.key && t.closable)}
                   hasClosableTabsToLeft={tabs.slice(0, index).some((t) => t.closable)}
                   hasClosableTabsToRight={tabs.slice(index + 1).some((t) => t.closable)}
@@ -1463,12 +1663,20 @@ function PaneTabStrip({
           )}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
+            chats={reopenableChats(chats, openChatIds)}
+            onOpenChat={(chatId) => onOpenChat(chatId, { pane: paneId })}
+            onNewChat={() => onNewChat({ pane: paneId })}
             open={newTabMenuOpen}
             onOpenChange={onNewTabMenuOpenChange}
           />
         </div>
         {tabs.length === 0 && (
-          <TabsEmptyState onOpen={(kind) => onOpenBase(kind, { pane: paneId })} />
+          <TabsEmptyState
+            onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
+            chats={reopenableChats(chats, openChatIds)}
+            onOpenChat={(chatId) => onOpenChat(chatId, { pane: paneId })}
+            onNewChat={() => onNewChat({ pane: paneId })}
+          />
         )}
         {tabs.map((entry) => (
           /*
@@ -1497,6 +1705,9 @@ function PaneTabStrip({
               onRevealInDiff={onRevealInDiff}
               onNewTerminal={onNewTerminal}
               events={events}
+              chats={chats}
+              runningChatsByTask={runningChatsByTask}
+              onOpenChat={onOpenChat}
             />
           </TabsContent>
         ))}
@@ -1522,6 +1733,7 @@ function DraggableTabTrigger({
   onCloseLeft,
   onCloseRight,
   onRenameTab,
+  onArchiveChat,
   hasOtherClosableTabs,
   hasClosableTabsToLeft,
   hasClosableTabsToRight,
@@ -1535,13 +1747,15 @@ function DraggableTabTrigger({
   onCloseLeft: (key: string) => void;
   onCloseRight: (key: string) => void;
   onRenameTab: (key: string, title: string) => void;
+  onArchiveChat: (entry: TabEntry) => void;
   hasOtherClosableTabs: boolean;
   hasClosableTabsToLeft: boolean;
   hasClosableTabsToRight: boolean;
 }) {
-  // Rename (terminal tabs only -- their title is arbitrary already, unlike
-  // a file/diff/chat tab's, which is derived from real identity a cosmetic
-  // override would just make misleading) swaps the trigger for a plain
+  // Rename (terminal and chat tabs -- a file/diff tab's title is derived
+  // from real identity a cosmetic override would just make misleading;
+  // chat swaps its title straight through to chat.rename, App.tsx's
+  // renameTabForTask dispatch) swaps the trigger for a plain
   // input in the same slot rather than trying to nest one inside
   // TabsTrigger's own <button> -- same reasoning as the close "×" below
   // being a span, not a button, but an <input> genuinely can't go inside
@@ -1702,11 +1916,19 @@ function DraggableTabTrigger({
         >
           Close to the right
         </ContextMenuItem>
-        {(entry.kind === "terminal" || (entry.kind === "file" && entry.path)) && <ContextMenuSeparator />}
-        {entry.kind === "terminal" && (
+        {(entry.kind === "terminal" || entry.kind === "chat" || (entry.kind === "file" && entry.path)) && (
+          <ContextMenuSeparator />
+        )}
+        {(entry.kind === "terminal" || entry.kind === "chat") && (
           <ContextMenuItem onSelect={() => setRenaming(true)} data-testid="workspace-tab-menu-rename">
             <Pencil />
             Rename
+          </ContextMenuItem>
+        )}
+        {entry.kind === "chat" && (
+          <ContextMenuItem onSelect={() => onArchiveChat(entry)} data-testid="workspace-tab-menu-archive-chat">
+            <Archive />
+            Archive chat
           </ContextMenuItem>
         )}
         {entry.kind === "file" && entry.path && (
@@ -1782,6 +2004,9 @@ function TabContent({
   onRevealInDiff,
   onNewTerminal,
   events,
+  chats,
+  runningChatsByTask,
+  onOpenChat,
 }: {
   entry: TabEntry;
   client: WsClient | null;
@@ -1794,17 +2019,37 @@ function TabContent({
   onRevealInDiff: () => void;
   onNewTerminal: () => void;
   events: ReturnType<typeof useDaemonEvents>;
+  chats: Chat[] | null;
+  runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
+  onOpenChat: (chatId: number, placement?: TabPlacement) => void;
 }) {
+  // ADR-0016 P3: this tab's own chat (undefined only for a stale tab whose
+  // chat.list result hasn't loaded yet, or was deleted out from under it --
+  // the "chat" branch below renders nothing rather than crashing on it).
+  const chat = entry.kind === "chat" ? (chats ?? []).find((c) => c.ID === entry.chatId) : undefined;
+  const isDefaultChat = entry.kind === "chat" && chats !== null && chats.length > 0 && chats[0]!.ID === entry.chatId;
+  const runningChatIds = runningChatsByTask.get(task.ID);
+  const otherRunningChatId =
+    chat && runningChatIds ? [...runningChatIds].find((id) => id !== chat.ID) : undefined;
+  const otherRunningChat =
+    otherRunningChatId !== undefined
+      ? { id: otherRunningChatId, title: (chats ?? []).find((c) => c.ID === otherRunningChatId)?.Title || "Chat" }
+      : null;
+
   const renderers: Record<TabKind, React.ReactNode> = {
-    task: (
+    chat: chat ? (
       <TaskDetailPane
         client={client}
         task={task}
+        chat={chat}
+        isDefaultChat={isDefaultChat}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={(chatId) => onOpenChat(chatId)}
         connectionStatus={connectionStatus}
         onOpenFile={onOpenFile}
         onOpenDiffTab={onRevealInDiff}
       />
-    ),
+    ) : null,
     files: (
       <FileExplorerPane
         client={client}

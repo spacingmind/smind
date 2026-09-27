@@ -13,7 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "@/App";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
-import type { Task, Workspace } from "@/lib/types";
+import type { Chat, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -57,6 +57,24 @@ function respondAll(socket: FakeSocket, method: string, result: unknown): void {
   for (const env of socket.sent.filter((e) => e.method === method)) {
     if (env.id) socket.emit({ id: env.id, result });
   }
+}
+
+/** The wire shape of TASK's sole default chat (ADR-0016 P3) -- see App.test.tsx's own defaultChatFor for the full rationale; this file only ever selects one task, so a single fixed chat suffices. */
+function defaultChatFor(task: Task): Chat {
+  return {
+    ID: task.ID * 100 + 1,
+    TaskID: task.ID,
+    Title: "Chat",
+    Provider: null,
+    AgentSession: null,
+    CreatedAt: "2024-01-01T00:00:00Z",
+    ArchivedAt: null,
+  };
+}
+
+/** Resolves task's chat.list -- selecting a task now fires this via useTaskChats, and only once it resolves does App.tsx seed the task's default Chat tab. See App.test.tsx's own respondChatList for the full rationale. */
+function respondChatList(socket: FakeSocket, task: Task): void {
+  respondAll(socket, "chat.list", [defaultChatFor(task)]);
 }
 
 async function resolveSidebar(socket: FakeSocket): Promise<void> {
@@ -207,6 +225,8 @@ describe("App compact layout (Item 21)", () => {
     await resolveSidebar(socket);
 
     clickTaskRow(TASK);
+    await flush();
+    respondChatList(socket, TASK);
     await flush();
     respondAll(socket, "run.list", []);
     await flush();

@@ -18,7 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Space, Task, Workspace } from "@/lib/types";
+import type { Chat, Space, Task, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 /** Inline, per-dialog error text for a failed submit -- the daemon's message verbatim (e.g. workspace.create's "not a git repository"). */
@@ -547,6 +547,76 @@ export function ArchiveTaskDialog({
               setError(null);
               try {
                 await client!.call("task.archive", { id: task.ID });
+                onArchived();
+                onOpenChange(false);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            {pending ? "Archiving…" : "Archive"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * ADR-0016 P3's "explicit action with a confirm" for archiving a chat --
+ * mirrors ArchiveTaskDialog's own shape exactly (a chat.archive rejected
+ * while the chat has a running run, internal/wsapi's own P1.2 guard,
+ * surfaces here as this dialog's FormError, same as any other daemon
+ * error). Closing the chat's tab afterwards is the caller's job (App.tsx's
+ * onArchived), not this dialog's -- it only ever calls the RPC.
+ */
+export function ArchiveChatDialog({
+  client,
+  chat,
+  open,
+  onOpenChange,
+  onArchived,
+}: {
+  client: WsClient | null;
+  chat: Pick<Chat, "ID" | "Title"> | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onArchived: () => void;
+}) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Archive chat?</DialogTitle>
+          <DialogDescription asChild>
+            <div>
+              <span className="font-medium text-foreground">{chat?.Title || "Chat"}</span>
+              <p className="mt-2">
+                The chat's history stays on the task; its tab closes and it stops appearing in "New chat"'s reopen list.
+              </p>
+            </div>
+          </DialogDescription>
+        </DialogHeader>
+        <FormError message={error} />
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            disabled={pending}
+            data-testid="dialog-archive-chat-confirm"
+            onClick={async () => {
+              if (!chat) return;
+              setPending(true);
+              setError(null);
+              try {
+                await client!.call("chat.archive", { id: chat.ID });
                 onArchived();
                 onOpenChange(false);
               } catch (err) {

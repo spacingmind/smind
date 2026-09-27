@@ -10,10 +10,13 @@ import {
   NewTabButton,
   BASE_TAB_KINDS,
   baseTabForKind,
+  chatTab,
+  chatTabKey,
   defaultTabsForTask,
   fileTab,
   fileTabKey,
   filePathFromTabKey,
+  isLegacyTaskTab,
   nextTerminalTab,
   terminalTab,
   type BaseTabKind,
@@ -231,8 +234,8 @@ describe("flexible tabs (Item 3)", () => {
 
     const buttons = screen.getAllByTestId("tabs-empty-open");
     expect(buttons.map((b) => b.dataset.kind)).toEqual([...BASE_TAB_KINDS]);
-    fireEvent.click(screen.getByRole("button", { name: "Open Chat" }));
-    expect(opened).toEqual(["task"]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Terminal" }));
+    expect(opened).toEqual(["terminal"]);
   });
 
   it("the + menu offers the same kinds as the empty state", async () => {
@@ -247,5 +250,65 @@ describe("flexible tabs (Item 3)", () => {
 
     fireEvent.click(screen.getByRole("menuitem", { name: "Open Terminal" }));
     expect(opened).toEqual(["terminal"]);
+  });
+});
+
+describe("chat tabs (ADR-0016 P3)", () => {
+  it("chatTab builds the strip key and title from a chat", () => {
+    const entry = chatTab(TASK.ID, { ID: 7, Title: "Bugfix" });
+    expect(entry).toMatchObject({
+      kind: "chat",
+      key: `${TASK.ID}:chat:7`,
+      taskId: TASK.ID,
+      title: "Bugfix",
+      closable: true,
+      chatId: 7,
+    });
+    expect(chatTabKey(TASK.ID, 7)).toBe(entry.key);
+  });
+
+  it("chatTab falls back to the default title for an untitled chat", () => {
+    expect(chatTab(TASK.ID, { ID: 7, Title: "" }).title).toBe("Chat");
+  });
+
+  it("isLegacyTaskTab recognizes only the pre-ADR-0016 kind", () => {
+    expect(isLegacyTaskTab({ kind: "task" })).toBe(true);
+    expect(isLegacyTaskTab({ kind: "chat" })).toBe(false);
+  });
+
+  it("the + menu's chat section lists New chat plus every not-open chat, separately from the base kinds", async () => {
+    const opened: number[] = [];
+    let newChatClicked = false;
+    render(
+      <NewTabButton
+        onOpen={() => {}}
+        chats={[{ id: 1, title: "Chat" }, { id: 2, title: "Second chat" }]}
+        onOpenChat={(id) => opened.push(id)}
+        onNewChat={() => {
+          newChatClicked = true;
+        }}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    expect(await screen.findByRole("menuitem", { name: "New chat" })).toBeInTheDocument();
+    const reopenItems = screen.getAllByTestId("tabs-new-tab-open-chat");
+    expect(reopenItems.map((i) => i.dataset.chatId)).toEqual(["1", "2"]);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Second chat" }));
+    expect(opened).toEqual([2]);
+
+    fireEvent.pointerDown(screen.getByTestId("tabs-new-tab"), { button: 0 });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "New chat" }));
+    expect(newChatClicked).toBe(true);
+  });
+
+  it("the empty state's New chat button appears alongside the base-kind reopen buttons", () => {
+    let newChatClicked = false;
+    render(<TabsEmptyState onOpen={() => {}} onNewChat={() => (newChatClicked = true)} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(newChatClicked).toBe(true);
+    expect(screen.getAllByTestId("tabs-empty-open")).toHaveLength(BASE_TAB_KINDS.length);
   });
 });
