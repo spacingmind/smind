@@ -272,7 +272,7 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--approval-policy manual|auto-safe]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--approval-policy manual|auto-safe]"
 
 // cmdTaskSend starts a run (via run.start, which returns as soon as the
 // run is registered) and then streams it in the foreground exactly like
@@ -287,15 +287,28 @@ const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [-
 // auto-safe lets a headless/monitored run self-approve the allowlisted
 // read-only verification commands (gofmt/go vet/go test) instead of
 // stalling on a permission card nobody is watching.
+//
+// --chat targets the run at one of the task's chats (ADR-0016 P4) and is
+// likewise passed through to run.start's chatId field; omitted, the task's
+// default chat is used, so pre-chats invocations keep working unchanged.
 func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, approvalPolicy string
+	var taskIDArg, provider, approvalPolicy, chatArg string
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--chat":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			chatArg = args[i]
+		case strings.HasPrefix(a, "--chat="):
+			chatArg = strings.TrimPrefix(a, "--chat=")
 		case a == "--approval-policy":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -326,6 +339,14 @@ func cmdTaskSend(args []string) int {
 		fmt.Fprintf(os.Stderr, "task send: invalid taskId %q: %v\n", taskIDArg, err)
 		return 2
 	}
+	var chatID int64
+	if chatArg != "" {
+		chatID, err = parseInt64(chatArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task send: invalid --chat value %q: %v\n", chatArg, err)
+			return 2
+		}
+	}
 	prompt := strings.Join(promptParts, " ")
 
 	client, err := dialDaemon(context.Background())
@@ -350,6 +371,9 @@ func cmdTaskSend(args []string) int {
 	}
 	if approvalPolicy != "" {
 		params["approvalPolicy"] = approvalPolicy
+	}
+	if chatID != 0 {
+		params["chatId"] = chatID
 	}
 	var start runStartResult
 	err = client.Call(ctx, "run.start", params, &start)
