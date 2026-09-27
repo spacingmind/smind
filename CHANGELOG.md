@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.8.0](https://github.com/spacingmind/smind/compare/v0.7.0...v0.8.0) (2026-09-27)
+
+
+### Features
+
+* **acp:** GLM session config options end to end (thinking-level fix) ([#147](https://github.com/spacingmind/smind/issues/147)) ([f684425](https://github.com/spacingmind/smind/commit/f6844250ce0aa95cfb688941b4259df46e32cf6c))
+* agent profiles stored in the daemon (ADR-0014) ([#200](https://github.com/spacingmind/smind/issues/200)) ([482d4c5](https://github.com/spacingmind/smind/commit/482d4c531886713a39bdd831c629303f70ff9bab))
+* **cli:** render + answer pending permission requests; relay admission ADR ([#144](https://github.com/spacingmind/smind/issues/144)) ([165e8b7](https://github.com/spacingmind/smind/commit/165e8b783c42e2b5b529bb1d3d22231d0f4c9f2b))
+* **cli:** task send --chat, task chat ls/new/rename/archive, task runs (ADR-0016 P4) ([#213](https://github.com/spacingmind/smind/issues/213)) ([0e2e0b7](https://github.com/spacingmind/smind/commit/0e2e0b7d1cd4197667f0dc94492312d70d950701))
+* **daemon:** version signal — build stamp, smind --version, /healthz version ([#195](https://github.com/spacingmind/smind/issues/195)) ([17b9e94](https://github.com/spacingmind/smind/commit/17b9e9440f9982da48b233035237e8024abbee71))
+* **desktop:** app-managed local daemon — install, update & restart (ADR-0013 part D2) ([#201](https://github.com/spacingmind/smind/issues/201)) ([9cd80a8](https://github.com/spacingmind/smind/commit/9cd80a875cf52be3e21568989b7f934ce06a4e66))
+* **desktop:** bundled UI behind a loopback proxy + connection list (ADR-0013 part 1) ([#196](https://github.com/spacingmind/smind/issues/196)) ([2d398e9](https://github.com/spacingmind/smind/commit/2d398e91e472d4c1c38973f1f88230b7c529781a))
+* **desktop:** relay transport in Rust over native gRPC (ADR-0013 part C) ([#199](https://github.com/spacingmind/smind/issues/199)) ([03132bc](https://github.com/spacingmind/smind/commit/03132bc092df75fed150886ce67d920a2be14c7a))
+* **desktop:** Tauri 2 desktop shell + native quick wins; ADR-0012/0013 ([#194](https://github.com/spacingmind/smind/issues/194)) ([2c9a511](https://github.com/spacingmind/smind/commit/2c9a5115a624d74ed6b1a5e6feed89c389ccea60))
+* mid-run approval-policy switching + retry with higher effort ([#172](https://github.com/spacingmind/smind/issues/172)) ([301f36c](https://github.com/spacingmind/smind/commit/301f36c404c39af6ecac27b5fc990d42a882d80d))
+* mobile app milestone 1 — daemon↔relay bridge, grpc-web, Expo E2EE client ([#175](https://github.com/spacingmind/smind/issues/175)) ([906d2a9](https://github.com/spacingmind/smind/commit/906d2a9c3bf66c78d04ad87cdae37f2f651333bc))
+* **mobile:** adopt @expo/ui for native controls ([#183](https://github.com/spacingmind/smind/issues/183)) ([b6e2c56](https://github.com/spacingmind/smind/commit/b6e2c569e1c1ba92445761eede6f9999220f77d4))
+* **mobile:** design-token foundation + agent-run UI polish ([#181](https://github.com/spacingmind/smind/issues/181)) ([5a0cf3b](https://github.com/spacingmind/smind/commit/5a0cf3b1060a5ae93bafdac5b87a24ba71845030))
+* **mobile:** persistent RPC client + workspace/task navigation + realtime timeline ([#176](https://github.com/spacingmind/smind/issues/176)) ([50e618d](https://github.com/spacingmind/smind/commit/50e618d158678e9acc5539bc1091d495e64fb49b))
+* **mobile:** send a follow-up prompt + approve/deny live permission requests ([#178](https://github.com/spacingmind/smind/issues/178)) ([212fbfd](https://github.com/spacingmind/smind/commit/212fbfd0011f9ae75ec13fe71ec96faf6b3cc732))
+* per-account base_url upstream routing ([#140](https://github.com/spacingmind/smind/issues/140)) ([5db2643](https://github.com/spacingmind/smind/commit/5db264303110311dac6ba6ff47245cf9fc0ad532))
+* **relay:** Phase 3 crypto core — X25519 keypair, pairing offer + QR, E2EE handshake, replay, rotation ([#145](https://github.com/spacingmind/smind/issues/145)) ([333e043](https://github.com/spacingmind/smind/commit/333e0437e2e8dd4744b9ec7d3c7b3dfa36766a49))
+* **relay:** self-hostable E2EE relay server + daemon-side client (Phase 3 relay half) ([#148](https://github.com/spacingmind/smind/issues/148)) ([76d9f2c](https://github.com/spacingmind/smind/commit/76d9f2c0a5e8d45355121dddc6829dd9ba11ae7f))
+* Settings → Providers + account rename/updateCredential/remove (ADR-0015) ([#202](https://github.com/spacingmind/smind/issues/202)) ([2325b5b](https://github.com/spacingmind/smind/commit/2325b5be777b9b35d1a5e61feb801dfca26ee172))
+* **tasks:** add task.move -- reassign a task to a different space ([#170](https://github.com/spacingmind/smind/issues/170)) ([fd0f6b5](https://github.com/spacingmind/smind/commit/fd0f6b5c1e82ecfbf2fefd6bf7d2c7953df3c21c))
+* **web:** actionable notifications + sidebar triage (Paseo parity) ([#186](https://github.com/spacingmind/smind/issues/186)) ([fabf4b8](https://github.com/spacingmind/smind/commit/fabf4b8e95d95956414e868ebceaeb069b445fa1))
+* **web:** calm technical console visual-identity pass + dropdown/resize/truncation fixes ([#152](https://github.com/spacingmind/smind/issues/152)) ([e903306](https://github.com/spacingmind/smind/commit/e9033062e234f9b824b0973a3db5ef5d683579eb))
+* **web:** chord shortcuts, pane/tab keyboard actions, Settings → Shortcuts ([#190](https://github.com/spacingmind/smind/issues/190)) ([87c62dc](https://github.com/spacingmind/smind/commit/87c62dcbc444f5cf3de248ea08bc73ae2042935c))
+* **web:** dogfood polish — flexible tabs, composer card, settings screen ([#158](https://github.com/spacingmind/smind/issues/158)) ([bf8a5b1](https://github.com/spacingmind/smind/commit/bf8a5b1f58128f075f91e700d0a1770413b5b520))
+* **web:** Find in chat, file and terminal (Paseo 0.9 parity) ([#187](https://github.com/spacingmind/smind/issues/187)) ([d2f2e80](https://github.com/spacingmind/smind/commit/d2f2e80cf32ee3186cb36214a152a00b42960daa))
+* **web:** first brand identity -- logo + cyan accent color ([#168](https://github.com/spacingmind/smind/issues/168)) ([808a168](https://github.com/spacingmind/smind/commit/808a1682d1e492a47d56772716e65647ccb0d4db))
+* **web:** move task to space, per-provider full-access approval, thinking-level controls ([#171](https://github.com/spacingmind/smind/issues/171)) ([d652ccd](https://github.com/spacingmind/smind/commit/d652ccd90a012534adeea94643c60ea4fcfec934))
+* **web:** multiple chat tabs per task — New chat, rename, archive, per-chat composer (ADR-0016 P3) ([#214](https://github.com/spacingmind/smind/issues/214)) ([41fb6e2](https://github.com/spacingmind/smind/commit/41fb6e23dfaced3c5b9e2c444a29a08d6cd1ac95))
+* **web:** pane split-tree -- hook port, split affordance, recursive renderer (Items 2-4) ([#162](https://github.com/spacingmind/smind/issues/162)) ([923908a](https://github.com/spacingmind/smind/commit/923908abb4ad9ba351de0b00fd96f16056e04869))
+* **web:** pane split-tree full parity -- 4-direction split, drag-to-split, exact-pane + (Items 7-9) ([#165](https://github.com/spacingmind/smind/issues/165)) ([96fad62](https://github.com/spacingmind/smind/commit/96fad62fe22aed2a3b8633a2b5af271194accb18))
+* **web:** port paseo's split-tree module (Item 1) ([#161](https://github.com/spacingmind/smind/issues/161)) ([72d955d](https://github.com/spacingmind/smind/commit/72d955dfba974ce22acd407e8cb732183feb7941))
+* **web:** recent-paths quick-jump in the new-workspace folder picker ([#167](https://github.com/spacingmind/smind/issues/167)) ([77b8053](https://github.com/spacingmind/smind/commit/77b8053446ec92ce7e2864e5122331e967c9f73f))
+* **web:** run-config IA — agents toolbar, header pill, settings regroup, palette ([#203](https://github.com/spacingmind/smind/issues/203)) ([7061f9a](https://github.com/spacingmind/smind/commit/7061f9adbd9d1f180083ed6a6de68cd9c7ab2204))
+* **web:** ZCode visual parity P1 — design system (tokens, text-ui-* scale, primitives) ([#197](https://github.com/spacingmind/smind/issues/197)) ([5e964d0](https://github.com/spacingmind/smind/commit/5e964d047783c07d9b22368702ae721061ca3e34))
+* **web:** ZCode visual parity P2 — app shell frames + sidebar ([#207](https://github.com/spacingmind/smind/issues/207)) ([fa85410](https://github.com/spacingmind/smind/commit/fa854107a379c26619f1bbae8535c1c2426071ee))
+* **web:** ZCode visual parity P3 — timeline, composer, tool & permission cards ([#208](https://github.com/spacingmind/smind/issues/208)) ([0534493](https://github.com/spacingmind/smind/commit/05344939b1199ddc342a5242867ef41ad748dfe1))
+* **web:** ZCode visual parity P4 — diff/git, terminal, files, settings ([#209](https://github.com/spacingmind/smind/issues/209)) ([1e3029f](https://github.com/spacingmind/smind/commit/1e3029fc39f9c1103a1e1932cbcb5805ef82f08d))
+* wire per-account base_url through CLI, wsapi, and UI ([#142](https://github.com/spacingmind/smind/issues/142)) ([4f86d06](https://github.com/spacingmind/smind/commit/4f86d0639ce267e500a43938a72058586ed6c89d))
+
+
+### Bug Fixes
+
+* **desktop:** stop flashing console windows and add Windows Desktop shortcut ([#216](https://github.com/spacingmind/smind/issues/216)) ([a42ab24](https://github.com/spacingmind/smind/commit/a42ab24384902ee55909c0518c7e260e1ded0b7c))
+* **desktop:** use the smind logo for app/tray/shortcut icons (was Expo's placeholder) ([#217](https://github.com/spacingmind/smind/issues/217)) ([e84cb08](https://github.com/spacingmind/smind/commit/e84cb081e3c03da047d65e7e5dbbe7665d5c5f29))
+* e2ee post-handshake cancel race; proxy aborts truncated upstream streams; CI flake ([#205](https://github.com/spacingmind/smind/issues/205)) ([0f1310e](https://github.com/spacingmind/smind/commit/0f1310e88fae41e8660f57fd1c378a2aa15a70c9))
+* **mobile:** render TasksScreen empty state ([#193](https://github.com/spacingmind/smind/issues/193)) ([2da6d5f](https://github.com/spacingmind/smind/commit/2da6d5f5647009eb9fd762296570c3f3221bf033))
+* root-cause two CI flakes (relay client reconnect, taskrunner fake Claude CLI) ([#204](https://github.com/spacingmind/smind/issues/204)) ([fd4444d](https://github.com/spacingmind/smind/commit/fd4444db231e3f6d21dfeffd6f183f5603968de1))
+* **runs:** record claude-native permission cancellation + raise CLI dialog deadline ([#153](https://github.com/spacingmind/smind/issues/153)) ([f8586e4](https://github.com/spacingmind/smind/commit/f8586e4a8933ab8025b1a09b47ae6b4900cf198d))
+* **taskrunner:** resume agent sessions so follow-up prompts keep context (ADR-0016 P2) ([#211](https://github.com/spacingmind/smind/issues/211)) ([b951d27](https://github.com/spacingmind/smind/commit/b951d27d762a88135673020623aeaafe0eb418f8))
+* **web:** icon-collapsed sidebar no longer leaves dead space ([#166](https://github.com/spacingmind/smind/issues/166)) ([7c1bb27](https://github.com/spacingmind/smind/commit/7c1bb27ab16b111bca1cb9da8c2a2a8061cf36f8))
+* **web:** make the resizable-panel drag actually work ([#146](https://github.com/spacingmind/smind/issues/146)) ([d1235c6](https://github.com/spacingmind/smind/commit/d1235c67f53a876aad4170e163e53817553ec713))
+* **web:** rename input loses focus to Radix's own dismiss-focus restoration ([#215](https://github.com/spacingmind/smind/issues/215)) ([6fcf6ce](https://github.com/spacingmind/smind/commit/6fcf6cec7e997e5a4b25a504c8468a52562a4ad4))
+* **web:** seed only the Chat tab on first task visit ([#159](https://github.com/spacingmind/smind/issues/159)) ([f60abbc](https://github.com/spacingmind/smind/commit/f60abbcba6ebf1a4524f935f69a30cf8c5d47f70))
+* **web:** show a raw event's real ACP kind, not the generic "raw" label ([#173](https://github.com/spacingmind/smind/issues/173)) ([f48e704](https://github.com/spacingmind/smind/commit/f48e704144199ca3b1768f3597ea642598934f26))
+* **web:** taller composer, no static border on the input card ([#169](https://github.com/spacingmind/smind/issues/169)) ([0af53b3](https://github.com/spacingmind/smind/commit/0af53b32e8d34a4cc268a2ef1abc57a851f64805))
+
 ## [0.7.0](https://github.com/spacingmind/smind/compare/v0.6.0...v0.7.0) (2026-09-15)
 
 
