@@ -389,3 +389,40 @@ func TestTaskRuns_BadArgs(t *testing.T) {
 		}
 	}
 }
+
+// TestTaskSend_ModeFlags is S15: --mode and --auto-accept reach run.start
+// as permissionMode/autoAccept (visible on the resulting run), and the
+// removed --approval-policy flag exits 2 pointing at --mode without
+// starting anything.
+func TestTaskSend_ModeFlags(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+
+	client := dialTestClient(t, srvURL)
+	taskID := newTestRepoTask(t, client)
+	id := strconv.FormatInt(taskID, 10)
+
+	if code, out := runCaptured(t, []string{"task", "send", id, "glm", "hi", "--mode", "default", "--auto-accept"}); code != 0 {
+		t.Fatalf("run(task send --mode --auto-accept) = %d; out %s", code, out)
+	}
+	var runs []struct {
+		PermissionMode string
+		AutoAccept     bool
+	}
+	if err := client.Call(context.Background(), "run.list", map[string]any{}, &runs); err != nil {
+		t.Fatalf("run.list: %v", err)
+	}
+	if len(runs) != 1 || runs[0].PermissionMode != "default" || !runs[0].AutoAccept {
+		t.Fatalf("run.list = %+v, want one default/autoAccept run", runs)
+	}
+
+	code := -1
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() { code = run([]string{"task", "send", id, "glm", "hi", "--approval-policy", "auto-safe"}) })
+	})
+	if code != 2 || !strings.Contains(stderr, "--mode") {
+		t.Fatalf("run(task send --approval-policy) = %d, stderr %q; want 2 mentioning --mode", code, stderr)
+	}
+}

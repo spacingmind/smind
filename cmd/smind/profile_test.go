@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/accounts"
@@ -58,7 +59,7 @@ func TestRunProfileAddPrintsCreatedRow(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = run([]string{"profile", "add", "UI work", "claude-native", "--approval-policy", "manual"})
+		code = run([]string{"profile", "add", "UI work", "claude-native", "--mode=plan"})
 	})
 	if code != 0 {
 		t.Fatalf("run(profile add) = %d, want 0; stdout: %s", code, out)
@@ -71,8 +72,8 @@ func TestRunProfileAddPrintsCreatedRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(list) != 1 || list[0].Name != "UI work" || list[0].Provider != "claude-native" || list[0].ApprovalPolicy != "manual" {
-		t.Fatalf("stored profiles = %+v, want one UI work/claude-native/manual profile", list)
+	if len(list) != 1 || list[0].Name != "UI work" || list[0].Provider != "claude-native" || list[0].PermissionMode != "plan" {
+		t.Fatalf("stored profiles = %+v, want one UI work/claude-native/plan profile", list)
 	}
 }
 
@@ -133,5 +134,22 @@ func TestRunProfileRmRemovesProfile(t *testing.T) {
 	}
 	if len(after) != 0 {
 		t.Fatalf("stored profiles after rm = %+v, want none", after)
+	}
+}
+
+// TestRunProfileAddRejectsRemovedApprovalPolicyFlag proves the removed
+// --approval-policy flag exits 2 pointing at --mode (ADR-0019), without
+// ever creating a profile.
+func TestRunProfileAddRejectsRemovedApprovalPolicyFlag(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	var code int
+	stderr := captureStderr(t, func() {
+		code = run([]string{"profile", "add", "x", "claude-native", "--approval-policy", "manual"})
+	})
+	if code != 2 || !strings.Contains(stderr, "--mode") {
+		t.Fatalf("run(profile add --approval-policy) = %d, stderr %q; want 2 mentioning --mode", code, stderr)
+	}
+	if list, _ := profiles.New(s).List(); len(list) != 0 {
+		t.Fatalf("stored profiles = %+v, want none", list)
 	}
 }

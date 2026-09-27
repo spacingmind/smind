@@ -204,7 +204,7 @@ func TestRunner_RunPrompt_WithChatSessionStore_ResumesAcrossRunsAndRestart(t *te
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -225,7 +225,7 @@ func TestRunner_RunPrompt_WithChatSessionStore_ResumesAcrossRunsAndRestart(t *te
 	events2 := make(chan Event)
 	errCh2 := make(chan error, 1)
 	go func() {
-		errCh2 <- r.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "what did I say before?", nil, "", "", events2)
+		errCh2 <- r.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", events2)
 	}()
 	drainEvents(events2)
 	if err := <-errCh2; err != nil {
@@ -259,7 +259,7 @@ func TestRunner_RunPrompt_WithChatSessionStore_ResumesAcrossRunsAndRestart(t *te
 	events3 := make(chan Event)
 	errCh3 := make(chan error, 1)
 	go func() {
-		errCh3 <- r2.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "and after that?", nil, "", "", events3)
+		errCh3 <- r2.RunPrompt(context.Background(), task.ID, chat.ID, ProviderGLM, "and after that?", nil, PermissionSettings{}, "", events3)
 	}()
 	drainEvents(events3)
 	if err := <-errCh3; err != nil {

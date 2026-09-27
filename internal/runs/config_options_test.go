@@ -28,7 +28,7 @@ func TestRegistry_ConfigOptions_NotSupportedForNonACPProvider(t *testing.T) {
 	reg := newTestRegistry(t, st)
 	runner := taskrunner.New(wm, taskrunner.WithCodexCommand([]string{"/nonexistent/smind-test-codex-agent"}))
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderCodexNative, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderCodexNative, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -71,7 +71,7 @@ func TestRegistry_ConfigOptions_GLM_RealSelectRoundTrip(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

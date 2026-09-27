@@ -63,7 +63,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"run.logs":                 handleRunLogs(reg),
 		"run.stop":                 handleRunStop(reg),
 		"run.respondPermission":    handleRunRespondPermission(reg),
-		"run.setApprovalPolicy":    handleRunSetApprovalPolicy(reg),
+		"run.setPermissionMode":    handleRunSetPermissionMode(reg),
 		"run.listConfigOptions":    handleRunListConfigOptions(reg),
 		"run.setConfigOption":      handleRunSetConfigOption(reg),
 		"terminal.create":          handleTerminalCreate(wm, treg),
@@ -917,10 +917,16 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
 			// the task's default chat, so a client that has never heard of
 			// chats (old CLI, mobile) keeps working unchanged.
-			ChatID         int64                     `json:"chatId"`
-			Provider       taskrunner.Provider       `json:"provider"`
-			Prompt         string                    `json:"prompt"`
-			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+			ChatID   int64               `json:"chatId"`
+			Provider taskrunner.Provider `json:"provider"`
+			Prompt   string              `json:"prompt"`
+			// PermissionMode/AutoAccept are the run's provider-native
+			// permission settings (ADR-0019); both optional -- an empty
+			// mode is the provider's DefaultMode. LegacyApprovalPolicy
+			// only exists to reject the removed field loudly.
+			PermissionMode       string          `json:"permissionMode"`
+			AutoAccept           bool            `json:"autoAccept"`
+			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
 			// doc comment); every other provider ignores it. Optional --
 			// an omitted field is taskrunner.ThinkingLevelUnspecified,
@@ -930,14 +936,14 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
 		}
-		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
-			return nil, fmt.Errorf("task.prompt: invalid approvalPolicy %q", p.ApprovalPolicy)
+		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
+			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -971,10 +977,16 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			TaskID int64 `json:"taskId"`
 			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
 			// the task's default chat.
-			ChatID         int64                     `json:"chatId"`
-			Provider       taskrunner.Provider       `json:"provider"`
-			Prompt         string                    `json:"prompt"`
-			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+			ChatID   int64               `json:"chatId"`
+			Provider taskrunner.Provider `json:"provider"`
+			Prompt   string              `json:"prompt"`
+			// PermissionMode/AutoAccept are the run's provider-native
+			// permission settings (ADR-0019); both optional -- an empty
+			// mode is the provider's DefaultMode. LegacyApprovalPolicy
+			// only exists to reject the removed field loudly.
+			PermissionMode       string          `json:"permissionMode"`
+			AutoAccept           bool            `json:"autoAccept"`
+			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			// ThinkingLevel is Claude-only (see taskrunner.ThinkingLevel's
 			// doc comment); every other provider ignores it. Optional --
 			// an omitted field is taskrunner.ThinkingLevelUnspecified,
@@ -987,14 +999,14 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
 		}
-		if p.ApprovalPolicy != "" && !p.ApprovalPolicy.IsValid() {
-			return nil, fmt.Errorf("run.start: invalid approvalPolicy %q", p.ApprovalPolicy)
+		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
+			return nil, fmt.Errorf("run.start: %w", err)
 		}
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
@@ -1284,31 +1296,56 @@ func handleRunRespondPermission(reg *runs.Registry) handlerFunc {
 	}
 }
 
-// runApprovalPolicyResult is the result of run.setApprovalPolicy: the
-// run's approvalPolicy after the change, so a caller can confirm the
-// switch took without a separate round trip.
-type runApprovalPolicyResult struct {
-	ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
+// rejectLegacyApprovalPolicy fails any request still carrying the removed
+// approvalPolicy field (ADR-0019 resolved decision 7): a hard error naming
+// the replacement, never a silent remap or ignore.
+func rejectLegacyApprovalPolicy(raw json.RawMessage) error {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return fmt.Errorf("approvalPolicy was removed; use permissionMode (and autoAccept for ACP providers) instead -- see docs/decisions/0019-provider-native-permission-modes.md")
 }
 
-// handleRunSetApprovalPolicy switches a live run's approvalPolicy between
-// "manual" and "auto-safe", from any connection regardless of which one (if
-// any) started the run -- mirroring run.setConfigOption's cross-connection
-// shape. "full-access" is rejected as a target (see
-// runs.Registry.SetApprovalPolicy), as is a run that has already finished.
-func handleRunSetApprovalPolicy(reg *runs.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+// runPermissionModeResult is the result of run.setPermissionMode: the
+// run's permission settings after the change.
+type runPermissionModeResult struct {
+	PermissionMode string `json:"permissionMode"`
+	AutoAccept     bool   `json:"autoAccept"`
+}
+
+// handleRunSetPermissionMode switches a live run's provider-native
+// permission mode (modeId, via the provider's own session -- see
+// runs.Registry.SetPermissionMode) and/or, for an ACP run, its autoAccept
+// toggle, from any connection. At least one must be given. Codex rejects
+// a mode switch mid-run; a finished run rejects both.
+func handleRunSetPermissionMode(reg *runs.Registry) handlerFunc {
+	return func(ctx context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			RunID  string                    `json:"runId"`
-			Policy taskrunner.ApprovalPolicy `json:"policy"`
+			RunID      string `json:"runId"`
+			ModeID     string `json:"modeId"`
+			AutoAccept *bool  `json:"autoAccept"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
-			return nil, fmt.Errorf("run.setApprovalPolicy: invalid params: %w", err)
+			return nil, fmt.Errorf("run.setPermissionMode: invalid params: %w", err)
 		}
-		if err := reg.SetApprovalPolicy(p.RunID, p.Policy); err != nil {
-			return nil, fmt.Errorf("run.setApprovalPolicy: %w", err)
+		if p.ModeID == "" && p.AutoAccept == nil {
+			return nil, fmt.Errorf("run.setPermissionMode: modeId or autoAccept is required")
 		}
-		return runApprovalPolicyResult{ApprovalPolicy: p.Policy}, nil
+		if p.ModeID != "" {
+			if err := reg.SetPermissionMode(ctx, p.RunID, p.ModeID); err != nil {
+				return nil, fmt.Errorf("run.setPermissionMode: %w", err)
+			}
+		}
+		if p.AutoAccept != nil {
+			if err := reg.SetAutoAccept(p.RunID, *p.AutoAccept); err != nil {
+				return nil, fmt.Errorf("run.setPermissionMode: %w", err)
+			}
+		}
+		_, status, err := reg.History(p.RunID)
+		if err != nil {
+			return nil, fmt.Errorf("run.setPermissionMode: %w", err)
+		}
+		return runPermissionModeResult{PermissionMode: status.PermissionMode, AutoAccept: status.AutoAccept}, nil
 	}
 }
 
@@ -1550,26 +1587,32 @@ func testProviderCredential(acctReg *accounts.Registry, provider string) provide
 }
 
 // handleProfileCreate creates a new agent profile (ADR-0014). Validation
-// (empty name, unknown provider, invalid approvalPolicy/thinkingLevel) is
+// (empty name, unknown provider, invalid permissionMode/thinkingLevel) is
 // profiles.Registry's job, not this handler's -- the error it returns is
 // passed straight through, matching handleWorkspaceCreate/handleSpaceCreate's
 // passthrough convention.
 func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			ApprovalPolicy string `json:"approvalPolicy"`
-			ThinkingLevel  string `json:"thinkingLevel"`
-			Notes          string `json:"notes"`
+			Name                 string          `json:"name"`
+			Provider             string          `json:"provider"`
+			PermissionMode       string          `json:"permissionMode"`
+			AutoAccept           bool            `json:"autoAccept"`
+			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+			ThinkingLevel        string          `json:"thinkingLevel"`
+			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.create: invalid params: %w", err)
 		}
+		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
+			return nil, fmt.Errorf("profile.create: %w", err)
+		}
 		return profReg.Create(store.AgentProfile{
 			Name:           p.Name,
 			Provider:       p.Provider,
-			ApprovalPolicy: p.ApprovalPolicy,
+			PermissionMode: p.PermissionMode,
+			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
 			Notes:          p.Notes,
 		})
@@ -1602,21 +1645,27 @@ func handleProfileGet(profReg *profiles.Registry) handlerFunc {
 func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			ID             int64  `json:"id"`
-			Name           string `json:"name"`
-			Provider       string `json:"provider"`
-			ApprovalPolicy string `json:"approvalPolicy"`
-			ThinkingLevel  string `json:"thinkingLevel"`
-			Notes          string `json:"notes"`
+			ID                   int64           `json:"id"`
+			Name                 string          `json:"name"`
+			Provider             string          `json:"provider"`
+			PermissionMode       string          `json:"permissionMode"`
+			AutoAccept           bool            `json:"autoAccept"`
+			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
+			ThinkingLevel        string          `json:"thinkingLevel"`
+			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("profile.update: invalid params: %w", err)
+		}
+		if err := rejectLegacyApprovalPolicy(p.LegacyApprovalPolicy); err != nil {
+			return nil, fmt.Errorf("profile.update: %w", err)
 		}
 		return profReg.Update(store.AgentProfile{
 			ID:             p.ID,
 			Name:           p.Name,
 			Provider:       p.Provider,
-			ApprovalPolicy: p.ApprovalPolicy,
+			PermissionMode: p.PermissionMode,
+			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
 			Notes:          p.Notes,
 		})

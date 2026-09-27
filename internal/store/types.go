@@ -81,10 +81,12 @@ type Task struct {
 // that drove it (see internal/runs.Registry.CloseAll's doc comment). StopReason
 // and ErrMsg mirror runs.RunStatus's fields of the same name. FinishedAt is
 // nil while the run is (as far as this row's writer knew) still going.
-// ApprovalPolicy mirrors taskrunner.ApprovalPolicy's underlying string (see
-// that type for the values) -- kept as a plain string here rather than an
-// import of internal/taskrunner, consistent with Provider also being a
-// plain string rather than internal/taskrunner.Provider.
+// PermissionMode/AutoAccept mirror taskrunner.PermissionSettings (ADR-0019:
+// the provider's own permission mode id, plus ACP's approve-every-prompt
+// toggle) -- kept as plain values here rather than an import of
+// internal/taskrunner, consistent with Provider also being a plain string
+// rather than internal/taskrunner.Provider. The legacy approval_policy
+// column is no longer read or written (ADR-0019 resolved decision 8).
 //
 // ChatID is the chats row this run belongs to (docs/decisions/
 // 0016-multiple-chats-per-task.md). The column itself is nullable (see
@@ -105,7 +107,8 @@ type Run struct {
 	FinishedAt     *time.Time
 	StopReason     string
 	ErrMsg         string
-	ApprovalPolicy string
+	PermissionMode string
+	AutoAccept     bool
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was
@@ -145,11 +148,11 @@ type TerminalSession struct {
 
 // AgentProfile is a named, daemon-global bundle of per-run settings
 // (docs/decisions/0014-agent-profiles.md): a provider plus the
-// ApprovalPolicy/ThinkingLevel values a composer would otherwise ask a
-// user to pick every time. Provider/ApprovalPolicy/ThinkingLevel are plain
-// strings, not internal/taskrunner types, for the same reason Run's fields
-// of the same name are -- internal/store does not import internal/
-// taskrunner (see Run's doc comment above). ApprovalPolicy/ThinkingLevel
+// PermissionMode/AutoAccept/ThinkingLevel values a composer would otherwise
+// ask a user to pick every time. Provider/PermissionMode/ThinkingLevel are
+// plain strings, not internal/taskrunner types, for the same reason Run's
+// fields of the same name are -- internal/store does not import internal/
+// taskrunner (see Run's doc comment above). PermissionMode/ThinkingLevel
 // may be "" (unset): the composer's own default applies in that case, same
 // as an omitted task.prompt field does today. Not scoped to any workspace
 // -- see the ADR's Scope section.
@@ -157,7 +160,8 @@ type AgentProfile struct {
 	ID             int64
 	Name           string
 	Provider       string
-	ApprovalPolicy string
+	PermissionMode string
+	AutoAccept     bool
 	ThinkingLevel  string
 	Notes          string
 	CreatedAt      time.Time

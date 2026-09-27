@@ -18,13 +18,11 @@ type recordingDecider struct {
 	err      error
 
 	gotSummary string
-	gotCommand string
 	gotOptions []PermissionOption
 }
 
-func (d *recordingDecider) Decide(_ context.Context, summary, command string, options []PermissionOption) (string, error) {
+func (d *recordingDecider) Decide(_ context.Context, summary string, options []PermissionOption) (string, error) {
 	d.gotSummary = summary
-	d.gotCommand = command
 	d.gotOptions = options
 	return d.optionID, d.err
 }
@@ -54,121 +52,12 @@ func TestACPDeciderAdapter_TranslatesOptionsAndChoice(t *testing.T) {
 	if d.gotSummary != "Delete a file" {
 		t.Fatalf("summary = %q, want %q", d.gotSummary, "Delete a file")
 	}
-	if d.gotCommand != "" {
-		t.Fatalf("command = %q, want empty -- this ToolCall has no kind \"execute\", so acpCommand must not guess one", d.gotCommand)
-	}
 	want := []PermissionOption{
 		{ID: "opt-1", Label: "Allow once", Kind: "allow_once"},
 		{ID: "opt-2", Label: "Reject once", Kind: "reject_once"},
 	}
 	if !reflect.DeepEqual(d.gotOptions, want) {
 		t.Fatalf("options = %+v, want %+v", d.gotOptions, want)
-	}
-}
-
-// livePolicyDecider wraps recordingDecider with a live, externally
-// mutable ApprovalPolicy, for proving acpDeciderAdapter's autoAllowACPFileEdit
-// gate consults a wrapped LivePolicyDecider's current value instead of its
-// own frozen approvalPolicy field once the wrapped decider implements it
-// (internal/runs.runPermissionDecider is the real implementation; see
-// LivePolicyDecider's doc comment for why this matters for a mid-run
-// Registry.SetApprovalPolicy switch).
-type livePolicyDecider struct {
-	recordingDecider
-	policy ApprovalPolicy
-}
-
-func (d *livePolicyDecider) CurrentApprovalPolicy() ApprovalPolicy {
-	return d.policy
-}
-
-func TestACPDeciderAdapter_AutoAllowFileEdit_PrefersLiveApprovalPolicyOverFrozenField(t *testing.T) {
-	t.Parallel()
-	d := &livePolicyDecider{recordingDecider: recordingDecider{optionID: "should-not-be-reached"}, policy: ApprovalPolicyManual}
-	// The adapter's own frozen field also says manual -- proving any
-	// auto-allow that happens below can only be coming from d's live
-	// value, never this field.
-	adapter := acpDeciderAdapter{decider: d, worktreePath: "/wt/task-1", approvalPolicy: ApprovalPolicyManual}
-
-	req := acp.RequestPermissionParams{
-		ToolCall: json.RawMessage(`{"kind":"edit","locations":[{"path":"/wt/task-1/a.go"}]}`),
-		Options: []acp.PermissionOption{
-			{OptionID: "allow-1", Name: "Allow", Kind: acp.PermissionAllowOnce},
-			{OptionID: "deny-1", Name: "Deny", Kind: acp.PermissionRejectOnce},
-		},
-	}
-
-	// Still manual (both the frozen field and d's live value): falls
-	// through to the wrapped decider, exactly as if LivePolicyDecider
-	// didn't exist.
-	got, err := adapter.Decide(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
-	}
-	if got != d.optionID {
-		t.Fatalf("Decide() while still manual = %q, want it to fall through to the wrapped decider's %q", got, d.optionID)
-	}
-
-	// d's live value switches to auto-safe -- the adapter's own frozen
-	// field is untouched (still ApprovalPolicyManual), so an auto-allow
-	// here can only be explained by the adapter reading d's live value via
-	// LivePolicyDecider.
-	d.policy = ApprovalPolicyAutoSafe
-	d.gotSummary = ""
-	got, err = adapter.Decide(context.Background(), req)
-	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
-	}
-	if got != "allow-1" {
-		t.Fatalf("Decide() after live switch to auto-safe = %q, want %q (auto-allowed via the live policy, not the frozen field)", got, "allow-1")
-	}
-	if d.gotSummary != "" {
-		t.Fatalf("wrapped decider was called (gotSummary = %q) -- the auto-allow fast path should have short-circuited before ever reaching it", d.gotSummary)
-	}
-}
-
-func TestACPDeciderAdapter_ExtractsExecuteCommand(t *testing.T) {
-	t.Parallel()
-	d := &recordingDecider{optionID: "opt-1"}
-	adapter := acpDeciderAdapter{decider: d}
-
-	// Shape confirmed live 2026-09-14 (glm-acp-agent's Bash tool call):
-	// kind "execute" with rawInput.command carrying the literal string.
-	req := acp.RequestPermissionParams{
-		ToolCall: json.RawMessage(`{"toolCallId":"tc-2","title":"Run command: go version","kind":"execute","rawInput":{"command":"go version"}}`),
-		Options: []acp.PermissionOption{
-			{OptionID: "opt-1", Name: "Allow once", Kind: acp.PermissionAllowOnce},
-		},
-	}
-
-	if _, err := adapter.Decide(context.Background(), req); err != nil {
-		t.Fatalf("Decide() error = %v", err)
-	}
-	if d.gotCommand != "go version" {
-		t.Fatalf("command = %q, want %q", d.gotCommand, "go version")
-	}
-}
-
-func TestACPDeciderAdapter_IgnoresRawInputCommandForNonExecuteKinds(t *testing.T) {
-	t.Parallel()
-	d := &recordingDecider{optionID: "opt-1"}
-	adapter := acpDeciderAdapter{decider: d}
-
-	// A rawInput.command-shaped field under a different kind is not this
-	// package's business to interpret -- rawInput's shape is tool-specific
-	// per kind, so reusing the field name here would be guessing.
-	req := acp.RequestPermissionParams{
-		ToolCall: json.RawMessage(`{"toolCallId":"tc-3","title":"Read a file","kind":"read","rawInput":{"command":"rm -rf /"}}`),
-		Options: []acp.PermissionOption{
-			{OptionID: "opt-1", Name: "Allow once", Kind: acp.PermissionAllowOnce},
-		},
-	}
-
-	if _, err := adapter.Decide(context.Background(), req); err != nil {
-		t.Fatalf("Decide() error = %v", err)
-	}
-	if d.gotCommand != "" {
-		t.Fatalf("command = %q, want empty for a non-execute kind", d.gotCommand)
 	}
 }
 
@@ -249,9 +138,6 @@ func TestClaudeDeciderAdapter_Allow(t *testing.T) {
 	if d.gotSummary != "run Bash" {
 		t.Fatalf("summary = %q, want %q", d.gotSummary, "run Bash")
 	}
-	if d.gotCommand != "echo hi" {
-		t.Fatalf("command = %q, want %q (from req.Input[\"command\"])", d.gotCommand, "echo hi")
-	}
 }
 
 // TestClaudeDeciderAdapter_Deny proves a "deny" choice translates into
@@ -279,36 +165,6 @@ func TestClaudeDeciderAdapter_Deny(t *testing.T) {
 	}
 	if updatedPermissions != nil || interrupt {
 		t.Fatalf("updatedPermissions/interrupt = %+v/%v, want nil/false -- this pass never sets them", updatedPermissions, interrupt)
-	}
-	if d.gotCommand != "rm -rf /" {
-		t.Fatalf("command = %q, want %q -- the decider must still see the real command even when it eventually denies", d.gotCommand, "rm -rf /")
-	}
-}
-
-// TestBashCommand proves bashCommand only ever extracts a command for a
-// Bash tool-use request, and never trusts a non-string "command" value --
-// both cases where returning a wrong non-empty string would be a real
-// safety issue, since a non-empty command is exactly what
-// ApprovalPolicyAutoSafe's AllowlistedCommand check looks at.
-func TestBashCommand(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		req  claudecode.CanUseToolRequest
-		want string
-	}{
-		{"bash with string command", claudecode.CanUseToolRequest{ToolName: "Bash", Input: map[string]any{"command": "go test ./..."}}, "go test ./..."},
-		{"non-bash tool name", claudecode.CanUseToolRequest{ToolName: "Read", Input: map[string]any{"command": "go test ./..."}}, ""},
-		{"bash with no input", claudecode.CanUseToolRequest{ToolName: "Bash"}, ""},
-		{"bash with non-string command", claudecode.CanUseToolRequest{ToolName: "Bash", Input: map[string]any{"command": 123}}, ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			if got := bashCommand(tt.req); got != tt.want {
-				t.Fatalf("bashCommand() = %q, want %q", got, tt.want)
-			}
-		})
 	}
 }
 

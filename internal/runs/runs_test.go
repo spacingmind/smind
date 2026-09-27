@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,12 +22,20 @@ import (
 // depending on npx/network access.
 var fakeACPAgentPath string
 
+// fakeCodexAgentPath is the compiled internal/codex/fakeagent binary.
+var fakeCodexAgentPath string
+
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "smind-runs-test-")
 	if err != nil {
 		panic(err)
 	}
 	defer os.RemoveAll(dir)
+
+	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	if out, err := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent").CombinedOutput(); err != nil {
+		panic(err.Error() + ": " + string(out))
+	}
 
 	fakeACPAgentPath = filepath.Join(dir, "fakeagent")
 	build := exec.Command("go", "build", "-o", fakeACPAgentPath, "../taskrunner/fakeagent")
@@ -222,7 +231,7 @@ func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -256,7 +265,7 @@ func TestRegistry_Start_UnknownTask_FailsSynchronously(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	_, err := reg.Start(context.Background(), wm, runner, 999999, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	_, err := reg.Start(context.Background(), wm, runner, 999999, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err == nil {
 		t.Fatal("Start() error = nil, want error for unknown task")
 	}
@@ -277,7 +286,7 @@ func TestRegistry_History_OnRunningRun_ReturnsWithoutBlocking(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -308,7 +317,7 @@ func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -354,7 +363,7 @@ func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -383,7 +392,7 @@ func TestRegistry_Stop_FromAnyCaller_CancelsTheRun(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -409,7 +418,7 @@ func TestRegistry_Stop_AlreadyFinished_IsNotAnError(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -445,7 +454,7 @@ func TestRegistry_Unsubscribe_DoesNotStopTheRun(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -498,11 +507,11 @@ func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runA, err := reg.Start(context.Background(), wm, runner, taskA.ID, 0, taskrunner.ProviderGLM, "hi a", taskrunner.ApprovalPolicyManual, "")
+	runA, err := reg.Start(context.Background(), wm, runner, taskA.ID, 0, taskrunner.ProviderGLM, "hi a", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start(A) error = %v", err)
 	}
-	runB, err := reg.Start(context.Background(), wm, runner, taskB.ID, 0, taskrunner.ProviderGLM, "hi b", taskrunner.ApprovalPolicyManual, "")
+	runB, err := reg.Start(context.Background(), wm, runner, taskB.ID, 0, taskrunner.ProviderGLM, "hi b", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start(B) error = %v", err)
 	}
@@ -537,13 +546,13 @@ func TestRegistry_List_ReflectsCurrentStatus(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runDone, err := reg.Start(context.Background(), wm, runner, taskDone.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runDone, err := reg.Start(context.Background(), wm, runner, taskDone.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start(done) error = %v", err)
 	}
 	waitForStatus(t, reg, runDone, StatusDone, 5*time.Second)
 
-	runStopped, err := reg.Start(context.Background(), wm, runner, taskHang.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runStopped, err := reg.Start(context.Background(), wm, runner, taskHang.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start(hang) error = %v", err)
 	}
@@ -583,7 +592,7 @@ func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionU
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -658,54 +667,48 @@ func TestRegistry_PermissionRequest_AppearsInHistoryBlocksThenRespondPermissionU
 	}
 }
 
-// TestRunPermissionDecider_Decide_AutoSafe_AllowlistedCommand_AutoAllows
-// proves task-permission-ux.md Item 1's "auto-allow" half at the
-// internal/runs integration layer: given ApprovalPolicyAutoSafe and a
-// command AllowlistedCommand matches, Decide returns the allow option
-// immediately -- no pending channel is ever registered (proven by
-// inspecting pendingPermissions directly, not just "RespondPermission
-// wasn't called"), and the resulting history shows the resolution tagged
-// PermissionResolvedByAutoSafe, not PermissionResolvedByHuman. Calls
-// runPermissionDecider.Decide directly (rather than through a real
-// subprocess) since the policy check itself is provider-agnostic --
-// internal/taskrunner/permission_test.go already covers each provider's
-// own command-extraction logic (bashCommand, Codex's req.Command) in
-// isolation.
-func TestRunPermissionDecider_Decide_AutoSafe_AllowlistedCommand_AutoAllows(t *testing.T) {
-	t.Parallel()
+// startedRun starts a GLM run on a fresh task with perm and returns the
+// registry and its own *run once the turn has finished, for tests that
+// drive runPermissionDecider.Decide directly.
+func startedRun(t *testing.T, perm taskrunner.PermissionSettings) (*Registry, *run, string) {
+	t.Helper()
 	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
-	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
-
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", perm, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
-
 	reg.mu.Lock()
 	r := reg.runs[runID]
 	reg.mu.Unlock()
 	if r == nil {
 		t.Fatalf("run %q not found in registry", runID)
 	}
-	decider := runPermissionDecider{reg: reg, r: r}
-	opts := []taskrunner.PermissionOption{
-		{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
-		{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
-	}
+	return reg, r, runID
+}
 
-	for _, cmd := range []string{"go test ./...", "gofmt -l .", "go vet ./internal/..."} {
-		t.Run(cmd, func(t *testing.T) {
-			optionID, err := decider.Decide(context.Background(), "run "+cmd, cmd, opts)
-			if err != nil {
-				t.Fatalf("Decide(%q) error = %v", cmd, err)
-			}
-			if optionID != "allow-1" {
-				t.Fatalf("Decide(%q) = %q, want %q (auto-allowed)", cmd, optionID, "allow-1")
-			}
-		})
+var allowDenyOptions = []taskrunner.PermissionOption{
+	{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
+	{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
+}
+
+// TestRunPermissionDecider_Decide_AutoAccept_AutoAllows proves an ACP run's
+// AutoAccept (the human's own per-run choice, ADR-0019) resolves a request
+// to its allow option immediately -- never pending -- and tags the
+// resolution PermissionResolvedByAutoAccept, not PermissionResolvedByHuman.
+func TestRunPermissionDecider_Decide_AutoAccept_AutoAllows(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{AutoAccept: true})
+	decider := runPermissionDecider{reg: reg, r: r}
+
+	optionID, err := decider.Decide(context.Background(), "Run a risky command", allowDenyOptions)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+	if optionID != "allow-1" {
+		t.Fatalf("Decide() = %q, want allow-1", optionID)
 	}
 
 	r.mu.Lock()
@@ -713,73 +716,44 @@ func TestRunPermissionDecider_Decide_AutoSafe_AllowlistedCommand_AutoAllows(t *t
 	hist := append([]taskrunner.Event(nil), r.history...)
 	r.mu.Unlock()
 	if pending != 0 {
-		t.Fatalf("pendingPermissions after auto-safe Decide calls = %d, want 0 (a genuinely auto-allowed request never becomes pending)", pending)
+		t.Fatalf("pendingPermissions = %d, want 0", pending)
 	}
-
-	var resolvedCount int
+	var resolved int
 	for _, e := range hist {
 		if e.Type == taskrunner.EventTypePermissionResolved {
-			resolvedCount++
-			if e.PermissionResolution != taskrunner.PermissionResolvedByAutoSafe {
-				t.Fatalf("PermissionResolution = %q, want %q", e.PermissionResolution, taskrunner.PermissionResolvedByAutoSafe)
-			}
-			if e.PermissionOptionID != "allow-1" {
-				t.Fatalf("PermissionOptionID = %q, want %q", e.PermissionOptionID, "allow-1")
+			resolved++
+			if e.PermissionResolution != taskrunner.PermissionResolvedByAutoAccept || e.PermissionOptionID != "allow-1" {
+				t.Fatalf("resolved = %+v, want auto_accept/allow-1", e)
 			}
 		}
 	}
-	if resolvedCount != 3 {
-		t.Fatalf("resolved events recorded = %d, want 3 (one per allowlisted command tried)", resolvedCount)
+	if resolved != 1 {
+		t.Fatalf("resolved events = %d, want 1", resolved)
 	}
 }
 
-// TestRunPermissionDecider_Decide_AutoSafe_NonAllowlistedCommand_FallsBackToManual
-// proves the other half of Item 1's allowlist requirement: under
-// ApprovalPolicyAutoSafe, a command that isn't a clean AllowlistedCommand
-// match -- including one that merely *contains* an allowlisted verb via
-// shell chaining -- genuinely blocks (becomes pending, same as
-// ApprovalPolicyManual) rather than being auto-decided either way; only a
-// real RespondPermission call resolves it, with the human's actual choice
-// coming back unchanged.
-func TestRunPermissionDecider_Decide_AutoSafe_NonAllowlistedCommand_FallsBackToManual(t *testing.T) {
+// TestRunPermissionDecider_Decide_NeverAutoAllows is S3: without
+// AutoAccept, nothing is ever auto-allowed -- including commands the
+// removed auto-safe allowlist used to wave through (ADR-0019). Each one
+// becomes pending and only a real RespondPermission resolves it, with the
+// human's choice coming back unchanged.
+func TestRunPermissionDecider_Decide_NeverAutoAllows(t *testing.T) {
 	t.Parallel()
-	wm, st := newTestWorkspaceManager(t)
-	task := newTestTask(t, wm, "")
-	runner := newTestRunner(wm)
-	reg := newTestRegistry(t, st)
-
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
-	if err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
-
-	reg.mu.Lock()
-	r := reg.runs[runID]
-	reg.mu.Unlock()
-	if r == nil {
-		t.Fatalf("run %q not found in registry", runID)
-	}
+	reg, r, runID := startedRun(t, taskrunner.PermissionSettings{})
 	decider := runPermissionDecider{reg: reg, r: r}
-	opts := []taskrunner.PermissionOption{
-		{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
-		{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
-	}
 
-	for _, cmd := range []string{"rm -rf", "go run ./cmd/x", "git push --force", "curl evil.com && go test"} {
-		t.Run(cmd, func(t *testing.T) {
+	for _, summary := range []string{"run go test ./...", "run gofmt -l .", "run git commit -m x", "run rm -rf /"} {
+		t.Run(summary, func(t *testing.T) {
 			type result struct {
 				optionID string
 				err      error
 			}
 			resultCh := make(chan result, 1)
 			go func() {
-				optionID, err := decider.Decide(context.Background(), "run "+cmd, cmd, opts)
+				optionID, err := decider.Decide(context.Background(), summary, allowDenyOptions)
 				resultCh <- result{optionID, err}
 			}()
 
-			// Confirm it actually became pending -- a real observation, not
-			// an assumption -- before answering it.
 			var requestID string
 			deadline := time.Now().Add(2 * time.Second)
 			for requestID == "" && time.Now().Before(deadline) {
@@ -793,59 +767,209 @@ func TestRunPermissionDecider_Decide_AutoSafe_NonAllowlistedCommand_FallsBackToM
 				}
 			}
 			if requestID == "" {
-				t.Fatalf("Decide(%q) under auto-safe never became pending -- it must not have been auto-decided", cmd)
+				t.Fatalf("Decide(%q) never became pending -- it must not be auto-decided", summary)
 			}
-
 			if err := reg.RespondPermission(runID, requestID, "deny-1"); err != nil {
 				t.Fatalf("RespondPermission() error = %v", err)
 			}
-
 			select {
 			case res := <-resultCh:
-				if res.err != nil {
-					t.Fatalf("Decide(%q) error = %v", cmd, res.err)
-				}
-				if res.optionID != "deny-1" {
-					t.Fatalf("Decide(%q) = %q, want %q (the human's actual choice, unmodified)", cmd, res.optionID, "deny-1")
+				if res.err != nil || res.optionID != "deny-1" {
+					t.Fatalf("Decide(%q) = %q/%v, want the human's deny-1", summary, res.optionID, res.err)
 				}
 			case <-time.After(2 * time.Second):
-				t.Fatalf("Decide(%q) did not unblock after RespondPermission", cmd)
+				t.Fatalf("Decide(%q) did not unblock after RespondPermission", summary)
 			}
 		})
 	}
 }
 
-// TestRegistry_ApprovalPolicyAutoSafe_UnrecognizedACPCommandFallsBackToManual
-// proves ApprovalPolicyAutoSafe against a *real* ACP permission request (the
-// fakeagent's "permission" scenario): since ACP's tool-call schema carries
-// no field this package has confirmed is the literal command
-// (acpDeciderAdapter always passes ""), AllowlistedCommand("") is false, so
-// this must behave exactly like ApprovalPolicyManual -- genuinely blocking
-// until a human (RespondPermission) answers, never auto-decided.
-func TestRegistry_ApprovalPolicyAutoSafe_UnrecognizedACPCommandFallsBackToManual(t *testing.T) {
+// TestRegistry_AutoAccept_RealACPRequest proves AutoAccept end to end
+// against the fake agent's real session/request_permission: the run
+// completes with no human answering, the agent was told the allow option,
+// and the history shows an auto_accept resolution.
+func TestRegistry_AutoAccept_RealACPRequest(t *testing.T) {
 	t.Parallel()
 	wm, st := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "permission")
-	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyAutoSafe, "")
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{AutoAccept: true}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	status := waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	if !status.AutoAccept {
+		t.Fatalf("RunStatus.AutoAccept = false, want true")
+	}
+	hist, _, _ := reg.History(runID)
+	var sawAuto, sawChoice bool
+	for _, e := range hist {
+		if e.Type == taskrunner.EventTypePermissionResolved && e.PermissionResolution == taskrunner.PermissionResolvedByAutoAccept {
+			sawAuto = true
+		}
+		if e.Type == taskrunner.EventTypeText && e.Text == "chose:allow-1" {
+			sawChoice = true
+		}
+	}
+	if !sawAuto || !sawChoice {
+		t.Fatalf("history = %+v, want an auto_accept resolution and chose:allow-1", hist)
+	}
+}
 
+// TestRegistry_SetAutoAccept_MidRun is S12: turning AutoAccept on while
+// the run is live makes the next permission request auto-allowed (the
+// fake agent's "permission-edit" scenario sends "ready", waits, then
+// asks).
+func TestRegistry_SetAutoAccept_MidRun(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission-edit")
+	reg := newTestRegistry(t, st)
+
+	runID, err := reg.Start(context.Background(), wm, newTestRunner(wm), task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForText(t, reg, runID, "ready", 5*time.Second)
+	if err := reg.SetAutoAccept(runID, true); err != nil {
+		t.Fatalf("SetAutoAccept() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	waitForText(t, reg, runID, "chose:allow-1", time.Second)
+
+	if err := reg.SetAutoAccept(runID, false); err == nil {
+		t.Fatal("SetAutoAccept() on a finished run = nil, want error")
+	}
+}
+
+func waitForText(t *testing.T, reg *Registry, runID, text string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		hist, _, err := reg.History(runID)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", runID, err)
+		}
+		for _, e := range hist {
+			if e.Type == taskrunner.EventTypeText && e.Text == text {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for text %q in run %q: %+v", text, runID, hist)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRegistry_Start_ValidatesPermissionSettings is S10 at the Registry
+// layer: an unknown mode for the provider, or AutoAccept on a non-ACP
+// provider, is rejected before anything is spawned; an empty mode records
+// the provider's DefaultMode.
+func TestRegistry_Start_ValidatesPermissionSettings(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	reg := newTestRegistry(t, st)
+	runner := newTestRunner(wm)
+
+	for _, tc := range []struct {
+		provider taskrunner.Provider
+		perm     taskrunner.PermissionSettings
+		want     string
+	}{
+		{taskrunner.ProviderClaudeNative, taskrunner.PermissionSettings{Mode: "auto-safe"}, "invalid permission mode"},
+		{taskrunner.ProviderClaudeNative, taskrunner.PermissionSettings{AutoAccept: true}, "autoAccept is not supported"},
+		{taskrunner.ProviderCodexNative, taskrunner.PermissionSettings{Mode: "bypassPermissions"}, "invalid permission mode"},
+	} {
+		task := newTestTask(t, wm, "")
+		_, err := reg.Start(context.Background(), wm, runner, task.ID, 0, tc.provider, "hi", tc.perm, "")
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("Start(%s, %+v) error = %v, want %q", tc.provider, tc.perm, err, tc.want)
+		}
+	}
+
+	task := newTestTask(t, wm, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	status := waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	if status.PermissionMode != taskrunner.ACPModeDefault {
+		t.Fatalf("PermissionMode = %q, want the provider default %q", status.PermissionMode, taskrunner.ACPModeDefault)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.PermissionMode != taskrunner.ACPModeDefault || row.AutoAccept {
+		t.Fatalf("persisted = %q/%v, want default/false", row.PermissionMode, row.AutoAccept)
+	}
+}
+
+// TestRegistry_SetPermissionMode is S11 at the Registry layer: a live ACP
+// run switches via the agent's session/set_mode (validated against the
+// modes its session advertised) and reports the new mode; an unknown mode
+// is rejected; a finished run and an unknown run both fail.
+func TestRegistry_SetPermissionMode(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
 	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
 
-	time.Sleep(100 * time.Millisecond)
-	_, status, err := reg.History(runID)
-	if err != nil {
-		t.Fatalf("History() error = %v", err)
+	if err := reg.SetPermissionMode(context.Background(), runID, "not-a-mode"); err == nil || !strings.Contains(err.Error(), "invalid permission mode") {
+		t.Fatalf("SetPermissionMode(not-a-mode) error = %v, want invalid permission mode", err)
 	}
-	if status.Status != StatusRunning {
-		t.Fatalf("Status = %q under auto-safe with an unrecognized command, want still %q (must fall back to manual)", status.Status, StatusRunning)
+	if err := reg.SetPermissionMode(context.Background(), runID, "accept_edits"); err != nil {
+		t.Fatalf("SetPermissionMode(accept_edits) error = %v", err)
+	}
+	_, status, _ := reg.History(runID)
+	if status.PermissionMode != "accept_edits" {
+		t.Fatalf("RunStatus.PermissionMode = %q, want accept_edits", status.PermissionMode)
+	}
+	data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "session-mode"))
+	if err != nil || strings.TrimSpace(string(data)) != "set_mode:accept_edits" {
+		t.Fatalf("session-mode = %q/%v, want set_mode:accept_edits", data, err)
 	}
 
-	if err := reg.RespondPermission(runID, req.PermissionRequestID, "deny-1"); err != nil {
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+	if err := reg.SetPermissionMode(context.Background(), runID, "default"); err == nil {
+		t.Fatal("SetPermissionMode() on a finished run = nil, want error")
+	}
+	if err := reg.SetPermissionMode(context.Background(), "no-such-run", "default"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("SetPermissionMode(unknown run) error = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRegistry_SetPermissionMode_CodexUnsupported proves Codex, whose mode
+// rides on thread/start, rejects a mid-run switch with
+// taskrunner.ErrModeSwitchNotSupported.
+func TestRegistry_SetPermissionMode_CodexUnsupported(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithCodexCommand([]string{fakeCodexAgentPath}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderCodexNative, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+	if err := reg.SetPermissionMode(context.Background(), runID, taskrunner.CodexModeFullAccess); !errors.Is(err, taskrunner.ErrModeSwitchNotSupported) {
+		t.Fatalf("SetPermissionMode() error = %v, want ErrModeSwitchNotSupported", err)
+	}
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "decline"); err != nil {
 		t.Fatalf("RespondPermission() error = %v", err)
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
@@ -869,7 +993,7 @@ func TestRegistry_PermissionRequest_TimesOutAutoResolvesToDenyDistinguishableFro
 	reg := newTestRegistry(t, st)
 	reg.SetPermissionTimeout(50 * time.Millisecond)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -938,7 +1062,6 @@ func TestRegistry_PermissionRequest_ProviderCtxCancelledRecordsDistinguishableEv
 		taskID:             task.ID,
 		provider:           taskrunner.ProviderClaudeNative,
 		prompt:             "hi",
-		approvalPolicy:     taskrunner.ApprovalPolicyManual,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             runCancel,
@@ -956,7 +1079,7 @@ func TestRegistry_PermissionRequest_ProviderCtxCancelledRecordsDistinguishableEv
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := decider.Decide(providerCtx, "Run a risky command", "curl", []taskrunner.PermissionOption{
+		_, err := decider.Decide(providerCtx, "Run a risky command", []taskrunner.PermissionOption{
 			{ID: "allow-1", Label: "Allow", Kind: "allow_once"},
 			{ID: "deny-1", Label: "Deny", Kind: "reject_once"},
 		})
@@ -1020,7 +1143,7 @@ func TestRegistry_RespondPermission_DoubleAnswer_SecondCallIsAClearError(t *test
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1056,7 +1179,7 @@ func TestRegistry_RespondPermission_UnknownRequestID_IsAClearError(t *testing.T)
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1104,7 +1227,7 @@ func TestRegistry_Stop_WhilePermissionPending_Unblocks(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 	baseline := runtime.NumGoroutine()
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1167,7 +1290,7 @@ func TestRegistry_CloseAll_StopsEveryRunningRunAndWaitsForThem(t *testing.T) {
 	runIDs := make([]string, n)
 	for i := 0; i < n; i++ {
 		task := newTestTask(t, wm, "hang")
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1209,7 +1332,7 @@ func TestRegistry_CloseAll_NoRunningRuns_ReturnsImmediately(t *testing.T) {
 	reg := newTestRegistry(t, st)
 
 	task := newTestTask(t, wm, "")
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1241,7 +1364,7 @@ func TestRegistry_Start_PersistsRunRowImmediately(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1269,7 +1392,7 @@ func TestRegistry_Record_PersistsEventsInOrder(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1321,7 +1444,7 @@ func TestRegistry_ToolCallEvents_RoundTripAcrossStoreReopen(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1381,7 +1504,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1409,7 +1532,7 @@ func TestRegistry_Finish_PersistsTerminalStatus(t *testing.T) {
 		runner := newTestRunner(wm)
 		reg := newTestRegistry(t, st)
 
-		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 		if err != nil {
 			t.Fatalf("Start() error = %v", err)
 		}
@@ -1445,7 +1568,7 @@ func TestRegistry_RestartSimulation_HistorySurvivesAcrossRegistries(t *testing.T
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -1513,7 +1636,7 @@ func TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted(t *
 	runner := newTestRunner(wm)
 	reg1 := newTestRegistry(t, st)
 
-	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

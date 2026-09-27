@@ -45,10 +45,10 @@ const (
 const extendedThinkingBudgetTokens = 32000
 
 // IsValid reports whether l is one of the ThinkingLevel values this package
-// knows how to apply -- same rejection-over-silent-fallback rationale as
-// ApprovalPolicy.IsValid (see its doc comment): an unrecognized value from
-// a wire caller should surface as an error, not silently collapse to
-// ThinkingLevelUnspecified.
+// knows how to apply: an unrecognized value from a wire caller should
+// surface as an error, not silently collapse to ThinkingLevelUnspecified
+// (the same rejection-over-silent-fallback rule ValidatePermissionSettings
+// applies to permission modes).
 func (l ThinkingLevel) IsValid() bool {
 	switch l {
 	case ThinkingLevelUnspecified, ThinkingLevelOff, ThinkingLevelStandard, ThinkingLevelExtended:

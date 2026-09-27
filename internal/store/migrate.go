@@ -79,6 +79,60 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0019: provider-native permission modes replace the legacy
+		// approval_policy (manual/auto-safe/full-access), which is kept
+		// but never read or written again (resolved decision 8).
+		name: "permission_modes",
+		apply: func(db *sql.DB) error {
+			for _, table := range []string{"runs", "agent_profiles"} {
+				if err := addColumnIfMissing(db, table, "permission_mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+					return err
+				}
+				if err := addColumnIfMissing(db, table, "auto_accept", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+					return err
+				}
+			}
+			return backfillPermissionModes(db)
+		},
+	},
+}
+
+// legacyPermissionModeSQL maps a row's legacy approval_policy (and
+// provider) onto ADR-0019's migration table -- always toward asking a
+// human: manual and auto-safe both become the provider's own
+// asks-for-shell-commands mode (Claude acceptEdits, Codex auto, ACP the
+// agent's own default ""), and only full-access becomes an auto-approving
+// setting (Claude bypassPermissions, Codex full-access, ACP autoAccept).
+// ACP's "accept_edits if advertised" isn't knowable at migration time (no
+// agent is running), so ACP auto-safe rows get the agent default -- the
+// narrower choice.
+const legacyPermissionModeSQL = `
+	permission_mode = CASE
+		WHEN provider = 'claude-native' AND approval_policy = 'full-access' THEN 'bypassPermissions'
+		WHEN provider = 'claude-native' THEN 'acceptEdits'
+		WHEN provider = 'codex-native' AND approval_policy = 'full-access' THEN 'full-access'
+		WHEN provider = 'codex-native' THEN 'auto'
+		ELSE '' END,
+	auto_accept = CASE
+		WHEN provider IN ('glm', 'kimi') AND approval_policy = 'full-access' THEN 1
+		ELSE 0 END`
+
+// backfillPermissionModes applies legacyPermissionModeSQL to every row not
+// yet carrying a permission setting. Idempotent: a row written after this
+// migration always has either a non-empty permission_mode (every Claude/
+// Codex run) or an ACP mapping that re-derives to the same values, and
+// the legacy column is never written again, so re-running changes
+// nothing. Profiles with an unset approval_policy stay unset (the
+// provider default applies), matching their pre-migration meaning.
+func backfillPermissionModes(db *sql.DB) error {
+	if _, err := db.Exec(`UPDATE runs SET` + legacyPermissionModeSQL + ` WHERE permission_mode = '' AND auto_accept = 0`); err != nil {
+		return fmt.Errorf("backfill runs.permission_mode: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE agent_profiles SET` + legacyPermissionModeSQL + ` WHERE permission_mode = '' AND auto_accept = 0 AND approval_policy != ''`); err != nil {
+		return fmt.Errorf("backfill agent_profiles.permission_mode: %w", err)
+	}
+	return nil
 }
 
 // backfillDefaultChats gives every task exactly one default chat

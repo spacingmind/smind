@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--approval-policy=<policy>] [--thinking-level=<level>] [--notes=<text>]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--notes=<text>]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
@@ -41,9 +42,22 @@ func cmdProfileAdd(args []string) int {
 	}
 	name, provider := args[0], args[1]
 
-	var approvalPolicy, thinkingLevel, notes string
+	var mode, thinkingLevel, notes string
+	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
+		if name, value, ok := strings.Cut(rest[i], "="); ok && strings.HasPrefix(name, "--") {
+			// --flag=value form, split into the same pair.
+			rest = append(rest[:i:i], append([]string{name, value}, rest[i+1:]...)...)
+		}
+		switch rest[i] {
+		case "--auto-accept":
+			autoAccept = true
+			continue
+		case "--approval-policy":
+			fmt.Fprintf(os.Stderr, "profile add: %s\n", approvalPolicyRemovedMsg)
+			return 2
+		}
 		if i+1 >= len(rest) {
 			fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", rest[i])
 			return 2
@@ -51,8 +65,8 @@ func cmdProfileAdd(args []string) int {
 		flag, value := rest[i], rest[i+1]
 		i++
 		switch flag {
-		case "--approval-policy":
-			approvalPolicy = value
+		case "--mode":
+			mode = value
 		case "--thinking-level":
 			thinkingLevel = value
 		case "--notes":
@@ -73,13 +87,13 @@ func cmdProfileAdd(args []string) int {
 	var p store.AgentProfile
 	err = client.Call(context.Background(), "profile.create", map[string]any{
 		"name": name, "provider": provider,
-		"approvalPolicy": approvalPolicy, "thinkingLevel": thinkingLevel, "notes": notes,
+		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "notes": notes,
 	}, &p)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "profile add: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, p.ApprovalPolicy, p.ThinkingLevel)
+	fmt.Printf("%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
 	return 0
 }
 
@@ -103,12 +117,25 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tAPPROVAL\tTHINKING")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, p.ApprovalPolicy, p.ThinkingLevel)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
 	}
 	tw.Flush()
 	return 0
+}
+
+// profileModeColumn renders a profile's permission settings for the MODE
+// column: the mode id (or "default" when unset), plus "+auto-accept".
+func profileModeColumn(p store.AgentProfile) string {
+	mode := p.PermissionMode
+	if mode == "" {
+		mode = "default"
+	}
+	if p.AutoAccept {
+		mode += "+auto-accept"
+	}
+	return mode
 }
 
 func cmdProfileRemove(args []string) int {

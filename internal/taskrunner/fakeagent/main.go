@@ -19,10 +19,9 @@
 // than a reply buffered until the end; "permission" issues a real
 // session/request_permission call and streams back which option was chosen,
 // for proving Runner's PermissionDecider wiring end to end; "permission-edit"
-// is the same idea for an edit-kind request (ApprovalPolicyAutoSafe's
-// ACP file-edit fast path, see acpDeciderAdapter.Decide), with a
-// synchronization chunk and a real delay before the request goes out so a
-// test can reliably switch ApprovalPolicy mid-run before it arrives; anything
+// is the same idea for an edit-kind request, with a synchronization chunk
+// and a real delay before the request goes out so a test can reliably
+// change the run's permission settings mid-run before it arrives; anything
 // else (including no file at all) runs the default two-chunk scripted reply.
 package main
 
@@ -367,12 +366,12 @@ func runPromptScript(promptMsg message, cwd string) {
 	if scenario == "permission-edit" {
 		// Unlike "permission" above, this scenario needs genuine
 		// happens-before ordering, not a race: a test proving a mid-run
-		// ApprovalPolicy switch (internal/runs.Registry.SetApprovalPolicy)
+		// permission-settings switch (internal/runs.Registry.SetAutoAccept)
 		// lands *before* this scenario's edit-kind session/request_permission
 		// call needs a reliable signal to synchronize on first. The
 		// preceding sessionUpdate + sleep gives the test time to observe
 		// the "ready" chunk (causally ordered before this, via the
-		// notification-forwarding pipeline) and call SetApprovalPolicy
+		// notification-forwarding pipeline) and make the switch
 		// before the request actually goes out.
 		sessionUpdate("ready")
 		time.Sleep(300 * time.Millisecond)

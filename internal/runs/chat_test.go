@@ -25,7 +25,7 @@ func TestRegistry_Start_OmittedChatID_LandsOnDefaultChat(t *testing.T) {
 		t.Fatalf("DefaultChat() error = %v", err)
 	}
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRegistry_Start_ExplicitChatID_LandsOnThatChat(t *testing.T) {
 		t.Fatalf("CreateChat() error = %v", err)
 	}
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -85,7 +85,7 @@ func TestRegistry_Start_ChatIDFromDifferentTask_IsRejected(t *testing.T) {
 		t.Fatalf("DefaultChat() error = %v", err)
 	}
 
-	if _, err := reg.Start(context.Background(), wm, runner, taskA.ID, chatB.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, ""); err == nil {
+	if _, err := reg.Start(context.Background(), wm, runner, taskA.ID, chatB.ID, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, ""); err == nil {
 		t.Fatal("Start() with a chatId from a different task: error = nil, want an error")
 	}
 }
@@ -107,7 +107,7 @@ func TestRegistry_Start_BindsProviderOnFirstRun(t *testing.T) {
 		t.Fatalf("default chat Provider = %v before any run, want nil", def.Provider)
 	}
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -137,13 +137,13 @@ func TestRegistry_Start_ProviderMismatchOnBoundChat_IsRejected(t *testing.T) {
 		t.Fatalf("DefaultChat() error = %v", err)
 	}
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
 
-	if _, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderCodexNative, "hi again", taskrunner.ApprovalPolicyManual, ""); err == nil {
+	if _, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderCodexNative, "hi again", taskrunner.PermissionSettings{}, ""); err == nil {
 		t.Fatal("Start() with a mismatched provider on a bound chat: error = nil, want an error")
 	}
 }
@@ -158,14 +158,14 @@ func TestRegistry_Start_SecondPromptToBusyChat_IsRejected(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	t.Cleanup(func() { _ = reg.Stop(runID) })
 	waitForStatus(t, reg, runID, StatusRunning, 2*time.Second)
 
-	if _, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi again", taskrunner.ApprovalPolicyManual, ""); err == nil {
+	if _, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi again", taskrunner.PermissionSettings{}, ""); err == nil {
 		t.Fatal("Start() on a busy chat: error = nil, want an error")
 	}
 }
@@ -189,13 +189,13 @@ func TestRegistry_Start_TwoChatsOfSameTask_RunConcurrently(t *testing.T) {
 		t.Fatalf("CreateChat() error = %v", err)
 	}
 
-	runA, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi a", taskrunner.ApprovalPolicyManual, "")
+	runA, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi a", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() chat A error = %v", err)
 	}
 	t.Cleanup(func() { _ = reg.Stop(runA) })
 
-	runB, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi b", taskrunner.ApprovalPolicyManual, "")
+	runB, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi b", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() chat B error = %v", err)
 	}
@@ -231,7 +231,7 @@ func TestRegistry_Start_ConcurrentFirstPromptsWithDifferentProviders_OnlyOneBind
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, providers[i], "hi", taskrunner.ApprovalPolicyManual, "")
+			_, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, providers[i], "hi", taskrunner.PermissionSettings{}, "")
 			results[i] = err
 		}(i)
 	}
@@ -275,13 +275,13 @@ func TestRegistry_List_FiltersByChatID(t *testing.T) {
 		t.Fatalf("CreateChat() error = %v", err)
 	}
 
-	runA, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi a", taskrunner.ApprovalPolicyManual, "")
+	runA, err := reg.Start(context.Background(), wm, runner, task.ID, def.ID, taskrunner.ProviderGLM, "hi a", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() chat A error = %v", err)
 	}
 	waitForStatus(t, reg, runA, StatusDone, 5*time.Second)
 
-	runB, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi b", taskrunner.ApprovalPolicyManual, "")
+	runB, err := reg.Start(context.Background(), wm, runner, task.ID, second.ID, taskrunner.ProviderGLM, "hi b", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() chat B error = %v", err)
 	}

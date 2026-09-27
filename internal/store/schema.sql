@@ -84,7 +84,9 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TIMESTAMP,
     stop_reason TEXT NOT NULL DEFAULT '',
     err_msg TEXT NOT NULL DEFAULT '',
-    approval_policy TEXT NOT NULL DEFAULT 'manual'
+    approval_policy TEXT NOT NULL DEFAULT 'manual',
+    permission_mode TEXT NOT NULL DEFAULT '',
+    auto_accept INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -112,6 +114,8 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     name TEXT NOT NULL,
     provider TEXT NOT NULL,
     approval_policy TEXT NOT NULL DEFAULT '',
+    permission_mode TEXT NOT NULL DEFAULT '',
+    auto_accept INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT NOT NULL DEFAULT '',
     notes TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,

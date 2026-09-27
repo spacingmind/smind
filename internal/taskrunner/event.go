@@ -222,15 +222,22 @@ const (
 	// before any auto-resolution fired.
 	PermissionResolvedByHuman PermissionResolution = "human"
 
-	// PermissionResolvedByAutoSafe is ApprovalPolicyAutoSafe auto-allowing
-	// the request itself, because its command matched AllowlistedCommand --
-	// no human was ever asked.
+	// PermissionResolvedByAutoSafe is legacy (ADR-0019): smind's removed
+	// auto-safe shell allowlist auto-allowing a request. No new event ever
+	// carries it; it's kept only so history recorded before the removal
+	// still decodes and renders.
 	PermissionResolvedByAutoSafe PermissionResolution = "auto_safe"
+
+	// PermissionResolvedByAutoAccept is an ACP run's AutoAccept setting
+	// (PermissionSettings.AutoAccept, Paseo's auto_accept toggle)
+	// approving the request -- no human was asked, because the human chose
+	// that for this run.
+	PermissionResolvedByAutoAccept PermissionResolution = "auto_accept"
 
 	// PermissionResolvedByTimeout is the request having gone unanswered
 	// long enough (see internal/runs's permission-timeout constant) that it
 	// was auto-resolved to a deny option instead of blocking the run
-	// forever -- never an allow, regardless of ApprovalPolicy.
+	// forever -- never an allow, regardless of permission mode.
 	PermissionResolvedByTimeout PermissionResolution = "timeout"
 
 	// PermissionResolvedByProviderCancellation is the provider's own
@@ -242,7 +249,7 @@ const (
 	// timeout, and cancels this per-request ctx when it fires. No option
 	// was actually chosen here (PermissionOptionID is empty); this
 	// resolution exists so the timeline can tell "the request vanished
-	// out from under us" apart from a real answer, an auto-safe allow, or
+	// out from under us" apart from a real answer, an auto-accept, or
 	// smind's own timeout. See
 	// docs/plans/active/claude-native-permission-cancellation.md.
 	PermissionResolvedByProviderCancellation PermissionResolution = "provider_cancellation"
