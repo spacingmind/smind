@@ -318,14 +318,17 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
-	r.trackACPSession(chatID, sessionID, client, configOptions)
-	defer r.endACPTurn(chatID)
 	r.recordSessionModes(provider, client, sessionID, configOptions)
 	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
 	}
-	r.updateACPSessionOptions(chatID, sessionID, updated)
+	// Published only once the start mode is applied: until then a
+	// SetPermissionMode can't reach the session (it fails as "no live
+	// session"), so a quick mid-run switch can never land first and then
+	// be overwritten by the start-up switch.
+	r.trackACPSession(chatID, sessionID, client, updated)
+	defer r.endACPTurn(chatID)
 	if mode, ok := currentACPMode(client, sessionID, updated); ok {
 		select {
 		case events <- Event{Type: EventTypePermissionModeChanged, Text: mode}:

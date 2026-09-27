@@ -298,6 +298,13 @@ type run struct {
 	// retroactively affects a request already pending a human.
 	perm taskrunner.PermissionSettings
 
+	// modeSwitchMu serializes Registry.SetPermissionMode for this run, so
+	// two concurrent switches can't interleave their provider calls with
+	// their perm.Mode writes (leaving RunStatus naming one mode while the
+	// agent is in the other). Held across the provider round trip -- never
+	// while holding mu.
+	modeSwitchMu sync.Mutex
+
 	history     []Event
 	subscribers map[int]*subQueue
 	nextSubID   int

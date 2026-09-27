@@ -1166,3 +1166,40 @@ func TestRunner_SetPermissionMode_FollowsCurrentModeUpdate(t *testing.T) {
 		t.Fatalf("session-mode log = %q, want set_mode:default", log)
 	}
 }
+
+// TestRunner_StartModeAppliedBeforeSessionIsSwitchable is the regression
+// test for a mid-run switch racing the start-up mode: the session must not
+// be reachable by SetPermissionMode until runACP has applied the run's
+// start mode, or a quick switch could land first and then be overwritten
+// by the start-up set_mode. While the start-up set_mode is still in flight
+// (the fake answers it after 400ms), SetPermissionMode must fail with "no
+// live session" rather than send its own switch.
+func TestRunner_StartModeAppliedBeforeSessionIsSwitchable(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "reply")
+	r := glmRunnerWithCaps(wm, "modes:slow")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: "accept_edits"}, "", events)
+	}()
+	go drainEvents(events)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for sessionModeLog(t, *task.WorktreePath) == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("start-up set_mode never reached the agent")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The start-up set_mode is now in flight.
+	if err := r.SetPermissionMode(context.Background(), task.ID, ProviderGLM, "bypass_permissions"); err == nil {
+		t.Fatal("SetPermissionMode during the start-up set_mode succeeded; want no-live-session until the start mode is applied")
+	}
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if log := sessionModeLog(t, *task.WorktreePath); log != "set_mode:accept_edits" {
+		t.Fatalf("session-mode log = %q, want only the start-up set_mode", log)
+	}
+}

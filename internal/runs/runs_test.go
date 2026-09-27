@@ -1723,3 +1723,42 @@ func waitForTerminal(t *testing.T, reg *Registry, runID string) RunStatus {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestRegistry_SetPermissionMode_ConcurrentSwitchesStayConsistent proves
+// SetPermissionMode is serialized per run: after concurrent switches,
+// the mode RunStatus reports is the one the agent received last.
+func TestRegistry_SetPermissionMode_ConcurrentSwitchesStayConsistent(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	modes := []string{"accept_edits", "bypass_permissions", "default", "accept_edits", "bypass_permissions", "default"}
+	done := make(chan error, len(modes))
+	for _, m := range modes {
+		go func(m string) { done <- reg.SetPermissionMode(context.Background(), runID, m) }(m)
+	}
+	for range modes {
+		if err := <-done; err != nil {
+			t.Fatalf("SetPermissionMode() error = %v", err)
+		}
+	}
+	_, status, _ := reg.History(runID)
+	data, _ := os.ReadFile(filepath.Join(*task.WorktreePath, "session-mode"))
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	last := strings.TrimPrefix(lines[len(lines)-1], "set_mode:")
+	if status.PermissionMode != last {
+		t.Fatalf("RunStatus.PermissionMode = %q but the agent's last switch was %q (log %q)", status.PermissionMode, last, data)
+	}
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}

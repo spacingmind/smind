@@ -52,7 +52,10 @@ var capsMode string
 // same modes as a category-"mode" select config option instead; unset
 // advertises no modes at all. "modes:nodefault" advertises SessionModeState
 // modes that don't include any "default" (ask/code, current ask), like
-// agents that name their modes differently. session/set_mode (and a set_config_option
+// agents that name their modes differently. "modes:slow" is "modes:session"
+// with every session/set_mode answered only after a 400ms delay (recorded
+// on receipt), so a test can act while a set_mode is in flight.
+// session/set_mode (and a set_config_option
 // on the "mode" config id) records the applied mode to a "session-mode"
 // file in the session's cwd, so tests can observe it.
 var modesMode string
@@ -185,7 +188,7 @@ func handle(msg message, sessionCwd *string) {
 			"sessionId":     sessionID,
 			"configOptions": defaultConfigOptions(),
 		}
-		if modesMode == "session" || modesMode == "nodefault" {
+		if modesMode == "session" || modesMode == "nodefault" || modesMode == "slow" {
 			ids := advertisedModeIDs()
 			available := make([]map[string]any, len(ids))
 			for i, id := range ids {
@@ -204,6 +207,9 @@ func handle(msg message, sessionCwd *string) {
 			return
 		}
 		recordSessionMode(*sessionCwd, "set_mode:"+params.ModeID)
+		if modesMode == "slow" {
+			time.Sleep(400 * time.Millisecond)
+		}
 		respond(msg.ID, map[string]any{})
 	case msg.Method == "session/load" || msg.Method == "session/resume":
 		handleResumeSession(msg, sessionCwd)

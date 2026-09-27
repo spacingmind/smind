@@ -36,6 +36,8 @@ func (reg *Registry) SetPermissionMode(ctx context.Context, runID, mode string) 
 	if err := taskrunner.ValidatePermissionSettings(catalog, taskrunner.PermissionSettings{Mode: mode}); err != nil {
 		return fmt.Errorf("runs: set permission mode: %w", err)
 	}
+	r.modeSwitchMu.Lock()
+	defer r.modeSwitchMu.Unlock()
 	if err := r.requireRunning("set permission mode"); err != nil {
 		return err
 	}
