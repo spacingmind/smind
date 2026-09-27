@@ -30,7 +30,7 @@ func TestOpen(t *testing.T) {
 
 	tables := []string{
 		"accounts", "routing_decisions", "quota_snapshots",
-		"workspaces", "workspace_accounts", "spaces", "tasks",
+		"workspaces", "workspace_accounts", "spaces", "tasks", "chats",
 	}
 	for _, table := range tables {
 		t.Run(table, func(t *testing.T) {

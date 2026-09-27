@@ -82,9 +82,19 @@ type Task struct {
 // that type for the values) -- kept as a plain string here rather than an
 // import of internal/taskrunner, consistent with Provider also being a
 // plain string rather than internal/taskrunner.Provider.
+//
+// ChatID is the chats row this run belongs to (docs/decisions/
+// 0016-multiple-chats-per-task.md). The column itself is nullable (see
+// schema.sql) purely so the migration that introduces it can add it to an
+// existing runs table before backfilling every row -- every run any caller
+// ever observes through this struct (CreateRun onward, and every row after
+// the migration's backfill has run) always has one, so this field is a
+// plain int64, not a pointer; scanRun treats a NULL here as a store bug, not
+// a valid state to represent.
 type Run struct {
 	ID             string
 	TaskID         int64
+	ChatID         int64
 	Provider       string
 	Prompt         string
 	Status         string
@@ -149,4 +159,24 @@ type AgentProfile struct {
 	Notes          string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// Chat is a conversation thread within a task (docs/decisions/
+// 0016-multiple-chats-per-task.md): the unit a provider binds to and an
+// agent session persists against, sharing its parent task's git worktree
+// with any sibling chats. Provider is nil until the chat's first run binds
+// it (immutable afterward); AgentSession is nil until a run persists a
+// session handle to it -- P1 only stores it (SetChatAgentSession/its getter
+// below), P2 is what actually populates it with a real
+// {provider,sessionId,nativeHandle,metadata} handle. ArchivedAt is nil for
+// an active chat; unlike Task, there is no cascading worktree/branch to
+// clean up on archive, since a chat owns no git state of its own.
+type Chat struct {
+	ID           int64
+	TaskID       int64
+	Title        string
+	Provider     *string
+	AgentSession *string
+	CreatedAt    time.Time
+	ArchivedAt   *time.Time
 }
