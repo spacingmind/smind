@@ -59,16 +59,28 @@ func cmdMcpServe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := newMCPServer(client).Run(ctx, &mcp.StdioTransport{}); err != nil {
+	// A daemon restart kills this /ws connection; without this race the
+	// MCP server would keep serving (every tool call failing with a
+	// transport error) until the host closed its stdin. Exiting non-zero
+	// lets the MCP host notice and respawn us against the new daemon
+	// (ADR-0017 resolved decision 5's "daemon must already be running"
+	// read the same way at runtime, not just at startup).
+	srvDone := make(chan error, 1)
+	go func() { srvDone <- newMCPServer(client).Run(ctx, &mcp.StdioTransport{}) }()
+
+	select {
+	case err := <-srvDone:
 		// A signal-driven shutdown or the client closing stdin are normal
 		// ends for a stdio server, not failures.
-		if errors.Is(err, context.Canceled) || errors.Is(err, io.EOF) {
-			return 0
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+			fmt.Fprintf(os.Stderr, "mcp serve: %v\n", err)
+			return 1
 		}
-		fmt.Fprintf(os.Stderr, "mcp serve: %v\n", err)
+		return 0
+	case <-client.Done():
+		fmt.Fprintln(os.Stderr, "mcp serve: lost connection to the smind daemon (was it restarted?); exiting -- the MCP host should restart this server")
 		return 1
 	}
-	return 0
 }
 
 // newMCPServer builds the MCP server and registers its tool catalog: the

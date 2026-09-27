@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,4 +55,13 @@ func newTestRepo(t *testing.T) string {
 		}
 	}
 	return dir
+}
+
+// decodeMCPInto decodes a tool call's structured output into out. The
+// tools deliberately pass the daemon's own wire shapes (store.Task,
+// store.Chat, ...) through untouched, and those add fields over time, so
+// partial-view decoding (a test struct declaring only the fields it
+// asserts on) is legal here -- unknown fields are ignored on purpose.
+func decodeMCPInto(raw []byte, out any) error {
+	return json.Unmarshal(raw, out)
 }

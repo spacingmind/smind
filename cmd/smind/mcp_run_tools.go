@@ -65,13 +65,14 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 			StopReason: result.StopReason,
 			Err:        result.Err,
 		}
+		out.Events = result.Events
 		if len(result.Events) > mcpStatusTail {
 			out.Events = result.Events[len(result.Events)-mcpStatusTail:]
-		} else {
-			out.Events = result.Events
 		}
-		pending, _ := pendingPermissionsFrom(result)
-		if len(pending) > 0 {
+		if out.Events == nil {
+			out.Events = []runLogEvent{}
+		}
+		if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 			out.PendingPermission = &pending[0]
 		}
 		return nil, out, nil
@@ -84,16 +85,33 @@ type taskLogsInput struct {
 	Tail  int    `json:"tail,omitempty" jsonschema:"return only the last N entries (default: all)"`
 }
 
+// taskLogsOutput is task_logs's structured output: the run's current
+// status plus its full (or tailed) transcript. events is empty rather
+// than null for an eventless run.
+type taskLogsOutput struct {
+	RunID      string        `json:"runId"`
+	Status     string        `json:"status"`
+	StopReason string        `json:"stopReason,omitempty"`
+	Err        string        `json:"err,omitempty"`
+	Events     []runLogEvent `json:"events"`
+}
+
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
 // current status, mirroring `smind task logs` (without --follow, which
 // has no request/response MCP shape).
-func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskLogsInput) (*mcp.CallToolResult, any, error) {
+func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, taskLogsOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskLogsInput) (*mcp.CallToolResult, taskLogsOutput, error) {
 		result, err := mcpRunLogs(ctx, client, "task_logs", in.RunID, in.Tail)
 		if err != nil {
-			return nil, nil, err
+			return nil, taskLogsOutput{}, err
 		}
-		return nil, result, nil
+		if result.Events == nil {
+			result.Events = []runLogEvent{}
+		}
+		return nil, taskLogsOutput{
+			RunID: result.RunID, Status: result.Status,
+			StopReason: result.StopReason, Err: result.Err, Events: result.Events,
+		}, nil
 	}
 }
 
@@ -110,7 +128,7 @@ type pendingPermissionOut struct {
 // shows up on a later permission_resolved entry -- the same read-through
 // logic fetchPendingPermissions (cmd/smind/task.go) implements for the
 // CLI. Read-only by construction: nothing here can resolve a request.
-func pendingPermissionsFrom(result runLogsResult) ([]pendingPermissionOut, error) {
+func pendingPermissionsFrom(result runLogsResult) []pendingPermissionOut {
 	resolved := map[string]bool{}
 	for _, e := range result.Events {
 		if e.Type == "permission_resolved" {
@@ -125,7 +143,7 @@ func pendingPermissionsFrom(result runLogsResult) ([]pendingPermissionOut, error
 			})
 		}
 	}
-	return pending, nil
+	return pending
 }
 
 // mcpTaskPermissions wraps the same run.logs read the CLI's
@@ -133,16 +151,23 @@ func pendingPermissionsFrom(result runLogsResult) ([]pendingPermissionOut, error
 // requests. Deliberately read-only (ADR-0017 resolved decision 1): the
 // orchestrator surfaces these to the human, who approves via
 // `smind task approve` or the web UI -- there is no task_approve tool.
-func mcpTaskPermissions(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, any, error) {
+// taskPermissionsOutput is task_permissions's structured output: the
+// run's still-pending permission requests, empty rather than null.
+type taskPermissionsOutput struct {
+	RunID   string                 `json:"runId"`
+	Pending []pendingPermissionOut `json:"pending"`
+}
+
+func mcpTaskPermissions(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskPermissionsOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, taskPermissionsOutput, error) {
 		result, err := mcpRunLogs(ctx, client, "task_permissions", in.RunID, 0)
 		if err != nil {
-			return nil, nil, err
+			return nil, taskPermissionsOutput{}, err
 		}
-		pending, err := pendingPermissionsFrom(result)
-		if err != nil {
-			return nil, nil, err
+		pending := pendingPermissionsFrom(result)
+		if pending == nil {
+			pending = []pendingPermissionOut{}
 		}
-		return nil, map[string]any{"runId": in.RunID, "pending": pending}, nil
+		return nil, taskPermissionsOutput{RunID: in.RunID, Pending: pending}, nil
 	}
 }

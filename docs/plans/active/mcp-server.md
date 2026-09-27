@@ -158,7 +158,11 @@ steps 3-5:
 
 - AC1 (subcommand starts over stdio, blocks until stdin closes/signal):
   `cmdMcpServe` runs the SDK's stdio transport under a signal context;
-  exercised by every in-memory-transport test below plus manual run.
+  exercised by every in-memory-transport test below plus manual run. A
+  daemon restart (the /ws connection dying) also exits non-zero with a
+  clear stderr message so the MCP host can respawn it --
+  `TestMCPServe_ExitsWhenDaemonConnectionDies` (via the new
+  `wsclient.Client.Done`).
 - AC2 (dials daemon, fails fast with clear stderr):
   `TestMCPServe_FailsFastWhenDaemonUnreachable` (exit 1, "is `smind
   serve` running?" on stderr, no hang -- dial bounded to 5s in

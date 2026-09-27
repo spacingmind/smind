@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
-	"os"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -17,18 +16,23 @@ import (
 // over an in-memory transport, so the full initialize -> tools/list ->
 // tools/call MCP round trip is exercised, schema validation included.
 
+// mcpTestEnv is one harness instance: the MCP client session plus the
+// test daemon's URL, so tests can open their own wsclient for direct-RPC
+// setup/assertions alongside the session.
+type mcpTestEnv struct {
+	cs     *mcp.ClientSession
+	srvURL string
+}
+
 // newMCPSession stands up the test daemon (newConfigOptionTestEnv), dials
 // it with the same wsclient the CLI uses, builds the MCP server over that
-// client, and connects an MCP client session to it. The caller must keep
-// the returned client alive for the session's lifetime.
-func newMCPSession(t *testing.T) *mcp.ClientSession {
+// client, and connects an MCP client session to it.
+func newMCPSession(t *testing.T) *mcpTestEnv {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
 	srvURL := newConfigOptionTestEnv(t, home)
 	writeTestConfig(t, home, srvURL)
-
-	t.Setenv("SMIND_DAEMON_TEST_URL", srvURL)
 
 	client := dialTestClient(t, srvURL)
 
@@ -45,25 +49,16 @@ func newMCPSession(t *testing.T) *mcp.ClientSession {
 		t.Fatalf("client.Connect() error = %v", err)
 	}
 	t.Cleanup(func() { _ = cs.Close() })
-	return cs
+	return &mcpTestEnv{cs: cs, srvURL: srvURL}
 }
 
-// daemonURLForTest returns the test daemon's URL recorded by
-// newMCPSession, so a test can open its own wsclient for direct-RPC
-// setup/assertions alongside the MCP session.
-func daemonURLForTest(t *testing.T) string {
-	t.Helper()
-	u, err := url.Parse(os.Getenv("SMIND_DAEMON_TEST_URL"))
+// daemonURL returns the test daemon's URL, parsed.
+func (e *mcpTestEnv) daemonURL() *url.URL {
+	u, err := url.Parse(e.srvURL)
 	if err != nil || u.Port() == "" {
-		t.Fatalf("no test daemon URL recorded (SMIND_DAEMON_TEST_URL=%q)", os.Getenv("SMIND_DAEMON_TEST_URL"))
+		return nil
 	}
-	return u.String()
-}
-
-// jsonUnmarshalStrict decodes raw JSON into out, failing loudly on a type
-// mismatch rather than silently zeroing fields.
-func jsonUnmarshalStrict(raw json.RawMessage, out any) error {
-	return json.Unmarshal(raw, out)
+	return u
 }
 
 // mcpToolNames returns the names in the server's tools/list response.
@@ -95,7 +90,7 @@ func callMCPTool(t *testing.T, cs *mcp.ClientSession, name string, args any, out
 		if err != nil {
 			t.Fatalf("CallTool(%s): marshal structured output: %v", name, err)
 		}
-		if err := jsonUnmarshalStrict(data, out); err != nil {
+		if err := decodeMCPInto(data, out); err != nil {
 			t.Fatalf("CallTool(%s): decode structured output: %v", name, err)
 		}
 	}

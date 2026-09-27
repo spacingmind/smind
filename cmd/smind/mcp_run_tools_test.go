@@ -15,10 +15,11 @@ import (
 // step) and polled to completion through a direct wsclient, so the MCP
 // assertions below read a genuinely finished run.
 func TestMCPTools_RunReadToolsAgainstFinishedRun(t *testing.T) {
-	cs := newMCPSession(t)
-	client := dialTestClient(t, daemonURLForTest(t))
+	env := newMCPSession(t)
+	cs := env.cs
+	client := dialTestClient(t, env.srvURL)
 
-	runID := startTestRun(t, daemonURLForTest(t), "glm")
+	runID := startTestRun(t, env.srvURL, "glm")
 	waitForRunStatus(t, client, runID, "done")
 
 	// task_status: a snapshot with terminal status and no pending
@@ -38,11 +39,7 @@ func TestMCPTools_RunReadToolsAgainstFinishedRun(t *testing.T) {
 	}
 
 	// task_logs: the same transcript in full.
-	var logs struct {
-		RunID  string        `json:"runId"`
-		Status string        `json:"status"`
-		Events []runLogEvent `json:"events"`
-	}
+	var logs taskLogsOutput
 	if isErr := callMCPTool(t, cs, "task_logs", map[string]any{"runId": runID}, &logs); isErr {
 		t.Fatal("task_logs returned an error result")
 	}
@@ -51,9 +48,7 @@ func TestMCPTools_RunReadToolsAgainstFinishedRun(t *testing.T) {
 	}
 
 	// task_permissions: read-only, empty on a finished run.
-	var perms struct {
-		Pending []pendingPermissionOut `json:"pending"`
-	}
+	var perms taskPermissionsOutput
 	if isErr := callMCPTool(t, cs, "task_permissions", map[string]any{"runId": runID}, &perms); isErr {
 		t.Fatal("task_permissions returned an error result")
 	}
@@ -67,15 +62,14 @@ func TestMCPTools_RunReadToolsAgainstFinishedRun(t *testing.T) {
 // manual) raises a real pending permission request; task_permissions
 // lists it and task_status surfaces it as pendingPermission.
 func TestMCPTools_TaskPermissionsShowsPendingPermission(t *testing.T) {
-	cs := newMCPSession(t)
-	client := dialTestClient(t, daemonURLForTest(t))
+	env := newMCPSession(t)
+	cs := env.cs
+	client := dialTestClient(t, env.srvURL)
 
-	runID := startTestRun(t, daemonURLForTest(t), "glm", "permission")
+	runID := startTestRun(t, env.srvURL, "glm", "permission")
 	waitForPendingPermission(t, client, runID)
 
-	var perms struct {
-		Pending []pendingPermissionOut `json:"pending"`
-	}
+	var perms taskPermissionsOutput
 	if isErr := callMCPTool(t, cs, "task_permissions", map[string]any{"runId": runID}, &perms); isErr {
 		t.Fatal("task_permissions returned an error result")
 	}
@@ -137,7 +131,7 @@ func waitForPendingPermission(t *testing.T, client *wsclient.Client, runID strin
 	for {
 		var result runLogsResult
 		if err := client.Call(context.Background(), "run.logs", map[string]any{"runId": runID}, &result); err == nil {
-			if pending, _ := pendingPermissionsFrom(result); len(pending) > 0 {
+			if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 				return
 			}
 		}

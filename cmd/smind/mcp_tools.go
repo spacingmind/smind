@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -45,19 +44,36 @@ type taskNewInput struct {
 	Title       string `json:"title" jsonschema:"title for the new task"`
 }
 
+// Output-shape note: the outputs below deliberately wrap daemon results
+// in objects ({"task": {...}}, {"tasks": [...]}) rather than passing a
+// bare array/object through as structuredContent -- MCP's
+// structuredContent is specified as a JSON object, and a bare array
+// risks rejection by clients that enforce that. The daemon's own shapes
+// (store.Task, store.Chat: bare Go field names) ride along as
+// map[string]any -- the wire contract with the daemon is dynamic, and
+// json.RawMessage would make the SDK's output-schema validation reject
+// an object where it inferred "array or null".
+
+// taskNewOutput is task_new's structured output: the created task. The
+// daemon's own store.Task wire shape (bare Go field names) passes through
+// as-is under "task".
+type taskNewOutput struct {
+	Task map[string]any `json:"task"`
+}
+
 // mcpTaskNew wraps task.create: {workspaceId, title, spaceId?} -> the
 // created task.
-func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskNewInput) (*mcp.CallToolResult, any, error) {
+func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNewOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskNewInput) (*mcp.CallToolResult, taskNewOutput, error) {
 		params := map[string]any{"workspaceId": in.WorkspaceID, "title": in.Title}
 		if in.SpaceID != nil {
 			params["spaceId"] = *in.SpaceID
 		}
-		var task json.RawMessage
+		var task map[string]any
 		if err := callWS(ctx, client, "task_new", "task.create", params, &task); err != nil {
-			return nil, nil, err
+			return nil, taskNewOutput{}, err
 		}
-		return nil, task, nil
+		return nil, taskNewOutput{Task: task}, nil
 	}
 }
 
@@ -66,14 +82,24 @@ type taskListInput struct {
 	WorkspaceID int64 `json:"workspaceId" jsonschema:"id of the workspace whose tasks to list"`
 }
 
+// taskListOutput is task_list's structured output: the workspace's tasks
+// under "tasks" (an object, not a bare array -- see the note above
+// taskNewOutput), empty rather than null when there are none.
+type taskListOutput struct {
+	Tasks []map[string]any `json:"tasks"`
+}
+
 // mcpTaskList wraps task.list: {workspaceId} -> the workspace's tasks.
-func mcpTaskList(client *wsclient.Client) mcp.ToolHandlerFor[taskListInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskListInput) (*mcp.CallToolResult, any, error) {
-		var tasks json.RawMessage
+func mcpTaskList(client *wsclient.Client) mcp.ToolHandlerFor[taskListInput, taskListOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskListInput) (*mcp.CallToolResult, taskListOutput, error) {
+		var tasks []map[string]any
 		if err := callWS(ctx, client, "task_list", "task.list", map[string]any{"workspaceId": in.WorkspaceID}, &tasks); err != nil {
-			return nil, nil, err
+			return nil, taskListOutput{}, err
 		}
-		return nil, tasks, nil
+		if tasks == nil {
+			tasks = []map[string]any{}
+		}
+		return nil, taskListOutput{Tasks: tasks}, nil
 	}
 }
 
@@ -86,15 +112,24 @@ type chatListInput struct {
 // mcpChatList wraps chat.list (ADR-0016): {taskId, includeArchived?} ->
 // the task's chats, so an orchestrator can address a specific
 // conversation rather than always the task's default chat.
-func mcpChatList(client *wsclient.Client) mcp.ToolHandlerFor[chatListInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in chatListInput) (*mcp.CallToolResult, any, error) {
-		var chats json.RawMessage
+// chatListOutput is chat_list's structured output: the task's chats
+// under "chats", empty rather than null when there are none.
+type chatListOutput struct {
+	Chats []map[string]any `json:"chats"`
+}
+
+func mcpChatList(client *wsclient.Client) mcp.ToolHandlerFor[chatListInput, chatListOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in chatListInput) (*mcp.CallToolResult, chatListOutput, error) {
+		var chats []map[string]any
 		if err := callWS(ctx, client, "chat_list", "chat.list", map[string]any{
 			"taskId": in.TaskID, "includeArchived": in.IncludeArchived,
 		}, &chats); err != nil {
-			return nil, nil, err
+			return nil, chatListOutput{}, err
 		}
-		return nil, chats, nil
+		if chats == nil {
+			chats = []map[string]any{}
+		}
+		return nil, chatListOutput{Chats: chats}, nil
 	}
 }
 
@@ -107,14 +142,19 @@ type chatNewInput struct {
 // mcpChatNew wraps chat.create: {taskId, title?} -> the created chat. An
 // omitted title is stored as a genuinely untitled chat, never defaulted
 // (see handleChatCreate).
-func mcpChatNew(client *wsclient.Client) mcp.ToolHandlerFor[chatNewInput, any] {
-	return func(ctx context.Context, _ *mcp.CallToolRequest, in chatNewInput) (*mcp.CallToolResult, any, error) {
-		var chat json.RawMessage
+// chatNewOutput is chat_new's structured output: the created chat.
+type chatNewOutput struct {
+	Chat map[string]any `json:"chat"`
+}
+
+func mcpChatNew(client *wsclient.Client) mcp.ToolHandlerFor[chatNewInput, chatNewOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in chatNewInput) (*mcp.CallToolResult, chatNewOutput, error) {
+		var chat map[string]any
 		if err := callWS(ctx, client, "chat_new", "chat.create", map[string]any{
 			"taskId": in.TaskID, "title": in.Title,
 		}, &chat); err != nil {
-			return nil, nil, err
+			return nil, chatNewOutput{}, err
 		}
-		return nil, chat, nil
+		return nil, chatNewOutput{Chat: chat}, nil
 	}
 }
