@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -20,6 +21,10 @@ import (
 type acpBackend interface {
 	Initialize(ctx context.Context) error
 	NewSession(ctx context.Context, cwd string) (string, []acp.ConfigOption, error)
+	LoadSession(ctx context.Context, sessionID, cwd string) ([]acp.ConfigOption, error)
+	ResumeSession(ctx context.Context, sessionID, cwd string) ([]acp.ConfigOption, error)
+	SupportsLoadSession() bool
+	SupportsResumeSession() bool
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	Close() error
@@ -40,6 +45,7 @@ type claudeBackend interface {
 type codexBackend interface {
 	Initialize(ctx context.Context) error
 	NewSession(ctx context.Context, cwd string) (string, error)
+	ResumeSession(ctx context.Context, threadID, cwd string) (string, error)
 	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
 	Close() error
 }
@@ -94,6 +100,15 @@ func WithCodexCommand(command []string) Option {
 	return func(r *Runner) { r.codexCommand = command }
 }
 
+// WithSessionStore overrides the SessionStore every provider's RunPrompt
+// call reads a resume handle from and writes one back to, in place of
+// New's own MemorySessionStore. Until ADR-0016 P1 lands (chats.agent_session),
+// this is the only seam for a caller wanting session continuity to survive
+// a daemon restart -- see SessionStore's doc comment.
+func WithSessionStore(store SessionStore) Option {
+	return func(r *Runner) { r.sessionStore = store }
+}
+
 // Runner drives task turns against a real agent backend (ACP or Claude Code
 // native), translating each backend's native streaming updates into the
 // unified Event type.
@@ -140,6 +155,12 @@ type Runner struct {
 	acpSessions map[int64]*acpSessionState
 	sessionMu   sync.Mutex
 
+	// sessionStore holds the resumable SessionHandle each provider's
+	// RunPrompt call reads before a turn and writes after one, keyed by
+	// task ID -- see SessionHandle/SessionStore's doc comments. Defaults to
+	// an empty MemorySessionStore; overridable via WithSessionStore.
+	sessionStore SessionStore
+
 	// newACPClient, newClaudeClient, and newCodexClient default to wrapping
 	// acp.New, claudecode.New, and codex.New. Overridable only from within
 	// this package's tests, to point at a fake agent binary / fake CLI
@@ -154,8 +175,9 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm:          wm,
-		acpSessions: map[int64]*acpSessionState{},
+		wm:           wm,
+		acpSessions:  map[int64]*acpSessionState{},
+		sessionStore: NewMemorySessionStore(),
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
@@ -232,9 +254,9 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
+		return r.runClaudeNative(ctx, taskID, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runCodexNative(ctx, taskID, worktreePath, prompt, decider, approvalPolicy, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -275,7 +297,7 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, configOptions, err := client.NewSession(ctx, worktreePath)
+	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, taskID, provider, client, worktreePath, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
@@ -303,12 +325,73 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s prompt: %w", provider, err)
 	}
+	r.sessionStore.Set(taskID, SessionHandle{Provider: provider, SessionID: sessionID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// newOrResumeACPSession starts the ACP session this turn drives: if taskID
+// has a stored SessionHandle for provider, it tries to resume that
+// session's conversation -- session/load if client advertises the
+// loadSession capability, else session/resume if it advertises
+// sessionCapabilities.resume -- before falling back to a fresh session/new.
+// A fresh session is also what's used when there's no stored handle at
+// all, and whenever a resume attempt itself fails (a stale/unknown session
+// id) or isn't offered by the agent at all: in every one of those
+// fallback cases, a human-readable EventTypeSessionNote is sent on events
+// first, so a stale/unsupported resume degrades to "new session, and the
+// UI says so" rather than either failing the prompt or silently losing
+// context. See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// P2.3/P2.5, modeled on
+// refs/paseo/packages/server/src/server/agent/providers/acp-agent.ts:1757-1800.
+func (r *Runner) newOrResumeACPSession(ctx context.Context, taskID int64, provider Provider, client acpBackend, worktreePath string, events chan<- Event) (string, []acp.ConfigOption, error) {
+	handle, ok := r.sessionStore.Get(taskID)
+	if !ok || handle.Provider != provider || handle.SessionID == "" {
+		return client.NewSession(ctx, worktreePath)
+	}
+
+	var (
+		configOptions []acp.ConfigOption
+		err           error
+		method        string
+	)
+	switch {
+	case client.SupportsLoadSession():
+		method = "session/load"
+		configOptions, err = client.LoadSession(ctx, handle.SessionID, worktreePath)
+	case client.SupportsResumeSession():
+		method = "session/resume"
+		configOptions, err = client.ResumeSession(ctx, handle.SessionID, worktreePath)
+	default:
+		r.sendSessionNote(ctx, events, fmt.Sprintf(
+			"%s does not support resuming a session (no loadSession or sessionCapabilities.resume); starting a new session -- prior context from session %s is not available this turn",
+			provider, handle.SessionID))
+		return client.NewSession(ctx, worktreePath)
+	}
+	if err == nil {
+		return handle.SessionID, configOptions, nil
+	}
+
+	r.sendSessionNote(ctx, events, fmt.Sprintf(
+		"could not resume %s session %s via %s (%v); starting a new session instead",
+		provider, handle.SessionID, method, err))
+	return client.NewSession(ctx, worktreePath)
+}
+
+// sendSessionNote logs note and, unless ctx is already done, forwards it as
+// an EventTypeSessionNote on events -- the shared "degrade, don't fail"
+// mechanism every runner's resume-fallback path uses (see
+// EventTypeSessionNote's doc comment).
+func (r *Runner) sendSessionNote(ctx context.Context, events chan<- Event, note string) {
+	log.Printf("taskrunner: %s", note)
+	select {
+	case events <- Event{Type: EventTypeSessionNote, Text: note}:
+	case <-ctx.Done():
+	}
 }
 
 // acpEvent translates one ACP SessionUpdate into its taskrunner.Event.
@@ -399,7 +482,7 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch thinkingLevel {
 	case ThinkingLevelOff:
@@ -456,7 +539,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
 	}
 
-	client, err := r.newClaudeClient(worktreePath, opts...)
+	client, err := r.newClaudeClientWithResume(ctx, taskID, worktreePath, opts, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
 	}
@@ -481,12 +564,39 @@ func (r *Runner) runClaudeNative(ctx context.Context, worktreePath, prompt strin
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
+	r.sessionStore.Set(taskID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// newClaudeClientWithResume spawns taskID's claude-native turn, resuming
+// its stored session (via claudecode.WithResume) when one exists. A
+// resume attempt that fails at construction -- verified live 2026-09-27
+// against a real `claude` CLI: an unknown/stale --resume session id fails
+// the CLI's own initialize handshake, surfacing as claudecode.New itself
+// erroring, before any prompt is ever sent -- degrades to a fresh session
+// instead of failing the turn, surfacing an EventTypeSessionNote first.
+// See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// P2.2/P2.5.
+func (r *Runner) newClaudeClientWithResume(ctx context.Context, taskID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (claudeBackend, error) {
+	handle, ok := r.sessionStore.Get(taskID)
+	if !ok || handle.Provider != ProviderClaudeNative || handle.SessionID == "" {
+		return r.newClaudeClient(worktreePath, opts...)
+	}
+
+	resumeOpts := append(append([]claudecode.Option{}, opts...), claudecode.WithResume(handle.SessionID))
+	client, err := r.newClaudeClient(worktreePath, resumeOpts...)
+	if err == nil {
+		return client, nil
+	}
+
+	r.sendSessionNote(ctx, events, fmt.Sprintf(
+		"could not resume claude-native session %s (%v); starting a new session instead", handle.SessionID, err))
+	return r.newClaudeClient(worktreePath, opts...)
 }
 
 // claudeEvents translates one claudecode.Message into zero or more
@@ -580,7 +690,7 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []codex.Option
 	switch {
 	case approvalPolicy == ApprovalPolicyFullAccess:
@@ -605,7 +715,7 @@ func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
 	}
-	threadID, err := client.NewSession(ctx, worktreePath)
+	threadID, err := r.newOrResumeCodexThread(ctx, taskID, client, worktreePath, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex new thread: %w", err)
 	}
@@ -627,12 +737,38 @@ func (r *Runner) runCodexNative(ctx context.Context, worktreePath, prompt string
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex prompt: %w", err)
 	}
+	r.sessionStore.Set(taskID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// newOrResumeCodexThread starts the codex thread this turn drives: if
+// taskID has a stored SessionHandle, it tries codexBackend.ResumeSession
+// (thread/resume, with the thread/loaded/list and archived->unarchive
+// handling that method's own doc comment describes) before falling back to
+// a fresh thread/start -- surfacing an EventTypeSessionNote first whenever
+// the stored thread couldn't be resumed (a stale/unknown/deleted thread
+// id), so that degrades gracefully rather than failing the prompt. See
+// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// P2.4/P2.5.
+func (r *Runner) newOrResumeCodexThread(ctx context.Context, taskID int64, client codexBackend, worktreePath string, events chan<- Event) (string, error) {
+	handle, ok := r.sessionStore.Get(taskID)
+	if !ok || handle.Provider != ProviderCodexNative || handle.SessionID == "" {
+		return client.NewSession(ctx, worktreePath)
+	}
+
+	threadID, err := client.ResumeSession(ctx, handle.SessionID, worktreePath)
+	if err == nil {
+		return threadID, nil
+	}
+
+	r.sendSessionNote(ctx, events, fmt.Sprintf(
+		"could not resume codex thread %s (%v); starting a new thread instead", handle.SessionID, err))
+	return client.NewSession(ctx, worktreePath)
 }
 
 // CommitTask commits whatever is currently staged in taskID's worktree
