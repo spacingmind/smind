@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
 
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
@@ -481,8 +481,8 @@ function RunConfigToolbarMode() {
           onClick={() => actions.setAutoAccept(!state.autoAccept)}
           className={cn(AGENT_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
         >
+          {state.autoAccept && <Check aria-hidden />}
           {AUTO_ACCEPT_LABEL}
-          {state.autoAccept ? ": on" : ": off"}
         </Button>
       )}
     </>

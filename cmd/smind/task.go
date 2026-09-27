@@ -340,7 +340,7 @@ const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [-
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
-const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <provider permission mode> (see `smind`'s provider.list modes, e.g. acceptEdits, plan, bypassPermissions for claude-native) and, for ACP providers, --auto-accept"
+const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <mode> (the provider's own permission mode, e.g. acceptEdits, plan or bypassPermissions for claude-native) and --auto-accept for ACP providers"
 
 // cmdTaskSend starts a run (via run.start, which returns as soon as the
 // run is registered) and then streams it in the foreground exactly like

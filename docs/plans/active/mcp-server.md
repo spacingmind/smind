@@ -132,7 +132,19 @@ agent (small, independently reviewable steps; each should end with
    fake-agent in-process daemon.
 3. **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
-   confirms the run actually started.
+   confirms the run actually started. **Permission guard (ADR-0019
+   decision 6, carried over from
+   `docs/plans/active/provider-native-permission-modes.md` AC11/S17):**
+   the tool takes `permissionMode?`/`autoAccept?` (not the removed
+   `approvalPolicy`) plus an optional `profileId`. It must reject a
+   `permissionMode` whose catalog entry has `autoApproves: true`
+   (`bypassPermissions`, Claude `auto`, Codex `full-access`, ACP
+   bypass-style modes) and reject `autoAccept: true` -- check with
+   `taskrunner.ModeAutoApproves` against the `provider.list` catalog --
+   unless those settings come from the human-authored profile named by
+   `profileId`. Test: `TestMCPTools_TaskSendRejectsAutoApprovingMode`
+   (bypass and autoAccept rejected; the same bypass mode via a profile id
+   accepted).
 4. [x] **`task_wait`**: the one genuinely new piece of logic -- implements
    the blocking-with-timeout/early-return-on-permission behavior
    client-side in the `smind mcp serve` process (no new `wsapi` RPC). Tests:

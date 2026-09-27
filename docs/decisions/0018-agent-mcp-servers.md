@@ -3,7 +3,12 @@
 ## Status
 
 Accepted (2026-09-28), with Codex deferred. The user approved all
-recommendations in Resolved decisions below.
+recommendations in Resolved decisions below. Superseded in part by
+[ADR-0019](0019-provider-native-permission-modes.md): the manual/auto-safe
+permission gate described below is gone -- MCP tool calls now reach
+whatever the provider's own permission mode escalates, and smind never
+auto-allows them itself (the `autoAllowACPFileEdit`/allowlist references
+are historical).
 
 ## Context
 
