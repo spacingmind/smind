@@ -110,17 +110,26 @@ Not started. Suggested breakdown for dispatching to an implementation
 agent (small, independently reviewable steps; each should end with
 `task test`/`task lint` green):
 
-1. **Scaffold the subcommand**: `smind mcp serve` in `cmd/smind/mcp.go`
-   (the `mcp` group is shared with ADR-0018's `add|ls|rm|...`) wired into
-   `cmd/smind/main.go`'s dispatch; connects via `wsclient.Dial` and
-   starts an MCP server with zero tools registered yet, over stdio, using
-   `github.com/modelcontextprotocol/go-sdk`. Add the dependency to
-   `go.mod`. Verify manually that `initialize`/`tools/list` round-trip
-   with an empty catalog.
-2. **Read-only tools**: `task_new`, `task_list`, `chat_list`, `chat_new`,
-   `task_status`, `task_logs`, `task_permissions`. Each is a direct
-   `wsclient.Call` wrapper; no new `wsapi` methods needed. Tests: happy
-   path for each against the in-process daemon harness.
+1. [x] **Scaffold the subcommand**: `smind mcp serve` in
+   `cmd/smind/mcp.go` (the `mcp` group is shared with ADR-0018's
+   `add|ls|rm|...`) wired into `cmd/smind/main.go`'s dispatch; connects
+   via `wsclient.Dial` (with a 5s dial bound so an unreachable daemon
+   fails fast even where unbound ports black-hole SYNs instead of
+   refusing them) and starts the MCP server over stdio, using
+   `github.com/modelcontextprotocol/go-sdk` v1.8.0 (`go.mod` updated).
+   `TestMCPServe_FailsFastWhenDaemonUnreachable` pins the fail-fast
+   contract; `TestMcp_Usage` pins the group's dispatch.
+2. [x] **Read-only tools**: `task_new`, `task_list`, `chat_list`,
+   `chat_new`, `task_status`, `task_logs`, `task_permissions` in
+   `cmd/smind/mcp_tools.go` + `cmd/smind/mcp_run_tools.go`. Each is a
+   direct `wsclient.Call` wrapper (the run-reading three share one
+   `run.logs` helper, mirroring the CLI's own
+   `fetchPendingPermissions`); no new `wsapi` methods. Tests:
+   `TestMCPTools_TaskNewListRoundTrip`, `TestMCPTools_ChatNewList`,
+   `TestMCPTools_RunReadToolsAgainstFinishedRun`,
+   `TestMCPTools_TaskPermissionsShowsPendingPermission` -- each driven
+   through the SDK's client type over an in-memory transport against the
+   fake-agent in-process daemon.
 3. **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
    confirms the run actually started.
@@ -130,9 +139,10 @@ agent (small, independently reviewable steps; each should end with
    the three `task_wait` scenarios above (happy path, early return on
    permission, timeout).
 5. **`task_stop`**: thin wrapper, one test.
-6. ~~Config flag + gated approval tools~~ -- dropped (ADR-0017 resolved
-   decision 1). Instead: a test asserting `tools/list` contains no
-   approval tool.
+6. [x] ~~Config flag + gated approval tools~~ -- dropped (ADR-0017
+   resolved decision 1). Instead: `TestMCPTools_NoApprovalToolInCatalog`
+   asserts `tools/list` contains the seven read-only/simple tools and no
+   approve/deny/respondPermission tool.
 7. **MCP protocol round-trip test**: add the end-to-end stdio test
    scenario once enough tools exist to make it meaningful (after step 3
    or 4).
@@ -142,17 +152,42 @@ agent (small, independently reviewable steps; each should end with
 
 ## Validation
 
-Not yet started -- to be filled in as each Acceptance Criterion is
-confirmed by a specific test or manual check, e.g.:
+Steps 1-2 (the read-only/simple tool set) validated as follows; the
+task_send/task_wait/task_stop scenarios (AC3's remaining rows) land with
+steps 3-5:
 
-- AC1/AC2 (subcommand starts, dials daemon, fails clearly) -> manual run
-  + a Go test that starts `smind mcp serve` as a subprocess against no daemon
-  and asserts non-zero exit / stderr content.
-- AC3 (each tool round-trips) -> the corresponding Test Scenario above,
-  one per tool.
-- AC4 (schema validation) -> "Invalid tool args" scenario.
-- AC5 (auth reuse, no credential leak) -> "Auth failure" scenario +
-  a grep/assert that no tool response or log line contains the raw token.
-- AC6 (`task test`/`task lint` green) -> CI/manual run, recorded here
-  with the commit/PR it passed on.
-- AC7 (no approval tool in `tools/list`) -> the catalog assertion test.
+- AC1 (subcommand starts over stdio, blocks until stdin closes/signal):
+  `cmdMcpServe` runs the SDK's stdio transport under a signal context;
+  exercised by every in-memory-transport test below plus manual run. A
+  daemon restart (the /ws connection dying) also exits non-zero with a
+  clear stderr message so the MCP host can respawn it --
+  `TestMCPServe_ExitsWhenDaemonConnectionDies` (via the new
+  `wsclient.Client.Done`).
+- AC2 (dials daemon, fails fast with clear stderr):
+  `TestMCPServe_FailsFastWhenDaemonUnreachable` (exit 1, "is `smind
+  serve` running?" on stderr, no hang -- dial bounded to 5s in
+  `dialDaemon`).
+- AC3 (tools round-trip against a real in-process daemon, no wsapi
+  mocks): `TestMCPTools_TaskNewListRoundTrip`,
+  `TestMCPTools_ChatNewList`,
+  `TestMCPTools_RunReadToolsAgainstFinishedRun`,
+  `TestMCPTools_TaskPermissionsShowsPendingPermission` (the
+  permission one drives a real fake-agent `permission` run and reads it
+  back through `task_permissions`/`task_status`).
+- AC4 (schema validation before the handler runs):
+  `TestMCPTools_SchemaValidationErrors` (type-invalid workspaceId ->
+  IsError result naming the argument, no panic, no wsapi error string).
+- AC5 (auth reuse, no token echo):
+  `TestMCPTools_ToolErrorsDoNotLeakToken` asserts a failing tool call's
+  content never contains the daemon token. The dial itself reuses
+  `dialDaemon` verbatim -- no new credential path exists to test.
+- AC6 (`task test`/`task lint` green): confirmed on this branch's
+  commit (feat(cli): add `smind mcp serve` with read-only MCP tools).
+- AC7 (no approval tool in `tools/list`):
+  `TestMCPTools_NoApprovalToolInCatalog`.
+
+MCP protocol round-trip (initialize -> tools/list -> tools/call): every
+test above drives the SDK's real client session against the real server
+implementation over an in-memory transport, which is the same
+framing/schema path the stdio transport uses; the dedicated stdio
+subprocess round-trip test is still step 7.

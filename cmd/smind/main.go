@@ -43,6 +43,8 @@ func run(args []string) int {
 		return cmdTask(args[1:])
 	case "profile":
 		return cmdProfile(args[1:])
+	case "mcp":
+		return cmdMcp(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":

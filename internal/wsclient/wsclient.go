@@ -84,6 +84,11 @@ type Client struct {
 	inflight map[string]*inflightRequest
 	closed   bool
 	closeErr error
+	// done is closed by failAll when the connection dies, so long-lived
+	// holders of a Client (e.g. `smind mcp serve`, which otherwise has no
+	// call in flight to fail) can notice and shut down/reconnect rather
+	// than serving errors forever. Closed exactly once.
+	done chan struct{}
 
 	nextID atomic.Uint64
 }
@@ -101,6 +106,7 @@ func Dial(ctx context.Context, addr, token string) (*Client, error) {
 	c := &Client{
 		ws:       ws,
 		inflight: make(map[string]*inflightRequest),
+		done:     make(chan struct{}),
 	}
 	go c.readLoop()
 	return c, nil
@@ -111,6 +117,14 @@ func Dial(ctx context.Context, addr, token string) (*Client, error) {
 // terminal response is unaffected.
 func (c *Client) Close() error {
 	return c.ws.Close()
+}
+
+// Done returns a channel that is closed once the connection has died
+// (read error, or Close). Long-lived holders with nothing in flight can
+// select on it to notice a daemon restart instead of discovering it one
+// failed Call at a time.
+func (c *Client) Done() <-chan struct{} {
+	return c.done
 }
 
 // Call issues method with params and blocks until its terminal response
@@ -251,9 +265,13 @@ func (c *Client) failAll(err error) {
 	c.mu.Lock()
 	reqs := c.inflight
 	c.inflight = make(map[string]*inflightRequest)
+	closedAlready := c.closed
 	c.closed = true
 	c.closeErr = err
 	c.mu.Unlock()
+	if !closedAlready {
+		close(c.done)
+	}
 
 	for _, req := range reqs {
 		req.term <- envelope{Error: &rpcError{Message: err.Error()}}

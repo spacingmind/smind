@@ -5,11 +5,20 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"time"
 
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/wsclient"
 )
+
+// dialTimeout bounds dialDaemon's dial (TCP connect + WS handshake). The
+// daemon is local, so a healthy dial completes in milliseconds; without a
+// bound, an unreachable address (a port nothing answers on -- which on
+// some networks black-holes SYNs instead of refusing them) hangs the CLI
+// for the OS-level connect timeout before the "is smind serve running?"
+// message ever appears.
+const dialTimeout = 5 * time.Second
 
 // dialDaemon connects to the locally running smind daemon's /ws endpoint,
 // reading the port from config and the auth token the same way the daemon
@@ -17,6 +26,9 @@ import (
 // CLI-side credential mechanism. Remote daemons (--host or equivalent)
 // are out of scope: smind is single-machine for now.
 func dialDaemon(ctx context.Context) (*wsclient.Client, error) {
+	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
