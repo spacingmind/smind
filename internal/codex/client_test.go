@@ -153,3 +153,90 @@ func TestClient_CommandExecutionApproval_OrderingAndDecision(t *testing.T) {
 		t.Fatalf("Prompt() stopReason = %q, want %q", res.stopReason, "completed")
 	}
 }
+
+// TestClient_ResumeSession covers ResumeSession's three branches against
+// the fake agent (internal/codex/fakeagent): resuming a thread that isn't
+// currently loaded, skipping thread/resume entirely for one that already
+// is, and the archived -> thread/unarchive -> retry path -- plus the
+// unknown-thread-id failure a caller falls back to a fresh thread on. See
+// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.4.
+func TestClient_ResumeSession(t *testing.T) {
+	t.Parallel()
+
+	t.Run("not loaded resumes via thread/resume", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		// This client never called NewSession, so the fake agent's
+		// "fake-thread-1" isn't loaded in its process -- ResumeSession must
+		// go through thread/resume, not short-circuit via
+		// thread/loaded/list.
+		threadID, err := c.ResumeSession(ctx, "fake-thread-1", cwd)
+		if err != nil {
+			t.Fatalf("ResumeSession() error = %v", err)
+		}
+		if threadID != "fake-thread-1" {
+			t.Fatalf("ResumeSession() = %q, want %q", threadID, "fake-thread-1")
+		}
+	})
+
+	t.Run("already loaded skips thread/resume", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		threadID, err := c.NewSession(ctx, cwd)
+		if err != nil {
+			t.Fatalf("NewSession() error = %v", err)
+		}
+
+		// The thread is already loaded in this same client's fake-agent
+		// process (from NewSession above) -- ResumeSession's
+		// thread/loaded/list check should report it loaded and never call
+		// thread/resume at all.
+		resumedID, err := c.ResumeSession(ctx, threadID, cwd)
+		if err != nil {
+			t.Fatalf("ResumeSession() error = %v", err)
+		}
+		if resumedID != threadID {
+			t.Fatalf("ResumeSession() = %q, want %q", resumedID, threadID)
+		}
+	})
+
+	t.Run("archived thread is unarchived then resumed", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		threadID, err := c.NewSession(ctx, cwd)
+		if err != nil {
+			t.Fatalf("NewSession() error = %v", err)
+		}
+		if _, err := c.conn.call(ctx, "thread/archive", map[string]string{"threadId": threadID}); err != nil {
+			t.Fatalf("thread/archive: %v", err)
+		}
+
+		resumedID, err := c.ResumeSession(ctx, threadID, cwd)
+		if err != nil {
+			t.Fatalf("ResumeSession() error = %v", err)
+		}
+		if resumedID != threadID {
+			t.Fatalf("ResumeSession() = %q, want %q", resumedID, threadID)
+		}
+	})
+
+	t.Run("unknown thread id fails", func(t *testing.T) {
+		t.Parallel()
+		c, cwd := newTestClient(t, "")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if _, err := c.ResumeSession(ctx, "no-such-thread", cwd); err == nil {
+			t.Fatal("ResumeSession() error = nil, want error for unknown thread id")
+		}
+	})
+}

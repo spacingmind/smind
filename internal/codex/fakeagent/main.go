@@ -26,6 +26,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,16 @@ import (
 const (
 	threadID = "fake-thread-1"
 	turnID   = "fake-turn-1"
+)
+
+// threadStateMu guards loadedThreads/archivedThreads, this fake agent's
+// bookkeeping for the thread/loaded/list, thread/resume,
+// thread/archive, thread/unarchive round trip a resume test drives --
+// separate from writeMu/pendingMu, which guard the wire transport itself.
+var (
+	threadStateMu   sync.Mutex
+	loadedThreads   = map[string]bool{}
+	archivedThreads = map[string]bool{}
 )
 
 type message struct {
@@ -127,7 +138,74 @@ func handle(msg message, threadCwd *string) {
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*threadCwd = params.Cwd
+		threadStateMu.Lock()
+		loadedThreads[threadID] = true
+		threadStateMu.Unlock()
+		recordThreadInitMethod(params.Cwd, "thread/start")
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": threadID}})
+	case msg.Method == "thread/loaded/list":
+		threadStateMu.Lock()
+		ids := make([]string, 0, len(loadedThreads))
+		for id := range loadedThreads {
+			ids = append(ids, id)
+		}
+		threadStateMu.Unlock()
+		respond(msg.ID, map[string]any{"data": ids, "nextCursor": nil})
+	case msg.Method == "thread/archive":
+		var params struct {
+			ThreadID string `json:"threadId"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		threadStateMu.Lock()
+		archivedThreads[params.ThreadID] = true
+		delete(loadedThreads, params.ThreadID)
+		threadStateMu.Unlock()
+		respond(msg.ID, map[string]any{"thread": map[string]any{"id": params.ThreadID}})
+	case msg.Method == "thread/unarchive":
+		var params struct {
+			ThreadID string `json:"threadId"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		threadStateMu.Lock()
+		wasArchived := archivedThreads[params.ThreadID]
+		delete(archivedThreads, params.ThreadID)
+		threadStateMu.Unlock()
+		if !wasArchived {
+			writeMessage(message{ID: msg.ID, Error: &rpcError{
+				Code: -32600, Message: fmt.Sprintf("no archived rollout found for thread id %s", params.ThreadID),
+			}})
+			return
+		}
+		respond(msg.ID, map[string]any{"thread": map[string]any{"id": params.ThreadID}})
+	case msg.Method == "thread/resume":
+		var params struct {
+			ThreadID string `json:"threadId"`
+			Cwd      string `json:"cwd"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		threadStateMu.Lock()
+		isArchived := archivedThreads[params.ThreadID]
+		isKnown := params.ThreadID == threadID
+		threadStateMu.Unlock()
+		if isArchived {
+			writeMessage(message{ID: msg.ID, Error: &rpcError{
+				Code:    -32600,
+				Message: fmt.Sprintf("session %s is archived. Run `codex unarchive %s` to unarchive it first.", params.ThreadID, params.ThreadID),
+			}})
+			return
+		}
+		if !isKnown {
+			writeMessage(message{ID: msg.ID, Error: &rpcError{
+				Code: -32600, Message: fmt.Sprintf("no rollout found for thread id %s", params.ThreadID),
+			}})
+			return
+		}
+		*threadCwd = params.Cwd
+		threadStateMu.Lock()
+		loadedThreads[params.ThreadID] = true
+		threadStateMu.Unlock()
+		recordThreadInitMethod(params.Cwd, "thread/resume")
+		respond(msg.ID, map[string]any{"thread": map[string]any{"id": params.ThreadID}})
 	case msg.Method == "turn/start":
 		respond(msg.ID, map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}})
 		go runTurnScript(*threadCwd)
@@ -145,6 +223,18 @@ func handle(msg message, threadCwd *string) {
 			}
 		}
 	}
+}
+
+// recordThreadInitMethod writes the method that started/resumed this
+// thread to a "thread-init-method" file in cwd, overwriting any prior
+// value -- the only way a test can observe whether Runner called
+// thread/start or thread/resume (both return the same thread id in this
+// fake agent).
+func recordThreadInitMethod(cwd, method string) {
+	if cwd == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "thread-init-method"), []byte(method), 0o644)
 }
 
 func delta(text string) {
