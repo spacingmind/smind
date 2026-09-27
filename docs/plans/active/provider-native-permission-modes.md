@@ -1,9 +1,7 @@
 # Provider-native permission modes (remove auto-safe)
 
 Design: [ADR-0019](../../decisions/0019-provider-native-permission-modes.md)
-(Proposed). Branch: `refactor/provider-native-permission-modes`.
-**Phase 1 (this doc + ADR) is design only. Implementation starts after the
-user resolves the Open questions below.**
+(Accepted 2026-09-28). Branch: `refactor/provider-native-permission-modes`.
 
 ## Acceptance Criteria
 
@@ -68,8 +66,7 @@ user resolves the Open questions below.**
     passed by id.
 12. Docs: ADR-0014 and ADR-0018 get a one-line "superseded in part by
     ADR-0019" note where they describe approvalPolicy/auto-safe. README and
-    `cmd/smind/main.go` usage text drop auto-safe. ADR-0019 moves to
-    Accepted.
+    `cmd/smind/main.go` usage text drop auto-safe. ADR-0019 is Accepted.
 13. `task test` and `task lint` pass. The web UI gets a light+dark
     screenshot pass of the composer mode picker, the profile form, and the
     mid-run control.
@@ -155,44 +152,20 @@ Web (`web/packages/ui`, vitest):
   in step 1.
 - Migration fails toward asking a human (ADR-0019 table). Browser drafts
   are discarded rather than mapped.
-
-## Open questions (need user answer before implementation)
-
-1. **Claude default mode: `acceptEdits` or `default`?** Paseo defaults to
-   `default`. smind's `manual` has used `acceptEdits` since 2026-09-11,
-   because under `default` the CLI blocked edits without emitting
-   can_use_tool (`runner.go:521-527`). *Recommendation:* make `acceptEdits`
-   the default. Add a spike (step 3) to check whether `default` now emits
-   can_use_tool for edits via `--permission-prompt-tool stdio`. If not,
-   list `default` with a description noting that edits are blocked
-   headless, or drop it.
-2. **Offer Claude `auto` (classifier) mode?** It's the closest native
-   replacement for auto-safe's goal of unattended verification, but it
-   costs classifier calls and requires the Anthropic API.
-   *Recommendation:* offer it, with `autoApproves=true` so it's blocked
-   from MCP `task_send` unless it comes from a profile.
-3. **ACP `autoAccept` toggle: keep it (Paseo parity) or rely only on the
-   agent's own bypass mode?** *Recommendation:* keep it, as a separate
-   boolean, because Kimi and other agents may advertise no bypass mode. It
-   is never auto-enabled.
-4. **ACP mode discovery: probe `session/new` or a static catalog?**
-   *Recommendation:* a lazy probe per provider, cached for the daemon's
-   lifetime, with a timeout and a static fallback, plus refresh on
-   `provider.test`. Needs a live capture of glm-acp-agent's and Kimi's
-   `session/new` `modes` (user-reported GLM modes: `default`,
-   `accept_edits`, `bypass_permissions`; not yet verified here).
-5. **Codex `auto-review` and `read-only`?** Paseo version-gates
-   auto-review. *Recommendation:* ship `auto` + `full-access` only, and
-   add the others later.
-6. **Orchestrator (MCP `task_send`) and auto-approving modes.** Should an
-   orchestrating agent be allowed to pick `bypassPermissions`/`auto`/
-   `autoAccept`? *Recommendation:* no, unless the mode comes from a
-   human-authored profile referenced by id (ADR-0019 point 6).
-7. **Legacy wire field: hard error or silent ignore?** *Recommendation:*
-   hard error, since smind's clients ship together. Confirm the mobile app
-   never sends `approvalPolicy` (grep shows it only in comments).
-8. **Old `approval_policy` columns: keep them unused or rebuild the tables
-   to drop them?** *Recommendation:* keep them unused.
+- The user accepted all eight open-question recommendations on 2026-09-28
+  (recorded in ADR-0019's Resolved decisions):
+  1. Claude default is `acceptEdits`. `default` stays listed, and its edit
+     behavior is a manual live check.
+  2. Claude `auto` is offered, with `autoApproves=true`.
+  3. The ACP `autoAccept` toggle is kept and never auto-enabled.
+  4. ACP modes come from a lazy probe `session/new`, cached, with a timeout
+     and a `[default]` fallback. GLM/Kimi's real modes are a manual live
+     check.
+  5. Codex has `auto` and `full-access` only.
+  6. MCP `task_send` can't pick an auto-approving mode or `autoAccept`
+     except via a profile id.
+  7. The legacy `approvalPolicy` field is a hard error.
+  8. The old `approval_policy` columns are kept but unused.
 
 ## Implementation steps (after sign-off)
 
@@ -226,7 +199,7 @@ Web (`web/packages/ui`, vitest):
     light+dark screenshot pass.
 11. **MCP guard** on the ADR-0017 `task_send` (S17). Rebase onto #223 once
     it lands on develop.
-12. **Docs**: ADR-0014/0018 notes, README, ADR-0019 → Accepted. Move this
+12. **Docs**: ADR-0014/0018 notes, README. Move this
     plan to completed.
 
 ## Files/areas to delete or change
@@ -250,8 +223,8 @@ Web (`web/packages/ui`, vitest):
 
 ## Progress
 
-- 2026-09-28: Phase 1 design done. ADR-0019 (Proposed) and this plan are
-  written. Awaiting answers to the Open questions. No code changed.
+- 2026-09-28: Phase 1 design done. ADR-0019 is Accepted and all open
+  questions are resolved.
 
 ## Validation
 

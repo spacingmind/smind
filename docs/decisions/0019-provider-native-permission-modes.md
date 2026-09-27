@@ -2,11 +2,10 @@
 
 ## Status
 
-Proposed (2026-09-28). The direction ("handle it like Paseo, don't build a
-custom mode") was decided by the user on 2026-09-28. The design details
-below, and the Open questions in
-[`docs/plans/active/provider-native-permission-modes.md`](../plans/active/provider-native-permission-modes.md),
-still need the user's sign-off before this moves to Accepted.
+Accepted (2026-09-28). The direction ("handle it like Paseo, don't build a
+custom mode") and every recommendation in Resolved decisions below were
+accepted by the user on 2026-09-28. Implementation is tracked in
+[`docs/plans/active/provider-native-permission-modes.md`](../plans/active/provider-native-permission-modes.md).
 
 ## Context
 
@@ -63,8 +62,8 @@ allowlist at all. It exposes each provider's own permission modes:
      rule Paseo uses.
    - `codex-native`: `auto` and `full-access`, sent as Codex's own
      `approvalPolicy` + `sandbox` on `thread/start`, using Paseo's presets.
-     Today smind sends only `cwd`. `auto-review` is deferred (see Open
-     questions).
+     Today smind sends only `cwd`. `auto-review` is deferred (Resolved
+     decision 5).
    - ACP providers (`glm`, `kimi`): whatever the agent advertises in
      `session/new` (`modes.availableModes`, or a `category: "mode"` config
      option), applied with `session/set_mode` (or
@@ -133,6 +132,29 @@ allowlist at all. It exposes each provider's own permission modes:
    with a legacy `approvalPolicy` is discarded to the provider's default
    mode instead of being mapped. That can only narrow access, never widen
    it.
+
+## Resolved decisions
+
+Accepted by the user on 2026-09-28, each as recommended:
+
+1. **Claude default mode is `acceptEdits`** (smind's existing manual
+   behavior). `default` stays in the catalog; whether it now asks before
+   edits via can_use_tool is a manual live check.
+2. **Claude `auto` (classifier) mode is offered**, flagged
+   `autoApproves=true` so an orchestrator can't pick it (point 6).
+3. **ACP `autoAccept` is kept** as a separate boolean. It is never
+   auto-enabled.
+4. **ACP modes are discovered by a lazy probe `session/new`**, cached per
+   provider for the daemon's lifetime, with a timeout and a static
+   `[default]` fallback.
+5. **Codex ships `auto` and `full-access` only.** `auto-review` and
+   `read-only` are deferred.
+6. **An orchestrator (MCP `task_send`) can't pick an auto-approving mode**
+   unless it comes from a human-authored profile referenced by id.
+7. **The legacy `approvalPolicy` wire field is a hard error** that names
+   `permissionMode`.
+8. **The old `approval_policy` columns are kept but unused.** No table
+   rebuild.
 
 ## Alternatives considered
 
