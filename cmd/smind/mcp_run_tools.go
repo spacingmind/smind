@@ -15,13 +15,14 @@ import (
 // its permission history -- there is no separate "pending permissions"
 // RPC to wrap.
 
-// registerMCPRunTools adds the run-reading tools and task_wait to the
-// catalog.
+// registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
+// to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here."}, mcpTaskPermissions(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
 
 // runIDInput is the shared argument shape of the run-reading tools.
@@ -269,5 +270,22 @@ func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, task
 				interval = mcpWaitPollMax
 			}
 		}
+	}
+}
+
+// taskStopOutput is task_stop's structured output.
+type taskStopOutput struct {
+	RunID   string `json:"runId"`
+	Stopped bool   `json:"stopped"`
+}
+
+// mcpTaskStop wraps run.stop: {runId} -> {runId, stopped: true} once the
+// daemon has accepted the stop request.
+func mcpTaskStop(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskStopOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, taskStopOutput, error) {
+		if err := callWS(ctx, client, "task_stop", "run.stop", map[string]any{"runId": in.RunID}, nil); err != nil {
+			return nil, taskStopOutput{}, err
+		}
+		return nil, taskStopOutput{RunID: in.RunID, Stopped: true}, nil
 	}
 }
