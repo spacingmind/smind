@@ -125,7 +125,7 @@ Each phase ships as its own PR.
 - [x] P1 backend
 - [ ] P2 session resume
 - [ ] P3 web
-- [ ] P4 CLI + mobile
+- [x] P4 CLI (mobile stays compatible on the default chat -- no changes needed, per the plan's "out of scope" note)
 
 ## Validation
 
@@ -141,3 +141,24 @@ All P1 acceptance criteria (P1.1-P1.6) and Test Scenarios are implemented and co
 - **P1.6 Compatibility**: every pre-existing `internal/wsapi` test passes unmodified (verified by running the full `internal/wsapi` suite after every change in this phase, with no test edits). The old-client flow (no `chatId` anywhere) is unchanged end to end -- `TestTaskPrompt_OmittedChatId_LandsOnDefaultChat`.
 
 Not done in P1 (explicitly out of scope, per the task that drove this phase): session resume itself (P2 owns it); `web/`, `mobile/`, and CLI wiring (P3/P4 own those) -- P1 only adds the `chats.agent_session` column plus `store.GetChat`/`SetChatAgentSession` for P2 to call.
+
+### P4 — CLI
+
+All P4 CLI acceptance criteria are implemented and covered by tests
+(`cmd/smind/task_chat_test.go`, against the same fake-agent-backed daemon
+the config-option tests use); `go test ./cmd/smind/...`, `task lint`, and
+`task test` all pass. `smind task logs`/`attach` are unchanged (they take
+a runId, which already identifies exactly one chat); mobile keeps working
+on the default chat with no changes.
+
+- `task send --chat` (ba3f751): passes chatId through to run.start;
+  omitted, the default chat is used (CLI-side P1.6 compatibility path,
+  covered by TestTaskSend_ChatFlagRoutesRunToThatChat and
+  TestTaskSend_OmittedChatLandsOnDefaultChat).
+- `task chat ls|new|rename|archive` (af934bc): ls prints ID/TITLE/
+  PROVIDER/ARCHIVED with --all including archived ones; the daemon's
+  running-run archive refusal and unknown-id not-founds surface verbatim
+  with non-zero exits.
+- `task runs <taskId> [--chat <chatId>]` (2acee61): run.list (exposed by
+  P1) surfaced in the CLI, most recent first, with the P1.4 chatId filter.
+- Usage text in cmd/smind/main.go documents all of the above.
