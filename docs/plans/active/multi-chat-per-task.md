@@ -114,14 +114,30 @@ Each phase ships as its own PR.
 
 - ADR-0016 is the source of truth.
 - Migrated default chats resume starting from their next run. This deliberately departs from the draft's "never resume", because the user needs follow-ups to keep context.
+- P1.1's `chats` schema uses a single `agent_session` JSON-handle column, not the ADR draft's separate `agent_session_id`/`agent_session_meta` columns -- the plan's own P1.1 AC (`agent_session (JSON handle, NULL)`) is more specific than the ADR's `§2` sketch and is what P1 implements; P2 owns whatever it decodes into.
+- `chat.updated` (not the ADR draft's `chat.renamed`) is the lifecycle topic for any chat mutation that is neither create nor archive -- matching `task.updated`'s own "created/archived excluded" semantics, and covering both a rename and a first-run provider bind (both are the "any transition" pattern, not two separate topics).
+- Every task always has >=1 chat: `workspace.Manager.CreateTask` creates a default chat ("Chat", provider NULL) the same way the migration backfills one for pre-existing tasks, so `DefaultChat` always has something to resolve to and no lazy-create branch is needed elsewhere.
+- `runs.Registry.Start`'s chat concurrency guard ("no running run per chat") and its per-chat run registration happen under one lock (not check-then-insert as two steps), closing a race two simultaneous `Start` calls for the same chat would otherwise hit.
+- `run.logs` does not gain a `chatId` filter, despite P1.4's AC bullet listing it alongside `run.list`: `run.logs` already takes an unambiguous `runId`, so a `chatId` filter on it would be a parameter with nothing to filter -- ADR-0016 §5's own wire table only lists the filter on `run.list`, and no Test Scenario names a `run.logs` filter.
 
 ## Progress
 
-- [ ] P1 backend
+- [x] P1 backend
 - [ ] P2 session resume
 - [ ] P3 web
 - [ ] P4 CLI + mobile
 
 ## Validation
 
-To be filled in per phase.
+### P1 — backend
+
+All P1 acceptance criteria (P1.1-P1.6) and Test Scenarios are implemented and covered by tests; `task test`, `task lint`, and `go test -race ./internal/store/... ./internal/wsapi/... ./internal/runs/...` all pass (plus the full repo suite via `task test`, including `web/`, which P1 does not touch).
+
+- **P1.1 Migration** (`internal/store/chats.go`, `migrate.go`, `chats_test.go`, `migrate_test.go`): idempotent, transactional `chats.default_chat_backfill` migration. Covered: a DB with 2 tasks/5 runs backfills 2 default chats with every run linked (`TestMigrate_BackfillsDefaultChatsForPreExistingTasksAndRuns`); re-running is a no-op, both for a fresh DB and a pre-chats one (`TestMigrate_ChatsBackfillIdempotentAcrossRepeatedOpen`); every existing store test (including a fresh `Open()`) still passes.
+- **P1.2 RPCs** (`internal/workspace/chat.go`, `internal/wsapi/handlers.go`+`events.go`+`server.go`): `chat.create/list/get/rename/archive` plus `chat.created`/`chat.updated`/`chat.archived` lifecycle events. Covered: full CRUD round trip, archive refused while a run is running (polled past `run.stop`'s async teardown), unknown ids as clear not-found errors, lifecycle events observed on a subscribed connection (`internal/wsapi/chat_test.go`).
+- **P1.3 Prompting** (`internal/runs/registry.go`): `task.prompt`/`run.start` accept an optional `chatId`; omitted resolves to the default chat; provider binds on first run (including the concurrent-first-bind race, closed and covered separately); a provider mismatch on a bound chat is rejected. Covered in `internal/runs/chat_test.go` and `internal/wsapi/chat_test.go`.
+- **P1.4 Events** (`internal/runs/runs.go`+`registry.go`, `internal/wsapi/events.go`+`server.go`): `run.status`/`permission.pending` carry `chatId`; `run.list` filters by it. Covered: `TestEvents_RunStatusCarriesChatID`, `TestRegistry_List_FiltersByChatID`, `TestTaskPrompt_ExplicitChatId_LandsOnThatChat`.
+- **P1.5 Concurrency**: a second prompt to a busy chat is rejected; two chats of one task run concurrently. Covered: `TestRegistry_Start_SecondPromptToBusyChat_IsRejected`, `TestRegistry_Start_TwoChatsOfSameTask_RunConcurrently`. `taskrunner.Runner.acpSessions` is now keyed by chat id, not task id, so the config-options path doesn't clobber across two concurrently running chats of the same task either.
+- **P1.6 Compatibility**: every pre-existing `internal/wsapi` test passes unmodified (verified by running the full `internal/wsapi` suite after every change in this phase, with no test edits). The old-client flow (no `chatId` anywhere) is unchanged end to end -- `TestTaskPrompt_OmittedChatId_LandsOnDefaultChat`.
+
+Not done in P1 (explicitly out of scope, per the task that drove this phase): session resume itself (P2 owns it); `web/`, `mobile/`, and CLI wiring (P3/P4 own those) -- P1 only adds the `chats.agent_session` column plus `store.GetChat`/`SetChatAgentSession` for P2 to call.
