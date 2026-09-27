@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed.** Per AGENTS.md rule (d): changes the data model and wire
+Accepted (2026-09-27). The user approved all 8 sub-decisions.
 protocol, not yet decided by the user. Each sub-decision gives a
 recommendation; none is final.
 
@@ -109,9 +109,32 @@ implements only `session/new` (`internal/acp/client.go:268`) and Codex only
 call added if the upstream agent supports one, an **open verification item
 not resolved here**.
 
-Migrated default chats (`provider=NULL`) never get a session id and never
-resume — zero behavior change for existing tasks. Continuity is new, and
-only applies to chats created after this ships.
+Migrated default chats start with `provider=NULL` and no session id. Their
+**next** run binds the provider and stores a session handle, and every
+follow-up after that resumes. Existing tasks start getting continuity from
+their next prompt on, because the user needs follow-ups to keep context
+now.
+
+**Resume mechanics, modeled on Paseo (user-reviewed 2026-09-27):**
+- Session state is persisted as a Paseo-style handle
+  `{provider, sessionId, nativeHandle, metadata}`
+  (`refs/paseo/.../agent/agent-types.ts:168-174`).
+- **claude-native:** keep the SDK session id. The next run passes it via
+  `WithResume`, which Paseo does as `resume: sessionId` in
+  `providers/claude/agent.ts:3153`.
+- **Codex:** `thread/resume` with the stored thread id. Check
+  `thread/loaded/list` first, and `thread/unarchive` then retry if the
+  thread was archived (`providers/codex-app-server-agent.ts:3963-3980`).
+- **ACP (GLM/Kimi):** capability-driven, in order:
+  1. `session/load` if `agentCapabilities.loadSession`;
+  2. else `unstable_resumeSession` if `sessionCapabilities.resume`;
+  3. else a clear, surfaced error: the agent doesn't support resume, so
+     the chat starts a new session and the UI says so. Never a silent
+     fresh start.
+
+  Paseo does this in `providers/acp-agent.ts:1777-1800`. Which
+  capability GLM's ACP agent actually advertises must be verified
+  against the real binary during implementation.
 
 ### 3. Per-chat run config: provider binds at first run
 
