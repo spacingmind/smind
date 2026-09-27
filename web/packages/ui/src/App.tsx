@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { Archive, Columns2, Copy, Pencil } from "lucide-react";
 import {
   DndContext,
@@ -13,6 +13,7 @@ import {
 } from "@dnd-kit/core";
 
 import { AppSidebar } from "@/components/app-sidebar";
+import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
@@ -1755,13 +1756,13 @@ function DraggableTabTrigger({
   // Rename (terminal and chat tabs -- a file/diff tab's title is derived
   // from real identity a cosmetic override would just make misleading;
   // chat swaps its title straight through to chat.rename, App.tsx's
-  // renameTabForTask dispatch) swaps the trigger for a plain
-  // input in the same slot rather than trying to nest one inside
-  // TabsTrigger's own <button> -- same reasoning as the close "×" below
-  // being a span, not a button, but an <input> genuinely can't go inside
-  // one at all.
+  // renameTabForTask dispatch) swaps the trigger for a plain input in
+  // the same slot rather than trying to nest one inside TabsTrigger's
+  // own <button> -- same reasoning as the close "×" below being a span,
+  // not a button, but an <input> genuinely can't go inside one at all.
+  // TabRenameInput (its own component/file) owns the input and its
+  // focus-race fix; see that file's doc comment.
   const [renaming, setRenaming] = useState(false);
-  const cancelledRenameRef = useRef(false);
   // Every tab is draggable, not just movable kinds -- dropping a Chat/Files
   // tab onto another pane's center still moves it there (Item 8's scope);
   // only *splitting* (an edge drop, handled in App.tsx's onDragEnd) is
@@ -1782,27 +1783,13 @@ function DraggableTabTrigger({
 
   if (renaming) {
     return (
-      <input
-        autoFocus
-        defaultValue={entry.title}
-        aria-label={`Rename ${entry.title}`}
-        data-testid="workspace-tab-rename-input"
-        className="h-7 max-w-48 shrink-0 rounded border border-ring bg-transparent px-2 text-ui-base outline-none"
-        onFocus={(e) => e.currentTarget.select()}
-        onKeyDown={(e) => {
-          e.stopPropagation();
-          if (e.key === "Enter") {
-            e.currentTarget.blur();
-          } else if (e.key === "Escape") {
-            cancelledRenameRef.current = true;
-            setRenaming(false);
-          }
-        }}
-        onBlur={(e) => {
-          if (!cancelledRenameRef.current) onRenameTab(entry.key, e.currentTarget.value);
-          cancelledRenameRef.current = false;
+      <TabRenameInput
+        title={entry.title}
+        onCommit={(value) => {
+          onRenameTab(entry.key, value);
           setRenaming(false);
         }}
+        onCancel={() => setRenaming(false)}
       />
     );
   }
@@ -1887,7 +1874,18 @@ function DraggableTabTrigger({
       )}
         </TabsTrigger>
       </ContextMenuTrigger>
-      <ContextMenuContent data-testid="workspace-tab-context-menu" data-tab-key={entry.key}>
+      <ContextMenuContent
+        data-testid="workspace-tab-context-menu"
+        data-tab-key={entry.key}
+        // Radix's own dismiss-time focus restoration would otherwise move
+        // focus to whatever it considers "the trigger" right as this
+        // menu closes -- for Rename specifically, that trigger element
+        // has just been replaced by the rename <input>, so restoring
+        // focus there yanks it right back off. The explicit rAF-deferred
+        // focus above is what actually focuses the input; this only
+        // stops Radix's own attempt from fighting it.
+        onCloseAutoFocus={(e) => e.preventDefault()}
+      >
         <ContextMenuItem
           disabled={!entry.closable}
           onSelect={() => onClose(entry.key)}
