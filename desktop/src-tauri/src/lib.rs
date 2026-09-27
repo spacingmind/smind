@@ -251,6 +251,7 @@ pub fn run() {
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
                 daemon_manager_distro: Mutex::new(None),
+                daemon_manager_platform: Mutex::new(None),
             });
 
             Ok(())

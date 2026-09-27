@@ -181,6 +181,21 @@ describe("daemon-section (desktop build)", () => {
     await flush();
   });
 
+  it("fetches daemon_status exactly once on mount, never polling", async () => {
+    // Each daemon_status call spawns wsl.exe/lsof/ps under the hood
+    // (daemon_manager.rs), and every uncached spawn on Windows flashes a
+    // console window -- a polling loop here would flicker continuously.
+    // Settings sections mount once and stay mounted, so extra time
+    // passing (simulated by repeated flushes) must never trigger a
+    // second fetch.
+    const daemonStatus = vi.fn(() => Promise.resolve(baseStatus()));
+    await renderSection({ daemonStatus });
+    await flush();
+    await flush();
+    await flush();
+    expect(daemonStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("surfaces an install error verbatim", async () => {
     await renderSection({
       daemonStatus: () => Promise.resolve(baseStatus({ managedState: "notRunning", reachable: false })),

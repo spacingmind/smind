@@ -9,6 +9,7 @@ pub mod protocol;
 pub mod proxy;
 pub mod relay;
 pub mod route;
+pub mod windows_process;
 pub mod zoom;
 
 pub use attention::Attention;

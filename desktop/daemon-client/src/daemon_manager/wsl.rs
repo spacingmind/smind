@@ -218,10 +218,14 @@ pub fn exe_path_matches(actual: &str, expected: &str) -> bool {
     actual.trim() == expected.trim()
 }
 
-/// run is the only function in this module that spawns anything.
+/// run is the only function in this module that spawns anything. Every
+/// call goes through `windows_process::no_window` so `wsl.exe` never
+/// flashes a console window on Windows -- see that module's doc comment.
 pub fn run(argv: &[String]) -> io::Result<Output> {
     let (prog, args) = argv.split_first().expect("smind desktop: argv is never empty");
-    Command::new(prog).args(args).output()
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    crate::windows_process::no_window(&mut cmd).output()
 }
 
 #[cfg(test)]
