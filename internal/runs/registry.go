@@ -100,7 +100,7 @@ func (reg *Registry) getPermissionTimeout() time.Duration {
 // changes.
 type Notifier interface {
 	NotifyRunStatus(s RunStatus)
-	NotifyPermissionPending(runID string, taskID int64, requestID, summary string, options []taskrunner.PermissionOption)
+	NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption)
 }
 
 // SetNotifier registers n; nil-safe (notifications with no notifier are
@@ -221,6 +221,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 	return &run{
 		id:                 row.ID,
 		taskID:             row.TaskID,
+		chatID:             row.ChatID,
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
 		approvalPolicy:     taskrunner.ApprovalPolicy(row.ApprovalPolicy),
@@ -244,6 +245,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 type run struct {
 	id        string
 	taskID    int64
+	chatID    int64
 	provider  taskrunner.Provider
 	prompt    string
 	startedAt time.Time
@@ -334,6 +336,7 @@ func (r *run) statusLocked() RunStatus {
 	return RunStatus{
 		ID:             r.id,
 		TaskID:         r.taskID,
+		ChatID:         r.chatID,
 		Provider:       r.provider,
 		Prompt:         r.prompt,
 		Status:         r.status,
@@ -346,18 +349,31 @@ func (r *run) statusLocked() RunStatus {
 	}
 }
 
-// Start allocates a Run for a taskID/provider/prompt turn and drives it to
-// completion in a background goroutine owned by the Registry, not by the
-// caller: ctx is the run's own background context (Stop cancels it; it is
-// not, and must not be, a request's own context, since the whole point is
-// that the run outlives whatever request started it). Start itself returns
-// as soon as the Run is registered, with the new run's ID -- it does not
-// wait for the turn to finish.
+// Start allocates a Run for a taskID/chatID/provider/prompt turn and drives
+// it to completion in a background goroutine owned by the Registry, not by
+// the caller: ctx is the run's own background context (Stop cancels it; it
+// is not, and must not be, a request's own context, since the whole point
+// is that the run outlives whatever request started it). Start itself
+// returns as soon as the Run is registered, with the new run's ID -- it
+// does not wait for the turn to finish.
 //
-// wm is used only to fail fast on an unknown taskID before committing to a
-// background goroutine; runner.RunPrompt performs the same lookup itself,
-// so this is a redundant, cheap check purely for a synchronous error
-// return instead of one only surfacing asynchronously.
+// wm is used to fail fast on an unknown taskID/chatID before committing to
+// a background goroutine (runner.RunPrompt performs the task lookup again
+// itself, so that part is a redundant, cheap check purely for a synchronous
+// error return instead of one only surfacing asynchronously), and to
+// resolve chatID and bind/validate the chat's provider -- see below.
+//
+// chatID is docs/decisions/0016-multiple-chats-per-task.md's P1.3/P1.5: 0
+// means "the task's default chat" (wm.DefaultChat), preserving every
+// pre-chats caller's behavior unchanged; a nonzero value must name a
+// non-archived chat belonging to taskID. A chat's provider binds on its
+// first run and is immutable after: an unbound chat is bound to provider
+// here (via wm.BindChatProvider), a chat already bound to a different
+// provider is rejected with a clear error, and a chat already bound to the
+// same provider proceeds normally. At most one run may be StatusRunning
+// per chat at a time -- a second Start for a chat that already has one
+// running is also rejected; different chats of the same task may run
+// concurrently (the whole point of this ADR).
 //
 // approvalPolicy governs how this run's own pending permission requests (if
 // any) get decided -- see taskrunner.ApprovalPolicy and
@@ -372,10 +388,34 @@ func (r *run) statusLocked() RunStatus {
 // its doc comment), ignored entirely by every other provider. The empty
 // string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
 // exactly, the same way an empty approvalPolicy does.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
 	if _, err := wm.GetTask(taskID); err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
 	}
+
+	chat, err := resolveChat(wm, taskID, chatID)
+	if err != nil {
+		return "", fmt.Errorf("runs: start: %w", err)
+	}
+	if chat.ArchivedAt != nil {
+		return "", fmt.Errorf("runs: start: chat %d is archived", chat.ID)
+	}
+	if chat.Provider == nil {
+		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
+			return "", fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
+		}
+	}
+	// Re-checked against chat as BindChatProvider actually left it, not
+	// just the pre-bind read above: store.BindChatProvider is a
+	// write-if-still-NULL, so two concurrent first prompts to the same
+	// unbound chat with different providers both reach this point seeing
+	// Provider == nil, but only one of them actually wins the bind -- the
+	// other's write silently no-ops and must still be rejected here rather
+	// than proceeding as if it had bound its own value.
+	if *chat.Provider != string(provider) {
+		return "", fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
+	}
+	chatID = chat.ID
 
 	if approvalPolicy == "" {
 		approvalPolicy = taskrunner.ApprovalPolicyManual
@@ -396,6 +436,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	r := &run{
 		id:                 id,
 		taskID:             taskID,
+		chatID:             chatID,
 		provider:           provider,
 		prompt:             prompt,
 		runner:             runner,
@@ -410,26 +451,67 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		pendingPermissions: make(map[string]chan string),
 	}
 
-	// Persisted before this run is registered/driven, so Start fails fast
-	// (and never starts an agent subprocess for a run whose row didn't make
-	// it to disk) rather than only surfacing a persistence problem later,
-	// silently, from inside the drive goroutine.
+	// The "at most one running run per chat" guard and this run's
+	// registration happen under the same reg.mu critical section, so two
+	// concurrent Start calls for the same chat can't both observe "no
+	// running run yet" and both proceed -- whichever acquires reg.mu first
+	// registers and the other sees it on its own check.
+	reg.mu.Lock()
+	for _, existing := range reg.runs {
+		if existing.chatID != chatID {
+			continue
+		}
+		existing.mu.Lock()
+		running := existing.status == StatusRunning
+		existing.mu.Unlock()
+		if running {
+			reg.mu.Unlock()
+			cancel()
+			return "", fmt.Errorf("runs: start: chat %d already has a running run (%s)", chatID, existing.id)
+		}
+	}
+	reg.runs[id] = r
+	reg.mu.Unlock()
+
+	// Persisted after registration but before driving the turn: a
+	// persistence failure here still leaves the concurrency guard above
+	// correct (this run is removed again immediately), and never starts an
+	// agent subprocess for a run whose row didn't make it to disk.
 	if _, err := reg.st.CreateRun(store.Run{
-		ID: id, TaskID: taskID, Provider: string(provider), Prompt: prompt,
+		ID: id, TaskID: taskID, ChatID: chatID, Provider: string(provider), Prompt: prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt, ApprovalPolicy: string(approvalPolicy),
 	}); err != nil {
+		reg.mu.Lock()
+		delete(reg.runs, id)
+		reg.mu.Unlock()
 		cancel()
 		return "", fmt.Errorf("runs: start: persist run: %w", err)
 	}
 
-	reg.mu.Lock()
-	reg.runs[id] = r
-	reg.mu.Unlock()
 	reg.notifyRunStatus(r)
 
 	go reg.drive(runCtx, r, runner)
 
 	return id, nil
+}
+
+// resolveChat returns the chat Start should use: wm.DefaultChat(taskID) if
+// chatID is 0 (an omitted wire chatId, ADR-0016 P1.3's backward-compat
+// path), otherwise wm.GetChat(chatID) after confirming it belongs to
+// taskID -- a chat id from a different task is a clear error, not a
+// same-worktree convenience.
+func resolveChat(wm *workspace.Manager, taskID, chatID int64) (store.Chat, error) {
+	if chatID == 0 {
+		return wm.DefaultChat(taskID)
+	}
+	chat, err := wm.GetChat(chatID)
+	if err != nil {
+		return store.Chat{}, err
+	}
+	if chat.TaskID != taskID {
+		return store.Chat{}, fmt.Errorf("chat %d belongs to task %d, not %d", chatID, chat.TaskID, taskID)
+	}
+	return chat, nil
 }
 
 func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runner) {
@@ -443,7 +525,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.provider, r.prompt, decider, r.getApprovalPolicy(), r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getApprovalPolicy(), r.thinkingLevel, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
@@ -520,7 +602,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 	d.r.mu.Unlock()
 
 	if n := d.reg.getNotifier(); n != nil {
-		n.NotifyPermissionPending(d.r.id, d.r.taskID, requestID, summary, options)
+		n.NotifyPermissionPending(d.r.id, d.r.taskID, d.r.chatID, requestID, summary, options)
 	}
 
 	d.reg.record(d.r, taskrunner.Event{
@@ -943,12 +1025,17 @@ func (reg *Registry) CloseAll() {
 }
 
 // List returns a summary of every Run the Registry currently knows about
-// (including runs evicted per finishedRetentionCap are absent), most
-// recently started first.
-func (reg *Registry) List() []RunSummary {
+// (runs evicted per finishedRetentionCap are absent), most recently started
+// first. chatID, when nonzero, restricts the result to that chat's runs
+// (ADR-0016 P1.4's additive run.list filter); 0 preserves today's
+// unfiltered behavior exactly.
+func (reg *Registry) List(chatID int64) []RunSummary {
 	reg.mu.Lock()
 	rs := make([]*run, 0, len(reg.runs))
 	for _, r := range reg.runs {
+		if chatID != 0 && r.chatID != chatID {
+			continue
+		}
 		rs = append(rs, r)
 	}
 	reg.mu.Unlock()

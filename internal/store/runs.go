@@ -19,10 +19,18 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		// not an empty/invalid policy string persisted to disk.
 		approvalPolicy = "manual"
 	}
+	// A zero ChatID is stored as NULL, not the literal (nonexistent) chat id
+	// 0 -- runs.chat_id's FK would reject that outright, and a caller that
+	// predates chats entirely (or a test simulating one) has no chat to
+	// name. See Run.ChatID's doc comment.
+	var chatID sql.NullInt64
+	if r.ChatID != 0 {
+		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
+	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.TaskID, r.Provider, r.Prompt, r.Status, r.StartedAt,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
 		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, approvalPolicy,
 	)
 	if err != nil {
@@ -67,7 +75,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -81,7 +89,7 @@ func (s *Store) GetRun(id string) (Run, error) {
 // used to rehydrate internal/runs.Registry's in-memory map at startup.
 func (s *Store) ListRecentRuns(limit int) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, approval_policy
 		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -141,11 +149,18 @@ func (s *Store) ListRunEvents(runID string) ([]RunEvent, error) {
 
 func scanRun(row rowScanner) (Run, error) {
 	var r Run
+	var chatID sql.NullInt64
 	var finishedAt sql.NullTime
-	if err := row.Scan(&r.ID, &r.TaskID, &r.Provider, &r.Prompt, &r.Status,
+	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
 		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.ApprovalPolicy); err != nil {
 		return Run{}, err
 	}
+	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
+	// symmetric write side and Run.ChatID's doc comment. Every run the
+	// application itself creates post-migration has a real chat_id; only a
+	// caller bypassing internal/runs.Registry.Start entirely (raw store
+	// access, e.g. a test simulating a legacy row) can produce this.
+	r.ChatID = chatID.Int64
 	r.FinishedAt = nullToTimePtr(finishedAt)
 	return r, nil
 }

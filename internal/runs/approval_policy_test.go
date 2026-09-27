@@ -26,7 +26,7 @@ func TestRegistry_SetApprovalPolicy_TakesEffectForSubsequentDecideCalls(t *testi
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestRegistry_SetApprovalPolicy_SwitchDoesNotRetroactivelyAffectAlreadyPendi
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRegistry_SetApprovalPolicy_RejectsFullAccessAsTarget(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -253,7 +253,7 @@ func TestRegistry_SetApprovalPolicy_RejectsInvalidPolicy(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -274,7 +274,7 @@ func TestRegistry_SetApprovalPolicy_RejectsFinishedRun(t *testing.T) {
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
@@ -346,7 +346,7 @@ func TestRegistry_SetApprovalPolicy_MidRunSwitchEnablesACPFileEditAutoAllow(t *t
 	runner := newTestRunner(wm)
 	reg := newTestRegistry(t, st)
 
-	runID, err := reg.Start(context.Background(), wm, runner, task.ID, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.ApprovalPolicyManual, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}

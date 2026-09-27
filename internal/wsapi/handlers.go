@@ -50,6 +50,11 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.stage":               handleTaskStage(wm),
 		"task.commit":              handleTaskCommit(wm),
 		"task.createPr":            handleTaskCreatePR(wm),
+		"chat.create":              handleChatCreate(wm),
+		"chat.list":                handleChatList(wm),
+		"chat.get":                 handleChatGet(wm),
+		"chat.rename":              handleChatRename(wm),
+		"chat.archive":             handleChatArchive(wm, reg),
 		"task.prompt":              handleTaskPrompt(wm, runner, reg),
 		"run.start":                handleRunStart(wm, runner, reg),
 		"run.list":                 handleRunList(reg),
@@ -679,6 +684,108 @@ func handleTaskCreatePR(wm *workspace.Manager) handlerFunc {
 	}
 }
 
+// handleChatCreate creates a new chat under taskId (ADR-0016 P1.2). title
+// is optional; an omitted title is stored as "" (a genuinely untitled
+// chat), never defaulted to "Chat" -- that name is reserved for a task's
+// automatically created first chat (see workspace.Manager.CreateTask).
+func handleChatCreate(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID int64  `json:"taskId"`
+			Title  string `json:"title"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.create: invalid params: %w", err)
+		}
+		c, err := wm.CreateChat(p.TaskID, p.Title)
+		if err != nil {
+			return nil, fmt.Errorf("chat.create: %w", err)
+		}
+		return c, nil
+	}
+}
+
+// handleChatList returns taskId's chats, ordered by id (its default chat
+// first). includeArchived is optional, defaulting to false (the active
+// working set, matching task.list's own archived-tasks-excluded default).
+func handleChatList(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			TaskID          int64 `json:"taskId"`
+			IncludeArchived bool  `json:"includeArchived"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.list: invalid params: %w", err)
+		}
+		chats, err := wm.ListChats(p.TaskID, p.IncludeArchived)
+		if err != nil {
+			return nil, fmt.Errorf("chat.list: %w", err)
+		}
+		return chats, nil
+	}
+}
+
+// handleChatGet returns the chat with the given id.
+func handleChatGet(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.get: invalid params: %w", err)
+		}
+		c, err := wm.GetChat(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("chat.get: %w", err)
+		}
+		return c, nil
+	}
+}
+
+// handleChatRename sets a chat's title (a tab rename, in the web UI).
+func handleChatRename(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID    int64  `json:"id"`
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.rename: invalid params: %w", err)
+		}
+		c, err := wm.RenameChat(p.ID, p.Title)
+		if err != nil {
+			return nil, fmt.Errorf("chat.rename: %w", err)
+		}
+		return c, nil
+	}
+}
+
+// handleChatArchive archives a chat, refusing while it has a running run
+// (ADR-0016 P1.2) -- checked here, against reg, rather than in
+// workspace.Manager.ArchiveChat itself: internal/workspace doesn't import
+// internal/runs (the reverse dependency already exists: runs imports
+// workspace), so this is the one layer that holds both.
+func handleChatArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.archive: invalid params: %w", err)
+		}
+		for _, run := range reg.List(p.ID) {
+			if run.Status == runs.StatusRunning {
+				return nil, fmt.Errorf("chat.archive: chat %d has a running run (%s)", p.ID, run.ID)
+			}
+		}
+		c, err := wm.ArchiveChat(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("chat.archive: %w", err)
+		}
+		return c, nil
+	}
+}
+
 // taskPromptResult is the terminal result of a successful task.prompt (or
 // run.attach/run.start reaching StatusDone).
 type taskPromptResult struct {
@@ -787,7 +894,11 @@ type permissionResolvedParams struct {
 func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(ctx context.Context, rc *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			TaskID         int64                     `json:"taskId"`
+			TaskID int64 `json:"taskId"`
+			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
+			// the task's default chat, so a client that has never heard of
+			// chats (old CLI, mobile) keeps working unchanged.
+			ChatID         int64                     `json:"chatId"`
 			Provider       taskrunner.Provider       `json:"provider"`
 			Prompt         string                    `json:"prompt"`
 			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
@@ -807,7 +918,7 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -838,7 +949,10 @@ type runStartResult struct {
 func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			TaskID         int64                     `json:"taskId"`
+			TaskID int64 `json:"taskId"`
+			// ChatID is optional (ADR-0016 P1.3): omitted or 0 resolves to
+			// the task's default chat.
+			ChatID         int64                     `json:"chatId"`
 			Provider       taskrunner.Provider       `json:"provider"`
 			Prompt         string                    `json:"prompt"`
 			ApprovalPolicy taskrunner.ApprovalPolicy `json:"approvalPolicy"`
@@ -861,7 +975,7 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
+		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, p.ApprovalPolicy, p.ThinkingLevel)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
@@ -869,9 +983,20 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 	}
 }
 
+// handleRunList returns every run the Registry knows about, or (with
+// chatId set) just that chat's runs -- ADR-0016 P1.4's additive filter;
+// an omitted/zero chatId preserves today's unfiltered behavior exactly.
 func handleRunList(reg *runs.Registry) handlerFunc {
-	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return reg.List(), nil
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ChatID int64 `json:"chatId"`
+		}
+		if len(raw) > 0 {
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, fmt.Errorf("run.list: invalid params: %w", err)
+			}
+		}
+		return reg.List(p.ChatID), nil
 	}
 }
 

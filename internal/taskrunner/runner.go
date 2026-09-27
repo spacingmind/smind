@@ -147,17 +147,20 @@ type Runner struct {
 	// map.
 	codexCommand []string
 
-	// acpSessions tracks each task's most recent ACP session (see
-	// acpSessionState in config_options.go), keyed by task ID, so
-	// ConfigOptions/SetSessionConfigOption can reach a task's live session
-	// without RunPrompt handing its per-turn client to anyone. Guarded by
-	// sessionMu.
+	// acpSessions tracks each chat's most recent ACP session (see
+	// acpSessionState in config_options.go), keyed by chat ID, so
+	// ConfigOptions/SetSessionConfigOption can reach a chat's live session
+	// without RunPrompt handing its per-turn client to anyone. Keyed by
+	// chat, not task (docs/decisions/0016-multiple-chats-per-task.md
+	// §4): two chats of the same task can now run concurrently, and a
+	// task-keyed map would let one chat's teardown null out another
+	// chat's live client. Guarded by sessionMu.
 	acpSessions map[int64]*acpSessionState
 	sessionMu   sync.Mutex
 
 	// sessionStore holds the resumable SessionHandle each provider's
 	// RunPrompt call reads before a turn and writes after one, keyed by
-	// task ID -- see SessionHandle/SessionStore's doc comments. Defaults to
+	// chat ID -- see SessionHandle/SessionStore's doc comments. Defaults to
 	// an empty MemorySessionStore; overridable via WithSessionStore.
 	sessionStore SessionStore
 
@@ -207,6 +210,14 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // whether it returns an error or not, so a caller can unconditionally range
 // over it.
 //
+// chatID identifies the docs/decisions/0016-multiple-chats-per-task.md chat
+// this turn belongs to -- RunPrompt itself does no chat validation (that's
+// internal/runs.Registry.Start's job, one layer up); it only uses chatID as
+// the acpSessions key (so ConfigOptions/SetSessionConfigOption can reach
+// the right live session even while a sibling chat of the same task has
+// its own turn in flight) and as the sessionStore key (so a chat's resume
+// handle -- SessionHandle -- is its own, distinct from any sibling chat's).
+//
 // decider, if non-nil, overrides the Runner-level acp.PermissionPolicy/
 // claudecode.PermissionPolicy default for this call only -- see
 // PermissionDecider's doc comment for why a human-in-the-loop decider is
@@ -238,7 +249,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -252,11 +263,11 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runACP(ctx, chatID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, taskID, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
+		return r.runClaudeNative(ctx, chatID, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, taskID, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runCodexNative(ctx, chatID, worktreePath, prompt, decider, approvalPolicy, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -267,7 +278,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -297,12 +308,12 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, taskID, provider, client, worktreePath, events)
+	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
-	r.trackACPSession(taskID, sessionID, client, configOptions)
-	defer r.endACPTurn(taskID)
+	r.trackACPSession(chatID, sessionID, client, configOptions)
+	defer r.endACPTurn(chatID)
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
@@ -325,7 +336,7 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s prompt: %w", provider, err)
 	}
-	r.sessionStore.Set(taskID, SessionHandle{Provider: provider, SessionID: sessionID})
+	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: sessionID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
@@ -334,7 +345,7 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	return nil
 }
 
-// newOrResumeACPSession starts the ACP session this turn drives: if taskID
+// newOrResumeACPSession starts the ACP session this turn drives: if chatID
 // has a stored SessionHandle for provider, it tries to resume that
 // session's conversation -- session/load if client advertises the
 // loadSession capability, else session/resume if it advertises
@@ -348,8 +359,12 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 // context. See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
 // P2.3/P2.5, modeled on
 // refs/paseo/packages/server/src/server/agent/providers/acp-agent.ts:1757-1800.
-func (r *Runner) newOrResumeACPSession(ctx context.Context, taskID int64, provider Provider, client acpBackend, worktreePath string, events chan<- Event) (string, []acp.ConfigOption, error) {
-	handle, ok := r.sessionStore.Get(taskID)
+//
+// The stored handle is keyed by chatID, not taskID: a chat's resumable
+// session is its own, distinct from any sibling chat of the same task (see
+// SessionStore's doc comment).
+func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, events chan<- Event) (string, []acp.ConfigOption, error) {
+	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != provider || handle.SessionID == "" {
 		return client.NewSession(ctx, worktreePath)
 	}
@@ -482,7 +497,7 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch thinkingLevel {
 	case ThinkingLevelOff:
@@ -539,7 +554,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
 	}
 
-	client, err := r.newClaudeClientWithResume(ctx, taskID, worktreePath, opts, events)
+	client, err := r.newClaudeClientWithResume(ctx, chatID, worktreePath, opts, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
 	}
@@ -564,7 +579,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath
 	if err != nil {
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
-	r.sessionStore.Set(taskID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID})
+	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
@@ -573,8 +588,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath
 	return nil
 }
 
-// newClaudeClientWithResume spawns taskID's claude-native turn, resuming
-// its stored session (via claudecode.WithResume) when one exists. A
+// newClaudeClientWithResume spawns chatID's claude-native turn, resuming
+// its stored session (via claudecode.WithResume) when one exists -- keyed
+// by chatID, not taskID, same reasoning as newOrResumeACPSession. A
 // resume attempt that fails at construction -- verified live 2026-09-27
 // against a real `claude` CLI: an unknown/stale --resume session id fails
 // the CLI's own initialize handshake, surfacing as claudecode.New itself
@@ -582,8 +598,8 @@ func (r *Runner) runClaudeNative(ctx context.Context, taskID int64, worktreePath
 // instead of failing the turn, surfacing an EventTypeSessionNote first.
 // See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
 // P2.2/P2.5.
-func (r *Runner) newClaudeClientWithResume(ctx context.Context, taskID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (claudeBackend, error) {
-	handle, ok := r.sessionStore.Get(taskID)
+func (r *Runner) newClaudeClientWithResume(ctx context.Context, chatID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (claudeBackend, error) {
+	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != ProviderClaudeNative || handle.SessionID == "" {
 		return r.newClaudeClient(worktreePath, opts...)
 	}
@@ -690,7 +706,7 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	var opts []codex.Option
 	switch {
 	case approvalPolicy == ApprovalPolicyFullAccess:
@@ -715,7 +731,7 @@ func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath,
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
 	}
-	threadID, err := r.newOrResumeCodexThread(ctx, taskID, client, worktreePath, events)
+	threadID, err := r.newOrResumeCodexThread(ctx, chatID, client, worktreePath, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex new thread: %w", err)
 	}
@@ -737,7 +753,7 @@ func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath,
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex prompt: %w", err)
 	}
-	r.sessionStore.Set(taskID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
+	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
@@ -747,7 +763,7 @@ func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath,
 }
 
 // newOrResumeCodexThread starts the codex thread this turn drives: if
-// taskID has a stored SessionHandle, it tries codexBackend.ResumeSession
+// chatID has a stored SessionHandle, it tries codexBackend.ResumeSession
 // (thread/resume, with the thread/loaded/list and archived->unarchive
 // handling that method's own doc comment describes) before falling back to
 // a fresh thread/start -- surfacing an EventTypeSessionNote first whenever
@@ -755,8 +771,8 @@ func (r *Runner) runCodexNative(ctx context.Context, taskID int64, worktreePath,
 // id), so that degrades gracefully rather than failing the prompt. See
 // ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
 // P2.4/P2.5.
-func (r *Runner) newOrResumeCodexThread(ctx context.Context, taskID int64, client codexBackend, worktreePath string, events chan<- Event) (string, error) {
-	handle, ok := r.sessionStore.Get(taskID)
+func (r *Runner) newOrResumeCodexThread(ctx context.Context, chatID int64, client codexBackend, worktreePath string, events chan<- Event) (string, error) {
+	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != ProviderCodexNative || handle.SessionID == "" {
 		return client.NewSession(ctx, worktreePath)
 	}

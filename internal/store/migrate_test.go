@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -174,6 +175,238 @@ func assertRunsHasApprovalPolicyColumn(t *testing.T, s *Store) {
 	if err != nil {
 		t.Fatalf("runs.approval_policy column not found: %v", err)
 	}
+}
+
+// preChatsSchema recreates the schema shape from immediately before
+// docs/decisions/0016-multiple-chats-per-task.md: no chats table, no
+// runs.chat_id -- otherwise identical to today's schema.sql (including
+// approval_policy, so this exercises the chats migration in isolation from
+// the older approval_policy one). This is what a real pre-chats smind.db
+// looked like on disk.
+const preChatsSchema = `
+CREATE TABLE workspaces (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    path TEXT NOT NULL,
+    title TEXT NOT NULL,
+    routing_policy TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+
+CREATE TABLE tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
+    space_id INTEGER,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    worktree_path TEXT,
+    branch TEXT,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    archived_at TIMESTAMP
+);
+
+CREATE TABLE runs (
+    id TEXT PRIMARY KEY,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    provider TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    stop_reason TEXT NOT NULL DEFAULT '',
+    err_msg TEXT NOT NULL DEFAULT '',
+    approval_policy TEXT NOT NULL DEFAULT 'manual'
+);
+`
+
+// seedPreChatsDB creates a database file at path with the pre-chats schema,
+// two tasks, and five runs split across them (three for the first, two for
+// the second) -- the exact shape the plan's migration test scenario names:
+// "a DB with 2 tasks and 5 runs gets 2 default chats with every run linked".
+func seedPreChatsDB(t *testing.T, path string) (task1ID, task2ID int64) {
+	t.Helper()
+
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open raw db error = %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(preChatsSchema); err != nil {
+		t.Fatalf("apply pre-chats schema error = %v", err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.Exec(
+		`INSERT INTO workspaces (id, path, title, routing_policy, created_at, updated_at) VALUES (1, '/repo', 'repo', 'hard', ?, ?)`,
+		now, now,
+	); err != nil {
+		t.Fatalf("seed workspace error = %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO tasks (id, workspace_id, title, status, created_at, updated_at) VALUES (1, 1, 'task one', 'done', ?, ?)`,
+		now, now,
+	); err != nil {
+		t.Fatalf("seed task 1 error = %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO tasks (id, workspace_id, title, status, created_at, updated_at) VALUES (2, 1, 'task two', 'done', ?, ?)`,
+		now, now,
+	); err != nil {
+		t.Fatalf("seed task 2 error = %v", err)
+	}
+
+	runTasks := []int64{1, 1, 1, 2, 2}
+	for i, taskID := range runTasks {
+		if _, err := db.Exec(
+			`INSERT INTO runs (id, task_id, provider, prompt, status, started_at) VALUES (?, ?, 'glm', 'hi', 'done', ?)`,
+			fmt.Sprintf("run-%d", i), taskID, now,
+		); err != nil {
+			t.Fatalf("seed run %d error = %v", i, err)
+		}
+	}
+
+	return 1, 2
+}
+
+// TestMigrate_BackfillsDefaultChatsForPreExistingTasksAndRuns is the
+// migration test scenario named in the plan: "a DB with 2 tasks and 5 runs
+// gets 2 default chats with every run linked".
+func TestMigrate_BackfillsDefaultChatsForPreExistingTasksAndRuns(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "pre-chats.db")
+	task1ID, task2ID := seedPreChatsDB(t, path)
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() on pre-chats database error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := s.Close(); err != nil {
+			t.Errorf("Close() error = %v", err)
+		}
+	})
+
+	for _, taskID := range []int64{task1ID, task2ID} {
+		chats, err := s.ListChatsByTask(taskID, true)
+		if err != nil {
+			t.Fatalf("ListChatsByTask(%d) error = %v", taskID, err)
+		}
+		if len(chats) != 1 {
+			t.Fatalf("ListChatsByTask(%d) = %+v, want exactly 1 default chat", taskID, chats)
+		}
+		if chats[0].Title != "Chat" {
+			t.Fatalf("default chat title = %q, want %q", chats[0].Title, "Chat")
+		}
+		if chats[0].Provider != nil {
+			t.Fatalf("default chat Provider = %v, want nil", chats[0].Provider)
+		}
+	}
+
+	task1Chats, _ := s.ListChatsByTask(task1ID, true)
+	task2Chats, _ := s.ListChatsByTask(task2ID, true)
+
+	wantChatID := map[string]int64{
+		"run-0": task1Chats[0].ID, "run-1": task1Chats[0].ID, "run-2": task1Chats[0].ID,
+		"run-3": task2Chats[0].ID, "run-4": task2Chats[0].ID,
+	}
+	for runID, wantID := range wantChatID {
+		got, err := s.GetRun(runID)
+		if err != nil {
+			t.Fatalf("GetRun(%q) error = %v", runID, err)
+		}
+		if got.ChatID != wantID {
+			t.Fatalf("GetRun(%q).ChatID = %d, want %d (its task's default chat)", runID, got.ChatID, wantID)
+		}
+	}
+}
+
+// TestMigrate_ChatsBackfillIdempotentAcrossRepeatedOpen proves re-running
+// the chats backfill migration (either against a fresh schema.sql database
+// or one that already went through the pre-chats backfill once) is a safe
+// no-op -- no duplicate default chats, no runs repointed away from their
+// already-assigned chat.
+func TestMigrate_ChatsBackfillIdempotentAcrossRepeatedOpen(t *testing.T) {
+	t.Parallel()
+
+	t.Run("fresh database", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "fresh-chats.db")
+
+		for i := 0; i < 3; i++ {
+			s, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open() call %d error = %v", i, err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatalf("Close() call %d error = %v", i, err)
+			}
+		}
+
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("final Open() error = %v", err)
+		}
+		t.Cleanup(func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("Close() error = %v", err)
+			}
+		})
+
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM chats`).Scan(&count); err != nil {
+			t.Fatalf("count chats error = %v", err)
+		}
+		if count != 0 {
+			t.Fatalf("chats count on a fresh, task-less database = %d, want 0", count)
+		}
+	})
+
+	t.Run("pre-existing database migrated repeatedly", func(t *testing.T) {
+		t.Parallel()
+		path := filepath.Join(t.TempDir(), "pre-chats-repeat.db")
+		task1ID, task2ID := seedPreChatsDB(t, path)
+
+		for i := 0; i < 3; i++ {
+			s, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open() call %d error = %v", i, err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatalf("Close() call %d error = %v", i, err)
+			}
+		}
+
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("final Open() error = %v", err)
+		}
+		t.Cleanup(func() {
+			if err := s.Close(); err != nil {
+				t.Errorf("Close() error = %v", err)
+			}
+		})
+
+		var count int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM chats`).Scan(&count); err != nil {
+			t.Fatalf("count chats error = %v", err)
+		}
+		if count != 2 {
+			t.Fatalf("chats count after repeated migration = %d, want 2 (one per task, not duplicated)", count)
+		}
+
+		for _, taskID := range []int64{task1ID, task2ID} {
+			chats, err := s.ListChatsByTask(taskID, true)
+			if err != nil {
+				t.Fatalf("ListChatsByTask(%d) error = %v", taskID, err)
+			}
+			if len(chats) != 1 {
+				t.Fatalf("ListChatsByTask(%d) = %+v, want exactly 1 chat", taskID, chats)
+			}
+		}
+	})
 }
 
 // seedPreApprovalPolicyDB creates a database file at path with the pre-#93

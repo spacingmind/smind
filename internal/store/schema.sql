@@ -62,9 +62,20 @@ CREATE TABLE IF NOT EXISTS tasks (
     archived_at TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS chats (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL REFERENCES tasks(id),
+    title TEXT NOT NULL DEFAULT '',
+    provider TEXT,
+    agent_session TEXT,
+    created_at TIMESTAMP NOT NULL,
+    archived_at TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id TEXT PRIMARY KEY,
     task_id INTEGER NOT NULL REFERENCES tasks(id),
+    chat_id INTEGER REFERENCES chats(id),
     provider TEXT NOT NULL,
     prompt TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -112,7 +123,14 @@ CREATE INDEX IF NOT EXISTS idx_workspace_accounts_account_id ON workspace_accoun
 CREATE INDEX IF NOT EXISTS idx_spaces_workspace_id ON spaces(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_space_id ON tasks(space_id);
+CREATE INDEX IF NOT EXISTS idx_chats_task_id ON chats(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
+-- idx_runs_chat_id is created by the chats.default_chat_backfill migration,
+-- not here: this file is applied in full (via one db.Exec) before any
+-- migration runs, so an index on runs.chat_id would fail against a
+-- pre-existing database whose runs table doesn't have that column yet --
+-- CREATE TABLE IF NOT EXISTS runs above is a no-op for it, since the table
+-- already exists.
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task_id ON terminal_sessions(task_id);

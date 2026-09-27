@@ -159,10 +159,11 @@ func (s *Store) ArchiveTask(id int64) (Task, error) {
 }
 
 // DeleteTask permanently removes task id and everything scoped to it from
-// smind's own tracking: run_events (via each of its runs), runs,
+// smind's own tracking: run_events (via each of its runs), runs, chats,
 // terminal_sessions, and finally the tasks row itself, in that FK-safe
 // child-before-parent order (matching the schema's foreign keys, enforced
-// by _pragma=foreign_keys(1) -- see store.sqliteDSN). It never touches
+// by _pragma=foreign_keys(1) -- see store.sqliteDSN; chats must go after
+// runs since runs.chat_id references chats(id)). It never touches
 // anything on disk; git worktree cleanup is workspace.Manager's job (see
 // workspace.Manager.DeleteTask), which calls this only after that succeeds.
 // Deleting a nonexistent task is a clear not-found error (via GetTask),
@@ -178,6 +179,9 @@ func (s *Store) DeleteTask(id int64) error {
 	}
 	if _, err := s.db.Exec(`DELETE FROM runs WHERE task_id = ?`, id); err != nil {
 		return fmt.Errorf("delete task %d: delete runs: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM chats WHERE task_id = ?`, id); err != nil {
+		return fmt.Errorf("delete task %d: delete chats: %w", id, err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM terminal_sessions WHERE task_id = ?`, id); err != nil {
 		return fmt.Errorf("delete task %d: delete terminal sessions: %w", id, err)

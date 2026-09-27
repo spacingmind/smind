@@ -2,7 +2,9 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"time"
 )
 
 // migration describes a single additive schema change needed to bring a
@@ -39,6 +41,103 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "runs", "approval_policy", "TEXT NOT NULL DEFAULT 'manual'")
 		},
 	},
+	{
+		// Added for docs/decisions/0016-multiple-chats-per-task.md. schema.sql
+		// already creates the chats table for every database (fresh or
+		// pre-existing, via CREATE TABLE IF NOT EXISTS, applied before migrate
+		// runs -- see Open); what a pre-existing database still needs is the
+		// runs.chat_id column (addColumnIfMissing can't express this one:
+		// unlike approval_policy's constant default, each task's default chat
+		// id is different, so there's nothing constant to default the column
+		// to) plus, for every task, exactly one default chat with every one
+		// of that task's chat_id-less runs repointed at it. See
+		// backfillDefaultChats.
+		name: "chats.default_chat_backfill",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "runs", "chat_id", "INTEGER REFERENCES chats(id)"); err != nil {
+				return err
+			}
+			// Only safe to create once the column above is guaranteed to
+			// exist -- see schema.sql's comment on why this index isn't
+			// declared there.
+			if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_runs_chat_id ON runs(chat_id)`); err != nil {
+				return fmt.Errorf("create idx_runs_chat_id: %w", err)
+			}
+			return backfillDefaultChats(db)
+		},
+	},
+}
+
+// backfillDefaultChats gives every task exactly one default chat
+// (provider/agent_session NULL, title "Chat") and repoints every one of
+// that task's runs still missing a chat_id at it. Idempotent: a task that
+// already has at least one chat (whether from a prior run of this
+// migration, or because it was created after chats shipped) is left alone,
+// and a run that already has a chat_id is left alone -- so running this
+// twice, or against a fresh database with no tasks at all, is a no-op.
+// Transactional: either every task gets its default chat and every run
+// gets repointed, or (on any failure) none of it is applied, since this
+// runs against the user's real smind.db on every daemon startup and a
+// half-applied backfill (some tasks migrated, others not) would be worse
+// than simply failing to start.
+func backfillDefaultChats(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("backfill default chats: begin: %w", err)
+	}
+	defer tx.Rollback()
+
+	taskRows, err := tx.Query(`SELECT id FROM tasks`)
+	if err != nil {
+		return fmt.Errorf("backfill default chats: list tasks: %w", err)
+	}
+	var taskIDs []int64
+	for taskRows.Next() {
+		var id int64
+		if err := taskRows.Scan(&id); err != nil {
+			taskRows.Close()
+			return fmt.Errorf("backfill default chats: scan task id: %w", err)
+		}
+		taskIDs = append(taskIDs, id)
+	}
+	if err := taskRows.Err(); err != nil {
+		taskRows.Close()
+		return fmt.Errorf("backfill default chats: read task ids: %w", err)
+	}
+	taskRows.Close()
+
+	for _, taskID := range taskIDs {
+		var chatID int64
+		err := tx.QueryRow(`SELECT id FROM chats WHERE task_id = ? ORDER BY id LIMIT 1`, taskID).Scan(&chatID)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			now := time.Now().UTC()
+			res, err := tx.Exec(
+				`INSERT INTO chats (task_id, title, provider, agent_session, created_at) VALUES (?, 'Chat', NULL, NULL, ?)`,
+				taskID, now,
+			)
+			if err != nil {
+				return fmt.Errorf("backfill default chats: create default chat for task %d: %w", taskID, err)
+			}
+			chatID, err = res.LastInsertId()
+			if err != nil {
+				return fmt.Errorf("backfill default chats: default chat id for task %d: %w", taskID, err)
+			}
+		case err != nil:
+			return fmt.Errorf("backfill default chats: find chat for task %d: %w", taskID, err)
+		}
+
+		if _, err := tx.Exec(
+			`UPDATE runs SET chat_id = ? WHERE task_id = ? AND chat_id IS NULL`, chatID, taskID,
+		); err != nil {
+			return fmt.Errorf("backfill default chats: repoint runs for task %d: %w", taskID, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("backfill default chats: commit: %w", err)
+	}
+	return nil
 }
 
 // migrate applies any pending migrations to db. It runs on every Open;

@@ -19,7 +19,7 @@ func (reg *Registry) ListConfigOptions(runID string) ([]acp.ConfigOption, error)
 	if r.runner == nil {
 		return nil, nil
 	}
-	return r.runner.ConfigOptions(r.taskID, r.provider), nil
+	return r.runner.ConfigOptions(r.chatID, r.provider), nil
 }
 
 // SetConfigOption sets one config option on runID's live ACP session via
@@ -35,7 +35,7 @@ func (reg *Registry) SetConfigOption(ctx context.Context, runID, configID, value
 	if r.runner == nil {
 		return nil, fmt.Errorf("runs: set config option: run %q has no live runner (daemon restarted since it ran?)", runID)
 	}
-	opts, err := r.runner.SetSessionConfigOption(ctx, r.taskID, r.provider, configID, value)
+	opts, err := r.runner.SetSessionConfigOption(ctx, r.chatID, r.provider, configID, value)
 	if err != nil {
 		return nil, fmt.Errorf("runs: set config option: %w", err)
 	}
