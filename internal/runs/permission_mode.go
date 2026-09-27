@@ -83,3 +83,17 @@ func (r *run) requireRunning(op string) error {
 	}
 	return nil
 }
+
+// applyReportedMode records the permission mode the provider reports the
+// run's session is actually in (taskrunner.EventTypePermissionModeChanged:
+// an ACP run's start mode once applied, or the agent's own later switch),
+// so RunStatus never shows a mode the agent isn't in.
+func (reg *Registry) applyReportedMode(r *run, mode string) {
+	r.mu.Lock()
+	changed := r.perm.Mode != mode
+	r.perm.Mode = mode
+	r.mu.Unlock()
+	if changed {
+		reg.notifyRunStatus(r)
+	}
+}

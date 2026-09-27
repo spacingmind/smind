@@ -415,6 +415,11 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
 	}
+	// An empty mode resolves to the provider default -- for an ACP agent
+	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
+	// treats as "leave the agent in its own start mode" unless the agent
+	// really has a mode by that name; the run then records the agent's
+	// actual mode as soon as its session reports it (applyReportedMode).
 	if perm.Mode == "" {
 		perm.Mode = catalog.DefaultMode
 	}
@@ -517,6 +522,10 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	go func() {
 		defer close(forwardDone)
 		for e := range events {
+			if e.Type == taskrunner.EventTypePermissionModeChanged {
+				reg.applyReportedMode(r, e.Text)
+				continue
+			}
 			reg.record(r, e)
 		}
 	}()

@@ -84,6 +84,15 @@ const (
 	// session). Never sent instead of EventTypeDone, only before it -- see
 	// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.5.
 	EventTypeSessionNote
+
+	// EventTypePermissionModeChanged reports the provider-native permission
+	// mode the session is actually in, populated in Text (ADR-0019): sent
+	// by an ACP run once its start mode is applied (so a run that left the
+	// agent in its own start mode records which one that is), and again
+	// whenever the agent reports its own switch (current_mode_update). It
+	// is bookkeeping for the run's status, not transcript: internal/runs
+	// applies it to the run and never records it into history.
+	EventTypePermissionModeChanged
 )
 
 // Unified ToolStatus values for Event.ToolStatus, spanning both providers'

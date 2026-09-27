@@ -50,12 +50,26 @@ var capsMode string
 // advertises ACP SessionModeState in session/new (GLM-shaped
 // default/accept_edits/bypass_permissions), "modes:config" advertises the
 // same modes as a category-"mode" select config option instead; unset
-// advertises no modes at all. session/set_mode (and a set_config_option
+// advertises no modes at all. "modes:nodefault" advertises SessionModeState
+// modes that don't include any "default" (ask/code, current ask), like
+// agents that name their modes differently. session/set_mode (and a set_config_option
 // on the "mode" config id) records the applied mode to a "session-mode"
 // file in the session's cwd, so tests can observe it.
 var modesMode string
 
 var fakeModeIDs = []string{"default", "accept_edits", "bypass_permissions"}
+
+// noDefaultModeIDs is modes:nodefault's catalog -- deliberately no
+// "default" id.
+var noDefaultModeIDs = []string{"ask", "code"}
+
+// advertisedModeIDs is the mode catalog this agent answers set_mode for.
+func advertisedModeIDs() []string {
+	if modesMode == "nodefault" {
+		return noDefaultModeIDs
+	}
+	return fakeModeIDs
+}
 
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -171,12 +185,13 @@ func handle(msg message, sessionCwd *string) {
 			"sessionId":     sessionID,
 			"configOptions": defaultConfigOptions(),
 		}
-		if modesMode == "session" {
-			available := make([]map[string]any, len(fakeModeIDs))
-			for i, id := range fakeModeIDs {
+		if modesMode == "session" || modesMode == "nodefault" {
+			ids := advertisedModeIDs()
+			available := make([]map[string]any, len(ids))
+			for i, id := range ids {
 				available[i] = map[string]any{"id": id, "name": "Mode " + id}
 			}
-			result["modes"] = map[string]any{"currentModeId": "default", "availableModes": available}
+			result["modes"] = map[string]any{"currentModeId": ids[0], "availableModes": available}
 		}
 		respond(msg.ID, result)
 	case msg.Method == "session/set_mode":
@@ -247,7 +262,7 @@ func defaultConfigOptions() []map[string]any {
 }
 
 func knownFakeMode(id string) bool {
-	for _, m := range fakeModeIDs {
+	for _, m := range advertisedModeIDs() {
 		if m == id {
 			return true
 		}

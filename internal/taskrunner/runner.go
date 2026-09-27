@@ -326,12 +326,27 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
 	}
 	r.updateACPSessionOptions(chatID, sessionID, updated)
+	if mode, ok := currentACPMode(client, sessionID, updated); ok {
+		select {
+		case events <- Event{Type: EventTypePermissionModeChanged, Text: mode}:
+		case <-ctx.Done():
+		}
+	}
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
 		for u := range updates {
+			if u.Type == acp.SessionUpdateCurrentModeUpdate {
+				// acp.Client has already applied it to SessionModes.
+				if mode, ok := currentACPMode(client, sessionID, nil); ok {
+					select {
+					case events <- Event{Type: EventTypePermissionModeChanged, Text: mode}:
+					case <-ctx.Done():
+					}
+				}
+			}
 			e, ok := acpEvent(u)
 			if !ok {
 				continue

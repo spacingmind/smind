@@ -96,13 +96,13 @@ func applyACPMode(ctx context.Context, client acpBackend, sessionID string, opti
 		return options, nil
 	}
 	if m, ok := client.SessionModes(sessionID); ok && len(m.AvailableModes) > 0 {
-		if m.CurrentModeID == mode {
+		if m.CurrentModeID == mode || (mode == ACPModeDefault && !hasSessionMode(m, mode)) {
 			return options, nil
 		}
 		return options, client.SetSessionMode(ctx, sessionID, mode)
 	}
 	if c, ok := deriveACPModes(nil, options); ok {
-		if c.defaultMode == mode {
+		if c.defaultMode == mode || (mode == ACPModeDefault && !hasCatalogMode(c, mode)) {
 			return options, nil
 		}
 		returned, err := client.SetSessionConfigOption(ctx, sessionID, c.configID, mode)
@@ -115,6 +115,42 @@ func applyACPMode(ctx context.Context, client acpBackend, sessionID string, opti
 		return options, nil
 	}
 	return options, fmt.Errorf("agent advertises no permission modes")
+}
+
+// hasSessionMode / hasCatalogMode report whether the agent actually
+// advertises a mode with id -- ACPModeDefault is only ever *sent* to an
+// agent that has a mode by that name; for any other agent it is smind's
+// "leave the agent in its own start mode" fallback (the id a run gets
+// before the agent's own modes are discovered).
+func hasSessionMode(m acp.SessionModeState, id string) bool {
+	for _, am := range m.AvailableModes {
+		if am.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func hasCatalogMode(c acpModeCatalog, id string) bool {
+	for _, cm := range c.modes {
+		if cm.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// currentACPMode reports the mode sessionID is actually in, from the
+// agent's SessionModeState or its mode config option; ok is false for an
+// agent that advertises no modes at all.
+func currentACPMode(client acpBackend, sessionID string, options []acp.ConfigOption) (string, bool) {
+	if m, ok := client.SessionModes(sessionID); ok && len(m.AvailableModes) > 0 {
+		return m.CurrentModeID, m.CurrentModeID != ""
+	}
+	if c, ok := deriveACPModes(nil, options); ok {
+		return c.defaultMode, c.defaultMode != ""
+	}
+	return "", false
 }
 
 // mergeConfigOptions overlays an agent's set_config_option response onto

@@ -1674,3 +1674,52 @@ func TestRegistry_InterruptedReconciliation_MarksStaleRunningRunsInterrupted(t *
 		t.Fatalf("persisted Status after reconciliation = %q, want %q", reconciled.Status, StatusInterrupted)
 	}
 }
+
+// TestRegistry_Start_UndiscoveredDefaultLeavesAgentMode is the regression
+// test for the first ACP run after a daemon start: with the agent's modes
+// not discovered yet, the fallback DefaultMode "default" must mean "leave
+// the agent in its own start mode" -- not session/set_mode("default"),
+// which an agent without such a mode (here ask/code) rejects, failing the
+// run -- and the run must then report the agent's actual current mode.
+func TestRegistry_Start_UndiscoveredDefaultLeavesAgentMode(t *testing.T) {
+	t.Parallel()
+	for _, perm := range []taskrunner.PermissionSettings{{}, {Mode: taskrunner.ACPModeDefault}} {
+		wm, st := newTestWorkspaceManager(t)
+		task := newTestTask(t, wm, "")
+		reg := newTestRegistry(t, st)
+		runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:nodefault"}))
+
+		runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", perm, "")
+		if err != nil {
+			t.Fatalf("Start(%+v) error = %v", perm, err)
+		}
+		status := waitForTerminal(t, reg, runID)
+		if status.Status != StatusDone {
+			t.Fatalf("Start(%+v) run = %s (%s), want done", perm, status.Status, status.Err)
+		}
+		if status.PermissionMode != "ask" {
+			t.Fatalf("Start(%+v) PermissionMode = %q, want the agent's own current mode %q", perm, status.PermissionMode, "ask")
+		}
+		if _, err := os.Stat(filepath.Join(*task.WorktreePath, "session-mode")); err == nil {
+			t.Fatalf("Start(%+v) sent a mode switch; want the agent left alone", perm)
+		}
+	}
+}
+
+func waitForTerminal(t *testing.T, reg *Registry, runID string) RunStatus {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, status, err := reg.History(runID)
+		if err != nil {
+			t.Fatalf("History(%q) error = %v", runID, err)
+		}
+		if status.Status != StatusRunning {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run %q still running", runID)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
