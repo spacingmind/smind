@@ -119,11 +119,12 @@ Each phase ships as its own PR.
 - Every task always has >=1 chat: `workspace.Manager.CreateTask` creates a default chat ("Chat", provider NULL) the same way the migration backfills one for pre-existing tasks, so `DefaultChat` always has something to resolve to and no lazy-create branch is needed elsewhere.
 - `runs.Registry.Start`'s chat concurrency guard ("no running run per chat") and its per-chat run registration happen under one lock (not check-then-insert as two steps), closing a race two simultaneous `Start` calls for the same chat would otherwise hit.
 - `run.logs` does not gain a `chatId` filter, despite P1.4's AC bullet listing it alongside `run.list`: `run.logs` already takes an unambiguous `runId`, so a `chatId` filter on it would be a parameter with nothing to filter -- ADR-0016 §5's own wire table only lists the filter on `run.list`, and no Test Scenario names a `run.logs` filter.
+- P2 landed (PR #211) keyed by task ID -- its own `SessionStore`/`MemorySessionStore` abstraction was designed with chats not yet existing, doc-commented "once chats land, the key becomes chat ID". Integrating the two branches (this merge) rekeys every `sessionStore.Get`/`Set` call in `internal/taskrunner/runner.go` from `taskID` to `chatID`, and replaces `MemorySessionStore` with a `chats.agent_session`-backed store (`internal/taskrunner/store_session_store.go` or similar) keyed by chat ID -- see the P2 integration Validation entry below.
 
 ## Progress
 
 - [x] P1 backend
-- [ ] P2 session resume
+- [x] P2 session resume (branch `feat/agent-session-resume`, merged into this branch and rekeyed by chat id)
 - [ ] P3 web
 - [ ] P4 CLI + mobile
 
@@ -141,3 +142,77 @@ All P1 acceptance criteria (P1.1-P1.6) and Test Scenarios are implemented and co
 - **P1.6 Compatibility**: every pre-existing `internal/wsapi` test passes unmodified (verified by running the full `internal/wsapi` suite after every change in this phase, with no test edits). The old-client flow (no `chatId` anywhere) is unchanged end to end -- `TestTaskPrompt_OmittedChatId_LandsOnDefaultChat`.
 
 Not done in P1 (explicitly out of scope, per the task that drove this phase): session resume itself (P2 owns it); `web/`, `mobile/`, and CLI wiring (P3/P4 own those) -- P1 only adds the `chats.agent_session` column plus `store.GetChat`/`SetChatAgentSession` for P2 to call.
+
+### P2 session resume
+
+- **P2.1 (SessionHandle/SessionStore).** Added `taskrunner.SessionHandle`
+  {Provider, SessionID, NativeHandle, Metadata} and a `SessionStore`
+  interface, with `MemorySessionStore` wired in as `Runner`'s default,
+  keyed by task ID (the same key the pre-existing in-memory ACP session
+  map used). `TestMemorySessionStore` covers the get/set/replace contract.
+- **P2.2 (claude-native).** `runClaudeNative` now resumes via the vendored
+  SDK's `claudecode.WithResume(sessionID)`, storing the next handle from
+  `ResultMessage.SessionID` after each successful turn.
+  `TestRunner_RunPrompt_ClaudeNative_ResumesSessionAcrossRuns` proves the
+  second run passes `--resume=<id>` and the first doesn't.
+- **P2.3 (ACP).** Verified live 2026-09-27 against the real
+  `glm-acp-agent@1.3.0` binary: its `initialize` response advertises
+  `{loadSession: true, sessionCapabilities: {resume, list, fork, close}}`.
+  `newOrResumeACPSession` tries `session/load` first, falls back to
+  `session/resume`, then to a fresh `session/new` with a surfaced
+  `EventTypeSessionNote` if neither is offered.
+  `TestRunner_RunPrompt_GLM_ResumeCapabilityMatrix` covers all four
+  combinations (loadSession, resume, both, neither) against an
+  extended fake ACP agent.
+- **P2.4 (Codex).** Added `codex.Client.ResumeSession`: checks
+  `thread/loaded/list` first, then `thread/resume`, retrying once via
+  `thread/unarchive` on the archived-thread error. `TestClient_ResumeSession`
+  covers not-loaded/already-loaded/archived-then-unarchived/unknown-id.
+  Verified live 2026-09-27 against the real `codex app-server` 0.149.1
+  binary: `thread/start`, `thread/loaded/list`, `thread/resume`,
+  `thread/archive`, and `thread/unarchive` all behave as documented,
+  including the exact `"no rollout found for thread id ..."` /
+  `"no archived rollout found for thread id ..."` error wording.
+- **P2.5 (fallback).** Every runner falls back to a fresh session on a
+  resume failure (stale/unknown id) instead of failing the prompt, logging
+  and emitting `EventTypeSessionNote` first.
+  `TestRunner_RunPrompt_{GLM,ClaudeNative,CodexNative}_StaleSessionFallsBackWithNote`
+  cover all three providers.
+
+**Live check, against the real daemon** (temp `SMIND_HOME`, port 4714,
+never touching `127.0.0.1:4648` or the real `~/.spacingmind`; reused the
+existing logged-in `claude`/`glm-acp-agent` CLIs read-only):
+
+- **GLM:** prompt 1 ("Remember this secret word: purplecatapult42...")
+  then prompt 2 ("what exactly did I ask you in my previous message?") on
+  the same task correctly answered "Your previous message asked me to
+  remember the secret word 'purplecatapult42' and to reply with just
+  'OK'." No fallback note logged -- `session/load` succeeded.
+- **claude-native:** same two-prompt pattern (secret word
+  "tangerinefalcon77"); the follow-up correctly recalled it. No fallback
+  note logged -- `WithResume` succeeded.
+- **codex-native:** not fully verifiable live -- `thread/start` succeeded,
+  but the first turn itself failed with the CLI's own
+  `"You've hit your usage limit ... try again at Oct 7th, 2026"` (an
+  account-level quota, not a protocol or code issue). The resume mechanics
+  (`thread/loaded/list`, `thread/resume`, `thread/archive`/`thread/unarchive`)
+  were separately verified against the same real binary outside the
+  daemon (see P2.4 above and `TestClient_ResumeSession`), and covered
+  end-to-end (including the fallback path) by
+  `TestRunner_RunPrompt_CodexNative_ResumesSessionAcrossRuns` and
+  `TestRunner_RunPrompt_CodexNative_StaleSessionFallsBackWithNote` against
+  the fake app-server. A full live prompt-resume-followup round trip for
+  Codex remains to be confirmed once the account's quota resets
+  (2026-10-07) or against a different account.
+
+`go test -race ./internal/taskrunner/... ./internal/acp/... ./internal/codex/...`
+and `task lint` both pass.
+
+### P2 integration onto P1 (this merge)
+
+PR #211 landed keyed by task ID, since chats didn't exist on `develop` yet -- its own doc comments anticipated this and said so explicitly. Integrating it onto P1:
+
+- Every `sessionStore.Get`/`Set` call in `internal/taskrunner/runner.go` (`runACP`/`newOrResumeACPSession`, `runClaudeNative`/`newClaudeClientWithResume`, `runCodexNative`/`newOrResumeCodexThread`) is rekeyed from `taskID` to `chatID` -- git's line-based merge combined P1's `chatID`-only `runACP`/`runClaudeNative`/`runCodexNative` signatures with P2's newly-added body lines that still referenced the now-nonexistent `taskID` local; this needed a manual pass function by function (compile errors pointed at exactly the two spots the auto-merge couldn't reconcile).
+- `MemorySessionStore` is replaced by a `chats.agent_session`-backed `SessionStore` (`internal/taskrunner/store_session_store.go`), keyed by chat ID: `Get`/`Set` serialize/deserialize `SessionHandle` as JSON through `store.GetChat`/`SetChatAgentSession`. A chat whose stored handle's `Provider` doesn't match the chat's own bound provider is treated as "no handle" (never used to resume) -- this can only happen if `chats.agent_session` and `chats.provider` somehow drift, which nothing in this codebase does today, but the check costs nothing and matches `SessionHandle.Provider`'s own doc comment ("a stored handle whose Provider doesn't match the run's own provider is never used to resume"). `MemorySessionStore` is kept (unchanged) for tests that don't need persistence.
+- Covered: a handle written after run 1 of a chat is read at run 2 of the *same* chat (`TestStoreSessionStore_RoundTripsThroughRealStore` and a `Runner`-level equivalent); two chats of one task keep separate handles; the handle survives a store reopen (simulated daemon restart); a migrated default chat (`agent_session` NULL) starts fresh on its next run, then resumes from the one after.
+- `go test -race ./internal/...`, `task test`, and `task lint` all pass post-merge.
