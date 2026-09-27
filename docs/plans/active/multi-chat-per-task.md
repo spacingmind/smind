@@ -126,7 +126,7 @@ Each phase ships as its own PR.
 - [x] P1 backend
 - [x] P2 session resume (branch `feat/agent-session-resume`, merged into this branch and rekeyed by chat id)
 - [ ] P3 web
-- [ ] P4 CLI + mobile
+- [x] P4 CLI (mobile stays compatible on the default chat -- no changes needed, per the plan's "out of scope" note)
 
 ## Validation
 
@@ -216,3 +216,12 @@ PR #211 landed keyed by task ID, since chats didn't exist on `develop` yet -- it
 - `MemorySessionStore` (kept, unchanged, still `Runner`'s default and still used by every test that doesn't need persistence) is joined by `ChatSessionStore` (`internal/taskrunner/chat_session_store.go`), a `chats.agent_session`-backed `SessionStore` keyed by chat ID: `Get`/`Set` serialize/deserialize `SessionHandle` as JSON through `store.GetChat`/`SetChatAgentSession`. `cmd/smind/serve.go` wires it in via `taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db))`, so the real daemon persists across restarts; nothing else about `New`'s defaults changed. A chat whose stored handle's `Provider` doesn't match the chat's own bound `provider` column is treated as "no handle" (never used to resume) -- on top of the identical check every `RunPrompt` resume call site already does against the handle's self-reported `Provider` (which is what actually prevents a live mismatch; this store-level check is defense in depth against `chats.agent_session` and `chats.provider` ever drifting apart, which nothing in this codebase does today).
 - Covered (`internal/taskrunner/chat_session_store_test.go`): `TestChatSessionStore_GetSet_RoundTrips` (a handle written after run 1 is read at run 2 of the same chat, at the store layer); `TestChatSessionStore_TwoChatsOfOneTask_KeepSeparateHandles`; `TestChatSessionStore_HandleSurvivesStoreReopen` (a fresh `store.Open` at the same path, simulating a daemon restart); `TestChatSessionStore_MigratedDefaultChat_StartsWithNoHandle` (a chat with `agent_session` NULL reports no handle, so its next run starts fresh); `TestChatSessionStore_Get_ProviderMismatchAgainstBoundChat_IsIgnored`. `TestRunner_RunPrompt_WithChatSessionStore_ResumesAcrossRunsAndRestart` proves the same three properties end to end through the real `Runner.RunPrompt` path against a fake GLM ACP agent: run 1 is `session/new`, run 2 (same chat) is `session/load`, and a third run against a brand-new `Runner`/`workspace.Manager` built on a reopened store is also `session/load` -- the handle survived the simulated restart.
 - `go test -race ./internal/...`, `task test`, and `task lint` all pass post-merge.
+
+### P4 — CLI
+
+All P4 CLI acceptance criteria are implemented and tested in `cmd/smind/task_chat_test.go`, which runs against the same fake-agent-backed daemon the config-option tests use. `go test ./cmd/smind/...`, `task lint` and `task test` all pass. `smind task logs`/`attach` are unchanged because they take a runId, and a runId already identifies exactly one chat. Mobile keeps working on the default chat with no changes.
+
+- `task send --chat`: passes chatId through to `run.start`. When the flag is omitted, the default chat is used. Tests: `TestTaskSend_ChatFlagRoutesRunToThatChat`, `TestTaskSend_OmittedChatLandsOnDefaultChat`.
+- `task chat ls|new|rename|archive`: `ls` prints ID/TITLE/PROVIDER/ARCHIVED, and `--all` includes archived chats. When the daemon refuses to archive a chat with a running run, or an id is unknown, its error is printed verbatim and the command exits non-zero.
+- `task runs <taskId> [--chat <chatId>]`: `run.list`, newest first, with the chatId filter.
+- The usage text in `cmd/smind/main.go` documents all of the above.
