@@ -132,11 +132,14 @@ type Runner struct {
 	// map.
 	codexCommand []string
 
-	// acpSessions tracks each task's most recent ACP session (see
-	// acpSessionState in config_options.go), keyed by task ID, so
-	// ConfigOptions/SetSessionConfigOption can reach a task's live session
-	// without RunPrompt handing its per-turn client to anyone. Guarded by
-	// sessionMu.
+	// acpSessions tracks each chat's most recent ACP session (see
+	// acpSessionState in config_options.go), keyed by chat ID, so
+	// ConfigOptions/SetSessionConfigOption can reach a chat's live session
+	// without RunPrompt handing its per-turn client to anyone. Keyed by
+	// chat, not task (docs/decisions/0016-multiple-chats-per-task.md
+	// §4): two chats of the same task can now run concurrently, and a
+	// task-keyed map would let one chat's teardown null out another
+	// chat's live client. Guarded by sessionMu.
 	acpSessions map[int64]*acpSessionState
 	sessionMu   sync.Mutex
 
@@ -185,6 +188,13 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // whether it returns an error or not, so a caller can unconditionally range
 // over it.
 //
+// chatID identifies the docs/decisions/0016-multiple-chats-per-task.md chat
+// this turn belongs to -- RunPrompt itself does no chat validation (that's
+// internal/runs.Registry.Start's job, one layer up); it only uses chatID as
+// the acpSessions key so ConfigOptions/SetSessionConfigOption can reach the
+// right live session even while a sibling chat of the same task has its own
+// turn in flight.
+//
 // decider, if non-nil, overrides the Runner-level acp.PermissionPolicy/
 // claudecode.PermissionPolicy default for this call only -- see
 // PermissionDecider's doc comment for why a human-in-the-loop decider is
@@ -216,7 +226,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -230,7 +240,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, taskID, provider, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runACP(ctx, chatID, provider, worktreePath, prompt, decider, approvalPolicy, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
 	case ProviderCodexNative:
@@ -245,7 +255,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID int64, provider Provider,
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -279,8 +289,8 @@ func (r *Runner) runACP(ctx context.Context, taskID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
-	r.trackACPSession(taskID, sessionID, client, configOptions)
-	defer r.endACPTurn(taskID)
+	r.trackACPSession(chatID, sessionID, client, configOptions)
+	defer r.endACPTurn(chatID)
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})

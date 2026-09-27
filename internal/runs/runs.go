@@ -58,6 +58,7 @@ const (
 type RunStatus struct {
 	ID         string
 	TaskID     int64
+	ChatID     int64
 	Provider   taskrunner.Provider
 	Prompt     string
 	Status     Status

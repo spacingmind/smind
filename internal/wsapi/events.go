@@ -75,20 +75,24 @@ type taskStatusPayload struct {
 }
 
 // runStatusPayload is the payload of run.status events:
-// {runId, taskId, status, stopReason, err}.
+// {runId, taskId, chatId, status, stopReason, err}. ChatID is ADR-0016
+// P1.4's additive field.
 type runStatusPayload struct {
 	RunID      string `json:"runId"`
 	TaskID     int64  `json:"taskId"`
+	ChatID     int64  `json:"chatId"`
 	Status     string `json:"status"`
 	StopReason string `json:"stopReason,omitempty"`
 	Err        string `json:"err,omitempty"`
 }
 
 // permissionPendingPayload is the payload of permission.pending events:
-// {runId, taskId, requestId, summary, options}.
+// {runId, taskId, chatId, requestId, summary, options}. ChatID is ADR-0016
+// P1.4's additive field.
 type permissionPendingPayload struct {
 	RunID     string                   `json:"runId"`
 	TaskID    int64                    `json:"taskId"`
+	ChatID    int64                    `json:"chatId"`
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`

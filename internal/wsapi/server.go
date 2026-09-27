@@ -220,14 +220,14 @@ type busRunNotifier struct {
 
 func (b busRunNotifier) NotifyRunStatus(s runs.RunStatus) {
 	b.bus.Publish(Event{Topic: TopicRunStatus, Payload: runStatusPayload{
-		RunID: s.ID, TaskID: s.TaskID, Status: string(s.Status),
+		RunID: s.ID, TaskID: s.TaskID, ChatID: s.ChatID, Status: string(s.Status),
 		StopReason: s.StopReason, Err: s.Err,
 	}})
 }
 
-func (b busRunNotifier) NotifyPermissionPending(runID string, taskID int64, requestID, summary string, options []taskrunner.PermissionOption) {
+func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption) {
 	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
-		RunID: runID, TaskID: taskID, RequestID: requestID, Summary: summary,
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Summary: summary,
 		Options: toPermissionOptionParams(options),
 	}})
 }

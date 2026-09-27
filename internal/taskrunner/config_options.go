@@ -15,7 +15,7 @@ import (
 // never do this" from "this ACP session isn't live right now".
 var ErrConfigOptionsNotSupported = errors.New("config options are not supported for this provider")
 
-// acpSessionState is Runner's bookkeeping for one task's ACP session.
+// acpSessionState is Runner's bookkeeping for one chat's ACP session.
 // options is populated exactly once, at session creation, and retained
 // after the turn ends (ConfigOptions keeps reporting what the agent
 // advertised); client is the live session's connection and is set to nil
@@ -28,23 +28,24 @@ type acpSessionState struct {
 }
 
 // trackACPSession records (under Runner's own lock) the session runACP
-// just created, replacing any prior state for the task -- a task's turns
-// are strictly one-session-at-a-time from the Registry's perspective (a
-// second Start on the same task spawns its own client), and the newest
+// just created, replacing any prior state for the chat -- a chat's turns
+// are strictly one-session-at-a-time from the Registry's perspective (see
+// docs/decisions/0016-multiple-chats-per-task.md §4: Registry.Start
+// rejects a second concurrent run on the same chat), and the newest
 // session is the only one a config-option call could ever reach.
-func (r *Runner) trackACPSession(taskID int64, sessionID string, client acpBackend, options []acp.ConfigOption) {
+func (r *Runner) trackACPSession(chatID int64, sessionID string, client acpBackend, options []acp.ConfigOption) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
-	r.acpSessions[taskID] = &acpSessionState{sessionID: sessionID, client: client, options: options}
+	r.acpSessions[chatID] = &acpSessionState{sessionID: sessionID, client: client, options: options}
 }
 
-// endACPTurn marks the task's tracked session as no longer live, keeping
+// endACPTurn marks the chat's tracked session as no longer live, keeping
 // the discovered options. Called from runACP's teardown, before the client
 // is closed.
-func (r *Runner) endACPTurn(taskID int64) {
+func (r *Runner) endACPTurn(chatID int64) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
-	if s, ok := r.acpSessions[taskID]; ok {
+	if s, ok := r.acpSessions[chatID]; ok {
 		s.client = nil
 	}
 }
@@ -62,35 +63,35 @@ func acpProvider(provider Provider) bool {
 }
 
 // ConfigOptions returns the config options the agent advertised for
-// taskID's ACP session, discovered once at session creation. A provider
-// that doesn't speak ACP (claude-native, codex-native), or a task whose
+// chatID's ACP session, discovered once at session creation. A provider
+// that doesn't speak ACP (claude-native, codex-native), or a chat whose
 // ACP session hasn't been created yet, reports an empty list.
-func (r *Runner) ConfigOptions(taskID int64, provider Provider) []acp.ConfigOption {
+func (r *Runner) ConfigOptions(chatID int64, provider Provider) []acp.ConfigOption {
 	if !acpProvider(provider) {
 		return nil
 	}
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
-	if s, ok := r.acpSessions[taskID]; ok {
+	if s, ok := r.acpSessions[chatID]; ok {
 		return append([]acp.ConfigOption(nil), s.options...)
 	}
 	return nil
 }
 
-// SetSessionConfigOption sets one config option on taskID's live ACP
+// SetSessionConfigOption sets one config option on chatID's live ACP
 // session (acp.Client.SetSessionConfigOption), returning the session's
 // full option list with current values as the agent reports them after
 // the change. For a provider that doesn't speak ACP it always fails with
 // an error wrapping ErrConfigOptionsNotSupported; for an ACP provider
 // whose session isn't currently live (turn not running, or finished), it
 // fails rather than silently no-opping.
-func (r *Runner) SetSessionConfigOption(ctx context.Context, taskID int64, provider Provider, configID, value string) ([]acp.ConfigOption, error) {
+func (r *Runner) SetSessionConfigOption(ctx context.Context, chatID int64, provider Provider, configID, value string) ([]acp.ConfigOption, error) {
 	if !acpProvider(provider) {
 		return nil, fmt.Errorf("taskrunner: set config option: %s: %w", provider, ErrConfigOptionsNotSupported)
 	}
 
 	r.sessionMu.Lock()
-	s, ok := r.acpSessions[taskID]
+	s, ok := r.acpSessions[chatID]
 	var client acpBackend
 	var sessionID string
 	if ok {
@@ -99,12 +100,12 @@ func (r *Runner) SetSessionConfigOption(ctx context.Context, taskID int64, provi
 	r.sessionMu.Unlock()
 
 	if client == nil {
-		return nil, fmt.Errorf("taskrunner: set config option: no live ACP session for task %d", taskID)
+		return nil, fmt.Errorf("taskrunner: set config option: no live ACP session for chat %d", chatID)
 	}
 
 	opts, err := client.SetSessionConfigOption(ctx, sessionID, configID, value)
 	if err != nil {
-		return nil, fmt.Errorf("taskrunner: set config option on task %d: %w", taskID, err)
+		return nil, fmt.Errorf("taskrunner: set config option on chat %d: %w", chatID, err)
 	}
 	return opts, nil
 }

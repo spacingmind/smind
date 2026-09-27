@@ -80,6 +80,23 @@ func (m *Manager) DefaultChat(taskID int64) (store.Chat, error) {
 	return chats[0], nil
 }
 
+// BindChatProvider sets a chat's provider the first time it runs (ADR-0016
+// P1.3) -- a no-op if the chat is already bound (store.BindChatProvider's
+// own guarantee). Checking whether a bind attempt actually conflicts with
+// an existing provider is internal/runs.Registry.Start's job (it fetches
+// the chat first and only calls this when Provider is still nil); this
+// method itself never rejects a call, it just writes through and notifies.
+func (m *Manager) BindChatProvider(id int64, provider string) (store.Chat, error) {
+	c, err := m.store.BindChatProvider(id, provider)
+	if err != nil {
+		return store.Chat{}, fmt.Errorf("bind chat %d provider: %w", id, err)
+	}
+	if n := m.getNotifier(); n != nil {
+		n.NotifyChatUpdated(c)
+	}
+	return c, nil
+}
+
 // RenameChat sets a chat's title. An empty title is rejected, matching
 // account.rename's convention (internal/wsapi's handleAccountRename).
 func (m *Manager) RenameChat(id int64, title string) (store.Chat, error) {
