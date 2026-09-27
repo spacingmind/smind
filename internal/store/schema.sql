@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workspace_id INTEGER NOT NULL REFERENCES workspaces(id),
     space_id INTEGER REFERENCES spaces(id),
+    parent_task_id INTEGER REFERENCES tasks(id),
     title TEXT NOT NULL,
     status TEXT NOT NULL,
     worktree_path TEXT,
@@ -171,6 +172,10 @@ CREATE INDEX IF NOT EXISTS idx_workspace_mcp_servers_mcp_server_id ON workspace_
 CREATE INDEX IF NOT EXISTS idx_spaces_workspace_id ON spaces(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_workspace_id ON tasks(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_space_id ON tasks(space_id);
+-- idx_tasks_parent_task_id is created by the tasks.parent_task_id migration,
+-- not here, for the same reason idx_runs_chat_id isn't: schema.sql runs
+-- before migrations, so an index on the column would fail against a
+-- pre-existing database whose tasks table doesn't have it yet.
 CREATE INDEX IF NOT EXISTS idx_chats_task_id ON chats(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_task_id ON runs(task_id);
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);

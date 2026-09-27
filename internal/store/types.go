@@ -57,13 +57,16 @@ type Space struct {
 }
 
 // Task is a unit of work within a workspace, optionally scoped to a space.
-// SpaceID, WorktreePath, Branch, and ArchivedAt are nullable: a task may not
-// belong to a space, and WorktreePath/Branch stay nil until a follow-up
+// SpaceID, ParentTaskID, WorktreePath, Branch, and ArchivedAt are nullable:
+// a task may not belong to a space, ParentTaskID is nil for a root task
+// (otherwise it points at a task in the same workspace -- CreateTask
+// validates this), and WorktreePath/Branch stay nil until a follow-up
 // worktree-creation step materializes them.
 type Task struct {
 	ID           int64
 	WorkspaceID  int64
 	SpaceID      *int64
+	ParentTaskID *int64
 	Title        string
 	Status       string
 	WorktreePath *string

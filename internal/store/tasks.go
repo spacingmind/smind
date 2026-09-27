@@ -2,19 +2,44 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
 
-// CreateTask inserts a new task, stamping created_at/updated_at.
+// ErrParentTaskMismatch and ErrParentTaskNotFound are returned by
+// CreateTask when a ParentTaskID fails validation. Compare with errors.Is.
+var (
+	ErrParentTaskMismatch = errors.New("parent task is in a different workspace")
+	ErrParentTaskNotFound = errors.New("parent task not found")
+)
+
+// CreateTask inserts a new task, stamping created_at/updated_at. A
+// non-nil ParentTaskID must point at an existing task in the same
+// workspace; otherwise CreateTask returns an error wrapping
+// ErrParentTaskNotFound or ErrParentTaskMismatch (checked via errors.Is),
+// and nothing is inserted.
 func (s *Store) CreateTask(t Task) (Task, error) {
+	if t.ParentTaskID != nil {
+		parent, err := s.GetTask(*t.ParentTaskID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return Task{}, fmt.Errorf("create task: parent task %d: %w", *t.ParentTaskID, ErrParentTaskNotFound)
+		}
+		if err != nil {
+			return Task{}, fmt.Errorf("create task: parent task %d: %w", *t.ParentTaskID, err)
+		}
+		if parent.WorkspaceID != t.WorkspaceID {
+			return Task{}, fmt.Errorf("create task: parent task %d: %w", *t.ParentTaskID, ErrParentTaskMismatch)
+		}
+	}
+
 	now := time.Now().UTC()
 	t.CreatedAt, t.UpdatedAt = now, now
 
 	res, err := s.db.Exec(
-		`INSERT INTO tasks (workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.WorkspaceID, int64PtrToNull(t.SpaceID), t.Title, t.Status,
+		`INSERT INTO tasks (workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.WorkspaceID, int64PtrToNull(t.SpaceID), int64PtrToNull(t.ParentTaskID), t.Title, t.Status,
 		stringPtrToNull(t.WorktreePath), stringPtrToNull(t.Branch),
 		t.CreatedAt, t.UpdatedAt, timePtrToNull(t.ArchivedAt),
 	)
@@ -32,7 +57,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 // GetTask returns the task with the given id.
 func (s *Store) GetTask(id int64) (Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
 		 FROM tasks WHERE id = ?`, id,
 	)
 	t, err := scanTask(row)
@@ -45,7 +70,7 @@ func (s *Store) GetTask(id int64) (Task, error) {
 // ListTasksByWorkspace returns all tasks for workspaceID, ordered by id.
 func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
 		 FROM tasks WHERE workspace_id = ? ORDER BY id`,
 		workspaceID,
 	)
@@ -68,7 +93,7 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 // ListTasksBySpace returns all tasks in spaceID, ordered by id.
 func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
 		 FROM tasks WHERE space_id = ? ORDER BY id`,
 		spaceID,
 	)
@@ -88,11 +113,36 @@ func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
+// ListTasksByParent returns the direct children of task parentID (tasks
+// whose parent_task_id is parentID), ordered by id. Grandchildren are not
+// included; callers walk one level at a time.
+func (s *Store) ListTasksByParent(parentID int64) ([]Task, error) {
+	rows, err := s.db.Query(
+		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		 FROM tasks WHERE parent_task_id = ? ORDER BY id`,
+		parentID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list tasks for parent %d: %w", parentID, err)
+	}
+	defer rows.Close()
+
+	tasks := make([]Task, 0)
+	for rows.Next() {
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task: %w", err)
+		}
+		tasks = append(tasks, t)
+	}
+	return tasks, rows.Err()
+}
+
 // ListUngroupedTasksByWorkspace returns all tasks directly in workspaceID
 // (i.e. with no space), ordered by id.
 func (s *Store) ListUngroupedTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
 		 FROM tasks WHERE workspace_id = ? AND space_id IS NULL ORDER BY id`,
 		workspaceID,
 	)
@@ -198,16 +248,17 @@ type rowScanner interface {
 
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
-	var spaceID sql.NullInt64
+	var spaceID, parentTaskID sql.NullInt64
 	var worktreePath, branch sql.NullString
 	var archivedAt sql.NullTime
 
-	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &t.Title, &t.Status,
+	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
 		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt); err != nil {
 		return Task{}, err
 	}
 
 	t.SpaceID = nullToInt64Ptr(spaceID)
+	t.ParentTaskID = nullToInt64Ptr(parentTaskID)
 	t.WorktreePath = nullToStringPtr(worktreePath)
 	t.Branch = nullToStringPtr(branch)
 	t.ArchivedAt = nullToTimePtr(archivedAt)

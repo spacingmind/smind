@@ -786,6 +786,9 @@ func assertTasksEqual(t *testing.T, got, want Task) {
 	if !ptrEqual(got.SpaceID, want.SpaceID) {
 		t.Errorf("task SpaceID = %v, want %v", derefInt64(got.SpaceID), derefInt64(want.SpaceID))
 	}
+	if !ptrEqual(got.ParentTaskID, want.ParentTaskID) {
+		t.Errorf("task ParentTaskID = %v, want %v", derefInt64(got.ParentTaskID), derefInt64(want.ParentTaskID))
+	}
 	if !strPtrEqual(got.WorktreePath, want.WorktreePath) {
 		t.Errorf("task WorktreePath = %v, want %v", derefString(got.WorktreePath), derefString(want.WorktreePath))
 	}
