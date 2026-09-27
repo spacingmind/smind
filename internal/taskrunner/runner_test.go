@@ -409,8 +409,8 @@ func TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags(t *testing.T) {
 // value maps to the specific claude-agent-sdk-go Option (and therefore CLI
 // flags -- see claudecode's own doc comments for WithAdaptiveThinking/
 // WithThinkingBudget/WithDisabledThinking) runClaudeNative's doc comment
-// promises, using the same "echo-args" observability the AutoSafeAllowedTools
-// test above uses for --allowedTools: the fake CLI dumps its real argv to a
+// promises, using the same "echo-args" observability the PermissionModeFlags
+// test above uses for --permission-mode: the fake CLI dumps its real argv to a
 // file, which is the only way to observe an Option's effect since
 // claudecode.Option values aren't otherwise inspectable from this package.
 // ThinkingLevelUnspecified (the zero value, what an older client that never

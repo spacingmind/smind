@@ -33,8 +33,10 @@ Design: [ADR-0019](../../decisions/0019-provider-native-permission-modes.md)
    error that names `permissionMode`.
 5. Runner applies the mode natively:
    - claude: `--permission-mode <id>` plus `--allow-dangerously-skip-permissions`.
-     The decider is installed for every mode except `bypassPermissions`.
-     No `--allowedTools` Bash rules.
+     The decider is installed for every mode, including `bypassPermissions`
+     (in bypass the CLI never asks, but a mid-run switch to an asking mode
+     must still reach a human; see Decisions). No `--allowedTools` Bash
+     rules.
    - codex: `thread/start` carries that mode's `approvalPolicy`/`sandbox`
      preset.
    - ACP: `session/set_mode` (or a mode config option) after `session/new`
@@ -78,9 +80,10 @@ Go (`internal/taskrunner`, `internal/runs`, `internal/wsapi`, `internal/store`, 
 - **S1 claude mode passthrough**: for each claude mode, the fake CLI
   receives `--permission-mode <id>` and `--allow-dangerously-skip-permissions`,
   and no `Bash(...)` `--allowedTools`.
-- **S2 claude bypass installs no decider**: `bypassPermissions` produces no
-  can_use_tool round-trip to the decider. `acceptEdits` routes a Bash
-  can_use_tool to the decider and then to a human.
+- **S2 claude decider wiring**: `acceptEdits` routes a Bash can_use_tool
+  to the decider and then to a human. The decider stays installed in
+  bypass too, so a later switch can still ask (whether the CLI actually
+  skips asking in bypass is the CLI's own behavior, a manual check).
 - **S3 decider never auto-allows**: a Bash request for `go test ./...`
   (previously auto-safe-allowlisted) now goes pending and waits for
   `run.respondPermission`. On timeout it resolves to deny.
@@ -117,8 +120,11 @@ Go (`internal/taskrunner`, `internal/runs`, `internal/wsapi`, `internal/store`, 
   `manual|auto-safe|full-access|''` × each provider, migrate, and assert
   the `permission_mode`/`auto_accept` values from ADR-0019's table.
   Migration is idempotent on a second run.
-- **S14 legacy event rendering**: a stored `permission_resolved` event
-  with resolution `auto_safe` still decodes, and `run.logs` returns it.
+- **S14 legacy event rendering**: an `auto_safe` resolution still renders
+  in the timeline, labelled as legacy. (Implementation found that
+  permission resolutions are never persisted to `run_events`, since the
+  persisted event shape has no resolution field, so no stored `auto_safe`
+  data exists. Only a live payload from an older daemon could carry it.)
 - **S15 CLI**: `task send --mode acceptEdits` sends `permissionMode`.
   `--approval-policy auto-safe` exits 2 with a message pointing to `--mode`.
   `profile add --mode=plan` round-trips.
@@ -166,6 +172,26 @@ Web (`web/packages/ui`, vitest):
      except via a profile id.
   7. The legacy `approvalPolicy` field is a hard error.
   8. The old `approval_policy` columns are kept but unused.
+- Implementation decisions (2026-09-28, within the accepted design):
+  - The Claude decider is installed for every mode, bypass included, so a
+    live switch out of bypass still reaches a human (AC5 updated).
+  - ACP `auto-safe` rows migrate to the agent default `""`, not
+    `accept_edits`, because no agent runs at migration time to say whether
+    it advertises that mode. This is the narrower choice. ACP `full-access`
+    becomes `autoAccept=true`, exactly what it did before
+    (`acp.AutoApprovePolicy`).
+  - With a decider, AutoAccept is applied in `runPermissionDecider` and
+    recorded as a new `auto_accept` resolution, so the timeline shows that
+    the request was auto-accepted. Without a decider it installs
+    `acp.AutoApprovePolicy`.
+  - ACP mode probing is opt-in (`WithACPModeProbe`, on in `serve`), so test
+    Runners never spawn real agents. Real runs always feed the mode cache.
+    While an ACP provider's modes are undiscovered, any mode id is
+    accepted and the agent itself rejects a bad one (the run fails with the
+    agent's error).
+  - Claude Code's installed CLI lists `manual` as the canonical id for
+    `default` and accepts `default` as an alias (Claude Code CHANGELOG).
+    smind keeps Paseo's `default`.
 
 ## Implementation steps (after sign-off)
 
@@ -225,8 +251,67 @@ Web (`web/packages/ui`, vitest):
 
 - 2026-09-28: Phase 1 design done. ADR-0019 is Accepted and all open
   questions are resolved.
+- 2026-09-28: Phase 2 implemented on `refactor/provider-native-permission-modes`
+  (rebased onto develop after #222/#223 merged), one commit per step:
+  - `635c499` step 1: salvaged e5017dd (approve hint includes the runId).
+  - `3697ead` step 2: static mode catalog in `provider.list`.
+  - `5ca2197` step 4: ACP modes, `SetSessionMode`, probe and cache.
+  - `c10e16e` step 5: Codex approvalPolicy/sandbox on thread start/resume.
+  - `4178fbd` steps 3 and 6-9: the Claude flag (step 3's spike could only
+    be done live, see manual checks), runner, runs, store and migration,
+    wsapi, CLI.
+  - `faba145` step 10: web UI.
+  - `b6cceb3` step 12: docs.
+- Step 11 (MCP `task_send` guard) was **not done**. PR #223 landed only the
+  read-only tools, and `task_send` doesn't exist yet. The requirement and
+  its test (`TestMCPTools_TaskSendRejectsAutoApprovingMode`) are now in
+  `docs/plans/active/mcp-server.md` step 3, and ADR-0017's `task_send` row
+  names `permissionMode`/`autoAccept`/`profileId`.
+  `taskrunner.ModeAutoApproves` is the check to call.
+- This plan stays in `active/` until AC11 lands with `task_send` and the
+  manual checks below are done.
 
 ## Validation
 
-(Filled in during implementation: map each Acceptance Criterion to the
-test/scenario or manual check that confirmed it.)
+`task test` and `task lint` pass (Go: all packages; web: 106 files, 1346
+tests). `cmd/smind`'s `TestMCPServe_ExitsWhenDaemonConnectionDies` (from
+#223, a file this branch doesn't touch) failed once in about 10 runs and
+passed on every rerun. That's a pre-existing flake.
+
+| AC | Status | How confirmed |
+|---|---|---|
+| 1 | ✅ | `policy.go` and the allowlist/fast-path code are deleted. The grep only finds the legacy `PermissionResolvedByAutoSafe` constant and label, migration code/comments, and tests that use `"auto-safe"` as an invalid/legacy input. |
+| 2 | ✅ | `PermissionDecider.Decide(ctx, summary, options)`. S3 `TestRunPermissionDecider_Decide_NeverAutoAllows`; `TestRunPermissionDecider_Decide_AutoAccept_AutoAllows` covers the only auto-allow, the human's per-run AutoAccept. |
+| 3 | ✅ | `TestSupportedProviders_ModeCatalogs`, `TestClaudeModes_AutoHiddenOnBedrockOrVertex`, S4-S6 `TestProviderCatalog_*`, `TestServer_ProviderList_RoundTrip` (catalog present). |
+| 4 | ✅ | S10 `TestValidatePermissionSettings`, `TestRegistry_Start_ValidatesPermissionSettings`, `TestServer_RunStart_PermissionSettings` (unknown mode, autoAccept on non-ACP, legacy field is a hard error naming permissionMode). |
+| 5 | ✅ | S1 `TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags`, S9 `TestRunner_RunPrompt_CodexNative_ModePresets`, S7/S5 `TestRunner_RunPrompt_ACP_AppliesPermissionMode`, `TestRunner_RunPrompt_GLM_AutoAcceptWithoutDecider`. |
+| 6 | ✅ | S11 `TestRunner_SetPermissionMode`, `TestRegistry_SetPermissionMode`, `TestRegistry_SetPermissionMode_CodexUnsupported`, `TestServer_RunSetPermissionMode_*`. Manual: clicking a mode in the live control of a running fake-GLM run wrote `set_mode:accept_edits` to the agent. |
+| 7 | ✅ | S13 `TestMigrate_PermissionModesBackfill` (every policy x provider, runs and profiles, idempotent across reopen), `TestStore_Runs_PermissionMode_RoundTrips`, profile store tests. |
+| 8 | ✅ | W1-W6: `composer.test.tsx` (mode list, provider switch reset, Auto-accept, Shift+Tab, legacy localStorage), `permission-mode-cycle.test.ts`, `permission-modes.test.ts`, `profiles-section.test.tsx` W4, `task-detail.test.tsx` (live control, hidden for Codex, pill), `permission-reason`/`run-timeline` tests (auto_accept, legacy auto_safe). |
+| 9 | ✅ | S15 `TestTaskSend_ModeFlags`, `TestRunProfileAddPrintsCreatedRow` (`--mode=plan`), `TestRunProfileAddRejectsRemovedApprovalPolicyFlag`. Manual: `task send --approval-policy auto-safe` exits 2 pointing at `--mode`. |
+| 10 | ✅ | S16 (e5017dd's test). Manual: `smind task permissions` printed `-> smind task approve <runId> <requestId>`. |
+| 11 | ⏳ blocked | `task_send` isn't implemented yet (see Progress). The requirement moved to mcp-server.md step 3. |
+| 12 | ✅ | ADR-0014/0018 notes, ADR-0017 `task_send` row, README "Permission modes", `cmd/smind/main.go` usage. |
+| 13 | ✅ | `task test`/`task lint` green. Light and dark screenshots (Playwright against a sandbox daemon with the fake ACP agent in `modes:session`): composer mode picker (Claude catalog, GLM discovered catalog), Auto-accept toggle off/on, live mid-run control, Settings → Agents mode field. Local only (`/tmp/smind-shot/out`), not committed. |
+
+### Manual verification still needed (needs a live provider)
+
+1. **GLM's and Kimi's real advertised modes**: run `smind serve`, open
+   the composer on GLM/Kimi, and confirm `provider.list` shows the agent's
+   own modes (user-reported GLM: `default` / `accept_edits` /
+   `bypass_permissions`) and that selecting one sends `session/set_mode`.
+   Fallback until then: `[default]`.
+2. **Claude `default` mode and edits**: does `--permission-mode default`
+   now route file edits through can_use_tool (asking a human), or still
+   block them silently in headless mode as seen on 2026-09-11? If it still
+   blocks, reword or drop `default` from `claudeModes()`. `acceptEdits`
+   stays the default regardless.
+3. **Claude live switch**: switch a running claude-native run between
+   `acceptEdits`/`plan`/`bypassPermissions` from the mid-run control
+   (`set_permission_mode`). This also confirms
+   `--allow-dangerously-skip-permissions` lets bypass be entered mid-run.
+4. **Claude `auto` mode** on an OAuth (non-Bedrock) account: the
+   classifier approves or blocks without prompting.
+5. **Codex presets**: `full-access` really runs with no approvals, and
+   `auto` escalates as `on-request`/`workspace-write`, against a real
+   `codex app-server` (including the `thread/resume` path).

@@ -180,7 +180,7 @@ func runFakeClaudeCLI() {
 	case "echo-args":
 		// Writes the CLI argv back to an "args" file in the working
 		// directory, so a test can assert exactly which flags RunPrompt
-		// spawned the CLI with (e.g. --allowedTools under auto-safe) --
+		// spawned the CLI with (e.g. --permission-mode) --
 		// the flags aren't observable through the wire protocol itself.
 		if err := os.WriteFile(filepath.Join(wd, "args"), []byte(strings.Join(os.Args[1:], "\n")), 0o644); err != nil {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write args: %v\n", err)
