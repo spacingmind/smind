@@ -1092,3 +1092,77 @@ func (f *fakeClaudeModeClient) SetPermissionMode(_ context.Context, mode string)
 	return nil
 }
 func (f *fakeClaudeModeClient) Close() error { return nil }
+
+// sequenceDecider runs each of modes through Runner.SetPermissionMode from
+// inside Decide (the session is provably live), then allows.
+type sequenceDecider struct {
+	r        *Runner
+	chatID   int64
+	provider Provider
+	modes    []string
+	errs     []error
+}
+
+func (d *sequenceDecider) Decide(ctx context.Context, _ string, options []PermissionOption) (string, error) {
+	for _, m := range d.modes {
+		d.errs = append(d.errs, d.r.SetPermissionMode(ctx, d.chatID, d.provider, m))
+	}
+	return options[0].ID, nil
+}
+
+// TestRunner_SetPermissionMode_ConfigOptionAgentRoundTrip is the regression
+// test for the stale config-option currentValue: on an agent exposing its
+// modes as a category-"mode" config option, default -> bypass_permissions
+// -> default must send *both* switches (the second used to be skipped as
+// "already current", leaving the agent in bypass).
+func TestRunner_SetPermissionMode_ConfigOptionAgentRoundTrip(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := glmRunnerWithCaps(wm, "modes:config")
+	d := &sequenceDecider{r: r, chatID: task.ID, provider: ProviderGLM, modes: []string{"bypass_permissions", "default"}}
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	for i, err := range d.errs {
+		if err != nil {
+			t.Fatalf("SetPermissionMode #%d error = %v", i, err)
+		}
+	}
+	want := "set_config_option:bypass_permissions\nset_config_option:default"
+	if log := sessionModeLog(t, *task.WorktreePath); log != want {
+		t.Fatalf("session-mode log = %q, want %q", log, want)
+	}
+}
+
+// TestRunner_SetPermissionMode_FollowsCurrentModeUpdate is the regression
+// test for a stale CurrentModeID: after the agent reports its own switch
+// to accept_edits (current_mode_update), asking for "default" must
+// actually send session/set_mode -- not be skipped because the client
+// still thinks the session is in its start mode.
+func TestRunner_SetPermissionMode_FollowsCurrentModeUpdate(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "mode-update")
+	r := glmRunnerWithCaps(wm, "modes:session")
+	d := &sequenceDecider{r: r, chatID: task.ID, provider: ProviderGLM, modes: []string{"default"}}
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if len(d.errs) != 1 || d.errs[0] != nil {
+		t.Fatalf("SetPermissionMode errors = %v", d.errs)
+	}
+	if log := sessionModeLog(t, *task.WorktreePath); log != "set_mode:default" {
+		t.Fatalf("session-mode log = %q, want set_mode:default", log)
+	}
+}

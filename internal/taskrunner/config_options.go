@@ -16,8 +16,9 @@ import (
 var ErrConfigOptionsNotSupported = errors.New("config options are not supported for this provider")
 
 // acpSessionState is Runner's bookkeeping for one chat's ACP session.
-// options is populated exactly once, at session creation, and retained
-// after the turn ends (ConfigOptions keeps reporting what the agent
+// options is populated at session creation, refreshed whenever the agent
+// confirms a change (a config option, or a mode applied as one -- see
+// updateACPSessionOptions), and retained after the turn ends (ConfigOptions keeps reporting what the agent
 // advertised); client is the live session's connection and is set to nil
 // the moment the turn's subprocess exits, since SetSessionConfigOption can
 // only ever apply to a session that's still alive.
@@ -37,6 +38,18 @@ func (r *Runner) trackACPSession(chatID int64, sessionID string, client acpBacke
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 	r.acpSessions[chatID] = &acpSessionState{sessionID: sessionID, client: client, options: options}
+}
+
+// updateACPSessionOptions replaces chatID's tracked option list after a
+// change the agent confirmed -- only if sessionID is still the tracked
+// session (a newer turn's session must not be clobbered by a late reply
+// for an old one).
+func (r *Runner) updateACPSessionOptions(chatID int64, sessionID string, options []acp.ConfigOption) {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	if s, ok := r.acpSessions[chatID]; ok && s.sessionID == sessionID {
+		s.options = options
+	}
 }
 
 // endACPTurn marks the chat's tracked session as no longer live, keeping
@@ -107,5 +120,13 @@ func (r *Runner) SetSessionConfigOption(ctx context.Context, chatID int64, provi
 	if err != nil {
 		return nil, fmt.Errorf("taskrunner: set config option on chat %d: %w", chatID, err)
 	}
+	// Keep the tracked copy current too: ConfigOptions and a later
+	// permission-mode switch (a mode may itself be a config option) read
+	// it.
+	r.sessionMu.Lock()
+	if s, ok := r.acpSessions[chatID]; ok && s.sessionID == sessionID {
+		s.options = mergeConfigOptions(s.options, opts)
+	}
+	r.sessionMu.Unlock()
 	return opts, nil
 }

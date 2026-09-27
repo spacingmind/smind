@@ -67,9 +67,11 @@ func (r *Runner) SetPermissionMode(ctx context.Context, chatID int64, provider P
 		if client == nil {
 			return fmt.Errorf("taskrunner: set permission mode: no live ACP session for chat %d", chatID)
 		}
-		if err := applyACPMode(ctx, client, sessionID, options, mode); err != nil {
+		updated, err := applyACPMode(ctx, client, sessionID, options, mode)
+		if err != nil {
 			return fmt.Errorf("taskrunner: set permission mode on chat %d: %w", chatID, err)
 		}
+		r.updateACPSessionOptions(chatID, sessionID, updated)
 		return nil
 	default:
 		return fmt.Errorf("taskrunner: set permission mode: %s: %w", provider, ErrModeSwitchNotSupported)
@@ -77,30 +79,84 @@ func (r *Runner) SetPermissionMode(ctx context.Context, chatID int64, provider P
 }
 
 // applyACPMode puts sessionID into mode, using whichever mechanism the
-// agent advertised: session/set_mode for SessionModeState modes, or
-// session/set_config_option for a category-"mode" config option. An empty
-// mode, or the mode the session is already in, sends nothing. An agent
-// advertising no modes at all accepts only ACPModeDefault (the "leave it
-// as it starts" fallback) and fails for anything else.
-func applyACPMode(ctx context.Context, client acpBackend, sessionID string, options []acp.ConfigOption, mode string) error {
+// agent advertised: session/set_mode for SessionModeState modes (whose
+// current mode the acp.Client keeps up to date, including the agent's own
+// current_mode_update notifications), or session/set_config_option for a
+// category-"mode" config option. An empty mode, or the mode the session is
+// already in, sends nothing. An agent advertising no modes at all accepts
+// only ACPModeDefault (the "leave it as it starts" fallback) and fails for
+// anything else.
+//
+// It returns options as they stand after the call -- merged with the
+// agent's set_config_option response when that path was taken -- so the
+// caller can keep its tracked copy current; otherwise the next switch
+// would compare against the currentValue captured at session start.
+func applyACPMode(ctx context.Context, client acpBackend, sessionID string, options []acp.ConfigOption, mode string) ([]acp.ConfigOption, error) {
 	if mode == "" {
-		return nil
+		return options, nil
 	}
 	if m, ok := client.SessionModes(sessionID); ok && len(m.AvailableModes) > 0 {
 		if m.CurrentModeID == mode {
-			return nil
+			return options, nil
 		}
-		return client.SetSessionMode(ctx, sessionID, mode)
+		return options, client.SetSessionMode(ctx, sessionID, mode)
 	}
 	if c, ok := deriveACPModes(nil, options); ok {
 		if c.defaultMode == mode {
-			return nil
+			return options, nil
 		}
-		_, err := client.SetSessionConfigOption(ctx, sessionID, c.configID, mode)
-		return err
+		returned, err := client.SetSessionConfigOption(ctx, sessionID, c.configID, mode)
+		if err != nil {
+			return options, err
+		}
+		return mergeConfigOptions(options, returned), nil
 	}
 	if mode == ACPModeDefault {
-		return nil
+		return options, nil
 	}
-	return fmt.Errorf("agent advertises no permission modes")
+	return options, fmt.Errorf("agent advertises no permission modes")
+}
+
+// mergeConfigOptions overlays an agent's set_config_option response onto
+// the tracked option list. ACP says the response is the full list, but
+// agents in the wild echo only the changed option, sometimes without its
+// category/type/choices -- so a returned option replaces its tracked twin
+// field by field, keeping whatever the response left empty, and a
+// returned option the list didn't have is appended.
+func mergeConfigOptions(existing, returned []acp.ConfigOption) []acp.ConfigOption {
+	out := append([]acp.ConfigOption(nil), existing...)
+	for _, r := range returned {
+		i := -1
+		for j := range out {
+			if out[j].ConfigID == r.ConfigID {
+				i = j
+				break
+			}
+		}
+		if i < 0 {
+			out = append(out, r)
+			continue
+		}
+		old := out[i]
+		if r.Name == "" {
+			r.Name = old.Name
+		}
+		if r.Description == "" {
+			r.Description = old.Description
+		}
+		if r.Category == "" {
+			r.Category = old.Category
+		}
+		if r.Type == "" {
+			r.Type = old.Type
+		}
+		if len(r.CurrentValue) == 0 {
+			r.CurrentValue = old.CurrentValue
+		}
+		if len(r.Options) == 0 {
+			r.Options = old.Options
+		}
+		out[i] = r
+	}
+	return out
 }

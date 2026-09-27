@@ -402,6 +402,29 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	if scenario == "mode-update" {
+		// The agent switches its own mode mid-turn (ACP's
+		// current_mode_update -- e.g. a plan-mode agent leaving plan) and
+		// then asks for permission, so a test can prove the client's idea
+		// of the current mode follows the agent's notification.
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update":    map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "accept_edits"},
+		})
+		time.Sleep(100 * time.Millisecond)
+		call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall":  map[string]any{"toolCallId": "tc-mode", "title": "After mode update"},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		sessionUpdate("done")
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
 	if scenario == "slow" {
 		// Streams several chunks with a real delay between each, so a
 		// caller (e.g. a manual CLI smoke test) can observe genuinely

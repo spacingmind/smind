@@ -62,6 +62,11 @@ const (
 	SessionUpdateToolCall          = "tool_call"
 	SessionUpdateToolCallUpdate    = "tool_call_update"
 	SessionUpdatePlan              = "plan"
+	// SessionUpdateCurrentModeUpdate is the agent reporting its own
+	// session mode changed (ACP's CurrentModeUpdate, field currentModeId)
+	// -- e.g. leaving plan mode by itself. The Client tracks it (see
+	// SessionModes) before forwarding it like any other update.
+	SessionUpdateCurrentModeUpdate = "current_mode_update"
 )
 
 // Text returns the text payload of a streaming chunk update (user message,
@@ -440,6 +445,25 @@ func (c *Client) SessionModes(sessionID string) (SessionModeState, bool) {
 	return m, ok
 }
 
+// recordCurrentMode applies a current_mode_update notification's
+// currentModeId to sessionID's tracked SessionModeState, so SessionModes
+// never reports a mode the agent has already left -- tracked regardless
+// of whether any Prompt is subscribed to the session's updates.
+func (c *Client) recordCurrentMode(sessionID string, raw json.RawMessage) {
+	var u struct {
+		CurrentModeID string `json:"currentModeId"`
+	}
+	if err := json.Unmarshal(raw, &u); err != nil || u.CurrentModeID == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if m, ok := c.sessionModes[sessionID]; ok {
+		m.CurrentModeID = u.CurrentModeID
+		c.sessionModes[sessionID] = m
+	}
+}
+
 // SetSessionMode switches sessionID to modeID via ACP's session/set_mode.
 // An agent-side JSON-RPC error (e.g. an unknown mode id) comes back as a
 // non-nil error.
@@ -544,6 +568,9 @@ func (c *Client) handleSessionUpdate(raw json.RawMessage) {
 		return
 	}
 	update.Raw = params.Update
+	if update.Type == SessionUpdateCurrentModeUpdate {
+		c.recordCurrentMode(params.SessionID, params.Update)
+	}
 
 	c.mu.Lock()
 	sub, ok := c.updateSubs[params.SessionID]

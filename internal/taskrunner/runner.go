@@ -321,9 +321,11 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	r.trackACPSession(chatID, sessionID, client, configOptions)
 	defer r.endACPTurn(chatID)
 	r.recordSessionModes(provider, client, sessionID, configOptions)
-	if err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode); err != nil {
+	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
+	if err != nil {
 		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
 	}
+	r.updateACPSessionOptions(chatID, sessionID, updated)
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
