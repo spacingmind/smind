@@ -7,6 +7,7 @@
 package mcpservers
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -67,7 +68,7 @@ func (r *Registry) getNotifier() Notifier {
 // Create validates m and inserts it, firing NotifyMcpServerCreated on
 // success.
 func (r *Registry) Create(m store.McpServer) (store.McpServer, error) {
-	if err := validate(m); err != nil {
+	if err := normalizeValidate(&m); err != nil {
 		return store.McpServer{}, err
 	}
 	created, err := r.store.CreateMcpServer(m)
@@ -114,7 +115,7 @@ func (r *Registry) SetEnabled(id int64, enabled bool) (store.McpServer, error) {
 // full-record replace -- see store.UpdateMcpServer), firing
 // NotifyMcpServerUpdated on success.
 func (r *Registry) Update(m store.McpServer) (store.McpServer, error) {
-	if err := validate(m); err != nil {
+	if err := normalizeValidate(&m); err != nil {
 		return store.McpServer{}, err
 	}
 	updated, err := r.store.UpdateMcpServer(m)
@@ -146,26 +147,84 @@ const (
 	TransportSSE   = "sse"
 )
 
-// validate rejects an MCP server this package's callers should never be
-// able to store, exactly ADR-0018's wsapi validation list: a non-empty
-// name (uniqueness is the store's UNIQUE constraint, surfaced as
-// store.ErrMcpServerNameConflict), a known transport, a command for stdio,
-// and a url for http/sse.
-func validate(m store.McpServer) error {
-	if strings.TrimSpace(m.Name) == "" {
+// validMcpServerName is the charset a server name may draw from. Name is
+// the wire identity every downstream protocol keys a server by (Claude's
+// mcpServers map key, Codex's [mcp_servers.<name>] TOML table key), so it
+// must survive those embeddings unchanged: no whitespace, dots (a TOML
+// table-name separator), or other punctuation with structural meaning.
+const validMcpServerName = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+
+// normalize and validate m in place. Validation is exactly ADR-0018's
+// wsapi list -- a non-empty charset-restricted name (uniqueness is the
+// store's UNIQUE constraint, surfaced as store.ErrMcpServerNameConflict),
+// a known transport, a command for stdio, a url for http/sse -- plus two
+// normalizations the ADR's column shapes imply: empty args/env/headers
+// become their canonical "[]"/"{}" (the SQL DEFAULT never applies, since
+// inserts pass every column explicitly), and each JSON blob must decode
+// as its declared shape (a []string for args, string->string objects for
+// env/headers) so a malformed blob can't reach a run's session setup.
+func normalizeValidate(m *store.McpServer) error {
+	// Trim first, then hold the trimmed name to the charset: surrounding
+	// whitespace is a copy/paste margin worth tolerating, but any interior
+	// character outside the set survives the trim and rejects -- a name is
+	// the wire key downstream protocols embed verbatim (Claude's
+	// mcpServers key, Codex's [mcp_servers.<name>] TOML table key).
+	m.Name = strings.TrimSpace(m.Name)
+	if m.Name == "" {
 		return fmt.Errorf("name is required")
 	}
+	if strings.Trim(m.Name, validMcpServerName) != "" {
+		return fmt.Errorf("name %q may only contain letters, digits, '_' and '-'", m.Name)
+	}
+
+	var err error
 	switch m.Transport {
 	case TransportStdio:
 		if strings.TrimSpace(m.Command) == "" {
 			return fmt.Errorf("stdio transport requires a command")
 		}
+		if m.Args, err = normalizeJSONShape(m.Args, "args", &[]string{}); err != nil {
+			return err
+		}
+		if m.Env, err = normalizeJSONShape(m.Env, "env", &map[string]string{}); err != nil {
+			return err
+		}
+		// A stdio server has no url/headers; drop any that arrived with a
+		// transport-flip so the stored row matches its transport exactly.
+		m.URL, m.Headers = "", ""
 	case TransportHTTP, TransportSSE:
 		if strings.TrimSpace(m.URL) == "" {
 			return fmt.Errorf("%s transport requires a url", m.Transport)
 		}
+		if m.Headers, err = normalizeJSONShape(m.Headers, "headers", &map[string]string{}); err != nil {
+			return err
+		}
+		m.Command, m.Args, m.Env = "", "", ""
 	default:
 		return fmt.Errorf("unknown transport %q", m.Transport)
 	}
 	return nil
+}
+
+// normalizeJSONShape canonicalizes an optional JSON blob: an empty/blank
+// string becomes example's zero-value encoding ("[]" or "{}"), and a
+// non-empty string must unmarshal into example's shape, returning it
+// re-encoded so insignificant formatting differences don't multiply row
+// representations of the same value.
+func normalizeJSONShape(raw, field string, example any) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		canon, err := json.Marshal(example)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", field, err)
+		}
+		return string(canon), nil
+	}
+	if err := json.Unmarshal([]byte(raw), example); err != nil {
+		return "", fmt.Errorf("%s: %w", field, err)
+	}
+	canon, err := json.Marshal(example)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", field, err)
+	}
+	return string(canon), nil
 }
