@@ -118,19 +118,19 @@ const legacyPermissionModeSQL = `
 		WHEN provider IN ('glm', 'kimi') AND approval_policy = 'full-access' THEN 1
 		ELSE 0 END`
 
-// backfillPermissionModes applies legacyPermissionModeSQL to every row not
-// yet carrying a permission setting. Idempotent: a row written after this
-// migration always has either a non-empty permission_mode (every Claude/
-// Codex run) or an ACP mapping that re-derives to the same values, and
-// the legacy column is never written again, so re-running changes
-// nothing. Profiles with an unset approval_policy stay unset (the
-// provider default applies), matching their pre-migration meaning.
+// backfillPermissionModes applies legacyPermissionModeSQL to every row
+// still carrying a legacy approval_policy, clearing approval_policy in the
+// same UPDATE -- so each row is backfilled exactly once, and a user's later
+// edit to its permission_mode/auto_accept (e.g. unticking a migrated
+// full-access profile's autoAccept, or resetting its mode to "") is never
+// re-overwritten on the next Open. New rows never carry a non-empty
+// approval_policy (CreateRun writes ” explicitly; agent_profiles
+// defaults to ”), so they never match.
 func backfillPermissionModes(db *sql.DB) error {
-	if _, err := db.Exec(`UPDATE runs SET` + legacyPermissionModeSQL + ` WHERE permission_mode = '' AND auto_accept = 0`); err != nil {
-		return fmt.Errorf("backfill runs.permission_mode: %w", err)
-	}
-	if _, err := db.Exec(`UPDATE agent_profiles SET` + legacyPermissionModeSQL + ` WHERE permission_mode = '' AND auto_accept = 0 AND approval_policy != ''`); err != nil {
-		return fmt.Errorf("backfill agent_profiles.permission_mode: %w", err)
+	for _, table := range []string{"runs", "agent_profiles"} {
+		if _, err := db.Exec(`UPDATE ` + table + ` SET` + legacyPermissionModeSQL + `, approval_policy = '' WHERE approval_policy != ''`); err != nil {
+			return fmt.Errorf("backfill %s.permission_mode: %w", table, err)
+		}
 	}
 	return nil
 }

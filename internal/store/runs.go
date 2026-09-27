@@ -20,8 +20,8 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
 		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept,
 	)

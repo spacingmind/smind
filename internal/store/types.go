@@ -86,7 +86,8 @@ type Task struct {
 // toggle) -- kept as plain values here rather than an import of
 // internal/taskrunner, consistent with Provider also being a plain string
 // rather than internal/taskrunner.Provider. The legacy approval_policy
-// column is no longer read or written (ADR-0019 resolved decision 8).
+// column is never read; the one-time backfill clears it (ADR-0019
+// resolved decision 8), and new rows store it empty.
 //
 // ChatID is the chats row this run belongs to (docs/decisions/
 // 0016-multiple-chats-per-task.md). The column itself is nullable (see

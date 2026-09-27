@@ -498,9 +498,14 @@ func TestMigrate_PermissionModesBackfill(t *testing.T) {
 			}
 			id := provider + "/" + policy
 			cases[id] = w
-			if _, err := s.db.Exec(`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, approval_policy) VALUES (?, ?, ?, 'p', 'done', ?, ?)`,
-				id, task.ID, provider, now, policy); err != nil {
-				t.Fatalf("seed run %s: %v", id, err)
+			// A legacy run row's approval_policy was never empty (column
+			// default 'manual', and CreateRun coerced '' to it), so the ''
+			// case only exists for profiles ("unset").
+			if policy != "" {
+				if _, err := s.db.Exec(`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, approval_policy) VALUES (?, ?, ?, 'p', 'done', ?, ?)`,
+					id, task.ID, provider, now, policy); err != nil {
+					t.Fatalf("seed run %s: %v", id, err)
+				}
 			}
 			if _, err := s.db.Exec(`INSERT INTO agent_profiles (name, provider, approval_policy, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
 				id, provider, policy, now, now); err != nil {
@@ -526,12 +531,14 @@ func TestMigrate_PermissionModesBackfill(t *testing.T) {
 			byName[p.Name] = p
 		}
 		for id, w := range cases {
-			got, err := s.GetRun(id)
-			if err != nil {
-				t.Fatalf("GetRun(%s) error = %v", id, err)
-			}
-			if got.PermissionMode != w.mode || got.AutoAccept != w.autoAccept {
-				t.Errorf("pass %d run %s = %q/%v, want %q/%v", pass, id, got.PermissionMode, got.AutoAccept, w.mode, w.autoAccept)
+			if id[len(id)-1] != '/' {
+				got, err := s.GetRun(id)
+				if err != nil {
+					t.Fatalf("GetRun(%s) error = %v", id, err)
+				}
+				if got.PermissionMode != w.mode || got.AutoAccept != w.autoAccept {
+					t.Errorf("pass %d run %s = %q/%v, want %q/%v", pass, id, got.PermissionMode, got.AutoAccept, w.mode, w.autoAccept)
+				}
 			}
 			p := byName[id]
 			pw := w
@@ -541,6 +548,84 @@ func TestMigrate_PermissionModesBackfill(t *testing.T) {
 			if p.PermissionMode != pw.mode || p.AutoAccept != pw.autoAccept {
 				t.Errorf("pass %d profile %s = %q/%v, want %q/%v", pass, id, p.PermissionMode, p.AutoAccept, pw.mode, pw.autoAccept)
 			}
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}
+}
+
+// TestMigrate_PermissionModesBackfillRunsOnce is the regression test for
+// the backfill re-running on every Open (approval_policy was never
+// cleared): after migration, a user's edit to a legacy row -- unticking a
+// migrated full-access GLM profile's autoAccept, resetting a migrated
+// Claude bypass profile to the provider default "", or turning a legacy
+// GLM run's autoAccept off -- must survive the next Open.
+func TestMigrate_PermissionModesBackfillRunsOnce(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "legacy-edit.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	for _, stmt := range []string{
+		`ALTER TABLE runs DROP COLUMN permission_mode`, `ALTER TABLE runs DROP COLUMN auto_accept`,
+		`ALTER TABLE agent_profiles DROP COLUMN permission_mode`, `ALTER TABLE agent_profiles DROP COLUMN auto_accept`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`INSERT INTO agent_profiles (id, name, provider, approval_policy, created_at, updated_at) VALUES
+		(1, 'glm-full', 'glm', 'full-access', ?, ?), (2, 'claude-full', 'claude-native', 'full-access', ?, ?)`, now, now, now, now); err != nil {
+		t.Fatalf("seed profiles: %v", err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, approval_policy) VALUES ('r1', ?, 'glm', 'p', 'done', ?, 'full-access')`, task.ID, now); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// First Open migrates; then the user edits the migrated rows.
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	glm, _ := s.GetAgentProfile(1)
+	claude, _ := s.GetAgentProfile(2)
+	if !glm.AutoAccept || claude.PermissionMode != "bypassPermissions" {
+		t.Fatalf("migrated = %+v / %+v, want glm autoAccept and claude bypass", glm, claude)
+	}
+	glm.AutoAccept = false
+	claude.PermissionMode = ""
+	for _, p := range []AgentProfile{glm, claude} {
+		if _, err := s.UpdateAgentProfile(p); err != nil {
+			t.Fatalf("UpdateAgentProfile(%s) error = %v", p.Name, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET auto_accept = 0 WHERE id = 'r1'`); err != nil {
+		t.Fatalf("edit run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Every later Open must leave the edits alone.
+	for pass := 0; pass < 2; pass++ {
+		s, err = Open(path)
+		if err != nil {
+			t.Fatalf("reopen %d error = %v", pass, err)
+		}
+		glm, _ = s.GetAgentProfile(1)
+		claude, _ = s.GetAgentProfile(2)
+		run, _ := s.GetRun("r1")
+		if glm.AutoAccept || claude.PermissionMode != "" || run.AutoAccept {
+			t.Fatalf("reopen %d re-applied the backfill: glm autoAccept=%v claude mode=%q run autoAccept=%v",
+				pass, glm.AutoAccept, claude.PermissionMode, run.AutoAccept)
 		}
 		if err := s.Close(); err != nil {
 			t.Fatalf("Close() error = %v", err)
