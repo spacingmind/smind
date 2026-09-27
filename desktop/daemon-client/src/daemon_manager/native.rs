@@ -51,7 +51,9 @@ pub fn install_binary(tarball: &Path, layout: &Layout) -> io::Result<()> {
     fs::create_dir_all(bin_dir)?;
     let argv = extract_argv(tarball, bin_dir);
     let (prog, args) = argv.split_first().expect("smind desktop: extract_argv is never empty");
-    let status = Command::new(prog).args(args).status()?;
+    let mut cmd = Command::new(prog);
+    cmd.args(args);
+    let status = crate::windows_process::no_window(&mut cmd).status()?;
     if !status.success() {
         return Err(io::Error::other(format!("tar extraction failed: {status}")));
     }
@@ -79,14 +81,16 @@ pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
     // on Windows (WSL2 path) and Linux, where process groups are unix-only.
     #[cfg(unix)]
     cmd.process_group(0);
-    cmd.spawn()
+    crate::windows_process::no_window(&mut cmd).spawn()
 }
 
 /// find_port_owner asks `lsof` who is bound (listening) on `port`, the
 /// same primitive used both to verify a managed pid is still the real
 /// server and to detect an unmanaged one (AC3).
 pub fn find_port_owner(port: u16) -> io::Result<Option<u32>> {
-    let output = Command::new("lsof").arg(format!("-tiTCP:{port}")).arg("-sTCP:LISTEN").output()?;
+    let mut cmd = Command::new("lsof");
+    cmd.arg(format!("-tiTCP:{port}")).arg("-sTCP:LISTEN");
+    let output = crate::windows_process::no_window(&mut cmd).output()?;
     Ok(parse_lsof_output(&String::from_utf8_lossy(&output.stdout)))
 }
 
@@ -98,18 +102,18 @@ pub fn parse_lsof_output(stdout: &str) -> Option<u32> {
 /// this module's system-tool-via-argv style and needing no extra
 /// dependency (`kill` ships everywhere this code runs).
 pub fn is_pid_alive(pid: u32) -> bool {
-    Command::new("kill")
-        .arg("-0")
-        .arg(pid.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+    let mut cmd = Command::new("kill");
+    cmd.arg("-0").arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null());
+    crate::windows_process::no_window(&mut cmd)
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
 
 pub fn kill_process(pid: u32) -> io::Result<()> {
-    let status = Command::new("kill").arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null()).status()?;
+    let mut cmd = Command::new("kill");
+    cmd.arg(pid.to_string()).stdout(Stdio::null()).stderr(Stdio::null());
+    let status = crate::windows_process::no_window(&mut cmd).status()?;
     if status.success() {
         Ok(())
     } else {
@@ -127,7 +131,9 @@ pub fn kill_process(pid: u32) -> io::Result<()> {
 /// the executable path itself, is kept; any arguments (`serve`) are not
 /// part of the identity check.
 pub fn exe_path_for_pid(pid: u32) -> io::Result<Option<String>> {
-    let output = Command::new("ps").arg("-p").arg(pid.to_string()).arg("-o").arg("args=").output()?;
+    let mut cmd = Command::new("ps");
+    cmd.arg("-p").arg(pid.to_string()).arg("-o").arg("args=");
+    let output = crate::windows_process::no_window(&mut cmd).output()?;
     if !output.status.success() {
         return Ok(None);
     }

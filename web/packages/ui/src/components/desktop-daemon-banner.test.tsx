@@ -93,6 +93,23 @@ describe("DesktopDaemonBanner", () => {
     expect(screen.queryByTestId("desktop-daemon-banner-update")).not.toBeInTheDocument();
   });
 
+  it("fetches connectionVersion/daemonStatus exactly once on mount, never polling", async () => {
+    // Same reasoning as daemon-section's equivalent test: this banner is
+    // mounted for the whole app session, so it must not re-poll on a
+    // timer -- each daemon_status/connection_version call can spawn a
+    // console-flashing child process on Windows.
+    const connectionVersion = vi.fn(() => Promise.resolve({ reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" }));
+    const daemonStatus = vi.fn(() => Promise.resolve({ managedState: "managed", comparison: "older" }));
+    mockPlatform({ current: LOCAL, connectionVersion, daemonStatus });
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    render(<DesktopDaemonBanner />);
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner")).toBeInTheDocument());
+    await flush();
+    await flush();
+    expect(connectionVersion).toHaveBeenCalledTimes(1);
+    expect(daemonStatus).toHaveBeenCalledTimes(1);
+  });
+
   it("Update & restart calls daemonUpdate", async () => {
     const daemonUpdate = vi.fn(() => Promise.resolve({ managedState: "managed" }));
     mockPlatform({
