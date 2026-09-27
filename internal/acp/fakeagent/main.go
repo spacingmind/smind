@@ -105,8 +105,11 @@ func handle(msg message, sessionCwd *string) {
 	switch {
 	case msg.Method == "initialize":
 		respond(msg.ID, map[string]any{
-			"protocolVersion":   1,
-			"agentCapabilities": map[string]any{},
+			"protocolVersion": 1,
+			"agentCapabilities": map[string]any{
+				"loadSession":         true,
+				"sessionCapabilities": map[string]any{"resume": map[string]any{}},
+			},
 		})
 	case msg.Method == "session/new":
 		var params struct {
@@ -142,6 +145,27 @@ func handle(msg message, sessionCwd *string) {
 					"currentValue": true,
 				},
 			},
+		})
+	case msg.Method == "session/load" || msg.Method == "session/resume":
+		var params struct {
+			SessionID string `json:"sessionId"`
+			Cwd       string `json:"cwd"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		if params.SessionID != sessionID {
+			writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
+				Code: -32000, Message: "unknown session: " + params.SessionID,
+			}})
+			return
+		}
+		*sessionCwd = params.Cwd
+		respond(msg.ID, map[string]any{
+			"configOptions": []map[string]any{{
+				"configId":     "thinking-level",
+				"name":         "Thinking Level",
+				"type":         "select",
+				"currentValue": "medium",
+			}},
 		})
 	case msg.Method == "session/set_config_option":
 		handleSetConfigOption(msg)

@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -386,5 +387,71 @@ func TestClient_SetSessionConfigOptionAgentError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unknown config option") {
 		t.Fatalf("SetSessionConfigOption() error = %v, want it to carry the agent's message", err)
+	}
+}
+
+// TestClient_SupportsLoadSessionAndResumeSession proves capabilityFlags
+// decodes AgentCapabilities.loadSession and .sessionCapabilities.resume
+// independently, without needing a live subprocess -- pure decode logic
+// exercised directly against the raw JSON Initialize would have stored.
+func TestClient_SupportsLoadSessionAndResumeSession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		caps       string
+		wantLoad   bool
+		wantResume bool
+	}{
+		{"neither", `{}`, false, false},
+		{"loadSession only", `{"loadSession":true}`, true, false},
+		{"resume only", `{"sessionCapabilities":{"resume":{}}}`, false, true},
+		{"both", `{"loadSession":true,"sessionCapabilities":{"resume":{}}}`, true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := &Client{AgentCapabilities: json.RawMessage(tt.caps)}
+			if got := c.SupportsLoadSession(); got != tt.wantLoad {
+				t.Errorf("SupportsLoadSession() = %v, want %v", got, tt.wantLoad)
+			}
+			if got := c.SupportsResumeSession(); got != tt.wantResume {
+				t.Errorf("SupportsResumeSession() = %v, want %v", got, tt.wantResume)
+			}
+		})
+	}
+}
+
+// TestClient_LoadSessionAndResumeSession drives both resume RPCs against
+// the fake agent (which only accepts requests for the session id
+// session/new hands out), proving each succeeds for the known id, fails
+// for an unknown one (the stale-session case a caller falls back to a
+// fresh session/new on), and that both requests are always sent with a
+// non-nil mcpServers (see loadSessionParams/resumeSessionParams' doc
+// comments on why an omitted mcpServers can break some agents).
+func TestClient_LoadSessionAndResumeSession(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sid, _, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	if _, err := c.LoadSession(ctx, sid, cwd); err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if _, err := c.ResumeSession(ctx, sid, cwd); err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+
+	if _, err := c.LoadSession(ctx, "unknown-session", cwd); err == nil {
+		t.Fatal("LoadSession() with unknown session id error = nil, want error")
+	}
+	if _, err := c.ResumeSession(ctx, "unknown-session", cwd); err == nil {
+		t.Fatal("ResumeSession() with unknown session id error = nil, want error")
 	}
 }

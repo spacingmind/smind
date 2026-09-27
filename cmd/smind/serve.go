@@ -62,7 +62,7 @@ func cmdServe(args []string) int {
 	router := routing.New(db, registry, poller)
 	wm := workspace.New(db)
 
-	var runnerOpts []taskrunner.Option
+	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db))}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {
 		// Testing-only hook: lets a manual/integration test point
 		// ProviderGLM turns at a fake ACP agent binary (see
