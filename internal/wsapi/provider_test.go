@@ -74,6 +74,9 @@ func TestServer_ProviderList_RoundTrip(t *testing.T) {
 		if p.AccountProvider != info.accountProvider {
 			t.Fatalf("provider %q accountProvider = %q, want %q", p.ID, p.AccountProvider, info.accountProvider)
 		}
+		if len(p.Modes) == 0 || p.DefaultMode == "" {
+			t.Fatalf("provider %q has no mode catalog: modes %v default %q", p.ID, p.Modes, p.DefaultMode)
+		}
 		delete(want, p.ID)
 	}
 }

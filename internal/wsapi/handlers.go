@@ -25,7 +25,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 	return map[string]handlerFunc{
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
-		"provider.list":            handleProviderList(),
+		"provider.list":            handleProviderList(runner),
 		"provider.test":            handleProviderTest(acctReg),
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
@@ -1417,10 +1417,12 @@ type providerListResult struct {
 	Providers []taskrunner.ProviderInfo `json:"providers"`
 }
 
-// handleProviderList returns the daemon's supported providers. No params.
-func handleProviderList() handlerFunc {
+// handleProviderList returns the daemon's supported providers, each with
+// its permission mode catalog (Runner.ProviderCatalog -- never blocks on
+// ACP mode discovery). No params.
+func handleProviderList(runner *taskrunner.Runner) handlerFunc {
 	return func(_ context.Context, _ *requestContext, _ json.RawMessage) (any, error) {
-		return providerListResult{Providers: taskrunner.SupportedProviders()}, nil
+		return providerListResult{Providers: runner.ProviderCatalog()}, nil
 	}
 }
 

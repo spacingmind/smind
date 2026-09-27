@@ -89,6 +89,22 @@ type ProviderInfo struct {
 	Kind            ProviderKind           `json:"kind,omitempty"`
 	CredentialKind  ProviderCredentialKind `json:"credentialKind,omitempty"`
 	AccountProvider string                 `json:"accountProvider,omitempty"`
+
+	// Modes is the provider's own permission mode catalog (ADR-0019), in
+	// display order, and DefaultMode the id a run gets when it names none.
+	// For an ACP provider these are the agent's own advertised session
+	// modes once discovered (ModesDiscovered), or a single-entry fallback
+	// until then -- see Runner.ProviderCatalog.
+	Modes           []ModeInfo `json:"modes,omitempty"`
+	DefaultMode     string     `json:"defaultMode,omitempty"`
+	ModesDiscovered bool       `json:"modesDiscovered,omitempty"`
+	// SupportsAutoAccept marks an ACP provider, which additionally takes
+	// PermissionSettings.AutoAccept (approve every permission prompt).
+	SupportsAutoAccept bool `json:"supportsAutoAccept,omitempty"`
+	// LiveModeSwitch reports whether a running run's mode can be changed
+	// (run.setPermissionMode) -- false for Codex, whose mode only applies
+	// at thread start.
+	LiveModeSwitch bool `json:"liveModeSwitch,omitempty"`
 }
 
 // SupportedProviders is the single source of truth for which providers the
@@ -98,11 +114,30 @@ type ProviderInfo struct {
 // CredentialKind/AccountProvider) its accounts dialog from it. A provider
 // added here (and to RunPrompt's switch) shows up in the UI without client
 // changes.
+//
+// Each entry carries its static permission mode catalog (see
+// staticModes); Runner.ProviderCatalog layers ACP agents' discovered modes
+// on top.
 func SupportedProviders() []ProviderInfo {
-	return []ProviderInfo{
-		{ID: ProviderClaudeNative, Label: "Claude Code", CredentialKind: CredentialKindOAuth, AccountProvider: "anthropic"},
-		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI},
-		{ID: ProviderKimi, Label: "Kimi", CredentialKind: CredentialKindAPIKey, AccountProvider: "kimi"},
+	providers := []ProviderInfo{
+		{ID: ProviderClaudeNative, Label: "Claude Code", CredentialKind: CredentialKindOAuth, AccountProvider: "anthropic", LiveModeSwitch: true},
+		{ID: ProviderGLM, Label: "GLM", Kind: ProviderKindCLI, SupportsAutoAccept: true, LiveModeSwitch: true},
+		{ID: ProviderKimi, Label: "Kimi", CredentialKind: CredentialKindAPIKey, AccountProvider: "kimi", SupportsAutoAccept: true, LiveModeSwitch: true},
 		{ID: ProviderCodexNative, Label: "Codex", CredentialKind: CredentialKindOAuth, AccountProvider: "openai"},
 	}
+	for i := range providers {
+		providers[i].Modes, providers[i].DefaultMode = staticModes(providers[i].ID)
+	}
+	return providers
+}
+
+// ProviderInfoFor returns SupportedProviders' entry for provider, and
+// false for an unknown one.
+func ProviderInfoFor(provider Provider) (ProviderInfo, bool) {
+	for _, p := range SupportedProviders() {
+		if p.ID == provider {
+			return p, true
+		}
+	}
+	return ProviderInfo{}, false
 }
