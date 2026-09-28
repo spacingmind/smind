@@ -455,3 +455,45 @@ func TestClient_LoadSessionAndResumeSession(t *testing.T) {
 		t.Fatal("ResumeSession() with unknown session id error = nil, want error")
 	}
 }
+
+// TestClient_SessionModes proves session/new's modes (ACP's
+// SessionModeState) are decoded and retained per session, and that
+// SetSessionMode sends session/set_mode, updates CurrentModeID on success,
+// and surfaces an agent rejection as an error without changing it.
+func TestClient_SessionModes(t *testing.T) {
+	t.Parallel()
+	c, cwd := newTestClient(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	sessionID, _, err := c.NewSession(ctx, cwd)
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+
+	modes, ok := c.SessionModes(sessionID)
+	if !ok {
+		t.Fatal("SessionModes() ok = false, want the advertised modes")
+	}
+	if modes.CurrentModeID != "default" || len(modes.AvailableModes) != 3 || modes.AvailableModes[1].ID != "accept_edits" || modes.AvailableModes[1].Description == "" {
+		t.Fatalf("SessionModes() = %+v, want default current with 3 modes", modes)
+	}
+
+	if err := c.SetSessionMode(ctx, sessionID, "accept_edits"); err != nil {
+		t.Fatalf("SetSessionMode(accept_edits) error = %v", err)
+	}
+	if m, _ := c.SessionModes(sessionID); m.CurrentModeID != "accept_edits" {
+		t.Fatalf("CurrentModeID = %q after set, want accept_edits", m.CurrentModeID)
+	}
+
+	if err := c.SetSessionMode(ctx, sessionID, "no-such-mode"); err == nil {
+		t.Fatal("SetSessionMode(no-such-mode) error = nil, want the agent's rejection")
+	}
+	if m, _ := c.SessionModes(sessionID); m.CurrentModeID != "accept_edits" {
+		t.Fatalf("CurrentModeID = %q after rejected set, want unchanged accept_edits", m.CurrentModeID)
+	}
+
+	if _, ok := c.SessionModes("unknown-session"); ok {
+		t.Fatal("SessionModes(unknown) ok = true, want false")
+	}
+}

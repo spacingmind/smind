@@ -73,13 +73,12 @@ type RunStatus struct {
 	// RunPrompt returned.
 	Err string
 
-	// ApprovalPolicy is this run's current taskrunner.ApprovalPolicy --
-	// live (may differ from what Start was called with, see
-	// Registry.SetApprovalPolicy) for a running run, and whatever it was
-	// last switched to (or started with) for a finished one. Lets a caller
-	// (internal/wsapi, and from there the web UI) know whether a live
-	// manual<->auto-safe switch control applies to this run at all.
-	ApprovalPolicy taskrunner.ApprovalPolicy
+	// PermissionMode/AutoAccept are this run's current provider-native
+	// permission settings (ADR-0019) -- live (may differ from what Start
+	// was called with, see Registry.SetPermissionMode/SetAutoAccept) for a
+	// running run, and whatever they last were for a finished one.
+	PermissionMode string
+	AutoAccept     bool
 
 	// ThinkingLevel is this run's taskrunner.ThinkingLevel as passed to
 	// Start -- immutable thereafter (see the run struct's own field doc

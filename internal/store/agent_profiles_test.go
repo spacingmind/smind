@@ -7,7 +7,7 @@ func TestStore_AgentProfiles(t *testing.T) {
 
 	s := newTestStore(t)
 	created, err := s.CreateAgentProfile(AgentProfile{
-		Name: "UI work", Provider: "claude-native", ApprovalPolicy: "manual", ThinkingLevel: "standard", Notes: "For UI polish.",
+		Name: "UI work", Provider: "claude-native", PermissionMode: "plan", ThinkingLevel: "standard", Notes: "For UI polish.",
 	})
 	if err != nil {
 		t.Fatalf("CreateAgentProfile() error = %v", err)
@@ -62,13 +62,13 @@ func TestStore_UpdateAgentProfile(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
-	created, err := s.CreateAgentProfile(AgentProfile{Name: "old", Provider: "claude-native", ApprovalPolicy: "manual"})
+	created, err := s.CreateAgentProfile(AgentProfile{Name: "old", Provider: "claude-native", PermissionMode: "acceptEdits"})
 	if err != nil {
 		t.Fatalf("CreateAgentProfile() error = %v", err)
 	}
 
 	updated, err := s.UpdateAgentProfile(AgentProfile{
-		ID: created.ID, Name: "new", Provider: "glm", ApprovalPolicy: "auto-safe", ThinkingLevel: "", Notes: "updated",
+		ID: created.ID, Name: "new", Provider: "glm", PermissionMode: "accept_edits", AutoAccept: true, ThinkingLevel: "", Notes: "updated",
 	})
 	if err != nil {
 		t.Fatalf("UpdateAgentProfile() error = %v", err)
@@ -84,7 +84,7 @@ func TestStore_UpdateAgentProfile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAgentProfile() error = %v", err)
 	}
-	if got.Name != "new" || got.Provider != "glm" || got.ApprovalPolicy != "auto-safe" || got.Notes != "updated" {
+	if got.Name != "new" || got.Provider != "glm" || got.PermissionMode != "accept_edits" || !got.AutoAccept || got.Notes != "updated" {
 		t.Fatalf("GetAgentProfile() after update = %+v, want fields replaced", got)
 	}
 }
@@ -127,7 +127,7 @@ func TestStore_DeleteAgentProfileMissing(t *testing.T) {
 func assertAgentProfilesEqual(t *testing.T, got, want AgentProfile) {
 	t.Helper()
 	if got.ID != want.ID || got.Name != want.Name || got.Provider != want.Provider ||
-		got.ApprovalPolicy != want.ApprovalPolicy || got.ThinkingLevel != want.ThinkingLevel || got.Notes != want.Notes {
+		got.PermissionMode != want.PermissionMode || got.AutoAccept != want.AutoAccept || got.ThinkingLevel != want.ThinkingLevel || got.Notes != want.Notes {
 		t.Errorf("agent profile fields = %+v, want %+v", got, want)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) {

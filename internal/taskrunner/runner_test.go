@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ import (
 // decider-wired branch this test needs to observe.
 type denyAllDecider struct{}
 
-func (denyAllDecider) Decide(_ context.Context, _ string, _ string, _ []PermissionOption) (string, error) {
+func (denyAllDecider) Decide(_ context.Context, _ string, _ []PermissionOption) (string, error) {
 	return "", nil
 }
 
@@ -64,7 +65,7 @@ func claudeNativeRunner(t *testing.T, wm *workspace.Manager) *Runner {
 	}
 	r := New(wm)
 	r.newClaudeClient = func(worktreePath string, opts ...claudecode.Option) (claudeBackend, error) {
-		opts = append(opts, claudecode.WithCLIPath(self), claudecode.WithPermissionMode("bypassPermissions"))
+		opts = append(opts, claudecode.WithCLIPath(self))
 		return claudecode.New(worktreePath, opts...)
 	}
 	return r
@@ -78,7 +79,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -116,7 +117,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderKimi, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderKimi, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -171,7 +172,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -201,7 +202,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -240,7 +241,7 @@ func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -295,7 +296,7 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -335,37 +336,49 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	}
 }
 
-// TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools proves the
-// auto-safe policy reaches the CLI's own permission gate, not just
-// smind's decider: RunPrompt must spawn claude with --allowedTools
-// carrying exactly SafeBashRules() (see SafeBashRules for why the
-// decider-side check alone can't help -- the CLI blocks Bash before
-// can_use_tool ever fires). Uses the fake CLI's echo-args scenario to
-// capture the actual argv.
-func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
-	t.Parallel()
+// flagValue returns the value of --name in args (either "--name value" or
+// "--name=value"), and whether the flag was present at all.
+func flagValue(args []string, name string) (string, bool) {
+	for i, a := range args {
+		if a == name {
+			if i+1 < len(args) {
+				return args[i+1], true
+			}
+			return "", true
+		}
+		if v, ok := strings.CutPrefix(a, name+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
 
+// TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags is S1: the run's
+// permission mode goes straight to --permission-mode (acceptEdits when
+// unset), --allow-dangerously-skip-permissions is always passed so a
+// mid-run switch into bypass works, and no Bash(...) --allowedTools rules
+// exist any more (ADR-0019).
+func TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
-		name           string
-		approvalPolicy ApprovalPolicy
-		wantRules      bool
+		mode, want string
 	}{
-		{name: "auto-safe pre-approves the allowlist at the CLI gate", approvalPolicy: ApprovalPolicyAutoSafe, wantRules: true},
-		{name: "manual spawns with no pre-approved tools", approvalPolicy: ApprovalPolicyManual, wantRules: false},
-		{name: "full-access spawns with no pre-approved tools either -- bypassPermissions covers everything already", approvalPolicy: ApprovalPolicyFullAccess, wantRules: false},
+		{"", ClaudeModeAcceptEdits},
+		{ClaudeModeDefault, ClaudeModeDefault},
+		{ClaudeModePlan, ClaudeModePlan},
+		{ClaudeModeAuto, ClaudeModeAuto},
+		{ClaudeModeBypass, ClaudeModeBypass},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.want, func(t *testing.T) {
 			t.Parallel()
 			wm, task := newTestTask(t, "echo-args")
 			r := claudeNativeRunner(t, wm)
 
-			decider := denyAllDecider{}
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, tc.approvalPolicy, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{Mode: tc.mode}, "", events)
 			}()
-
 			got := drainEvents(events)
 			if err := <-errCh; err != nil {
 				t.Fatalf("RunPrompt() error = %v", err)
@@ -379,22 +392,14 @@ func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
 				t.Fatalf("read args file: %v", err)
 			}
 			args := strings.Split(string(data), "\n")
-			var allowed []string
-			for i, a := range args {
-				if a == "--allowedTools" && i+1 < len(args) {
-					allowed = strings.Split(args[i+1], ",")
-				}
+			if v, _ := flagValue(args, "--permission-mode"); v != tc.want {
+				t.Fatalf("--permission-mode = %q, want %q (args %v)", v, tc.want, args)
 			}
-
-			if !tc.wantRules {
-				if allowed != nil {
-					t.Fatalf("got --allowedTools %v, want none under %q", allowed, tc.approvalPolicy)
-				}
-				return
+			if _, ok := flagValue(args, "--"+claudeAllowBypassFlag); !ok {
+				t.Fatalf("--%s missing from args %v", claudeAllowBypassFlag, args)
 			}
-			want := SafeBashRules()
-			if strings.Join(allowed, ",") != strings.Join(want, ",") {
-				t.Fatalf("--allowedTools = %v, want %v", allowed, want)
+			if v, ok := flagValue(args, "--allowedTools"); ok {
+				t.Fatalf("--allowedTools = %q, want none (no smind allowlist)", v)
 			}
 		})
 	}
@@ -404,8 +409,8 @@ func TestRunner_RunPrompt_ClaudeNative_AutoSafeAllowedTools(t *testing.T) {
 // value maps to the specific claude-agent-sdk-go Option (and therefore CLI
 // flags -- see claudecode's own doc comments for WithAdaptiveThinking/
 // WithThinkingBudget/WithDisabledThinking) runClaudeNative's doc comment
-// promises, using the same "echo-args" observability the AutoSafeAllowedTools
-// test above uses for --allowedTools: the fake CLI dumps its real argv to a
+// promises, using the same "echo-args" observability the PermissionModeFlags
+// test above uses for --permission-mode: the fake CLI dumps its real argv to a
 // file, which is the only way to observe an Option's effect since
 // claudecode.Option values aren't otherwise inspectable from this package.
 // ThinkingLevelUnspecified (the zero value, what an older client that never
@@ -433,7 +438,7 @@ func TestRunner_RunPrompt_ClaudeNative_ThinkingLevel(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, "", tc.level, events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, tc.level, events)
 			}()
 
 			got := drainEvents(events)
@@ -507,7 +512,7 @@ func TestRunner_RunPrompt_NoWorktree(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -527,7 +532,7 @@ func TestRunner_RunPrompt_UnknownProvider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, Provider("bogus"), "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, Provider("bogus"), "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -556,7 +561,7 @@ func TestRunner_RunPrompt_ContextCancellationStopsSubprocess(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hi", nil, "", "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
 	}()
 
 	select {
@@ -609,7 +614,7 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	defer cancel()
 
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hello", nil, "", "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hello", nil, PermissionSettings{}, "", events)
 	}()
 
 	select {
@@ -645,15 +650,13 @@ type stubDecider struct {
 	mu      sync.Mutex
 	calls   int
 	summary string
-	command string
 	options []PermissionOption
 }
 
-func (d *stubDecider) Decide(_ context.Context, summary, command string, options []PermissionOption) (string, error) {
+func (d *stubDecider) Decide(_ context.Context, summary string, options []PermissionOption) (string, error) {
 	d.mu.Lock()
 	d.calls++
 	d.summary = summary
-	d.command = command
 	d.options = options
 	d.mu.Unlock()
 	return d.optionID, nil
@@ -682,7 +685,7 @@ func TestRunner_RunPrompt_PermissionRequest_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -737,7 +740,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -784,7 +787,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, "", "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", events)
 	}()
 
 	got := drainEvents(events)
@@ -826,7 +829,7 @@ func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, ApprovalPolicyManual, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
 			}()
 
 			got := drainEvents(events)
@@ -848,117 +851,355 @@ func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
 	}
 }
 
-// TestRunner_RunPrompt_ClaudeNative_FullAccess_NeverAsksDecider proves
-// ApprovalPolicyFullAccess installs no decider at all for Claude Code
-// native, even when RunPrompt is handed a non-nil one: it reuses the
-// "permission" fake-CLI scenario the manual-tier tests above drive through
-// claudeDeciderAdapter, but wires a decider that would answer "deny" if
-// consulted -- since runClaudeNative's full-access branch never adds
-// claudecode.WithPermissionPolicy(claudeDeciderAdapter{...}) at all (only
-// WithPermissionMode("bypassPermissions")), the SDK's own can_use_tool
-// handling never reaches this decider, so a deny-leaning decider going
-// unconsulted is exactly the signal that no permission-request round trip
-// (taskrunner.EventTypePermissionRequest, emitted one level up by
-// internal/runs' own PermissionDecider wrapper) ever happens under this
-// tier -- see docs/plans/active/task-move-approval-thinking.md's Item 2
-// Test Scenarios.
-func TestRunner_RunPrompt_ClaudeNative_FullAccess_NeverAsksDecider(t *testing.T) {
+// TestRunner_RunPrompt_GLM_AutoAcceptWithoutDecider proves AutoAccept
+// with no decider installs acp.AutoApprovePolicy{}: the fake agent's
+// "permission" scenario echoes back the allow option AutoApprovePolicy
+// always picks.
+func TestRunner_RunPrompt_GLM_AutoAcceptWithoutDecider(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "permission")
-	r := claudeNativeRunner(t, wm)
-	decider := &stubDecider{optionID: claudeOptionDeny}
+	r := glmRunner(wm)
+	r.acpPermissionPolicy = acp.AutoDenyPolicy{}
 
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, ApprovalPolicyFullAccess, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{AutoAccept: true}, "", events)
 	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if texts := eventTexts(got); len(texts) != 1 || texts[0] != "chose:allow-1" {
+		t.Fatalf("got texts %v, want [chose:allow-1]", texts)
+	}
+}
 
+func eventTexts(events []Event) []string {
+	var texts []string
+	for _, e := range events {
+		if e.Type == EventTypeText {
+			texts = append(texts, e.Text)
+		}
+	}
+	return texts
+}
+
+// TestRunner_RunPrompt_CodexNative_ModePresets is S9: each Codex mode
+// sends its own approvalPolicy/sandbox pair on thread/start, and whatever
+// Codex still escalates reaches the decider (here: declined).
+func TestRunner_RunPrompt_CodexNative_ModePresets(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		mode, want string
+	}{
+		{"", "on-request workspace-write"},
+		{CodexModeAuto, "on-request workspace-write"},
+		{CodexModeFullAccess, "never danger-full-access"},
+	} {
+		t.Run(tc.want+"/"+tc.mode, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "permission")
+			r := codexRunner(wm)
+			decider := &stubDecider{optionID: codexOptionDecline}
+
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", decider, PermissionSettings{Mode: tc.mode}, "", events)
+			}()
+			got := drainEvents(events)
+			if err := <-errCh; err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			policy, err := os.ReadFile(filepath.Join(*task.WorktreePath, "thread-policy"))
+			if err != nil {
+				t.Fatalf("read thread-policy: %v", err)
+			}
+			if string(policy) != tc.want {
+				t.Fatalf("thread/start policy = %q, want %q", policy, tc.want)
+			}
+			if decider.callCount() != 1 {
+				t.Fatalf("decider.calls = %d, want 1", decider.callCount())
+			}
+			if texts := eventTexts(got); len(texts) != 1 || texts[0] != "decision:decline" {
+				t.Fatalf("got texts %v, want [decision:decline]", texts)
+			}
+		})
+	}
+
+	t.Run("unknown mode fails the run", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "reply")
+		r := codexRunner(wm)
+		events := make(chan Event)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{Mode: "auto-safe"}, "", events)
+		}()
+		drainEvents(events)
+		if err := <-errCh; err == nil || !strings.Contains(err.Error(), "auto-safe") {
+			t.Fatalf("RunPrompt() error = %v, want unknown-mode error", err)
+		}
+	})
+}
+
+// sessionModeLog reads the fake ACP agent's "session-mode" log: one line
+// per session/set_mode or mode config option it was sent.
+func sessionModeLog(t *testing.T, worktreePath string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(worktreePath, "session-mode"))
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read session-mode: %v", err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// TestRunner_RunPrompt_ACP_AppliesPermissionMode is S7 (plus the S5
+// config-option route): a non-current mode is applied before the prompt
+// by whichever mechanism the agent advertised; the current mode or an
+// empty one sends nothing; a mode the agent rejects, or any non-default
+// mode on an agent with no modes at all, fails the run.
+func TestRunner_RunPrompt_ACP_AppliesPermissionMode(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, agentModes, mode, wantLog string
+		wantErr                         bool
+	}{
+		{"set_mode", "modes:session", "accept_edits", "set_mode:accept_edits", false},
+		{"already current", "modes:session", "default", "", false},
+		{"empty mode", "modes:session", "", "", false},
+		{"agent rejects", "modes:session", "nope", "", true},
+		{"config option", "modes:config", "bypass_permissions", "set_config_option:bypass_permissions", false},
+		{"no modes, default", "", ACPModeDefault, "", false},
+		{"no modes, other", "", "accept_edits", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "reply")
+			r := glmRunnerWithCaps(wm, tc.agentModes)
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: tc.mode}, "", events)
+			}()
+			got := drainEvents(events)
+			err := <-errCh
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("RunPrompt() error = nil, want a mode error")
+				}
+				if texts := eventTexts(got); len(texts) != 0 {
+					t.Fatalf("prompt ran despite mode failure: %v", texts)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			if log := sessionModeLog(t, *task.WorktreePath); log != tc.wantLog {
+				t.Fatalf("session-mode log = %q, want %q", log, tc.wantLog)
+			}
+		})
+	}
+}
+
+// switchingDecider calls Runner.SetPermissionMode from inside Decide --
+// i.e. while the run's session is provably live -- then allows.
+type switchingDecider struct {
+	r        *Runner
+	chatID   int64
+	provider Provider
+	mode     string
+	err      error
+}
+
+func (d *switchingDecider) Decide(ctx context.Context, _ string, options []PermissionOption) (string, error) {
+	d.err = d.r.SetPermissionMode(ctx, d.chatID, d.provider, d.mode)
+	return options[0].ID, nil
+}
+
+// TestRunner_SetPermissionMode is S11 at the Runner layer: a live ACP
+// session switches via session/set_mode; Codex is ErrModeSwitchNotSupported;
+// a chat with no live session fails for Claude and ACP alike.
+func TestRunner_SetPermissionMode(t *testing.T) {
+	t.Parallel()
+
+	t.Run("live ACP session", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "permission")
+		r := glmRunnerWithCaps(wm, "modes:session")
+		d := &switchingDecider{r: r, chatID: task.ID, provider: ProviderGLM, mode: "bypass_permissions"}
+		events := make(chan Event)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+		}()
+		drainEvents(events)
+		if err := <-errCh; err != nil {
+			t.Fatalf("RunPrompt() error = %v", err)
+		}
+		if d.err != nil {
+			t.Fatalf("SetPermissionMode() mid-run error = %v", d.err)
+		}
+		if log := sessionModeLog(t, *task.WorktreePath); log != "set_mode:bypass_permissions" {
+			t.Fatalf("session-mode log = %q", log)
+		}
+		// The turn is over: no live session any more.
+		if err := r.SetPermissionMode(context.Background(), task.ID, ProviderGLM, "default"); err == nil {
+			t.Fatal("SetPermissionMode() after the turn = nil, want no-live-session error")
+		}
+	})
+
+	t.Run("live Claude session", func(t *testing.T) {
+		t.Parallel()
+		r := New(nil)
+		fake := &fakeClaudeModeClient{}
+		r.trackClaudeClient(7, fake)
+		if err := r.SetPermissionMode(context.Background(), 7, ProviderClaudeNative, ClaudeModeDefault); err != nil {
+			t.Fatalf("SetPermissionMode() error = %v", err)
+		}
+		if fake.mode != ClaudeModeDefault {
+			t.Fatalf("claude client mode = %q, want %q", fake.mode, ClaudeModeDefault)
+		}
+		r.untrackClaudeClient(7)
+		if err := r.SetPermissionMode(context.Background(), 7, ProviderClaudeNative, ClaudeModePlan); err == nil {
+			t.Fatal("SetPermissionMode() with no live claude session = nil, want error")
+		}
+	})
+
+	t.Run("codex unsupported", func(t *testing.T) {
+		t.Parallel()
+		err := New(nil).SetPermissionMode(context.Background(), 1, ProviderCodexNative, CodexModeFullAccess)
+		if !errors.Is(err, ErrModeSwitchNotSupported) {
+			t.Fatalf("err = %v, want ErrModeSwitchNotSupported", err)
+		}
+	})
+}
+
+// fakeClaudeModeClient is a claudeBackend that only records
+// SetPermissionMode calls.
+type fakeClaudeModeClient struct{ mode string }
+
+func (f *fakeClaudeModeClient) Prompt(context.Context, string, chan<- claudecode.Message) (claudecode.ResultMessage, error) {
+	return claudecode.ResultMessage{}, nil
+}
+func (f *fakeClaudeModeClient) SetPermissionMode(_ context.Context, mode string) error {
+	f.mode = mode
+	return nil
+}
+func (f *fakeClaudeModeClient) Close() error { return nil }
+
+// sequenceDecider runs each of modes through Runner.SetPermissionMode from
+// inside Decide (the session is provably live), then allows.
+type sequenceDecider struct {
+	r        *Runner
+	chatID   int64
+	provider Provider
+	modes    []string
+	errs     []error
+}
+
+func (d *sequenceDecider) Decide(ctx context.Context, _ string, options []PermissionOption) (string, error) {
+	for _, m := range d.modes {
+		d.errs = append(d.errs, d.r.SetPermissionMode(ctx, d.chatID, d.provider, m))
+	}
+	return options[0].ID, nil
+}
+
+// TestRunner_SetPermissionMode_ConfigOptionAgentRoundTrip is the regression
+// test for the stale config-option currentValue: on an agent exposing its
+// modes as a category-"mode" config option, default -> bypass_permissions
+// -> default must send *both* switches (the second used to be skipped as
+// "already current", leaving the agent in bypass).
+func TestRunner_SetPermissionMode_ConfigOptionAgentRoundTrip(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission")
+	r := glmRunnerWithCaps(wm, "modes:config")
+	d := &sequenceDecider{r: r, chatID: task.ID, provider: ProviderGLM, modes: []string{"bypass_permissions", "default"}}
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
-
-	if decider.callCount() != 0 {
-		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
+	for i, err := range d.errs {
+		if err != nil {
+			t.Fatalf("SetPermissionMode #%d error = %v", i, err)
+		}
+	}
+	want := "set_config_option:bypass_permissions\nset_config_option:default"
+	if log := sessionModeLog(t, *task.WorktreePath); log != want {
+		t.Fatalf("session-mode log = %q, want %q", log, want)
 	}
 }
 
-// TestRunner_RunPrompt_GLM_FullAccess_InstallsAutoApprove proves
-// ApprovalPolicyFullAccess installs acp.AutoApprovePolicy{} for ACP
-// (GLM/Kimi), not merely "no decider": the fake agent's "permission"
-// scenario offers an allow_once and a reject_once option and echoes back
-// whichever optionId the client chose, so seeing "chose:allow-1" (the
-// allow option AutoApprovePolicy always selects) rather than the
-// deny-leaning stubDecider's answer proves the real auto-approve
-// mechanism is actually wired in, and decider.callCount() == 0 proves the
-// decider it was handed is never consulted to get there.
-func TestRunner_RunPrompt_GLM_FullAccess_InstallsAutoApprove(t *testing.T) {
+// TestRunner_SetPermissionMode_FollowsCurrentModeUpdate is the regression
+// test for a stale CurrentModeID: after the agent reports its own switch
+// to accept_edits (current_mode_update), asking for "default" must
+// actually send session/set_mode -- not be skipped because the client
+// still thinks the session is in its start mode.
+func TestRunner_SetPermissionMode_FollowsCurrentModeUpdate(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "permission")
-	r := glmRunner(wm)
-	decider := &stubDecider{optionID: "deny-1"}
-
+	wm, task := newTestTask(t, "mode-update")
+	r := glmRunnerWithCaps(wm, "modes:session")
+	d := &sequenceDecider{r: r, chatID: task.ID, provider: ProviderGLM, modes: []string{"default"}}
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, ApprovalPolicyFullAccess, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
 	}()
-
-	got := drainEvents(events)
+	drainEvents(events)
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
-	if decider.callCount() != 0 {
-		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
+	if len(d.errs) != 1 || d.errs[0] != nil {
+		t.Fatalf("SetPermissionMode errors = %v", d.errs)
 	}
-
-	var texts []string
-	for _, e := range got {
-		if e.Type == EventTypeText {
-			texts = append(texts, e.Text)
-		}
-	}
-	if len(texts) != 1 || texts[0] != "chose:allow-1" {
-		t.Fatalf("got texts %v, want [%q] (proves acp.AutoApprovePolicy{} chose the allow option, not the stub decider's deny)", texts, "chose:allow-1")
+	if log := sessionModeLog(t, *task.WorktreePath); log != "set_mode:default" {
+		t.Fatalf("session-mode log = %q, want set_mode:default", log)
 	}
 }
 
-// TestRunner_RunPrompt_CodexNative_FullAccess_InstallsAutoApprove is the
-// Codex-native twin of the GLM test above: the fake app-server's
-// "permission" scenario issues a real item/commandExecution/requestApproval
-// call and streams back the decision it received, so "decision:accept"
-// (what codex.AutoApprovePolicy{} always answers) rather than the
-// deny-leaning stubDecider's "decline" proves the real policy is installed,
-// and decider.callCount() == 0 proves codexDeciderAdapter is never reached
-// to get there.
-func TestRunner_RunPrompt_CodexNative_FullAccess_InstallsAutoApprove(t *testing.T) {
+// TestRunner_StartModeAppliedBeforeSessionIsSwitchable is the regression
+// test for a mid-run switch racing the start-up mode: the session must not
+// be reachable by SetPermissionMode until runACP has applied the run's
+// start mode, or a quick switch could land first and then be overwritten
+// by the start-up set_mode. While the start-up set_mode is still in flight
+// (the fake answers it after 400ms), SetPermissionMode must fail with "no
+// live session" rather than send its own switch.
+func TestRunner_StartModeAppliedBeforeSessionIsSwitchable(t *testing.T) {
 	t.Parallel()
-	wm, task := newTestTask(t, "permission")
-	r := codexRunner(wm)
-	decider := &stubDecider{optionID: codexOptionDecline}
-
+	wm, task := newTestTask(t, "reply")
+	r := glmRunnerWithCaps(wm, "modes:slow")
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", decider, ApprovalPolicyFullAccess, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: "accept_edits"}, "", events)
 	}()
+	go drainEvents(events)
 
-	got := drainEvents(events)
+	deadline := time.Now().Add(5 * time.Second)
+	for sessionModeLog(t, *task.WorktreePath) == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("start-up set_mode never reached the agent")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	// The start-up set_mode is now in flight.
+	if err := r.SetPermissionMode(context.Background(), task.ID, ProviderGLM, "bypass_permissions"); err == nil {
+		t.Fatal("SetPermissionMode during the start-up set_mode succeeded; want no-live-session until the start mode is applied")
+	}
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
-	if decider.callCount() != 0 {
-		t.Fatalf("decider.calls = %d, want 0 (full-access must never consult it)", decider.callCount())
-	}
-
-	var texts []string
-	for _, e := range got {
-		if e.Type == EventTypeText {
-			texts = append(texts, e.Text)
-		}
-	}
-	if len(texts) != 1 || texts[0] != "decision:accept" {
-		t.Fatalf("got texts %v, want [%q] (proves codex.AutoApprovePolicy{} accepted, not the stub decider's decline)", texts, "decision:accept")
+	if log := sessionModeLog(t, *task.WorktreePath); log != "set_mode:accept_edits" {
+		t.Fatalf("session-mode log = %q, want only the start-up set_mode", log)
 	}
 }

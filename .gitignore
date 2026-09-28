@@ -1,4 +1,7 @@
 bin/
+# Stray `go build ./internal/*/fakeagent` output at the repo root (test
+# fake agents are built into temp dirs by TestMain; never commit one).
+/fakeagent
 refs/
 .task/
 

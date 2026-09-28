@@ -1,11 +1,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { RotateCcw } from "lucide-react";
+import { Check, RotateCcw } from "lucide-react";
 
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
 import { cn } from "@/lib/utils";
-import { approvalPolicies as allApprovalPolicies, approvalPolicyLabel, type ApprovalPolicyInfo } from "@/lib/approval-policies";
+import {
+  AUTO_ACCEPT_HELP,
+  AUTO_ACCEPT_LABEL,
+  describePermission,
+  effectiveMode,
+  providerModes,
+  supportsAutoAccept,
+} from "@/lib/permission-modes";
 import { THINKING_LEVELS, thinkingLevelLabel } from "@/lib/thinking-levels";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { AgentProfile, ApprovalPolicy, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 // Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
 // the original dense sizing at `md:` and above -- plain responsive Tailwind
@@ -58,7 +65,10 @@ export interface RunConfigState {
   /** True once any field has been hand-edited since baseAgentId was applied. */
   custom: boolean;
   provider: Provider;
-  approvalPolicy: ApprovalPolicy;
+  /** One of the provider's own permission mode ids (ADR-0019); "" means the provider's default. */
+  permissionMode: string;
+  /** ACP providers only: approve every permission prompt. */
+  autoAccept: boolean;
   thinkingLevel: ThinkingLevel;
 }
 
@@ -66,7 +76,8 @@ export interface RunConfigContextValue {
   state: RunConfigState;
   actions: {
     setProvider: (provider: Provider) => void;
-    setApprovalPolicy: (policy: ApprovalPolicy) => void;
+    setPermissionMode: (mode: string) => void;
+    setAutoAccept: (autoAccept: boolean) => void;
     setThinkingLevel: (level: ThinkingLevel) => void;
     /** Applies a profile's stored config to the three fields (ADR-0014's client-side seed) and marks it as the base agent. */
     applyProfile: (profileId: string) => void;
@@ -78,8 +89,12 @@ export interface RunConfigContextValue {
   meta: {
     profiles: AgentProfile[];
     providers: ProviderInfo[];
-    /** The three tiers for the currently selected provider (full-access's label is provider-specific). */
-    approvalPolicies: ApprovalPolicyInfo[];
+    /** The selected provider's own permission modes (provider.list's catalog). */
+    modes: ModeInfo[];
+    /** state.permissionMode resolved against the provider default -- what the run will actually use. */
+    effectiveMode: string;
+    /** Whether the selected provider takes autoAccept (ACP). */
+    supportsAutoAccept: boolean;
     disabled: boolean;
     /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the Provider select read-only, since a stored agent session is provider-native. */
     boundProvider: Provider | null;
@@ -95,15 +110,16 @@ export function useRunConfig(): RunConfigContextValue {
   return ctx;
 }
 
-const EMPTY_STATE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" };
+const EMPTY_STATE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
 
-/** Applies profile p's stored fields on top of prev -- shared by applyProfile and resetToAgent so "reset" really means "re-apply the same profile". A profile field left empty (e.g. a "Composer default" ApprovalPolicy) leaves the current value alone rather than clobbering it with a hardcoded fallback. */
+/** Applies profile p's stored fields on top of prev -- shared by applyProfile and resetToAgent so "reset" really means "re-apply the same profile". A mode is provider-scoped, so it always comes from the profile ("" = that provider's default) rather than carrying prev's (possibly another provider's) mode over; an empty ThinkingLevel leaves the current value alone. */
 function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigState {
   return {
     baseAgentId: String(p.ID),
     custom: false,
     provider: p.Provider as Provider,
-    approvalPolicy: (p.ApprovalPolicy || prev.approvalPolicy) as ApprovalPolicy,
+    permissionMode: p.PermissionMode,
+    autoAccept: p.AutoAccept,
     thinkingLevel: (p.ThinkingLevel || prev.thinkingLevel) as ThinkingLevel,
   };
 }
@@ -115,9 +131,9 @@ function initialStateFor(taskId: number | null, chatId: number | null, isDefault
 
 /**
  * The composer's run-config toolbar (run-config IA plan): one compound
- * component -- `RunConfigToolbar.Agent`, `.Provider`, `.Approval`,
+ * component -- `RunConfigToolbar.Agent`, `.Provider`, `.Mode`,
  * `.Thinking` -- sharing a single context that holds
- * `{baseAgentId, custom, provider, approvalPolicy, thinkingLevel}`. The
+ * `{baseAgentId, custom, provider, permissionMode, autoAccept, thinkingLevel}`. The
  * provider is the only place state lives; the parts are pure readers
  * (vercel composition-patterns' state-context-interface / state-decouple-
  * implementation).
@@ -192,7 +208,7 @@ export function RunConfigToolbar({
   // the user pick) anything else, regardless of what was seeded above.
   useEffect(() => {
     if (!boundProvider) return;
-    setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider }));
+    setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider, permissionMode: "", autoAccept: false }));
   }, [boundProvider]);
 
   // The ★ default agent (Settings -> Agents): a task that has never had a
@@ -237,13 +253,19 @@ export function RunConfigToolbar({
   }, [profiles]);
 
   const setField = useCallback(
-    (patch: Partial<Pick<RunConfigState, "provider" | "approvalPolicy" | "thinkingLevel">>) => {
+    (patch: Partial<Pick<RunConfigState, "provider" | "permissionMode" | "autoAccept" | "thinkingLevel">>) => {
       setState((prev) => ({ ...prev, ...patch, custom: prev.baseAgentId !== null ? true : prev.custom }));
     },
     [],
   );
-  const setProvider = useCallback((provider: Provider) => setField({ provider }), [setField]);
-  const setApprovalPolicy = useCallback((approvalPolicy: ApprovalPolicy) => setField({ approvalPolicy }), [setField]);
+  // Modes are provider-scoped (W1): switching provider resets to the new
+  // provider's own default mode and turns autoAccept off.
+  const setProvider = useCallback(
+    (provider: Provider) => setField({ provider, permissionMode: "", autoAccept: false }),
+    [setField],
+  );
+  const setPermissionMode = useCallback((permissionMode: string) => setField({ permissionMode }), [setField]);
+  const setAutoAccept = useCallback((autoAccept: boolean) => setField({ autoAccept }), [setField]);
   const setThinkingLevel = useCallback((thinkingLevel: ThinkingLevel) => setField({ thinkingLevel }), [setField]);
 
   // The command palette's "Use agent: <name>" entry lands here (the
@@ -265,13 +287,20 @@ export function RunConfigToolbar({
   }, [profiles]);
 
   const value = useMemo<RunConfigContextValue>(() => {
-    const policies = allApprovalPolicies(state.provider);
     return {
       state,
-      actions: { setProvider, setApprovalPolicy, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
-      meta: { profiles, providers, approvalPolicies: policies, disabled, boundProvider },
+      actions: { setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
+      meta: {
+        profiles,
+        providers,
+        modes: providerModes(providers, state.provider),
+        effectiveMode: effectiveMode(providers, state.provider, state.permissionMode),
+        supportsAutoAccept: supportsAutoAccept(providers, state.provider),
+        disabled,
+        boundProvider,
+      },
     };
-  }, [state, setProvider, setApprovalPolicy, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
+  }, [state, setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
 
   useEffect(() => {
     onChange?.(value);
@@ -288,10 +317,10 @@ export function RunConfigToolbar({
   return <RunConfigContext.Provider value={value}>{children}</RunConfigContext.Provider>;
 }
 
-/** "<provider> · <approval> · <thinking>" -- the agent menu's per-row metadata (AC's "<name> (<provider> · <approval> · <thinking>)" format) and the header pill share this. Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
+/** "<provider> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this. The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
 export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): string {
   const providerLabel = providers.find((candidate) => candidate.id === p.Provider)?.label ?? p.Provider;
-  const parts = [providerLabel, approvalPolicyLabel((p.ApprovalPolicy || "manual") as ApprovalPolicy)];
+  const parts = [providerLabel, describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept)];
   if (p.Provider === "claude-native") parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }
@@ -418,34 +447,45 @@ function RunConfigToolbarProvider() {
   );
 }
 
-function RunConfigToolbarApproval() {
+/**
+ * The provider's own permission modes (ADR-0019), straight from
+ * provider.list -- labels and help text are the provider's words. For an
+ * ACP provider an Auto-accept toggle sits beside it (Paseo's auto_accept:
+ * approve every prompt), never switched on by default.
+ */
+function RunConfigToolbarMode() {
   const { state, actions, meta } = useRunConfig();
+  const current = meta.modes.find((m) => m.id === meta.effectiveMode);
   return (
-    <Select
-      value={state.approvalPolicy}
-      onValueChange={(v) => actions.setApprovalPolicy(v as ApprovalPolicy)}
-      disabled={meta.disabled}
-    >
-      {/* The help text stays a plain `title` -- a hover tooltip on the
-          trigger, exactly where it was on the native select. Reflects the
-          *current* selection's own help (each option gets its own too, in
-          the open list below), since the three tiers no longer share one
-          description now that full-access differs per provider. */}
-      <SelectTrigger
-        aria-label="Approval policy"
-        title={meta.approvalPolicies.find((p) => p.id === state.approvalPolicy)?.help}
-        className={SELECT_TRIGGER_CLASS}
-      >
-        <SelectValue placeholder="Select policy" />
-      </SelectTrigger>
-      <SelectContent>
-        {meta.approvalPolicies.map((p) => (
-          <SelectItem key={p.id} value={p.id} title={p.help}>
-            {p.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <>
+      <Select value={meta.effectiveMode} onValueChange={(v) => v && actions.setPermissionMode(v)} disabled={meta.disabled}>
+        <SelectTrigger aria-label="Permission mode" title={current?.description} className={SELECT_TRIGGER_CLASS}>
+          <SelectValue placeholder="Select mode" />
+        </SelectTrigger>
+        <SelectContent>
+          {meta.modes.map((m) => (
+            <SelectItem key={m.id} value={m.id} title={m.description}>
+              {m.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {meta.supportsAutoAccept && (
+        <Button
+          type="button"
+          variant="ghost"
+          aria-pressed={state.autoAccept}
+          title={AUTO_ACCEPT_HELP}
+          data-testid="composer-auto-accept"
+          disabled={meta.disabled}
+          onClick={() => actions.setAutoAccept(!state.autoAccept)}
+          className={cn(AGENT_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
+        >
+          {state.autoAccept && <Check aria-hidden />}
+          {AUTO_ACCEPT_LABEL}
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -485,5 +525,5 @@ function RunConfigToolbarThinking() {
 
 RunConfigToolbar.Agent = RunConfigToolbarAgent;
 RunConfigToolbar.Provider = RunConfigToolbarProvider;
-RunConfigToolbar.Approval = RunConfigToolbarApproval;
+RunConfigToolbar.Mode = RunConfigToolbarMode;
 RunConfigToolbar.Thinking = RunConfigToolbarThinking;

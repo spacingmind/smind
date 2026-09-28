@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/accounts"
@@ -58,7 +59,7 @@ func TestRunProfileAddPrintsCreatedRow(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = run([]string{"profile", "add", "UI work", "claude-native", "--approval-policy", "manual"})
+		code = run([]string{"profile", "add", "UI work", "claude-native", "--mode=plan"})
 	})
 	if code != 0 {
 		t.Fatalf("run(profile add) = %d, want 0; stdout: %s", code, out)
@@ -71,8 +72,8 @@ func TestRunProfileAddPrintsCreatedRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("List() error = %v", err)
 	}
-	if len(list) != 1 || list[0].Name != "UI work" || list[0].Provider != "claude-native" || list[0].ApprovalPolicy != "manual" {
-		t.Fatalf("stored profiles = %+v, want one UI work/claude-native/manual profile", list)
+	if len(list) != 1 || list[0].Name != "UI work" || list[0].Provider != "claude-native" || list[0].PermissionMode != "plan" {
+		t.Fatalf("stored profiles = %+v, want one UI work/claude-native/plan profile", list)
 	}
 }
 
@@ -133,5 +134,71 @@ func TestRunProfileRmRemovesProfile(t *testing.T) {
 	}
 	if len(after) != 0 {
 		t.Fatalf("stored profiles after rm = %+v, want none", after)
+	}
+}
+
+// TestRunProfileAddRejectsRemovedApprovalPolicyFlag proves the removed
+// --approval-policy flag exits 2 pointing at --mode (ADR-0019), without
+// ever creating a profile.
+func TestRunProfileAddRejectsRemovedApprovalPolicyFlag(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	var code int
+	stderr := captureStderr(t, func() {
+		code = run([]string{"profile", "add", "x", "claude-native", "--approval-policy", "manual"})
+	})
+	if code != 2 || !strings.Contains(stderr, "--mode") {
+		t.Fatalf("run(profile add --approval-policy) = %d, stderr %q; want 2 mentioning --mode", code, stderr)
+	}
+	if list, _ := profiles.New(s).List(); len(list) != 0 {
+		t.Fatalf("stored profiles = %+v, want none", list)
+	}
+}
+
+// TestRunProfileAddAutoAcceptForms proves every accepted spelling of the
+// boolean --auto-accept flag works: bare (true), =true, and =false -- the
+// `=value` form previously leaked a stray `true` positional that tripped
+// the flag parser.
+func TestRunProfileAddAutoAcceptForms(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"bare", []string{"profile", "add", "bare", "glm", "--auto-accept"}, true},
+		{"equals true", []string{"profile", "add", "eqtrue", "glm", "--auto-accept=true"}, true},
+		{"equals false", []string{"profile", "add", "eqfalse", "glm", "--auto-accept=false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s := newTestProfileDaemon(t)
+			var code int
+			captureStdout(t, func() { code = run(tc.args) })
+			if code != 0 {
+				t.Fatalf("run(%v) = %d, want 0", tc.args, code)
+			}
+			list, err := profiles.New(s).List()
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List() = %+v, %v, want one profile", list, err)
+			}
+			if list[0].AutoAccept != tc.want {
+				t.Fatalf("stored AutoAccept = %v, want %v", list[0].AutoAccept, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunProfileAddAutoAcceptRejectsNonBoolean proves a non-boolean
+// --auto-accept value exits 2 with a clear message, without creating a
+// profile.
+func TestRunProfileAddAutoAcceptRejectsNonBoolean(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	var code int
+	stderr := captureStderr(t, func() {
+		code = run([]string{"profile", "add", "x", "glm", "--auto-accept=yes"})
+	})
+	if code != 2 || !strings.Contains(stderr, "not a boolean") {
+		t.Fatalf("run(profile add --auto-accept=yes) = %d, stderr %q; want 2 mentioning boolean", code, stderr)
+	}
+	if list, _ := profiles.New(s).List(); len(list) != 0 {
+		t.Fatalf("stored profiles = %+v, want none", list)
 	}
 }

@@ -48,7 +48,7 @@ function run(id: string, taskId: number, status: RunStatusValue, startedAt: stri
     FinishedAt: status === "running" ? null : startedAt,
     StopReason: "",
     Err: "",
-    ApprovalPolicy: "manual",
+    PermissionMode: "", AutoAccept: false,
     ThinkingLevel: "",
   };
 }

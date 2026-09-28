@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { runConfigPillLabel, TaskDetailPane } from "@/components/task-detail";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+import type { AgentProfile, Chat, ProviderInfo, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 // The run-config IA plan persists RunConfigToolbar's state per task id
 // (docs/design.md §9) -- most tests below share TASK_A.ID, so a leftover
@@ -52,7 +52,8 @@ function runningRun(overrides: Partial<RunSummary> = {}): RunSummary {
     FinishedAt: null,
     StopReason: "",
     Err: "",
-    ApprovalPolicy: "manual",
+    PermissionMode: "acceptEdits",
+    AutoAccept: false,
     ThinkingLevel: "",
     ...overrides,
   };
@@ -70,7 +71,8 @@ function doneRun(overrides: Partial<RunSummary> = {}): RunSummary {
     FinishedAt: "2024-01-01T00:00:05Z",
     StopReason: "end_turn",
     Err: "",
-    ApprovalPolicy: "manual",
+    PermissionMode: "acceptEdits",
+    AutoAccept: false,
     ThinkingLevel: "",
     ...overrides,
   };
@@ -591,14 +593,14 @@ describe("TaskDetailPane", () => {
     expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
   });
 
-  it("defaults the approval-policy selector to manual and omits approvalPolicy from run.start", async () => {
+  it("defaults the permission-mode selector to the provider default and omits permissionMode from run.start", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     await flush();
 
-    expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Manual approval");
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept File Edits");
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -608,15 +610,15 @@ describe("TaskDetailPane", () => {
     expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
   });
 
-  it("sends approvalPolicy=auto-safe in run.start when auto-safe is selected", async () => {
+  it("sends the picked permissionMode in run.start", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Approval policy"));
-    fireEvent.click(await screen.findByRole("option", { name: "Auto-safe" }));
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
@@ -627,7 +629,7 @@ describe("TaskDetailPane", () => {
       chatId: CHAT_A.ID,
       provider: "claude-native",
       prompt: "do the thing",
-      approvalPolicy: "auto-safe",
+      permissionMode: "plan",
     });
   });
 
@@ -777,67 +779,89 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("run-config-options-error")).toHaveTextContent("no such config option");
   });
 
-  it("shows the live approval-policy control for a running manual run and switches it via run.setApprovalPolicy", async () => {
+  it("shows the live permission-mode control for a running run and switches it via run.setPermissionMode (W5)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
+    client.nth("run.list", 0).resolve([runningRun({ PermissionMode: "acceptEdits" })]);
     await flush();
 
-    const control = screen.getByTestId("approval-policy-control");
-    expect(within(control).getByTestId("approval-policy-option-manual")).toHaveAttribute("aria-pressed", "true");
-    expect(within(control).getByTestId("approval-policy-option-auto-safe")).toHaveAttribute("aria-pressed", "false");
+    const control = screen.getByTestId("permission-mode-control");
+    expect(within(control).getByTestId("permission-mode-option-acceptEdits")).toHaveAttribute("aria-pressed", "true");
+    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "false");
+    // Claude takes no auto-accept toggle.
+    expect(within(control).queryByTestId("permission-mode-auto-accept")).not.toBeInTheDocument();
 
-    fireEvent.click(within(control).getByTestId("approval-policy-option-auto-safe"));
+    fireEvent.click(within(control).getByTestId("permission-mode-option-plan"));
     await flush();
 
-    const setCall = client.nth("run.setApprovalPolicy", 0);
-    expect(setCall.params).toEqual({ runId: "run-1", policy: "auto-safe" });
+    const setCall = client.nth("run.setPermissionMode", 0);
+    expect(setCall.params).toEqual({ runId: "run-1", modeId: "plan" });
 
     await act(async () => {
-      setCall.resolve({ approvalPolicy: "auto-safe" });
+      setCall.resolve({ permissionMode: "plan", autoAccept: false });
     });
 
-    expect(within(control).getByTestId("approval-policy-option-auto-safe")).toHaveAttribute("aria-pressed", "true");
+    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("surfaces a failed run.setApprovalPolicy as an error instead of silently no-op'ing", async () => {
+  it("offers the Auto-accept toggle for a running ACP run and flips it via run.setPermissionMode", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "manual" })]);
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "glm", PermissionMode: "default" })]);
     await flush();
 
-    fireEvent.click(screen.getByTestId("approval-policy-option-auto-safe"));
+    const toggle = screen.getByTestId("permission-mode-auto-accept");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    await flush();
+
+    const setCall = client.nth("run.setPermissionMode", 0);
+    expect(setCall.params).toEqual({ runId: "run-1", autoAccept: true });
+    await act(async () => {
+      setCall.resolve({ permissionMode: "default", autoAccept: true });
+    });
+    expect(screen.getByTestId("permission-mode-auto-accept")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("surfaces a failed run.setPermissionMode as an error instead of silently no-op'ing", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("permission-mode-option-plan"));
     await flush();
 
     await act(async () => {
-      client.nth("run.setApprovalPolicy", 0).reject(new Error("run already finished"));
+      client.nth("run.setPermissionMode", 0).reject(new Error("run already finished"));
     });
 
-    expect(screen.getByTestId("approval-policy-error")).toHaveTextContent("run already finished");
+    expect(screen.getByTestId("permission-mode-error")).toHaveTextContent("run already finished");
   });
 
-  it("hides the approval-policy control entirely for a full-access run", async () => {
+  it("hides the permission-mode control for a running Codex run (no mid-run switch)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun({ ApprovalPolicy: "full-access" })]);
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "codex-native", PermissionMode: "auto" })]);
     await flush();
 
-    expect(screen.queryByTestId("approval-policy-control")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
   });
 
-  it("hides the approval-policy control once the run has finished", async () => {
+  it("hides the permission-mode control once the run has finished", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([doneRun({ ApprovalPolicy: "manual" })]);
+    client.nth("run.list", 0).resolve([doneRun()]);
     await flush();
     client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", events: [] });
     await flush();
 
-    expect(screen.queryByTestId("approval-policy-control")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
   });
 
   it("shows Retry with higher effort for a failed Claude run below extended and resubmits at the next tier", async () => {
@@ -849,7 +873,7 @@ describe("TaskDetailPane", () => {
         Status: "error",
         Err: "boom",
         Provider: "claude-native",
-        ApprovalPolicy: "auto-safe",
+        PermissionMode: "plan",
         ThinkingLevel: "off",
       }),
     ]);
@@ -867,7 +891,7 @@ describe("TaskDetailPane", () => {
       chatId: CHAT_A.ID,
       provider: "claude-native",
       prompt: "do the thing",
-      approvalPolicy: "auto-safe",
+      permissionMode: "plan",
       thinkingLevel: "standard",
     });
   });
@@ -929,7 +953,7 @@ describe("run-config pill (run-config IA)", () => {
     client.nth("provider.list", 1).resolve(providersResult);
     await flush();
 
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Manual approval · Standard");
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Accept File Edits · Standard");
 
     fireEvent.click(screen.getByLabelText("Provider"));
     fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
@@ -937,7 +961,7 @@ describe("run-config pill (run-config IA)", () => {
 
     // GLM has no thinking-level segment (mirrors the toolbar's own Thinking
     // control being omitted for non-Claude providers).
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · GLM · Manual approval");
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · GLM · Default");
     expect(screen.getByTestId("task-run-config-pill")).not.toHaveTextContent("Standard");
 
     fireEvent.click(screen.getByTestId("task-run-config-pill"));
@@ -953,7 +977,8 @@ describe("run-config pill (run-config IA)", () => {
       ID: 1,
       Name: "Quick Fixes",
       Provider: "claude-native",
-      ApprovalPolicy: "manual",
+      PermissionMode: "",
+      AutoAccept: false,
       ThinkingLevel: "",
       Notes: "",
       CreatedAt: "2026-09-25T00:00:00Z",
@@ -974,8 +999,11 @@ describe("run-config pill (run-config IA)", () => {
 });
 
 describe("runConfigPillLabel", () => {
-  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" };
-  const providerLabels = { "claude-native": "Claude Code", glm: "GLM" };
+  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
+  const providers: ProviderInfo[] = [
+    { id: "claude-native", label: "Claude Code" },
+    { id: "glm", label: "GLM" },
+  ];
 
   it("names the agent when one is applied", () => {
     const profiles: AgentProfile[] = [
@@ -983,26 +1011,32 @@ describe("runConfigPillLabel", () => {
         ID: 1,
         Name: "Quick Fixes",
         Provider: "claude-native",
-        ApprovalPolicy: "manual",
+        PermissionMode: "",
+        AutoAccept: false,
         ThinkingLevel: "",
         Notes: "",
         CreatedAt: "",
         UpdatedAt: "",
       },
     ];
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1" }, profiles, providerLabels)).toBe(
-      "Quick Fixes · Claude Code · Manual approval · Standard",
+    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1" }, profiles, providers)).toBe(
+      "Quick Fixes · Claude Code · Accept File Edits · Standard",
     );
   });
 
   it('says "Custom" when hand-edited, and "No agent" when nothing was ever picked', () => {
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1", custom: true }, [], providerLabels)).toBe(
-      "Custom · Claude Code · Manual approval · Standard",
+    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1", custom: true }, [], providers)).toBe(
+      "Custom · Claude Code · Accept File Edits · Standard",
     );
-    expect(runConfigPillLabel(BASE, [], providerLabels)).toBe("No agent · Claude Code · Manual approval · Standard");
+    expect(runConfigPillLabel(BASE, [], providers)).toBe("No agent · Claude Code · Accept File Edits · Standard");
   });
 
   it("omits the thinking segment for a non-Claude provider", () => {
-    expect(runConfigPillLabel({ ...BASE, provider: "glm" }, [], providerLabels)).toBe("No agent · GLM · Manual approval");
+    expect(runConfigPillLabel({ ...BASE, provider: "glm" }, [], providers)).toBe("No agent · GLM · Default");
+  });
+
+  it("uses the provider's own mode label and notes auto-accept", () => {
+    expect(runConfigPillLabel({ ...BASE, permissionMode: "plan" }, [], providers)).toBe("No agent · Claude Code · Plan Mode · Standard");
+    expect(runConfigPillLabel({ ...BASE, provider: "glm", autoAccept: true }, [], providers)).toBe("No agent · GLM · Default · Auto-accept");
   });
 });

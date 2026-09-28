@@ -18,7 +18,7 @@ func TestProfile_CreateGetRoundTrip(t *testing.T) {
 	t.Cleanup(func() { _ = ws.Close() })
 
 	sendRequest(t, ws, "create", "profile.create", map[string]any{
-		"name": "UI work", "provider": "claude-native", "approvalPolicy": "manual",
+		"name": "UI work", "provider": "claude-native", "permissionMode": "plan",
 		"thinkingLevel": "standard", "notes": "For UI polish.",
 	})
 	resp := readEnvelopeFor(t, ws, "create", 5*time.Second)
@@ -93,7 +93,7 @@ func TestProfile_UpdateVisibleFromSecondConnection(t *testing.T) {
 	mustDecode(t, readEnvelopeFor(t, wsA, "create", 5*time.Second).Result, &created)
 
 	sendRequest(t, wsA, "update", "profile.update", map[string]any{
-		"id": created.ID, "name": "new", "provider": "glm", "approvalPolicy": "auto-safe",
+		"id": created.ID, "name": "new", "provider": "glm", "permissionMode": "accept_edits", "autoAccept": true,
 	})
 	if resp := readEnvelopeFor(t, wsA, "update", 5*time.Second); resp.Error != nil {
 		t.Fatalf("profile.update error = %v", resp.Error.Message)
@@ -106,7 +106,7 @@ func TestProfile_UpdateVisibleFromSecondConnection(t *testing.T) {
 	}
 	var got store.AgentProfile
 	mustDecode(t, resp.Result, &got)
-	if got.Name != "new" || got.Provider != "glm" || got.ApprovalPolicy != "auto-safe" {
+	if got.Name != "new" || got.Provider != "glm" || got.PermissionMode != "accept_edits" || !got.AutoAccept {
 		t.Fatalf("profile.get from second connection = %+v, want updated fields", got)
 	}
 }

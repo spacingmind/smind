@@ -17,7 +17,7 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
     startedAt: "2024-01-01T00:00:00Z",
     finishedAt: "2024-01-01T00:00:02Z",
     items: buildTimeline(events),
-    approvalPolicy: "manual",
+    permissionMode: "", autoAccept: false,
     thinkingLevel: "",
     ...overrides,
   };
@@ -64,7 +64,8 @@ describe("RunTimeline", () => {
 
   it.each([
     ["human", "You approved"],
-    ["auto_safe", "Auto-approved"],
+    ["auto_accept", "Auto-accepted"],
+    ["auto_safe", "Auto-approved (legacy)"],
     ["timeout", "Timed out"],
   ] as const)("renders a resolved permission's reason %s as %s", (reason, label) => {
     render(

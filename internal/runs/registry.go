@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -33,7 +34,7 @@ const finishedRetentionCap = 200
 
 // defaultPermissionTimeout is how long a pending permission request (see
 // runPermissionDecider.Decide) waits for either a human response
-// (RespondPermission) or an ApprovalPolicyAutoSafe auto-allow before it
+// (RespondPermission) before it
 // auto-resolves to a deny option itself, rather than blocking the run
 // forever -- see PermissionResolvedByTimeout and
 // docs/plans/active/task-permission-ux.md Item 2. Kept as its own named
@@ -72,7 +73,7 @@ type Registry struct {
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
-// waits for a human response (or an ApprovalPolicyAutoSafe auto-allow)
+// waits for a human response
 // before runPermissionDecider.Decide auto-resolves it to deny instead of
 // blocking the run forever (see defaultPermissionTimeout). d <= 0 restores
 // the default. Exists so a test can shrink the timeout to something it can
@@ -224,7 +225,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		chatID:             row.ChatID,
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
-		approvalPolicy:     taskrunner.ApprovalPolicy(row.ApprovalPolicy),
+		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -262,7 +263,7 @@ type run struct {
 	// immutable thereafter -- passed straight through to RunPrompt in
 	// drive; only ever meaningful for ProviderClaudeNative (see
 	// ThinkingLevel's doc comment). Not persisted to the store row (unlike
-	// approvalPolicy): it only matters for the live call drive makes, and a
+	// perm): it only matters for the live call drive makes, and a
 	// rehydrated run never re-drives, so there's nothing for a stored value
 	// to feed.
 	thinkingLevel taskrunner.ThinkingLevel
@@ -290,17 +291,24 @@ type run struct {
 	errMsg        string
 	stopRequested bool
 
-	// approvalPolicy is this run's taskrunner.ApprovalPolicy, set at Start
-	// and live-switchable thereafter via Registry.SetApprovalPolicy between
-	// ApprovalPolicyManual and ApprovalPolicyAutoSafe (ApprovalPolicyFullAccess
-	// is rejected as a switch target -- see SetApprovalPolicy's doc comment).
-	// Guarded by mu because runPermissionDecider.Decide (the only reader)
-	// and SetApprovalPolicy (the only writer after Start) can race across
-	// goroutines exactly like every other mid-run-mutable field here. A
-	// switch takes effect for the next Decide call that checks it; a
-	// request already past that check (blocked in its own select, waiting
-	// on a human/timeout/cancellation) is never retroactively affected.
-	approvalPolicy taskrunner.ApprovalPolicy
+	// perm is this run's provider-native permission settings (ADR-0019),
+	// set at Start and live-switchable thereafter via
+	// Registry.SetPermissionMode (Mode, applied through the provider's own
+	// session) and Registry.SetAutoAccept (AutoAccept, read by
+	// runPermissionDecider.Decide). Guarded by mu. A switch never
+	// retroactively affects a request already pending a human.
+	perm taskrunner.PermissionSettings
+
+	// modeSwitchMu serializes Registry.SetPermissionMode for this run, so
+	// two concurrent switches can't interleave their provider calls with
+	// their perm.Mode writes (leaving RunStatus naming one mode while the
+	// agent is in the other). Held across the provider round trip -- never
+	// while holding mu.
+	modeSwitchMu sync.Mutex
+
+	// explicitModeSwitches is bumped when a live switch begins; a
+	// start-mode report seen after that is stale.
+	explicitModeSwitches atomic.Int64
 
 	history     []Event
 	subscribers map[int]*subQueue
@@ -322,14 +330,11 @@ type run struct {
 	pendingPermissions map[string]chan string
 }
 
-// getApprovalPolicy returns r's current approvalPolicy under its mutex --
-// the one place every reader of the live (possibly Registry.SetApprovalPolicy
-// -switched) value should go through, rather than each call site taking
-// r.mu by hand.
-func (r *run) getApprovalPolicy() taskrunner.ApprovalPolicy {
+// getPerm returns r's current permission settings under its mutex.
+func (r *run) getPerm() taskrunner.PermissionSettings {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.approvalPolicy
+	return r.perm
 }
 
 func (r *run) statusLocked() RunStatus {
@@ -344,7 +349,8 @@ func (r *run) statusLocked() RunStatus {
 		FinishedAt:     r.finishedAt,
 		StopReason:     r.stopReason,
 		Err:            r.errMsg,
-		ApprovalPolicy: r.approvalPolicy,
+		PermissionMode: r.perm.Mode,
+		AutoAccept:     r.perm.AutoAccept,
 		ThinkingLevel:  r.thinkingLevel,
 	}
 }
@@ -375,20 +381,17 @@ func (r *run) statusLocked() RunStatus {
 // running is also rejected; different chats of the same task may run
 // concurrently (the whole point of this ADR).
 //
-// approvalPolicy governs how this run's own pending permission requests (if
-// any) get decided -- see taskrunner.ApprovalPolicy and
-// runPermissionDecider.Decide. The empty string is accepted and treated as
-// taskrunner.ApprovalPolicyManual (today's only behavior before this field
-// existed); any other value must be taskrunner.ApprovalPolicy.IsValid, or
-// Start returns an error rather than silently falling back to manual --
-// callers one layer up (internal/wsapi) are expected to have already
-// validated this against user input, but Start itself doesn't trust that.
+// perm is this run's provider-native permission settings (ADR-0019),
+// validated against runner.ProviderCatalogFor(provider): an unknown mode
+// for the provider, or AutoAccept on a provider without it, is rejected
+// rather than silently falling back. An empty Mode resolves to the
+// provider's DefaultMode, so the run records the mode it actually ran in.
 //
 // thinkingLevel is this run's taskrunner.ThinkingLevel -- Claude-only (see
 // its doc comment), ignored entirely by every other provider. The empty
 // string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
-// exactly, the same way an empty approvalPolicy does.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, approvalPolicy taskrunner.ApprovalPolicy, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
+// exactly.
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
 	if _, err := wm.GetTask(taskID); err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
 	}
@@ -417,10 +420,20 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	}
 	chatID = chat.ID
 
-	if approvalPolicy == "" {
-		approvalPolicy = taskrunner.ApprovalPolicyManual
-	} else if !approvalPolicy.IsValid() {
-		return "", fmt.Errorf("runs: start: invalid approval policy %q", approvalPolicy)
+	catalog, ok := runner.ProviderCatalogFor(provider)
+	if !ok {
+		return "", fmt.Errorf("runs: start: unknown provider %q", provider)
+	}
+	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
+		return "", fmt.Errorf("runs: start: %w", err)
+	}
+	// An empty mode resolves to the provider default -- for an ACP agent
+	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
+	// treats as "leave the agent in its own start mode" unless the agent
+	// really has a mode by that name; the run then records the agent's
+	// actual mode as soon as its session reports it (applyReportedMode).
+	if perm.Mode == "" {
+		perm.Mode = catalog.DefaultMode
 	}
 
 	if !thinkingLevel.IsValid() {
@@ -440,7 +453,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		provider:           provider,
 		prompt:             prompt,
 		runner:             runner,
-		approvalPolicy:     approvalPolicy,
+		perm:               perm,
 		thinkingLevel:      thinkingLevel,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
@@ -479,7 +492,8 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// agent subprocess for a run whose row didn't make it to disk.
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: id, TaskID: taskID, ChatID: chatID, Provider: string(provider), Prompt: prompt,
-		Status: string(StatusRunning), StartedAt: r.startedAt, ApprovalPolicy: string(approvalPolicy),
+		Status: string(StatusRunning), StartedAt: r.startedAt,
+		PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept,
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, id)
@@ -520,12 +534,16 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	go func() {
 		defer close(forwardDone)
 		for e := range events {
+			if e.Type == taskrunner.EventTypePermissionModeChanged {
+				reg.applyReportedMode(r, e.Text, e.Initial)
+				continue
+			}
 			reg.record(r, e)
 		}
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getApprovalPolicy(), r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
@@ -549,36 +567,19 @@ type runPermissionDecider struct {
 	r   *run
 }
 
-// CurrentApprovalPolicy implements taskrunner.LivePolicyDecider: it lets a
-// wrapping adapter that only captured this run's approvalPolicy once, at
-// RunPrompt's call (acpDeciderAdapter's own frozen field, needed for its
-// autoAllowACPFileEdit fast path -- see that type's doc comment), read the
-// live value instead, the same way Decide above already does for its own
-// AllowlistedCommand check. Without this, Registry.SetApprovalPolicy's
-// mid-run switch to auto-safe would correctly unlock the shell-command
-// allowlist for GLM/Kimi but silently leave every in-worktree file edit
-// still asking a human, since acpDeciderAdapter had no way to ever see the
-// switch.
-func (d runPermissionDecider) CurrentApprovalPolicy() taskrunner.ApprovalPolicy {
-	return d.r.getApprovalPolicy()
-}
-
-func (d runPermissionDecider) Decide(ctx context.Context, summary, command string, options []taskrunner.PermissionOption) (string, error) {
+func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
 	requestID, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: permission request id: %w", err)
 	}
 
-	// ApprovalPolicyAutoSafe: if command matches AllowlistedCommand, allow
-	// it immediately without ever registering a pending channel or
-	// notifying anyone that something needs a human decision -- there
-	// genuinely is no pending state here, just a request and its resolution
-	// recorded back-to-back, same as any other resolved request in
-	// history, but tagged PermissionResolvedByAutoSafe so the timeline can
-	// tell it apart from a real human answering. An unrecognized/ambiguous
-	// command (including "" -- see PermissionDecider's doc comment) always
-	// falls through to the manual flow below, never auto-allowed.
-	if d.r.getApprovalPolicy() == taskrunner.ApprovalPolicyAutoSafe && taskrunner.AllowlistedCommand(command) {
+	// AutoAccept (ACP only, validated at Start): the human chose to approve
+	// every prompt for this run, so allow immediately without registering
+	// a pending channel -- recorded back-to-back as a request and its
+	// resolution, tagged PermissionResolvedByAutoAccept so the timeline can
+	// tell it apart from a real human answer. This is the only auto-allow
+	// smind performs, and it's the human's own per-run choice (ADR-0019).
+	if d.r.getPerm().AutoAccept {
 		if optionID, ok := firstOptionByKind(options, "allow_once", "allow_always"); ok {
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                taskrunner.EventTypePermissionRequest,
@@ -590,7 +591,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 				Type:                 taskrunner.EventTypePermissionResolved,
 				PermissionRequestID:  requestID,
 				PermissionOptionID:   optionID,
-				PermissionResolution: taskrunner.PermissionResolvedByAutoSafe,
+				PermissionResolution: taskrunner.PermissionResolvedByAutoAccept,
 			})
 			return optionID, nil
 		}
@@ -632,7 +633,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 
 	case <-timer.C:
 		// Nobody answered within the timeout: auto-resolve to deny (never
-		// allow, regardless of ApprovalPolicy -- see
+		// allow, regardless of permission mode -- see
 		// PermissionResolvedByTimeout) so the run continues instead of
 		// hanging forever on one unanswered request. abandon first, so a
 		// RespondPermission call that arrives right after this fires gets a
@@ -686,7 +687,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary, command strin
 // firstOptionByKind returns the ID of the first option in options whose
 // Kind matches any of kinds, mirroring acp.AutoApprovePolicy/AutoDenyPolicy's
 // own "first option of a matching kind" selection logic -- used both for
-// ApprovalPolicyAutoSafe's auto-allow and for the timeout's auto-deny.
+// AutoAccept's auto-allow and for the timeout's auto-deny.
 func firstOptionByKind(options []taskrunner.PermissionOption, kinds ...string) (string, bool) {
 	for _, o := range options {
 		for _, k := range kinds {

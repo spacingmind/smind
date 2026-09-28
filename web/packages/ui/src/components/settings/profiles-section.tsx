@@ -8,25 +8,19 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { useDefaultAgentId } from "@/hooks/use-default-agent";
-import { approvalPolicies, approvalPolicyLabel } from "@/lib/approval-policies";
+import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { accountHealthTestKey } from "@/lib/provider-health";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
-import type { AgentProfile, ApprovalPolicy, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, ModeInfo, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails), same fallback composer.tsx uses -- this form must never be unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
-// "Composer default" (the empty id -- inherit whatever the composer is
-// set to) is this form's own entry; the three real tiers come from the
-// shared vocabulary in lib/approval-policies.ts. Claude-native here
-// because full-access's label is provider-specific and this form shows
-// one list for whichever provider is selected above -- a mismatch only
-// ever cosmetic.
-const APPROVAL_POLICIES = [
-  { id: "", label: "Composer default" },
-  ...approvalPolicies("claude-native"),
-];
+// "Provider default" (the empty id -- the provider's own default mode) is
+// this form's own entry; the rest are the selected provider's own
+// permission modes from provider.list (ADR-0019).
+const PROVIDER_DEFAULT_MODE = { id: "", label: "Provider default" };
 
 const THINKING_LEVELS = [
   { id: "", label: "Composer default" },
@@ -39,15 +33,23 @@ const THINKING_LEVELS = [
 interface ProfileFormState {
   name: string;
   provider: string;
-  approvalPolicy: string;
+  permissionMode: string;
+  autoAccept: boolean;
   thinkingLevel: string;
   notes: string;
 }
 
-const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", approvalPolicy: "", thinkingLevel: "", notes: "" };
+const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", notes: "" };
 
 function formFromProfile(p: AgentProfile): ProfileFormState {
-  return { name: p.Name, provider: p.Provider, approvalPolicy: p.ApprovalPolicy, thinkingLevel: p.ThinkingLevel, notes: p.Notes };
+  return {
+    name: p.Name,
+    provider: p.Provider,
+    permissionMode: p.PermissionMode,
+    autoAccept: p.AutoAccept,
+    thinkingLevel: p.ThinkingLevel,
+    notes: p.Notes,
+  };
 }
 
 /** Which card is open: "new" for the add card (rendered at the top of the list), a profile id for that row's inline edit, or null for none. Only one is ever open -- opening one closes whichever was open before. */
@@ -55,7 +57,7 @@ type OpenCard = number | "new" | null;
 
 /**
  * Settings -> Profiles (ADR-0014 / docs/plans/active/agent-profiles.md):
- * create, edit, and delete named provider/approvalPolicy/thinkingLevel
+ * create, edit, and delete named provider/permissionMode/thinkingLevel
  * bundles, stored in the daemon so every client (web, desktop, mobile,
  * CLI) shares the same list. No `model` field -- dropped from v1 entirely,
  * see the ADR's "Deferred: model" section.
@@ -162,7 +164,8 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
       const params = {
         name: form.name.trim(),
         provider: form.provider,
-        approvalPolicy: form.approvalPolicy,
+        permissionMode: form.permissionMode,
+        autoAccept: supportsAutoAccept(providers, form.provider) && form.autoAccept,
         thinkingLevel: form.thinkingLevel,
         notes: form.notes,
       };
@@ -221,7 +224,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
             {profiles.length === 0 && openCard !== "new" && (
               <div data-testid="profiles-empty-state" className="flex flex-col items-start gap-2">
                 <p className="text-ui-base text-muted-foreground">
-                  No agents yet — create one to reuse a provider/approval/thinking bundle from the composer's
+                  No agents yet — create one to reuse a provider/mode/thinking bundle from the composer's
                   Agents picker.
                 </p>
                 <Button type="button" size="sm" data-testid="profiles-empty-new-button" onClick={openNew}>
@@ -325,14 +328,14 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
 }
 
 /**
- * The Name/Provider/Approval/Thinking/Notes fields, reused by both the
+ * The Name/Provider/Mode/Thinking/Notes fields, reused by both the
  * "New agent" card and each row's inline edit (run-config IA's "Edit
  * opens inline in the row" AC, and the follow-up polish pass's "reuse
  * one form component for both create and edit") -- `idPrefix` keeps
  * their data-testids distinct, though only one instance is ever mounted
  * at a time (ProfilesSection's `openCard`).
  *
- * Provider/Approval/Thinking sit in one 3-column equal grid row (the
+ * Provider/Mode/Thinking sit in one 3-column equal grid row (the
  * polish pass's layout fix -- they used to be a 2-column row with
  * Thinking as an inconsistent full-width row below). Thinking is
  * Claude-only, so a non-Claude provider renders an empty grid cell
@@ -373,7 +376,11 @@ function ProfileForm({
       />
       <div className="grid grid-cols-3 gap-2">
         <div className="flex min-w-0 items-center gap-1.5">
-          <Select value={form.provider} onValueChange={(value) => setForm((f) => ({ ...f, provider: value }))}>
+          <Select
+            value={form.provider}
+            // Modes are provider-scoped: a new provider starts from its own default.
+            onValueChange={(value) => setForm((f) => ({ ...f, provider: value, permissionMode: "", autoAccept: false }))}
+          >
             <SelectTrigger aria-label="Provider" data-testid={`${idPrefix}-provider`} className="w-full">
               <SelectValue placeholder="Select provider" />
             </SelectTrigger>
@@ -387,13 +394,13 @@ function ProfileForm({
           </Select>
           <ProviderHealthDot client={client} provider={form.provider} providers={providers} testId={`${idPrefix}-provider-health`} />
         </div>
-        <Select value={form.approvalPolicy} onValueChange={(value) => setForm((f) => ({ ...f, approvalPolicy: value }))}>
-          <SelectTrigger aria-label="Approval policy" data-testid={`${idPrefix}-approval-policy`} className="w-full">
-            <SelectValue placeholder="Approval policy" />
+        <Select value={form.permissionMode} onValueChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}>
+          <SelectTrigger aria-label="Permission mode" data-testid={`${idPrefix}-permission-mode`} className="w-full">
+            <SelectValue placeholder="Permission mode" />
           </SelectTrigger>
           <SelectContent>
-            {APPROVAL_POLICIES.map((o) => (
-              <SelectItem key={o.id} value={o.id} title={o.id ? approvalPolicies("claude-native").find((a) => a.id === o.id)?.help : undefined}>
+            {[PROVIDER_DEFAULT_MODE as ModeInfo, ...providerModes(providers, form.provider)].map((o) => (
+              <SelectItem key={o.id} value={o.id} title={o.description}>
                 {o.label}
               </SelectItem>
             ))}
@@ -416,6 +423,17 @@ function ProfileForm({
           <div aria-hidden />
         )}
       </div>
+      {supportsAutoAccept(providers, form.provider) && (
+        <label className="flex items-center gap-2 text-ui-sm text-foreground-muted" title={AUTO_ACCEPT_HELP}>
+          <input
+            type="checkbox"
+            data-testid={`${idPrefix}-auto-accept`}
+            checked={form.autoAccept}
+            onChange={(e) => setForm((f) => ({ ...f, autoAccept: e.target.checked }))}
+          />
+          {AUTO_ACCEPT_LABEL} every permission prompt
+        </label>
+      )}
       <textarea
         aria-label="Notes"
         data-testid={`${idPrefix}-notes`}
@@ -512,10 +530,10 @@ function providerLabel(providers: ProviderInfo[], id: string): string {
   return providers.find((p) => p.id === id)?.label ?? id;
 }
 
-/** The card's one metadata line ("<provider> · <approval> · <thinking>", run-config IA): the shared approval-policies.ts/thinking-levels.ts vocabulary, not the raw stored strings -- "auto-safe" reads as "Auto-safe", not the wire id. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
+/** The card's one metadata line ("<provider> · <mode> · <thinking>", run-config IA): the provider's own mode label (ADR-0019), not the raw wire id -- omitted when the profile leaves the mode to the provider default and auto-accept off. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
 function profileMetaLine(p: AgentProfile, providers: ProviderInfo[]): string {
   const parts = [providerLabel(providers, p.Provider)];
-  if (p.ApprovalPolicy) parts.push(approvalPolicyLabel(p.ApprovalPolicy as ApprovalPolicy));
+  if (p.PermissionMode || p.AutoAccept) parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
   if (p.Provider === "claude-native" && p.ThinkingLevel) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }

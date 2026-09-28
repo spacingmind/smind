@@ -100,19 +100,22 @@ type permissionOptionParams struct {
 // printRunLogs/streamRun at all, so a run would sit waiting for
 // runs.defaultPermissionTimeout (5 minutes) with nothing on screen
 // explaining why. Each option's ID is shown explicitly so it can be pasted
-// straight into `task approve <runId> <requestId> <optionId>`.
-func renderPermissionRequest(requestID, summary string, options []permissionOptionParams) string {
+// straight into `task approve <runId> <requestId> <optionId>`. The hint
+// includes the runId so it is copy-pasteable as-is: cmdTaskApprove's real
+// usage is `smind task approve <runId> [requestId] [optionId]` -- a hint
+// printing only the requestId would paste into nothing.
+func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
-	fmt.Fprintf(&b, "  -> smind task approve %s\n", requestID)
+	fmt.Fprintf(&b, "  -> smind task approve %s %s\n", runID, requestID)
 	return b.String()
 }
 
 // renderPermissionResolved formats how a permission request was resolved --
-// distinguishing a real human decision from an auto-safe allow or a
+// distinguishing a real human decision from an auto-accept or a
 // timeout deny (runs.PermissionResolution) matters because a silent
 // timeout-deny is exactly the failure mode a human watching the run needs
 // to notice, not mistake for the agent giving up on its own.
@@ -333,7 +336,11 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--approval-policy manual|auto-safe]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept]"
+
+// approvalPolicyRemovedMsg is printed for the removed --approval-policy
+// flag (ADR-0019): a hard error pointing at the replacement.
+const approvalPolicyRemovedMsg = "--approval-policy was removed; use --mode <mode> (the provider's own permission mode, e.g. acceptEdits, plan or bypassPermissions for claude-native) and --auto-accept for ACP providers"
 
 // cmdTaskSend starts a run (via run.start, which returns as soon as the
 // run is registered) and then streams it in the foreground exactly like
@@ -343,11 +350,10 @@ const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [-
 // handleRunStart) is what makes Ctrl+C here detach instead of stopping the
 // run.
 //
-// --approval-policy is passed through to run.start's approvalPolicy field
-// (default manual when absent -- see internal/runs.Registry.Start);
-// auto-safe lets a headless/monitored run self-approve the allowlisted
-// read-only verification commands (gofmt/go vet/go test) instead of
-// stalling on a permission card nobody is watching.
+// --mode is passed through to run.start's permissionMode field -- one of
+// the provider's own permission mode ids (ADR-0019; the provider's
+// default when absent) -- and --auto-accept to autoAccept (ACP providers
+// only: approve every permission prompt).
 //
 // --chat targets the run at one of the task's chats (ADR-0016 P4) and is
 // likewise passed through to run.start's chatId field; omitted, the task's
@@ -356,7 +362,8 @@ func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, approvalPolicy, chatArg string
+	var taskIDArg, provider, mode, chatArg string
+	var autoAccept bool
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -370,15 +377,20 @@ func cmdTaskSend(args []string) int {
 			chatArg = args[i]
 		case strings.HasPrefix(a, "--chat="):
 			chatArg = strings.TrimPrefix(a, "--chat=")
-		case a == "--approval-policy":
+		case a == "--mode":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
 				return 2
 			}
 			i++
-			approvalPolicy = args[i]
-		case strings.HasPrefix(a, "--approval-policy="):
-			approvalPolicy = strings.TrimPrefix(a, "--approval-policy=")
+			mode = args[i]
+		case strings.HasPrefix(a, "--mode="):
+			mode = strings.TrimPrefix(a, "--mode=")
+		case a == "--auto-accept":
+			autoAccept = true
+		case a == "--approval-policy" || strings.HasPrefix(a, "--approval-policy="):
+			fmt.Fprintf(os.Stderr, "task send: %s\n", approvalPolicyRemovedMsg)
+			return 2
 		case strings.HasPrefix(a, "-"):
 			fmt.Fprintf(os.Stderr, "task send: unknown flag %q\n", a)
 			fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -430,8 +442,11 @@ func cmdTaskSend(args []string) int {
 	params := map[string]any{
 		"taskId": taskID, "provider": provider, "prompt": prompt,
 	}
-	if approvalPolicy != "" {
-		params["approvalPolicy"] = approvalPolicy
+	if mode != "" {
+		params["permissionMode"] = mode
+	}
+	if autoAccept {
+		params["autoAccept"] = true
 	}
 	if chatID != 0 {
 		params["chatId"] = chatID
@@ -523,7 +538,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
 		case "permission_resolved":
 			var p struct {
 				RequestID string `json:"requestId"`
@@ -693,7 +708,7 @@ func printRunLogs(result runLogsResult) {
 		case "raw":
 			fmt.Print(renderRaw(e.rawEventParams))
 		case "permission_request":
-			fmt.Print(renderPermissionRequest(e.RequestID, e.Summary, e.Options))
+			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options))
 		case "permission_resolved":
 			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 		}
@@ -799,7 +814,7 @@ func cmdTaskPermissions(args []string) int {
 		return 0
 	}
 	for _, p := range pending {
-		fmt.Print(renderPermissionRequest(p.RequestID, p.Summary, p.Options))
+		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
 	}
 	return 0
 }
@@ -808,10 +823,9 @@ func cmdTaskPermissions(args []string) int {
 const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]"
 
 // cmdTaskApprove answers a run's pending permission request via
-// run.respondPermission -- closing the gap where a run with
-// --approval-policy manual (the default) or an auto-safe run hitting a
-// command outside its allowlist has no CLI-side way to be unblocked at
-// all short of the 5-minute timeout-deny (runs.defaultPermissionTimeout).
+// run.respondPermission -- closing the gap where a run whose provider
+// permission mode escalated a request has no CLI-side way to be unblocked
+// at all short of the 5-minute timeout-deny (runs.defaultPermissionTimeout).
 //
 // requestId defaults to the oldest still-pending request (there is
 // normally only one at a time -- a run blocks on Decide before issuing

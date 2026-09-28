@@ -22,33 +22,58 @@ func newTestTaskForRuns(t *testing.T, s *Store) Task {
 	return task
 }
 
-// TestStore_Runs_ApprovalPolicy_RoundTrips proves an explicitly set
-// ApprovalPolicy survives CreateRun/GetRun unchanged, rather than always
-// being coerced to the "manual" default -- the default only applies when a
-// caller leaves it unset (see TestStore_Runs above).
-func TestStore_Runs_ApprovalPolicy_RoundTrips(t *testing.T) {
+// TestStore_Runs_PermissionMode_RoundTrips proves a run's PermissionMode
+// and AutoAccept survive CreateRun/GetRun unchanged.
+func TestStore_Runs_PermissionMode_RoundTrips(t *testing.T) {
 	t.Parallel()
 
 	s := newTestStore(t)
 	task := newTestTaskForRuns(t, s)
 
 	created, err := s.CreateRun(Run{
-		ID: "run-auto-safe", TaskID: task.ID, Provider: "claude-native", Prompt: "hi",
-		Status: "running", StartedAt: time.Now().UTC(), ApprovalPolicy: "auto-safe",
+		ID: "run-mode", TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "running", StartedAt: time.Now().UTC(), PermissionMode: "accept_edits", AutoAccept: true,
 	})
 	if err != nil {
 		t.Fatalf("CreateRun() error = %v", err)
 	}
-	if created.ApprovalPolicy != "auto-safe" {
-		t.Fatalf("CreateRun() ApprovalPolicy = %q, want %q", created.ApprovalPolicy, "auto-safe")
+	if created.PermissionMode != "accept_edits" || !created.AutoAccept {
+		t.Fatalf("CreateRun() = %q/%v, want accept_edits/true", created.PermissionMode, created.AutoAccept)
 	}
 
-	got, err := s.GetRun("run-auto-safe")
+	got, err := s.GetRun("run-mode")
 	if err != nil {
 		t.Fatalf("GetRun() error = %v", err)
 	}
-	if got.ApprovalPolicy != "auto-safe" {
-		t.Fatalf("GetRun() ApprovalPolicy = %q, want %q", got.ApprovalPolicy, "auto-safe")
+	if got.PermissionMode != "accept_edits" || !got.AutoAccept {
+		t.Fatalf("GetRun() = %q/%v, want accept_edits/true", got.PermissionMode, got.AutoAccept)
+	}
+}
+
+// TestStore_Runs_UpdateRunPermission proves a mid-run permission switch
+// (ADR-0019) persists: after UpdateRunPermission, GetRun returns the
+// switched mode/auto_accept, not the values CreateRun wrote.
+func TestStore_Runs_UpdateRunPermission(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+
+	if _, err := s.CreateRun(Run{
+		ID: "run-switch", TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "running", StartedAt: time.Now().UTC(), PermissionMode: "default", AutoAccept: false,
+	}); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	if err := s.UpdateRunPermission("run-switch", "accept_edits", true); err != nil {
+		t.Fatalf("UpdateRunPermission() error = %v", err)
+	}
+	got, err := s.GetRun("run-switch")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.PermissionMode != "accept_edits" || !got.AutoAccept {
+		t.Fatalf("GetRun() = %q/%v, want accept_edits/true after UpdateRunPermission", got.PermissionMode, got.AutoAccept)
 	}
 }
 
@@ -77,8 +102,8 @@ func TestStore_Runs(t *testing.T) {
 	if got.TaskID != task.ID || got.Provider != "glm" || got.Prompt != "hi" || got.Status != "running" {
 		t.Fatalf("GetRun() = %+v", got)
 	}
-	if got.ApprovalPolicy != "manual" {
-		t.Fatalf("GetRun() ApprovalPolicy = %q, want %q (default when CreateRun's caller doesn't set one)", got.ApprovalPolicy, "manual")
+	if got.PermissionMode != "" || got.AutoAccept {
+		t.Fatalf("GetRun() = %q/%v, want unset when CreateRun's caller doesn't set one", got.PermissionMode, got.AutoAccept)
 	}
 	if got.FinishedAt != nil {
 		t.Fatalf("GetRun() FinishedAt = %v, want nil", got.FinishedAt)

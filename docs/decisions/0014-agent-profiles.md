@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted (2026-09-25)
+Accepted (2026-09-25). Superseded in part by
+[ADR-0019](0019-provider-native-permission-modes.md): a profile's
+`approvalPolicy` is replaced by `permissionMode`/`autoAccept` (the
+provider's own permission mode ids); everything else here stands.
 
 ## Context
 

@@ -6,14 +6,47 @@ import { Composer } from "@/components/composer/composer";
 import { autoGrow, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { ApprovalPolicy, Provider, ThinkingLevel } from "@/lib/types";
+import type { Provider, ThinkingLevel } from "@/lib/types";
 
 interface Submission {
   provider: Provider;
   prompt: string;
-  approvalPolicy: ApprovalPolicy;
+  permissionMode: string;
+  autoAccept: boolean;
   thinkingLevel?: ThinkingLevel;
 }
+
+/** provider.list with served mode catalogs (ADR-0019), GLM's being agent-discovered. */
+const SERVED_PROVIDERS = {
+  providers: [
+    {
+      id: "claude-native",
+      label: "Claude Code",
+      defaultMode: "acceptEdits",
+      liveModeSwitch: true,
+      modes: [
+        { id: "acceptEdits", label: "Accept File Edits", description: "Automatically approves edit-focused tools without prompting" },
+        { id: "default", label: "Always Ask" },
+        { id: "plan", label: "Plan Mode" },
+        { id: "auto", label: "Auto mode", autoApproves: true },
+        { id: "bypassPermissions", label: "Bypass", description: "Skip all permission prompts (use with caution)", autoApproves: true },
+      ],
+    },
+    {
+      id: "glm",
+      label: "GLM",
+      defaultMode: "default",
+      modesDiscovered: true,
+      supportsAutoAccept: true,
+      liveModeSwitch: true,
+      modes: [
+        { id: "default", label: "Default" },
+        { id: "accept_edits", label: "Accept Edits" },
+        { id: "bypass_permissions", label: "Bypass Permissions", autoApproves: true },
+      ],
+    },
+  ],
+};
 
 /** Flushes pending microtasks inside `act` so React commits before assertions. */
 async function flush(): Promise<void> {
@@ -42,8 +75,8 @@ function renderComposer(
     boundProvider: null,
     connected: true,
     runningRunId: null,
-    onSubmit: async (provider, prompt, approvalPolicy, thinkingLevel) => {
-      submissions.push({ provider, prompt, approvalPolicy, thinkingLevel });
+    onSubmit: async (provider, prompt, permission, thinkingLevel) => {
+      submissions.push({ provider, prompt, ...permission, thinkingLevel });
     },
     onStop: async (runId) => {
       stops.push(runId);
@@ -80,7 +113,7 @@ describe("Composer", () => {
 
     fireEvent.keyDown(textarea(), { key: "Enter" });
     await flush();
-    expect(submissions).toEqual([{ provider: "claude-native", prompt: "line one", approvalPolicy: "manual" }]);
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "line one", permissionMode: "", autoAccept: false }]);
   });
 
   it("does not submit on the Enter that commits an IME composition", async () => {
@@ -183,7 +216,7 @@ describe("Composer", () => {
     rerender({ runningRunId: null });
     await flush();
 
-    expect(submissions).toEqual([{ provider: "claude-native", prompt: "then do this", approvalPolicy: "manual" }]);
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "then do this", permissionMode: "", autoAccept: false }]);
     expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
   });
 
@@ -257,7 +290,7 @@ describe("Composer", () => {
     // the accessible name now comes from aria-label on the label-less
     // trigger, which is still what getByLabelText resolved through.
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
-    expect(screen.queryByText("Approval policy")).not.toBeInTheDocument();
+    expect(screen.queryByText("Permission mode")).not.toBeInTheDocument();
   });
 
   it("selecting a provider from the open dropdown is what the next prompt is sent with", async () => {
@@ -280,100 +313,104 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
 
-    expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", approvalPolicy: "manual" }]);
+    expect(submissions).toEqual([{ provider: "glm", prompt: "do the thing", permissionMode: "", autoAccept: false }]);
   });
 
-  it("approval-policy dropdown offers a third, provider-worded full-access tier, and submits it as approvalPolicy", async () => {
-    const { submissions } = renderComposer();
+  it("the permission-mode dropdown lists the provider's own modes, in its own words, and submits the pick (W1)", async () => {
+    const client = new FakeWsClient();
+    const { submissions } = renderComposer({ client });
+    client.nth("provider.list", 0).resolve(SERVED_PROVIDERS);
+    await flush();
 
-    // Default provider is claude-native -- Claude's own vocabulary.
-    fireEvent.click(screen.getByLabelText("Approval policy"));
-    let options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Manual approval", "Auto-safe", "Bypass"]);
-    const claudeFullAccess = options[2];
-    expect(claudeFullAccess).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Auto mode", "Bypass"]);
+    const bypass = options[4];
+    expect(bypass).toHaveAttribute("title", expect.stringContaining("Skip all permission prompts"));
 
-    fireEvent.click(claudeFullAccess);
+    fireEvent.click(bypass);
     await flush();
 
     fireEvent.change(textarea(), { target: { value: "go wild" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
 
-    expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", approvalPolicy: "full-access" }]);
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "go wild", permissionMode: "bypassPermissions", autoAccept: false }]);
   });
 
-  it("Shift+Tab in the composer cycles the approval policy, wrapping, and submits the cycled-to value", async () => {
+  it("before provider.list answers, the static catalog keeps the mode dropdown usable", async () => {
+    renderComposer();
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Accept File Edits", "Always Ask", "Plan Mode", "Bypass"]);
+  });
+
+  it("Shift+Tab in the composer cycles the provider's modes, wrapping, and submits the cycled-to value (W3)", async () => {
     const { submissions } = renderComposer();
 
-    const trigger = () => screen.getByLabelText("Approval policy");
-    expect(trigger()).toHaveTextContent("Manual approval");
+    const trigger = () => screen.getByLabelText("Permission mode");
+    expect(trigger()).toHaveTextContent("Accept File Edits");
 
     fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
-    expect(trigger()).toHaveTextContent("Auto-safe");
+    expect(trigger()).toHaveTextContent("Always Ask");
 
+    fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
     fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
     expect(trigger()).toHaveTextContent("Bypass");
 
-    // Wraps past the last option back to the first.
+    // Wraps past the last mode back to the first.
     fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
-    expect(trigger()).toHaveTextContent("Manual approval");
+    expect(trigger()).toHaveTextContent("Accept File Edits");
 
     fireEvent.keyDown(textarea(), { key: "Tab", shiftKey: true });
-    fireEvent.change(textarea(), { target: { value: "go safely" } });
+    fireEvent.change(textarea(), { target: { value: "ask me" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
 
-    expect(submissions).toEqual([
-      { provider: "claude-native", prompt: "go safely", approvalPolicy: "auto-safe" },
-    ]);
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "ask me", permissionMode: "default", autoAccept: false }]);
   });
 
-  it("a plain Tab (no Shift) in the composer does not touch the approval policy", async () => {
+  it("a plain Tab (no Shift) in the composer does not touch the permission mode", async () => {
     renderComposer();
-    const trigger = () => screen.getByLabelText("Approval policy");
+    const trigger = () => screen.getByLabelText("Permission mode");
 
     fireEvent.keyDown(textarea(), { key: "Tab" });
 
-    expect(trigger()).toHaveTextContent("Manual approval");
+    expect(trigger()).toHaveTextContent("Accept File Edits");
   });
 
-  it("full-access is worded per provider, not one shared generic label", async () => {
+  it("switching provider resets to that provider's own default mode; an ACP provider adds the Auto-accept toggle (W1)", async () => {
     const client = new FakeWsClient();
-    renderComposer({ client });
-    client.nth("provider.list", 0).resolve({
-      providers: [
-        { id: "claude-native", label: "Claude Code" },
-        { id: "codex-native", label: "Codex" },
-        { id: "glm", label: "GLM" },
-      ],
-    });
+    const { submissions } = renderComposer({ client });
+    client.nth("provider.list", 0).resolve(SERVED_PROVIDERS);
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "Codex" }));
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     await flush();
-
-    fireEvent.click(screen.getByLabelText("Approval policy"));
-    let options = await screen.findAllByRole("option");
-    const codexFullAccess = options[options.length - 1];
-    expect(codexFullAccess).toHaveTextContent("Full Access");
-    expect(codexFullAccess).toHaveAttribute(
-      "title",
-      expect.stringContaining("Edit files, run commands, and access the network"),
-    );
-    fireEvent.click(codexFullAccess);
-    await flush();
+    expect(screen.queryByTestId("composer-auto-accept")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Provider"));
     fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Approval policy"));
-    options = await screen.findAllByRole("option");
-    const glmFullAccess = options[options.length - 1];
-    expect(glmFullAccess).toHaveTextContent("Bypass all permissions");
-    expect(glmFullAccess).toHaveAttribute("title", expect.stringContaining("without prompting"));
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Default");
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Default", "Accept Edits", "Bypass Permissions"]);
+    fireEvent.keyDown(options[0], { key: "Escape" });
+    await flush();
+
+    const toggle = screen.getByTestId("composer-auto-accept");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    await flush();
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.change(textarea(), { target: { value: "unattended" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+    expect(submissions).toEqual([{ provider: "glm", prompt: "unattended", permissionMode: "", autoAccept: true }]);
   });
 
   it("shows a thinking-level selector only for claude-native, and omits the field entirely for every other provider", async () => {
@@ -399,7 +436,7 @@ describe("Composer", () => {
     expect(screen.queryByLabelText("Thinking level")).not.toBeInTheDocument();
   });
 
-  it("thinking level defaults to Standard visually but omits the field until the user actually picks one, same as approval-policy's own default", async () => {
+  it("thinking level defaults to Standard visually but omits the field until the user actually picks one, same as the permission mode's own default", async () => {
     const { submissions } = renderComposer();
 
     // Untouched: the control shows "Standard" but the field is left off
@@ -412,7 +449,7 @@ describe("Composer", () => {
     await flush();
 
     expect(submissions).toEqual([
-      { provider: "claude-native", prompt: "think about it", approvalPolicy: "manual" },
+      { provider: "claude-native", prompt: "think about it", permissionMode: "", autoAccept: false },
     ]);
     expect(submissions[0].thinkingLevel).toBeUndefined();
   });
@@ -431,24 +468,23 @@ describe("Composer", () => {
     await flush();
 
     expect(submissions).toEqual([
-      { provider: "claude-native", prompt: "reason hard", approvalPolicy: "manual", thinkingLevel: "extended" },
+      { provider: "claude-native", prompt: "reason hard", permissionMode: "", autoAccept: false, thinkingLevel: "extended" },
     ]);
   });
 
-  it("keeps the approval-policy help tooltip and disables both selects while the composer is inactive", () => {
+  it("keeps the permission-mode help tooltip and disables both selects while the composer is inactive", () => {
     const { rerender } = renderComposer();
 
-    // Manual is the default selection, so the trigger's tooltip is
-    // manual's own help text (each tier's tooltip reflects its own
-    // selection now that full-access's differs per provider).
-    const policy = screen.getByLabelText("Approval policy");
-    expect(policy).toHaveAttribute("title", expect.stringContaining("approval"));
+    // acceptEdits is Claude's default, so the trigger's tooltip is that
+    // mode's own description (the provider's words).
+    const policy = screen.getByLabelText("Permission mode");
+    expect(policy).toHaveAttribute("title", expect.stringContaining("edit"));
     expect(policy).not.toBeDisabled();
     expect(screen.getByLabelText("Provider")).not.toBeDisabled();
 
     rerender({ connected: false });
     expect(screen.getByLabelText("Provider")).toBeDisabled();
-    expect(screen.getByLabelText("Approval policy")).toBeDisabled();
+    expect(screen.getByLabelText("Permission mode")).toBeDisabled();
   });
 
   // Item 21: touch targets need a stated minimum below the compact
@@ -464,7 +500,7 @@ describe("Composer", () => {
 
     // The trigger element is what the finger lands on, so the rule has to
     // survive on it and not be merged away by SelectTrigger's own h-8.
-    for (const label of ["Provider", "Approval policy"]) {
+    for (const label of ["Provider", "Permission mode"]) {
       const trigger = screen.getByLabelText(label);
       expect(trigger.className).toContain("h-11");
       expect(trigger.className).toContain("md:h-7");
@@ -526,7 +562,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
     expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
 
-  // ADR-0014's Profiles picker: client-side seed of provider/approvalPolicy/
+  // ADR-0014's Profiles picker: client-side seed of provider/permissionMode/
   // thinkingLevel from a saved profile, per the ADR's "How a profile is
   // applied" section.
   describe("Profiles picker (ADR-0014)", () => {
@@ -552,25 +588,21 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
       await flush();
 
-      expect(submissions).toEqual([{ provider: "claude-native", prompt: "still works", approvalPolicy: "manual" }]);
+      expect(submissions).toEqual([{ provider: "claude-native", prompt: "still works", permissionMode: "", autoAccept: false }]);
     });
 
-    it("selecting a profile seeds provider/approvalPolicy/thinkingLevel in one click", async () => {
+    it("selecting a profile seeds provider/permissionMode/autoAccept/thinkingLevel in one click", async () => {
       const client = new FakeWsClient();
       renderComposer({ client });
 
-      client.nth("provider.list", 0).resolve({
-        providers: [
-          { id: "claude-native", label: "Claude Code" },
-          { id: "glm", label: "GLM" },
-        ],
-      });
+      client.nth("provider.list", 0).resolve(SERVED_PROVIDERS);
       client.nth("profile.list", 0).resolve([
         {
           ID: 1,
           Name: "UI work",
           Provider: "glm",
-          ApprovalPolicy: "auto-safe",
+          PermissionMode: "accept_edits",
+          AutoAccept: true,
           ThinkingLevel: "",
           Notes: "",
           CreatedAt: "2026-09-25T00:00:00Z",
@@ -584,7 +616,8 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
-      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept Edits");
+      expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
       // The trigger now shows the applied agent's own name (run-config IA:
       // the toolbar tracks which agent is active, not just a one-time seed).
       expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
@@ -599,7 +632,8 @@ describe("Composer diff-stat pill (Item 5)", () => {
           ID: 1,
           Name: "UI work",
           Provider: "claude-native",
-          ApprovalPolicy: "auto-safe",
+          PermissionMode: "plan",
+          AutoAccept: false,
           ThinkingLevel: "",
           Notes: "",
           CreatedAt: "2026-09-25T00:00:00Z",
@@ -611,14 +645,14 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
       fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
       await flush();
-      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
       expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
 
-      fireEvent.click(screen.getByLabelText("Approval policy"));
-      fireEvent.click(await screen.findByRole("option", { name: "Manual approval" }));
+      fireEvent.click(screen.getByLabelText("Permission mode"));
+      fireEvent.click(await screen.findByRole("option", { name: "Accept File Edits" }));
       await flush();
-      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Manual approval");
+      expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept File Edits");
       // Hand-editing flips the Agent trigger to a "Custom · from <name>"
       // hint -- the change is a per-run override, not written back to the
       // stored profile (nothing here calls profile.update).
@@ -630,12 +664,12 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.change(textarea(), { target: { value: "go" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
       await flush();
-      expect(submissions).toEqual([{ provider: "claude-native", prompt: "go", approvalPolicy: "manual" }]);
+      expect(submissions).toEqual([{ provider: "claude-native", prompt: "go", permissionMode: "acceptEdits", autoAccept: false }]);
 
       // The ↺ reset restores the picked agent's own stored values.
       fireEvent.click(screen.getByTestId("composer-agent-reset"));
       await flush();
-      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
       expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
     });
@@ -649,7 +683,8 @@ describe("Composer diff-stat pill (Item 5)", () => {
           ID: 1,
           Name: "UI work",
           Provider: "claude-native",
-          ApprovalPolicy: "auto-safe",
+          PermissionMode: "",
+          AutoAccept: false,
           ThinkingLevel: "",
           Notes: "",
           CreatedAt: "2026-09-25T00:00:00Z",
@@ -687,7 +722,8 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ID: 1,
       Name: "UI work",
       Provider: "glm",
-      ApprovalPolicy: "auto-safe",
+      PermissionMode: "",
+      AutoAccept: true,
       ThinkingLevel: "",
       Notes: "",
       CreatedAt: "2026-09-25T00:00:00Z",
@@ -737,7 +773,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
-      expect(screen.getByLabelText("Approval policy")).toHaveTextContent("Auto-safe");
+      expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
       expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
     });
 
@@ -745,7 +781,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       window.localStorage.setItem("smind:settings:defaultAgentId", "1");
       window.localStorage.setItem(
         "smind:run-config:5:10",
-        JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "manual", thinkingLevel: "" }),
+        JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" }),
       );
       const client = new FakeWsClient();
       renderComposer({ client, taskId: 5 });
@@ -761,6 +797,23 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
       expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
+    });
+
+    it("a pre-ADR-0019 persisted run-config loads with the provider's default mode, never a mapped legacy policy (W2)", async () => {
+      window.localStorage.setItem(
+        "smind:run-config:5:10",
+        JSON.stringify({ baseAgentId: null, custom: false, provider: "claude-native", approvalPolicy: "full-access", thinkingLevel: "extended" }),
+      );
+      const { submissions } = renderComposer({ taskId: 5 });
+
+      expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept File Edits");
+      expect(screen.getByLabelText("Thinking level")).toHaveTextContent("Extended");
+
+      fireEvent.change(textarea(), { target: { value: "hi" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await flush();
+      expect(submissions).toEqual([{ provider: "claude-native", prompt: "hi", permissionMode: "", autoAccept: false, thinkingLevel: "extended" }]);
+      expect(window.localStorage.getItem("smind:run-config:5:10")).not.toContain("approvalPolicy");
     });
   });
 

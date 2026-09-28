@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--approval-policy=<policy>] [--thinking-level=<level>] [--notes=<text>]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--notes=<text>]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
@@ -29,11 +31,12 @@ func cmdProfile(args []string) int {
 	}
 }
 
-// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`. Flags
-// are each a single `--flag value` pair (matching `task new`'s `--space
-// <id>` convention), scanned in any order after the two required
-// positional args -- no model flag (ADR-0014's model deferral, dropped
-// from v1 entirely).
+// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`.
+// Value-taking flags accept both `--flag value` (matching `task new`'s
+// `--space <id>` convention) and `--flag=value`; the boolean
+// --auto-accept accepts `--auto-accept`, `--auto-accept=true`, and
+// `--auto-accept=false` -- no model flag (ADR-0014's model deferral,
+// dropped from v1 entirely).
 func cmdProfileAdd(args []string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, cmdProfileAddUsage)
@@ -41,18 +44,43 @@ func cmdProfileAdd(args []string) int {
 	}
 	name, provider := args[0], args[1]
 
-	var approvalPolicy, thinkingLevel, notes string
+	var mode, thinkingLevel, notes string
+	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
-		if i+1 >= len(rest) {
-			fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", rest[i])
+		flag := rest[i]
+		value := ""
+		hasValue := false
+		if n, v, ok := strings.Cut(flag, "="); ok && strings.HasPrefix(n, "--") {
+			flag, value, hasValue = n, v, true
+		}
+		switch flag {
+		case "--auto-accept":
+			autoAccept = true
+			if hasValue {
+				b, err := strconv.ParseBool(value)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "profile add: --auto-accept: %q is not a boolean\n", value)
+					return 2
+				}
+				autoAccept = b
+			}
+			continue
+		case "--approval-policy":
+			fmt.Fprintf(os.Stderr, "profile add: %s\n", approvalPolicyRemovedMsg)
 			return 2
 		}
-		flag, value := rest[i], rest[i+1]
-		i++
+		if !hasValue {
+			if i+1 >= len(rest) {
+				fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", flag)
+				return 2
+			}
+			i++
+			value = rest[i]
+		}
 		switch flag {
-		case "--approval-policy":
-			approvalPolicy = value
+		case "--mode":
+			mode = value
 		case "--thinking-level":
 			thinkingLevel = value
 		case "--notes":
@@ -73,13 +101,13 @@ func cmdProfileAdd(args []string) int {
 	var p store.AgentProfile
 	err = client.Call(context.Background(), "profile.create", map[string]any{
 		"name": name, "provider": provider,
-		"approvalPolicy": approvalPolicy, "thinkingLevel": thinkingLevel, "notes": notes,
+		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "notes": notes,
 	}, &p)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "profile add: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, p.ApprovalPolicy, p.ThinkingLevel)
+	fmt.Printf("%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
 	return 0
 }
 
@@ -103,12 +131,25 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tAPPROVAL\tTHINKING")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, p.ApprovalPolicy, p.ThinkingLevel)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
 	}
 	tw.Flush()
 	return 0
+}
+
+// profileModeColumn renders a profile's permission settings for the MODE
+// column: the mode id (or "default" when unset), plus "+auto-accept".
+func profileModeColumn(p store.AgentProfile) string {
+	mode := p.PermissionMode
+	if mode == "" {
+		mode = "default"
+	}
+	if p.AutoAccept {
+		mode += "+auto-accept"
+	}
+	return mode
 }
 
 func cmdProfileRemove(args []string) int {

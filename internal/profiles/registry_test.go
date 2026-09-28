@@ -37,11 +37,21 @@ func TestRegistry_CreateRejectsUnknownProvider(t *testing.T) {
 	}
 }
 
-func TestRegistry_CreateRejectsInvalidApprovalPolicy(t *testing.T) {
+func TestRegistry_CreateRejectsInvalidPermissionSettings(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
-	if _, err := r.Create(store.AgentProfile{Name: "x", Provider: "claude-native", ApprovalPolicy: "not-a-policy"}); err == nil {
-		t.Fatalf("Create() with invalid approvalPolicy error = nil, want error")
+	for _, p := range []store.AgentProfile{
+		{Name: "x", Provider: "claude-native", PermissionMode: "auto-safe"},
+		{Name: "x", Provider: "codex-native", PermissionMode: "bypassPermissions"},
+		{Name: "x", Provider: "claude-native", AutoAccept: true},
+	} {
+		if _, err := r.Create(p); err == nil {
+			t.Errorf("Create(%+v) error = nil, want error", p)
+		}
+	}
+	// An ACP provider's modes are the agent's own, so any id is stored.
+	if _, err := r.Create(store.AgentProfile{Name: "x", Provider: "glm", PermissionMode: "accept_edits", AutoAccept: true}); err != nil {
+		t.Fatalf("Create(glm accept_edits) error = %v", err)
 	}
 }
 
@@ -53,15 +63,15 @@ func TestRegistry_CreateRejectsInvalidThinkingLevel(t *testing.T) {
 	}
 }
 
-func TestRegistry_CreateAcceptsOmittedApprovalPolicyAndThinkingLevel(t *testing.T) {
+func TestRegistry_CreateAcceptsOmittedPermissionModeAndThinkingLevel(t *testing.T) {
 	t.Parallel()
 	r := newTestRegistry(t)
 	p, err := r.Create(store.AgentProfile{Name: "x", Provider: "claude-native"})
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	if p.ApprovalPolicy != "" || p.ThinkingLevel != "" {
-		t.Fatalf("Create() = %+v, want empty approvalPolicy/thinkingLevel preserved", p)
+	if p.PermissionMode != "" || p.AutoAccept || p.ThinkingLevel != "" {
+		t.Fatalf("Create() = %+v, want empty permissionMode/thinkingLevel preserved", p)
 	}
 }
 

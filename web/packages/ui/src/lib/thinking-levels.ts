@@ -2,8 +2,8 @@ import type { ThinkingLevel } from "@/lib/types";
 
 /**
  * The one thinking-level vocabulary every surface shares (run-config IA
- * plan, mirroring lib/approval-policies.ts's unification of the approval
- * tiers) -- previously duplicated between run-config-toolbar.tsx and
+ * plan, mirroring lib/permission-modes.ts's single source for permission
+ * modes) -- previously duplicated between run-config-toolbar.tsx and
  * profiles-section.tsx with slightly different id sets.
  *
  * Claude-only (see internal/taskrunner/thinking.go's doc comment): every

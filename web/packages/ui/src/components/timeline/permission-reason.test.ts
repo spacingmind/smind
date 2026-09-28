@@ -5,7 +5,8 @@ import { PERMISSION_REASON_LABEL } from "@/components/timeline/permission-reason
 describe("PERMISSION_REASON_LABEL", () => {
   it.each([
     ["human", "You approved", "success"],
-    ["auto_safe", "Auto-approved", "running"],
+    ["auto_accept", "Auto-accepted", "running"],
+    ["auto_safe", "Auto-approved (legacy)", "running"],
     ["timeout", "Timed out", "warning"],
     ["provider_cancellation", "Cancelled by provider", "warning"],
   ] as const)("resolves %s to label %j with status %j", (reason, label, status) => {

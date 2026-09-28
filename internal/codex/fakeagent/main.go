@@ -134,7 +134,9 @@ func handle(msg message, threadCwd *string) {
 		// Notification, no response.
 	case msg.Method == "thread/start":
 		var params struct {
-			Cwd string `json:"cwd"`
+			Cwd            string `json:"cwd"`
+			ApprovalPolicy string `json:"approvalPolicy"`
+			Sandbox        string `json:"sandbox"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*threadCwd = params.Cwd
@@ -142,6 +144,7 @@ func handle(msg message, threadCwd *string) {
 		loadedThreads[threadID] = true
 		threadStateMu.Unlock()
 		recordThreadInitMethod(params.Cwd, "thread/start")
+		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 	case msg.Method == "thread/loaded/list":
 		threadStateMu.Lock()
@@ -179,10 +182,13 @@ func handle(msg message, threadCwd *string) {
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": params.ThreadID}})
 	case msg.Method == "thread/resume":
 		var params struct {
-			ThreadID string `json:"threadId"`
-			Cwd      string `json:"cwd"`
+			ThreadID       string `json:"threadId"`
+			Cwd            string `json:"cwd"`
+			ApprovalPolicy string `json:"approvalPolicy"`
+			Sandbox        string `json:"sandbox"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
+		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
 		threadStateMu.Lock()
 		isArchived := archivedThreads[params.ThreadID]
 		isKnown := params.ThreadID == threadID
@@ -290,4 +296,15 @@ func runTurnScript(cwd string) {
 	delta("Hello, ")
 	delta("world!")
 	turnCompleted("completed")
+}
+
+// recordThreadPolicy writes the approvalPolicy/sandbox a thread/start or
+// thread/resume carried to a "thread-policy" file in cwd
+// ("<approvalPolicy> <sandbox>"), so tests can assert which Codex preset
+// a mode sent.
+func recordThreadPolicy(cwd, approvalPolicy, sandbox string) {
+	if cwd == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "thread-policy"), []byte(approvalPolicy+" "+sandbox), 0o644)
 }

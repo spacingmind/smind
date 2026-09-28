@@ -41,8 +41,9 @@ export interface Space {
 // Mirrors internal/store.AgentProfile field-for-field (ADR-0014, "docs/
 // decisions/0014-agent-profiles.md") -- same no-json-tags, PascalCase-on-
 // the-wire convention as Workspace/Task/Space above. A named, daemon-global
-// bundle of per-run settings (Provider/ApprovalPolicy/ThinkingLevel), not
-// scoped to any workspace. ApprovalPolicy/ThinkingLevel may be "" (unset):
+// bundle of per-run settings (Provider/PermissionMode/AutoAccept/
+// ThinkingLevel), not scoped to any workspace. PermissionMode/ThinkingLevel
+// may be "" (unset -- the provider's own default mode applies):
 // the composer's own default applies in that case, same as an omitted
 // task.prompt field does today. No `Model` field -- dropped from v1 per the
 // ADR's 2026-09-25 review (task.prompt has no model parameter to apply it
@@ -51,7 +52,10 @@ export interface AgentProfile {
   ID: number;
   Name: string;
   Provider: string;
-  ApprovalPolicy: string;
+  /** One of the provider's own permission mode ids (ADR-0019), or "" for the provider default. */
+  PermissionMode: string;
+  /** ACP providers only: approve every permission prompt. */
+  AutoAccept: boolean;
   ThinkingLevel: string;
   Notes: string;
   CreatedAt: string;
@@ -79,18 +83,25 @@ export interface Chat {
 // covers the values that can appear, including the hardcoded fallback's two.
 export type Provider = "claude-native" | "glm" | "kimi" | "codex-native";
 
-// internal/taskrunner.ApprovalPolicy's three values, carried over the wire
-// as their underlying string -- run.start/task.prompt's optional
-// `approvalPolicy` param (internal/wsapi/handlers.go). "manual" is the
-// default when omitted (today's always-ask-a-human behavior); "auto-safe"
-// lets a small, conservative allowlist of read-only verification commands
-// (see internal/taskrunner.AllowlistedCommand) skip the human prompt;
-// "full-access" installs no decider at all and hands the provider its own
-// native "auto-approve everything" mechanism instead (Claude Code's
-// bypassPermissions mode, Codex's AutoApprovePolicy, ACP's
-// AutoApprovePolicy) -- each provider's own real ceiling, not one shared
-// generic tier (see docs/plans/active/task-move-approval-thinking.md).
-export type ApprovalPolicy = "manual" | "auto-safe" | "full-access";
+// One of a provider's own permission modes (internal/taskrunner.ModeInfo,
+// ADR-0019): Claude Code's --permission-mode values, Codex's presets, or
+// an ACP agent's advertised session modes -- the provider's own
+// vocabulary, never a smind-invented tier. autoApproves marks a mode in
+// which the provider runs tool calls without asking anyone.
+export interface ModeInfo {
+  id: string;
+  label: string;
+  description?: string;
+  autoApproves?: boolean;
+}
+
+// A run's provider-native permission settings as the composer submits them
+// (run.start's permissionMode/autoAccept params, ADR-0019): permissionMode
+// "" means the provider's default mode.
+export interface PermissionSettings {
+  permissionMode: string;
+  autoAccept: boolean;
+}
 
 // internal/taskrunner.ThinkingLevel's values, carried over the wire as
 // their underlying string -- run.start/task.prompt's optional
@@ -135,6 +146,16 @@ export interface ProviderInfo {
   kind?: ProviderKind;
   credentialKind?: ProviderCredentialKind;
   accountProvider?: string;
+  /** The provider's own permission modes (ADR-0019), in display order. */
+  modes?: ModeInfo[];
+  /** The mode a run gets when it names none. */
+  defaultMode?: string;
+  /** ACP: true once the agent's own modes were discovered (else `modes` is a fallback). */
+  modesDiscovered?: boolean;
+  /** ACP providers: the run may also set autoAccept (approve every prompt). */
+  supportsAutoAccept?: boolean;
+  /** Whether a running run's mode can be switched (run.setPermissionMode) -- false for Codex. */
+  liveModeSwitch?: boolean;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
@@ -171,8 +192,10 @@ export interface RunSummary {
   FinishedAt: string | null;
   StopReason: string;
   Err: string;
-  /** The run's current policy -- live for a running run (see run.setApprovalPolicy), whatever it last was for a finished one. */
-  ApprovalPolicy: ApprovalPolicy;
+  /** The run's current provider-native permission mode -- live for a running run (see run.setPermissionMode), whatever it last was for a finished one. */
+  PermissionMode: string;
+  /** ACP only: whether every permission prompt is auto-approved (live-switchable). */
+  AutoAccept: boolean;
   /** Claude-only; "" (unset) for every other provider or a run started before the thinking-level selector was touched. Not persisted across a daemon restart -- a rehydrated run always reports "". */
   ThinkingLevel: ThinkingLevel;
 }
@@ -182,11 +205,12 @@ export interface RunStartResult {
   runId: string;
 }
 
-// Result of run.setApprovalPolicy (internal/wsapi/handlers.go's
-// runApprovalPolicyResult): the run's approvalPolicy after the change, so a
-// caller can confirm the switch took without a separate round trip.
-export interface RunSetApprovalPolicyResult {
-  approvalPolicy: ApprovalPolicy;
+// Result of run.setPermissionMode (internal/wsapi/handlers.go's
+// runPermissionModeResult): the run's permission settings after the
+// change, so a caller can confirm the switch took without a round trip.
+export interface RunSetPermissionModeResult {
+  permissionMode: string;
+  autoAccept: boolean;
 }
 
 // Terminal result of a successful run.attach (internal/wsapi/handlers.go's
@@ -284,7 +308,9 @@ export interface PermissionRequestEventParams {
 // reason this client has never heard of still decodes and renders as
 // "no badge" instead of a type error -- the same append-only-enum
 // tolerance RunEventType documents below.
-export type PermissionResolutionReason = "human" | "auto_safe" | "timeout" | (string & {});
+// "auto_safe" is legacy (ADR-0019 removed smind's auto-safe allowlist) --
+// kept so an older daemon's payload still renders.
+export type PermissionResolutionReason = "human" | "auto_accept" | "auto_safe" | "timeout" | (string & {});
 
 // Params of a "permission_resolved" event task.prompt/run.attach emit
 // (internal/wsapi/handlers.go's permissionResolvedParams). `reason` is

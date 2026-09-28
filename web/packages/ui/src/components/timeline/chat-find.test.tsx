@@ -52,7 +52,7 @@ function runningRun(): RunSummary {
     FinishedAt: null,
     StopReason: "",
     Err: "",
-    ApprovalPolicy: "manual",
+    PermissionMode: "", AutoAccept: false,
     ThinkingLevel: "",
   };
 }
@@ -69,7 +69,7 @@ function doneRun(): RunSummary {
     FinishedAt: "2024-01-01T00:00:05Z",
     StopReason: "end_turn",
     Err: "",
-    ApprovalPolicy: "manual",
+    PermissionMode: "", AutoAccept: false,
     ThinkingLevel: "",
   };
 }

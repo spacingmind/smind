@@ -76,8 +76,10 @@ func TestMigrate_AddsApprovalPolicyToPreExistingRunsTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRun() error = %v", err)
 	}
-	if got.ApprovalPolicy != "manual" {
-		t.Fatalf("GetRun() ApprovalPolicy = %q, want %q", got.ApprovalPolicy, "manual")
+	// A pre-#93 glm row migrates to the ACP agent's own default mode, no
+	// auto-accept (ADR-0019's migration table for "manual").
+	if got.PermissionMode != "" || got.AutoAccept {
+		t.Fatalf("GetRun() PermissionMode/AutoAccept = %q/%v, want \"\"/false", got.PermissionMode, got.AutoAccept)
 	}
 	if got.Provider != "glm" || got.Prompt != "hi" || got.Status != "done" {
 		t.Fatalf("GetRun() = %+v, old row data not preserved", got)
@@ -93,8 +95,8 @@ func TestMigrate_AddsApprovalPolicyToPreExistingRunsTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRun() after migration error = %v", err)
 	}
-	if created.ApprovalPolicy != "manual" {
-		t.Fatalf("CreateRun() ApprovalPolicy = %q, want %q", created.ApprovalPolicy, "manual")
+	if created.PermissionMode != "" || created.AutoAccept {
+		t.Fatalf("CreateRun() PermissionMode/AutoAccept = %q/%v, want unset", created.PermissionMode, created.AutoAccept)
 	}
 }
 
@@ -162,18 +164,20 @@ func TestMigrate_IdempotentAcrossRepeatedOpen(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetRun() error = %v", err)
 		}
-		if got.ApprovalPolicy != "manual" {
-			t.Fatalf("GetRun() ApprovalPolicy = %q, want %q", got.ApprovalPolicy, "manual")
+		if got.PermissionMode != "" || got.AutoAccept {
+			t.Fatalf("GetRun() PermissionMode/AutoAccept = %q/%v, want unset", got.PermissionMode, got.AutoAccept)
 		}
 	})
 }
 
 func assertRunsHasApprovalPolicyColumn(t *testing.T, s *Store) {
 	t.Helper()
-	var name string
-	err := s.db.QueryRow(`SELECT name FROM pragma_table_info('runs') WHERE name = 'approval_policy'`).Scan(&name)
-	if err != nil {
-		t.Fatalf("runs.approval_policy column not found: %v", err)
+	for _, col := range []string{"approval_policy", "permission_mode", "auto_accept"} {
+		var name string
+		err := s.db.QueryRow(`SELECT name FROM pragma_table_info('runs') WHERE name = ?`, col).Scan(&name)
+		if err != nil {
+			t.Fatalf("runs.%s column not found: %v", col, err)
+		}
 	}
 }
 
@@ -443,5 +447,188 @@ func seedPreApprovalPolicyDB(t *testing.T, path string) {
 		now,
 	); err != nil {
 		t.Fatalf("seed pre-#93 run error = %v", err)
+	}
+}
+
+// TestMigrate_PermissionModesBackfill is S13: every legacy approval_policy
+// x provider combination on both runs and agent_profiles maps to
+// ADR-0019's migration table (always toward asking a human; only
+// full-access becomes an auto-approving setting), and re-opening the
+// database changes nothing.
+func TestMigrate_PermissionModesBackfill(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "legacy-policies.db")
+
+	// A database from just before ADR-0019: today's schema minus the new
+	// columns. Built by opening fresh, then dropping them.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	for _, stmt := range []string{
+		`ALTER TABLE runs DROP COLUMN permission_mode`, `ALTER TABLE runs DROP COLUMN auto_accept`,
+		`ALTER TABLE agent_profiles DROP COLUMN permission_mode`, `ALTER TABLE agent_profiles DROP COLUMN auto_accept`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	type want struct {
+		mode       string
+		autoAccept bool
+	}
+	cases := map[string]want{}
+	now := time.Now().UTC()
+	for _, provider := range []string{"claude-native", "codex-native", "glm", "kimi"} {
+		for _, policy := range []string{"manual", "auto-safe", "full-access", ""} {
+			var w want
+			switch {
+			case provider == "claude-native" && policy == "full-access":
+				w = want{"bypassPermissions", false}
+			case provider == "claude-native":
+				w = want{"acceptEdits", false}
+			case provider == "codex-native" && policy == "full-access":
+				w = want{"full-access", false}
+			case provider == "codex-native":
+				w = want{"auto", false}
+			case policy == "full-access":
+				w = want{"", true}
+			}
+			id := provider + "/" + policy
+			cases[id] = w
+			// A legacy run row's approval_policy was never empty (column
+			// default 'manual', and CreateRun coerced '' to it), so the ''
+			// case only exists for profiles ("unset").
+			if policy != "" {
+				if _, err := s.db.Exec(`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, approval_policy) VALUES (?, ?, ?, 'p', 'done', ?, ?)`,
+					id, task.ID, provider, now, policy); err != nil {
+					t.Fatalf("seed run %s: %v", id, err)
+				}
+			}
+			if _, err := s.db.Exec(`INSERT INTO agent_profiles (name, provider, approval_policy, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+				id, provider, policy, now, now); err != nil {
+				t.Fatalf("seed profile %s: %v", id, err)
+			}
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for pass := 0; pass < 2; pass++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() pass %d error = %v", pass, err)
+		}
+		profiles, err := s.ListAgentProfiles()
+		if err != nil {
+			t.Fatalf("ListAgentProfiles() error = %v", err)
+		}
+		byName := map[string]AgentProfile{}
+		for _, p := range profiles {
+			byName[p.Name] = p
+		}
+		for id, w := range cases {
+			if id[len(id)-1] != '/' {
+				got, err := s.GetRun(id)
+				if err != nil {
+					t.Fatalf("GetRun(%s) error = %v", id, err)
+				}
+				if got.PermissionMode != w.mode || got.AutoAccept != w.autoAccept {
+					t.Errorf("pass %d run %s = %q/%v, want %q/%v", pass, id, got.PermissionMode, got.AutoAccept, w.mode, w.autoAccept)
+				}
+			}
+			p := byName[id]
+			pw := w
+			if id[len(id)-1] == '/' {
+				pw = want{} // an unset profile policy stays unset
+			}
+			if p.PermissionMode != pw.mode || p.AutoAccept != pw.autoAccept {
+				t.Errorf("pass %d profile %s = %q/%v, want %q/%v", pass, id, p.PermissionMode, p.AutoAccept, pw.mode, pw.autoAccept)
+			}
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
+	}
+}
+
+// TestMigrate_PermissionModesBackfillRunsOnce is the regression test for
+// the backfill re-running on every Open (approval_policy was never
+// cleared): after migration, a user's edit to a legacy row -- unticking a
+// migrated full-access GLM profile's autoAccept, resetting a migrated
+// Claude bypass profile to the provider default "", or turning a legacy
+// GLM run's autoAccept off -- must survive the next Open.
+func TestMigrate_PermissionModesBackfillRunsOnce(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "legacy-edit.db")
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	for _, stmt := range []string{
+		`ALTER TABLE runs DROP COLUMN permission_mode`, `ALTER TABLE runs DROP COLUMN auto_accept`,
+		`ALTER TABLE agent_profiles DROP COLUMN permission_mode`, `ALTER TABLE agent_profiles DROP COLUMN auto_accept`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(`INSERT INTO agent_profiles (id, name, provider, approval_policy, created_at, updated_at) VALUES
+		(1, 'glm-full', 'glm', 'full-access', ?, ?), (2, 'claude-full', 'claude-native', 'full-access', ?, ?)`, now, now, now, now); err != nil {
+		t.Fatalf("seed profiles: %v", err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO runs (id, task_id, provider, prompt, status, started_at, approval_policy) VALUES ('r1', ?, 'glm', 'p', 'done', ?, 'full-access')`, task.ID, now); err != nil {
+		t.Fatalf("seed run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// First Open migrates; then the user edits the migrated rows.
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	glm, _ := s.GetAgentProfile(1)
+	claude, _ := s.GetAgentProfile(2)
+	if !glm.AutoAccept || claude.PermissionMode != "bypassPermissions" {
+		t.Fatalf("migrated = %+v / %+v, want glm autoAccept and claude bypass", glm, claude)
+	}
+	glm.AutoAccept = false
+	claude.PermissionMode = ""
+	for _, p := range []AgentProfile{glm, claude} {
+		if _, err := s.UpdateAgentProfile(p); err != nil {
+			t.Fatalf("UpdateAgentProfile(%s) error = %v", p.Name, err)
+		}
+	}
+	if _, err := s.db.Exec(`UPDATE runs SET auto_accept = 0 WHERE id = 'r1'`); err != nil {
+		t.Fatalf("edit run: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	// Every later Open must leave the edits alone.
+	for pass := 0; pass < 2; pass++ {
+		s, err = Open(path)
+		if err != nil {
+			t.Fatalf("reopen %d error = %v", pass, err)
+		}
+		glm, _ = s.GetAgentProfile(1)
+		claude, _ = s.GetAgentProfile(2)
+		run, _ := s.GetRun("r1")
+		if glm.AutoAccept || claude.PermissionMode != "" || run.AutoAccept {
+			t.Fatalf("reopen %d re-applied the backfill: glm autoAccept=%v claude mode=%q run autoAccept=%v",
+				pass, glm.AutoAccept, claude.PermissionMode, run.AutoAccept)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
+		}
 	}
 }

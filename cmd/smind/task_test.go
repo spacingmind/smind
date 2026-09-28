@@ -160,3 +160,25 @@ func TestToolCallNames_Render(t *testing.T) {
 		})
 	}
 }
+
+// TestRenderPermissionRequest proves the pending-permission card's hint
+// line is copy-pasteable into `smind task approve` as-is: it must carry
+// the runId before the requestId, because cmdTaskApprove's usage is
+// `task approve <runId> [requestId] [optionId]` -- a hint printing only
+// the requestId pastes into nothing.
+func TestRenderPermissionRequest(t *testing.T) {
+	t.Parallel()
+
+	got := renderPermissionRequest("run-1", "req-2", "Bash(git push)", []permissionOptionParams{
+		{ID: "opt-allow", Label: "Allow once", Kind: "allow_once"},
+	})
+	if !strings.Contains(got, "-> smind task approve run-1 req-2\n") {
+		t.Fatalf("renderPermissionRequest() = %q, want a hint line `-> smind task approve run-1 req-2`", got)
+	}
+	if !strings.Contains(got, "[permission] Bash(git push) (request req-2)") {
+		t.Fatalf("renderPermissionRequest() = %q, want the summary and request id", got)
+	}
+	if !strings.Contains(got, "opt-allow: Allow once (allow_once)") {
+		t.Fatalf("renderPermissionRequest() = %q, want every option rendered", got)
+	}
+}

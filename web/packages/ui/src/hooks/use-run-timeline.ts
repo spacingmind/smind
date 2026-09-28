@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
-  ApprovalPolicy,
+  PermissionSettings,
   PermissionQuestion,
   PermissionRequestEventParams,
   PermissionResolutionReason,
@@ -11,7 +11,7 @@ import type {
   RunAttachResult,
   RunLogEvent,
   RunLogsResult,
-  RunSetApprovalPolicyResult,
+  RunSetPermissionModeResult,
   RunStartResult,
   RunStatusValue,
   RunSummary,
@@ -66,7 +66,7 @@ export interface TimelineToolCallItem {
 /**
  * A resolved permission request, rendered as a small marker row so the
  * transcript keeps a visible trace of *how* it was resolved -- a person
- * clicking an option, an auto-safe policy deciding for them, or the
+ * clicking an option, an Auto-accept run deciding for them, or the
  * request timing out unanswered (ui-redesign-parity.md's Validation
  * note). There is deliberately no "pending" counterpart item: while a
  * request is unanswered it lives only in `RunEntry.pendingPermission`
@@ -228,16 +228,17 @@ export interface RunEntry {
   stopReason?: string;
   err?: string;
   /**
-   * The run's approval policy -- "manual" (the default) if the run was
-   * started without ever touching the composer's selector, or whatever it
-   * was live-switched to since (see setApprovalPolicy below and
-   * docs/plans/active/mid-run-approval-and-retry-effort.md's Item A).
+   * The run's provider-native permission mode (ADR-0019) -- "" until the
+   * daemon reports the resolved default for a just-submitted run, or
+   * whatever it was live-switched to since (see setPermissionMode below).
    */
-  approvalPolicy: ApprovalPolicy;
+  permissionMode: string;
+  /** ACP only: whether every permission prompt is auto-approved (live-switchable). */
+  autoAccept: boolean;
   /**
    * The run's Claude-only thinking level, "" (unset) for every other
    * provider or an untouched selector -- immutable for the run's lifetime
-   * (unlike approvalPolicy, there is no live thinking-level switch; see
+   * (unlike permissionMode, there is no live thinking-level switch; see
    * retryWithHigherEffort below for how a *new* run gets a higher tier).
    */
   thinkingLevel: ThinkingLevel;
@@ -259,20 +260,16 @@ interface TimelineState {
   error: string | null;
   /**
    * Starts a new run (run.start) and immediately begins streaming it
-   * (run.attach) into the timeline. approvalPolicy is omitted from the
-   * run.start payload entirely when it's "manual" -- the backend's default
-   * when the field is absent (internal/wsapi/handlers.go) -- so a run
-   * started without ever touching the approval-policy selector sends the
-   * exact same payload as before that selector existed. thinkingLevel is
-   * the same story: omitted whenever it's "" (unset -- every non-Claude
-   * provider, and Claude before the selector is touched), so a run started
-   * without ever touching the thinking-level selector sends the exact same
-   * payload as before that selector existed either.
+   * (run.attach) into the timeline. permissionMode is omitted from the
+   * run.start payload when it's "" (the provider's own default applies)
+   * and autoAccept when false; thinkingLevel is likewise omitted whenever
+   * it's "" (unset -- every non-Claude provider, and Claude before the
+   * selector is touched).
    */
   submitPrompt: (
     provider: Provider,
     prompt: string,
-    approvalPolicy?: ApprovalPolicy,
+    permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
   ) => Promise<void>;
   /**
@@ -293,16 +290,17 @@ interface TimelineState {
    */
   respondPermission: (runId: string, requestId: string, optionId: string) => Promise<void>;
   /**
-   * Switches runId's live approvalPolicy between "manual" and "auto-safe"
-   * (run.setApprovalPolicy) -- see Item A. Only meaningful while the run is
-   * still running; the caller is expected to have already gated the
-   * control that invokes this on that (see task-detail.tsx).
+   * Switches runId's live permission mode (modeId, applied through the
+   * provider's own session) and/or its ACP autoAccept toggle
+   * (run.setPermissionMode). Only meaningful while the run is still
+   * running, and not for Codex; the caller gates the control on that (see
+   * task-detail.tsx).
    */
-  setApprovalPolicy: (runId: string, policy: ApprovalPolicy) => Promise<void>;
+  setPermissionMode: (runId: string, change: { modeId?: string; autoAccept?: boolean }) => Promise<void>;
   /**
    * Starts a new run for the same task as `run`, one thinking tier above
    * `run.thinkingLevel` (see nextThinkingTier), with the same prompt,
-   * provider, and approvalPolicy -- Item B's "Retry with higher effort". A
+   * provider, and permission settings -- Item B's "Retry with higher effort". A
    * no-op if there's no higher tier to try (the caller is expected to have
    * already gated the button that invokes this on canRetryWithHigherEffort).
    */
@@ -512,7 +510,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
           items: [],
           stopReason: r.StopReason || undefined,
           err: r.Err || undefined,
-          approvalPolicy: r.ApprovalPolicy,
+          permissionMode: r.PermissionMode,
+          autoAccept: r.AutoAccept,
           thinkingLevel: r.ThinkingLevel,
         }));
         setRuns(initial);
@@ -550,7 +549,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
   }, [client, taskId, chatId]);
 
   const submitPrompt = useCallback(
-    async (provider: Provider, prompt: string, approvalPolicy?: ApprovalPolicy, thinkingLevel?: ThinkingLevel) => {
+    async (provider: Provider, prompt: string, permission?: PermissionSettings, thinkingLevel?: ThinkingLevel) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
         throw new Error("no chat selected");
@@ -561,7 +560,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         chatId,
         provider,
         prompt,
-        ...(approvalPolicy && approvalPolicy !== "manual" ? { approvalPolicy } : {}),
+        ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
+        ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
       if (session.cancelled) return;
@@ -573,7 +573,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         status: "running",
         startedAt: new Date().toISOString(),
         items: [],
-        approvalPolicy: approvalPolicy ?? "manual",
+        permissionMode: permission?.permissionMode ?? "",
+        autoAccept: permission?.autoAccept ?? false,
         thinkingLevel: thinkingLevel ?? "",
       };
       setRuns((prev) => (prev ? [...prev, entry] : [entry]));
@@ -599,11 +600,11 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     [client],
   );
 
-  const setApprovalPolicy = useCallback(
-    async (runId: string, policy: ApprovalPolicy) => {
+  const setPermissionMode = useCallback(
+    async (runId: string, change: { modeId?: string; autoAccept?: boolean }) => {
       if (!client) throw new Error("not connected");
-      const result = await client.call<RunSetApprovalPolicyResult>("run.setApprovalPolicy", { runId, policy });
-      patch(setRuns, runId, { approvalPolicy: result.approvalPolicy });
+      const result = await client.call<RunSetPermissionModeResult>("run.setPermissionMode", { runId, ...change });
+      patch(setRuns, runId, { permissionMode: result.permissionMode, autoAccept: result.autoAccept });
     },
     [client],
   );
@@ -612,10 +613,10 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
     async (run: RunEntry) => {
       const tier = nextThinkingTier(run.thinkingLevel);
       if (!tier) return;
-      await submitPrompt(run.provider, run.prompt, run.approvalPolicy, tier);
+      await submitPrompt(run.provider, run.prompt, { permissionMode: run.permissionMode, autoAccept: run.autoAccept }, tier);
     },
     [submitPrompt],
   );
 
-  return { runs, error, submitPrompt, stopRun, respondPermission, setApprovalPolicy, retryWithHigherEffort };
+  return { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort };
 }

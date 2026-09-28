@@ -19,10 +19,9 @@
 // than a reply buffered until the end; "permission" issues a real
 // session/request_permission call and streams back which option was chosen,
 // for proving Runner's PermissionDecider wiring end to end; "permission-edit"
-// is the same idea for an edit-kind request (ApprovalPolicyAutoSafe's
-// ACP file-edit fast path, see acpDeciderAdapter.Decide), with a
-// synchronization chunk and a real delay before the request goes out so a
-// test can reliably switch ApprovalPolicy mid-run before it arrives; anything
+// is the same idea for an edit-kind request, with a synchronization chunk
+// and a real delay before the request goes out so a test can reliably
+// change the run's permission settings mid-run before it arrives; anything
 // else (including no file at all) runs the default two-chunk scripted reply.
 package main
 
@@ -46,6 +45,34 @@ const sessionID = "fake-session-1"
 // newOrResumeACPSession's loadSession-first priority), or unset/anything
 // else (neither -- the "this agent can't resume at all" fallback path).
 var capsMode string
+
+// modesMode is set from a "modes:<kind>" argument: "modes:session"
+// advertises ACP SessionModeState in session/new (GLM-shaped
+// default/accept_edits/bypass_permissions), "modes:config" advertises the
+// same modes as a category-"mode" select config option instead; unset
+// advertises no modes at all. "modes:nodefault" advertises SessionModeState
+// modes that don't include any "default" (ask/code, current ask), like
+// agents that name their modes differently. "modes:slow" is "modes:session"
+// with every session/set_mode answered only after a 400ms delay (recorded
+// on receipt), so a test can act while a set_mode is in flight.
+// session/set_mode (and a set_config_option
+// on the "mode" config id) records the applied mode to a "session-mode"
+// file in the session's cwd, so tests can observe it.
+var modesMode string
+
+var fakeModeIDs = []string{"default", "accept_edits", "bypass_permissions"}
+
+// noDefaultModeIDs is modes:nodefault's catalog -- deliberately no
+// "default" id.
+var noDefaultModeIDs = []string{"ask", "code"}
+
+// advertisedModeIDs is the mode catalog this agent answers set_mode for.
+func advertisedModeIDs() []string {
+	if modesMode == "nodefault" {
+		return noDefaultModeIDs
+	}
+	return fakeModeIDs
+}
 
 type message struct {
 	JSONRPC string          `json:"jsonrpc"`
@@ -108,8 +135,12 @@ func call(method string, params any) message {
 }
 
 func main() {
-	if len(os.Args) > 1 {
-		capsMode = os.Args[1]
+	for _, a := range os.Args[1:] {
+		if strings.HasPrefix(a, "modes:") {
+			modesMode = strings.TrimPrefix(a, "modes:")
+		} else {
+			capsMode = a
+		}
 	}
 
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
@@ -153,14 +184,37 @@ func handle(msg message, sessionCwd *string) {
 		_ = json.Unmarshal(msg.Params, &params)
 		*sessionCwd = params.Cwd
 		recordSessionInitMethod(params.Cwd, "session/new")
-		respond(msg.ID, map[string]any{
+		result := map[string]any{
 			"sessionId":     sessionID,
 			"configOptions": defaultConfigOptions(),
-		})
+		}
+		if modesMode == "session" || modesMode == "nodefault" || modesMode == "slow" {
+			ids := advertisedModeIDs()
+			available := make([]map[string]any, len(ids))
+			for i, id := range ids {
+				available[i] = map[string]any{"id": id, "name": "Mode " + id}
+			}
+			result["modes"] = map[string]any{"currentModeId": ids[0], "availableModes": available}
+		}
+		respond(msg.ID, result)
+	case msg.Method == "session/set_mode":
+		var params struct {
+			ModeID string `json:"modeId"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		if !knownFakeMode(params.ModeID) {
+			writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{Code: -32602, Message: "unknown mode: " + params.ModeID}})
+			return
+		}
+		recordSessionMode(*sessionCwd, "set_mode:"+params.ModeID)
+		if modesMode == "slow" {
+			time.Sleep(400 * time.Millisecond)
+		}
+		respond(msg.ID, map[string]any{})
 	case msg.Method == "session/load" || msg.Method == "session/resume":
 		handleResumeSession(msg, sessionCwd)
 	case msg.Method == "session/set_config_option":
-		handleSetConfigOption(msg)
+		handleSetConfigOption(msg, *sessionCwd)
 	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
 	case msg.Method == "" && len(msg.ID) > 0:
@@ -184,7 +238,7 @@ func handle(msg message, sessionCwd *string) {
 // wsapi tests can drive a real config-option round trip end to end rather
 // than asserting only against the non-ACP "not supported" path.
 func defaultConfigOptions() []map[string]any {
-	return []map[string]any{{
+	opts := []map[string]any{{
 		"configId":     "thinking-level",
 		"name":         "Thinking Level",
 		"type":         "select",
@@ -196,6 +250,44 @@ func defaultConfigOptions() []map[string]any {
 			{"value": "high", "name": "High"},
 		},
 	}}
+	if modesMode == "config" {
+		choices := make([]map[string]any, len(fakeModeIDs))
+		for i, id := range fakeModeIDs {
+			choices[i] = map[string]any{"value": id, "name": "Mode " + id}
+		}
+		opts = append(opts, map[string]any{
+			"configId":     "mode",
+			"name":         "Mode",
+			"category":     "mode",
+			"type":         "select",
+			"currentValue": "default",
+			"options":      choices,
+		})
+	}
+	return opts
+}
+
+func knownFakeMode(id string) bool {
+	for _, m := range advertisedModeIDs() {
+		if m == id {
+			return true
+		}
+	}
+	return false
+}
+
+// recordSessionMode appends how a mode was applied to "session-mode" in
+// cwd (one line per call).
+func recordSessionMode(cwd, line string) {
+	if cwd == "" {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(cwd, "session-mode"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(line + "\n")
 }
 
 // recordSessionInitMethod writes the method that started/resumed this
@@ -295,12 +387,12 @@ func runPromptScript(promptMsg message, cwd string) {
 	if scenario == "permission-edit" {
 		// Unlike "permission" above, this scenario needs genuine
 		// happens-before ordering, not a race: a test proving a mid-run
-		// ApprovalPolicy switch (internal/runs.Registry.SetApprovalPolicy)
+		// permission-settings switch (internal/runs.Registry.SetAutoAccept)
 		// lands *before* this scenario's edit-kind session/request_permission
 		// call needs a reliable signal to synchronize on first. The
 		// preceding sessionUpdate + sleep gives the test time to observe
 		// the "ready" chunk (causally ordered before this, via the
-		// notification-forwarding pipeline) and call SetApprovalPolicy
+		// notification-forwarding pipeline) and make the switch
 		// before the request actually goes out.
 		sessionUpdate("ready")
 		time.Sleep(300 * time.Millisecond)
@@ -327,6 +419,29 @@ func runPromptScript(promptMsg message, cwd string) {
 			optionID = result.Outcome.OptionID
 		}
 		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
+	if scenario == "mode-update" {
+		// The agent switches its own mode mid-turn (ACP's
+		// current_mode_update -- e.g. a plan-mode agent leaving plan) and
+		// then asks for permission, so a test can prove the client's idea
+		// of the current mode follows the agent's notification.
+		notify("session/update", map[string]any{
+			"sessionId": sessionID,
+			"update":    map[string]any{"sessionUpdate": "current_mode_update", "currentModeId": "accept_edits"},
+		})
+		time.Sleep(100 * time.Millisecond)
+		call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall":  map[string]any{"toolCallId": "tc-mode", "title": "After mode update"},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		sessionUpdate("done")
 		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
 	}

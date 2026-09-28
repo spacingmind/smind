@@ -33,7 +33,9 @@ type initializeParams struct {
 }
 
 type threadStartParams struct {
-	Cwd string `json:"cwd,omitempty"`
+	Cwd            string `json:"cwd,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
 }
 
 type thread struct {
@@ -54,8 +56,10 @@ type threadLoadedListResponse struct {
 }
 
 type threadResumeParams struct {
-	ThreadID string `json:"threadId"`
-	Cwd      string `json:"cwd,omitempty"`
+	ThreadID       string `json:"threadId"`
+	Cwd            string `json:"cwd,omitempty"`
+	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
+	Sandbox        string `json:"sandbox,omitempty"`
 }
 
 type threadUnarchiveParams struct {
@@ -109,6 +113,12 @@ type Client struct {
 	policy    PermissionPolicy
 	logWriter io.Writer
 
+	// approvalPolicy/sandbox are Codex's own AskForApproval and
+	// SandboxMode values sent on every thread/start and thread/resume (see
+	// WithThreadPolicy); empty leaves Codex's own configured default.
+	approvalPolicy string
+	sandbox        string
+
 	// mu guards updateSubs/turnWaiters, both keyed by threadID -- not
 	// turnID, deliberately: a turn's own id is only known once turn/start's
 	// response arrives, which would create a window (between issuing the
@@ -150,6 +160,16 @@ func WithLogWriter(w io.Writer) Option {
 // AutoApprovePolicy for the default and why it was chosen.
 func WithPermissionPolicy(p PermissionPolicy) Option {
 	return func(c *Client) { c.policy = p }
+}
+
+// WithThreadPolicy sets Codex's own approvalPolicy (AskForApproval, e.g.
+// "on-request", "never") and sandbox (SandboxMode, e.g. "workspace-write",
+// "danger-full-access") on every thread this Client starts or resumes --
+// the app-server's native permission surface (codex-rs
+// app-server-protocol v2 ThreadStartParams/ThreadResumeParams). Either
+// may be empty to leave Codex's configured default in place.
+func WithThreadPolicy(approvalPolicy, sandbox string) Option {
+	return func(c *Client) { c.approvalPolicy, c.sandbox = approvalPolicy, sandbox }
 }
 
 // New spawns command[0] with command[1:] as arguments and wires up a codex
@@ -199,7 +219,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession starts a new codex thread rooted at cwd (the task's worktree
 // path), returning its thread id.
 func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
-	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd})
+	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox})
 	if err != nil {
 		return "", fmt.Errorf("codex: thread/start: %w", err)
 	}
@@ -263,7 +283,7 @@ func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error
 }
 
 func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
-	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd}); err != nil {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox}); err != nil {
 		return fmt.Errorf("codex: thread/resume: %w", err)
 	}
 	return nil

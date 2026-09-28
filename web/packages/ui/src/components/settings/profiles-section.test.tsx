@@ -11,7 +11,8 @@ const PROFILE = {
   ID: 1,
   Name: "UI work",
   Provider: "claude-native",
-  ApprovalPolicy: "manual",
+  PermissionMode: "plan",
+  AutoAccept: false,
   ThinkingLevel: "standard",
   Notes: "For UI polish.",
   CreatedAt: "2026-09-25T00:00:00Z",
@@ -99,6 +100,36 @@ describe("profiles-section", () => {
     expect(within(screen.getByTestId("profile-row-2")).getByText("New profile")).toBeInTheDocument();
     // The card closes on save.
     expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
+  });
+
+  it("the form's permission-mode field lists the provider's own modes, saves permissionMode, and the card names the mode (W4)", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    await flush();
+
+    // The stored profile's card line uses the provider's own mode label.
+    expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Plan Mode");
+
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Bypass bot" } });
+    fireEvent.click(screen.getByTestId("profile-form-permission-mode"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Provider default", "Accept File Edits", "Always Ask", "Plan Mode", "Bypass"]);
+    fireEvent.click(options[4]);
+    await flush();
+    // Claude takes no auto-accept.
+    expect(screen.queryByTestId("profile-form-auto-accept")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+
+    expect(client.nth("profile.create").params).toMatchObject({
+      name: "Bypass bot",
+      provider: "claude-native",
+      permissionMode: "bypassPermissions",
+      autoAccept: false,
+    });
   });
 
   it("Cancel closes the add card without creating anything, and opening Edit on a row closes an open add card", async () => {

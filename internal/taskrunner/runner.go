@@ -26,6 +26,8 @@ type acpBackend interface {
 	SupportsLoadSession() bool
 	SupportsResumeSession() bool
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
+	SessionModes(sessionID string) (acp.SessionModeState, bool)
+	SetSessionMode(ctx context.Context, sessionID, modeID string) error
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	Close() error
 }
@@ -35,6 +37,7 @@ type acpBackend interface {
 // test-substitution reason as acpBackend.
 type claudeBackend interface {
 	Prompt(ctx context.Context, text string, updates chan<- claudecode.Message) (claudecode.ResultMessage, error)
+	SetPermissionMode(ctx context.Context, mode string) error
 	Close() error
 }
 
@@ -158,6 +161,17 @@ type Runner struct {
 	acpSessions map[int64]*acpSessionState
 	sessionMu   sync.Mutex
 
+	// acpModes caches each ACP provider's discovered permission modes
+	// (see acp_modes.go), guarded by modeMu. acpModeProbe enables
+	// background discovery probes (WithACPModeProbe).
+	acpModes map[Provider]acpModeCacheEntry
+
+	// claudeClients holds each chat's live Claude Code client for the
+	// duration of its turn (see live_mode.go), guarded by sessionMu.
+	claudeClients map[int64]claudeBackend
+	modeMu        sync.Mutex
+	acpModeProbe  bool
+
 	// sessionStore holds the resumable SessionHandle each provider's
 	// RunPrompt call reads before a turn and writes after one, keyed by
 	// chat ID -- see SessionHandle/SessionStore's doc comments. Defaults to
@@ -178,9 +192,11 @@ type Runner struct {
 // New returns a Runner backed by wm.
 func New(wm *workspace.Manager, opts ...Option) *Runner {
 	r := &Runner{
-		wm:           wm,
-		acpSessions:  map[int64]*acpSessionState{},
-		sessionStore: NewMemorySessionStore(),
+		wm:            wm,
+		acpSessions:   map[int64]*acpSessionState{},
+		acpModes:      map[Provider]acpModeCacheEntry{},
+		claudeClients: map[int64]claudeBackend{},
+		sessionStore:  NewMemorySessionStore(),
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
 			ProviderKimi: acp.KimiCommand(),
@@ -225,19 +241,14 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // today's behavior exactly: each provider falls through to its own
 // Runner-level default.
 //
-// approvalPolicy is the run's ApprovalPolicy (see policy.go). For
-// ApprovalPolicyManual/ApprovalPolicyAutoSafe it only matters when decider
-// is non-nil, and only widens what may run without a human --
-// ApprovalPolicyAutoSafe pre-approves the allowlisted verification commands
-// at the provider's own gate (see SafeBashRules for why the decider-side
-// check alone is not enough for claude-native) in addition to
-// auto-allowing them in the decider itself. The zero value
-// (ApprovalPolicyManual) preserves today's behavior exactly.
-// ApprovalPolicyFullAccess is different: it takes priority over decider
-// entirely -- no decider is installed at all, regardless of whether the
-// caller supplied one, and each provider's own native "auto-approve
-// everything" mechanism is used instead (see runClaudeNative/
-// runCodexNative/runACP).
+// perm is the run's provider-native permission settings (ADR-0019): Mode is
+// one of the provider's own ModeInfo ids ("" for the provider's
+// DefaultMode), applied natively -- Claude Code's --permission-mode,
+// Codex's thread approvalPolicy/sandbox preset, an ACP agent's
+// session/set_mode. AutoAccept (ACP only) approves every permission
+// prompt; with a decider it's the decider's job (internal/runs records the
+// auto-accept), without one acp.AutoApprovePolicy is installed. Whatever
+// the provider's mode still escalates goes to decider.
 //
 // thinkingLevel is Claude-only (see ThinkingLevel's doc comment): every
 // other provider ignores it entirely, regardless of what it's set to.
@@ -249,7 +260,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -263,11 +274,11 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, chatID, provider, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runACP(ctx, chatID, provider, worktreePath, prompt, decider, perm, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, chatID, worktreePath, prompt, decider, approvalPolicy, thinkingLevel, events)
+		return r.runClaudeNative(ctx, chatID, worktreePath, prompt, decider, perm, thinkingLevel, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, chatID, worktreePath, prompt, decider, approvalPolicy, events)
+		return r.runCodexNative(ctx, chatID, worktreePath, prompt, decider, perm, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -278,7 +289,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -286,15 +297,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 
 	var opts []acp.Option
 	switch {
-	case approvalPolicy == ApprovalPolicyFullAccess:
-		// ACP has no native permission-mode concept to defer to (unlike
-		// Claude/Codex) -- AutoApprovePolicy answering allow_once/
-		// allow_always on every request already is this provider's real
-		// ceiling. No decider is installed at all, same as the other two
-		// providers' full-access branch.
-		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case decider != nil:
-		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider, worktreePath: worktreePath, approvalPolicy: approvalPolicy}))
+		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider}))
+	case perm.AutoAccept:
+		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case r.acpPermissionPolicy != nil:
 		opts = append(opts, acp.WithPermissionPolicy(r.acpPermissionPolicy))
 	}
@@ -312,14 +318,38 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
-	r.trackACPSession(chatID, sessionID, client, configOptions)
+	r.recordSessionModes(provider, client, sessionID, configOptions)
+	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
+	}
+	// Published only once the start mode is applied: until then a
+	// SetPermissionMode can't reach the session (it fails as "no live
+	// session"), so a quick mid-run switch can never land first and then
+	// be overwritten by the start-up switch.
+	r.trackACPSession(chatID, sessionID, client, updated)
 	defer r.endACPTurn(chatID)
+	if mode, ok := currentACPMode(client, sessionID, updated); ok {
+		select {
+		case events <- Event{Type: EventTypePermissionModeChanged, Text: mode, Initial: true}:
+		case <-ctx.Done():
+		}
+	}
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
 	go func() {
 		defer close(forwardDone)
 		for u := range updates {
+			if u.Type == acp.SessionUpdateCurrentModeUpdate {
+				// acp.Client has already applied it to SessionModes.
+				if mode, ok := currentACPMode(client, sessionID, nil); ok {
+					select {
+					case events <- Event{Type: EventTypePermissionModeChanged, Text: mode}:
+					case <-ctx.Done():
+					}
+				}
+			}
 			e, ok := acpEvent(u)
 			if !ok {
 				continue
@@ -497,7 +527,7 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
 	switch thinkingLevel {
 	case ThinkingLevelOff:
@@ -511,32 +541,25 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath
 		// exactly, for an older client or any request that never set the
 		// field.
 	}
+	mode := perm.Mode
+	if mode == "" {
+		mode = ClaudeModeAcceptEdits
+	}
+	// The run's permission mode goes straight to the CLI (ADR-0019), and
+	// --allow-dangerously-skip-permissions is always passed -- as Paseo
+	// does -- so a mid-run switch into bypassPermissions (SetPermissionMode)
+	// is accepted by the CLI rather than refused for a session that
+	// wasn't launched with that capability. It grants nothing by itself.
+	opts = append(opts,
+		claudecode.WithPermissionMode(mode),
+		claudecode.WithExtraArgs(map[string]*string{claudeAllowBypassFlag: nil}),
+	)
 	switch {
-	case approvalPolicy == ApprovalPolicyFullAccess:
-		// No decider at all -- the CLI's own bypassPermissions mode is
-		// Claude Code's real "skip every permission prompt" mode, the same
-		// one its own CLI exposes under that name.
-		opts = append(opts, claudecode.WithPermissionMode("bypassPermissions"))
 	case decider != nil:
-		// A human decider is wired up, so ask the CLI for permission-mode
-		// "acceptEdits" (not its "default"): under "default", the CLI blocks
-		// file edits itself without ever emitting a can_use_tool request,
-		// so a headless run with a decider silently loses every edit --
-		// the exact dogfood failure that motivated this (2026-09-11).
-		// "acceptEdits" lets edits through and still routes Bash and other
-		// sensitive tools through can_use_tool -> the decider -> the UI.
-		opts = append(opts,
-			claudecode.WithPermissionMode("acceptEdits"),
-			claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}),
-		)
-		// The CLI's own session gate blocks allowlisted Bash commands
-		// before can_use_tool ever fires (see SafeBashRules), so under
-		// auto-safe the allowlist has to be handed to the CLI at spawn
-		// time too -- the decider-side check alone only helps ACP/codex
-		// backends, whose permission flow starts at the decider.
-		if approvalPolicy == ApprovalPolicyAutoSafe {
-			opts = append(opts, claudecode.WithAllowedTools(SafeBashRules()...))
-		}
+		// Installed for every mode, bypassPermissions included: in bypass
+		// the CLI never asks, but a mid-run switch to an asking mode must
+		// still reach a human.
+		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}))
 		// Hold the CLI's own permission-dialog deadline open well past
 		// smind's 5-minute manual-approval window, so the CLI's internal
 		// auto-deny fallback can't silently cancel a pending request
@@ -559,6 +582,8 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath
 		return fmt.Errorf("taskrunner: spawn claude code agent: %w", err)
 	}
 	defer client.Close()
+	r.trackClaudeClient(chatID, client)
+	defer r.untrackClaudeClient(chatID)
 
 	updates := make(chan claudecode.Message)
 	forwardDone := make(chan struct{})
@@ -706,16 +731,19 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, approvalPolicy ApprovalPolicy, events chan<- Event) error {
-	var opts []codex.Option
+func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
+	mode := perm.Mode
+	if mode == "" {
+		mode = CodexModeAuto
+	}
+	preset, ok := codexModePresets[mode]
+	if !ok {
+		return fmt.Errorf("taskrunner: unknown codex permission mode %q", mode)
+	}
+	// The mode's own approvalPolicy/sandbox pair (ADR-0019) -- Codex itself
+	// decides what to escalate; whatever it does reaches decider.
+	opts := []codex.Option{codex.WithThreadPolicy(preset.approvalPolicy, preset.sandbox)}
 	switch {
-	case approvalPolicy == ApprovalPolicyFullAccess:
-		// No decider at all -- codex.AutoApprovePolicy{} auto-resolves every
-		// commandExecution/fileChange approval request, the closest smind
-		// gets to driving Codex's own never/danger-full-access combination
-		// without owning its native approval_policy/sandbox_mode config
-		// surface (see docs/plans/active/task-move-approval-thinking.md).
-		opts = append(opts, codex.WithPermissionPolicy(codex.AutoApprovePolicy{}))
 	case decider != nil:
 		opts = append(opts, codex.WithPermissionPolicy(codexDeciderAdapter{decider}))
 	case r.codexPermissionPolicy != nil:

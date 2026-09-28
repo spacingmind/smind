@@ -5,7 +5,7 @@
 // requestId and fed from ALL three delivery paths -- run.logs history,
 // the initial run's attach, and any follow-up run's attach -- because a
 // request can be resolved from anywhere (this device's tap, the web UI,
-// an auto-safe/timeout), and the one source of truth is the event
+// an auto-accept/timeout), and the one source of truth is the event
 // stream: a permission_resolved event always overwrites optimistic
 // local state. respondToPermission is the tap flow: resolve optimistically
 // first (buttons disable immediately, like a sent message in a chat
@@ -98,7 +98,7 @@ export class PermissionBoard {
     this.onChange();
   }
 
-  /** A failed run.respondPermission: roll the optimistic resolution back -- unless an authoritative event already resolved the request (e.g. an auto-safe timeout fired before the tap's RPC landed), in which case the event wins and the failure is moot. */
+  /** A failed run.respondPermission: roll the optimistic resolution back -- unless an authoritative event already resolved the request (e.g. a timeout fired before the tap's RPC landed), in which case the event wins and the failure is moot. */
   chooseFailed(requestId: string, optionId: string, message: string): void {
     const req = this.requests.get(requestId);
     if (!req || req.status !== 'resolved' || req.resolvedWith?.by !== 'tap' || req.resolvedWith.optionId !== optionId) return;

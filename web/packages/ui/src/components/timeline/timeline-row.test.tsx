@@ -14,7 +14,7 @@ function run(events: RunLogEvent[]): RunEntry {
     startedAt: "2024-01-01T00:00:00Z",
     finishedAt: "2024-01-01T00:00:02Z",
     items: buildTimeline(events),
-    approvalPolicy: "manual",
+    permissionMode: "", autoAccept: false,
     thinkingLevel: "",
   };
 }

@@ -71,17 +71,24 @@ smind task new <workspaceId> "fix the failing test"
 smind task send <taskId> glm "fix the failing test"   # or open the web UI and use the Chat tab
 ```
 
-### Unattended runs
+### Permission modes
 
 ```sh
-smind task send <id> <provider> <prompt> --approval-policy auto-safe
+smind task send <id> claude-native <prompt> --mode plan
+smind task send <id> glm <prompt> --auto-accept
 ```
 
-`auto-safe` lets a run self-approve known-safe verification commands (`gofmt
--l`, `go vet`, `go test`, `task test`/`lint`/`build`, including a leading `cd
-<dir> &&`) without waiting on a human; everything else still needs approval.
-The same choice is available in the web UI's prompt form (Approval policy
-dropdown). Default remains `manual`.
+Each run uses its provider's own permission modes
+([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)):
+
+- **Claude Code:** `acceptEdits` (default), `default`, `plan`, `auto`
+  (Claude Code's classifier), `bypassPermissions`.
+- **Codex:** `auto` (default) or `full-access`.
+- **ACP agents (GLM, Kimi):** whatever modes the agent advertises, plus
+  `--auto-accept` to approve every permission prompt.
+
+Anything the chosen mode still escalates waits for a human in the web UI or
+`smind task approve`. The web UI's prompt form has the same mode picker.
 
 ## Dev quickstart
 

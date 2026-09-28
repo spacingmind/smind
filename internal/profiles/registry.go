@@ -124,7 +124,9 @@ func (r *Registry) Delete(id int64) error {
 }
 
 // validate rejects a profile this package's callers should never be able
-// to store: an empty name, an unknown provider id, or an approvalPolicy/
+// to store: an empty name, an unknown provider id, a permission mode /
+// autoAccept the provider's static catalog rejects (ADR-0019 -- an ACP
+// provider accepts any mode id, since its modes are the agent's own), or a
 // thinkingLevel string that internal/taskrunner itself would reject from
 // task.prompt -- so a stored profile can never carry a combination the wire
 // would reject if applied directly.
@@ -132,23 +134,15 @@ func validate(p store.AgentProfile) error {
 	if strings.TrimSpace(p.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	if !isSupportedProvider(p.Provider) {
+	info, ok := taskrunner.ProviderInfoFor(taskrunner.Provider(p.Provider))
+	if !ok {
 		return fmt.Errorf("unknown provider %q", p.Provider)
 	}
-	if p.ApprovalPolicy != "" && !taskrunner.ApprovalPolicy(p.ApprovalPolicy).IsValid() {
-		return fmt.Errorf("invalid approvalPolicy %q", p.ApprovalPolicy)
+	if err := taskrunner.ValidatePermissionSettings(info, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}); err != nil {
+		return err
 	}
 	if p.ThinkingLevel != "" && !taskrunner.ThinkingLevel(p.ThinkingLevel).IsValid() {
 		return fmt.Errorf("invalid thinkingLevel %q", p.ThinkingLevel)
 	}
 	return nil
-}
-
-func isSupportedProvider(id string) bool {
-	for _, p := range taskrunner.SupportedProviders() {
-		if string(p.ID) == id {
-			return true
-		}
-	}
-	return false
 }

@@ -79,6 +79,61 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0019: provider-native permission modes replace the legacy
+		// approval_policy (manual/auto-safe/full-access), which the
+		// backfill clears in the same UPDATE so each row is migrated
+		// exactly once (resolved decision 8).
+		name: "permission_modes",
+		apply: func(db *sql.DB) error {
+			for _, table := range []string{"runs", "agent_profiles"} {
+				if err := addColumnIfMissing(db, table, "permission_mode", "TEXT NOT NULL DEFAULT ''"); err != nil {
+					return err
+				}
+				if err := addColumnIfMissing(db, table, "auto_accept", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+					return err
+				}
+			}
+			return backfillPermissionModes(db)
+		},
+	},
+}
+
+// legacyPermissionModeSQL maps a row's legacy approval_policy (and
+// provider) onto ADR-0019's migration table -- always toward asking a
+// human: manual and auto-safe both become the provider's own
+// asks-for-shell-commands mode (Claude acceptEdits, Codex auto, ACP the
+// agent's own default ""), and only full-access becomes an auto-approving
+// setting (Claude bypassPermissions, Codex full-access, ACP autoAccept).
+// ACP's "accept_edits if advertised" isn't knowable at migration time (no
+// agent is running), so ACP auto-safe rows get the agent default -- the
+// narrower choice.
+const legacyPermissionModeSQL = `
+	permission_mode = CASE
+		WHEN provider = 'claude-native' AND approval_policy = 'full-access' THEN 'bypassPermissions'
+		WHEN provider = 'claude-native' THEN 'acceptEdits'
+		WHEN provider = 'codex-native' AND approval_policy = 'full-access' THEN 'full-access'
+		WHEN provider = 'codex-native' THEN 'auto'
+		ELSE '' END,
+	auto_accept = CASE
+		WHEN provider IN ('glm', 'kimi') AND approval_policy = 'full-access' THEN 1
+		ELSE 0 END`
+
+// backfillPermissionModes applies legacyPermissionModeSQL to every row
+// still carrying a legacy approval_policy, clearing approval_policy in the
+// same UPDATE -- so each row is backfilled exactly once, and a user's later
+// edit to its permission_mode/auto_accept (e.g. unticking a migrated
+// full-access profile's autoAccept, or resetting its mode to "") is never
+// re-overwritten on the next Open. New rows never carry a non-empty
+// approval_policy (CreateRun writes ” explicitly; agent_profiles
+// defaults to ”), so they never match.
+func backfillPermissionModes(db *sql.DB) error {
+	for _, table := range []string{"runs", "agent_profiles"} {
+		if _, err := db.Exec(`UPDATE ` + table + ` SET` + legacyPermissionModeSQL + `, approval_policy = '' WHERE approval_policy != ''`); err != nil {
+			return fmt.Errorf("backfill %s.permission_mode: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // backfillDefaultChats gives every task exactly one default chat

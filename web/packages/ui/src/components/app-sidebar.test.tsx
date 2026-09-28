@@ -1021,7 +1021,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     ID: 7,
     Name: "Quick Fixes",
     Provider: "claude-native",
-    ApprovalPolicy: "manual",
+    PermissionMode: "", AutoAccept: false,
     ThinkingLevel: "standard",
     Notes: "",
     CreatedAt: "2024-01-01T00:00:00Z",

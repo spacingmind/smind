@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
@@ -34,56 +31,26 @@ type PermissionOption struct {
 }
 
 // PermissionDecider decides a pending permission request raised mid-turn by
-// either provider, blocking until an answer is available -- this is
+// any provider, blocking until an answer is available -- this is
 // precisely what "the agent is waiting for a human" means, so a slow or
 // never-returning Decide call is expected, not a bug (see RunPrompt's ctx
 // cancellation for how a caller aborts it). Implementations that need to
 // know which run's event stream to push the request onto (e.g. a
 // human-in-the-loop UI) construct a PermissionDecider per call, closing
 // over that context; internal/runs.Registry is today's only such
-// implementation, and the only one that inspects command at all (to decide
-// whether ApprovalPolicyAutoSafe can auto-allow this request without ever
-// asking a human -- see AllowlistedCommand).
+// implementation.
 //
-// command is the literal shell command this request is asking to run, when
-// the calling adapter can confirm one -- Claude Code's Bash tool
-// (claudeDeciderAdapter, from its Input["command"]), Codex's
-// command-execution approval (codexDeciderAdapter, from its own Command
-// field), and ACP's kind-"execute" tool calls (acpDeciderAdapter, from
-// rawInput.command -- see acpCommand) all can. command is empty for any
-// request that isn't shaped like a shell command at all (a file-change
-// approval, an ACP tool call of a different kind, ...).
-// A PermissionDecider must never treat a non-empty command as anything
-// more than a hint -- ApprovalPolicyAutoSafe's AllowlistedCommand check is
-// the only thing that should ever turn it into an auto-allow decision, and
-// only for its own conservative allowlist.
+// smind never decides on its own that a request is safe (ADR-0019): what
+// reaches a PermissionDecider is exactly what the provider's own permission
+// mode chose to escalate.
 //
-// When no PermissionDecider is supplied to RunPrompt, behavior is
-// unchanged from before this type existed: each provider falls back to its
-// own Runner-level acp.PermissionPolicy/claudecode.PermissionPolicy default
-// (see WithACPPermissionPolicy/WithClaudeCodePermissionPolicy), which in
-// turn default to acp.AutoApprovePolicy/claudecode.AutoDenyPolicy if never
-// set at all.
+// When no PermissionDecider is supplied to RunPrompt, each provider falls
+// back to its own Runner-level acp.PermissionPolicy/claudecode.PermissionPolicy
+// default (see WithACPPermissionPolicy/WithClaudeCodePermissionPolicy),
+// which in turn default to acp.AutoApprovePolicy/claudecode.AutoDenyPolicy
+// if never set at all.
 type PermissionDecider interface {
-	Decide(ctx context.Context, summary, command string, options []PermissionOption) (optionID string, err error)
-}
-
-// LivePolicyDecider is an optional capability a PermissionDecider may
-// implement to report its own current ApprovalPolicy, which -- unlike the
-// approvalPolicy RunPrompt is called with -- can change after RunPrompt
-// begins (see internal/runs.Registry.SetApprovalPolicy; internal/runs's
-// runPermissionDecider is today's only implementation). acpDeciderAdapter's
-// autoAllowACPFileEdit gate checks this instead of its own frozen
-// approvalPolicy field when the wrapped decider implements it, so a
-// mid-run switch to auto-safe takes effect for ACP's file-edit fast path
-// too -- not just the shell-command allowlist, which Decide's call into
-// the wrapped decider already resolves against the live value regardless
-// of this interface. A decider that doesn't implement it (every test
-// fake, and any future PermissionDecider with no live-switching concept)
-// leaves acpDeciderAdapter falling back to its own frozen field, exactly
-// as before this interface existed.
-type LivePolicyDecider interface {
-	CurrentApprovalPolicy() ApprovalPolicy
+	Decide(ctx context.Context, summary string, options []PermissionOption) (optionID string, err error)
 }
 
 // acpDeciderAdapter adapts a PermissionDecider to acp.PermissionPolicy: ACP's
@@ -91,16 +58,6 @@ type LivePolicyDecider interface {
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
-	// worktreePath carries the run's worktree down to this adapter -- see
-	// autoAllowACPFileEdit.
-	worktreePath string
-	// approvalPolicy is the run's auto-safe edit policy as of RunPrompt's
-	// call -- see autoAllowACPFileEdit. Frozen, and only ever consulted
-	// when decider doesn't implement LivePolicyDecider (see Decide): every
-	// real caller (internal/runs) does implement it, so this field mainly
-	// exists so a decider that doesn't need mid-run switching (test fakes)
-	// still gets the policy it was actually started with.
-	approvalPolicy ApprovalPolicy
 }
 
 func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermissionParams) (string, error) {
@@ -108,170 +65,7 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
-
-	policy := a.approvalPolicy
-	if live, ok := a.decider.(LivePolicyDecider); ok {
-		policy = live.CurrentApprovalPolicy()
-	}
-
-	// ApprovalPolicyAutoSafe's file-edit analog for ACP: claude-native
-	// runs get the CLI's own acceptEdits mode for this exact purpose, but
-	// ACP has no permission-mode concept -- every sensitive tool call
-	// arrives as a session/request_permission. Without this, a headless
-	// auto-safe GLM/Kimi run can never write a single file (every edit
-	// times out to auto-deny), which is the ACP twin of the 2026-09-11
-	// acceptEdits failure. Scoped to edits (kind edit/move/delete) whose
-	// every reported location stays inside the task's own worktree --
-	// see autoAllowACPFileEdit for why that boundary is the safe one.
-	if policy == ApprovalPolicyAutoSafe && autoAllowACPFileEdit(req.ToolCall, a.worktreePath) {
-		if optionID, ok := firstOptionByKind(opts, "allow_once", "allow_always"); ok {
-			return optionID, nil
-		}
-	}
-
-	// kind "execute"'s rawInput.command carries the literal shell command
-	// (confirmed live 2026-09-14: glm-acp-agent's Bash tool call shape is
-	// {"kind":"execute","rawInput":{"command":"go version"},...}), letting
-	// ApprovalPolicyAutoSafe's AllowlistedCommand match ACP-driven
-	// (GLM/Kimi) shell commands the same way it already does for
-	// claude-native's Input["command"] and Codex's Command below. Any
-	// other kind (or a missing rawInput.command) yields "", so it can
-	// never spuriously match the allowlist.
-	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), acpCommand(req.ToolCall), opts)
-}
-
-// autoAllowACPFileEdit reports whether an ACP permission request is a
-// file edit confined to the task's own worktree, making it safe to
-// auto-allow under ApprovalPolicyAutoSafe: a write that can't escape the
-// throwaway task worktree is no more dangerous than the local git
-// commits that policy already allows, and the diff is human-reviewable
-// afterward (task.diff). Kind execute (shell commands) is deliberately
-// NOT covered here -- those requests keep going to the decider's
-// AllowlistedCommand path, which can't identify an ACP command string
-// anyway (see Decide above) and therefore stays manual. Anything
-// unparsable or incomplete fails closed (false).
-//
-// The path is identified two ways, because real agents populate
-// ToolCallUpdate inconsistently: the schema's structured fields first
-// (kind edit/move/delete + locations[].path), then -- only when the
-// agent filled in neither -- a conservative title fallback
-// ("<verb> file: <path>", glm-acp-agent's actual shape when it omits
-// locations). Either route's path may be relative: live glm-acp-agent
-// traffic (2026-09-14) showed kind "edit" with locations[].path set to
-// the plain relative path too, not an absolute one, despite the ACP
-// schema not requiring that. A relative path's base is known regardless
-// of route -- the session's own cwd is worktreePath (set via
-// NewSession) -- so it's resolved against that before the same
-// inside-worktree check. A title that names no recognizable file-edit
-// verb, or any path (relative or absolute) that resolves outside the
-// worktree, fails closed.
-func autoAllowACPFileEdit(raw json.RawMessage, worktreePath string) bool {
-	if worktreePath == "" {
-		return false
-	}
-	var tc struct {
-		Kind      string `json:"kind"`
-		Title     string `json:"title"`
-		Locations []struct {
-			Path string `json:"path"`
-		} `json:"locations"`
-	}
-	if err := json.Unmarshal(raw, &tc); err != nil {
-		return false
-	}
-
-	var paths []string
-	switch tc.Kind {
-	case "edit", "move", "delete":
-		for _, loc := range tc.Locations {
-			paths = append(paths, loc.Path)
-		}
-	case "", "execute", "read", "search", "other", "think", "fetch":
-		// Structured fields absent or not an edit kind: try the title
-		// fallback only when the agent provided no kind at all -- a tool
-		// call that *declared* a non-edit kind is not second-guessed from
-		// its title.
-		if tc.Kind == "" {
-			if p, ok := fileEditPathFromTitle(tc.Title); ok {
-				paths = append(paths, p)
-			}
-		}
-	}
-	if len(paths) == 0 {
-		return false
-	}
-
-	root := filepath.Clean(worktreePath)
-	rootSep := root + string(os.PathSeparator)
-	for _, p := range paths {
-		if p == "" {
-			return false
-		}
-		if !filepath.IsAbs(p) {
-			// filepath.Join cleans the result, so a traversal like
-			// "../../etc/passwd" resolves to its real absolute location
-			// before the containment check below, same as any other path.
-			p = filepath.Join(root, p)
-		}
-		cleaned := filepath.Clean(p)
-		// The root itself is rejected along with everything outside it: a
-		// "location" equal to the worktree isn't a file this edit targets,
-		// it's at best a malformed request -- fail closed.
-		if cleaned == root || !strings.HasPrefix(cleaned+string(os.PathSeparator), rootSep) {
-			return false
-		}
-	}
-	return true
-}
-
-// fileEditPathFromTitle extracts the path (absolute or relative -- the
-// caller resolves relative ones against the worktree root) from a
-// file-edit permission title of the form "<verb> file: <path>" (verbs
-// observed in the wild: glm-acp-agent's "Write file: docs/x.md").
-func fileEditPathFromTitle(title string) (string, bool) {
-	idx := strings.LastIndex(title, " file: ")
-	if idx < 0 {
-		return "", false
-	}
-	verb := title[:idx]
-	switch verb {
-	case "Write", "Edit", "Create", "Move", "Rename", "Delete", "Remove", "Overwrite":
-	default:
-		return "", false
-	}
-	return title[idx+len(" file: "):], true
-}
-
-// acpCommand extracts the literal shell command from an ACP
-// ToolCallUpdate, for the AllowlistedCommand check in Decide above.
-// Confined to kind "execute" -- rawInput's shape is tool-specific, so
-// reading rawInput.command for any other kind would be guessing what a
-// same-named field there happens to mean.
-func acpCommand(raw json.RawMessage) string {
-	var tc struct {
-		Kind     string `json:"kind"`
-		RawInput struct {
-			Command string `json:"command"`
-		} `json:"rawInput"`
-	}
-	if err := json.Unmarshal(raw, &tc); err != nil || tc.Kind != "execute" {
-		return ""
-	}
-	return tc.RawInput.Command
-}
-
-// firstOptionByKind mirrors internal/runs's unexported helper of the same
-// name, for this package's adapters' own auto-allow paths (the runs-side
-// helper is not importable from here).
-func firstOptionByKind(options []PermissionOption, kinds ...string) (string, bool) {
-	for _, o := range options {
-		for _, k := range kinds {
-			if o.Kind == k {
-				return o.ID, true
-			}
-		}
-	}
-	return "", false
+	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), opts)
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a
@@ -330,7 +124,7 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 	}
 	summary := fmt.Sprintf("run %s", req.ToolName)
 
-	optionID, err := a.decider.Decide(ctx, summary, bashCommand(req), opts)
+	optionID, err := a.decider.Decide(ctx, summary, opts)
 	if err != nil {
 		return false, nil, "", nil, false, err
 	}
@@ -338,24 +132,6 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		return true, req.Input, "", nil, false, nil
 	}
 	return false, nil, claudeFixedDenyMessage, nil, false, nil
-}
-
-// bashCommand extracts the literal shell command from req, if req is a
-// Bash tool-use request -- Claude Code's built-in Bash tool's Input schema
-// is {"command": "...", ...}, confirmed against the fake CLI's own
-// "streaming_and_permission"-style scenarios in taskrunner_test.go. Any
-// other ToolName (Read, Edit, Write, a custom MCP tool, ...), or a Bash
-// request whose Input for some reason doesn't carry a string "command"
-// (shouldn't happen for a real Claude Code turn, but this is user-influenced
-// wire data, not something to trust blindly), returns "" -- see
-// PermissionDecider's doc comment on why an empty command is always safe
-// (never auto-allowed).
-func bashCommand(req claudecode.CanUseToolRequest) string {
-	if req.ToolName != "Bash" {
-		return ""
-	}
-	cmd, _ := req.Input["command"].(string)
-	return cmd
 }
 
 // Synthesized PermissionOption IDs for Codex-native turns, whose wire
@@ -376,11 +152,7 @@ type codexDeciderAdapter struct {
 }
 
 func (a codexDeciderAdapter) DecideCommandExecution(ctx context.Context, req codex.CommandExecutionApprovalRequest) (bool, error) {
-	summary := fmt.Sprintf("run %s", req.Command)
-	// req.Command is Codex's own decoded field for exactly this request
-	// kind (unlike Claude Code's Input, there's no tool-name check needed
-	// here -- a CommandExecutionApprovalRequest is always a shell command).
-	return a.decide(ctx, summary, req.Command)
+	return a.decide(ctx, fmt.Sprintf("run %s", req.Command))
 }
 
 func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.FileChangeApprovalRequest) (bool, error) {
@@ -388,19 +160,15 @@ func (a codexDeciderAdapter) DecideFileChange(ctx context.Context, req codex.Fil
 	if req.Reason != "" {
 		summary = req.Reason
 	}
-	// A file-change approval carries no shell command at all -- "" here
-	// means ApprovalPolicyAutoSafe can never auto-allow one, which is
-	// correct: this pass's allowlist only ever covers read-only shell
-	// verification commands, never a file modification.
-	return a.decide(ctx, summary, "")
+	return a.decide(ctx, summary)
 }
 
-func (a codexDeciderAdapter) decide(ctx context.Context, summary, command string) (bool, error) {
+func (a codexDeciderAdapter) decide(ctx context.Context, summary string) (bool, error) {
 	opts := []PermissionOption{
 		{ID: codexOptionAccept, Label: "Accept", Kind: "allow_once"},
 		{ID: codexOptionDecline, Label: "Decline", Kind: "reject_once"},
 	}
-	optionID, err := a.decider.Decide(ctx, summary, command, opts)
+	optionID, err := a.decider.Decide(ctx, summary, opts)
 	if err != nil {
 		return false, err
 	}
