@@ -951,6 +951,56 @@ func TestRegistry_SetPermissionMode(t *testing.T) {
 	}
 }
 
+// TestRegistry_SetPermissionMode_PersistedToStore is the persistence half
+// of S11 (ADR-0019 review #6): a successful live switch must update the
+// run's store row too, so after a daemon restart the rehydrated registry
+// reports the mode the run ended in, not the one it started in. Covers
+// SetPermissionMode and SetAutoAccept.
+func TestRegistry_SetPermissionMode_PersistedToStore(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	if err := reg.SetPermissionMode(context.Background(), runID, "accept_edits"); err != nil {
+		t.Fatalf("SetPermissionMode() error = %v", err)
+	}
+	if err := reg.SetAutoAccept(runID, true); err != nil {
+		t.Fatalf("SetAutoAccept() error = %v", err)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.PermissionMode != "accept_edits" || !row.AutoAccept {
+		t.Fatalf("stored = %q/%v, want accept_edits/true after live switches", row.PermissionMode, row.AutoAccept)
+	}
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+
+	reg2, err := New(st)
+	if err != nil {
+		t.Fatalf("New() (rehydrated) error = %v", err)
+	}
+	_, status, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("rehydrated History(%q) error = %v", runID, err)
+	}
+	if status.PermissionMode != "accept_edits" || !status.AutoAccept {
+		t.Fatalf("rehydrated = %q/%v, want accept_edits/true", status.PermissionMode, status.AutoAccept)
+	}
+}
+
 // TestRegistry_SetPermissionMode_CodexUnsupported proves Codex, whose mode
 // rides on thread/start, rejects a mid-run switch with
 // taskrunner.ErrModeSwitchNotSupported.

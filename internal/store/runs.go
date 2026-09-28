@@ -44,6 +44,21 @@ func (s *Store) UpdateRunStatus(id, status string, finishedAt *time.Time, stopRe
 	return s.GetRun(id)
 }
 
+// UpdateRunPermission persists a run's live permission settings after a
+// mid-run switch (internal/runs.Registry.SetPermissionMode /
+// SetAutoAccept, ADR-0019) so the row a daemon restart rehydrates from
+// reflects the mode the run ended in, not the one it started in.
+func (s *Store) UpdateRunPermission(id, permissionMode string, autoAccept bool) error {
+	_, err := s.db.Exec(
+		`UPDATE runs SET permission_mode = ?, auto_accept = ? WHERE id = ?`,
+		permissionMode, autoAccept, id,
+	)
+	if err != nil {
+		return fmt.Errorf("update run %q permission: %w", id, err)
+	}
+	return nil
+}
+
 // MarkRunningRunsInterrupted transitions every run row still status =
 // "running" to "interrupted" -- called once at daemon startup, before any
 // new Run exists, since a "running" row surviving to a fresh process start

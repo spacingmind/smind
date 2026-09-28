@@ -48,6 +48,12 @@ func (reg *Registry) SetPermissionMode(ctx context.Context, runID, mode string) 
 	r.mu.Lock()
 	r.perm.Mode = mode
 	r.mu.Unlock()
+	if err := reg.persistPermission(r); err != nil {
+		// The provider already switched, so the in-memory mode stays at
+		// the new value (RunStatus must not lie about the live session);
+		// only the durable row is stale.
+		return fmt.Errorf("runs: set permission mode: %w", err)
+	}
 	reg.notifyRunStatus(r)
 	return nil
 }
@@ -72,7 +78,23 @@ func (reg *Registry) SetAutoAccept(runID string, autoAccept bool) error {
 	}
 	r.perm.AutoAccept = autoAccept
 	r.mu.Unlock()
+	if err := reg.persistPermission(r); err != nil {
+		return fmt.Errorf("runs: set auto-accept: %w", err)
+	}
 	reg.notifyRunStatus(r)
+	return nil
+}
+
+// persistPermission writes r's current permission settings to its store
+// row, so a mid-run switch (SetPermissionMode, SetAutoAccept, or the
+// agent-reported mode applyReportedMode records) survives a daemon
+// restart: the rehydrated run shows the mode it ended in, not the one it
+// started in.
+func (reg *Registry) persistPermission(r *run) error {
+	perm := r.getPerm()
+	if err := reg.st.UpdateRunPermission(r.id, perm.Mode, perm.AutoAccept); err != nil {
+		return fmt.Errorf("persist run %q permission: %w", r.id, err)
+	}
 	return nil
 }
 
@@ -89,13 +111,17 @@ func (r *run) requireRunning(op string) error {
 // applyReportedMode records the permission mode the provider reports the
 // run's session is actually in (taskrunner.EventTypePermissionModeChanged:
 // an ACP run's start mode once applied, or the agent's own later switch),
-// so RunStatus never shows a mode the agent isn't in.
+// so RunStatus never shows a mode the agent isn't in. The reported mode is
+// persisted too (best-effort, like record: this runs on drive's forwarding
+// goroutine with no caller to return an error to) so the stored row keeps
+// up with the agent's own switches, not just smind-initiated ones.
 func (reg *Registry) applyReportedMode(r *run, mode string) {
 	r.mu.Lock()
 	changed := r.perm.Mode != mode
 	r.perm.Mode = mode
 	r.mu.Unlock()
 	if changed {
+		_ = reg.persistPermission(r)
 		reg.notifyRunStatus(r)
 	}
 }

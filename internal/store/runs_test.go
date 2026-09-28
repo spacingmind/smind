@@ -50,6 +50,33 @@ func TestStore_Runs_PermissionMode_RoundTrips(t *testing.T) {
 	}
 }
 
+// TestStore_Runs_UpdateRunPermission proves a mid-run permission switch
+// (ADR-0019) persists: after UpdateRunPermission, GetRun returns the
+// switched mode/auto_accept, not the values CreateRun wrote.
+func TestStore_Runs_UpdateRunPermission(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+
+	if _, err := s.CreateRun(Run{
+		ID: "run-switch", TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "running", StartedAt: time.Now().UTC(), PermissionMode: "default", AutoAccept: false,
+	}); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	if err := s.UpdateRunPermission("run-switch", "accept_edits", true); err != nil {
+		t.Fatalf("UpdateRunPermission() error = %v", err)
+	}
+	got, err := s.GetRun("run-switch")
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if got.PermissionMode != "accept_edits" || !got.AutoAccept {
+		t.Fatalf("GetRun() = %q/%v, want accept_edits/true after UpdateRunPermission", got.PermissionMode, got.AutoAccept)
+	}
+}
+
 func TestStore_Runs(t *testing.T) {
 	t.Parallel()
 
