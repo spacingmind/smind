@@ -163,9 +163,53 @@ func handleMcpGet(mcpReg *mcpservers.Registry) handlerFunc {
 	}
 }
 
+// mergePlaceholderSecrets reconciles the incoming env/headers of an
+// mcp.update with the stored record: a value equal to mcpSecretPlaceholder
+// means the client is echoing back a redacted read (mcp.get/mcp.list)
+// rather than choosing a new secret, so the stored value is kept for that
+// key. The placeholder on a key with no stored value is a client bug (a
+// hand-crafted round-trip of a redacted read that never had a real value
+// to begin with) and is rejected with a clear error naming the key --
+// never a real value -- rather than persisting the literal placeholder
+// string as a "secret". Non-placeholder values pass through unchanged:
+// they're new real secrets replacing old ones, and omitted keys are simply
+// gone (update is a full-record replace).
+func mergePlaceholderSecrets(field, incoming, stored string) (string, error) {
+	if incoming == "" {
+		return "", nil
+	}
+	var inc map[string]string
+	if err := json.Unmarshal([]byte(incoming), &inc); err != nil {
+		return incoming, nil // registry validation reports the bad shape
+	}
+	var sto map[string]string
+	if stored != "" {
+		if err := json.Unmarshal([]byte(stored), &sto); err != nil {
+			return "", fmt.Errorf("mcp.update: stored %s is malformed; recreate the server", field)
+		}
+	}
+	for k, v := range inc {
+		if v != mcpSecretPlaceholder {
+			continue
+		}
+		storedVal, ok := sto[k]
+		if !ok {
+			return "", fmt.Errorf("mcp.update: %s %q has the redaction placeholder as its value; send the real value", field, k)
+		}
+		inc[k] = storedVal
+	}
+	out, err := json.Marshal(inc)
+	if err != nil {
+		return "", fmt.Errorf("mcp.update: re-encode %s: %w", field, err)
+	}
+	return string(out), nil
+}
+
 // handleMcpUpdate replaces every field of the MCP server p.ID (a
 // full-record replace, not a partial patch -- matching handleProfileUpdate),
-// redacted.
+// redacted. env/headers values sent back as the redaction placeholder (a
+// client round-tripping an mcp.get/mcp.list result) keep their stored
+// secrets rather than being overwritten with the literal placeholder.
 func handleMcpUpdate(mcpReg *mcpservers.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
@@ -175,7 +219,17 @@ func handleMcpUpdate(mcpReg *mcpservers.Registry) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("mcp.update: invalid params: %w", err)
 		}
+		existing, err := mcpReg.Get(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("mcp.update: %w", err)
+		}
 		m := p.toStoreMcpServer()
+		if m.Env, err = mergePlaceholderSecrets("env", m.Env, existing.Env); err != nil {
+			return nil, err
+		}
+		if m.Headers, err = mergePlaceholderSecrets("headers", m.Headers, existing.Headers); err != nil {
+			return nil, err
+		}
 		m.ID = p.ID
 		updated, err := mcpReg.Update(m)
 		if err != nil {

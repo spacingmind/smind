@@ -215,4 +215,16 @@ accepted):
   (daemon's conflict error surfaced), `TestRunMcpAddInvalidTransport
   ExitsNonzero`; dispatch contract in `TestMcp_Usage` (mcp_serve_test.go).
   Verified green: `task test`, `task lint`.
+- Update-semantics fixes (code review, post-step-2): `internal/store/`
+  `TestStore_UpdateMcpServerPreservesEnabled` — update never touches the
+  enabled column (only `SetMcpServerEnabled` owns it): enabled stays
+  enabled across an edit, disabled stays disabled. `internal/wsapi/`
+  `TestMcp_UpdatePreservesEnabled` pins the same end to end over mcp.update
+  + mcp.setEnabled. `TestMcp_UpdatePlaceholderRoundTripKeepsSecrets` —
+  round-tripping an mcp.get result back through mcp.update keeps the stored
+  secret (asserted via the store), and changing one key while another stays
+  `[redacted]` replaces only the changed one. `TestMcp_
+  UpdatePlaceholderForNewKeyIsError` — the placeholder on a new key is a
+  clear error naming the key, containing no secret, with the stored record
+  untouched.
 - ACs 5-7, 9 (runner/ACP/log halves), 10: not started (steps 3-5, 8).

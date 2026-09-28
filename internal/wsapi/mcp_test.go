@@ -3,6 +3,7 @@ package wsapi
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -379,4 +380,159 @@ func nextRawMessage(t *testing.T, ws *websocket.Conn, timeout time.Duration) []b
 		t.Fatalf("ReadMessage() error = %v", err)
 	}
 	return data
+}
+
+// TestMcp_UpdatePreservesEnabled pins the Bug-1 fix: mcp.update carries no
+// enabled field, and store.UpdateMcpServer no longer writes the column, so
+// an edit can never silently disable the server -- in either direction.
+func TestMcp_UpdatePreservesEnabled(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	sendRequest(t, ws, "create", "mcp.create", map[string]any{
+		"name": "playwright", "transport": "stdio", "command": "npx",
+	})
+	var created mcpServerResult
+	mustDecode(t, readEnvelopeFor(t, ws, "create", 5*time.Second).Result, &created)
+
+	sendRequest(t, ws, "update", "mcp.update", map[string]any{
+		"id": created.ID, "name": "playwright", "transport": "stdio", "command": "npx",
+		"args": []string{"--headless"},
+	})
+	var updated mcpServerResult
+	mustDecode(t, readEnvelopeFor(t, ws, "update", 5*time.Second).Result, &updated)
+	if !updated.Enabled {
+		t.Fatalf("mcp.update result Enabled = false, want the enabled server untouched")
+	}
+
+	sendRequest(t, ws, "disable", "mcp.setEnabled", map[string]any{"id": created.ID, "enabled": false})
+	mustDecode(t, readEnvelopeFor(t, ws, "disable", 5*time.Second).Result, &updated)
+
+	sendRequest(t, ws, "update2", "mcp.update", map[string]any{
+		"id": created.ID, "name": "playwright", "transport": "stdio", "command": "npx",
+		"args": []string{"--headed"},
+	})
+	mustDecode(t, readEnvelopeFor(t, ws, "update2", 5*time.Second).Result, &updated)
+	if updated.Enabled {
+		t.Fatalf("mcp.update result Enabled = true after disable, want the disabled state untouched")
+	}
+}
+
+// TestMcp_UpdatePlaceholderRoundTripKeepsSecrets pins the Bug-2 fix: a
+// client that GETs a server and PUTs the (redacted) result back must not
+// overwrite the real secrets with the literal "[redacted]" placeholder.
+// Asserted against the stored record, since every API read path is
+// redacted by design.
+func TestMcp_UpdatePlaceholderRoundTripKeepsSecrets(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	const storedSecret = "sk-original-secret"
+	sendRequest(t, ws, "create", "mcp.create", map[string]any{
+		"name": "pplx", "transport": "http", "url": "https://mcp.pplx.ai/mcp",
+		"headers": map[string]string{"Authorization": storedSecret},
+	})
+	var created mcpServerResult
+	mustDecode(t, readEnvelopeFor(t, ws, "create", 5*time.Second).Result, &created)
+
+	sendRequest(t, ws, "get", "mcp.get", map[string]any{"id": created.ID})
+	var got mcpServerResult
+	mustDecode(t, readEnvelopeFor(t, ws, "get", 5*time.Second).Result, &got)
+
+	// The exact round-trip: got.Headers is the redacted read result, sent
+	// back verbatim as the update's headers.
+	sendRequest(t, ws, "update", "mcp.update", map[string]any{
+		"id": created.ID, "name": "pplx", "transport": "http", "url": "https://mcp.pplx.ai/mcp",
+		"headers": got.Headers,
+	})
+	resp := readEnvelopeFor(t, ws, "update", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("mcp.update error = %v", resp.Error.Message)
+	}
+	after, err := db.GetMcpServer(created.ID)
+	if err != nil {
+		t.Fatalf("GetMcpServer() error = %v", err)
+	}
+	if !strings.Contains(after.Headers, storedSecret) {
+		t.Fatalf("stored headers after placeholder round-trip = %q, want the original secret kept", after.Headers)
+	}
+
+	// Changing one key while another stays placeholder: the changed key is
+	// replaced, the placeholder key keeps its stored value.
+	sendRequest(t, ws, "update2", "mcp.update", map[string]any{
+		"id": created.ID, "name": "pplx", "transport": "http", "url": "https://mcp.pplx.ai/mcp",
+		"headers": map[string]string{
+			"Authorization": mcpSecretPlaceholder,
+			"X-Api-Version": "2026-01",
+		},
+	})
+	resp = readEnvelopeFor(t, ws, "update2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("mcp.update error = %v", resp.Error.Message)
+	}
+	after, err = db.GetMcpServer(created.ID)
+	if err != nil {
+		t.Fatalf("GetMcpServer() error = %v", err)
+	}
+	if !strings.Contains(after.Headers, storedSecret) {
+		t.Fatalf("stored headers = %q, want the placeholder key to keep its stored secret", after.Headers)
+	}
+	if !strings.Contains(after.Headers, `"X-Api-Version":"2026-01"`) {
+		t.Fatalf("stored headers = %q, want the new real key added", after.Headers)
+	}
+}
+
+// TestMcp_UpdatePlaceholderForNewKeyIsError: the placeholder on a key with
+// no stored value is rejected with a clear error naming the key -- and the
+// error must never contain a real secret value.
+func TestMcp_UpdatePlaceholderForNewKeyIsError(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	const storedSecret = "sk-original-secret"
+	sendRequest(t, ws, "create", "mcp.create", map[string]any{
+		"name": "pplx", "transport": "http", "url": "https://mcp.pplx.ai/mcp",
+		"headers": map[string]string{"Authorization": storedSecret},
+	})
+	var created mcpServerResult
+	mustDecode(t, readEnvelopeFor(t, ws, "create", 5*time.Second).Result, &created)
+
+	sendRequest(t, ws, "update", "mcp.update", map[string]any{
+		"id": created.ID, "name": "pplx", "transport": "http", "url": "https://mcp.pplx.ai/mcp",
+		"headers": map[string]string{"X-New-Header": mcpSecretPlaceholder},
+	})
+	resp := readEnvelopeFor(t, ws, "update", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatalf("mcp.update with placeholder for a new key = nil error, want a clear rejection")
+	}
+	if !strings.Contains(resp.Error.Message, `X-New-Header`) || !strings.Contains(resp.Error.Message, "placeholder") {
+		t.Fatalf("mcp.update error = %q, want it to name the key and the placeholder problem", resp.Error.Message)
+	}
+	if strings.Contains(resp.Error.Message, storedSecret) {
+		t.Fatalf("mcp.update error = %q, must never contain a real secret value", resp.Error.Message)
+	}
+
+	// The rejected update must not have partially applied.
+	after, err := db.GetMcpServer(created.ID)
+	if err != nil {
+		t.Fatalf("GetMcpServer() error = %v", err)
+	}
+	if !strings.Contains(after.Headers, storedSecret) || strings.Contains(after.Headers, "X-New-Header") {
+		t.Fatalf("stored headers after rejected update = %q, want the original record untouched", after.Headers)
+	}
 }

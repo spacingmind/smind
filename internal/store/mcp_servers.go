@@ -99,21 +99,25 @@ func (s *Store) ListMcpServers() ([]McpServer, error) {
 
 // UpdateMcpServer replaces every field of the MCP server m.ID (a
 // full-record replace, not a partial patch -- matching UpdateAgentProfile),
-// preserving its original created_at. Updating a nonexistent id is a clear
-// not-found error, never a silent no-op. A name colliding with a different
-// row's returns ErrMcpServerNameConflict.
+// preserving its original created_at and enabled flag: only
+// SetMcpServerEnabled owns the enabled column, so an update carrying no
+// enabled field (every wsapi mcp.update) can never silently disable the
+// server. Updating a nonexistent id is a clear not-found error, never a
+// silent no-op. A name colliding with a different row's returns
+// ErrMcpServerNameConflict.
 func (s *Store) UpdateMcpServer(m McpServer) (McpServer, error) {
 	existing, err := s.GetMcpServer(m.ID)
 	if err != nil {
 		return McpServer{}, fmt.Errorf("update mcp server %d: %w", m.ID, err)
 	}
 	m.CreatedAt = existing.CreatedAt
+	m.Enabled = existing.Enabled
 	m.UpdatedAt = time.Now().UTC()
 
 	res, err := s.db.Exec(
-		`UPDATE mcp_servers SET name = ?, transport = ?, command = ?, args = ?, env = ?, url = ?, headers = ?, enabled = ?, updated_at = ?
+		`UPDATE mcp_servers SET name = ?, transport = ?, command = ?, args = ?, env = ?, url = ?, headers = ?, updated_at = ?
 		 WHERE id = ?`,
-		m.Name, m.Transport, m.Command, m.Args, m.Env, m.URL, m.Headers, m.Enabled, m.UpdatedAt, m.ID,
+		m.Name, m.Transport, m.Command, m.Args, m.Env, m.URL, m.Headers, m.UpdatedAt, m.ID,
 	)
 	if err != nil {
 		if isMcpServerNameConflict(err) {
