@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 
@@ -30,11 +31,12 @@ func cmdProfile(args []string) int {
 	}
 }
 
-// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`. Flags
-// are each a single `--flag value` pair (matching `task new`'s `--space
-// <id>` convention), scanned in any order after the two required
-// positional args -- no model flag (ADR-0014's model deferral, dropped
-// from v1 entirely).
+// cmdProfileAdd parses `smind profile add <name> <provider> [flags]`.
+// Value-taking flags accept both `--flag value` (matching `task new`'s
+// `--space <id>` convention) and `--flag=value`; the boolean
+// --auto-accept accepts `--auto-accept`, `--auto-accept=true`, and
+// `--auto-accept=false` -- no model flag (ADR-0014's model deferral,
+// dropped from v1 entirely).
 func cmdProfileAdd(args []string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, cmdProfileAddUsage)
@@ -46,24 +48,36 @@ func cmdProfileAdd(args []string) int {
 	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
-		if name, value, ok := strings.Cut(rest[i], "="); ok && strings.HasPrefix(name, "--") {
-			// --flag=value form, split into the same pair.
-			rest = append(rest[:i:i], append([]string{name, value}, rest[i+1:]...)...)
+		flag := rest[i]
+		value := ""
+		hasValue := false
+		if n, v, ok := strings.Cut(flag, "="); ok && strings.HasPrefix(n, "--") {
+			flag, value, hasValue = n, v, true
 		}
-		switch rest[i] {
+		switch flag {
 		case "--auto-accept":
 			autoAccept = true
+			if hasValue {
+				b, err := strconv.ParseBool(value)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "profile add: --auto-accept: %q is not a boolean\n", value)
+					return 2
+				}
+				autoAccept = b
+			}
 			continue
 		case "--approval-policy":
 			fmt.Fprintf(os.Stderr, "profile add: %s\n", approvalPolicyRemovedMsg)
 			return 2
 		}
-		if i+1 >= len(rest) {
-			fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", rest[i])
-			return 2
+		if !hasValue {
+			if i+1 >= len(rest) {
+				fmt.Fprintf(os.Stderr, "profile add: flag %q needs a value\n", flag)
+				return 2
+			}
+			i++
+			value = rest[i]
 		}
-		flag, value := rest[i], rest[i+1]
-		i++
 		switch flag {
 		case "--mode":
 			mode = value

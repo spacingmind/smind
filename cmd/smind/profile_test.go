@@ -153,3 +153,52 @@ func TestRunProfileAddRejectsRemovedApprovalPolicyFlag(t *testing.T) {
 		t.Fatalf("stored profiles = %+v, want none", list)
 	}
 }
+
+// TestRunProfileAddAutoAcceptForms proves every accepted spelling of the
+// boolean --auto-accept flag works: bare (true), =true, and =false -- the
+// `=value` form previously leaked a stray `true` positional that tripped
+// the flag parser.
+func TestRunProfileAddAutoAcceptForms(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{"bare", []string{"profile", "add", "bare", "glm", "--auto-accept"}, true},
+		{"equals true", []string{"profile", "add", "eqtrue", "glm", "--auto-accept=true"}, true},
+		{"equals false", []string{"profile", "add", "eqfalse", "glm", "--auto-accept=false"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, s := newTestProfileDaemon(t)
+			var code int
+			captureStdout(t, func() { code = run(tc.args) })
+			if code != 0 {
+				t.Fatalf("run(%v) = %d, want 0", tc.args, code)
+			}
+			list, err := profiles.New(s).List()
+			if err != nil || len(list) != 1 {
+				t.Fatalf("List() = %+v, %v, want one profile", list, err)
+			}
+			if list[0].AutoAccept != tc.want {
+				t.Fatalf("stored AutoAccept = %v, want %v", list[0].AutoAccept, tc.want)
+			}
+		})
+	}
+}
+
+// TestRunProfileAddAutoAcceptRejectsNonBoolean proves a non-boolean
+// --auto-accept value exits 2 with a clear message, without creating a
+// profile.
+func TestRunProfileAddAutoAcceptRejectsNonBoolean(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	var code int
+	stderr := captureStderr(t, func() {
+		code = run([]string{"profile", "add", "x", "glm", "--auto-accept=yes"})
+	})
+	if code != 2 || !strings.Contains(stderr, "not a boolean") {
+		t.Fatalf("run(profile add --auto-accept=yes) = %d, stderr %q; want 2 mentioning boolean", code, stderr)
+	}
+	if list, _ := profiles.New(s).List(); len(list) != 0 {
+		t.Fatalf("stored profiles = %+v, want none", list)
+	}
+}
