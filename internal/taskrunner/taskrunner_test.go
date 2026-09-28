@@ -177,6 +177,35 @@ func runFakeClaudeCLI() {
 		stdin.Scan() // consume the prompt line, then never respond or exit
 		time.Sleep(time.Hour)
 
+	case "init-hang":
+		// Emits the init system message carrying the session id, one text
+		// chunk to synchronize on, then blocks forever -- so a test can
+		// cancel the run after the session id exists but before the turn
+		// completes, proving the handle was already stored (runClaudeNative
+		// captures it from the init message, not only the result).
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "system",
+			"subtype":    "init",
+			"session_id": "sess-1",
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"model": "claude-fake",
+				"content": []any{
+					map[string]any{"type": "text", "text": "before hang"},
+				},
+			},
+		})
+		// Unlike the plain "hang" scenario, block on stdin EOF rather than
+		// sleeping: Close()'s stdin-close -> grace -> force-kill teardown
+		// reaches this process's EOF immediately, so the test isn't slowed
+		// by the grace period after a cancelled run.
+		for stdin.Scan() {
+		}
+
 	case "echo-args":
 		// Writes the CLI argv back to an "args" file in the working
 		// directory, so a test can assert exactly which flags RunPrompt

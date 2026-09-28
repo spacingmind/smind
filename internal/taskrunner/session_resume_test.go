@@ -6,8 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -293,5 +295,146 @@ func TestRunner_RunPrompt_CodexNative_StaleSessionFallsBackWithNote(t *testing.T
 	}
 	if got[len(got)-1].Type != EventTypeDone {
 		t.Fatalf("last event = %+v, want EventTypeDone (prompt must still succeed)", got[len(got)-1])
+	}
+}
+
+// setScenario overwrites the fake agent/CLI's "scenario" file in the
+// worktree, so a follow-up RunPrompt on the same task runs a different
+// script than the first one.
+func setScenario(t *testing.T, worktreePath, scenario string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(worktreePath, "scenario"), []byte(scenario), 0o644); err != nil {
+		t.Fatalf("write scenario file: %v", err)
+	}
+}
+
+// cancelRunAfterFirstChunk runs RunPrompt under ctx and cancels ctx as soon
+// as the first event arrives (the "hang" scripts emit one chunk before
+// blocking forever), then waits for RunPrompt to return and requires that
+// it failed -- the "stopped run" every StoppedRun* test below starts from.
+func cancelRunAfterFirstChunk(t *testing.T, r *Runner, taskHandle store.Task, provider Provider) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(ctx, taskHandle.ID, taskHandle.ID, provider, "hi", nil, PermissionSettings{}, "", events)
+	}()
+
+	select {
+	case _, ok := <-events:
+		if !ok {
+			t.Fatal("events closed before the first chunk arrived")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the fake agent's first chunk")
+	}
+
+	cancel()
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("RunPrompt() error = nil, want context cancellation error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for RunPrompt() to return after cancellation")
+	}
+	// Drain the remainder (forwarder may emit one ctx-guarded send) so the
+	// events channel is closed and the goroutine fully winds down.
+	for range events {
+	}
+}
+
+// TestRunner_RunPrompt_GLM_StoppedRunStillResumes proves the fix for the
+// stop-resume bug on the ACP path: a run cancelled after its session was
+// created (but before Prompt completed) must not lose the session handle --
+// the next RunPrompt on that chat resumes the same session via
+// session/load rather than starting fresh.
+func TestRunner_RunPrompt_GLM_StoppedRunStillResumes(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "hang")
+	r := glmRunnerWithCaps(wm, "loadSession")
+
+	cancelRunAfterFirstChunk(t, r, task, ProviderGLM)
+
+	handle, ok := r.sessionStore.Get(task.ID)
+	if !ok || handle.Provider != ProviderGLM || handle.SessionID != "fake-session-1" {
+		t.Fatalf("sessionStore handle after cancelled run = %+v (found=%v), want GLM/fake-session-1", handle, ok)
+	}
+
+	setScenario(t, *task.WorktreePath, "reply")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() (second run) error = %v", err)
+	}
+	if m := sessionInitMethod(t, *task.WorktreePath); m != "session/load" {
+		t.Fatalf("second run session-init-method = %q, want %q (resumed despite the cancelled first run)", m, "session/load")
+	}
+}
+
+// TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes proves the same
+// fix on the Codex-native path: a cancelled run must not lose the thread
+// handle -- the next RunPrompt resumes via thread/resume.
+func TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "hang")
+	r := codexRunner(wm)
+
+	cancelRunAfterFirstChunk(t, r, task, ProviderCodexNative)
+
+	handle, ok := r.sessionStore.Get(task.ID)
+	if !ok || handle.Provider != ProviderCodexNative || handle.SessionID != "fake-thread-1" {
+		t.Fatalf("sessionStore handle after cancelled run = %+v (found=%v), want CodexNative/fake-thread-1", handle, ok)
+	}
+
+	setScenario(t, *task.WorktreePath, "reply")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "what did I say before?", nil, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() (second run) error = %v", err)
+	}
+	if m := threadInitMethod(t, *task.WorktreePath); m != "thread/resume" {
+		t.Fatalf("second run thread-init-method = %q, want %q (resumed despite the cancelled first run)", m, "thread/resume")
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNative_StoppedRunStillResumes proves the same
+// fix on the Claude-native path: the session id is captured from the CLI's
+// init system message (the "init-hang" scenario emits it before hanging),
+// so a cancelled run still leaves a resume handle and the next RunPrompt
+// spawns the CLI with --resume=<id>.
+func TestRunner_RunPrompt_ClaudeNative_StoppedRunStillResumes(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "init-hang")
+	r := claudeNativeRunner(t, wm)
+
+	cancelRunAfterFirstChunk(t, r, task, ProviderClaudeNative)
+
+	handle, ok := r.sessionStore.Get(task.ID)
+	if !ok || handle.Provider != ProviderClaudeNative || handle.SessionID != "sess-1" {
+		t.Fatalf("sessionStore handle after cancelled run = %+v (found=%v), want ClaudeNative/sess-1", handle, ok)
+	}
+
+	setScenario(t, *task.WorktreePath, "echo-args")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "what did I say before?", nil, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() (second run) error = %v", err)
+	}
+	if args := readArgsFile(t, *task.WorktreePath); !strings.Contains(args, "--resume=sess-1") {
+		t.Fatalf("second run args = %q, want them to contain --resume=sess-1 (resumed despite the cancelled first run)", args)
 	}
 }
