@@ -10,6 +10,7 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/codex"
+	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -19,8 +20,8 @@ import (
 )
 
 // methodHandlers returns the full set of RPC methods this package serves,
-// bound to wm, runner, reg, treg, profReg, coord, and db.
-func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, coord *accounts.LoginCoordinator, db *store.Store) map[string]handlerFunc {
+// bound to wm, runner, reg, treg, profReg, mcpReg, coord, and db.
+func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.Runner, reg *runs.Registry, treg *terminal.Registry, profReg *profiles.Registry, mcpReg *mcpservers.Registry, coord *accounts.LoginCoordinator, db *store.Store) map[string]handlerFunc {
 	return map[string]handlerFunc{
 		"account.add":              handleAccountAdd(acctReg),
 		"account.oauthStart":       handleAccountOAuthStart(coord),
@@ -83,6 +84,12 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"profile.delete":           handleProfileDelete(profReg),
 		"usage.list":               handleUsageList(db),
 		"usage.summary":            handleUsageSummary(db),
+		"mcp.create":               handleMcpCreate(mcpReg),
+		"mcp.list":                 handleMcpList(mcpReg),
+		"mcp.get":                  handleMcpGet(mcpReg),
+		"mcp.update":               handleMcpUpdate(mcpReg),
+		"mcp.delete":               handleMcpDelete(mcpReg),
+		"mcp.setEnabled":           handleMcpSetEnabled(mcpReg),
 	}
 }
 

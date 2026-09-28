@@ -37,6 +37,9 @@ const (
 	TopicProfileDeleted    = "profile.deleted"
 	TopicAccountUpdated    = "account.updated"
 	TopicAccountRemoved    = "account.removed"
+	TopicMcpServerCreated  = "mcpServer.created"
+	TopicMcpServerUpdated  = "mcpServer.updated"
+	TopicMcpServerDeleted  = "mcpServer.deleted"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
@@ -61,6 +64,9 @@ var knownTopics = map[string]bool{
 	TopicProfileDeleted:    true,
 	TopicAccountUpdated:    true,
 	TopicAccountRemoved:    true,
+	TopicMcpServerCreated:  true,
+	TopicMcpServerUpdated:  true,
+	TopicMcpServerDeleted:  true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):
@@ -224,6 +230,30 @@ type accountUpdatedPayload struct {
 
 // accountRemovedPayload is the payload of account.removed events: {id}.
 type accountRemovedPayload struct {
+	ID int64 `json:"id"`
+}
+
+// MCP-server lifecycle event payloads (ADR-0018), shaped like the profile
+// payloads above: created/updated carry the full mcpServerResult snapshot
+// (the wsapi struct, never a bare store.McpServer, precisely so a raw
+// env/headers value can never ride along -- see mcpServerResultFrom's
+// redaction); deleted carries just the id, matching profile.deleted.
+
+// mcpServerCreatedPayload is the payload of mcpServer.created events:
+// {server: mcpServerResult}.
+type mcpServerCreatedPayload struct {
+	Server mcpServerResult `json:"server"`
+}
+
+// mcpServerUpdatedPayload is the payload of mcpServer.updated events
+// (including a setEnabled toggle, which fires the same NotifyMcpServerUpdated
+// as a full update): {server: mcpServerResult}.
+type mcpServerUpdatedPayload struct {
+	Server mcpServerResult `json:"server"`
+}
+
+// mcpServerDeletedPayload is the payload of mcpServer.deleted events: {id}.
+type mcpServerDeletedPayload struct {
 	ID int64 `json:"id"`
 }
 

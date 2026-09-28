@@ -39,8 +39,9 @@ func TestMCPServe_FailsFastWhenDaemonUnreachable(t *testing.T) {
 }
 
 // TestMcp_Usage pins the `mcp` group's dispatch contract: unknown or
-// missing subcommands print usage and exit 2 (add/ls/rm come later from
-// ADR-0018's task).
+// missing subcommands print usage and exit 2. add/ls/rm/enable/disable
+// (ADR-0018) now share the group with serve (ADR-0017), hence the usage
+// line naming every subcommand.
 func TestMcp_Usage(t *testing.T) {
 	for _, args := range [][]string{{"mcp"}, {"mcp", "bogus"}, {"mcp", "serve", "extra"}} {
 		code := -1
@@ -48,7 +49,7 @@ func TestMcp_Usage(t *testing.T) {
 		if code != 2 {
 			t.Errorf("run(%v) = %d, want 2 (stderr = %q)", args, code, stderr)
 		}
-		if !contains(stderr, "usage: smind mcp serve") {
+		if !contains(stderr, "usage: smind mcp <serve|add|ls|rm|enable|disable>") {
 			t.Errorf("run(%v) stderr = %q, want the usage line", args, stderr)
 		}
 	}

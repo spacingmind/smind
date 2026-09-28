@@ -15,10 +15,12 @@ import (
 )
 
 // cmdMcpUsage is printed when `mcp` is invoked with no (or an unknown)
-// subcommand. The group is shared with ADR-0018's agent-side MCP server
-// management (add|ls|rm|...), which lands as a separate task; only
-// `serve` -- ADR-0017's orchestrator-facing MCP server -- exists today.
-const cmdMcpUsage = "usage: smind mcp serve"
+// subcommand. The group covers both ADR-0017's orchestrator-facing MCP
+// server (`serve`) and ADR-0018's agent-side MCP server management
+// (add|ls|rm|enable|disable), which manage the daemon-global mcp_servers
+// registry runs are handed (internal/mcpservers.Registry) -- unrelated
+// registries sharing one command-group name, matching resolved decision 8.
+const cmdMcpUsage = "usage: smind mcp <serve|add|ls|rm|enable|disable> ..."
 
 // cmdMcp dispatches the `smind mcp` command group.
 func cmdMcp(args []string) int {
@@ -29,6 +31,16 @@ func cmdMcp(args []string) int {
 	switch args[0] {
 	case "serve":
 		return cmdMcpServe(args[1:])
+	case "add":
+		return cmdMcpAdd(args[1:])
+	case "ls":
+		return cmdMcpList(args[1:])
+	case "rm":
+		return cmdMcpRemove(args[1:])
+	case "enable":
+		return cmdMcpSetEnabled(args[1:], true)
+	case "disable":
+		return cmdMcpSetEnabled(args[1:], false)
 	default:
 		fmt.Fprintf(os.Stderr, "smind mcp: unknown subcommand %q\n", args[0])
 		fmt.Fprintln(os.Stderr, cmdMcpUsage)

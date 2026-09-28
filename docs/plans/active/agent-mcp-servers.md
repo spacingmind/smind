@@ -130,7 +130,7 @@ accepted):
    table (+ `workspace_mcp_servers`, resolved decision 3),
    `internal/store/mcp_servers.go` CRUD, `internal/mcpservers.Registry`
    with validation, unit tests. No wsapi, no runner wiring yet.
-2. **wsapi + events + CLI.** `mcp.*` methods in
+2. [x] **wsapi + events + CLI.** `mcp.*` methods in
    `internal/wsapi/handlers.go`, `busMcpServerNotifier` in
    `internal/wsapi/server.go`, lifecycle event topics, redaction on every
    read path, `smind mcp add|ls|rm|enable|disable` in `cmd/smind`. Depends
@@ -192,4 +192,39 @@ accepted):
   `TestStore_McpServersForWorkspace` — restricted server included only for
   its workspace, unrestricted server included everywhere, disabled servers
   never returned, un-restrict makes a server global again.
-- ACs 3-10: not started (steps 2-8).
+- AC3 (wsapi CRUD): `internal/wsapi/mcp_test.go` — `TestMcp_
+  CreateGetRoundTrip`, `TestMcp_ListOrdering` (id-ordered), `TestMcp_
+  UpdateVisibleFromSecondConnection` (full-record replace), `TestMcp_
+  DeleteThenGetErrors`, `TestMcp_SetEnabledToggles`, `TestMcp_
+  CreateDuplicateNameIsConflictError` (name conflict as a clear RPC error,
+  not a silent overwrite).
+- AC3/AC9 read-path redaction (wsapi half): `TestMcp_RedactionOnEveryRead
+  Result` — mcp.create/get/list/update results asserted against the raw
+  JSON bytes, never containing the seeded secret; `TestMcp_
+  ListDisabledServersStillVisible` (resolved decision 7: disabled rows
+  stay in mcp.list).
+- AC4 (lifecycle events): `TestMcp_RedactionOnLifecycleEvents` —
+  mcpServer.created/updated asserted against the raw inbound WebSocket
+  frame bytes on a watch-only connection, redacted identically to the RPC
+  results.
+- AC8 (CLI): `cmd/smind/mcp_servers_test.go` — `TestRunMcpAddPrints
+  CreatedRow` (add→stored row, canonical args/env JSON, secret never
+  printed), `TestRunMcpLsShowsRedactedValues` (ls shows TOKEN key but
+  never the raw value), `TestRunMcpRmRemovesServer`, `TestRunMcp
+  EnableDisableToggles`, `TestRunMcpAddDuplicateNamePrintsConflictError`
+  (daemon's conflict error surfaced), `TestRunMcpAddInvalidTransport
+  ExitsNonzero`; dispatch contract in `TestMcp_Usage` (mcp_serve_test.go).
+  Verified green: `task test`, `task lint`.
+- Update-semantics fixes (code review, post-step-2): `internal/store/`
+  `TestStore_UpdateMcpServerPreservesEnabled` — update never touches the
+  enabled column (only `SetMcpServerEnabled` owns it): enabled stays
+  enabled across an edit, disabled stays disabled. `internal/wsapi/`
+  `TestMcp_UpdatePreservesEnabled` pins the same end to end over mcp.update
+  + mcp.setEnabled. `TestMcp_UpdatePlaceholderRoundTripKeepsSecrets` —
+  round-tripping an mcp.get result back through mcp.update keeps the stored
+  secret (asserted via the store), and changing one key while another stays
+  `[redacted]` replaces only the changed one. `TestMcp_
+  UpdatePlaceholderForNewKeyIsError` — the placeholder on a new key is a
+  clear error naming the key, containing no secret, with the stored record
+  untouched.
+- ACs 5-7, 9 (runner/ACP/log halves), 10: not started (steps 3-5, 8).

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/profiles"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -90,14 +91,16 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 		return nil, fmt.Errorf("wsapi: new: %w", err)
 	}
 	profReg := profiles.New(db)
+	mcpReg := mcpservers.New(db)
 	bus := newEventBus()
 	wm.SetNotifier(busWorkspaceNotifier{bus: bus})
 	reg.SetNotifier(busRunNotifier{bus: bus})
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
+	mcpReg.SetNotifier(busMcpServerNotifier{bus: bus})
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, coord, db)
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
 	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
 	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
@@ -210,6 +213,27 @@ func (b busProfileNotifier) NotifyProfileUpdated(p store.AgentProfile) {
 
 func (b busProfileNotifier) NotifyProfileDeleted(id int64) {
 	b.bus.Publish(Event{Topic: TopicProfileDeleted, Payload: profileDeletedPayload{ID: id}})
+}
+
+// busMcpServerNotifier adapts the shared event bus to mcpservers.Notifier,
+// translating each Registry lifecycle notification into its ADR-0018 wire
+// payload -- mirrors busProfileNotifier's shape, redacting env/headers via
+// mcpServerResultFrom on every publish (created/updated, including the
+// setEnabled toggle, which also calls NotifyMcpServerUpdated).
+type busMcpServerNotifier struct {
+	bus *eventBus
+}
+
+func (b busMcpServerNotifier) NotifyMcpServerCreated(m store.McpServer) {
+	b.bus.Publish(Event{Topic: TopicMcpServerCreated, Payload: mcpServerCreatedPayload{Server: mcpServerResultFrom(m)}})
+}
+
+func (b busMcpServerNotifier) NotifyMcpServerUpdated(m store.McpServer) {
+	b.bus.Publish(Event{Topic: TopicMcpServerUpdated, Payload: mcpServerUpdatedPayload{Server: mcpServerResultFrom(m)}})
+}
+
+func (b busMcpServerNotifier) NotifyMcpServerDeleted(id int64) {
+	b.bus.Publish(Event{Topic: TopicMcpServerDeleted, Payload: mcpServerDeletedPayload{ID: id}})
 }
 
 // busRunNotifier adapts the shared event bus to runs.Notifier, translating

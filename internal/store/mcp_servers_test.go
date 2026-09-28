@@ -196,6 +196,40 @@ func TestStore_UpdateMcpServer(t *testing.T) {
 	}
 }
 
+func TestStore_UpdateMcpServerPreservesEnabled(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	created := newTestMcpServer(t, s, McpServer{
+		Name: "playwright", Transport: "stdio", Command: "npx", Env: `{"A":"1"}`,
+	})
+
+	// An update's input Enabled is ignored entirely (a store caller has no
+	// way to flip it here); the stored flag survives the replace.
+	updated, err := s.UpdateMcpServer(McpServer{
+		ID: created.ID, Name: "playwright", Transport: "stdio", Command: "npx", Env: `{"A":"2"}`,
+	})
+	if err != nil {
+		t.Fatalf("UpdateMcpServer() error = %v", err)
+	}
+	if !updated.Enabled {
+		t.Errorf("UpdateMcpServer() Enabled = false, want the created server still enabled")
+	}
+
+	if _, err := s.SetMcpServerEnabled(created.ID, false); err != nil {
+		t.Fatalf("SetMcpServerEnabled(false) error = %v", err)
+	}
+	updated, err = s.UpdateMcpServer(McpServer{
+		ID: created.ID, Name: "playwright", Transport: "stdio", Command: "npx", Env: `{"A":"3"}`,
+	})
+	if err != nil {
+		t.Fatalf("UpdateMcpServer() after disable error = %v", err)
+	}
+	if updated.Enabled {
+		t.Errorf("UpdateMcpServer() after disable Enabled = true, want still disabled")
+	}
+}
+
 func TestStore_UpdateMcpServerMissing(t *testing.T) {
 	t.Parallel()
 
