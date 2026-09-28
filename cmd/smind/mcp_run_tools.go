@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spacingmind/smind/internal/wsclient"
@@ -14,11 +15,14 @@ import (
 // its permission history -- there is no separate "pending permissions"
 // RPC to wrap.
 
-// registerMCPRunTools adds the run-reading tools to the catalog.
+// registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
+// to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here."}, mcpTaskPermissions(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
 
 // runIDInput is the shared argument shape of the run-reading tools.
@@ -169,5 +173,119 @@ func mcpTaskPermissions(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, 
 			pending = []pendingPermissionOut{}
 		}
 		return nil, taskPermissionsOutput{RunID: in.RunID, Pending: pending}, nil
+	}
+}
+
+// mcpWaitDefaultTimeout is task_wait's default timeout (ADR-0017 resolved
+// decision 4): a timeout is not a failure, so this only bounds how long one
+// tool call blocks -- the orchestrator is expected to re-issue task_wait
+// with the same runId when it sees timedOut: true.
+const mcpWaitDefaultTimeout = 120 * time.Second
+
+// mcpWaitPollMin/Max bound the backoff task_wait polls run.logs with,
+// instead of a new wsapi RPC or a busy loop (ADR-0017's "Surfacing
+// long-running runs" section): fast enough at first to catch a quick
+// permission request without materially overshooting a short timeout, capped
+// well below any timeout a caller is likely to use.
+const (
+	mcpWaitPollMin = 50 * time.Millisecond
+	mcpWaitPollMax = 500 * time.Millisecond
+)
+
+// isTerminalRunStatus reports whether status is one of run.logs's terminal
+// statuses (internal/runs.StatusDone/StatusError/StatusStopped's wire
+// values) -- the set task_wait blocks for, mirrored from printRunLogs's own
+// switch over the same statuses.
+func isTerminalRunStatus(status string) bool {
+	switch status {
+	case "done", "error", "stopped":
+		return true
+	default:
+		return false
+	}
+}
+
+// taskWaitInput is task_wait's argument shape.
+type taskWaitInput struct {
+	RunID          string `json:"runId" jsonschema:"id of the run to wait on (returned by run.start/task.prompt)"`
+	TimeoutSeconds int    `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable); a timeout is not a failure -- re-issue task_wait with the same runId to keep waiting"`
+}
+
+// taskWaitOutput is task_wait's structured output: the run's status once it
+// stopped waiting, for one of three reasons -- terminal status reached,
+// permission pending, or the timeout elapsed (timedOut).
+type taskWaitOutput struct {
+	RunID             string                `json:"runId"`
+	Status            string                `json:"status"`
+	StopReason        string                `json:"stopReason,omitempty"`
+	Err               string                `json:"err,omitempty"`
+	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
+	TimedOut          bool                  `json:"timedOut"`
+}
+
+// mcpTaskWait implements ADR-0017's one genuinely new capability: block
+// until runId reaches a terminal status, a permission request goes pending,
+// or the timeout elapses -- client-side in this process via bounded,
+// backed-off run.logs polling, not a new wsapi method (matching the
+// reasoning that led to run.attach's own event-stream API rather than a
+// run.wait RPC).
+func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, taskWaitOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskWaitInput) (*mcp.CallToolResult, taskWaitOutput, error) {
+		timeout := mcpWaitDefaultTimeout
+		if in.TimeoutSeconds > 0 {
+			timeout = time.Duration(in.TimeoutSeconds) * time.Second
+		}
+		deadline := time.Now().Add(timeout)
+		interval := mcpWaitPollMin
+
+		for {
+			result, err := mcpRunLogs(ctx, client, "task_wait", in.RunID, 0)
+			if err != nil {
+				return nil, taskWaitOutput{}, err
+			}
+			out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
+			if pending := pendingPermissionsFrom(result); len(pending) > 0 {
+				out.PendingPermission = &pending[0]
+				return nil, out, nil
+			}
+			if isTerminalRunStatus(result.Status) {
+				return nil, out, nil
+			}
+
+			remaining := time.Until(deadline)
+			if remaining <= 0 {
+				out.TimedOut = true
+				return nil, out, nil
+			}
+			sleep := interval
+			if sleep > remaining {
+				sleep = remaining
+			}
+			select {
+			case <-ctx.Done():
+				return nil, taskWaitOutput{}, ctx.Err()
+			case <-time.After(sleep):
+			}
+			if interval *= 2; interval > mcpWaitPollMax {
+				interval = mcpWaitPollMax
+			}
+		}
+	}
+}
+
+// taskStopOutput is task_stop's structured output.
+type taskStopOutput struct {
+	RunID   string `json:"runId"`
+	Stopped bool   `json:"stopped"`
+}
+
+// mcpTaskStop wraps run.stop: {runId} -> {runId, stopped: true} once the
+// daemon has accepted the stop request.
+func mcpTaskStop(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskStopOutput] {
+	return func(ctx context.Context, _ *mcp.CallToolRequest, in runIDInput) (*mcp.CallToolResult, taskStopOutput, error) {
+		if err := callWS(ctx, client, "task_stop", "run.stop", map[string]any{"runId": in.RunID}, nil); err != nil {
+			return nil, taskStopOutput{}, err
+		}
+		return nil, taskStopOutput{RunID: in.RunID, Stopped: true}, nil
 	}
 }
