@@ -97,7 +97,7 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
-	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, coord)
+	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, coord, db)
 	api := &API{Runs: reg, Terminals: treg, hs: hs, bus: bus}
 	api.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
