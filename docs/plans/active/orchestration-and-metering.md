@@ -253,6 +253,18 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
 - Live smoke (GLM and claude-native): stop mid-turn, send a correction,
   and the transcript shows the earlier context.
 
+Validated (taskrunner-level, 2026-09-28):
+`TestRunner_RunPrompt_GLM_StoppedRunStillResumes`,
+`TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes`, and
+`TestRunner_RunPrompt_ClaudeNative_StoppedRunStillResumes`
+(`internal/taskrunner/session_resume_test.go`) prove each backend stores
+its handle as soon as the session/thread/init message exists, so a
+cancelled run resumes instead of starting fresh.
+
+Deferred: the "explicit notice when a stopped run left nothing to resume"
+part needs run history the runner doesn't have -- revisit once run
+provenance (O1) gives the runner (or internal/runs) that context.
+
 **O2:**
 - A child at depth 2 succeeds; depth 3 returns the depth error through
   MCP as a tool error.
@@ -316,7 +328,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
 - [x] M1: wsapi `usage.*` + `smind usage`
 - [ ] O1: run provenance
-- [ ] O1: stop/resume keeps the session
+- [x] O1: stop/resume keeps the session
 - [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
       concurrency guard and guide stay Wave 2)
 - [x] ADR-M drafted as ADR-0020 (Proposed)

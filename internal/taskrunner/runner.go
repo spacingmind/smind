@@ -318,6 +318,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
+	// Stored as soon as the session exists, not only after a successful
+	// prompt: a cancelled turn (ctx cancellation aborting Prompt) must not
+	// lose the handle, or the next prompt would silently start fresh.
+	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: sessionID})
 	r.recordSessionModes(provider, client, sessionID, configOptions)
 	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
 	if err != nil {
@@ -590,6 +594,19 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath
 	go func() {
 		defer close(forwardDone)
 		for msg := range updates {
+			// The CLI reports its session id on an "init" system message
+			// -- the earliest point a handle exists at all on this
+			// backend. Storing it here (never overwriting with an empty
+			// id) means a cancelled turn doesn't lose the handle and the
+			// next prompt resumes this session instead of starting fresh.
+			if sys, ok := msg.(claudecode.SystemMessage); ok && sys.Subtype == "init" {
+				var w struct {
+					SessionID string `json:"session_id"`
+				}
+				if json.Unmarshal(sys.Raw, &w) == nil && w.SessionID != "" {
+					r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: w.SessionID})
+				}
+			}
 			for _, e := range claudeEvents(msg) {
 				select {
 				case events <- e:
@@ -763,6 +780,9 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath,
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex new thread: %w", err)
 	}
+	// Stored as soon as the thread exists, not only after a successful
+	// prompt -- same stop-doesn't-lose-the-handle reasoning as runACP.
+	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
 
 	updates := make(chan codex.Update)
 	forwardDone := make(chan struct{})

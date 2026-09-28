@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -263,6 +264,15 @@ func runTurnScript(cwd string) {
 	scenario := "reply"
 	if data, err := os.ReadFile(filepath.Join(cwd, "scenario")); err == nil {
 		scenario = strings.TrimSpace(string(data))
+	}
+
+	if scenario == "hang" {
+		// Streams one delta then blocks forever, for proving a cancelled
+		// turn still leaves the thread resumable -- same shape as
+		// internal/taskrunner/fakeagent's "hang" scenario.
+		delta("before hang")
+		time.Sleep(time.Hour)
+		return
 	}
 
 	if scenario == "permission" {
