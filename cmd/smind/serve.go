@@ -61,6 +61,7 @@ func cmdServe(args []string) int {
 	poller := quota.New(db, noopQuotaFetcher{})
 	router := routing.New(db, registry, poller)
 	wm := workspace.New(db)
+	wm.SetMaxDepth(cfg.Orchestration.MaxDepth)
 
 	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db))}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {

@@ -130,6 +130,49 @@ func TestStore_ListTasksByParent(t *testing.T) {
 	}
 }
 
+// TestStore_TaskDepth proves TaskDepth walks the parent_task_id chain
+// correctly: a root task is depth 0, and each hop down adds 1.
+func TestStore_TaskDepth(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	ws, err := s.CreateWorkspace(Workspace{Path: "/repo", Title: "repo", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+
+	root := newTestTaskInWorkspace(t, s, ws.ID, "root")
+	child, err := s.CreateTask(Task{WorkspaceID: ws.ID, ParentTaskID: &root.ID, Title: "child", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() child error = %v", err)
+	}
+	grandchild, err := s.CreateTask(Task{WorkspaceID: ws.ID, ParentTaskID: &child.ID, Title: "grandchild", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() grandchild error = %v", err)
+	}
+
+	for _, tt := range []struct {
+		name string
+		id   int64
+		want int
+	}{
+		{"root", root.ID, 0},
+		{"child", child.ID, 1},
+		{"grandchild", grandchild.ID, 2},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := s.TaskDepth(tt.id)
+			if err != nil {
+				t.Fatalf("TaskDepth(%d) error = %v", tt.id, err)
+			}
+			if got != tt.want {
+				t.Errorf("TaskDepth(%d) = %d, want %d", tt.id, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestStore_MigrateAddsParentTaskID proves a database created before the
 // hierarchy shipped (tasks table without parent_task_id -- seedPreChatsDB's
 // shape) gets the column from the migration path, with existing tasks

@@ -138,6 +138,27 @@ func (s *Store) ListTasksByParent(parentID int64) ([]Task, error) {
 	return tasks, rows.Err()
 }
 
+// TaskDepth returns the number of ancestors task id has -- a root task
+// (ParentTaskID nil) is at depth 0, its direct children at depth 1, and so
+// on. It walks the parent_task_id chain one hop at a time via GetTask, so
+// callers enforcing a depth limit (internal/workspace's CreateTask) can add
+// 1 for the depth a prospective child would sit at.
+func (s *Store) TaskDepth(id int64) (int, error) {
+	depth := 0
+	current := id
+	for {
+		t, err := s.GetTask(current)
+		if err != nil {
+			return 0, fmt.Errorf("task depth %d: %w", id, err)
+		}
+		if t.ParentTaskID == nil {
+			return depth, nil
+		}
+		depth++
+		current = *t.ParentTaskID
+	}
+}
+
 // ListUngroupedTasksByWorkspace returns all tasks directly in workspaceID
 // (i.e. with no space), ordered by id.
 func (s *Store) ListUngroupedTasksByWorkspace(workspaceID int64) ([]Task, error) {
