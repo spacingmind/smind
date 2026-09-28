@@ -54,12 +54,15 @@ func TestMCPServe_ExitsWhenDaemonConnectionDies(t *testing.T) {
 		t.Fatalf("build smind: %v: %s", err, out)
 	}
 
-	// Never written, never closed: keeps the subprocess's stdin (and so
-	// its stdio transport) up until the lost-connection path exits it.
-	stdin, _, err := os.Pipe()
+	// Never written: keeps the subprocess's stdin (and so its stdio
+	// transport) up until the lost-connection path exits it. The write end
+	// must stay referenced -- if it were discarded, its finalizer would
+	// close it on the next GC, the child would read EOF on stdin, and exit 0.
+	stdin, stdinW, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("pipe: %v", err)
 	}
+	defer stdinW.Close()
 	cmd := exec.Command(bin, "mcp", "serve")
 	cmd.Stdin = stdin
 	var stderr strings.Builder
