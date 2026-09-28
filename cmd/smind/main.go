@@ -43,6 +43,8 @@ func run(args []string) int {
 		return cmdTask(args[1:])
 	case "profile":
 		return cmdProfile(args[1:])
+	case "usage":
+		return cmdUsage(args[1:])
 	case "mcp":
 		return cmdMcp(args[1:])
 	case "version", "--version", "-v":
@@ -97,6 +99,9 @@ Usage:
       [--thinking-level=<level>] [--notes=<text>]         create an agent profile
   smind profile ls                                         list agent profiles
   smind profile rm <id>                                    remove an agent profile
+
+  smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
+      [--by account|model|day]
 
 Every subcommand except "serve" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to

@@ -43,7 +43,7 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 	}
 	return &Server{
 		cfg:       cfg,
-		proxy:     newProxy(reg, router),
+		proxy:     newProxy(reg, router, db),
 		ws:        api.Handler,
 		api:       api,
 		runs:      api.Runs,
@@ -65,11 +65,14 @@ func (s *Server) API() *wsapi.API {
 // internal/runs.Registry.CloseAll) and terminal session's shell/PTY (see
 // internal/terminal.Registry.CloseAll), so a graceful daemon shutdown
 // (cmdServe, in cmd/smind/serve.go) doesn't leave either kind of
-// subprocess orphaned behind. Safe to call once, after
-// http.Server.Shutdown has stopped accepting new /ws connections.
+// subprocess orphaned behind, and draining the proxy's async request_log
+// writer (see proxy.Close) so a row enqueued just before shutdown isn't
+// silently lost. Safe to call once, after http.Server.Shutdown has
+// stopped accepting new /ws connections and new proxy requests.
 func (s *Server) Close() {
 	s.runs.CloseAll()
 	s.terminals.CloseAll()
+	s.proxy.Close()
 }
 
 // Handler returns the root http handler.

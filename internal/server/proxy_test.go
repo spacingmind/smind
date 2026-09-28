@@ -69,6 +69,40 @@ func (f *fakeQuotaFetcher) setExhausted(accountID int64) {
 
 func newTestProxy(t *testing.T, opts ...proxyOption) (*proxy, *accounts.Registry, *fakeQuotaFetcher) {
 	t.Helper()
+	s := newTestStoreForProxy(t)
+
+	reg, router, fetcher := newTestRoutingWithFetcher(t, s)
+	p := newProxy(reg, router, s, opts...)
+	t.Cleanup(p.Close)
+	return p, reg, fetcher
+}
+
+// newTestRouting builds an accounts.Registry and routing.Router backed by
+// s, with a quota fetcher that always reports zero usage -- for
+// request_log-focused tests (proxy_requestlog_test.go) that don't need to
+// simulate quota exhaustion and so don't need a handle to the fetcher.
+func newTestRouting(t *testing.T, s *store.Store) (*accounts.Registry, *routing.Router) {
+	t.Helper()
+	reg, router, _ := newTestRoutingWithFetcher(t, s)
+	return reg, router
+}
+
+func newTestRoutingWithFetcher(t *testing.T, s *store.Store) (*accounts.Registry, *routing.Router, *fakeQuotaFetcher) {
+	t.Helper()
+	reg := accounts.New(s)
+	fetcher := newFakeQuotaFetcher()
+	poller := quota.New(s, fetcher)
+	router := routing.New(s, reg, poller)
+	return reg, router, fetcher
+}
+
+// newTestStoreForProxy opens a temp-file-backed store, exactly like
+// newTestProxy always has -- pulled out so tests that need to keep a
+// direct handle to the store (to assert on request_log rows after the
+// proxy writes them) can build one the same way, then pass it into
+// newProxy themselves.
+func newTestStoreForProxy(t *testing.T) *store.Store {
+	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
 		t.Fatalf("store.Open() error = %v", err)
@@ -78,12 +112,7 @@ func newTestProxy(t *testing.T, opts ...proxyOption) (*proxy, *accounts.Registry
 			t.Errorf("Close() error = %v", err)
 		}
 	})
-
-	reg := accounts.New(s)
-	fetcher := newFakeQuotaFetcher()
-	poller := quota.New(s, fetcher)
-	router := routing.New(s, reg, poller)
-	return newProxy(reg, router, opts...), reg, fetcher
+	return s
 }
 
 func addAPIKeyAccount(t *testing.T, reg *accounts.Registry, provider, label, key string) int64 {

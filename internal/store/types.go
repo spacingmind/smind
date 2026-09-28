@@ -208,3 +208,69 @@ type Chat struct {
 	CreatedAt    time.Time
 	ArchivedAt   *time.Time
 }
+
+// RequestLog is one proxied-request trace row (docs/plans/active/
+// orchestration-and-metering.md, "M1"): metadata about a single request
+// through internal/server's /v1/messages or /v1/chat/completions handler,
+// never its prompt or response content, and never a credential value.
+//
+// AccountID is nil when routing itself failed before an account was
+// chosen (Outcome "route_error" with no candidate). Model and Stream are
+// nil when the request body exceeded the parse cap before either field
+// could be read (see proxy.go's requestBodyParseCap), not when the field
+// was legitimately absent -- an absent "stream" in a real request means
+// non-streaming, which is recorded as a false, not a nil. UpstreamStatus
+// is nil whenever the proxy never got a real upstream response (route
+// failure, or a network error dialing upstream); Status is always set, to
+// whatever smind itself returned the caller.
+//
+// The five token fields are nil ("unknown") rather than 0 whenever usage
+// couldn't be extracted -- over the response parse cap, a provider that
+// omits a field, or a route/upstream failure before any usage was ever
+// seen. This is a real distinction: 0 reasoning tokens on a
+// non-reasoning model is a fact; nil is "we don't know."
+type RequestLog struct {
+	ID               int64
+	StartedAt        time.Time
+	Provider         string
+	AccountID        *int64
+	SessionKey       string
+	Model            *string
+	Stream           *bool
+	Status           int
+	UpstreamStatus   *int
+	Outcome          string
+	Error            *string
+	TTFBMs           *int64
+	DurationMs       int64
+	InputTokens      *int64
+	OutputTokens     *int64
+	CacheReadTokens  *int64
+	CacheWriteTokens *int64
+	ReasoningTokens  *int64
+}
+
+// RequestLogOutcome enumerates RequestLog.Outcome's valid values.
+const (
+	RequestLogOutcomeOK              = "ok"
+	RequestLogOutcomeUpstreamError   = "upstream_error"
+	RequestLogOutcomeRouteError      = "route_error"
+	RequestLogOutcomeAborted         = "aborted"
+	RequestLogOutcomeClientCancelled = "client_cancelled"
+)
+
+// UsageSummary is one grouped row of usage.summary: total requests and
+// summed token counts for one key (an account id, a model name, or a day,
+// depending on the groupBy the caller asked for). Summed token fields
+// only include rows where that field was non-nil -- a run of rows with
+// entirely unknown tokens sums to 0 for that field, same as SQL SUM over
+// no non-NULL rows.
+type UsageSummary struct {
+	Key              string
+	Count            int64
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+}

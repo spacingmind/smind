@@ -312,9 +312,9 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 ## Progress
 
 - [ ] Step 0: mcp-server, agent-mcp-servers, task hierarchy landed
-- [ ] M1: schema + async writer
-- [ ] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
-- [ ] M1: wsapi `usage.*` + `smind usage`
+- [x] M1: schema + async writer
+- [x] M1: usage extraction (4 cases) + tee'd passthrough + include_usage
+- [x] M1: wsapi `usage.*` + `smind usage`
 - [ ] O1: run provenance
 - [ ] O1: stop/resume keeps the session
 - [ ] O2: MCP parent params + guards + guide
@@ -328,4 +328,58 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 
 ## Validation
 
-Not started.
+**M1** (`task test` + `task lint` green, 2026-09-28):
+
+- `request_log` schema (nullable model/stream/token columns, account FK,
+  `idx_request_log_started_at`/`idx_request_log_account_id`):
+  `TestStore_CreateAndListRequestLog`, `TestStore_RequestLogNullableFields`
+  (`internal/store/request_log_test.go`).
+- Bounded async writer, full-queue/closed-DB never affects the response:
+  `TestRequestLogWriter_QueueFullDropsAndCounts`,
+  `TestRequestLogWriter_WriteFailureCounts`,
+  `TestRequestLogWriter_CloseDrainsGoroutine`
+  (`internal/server/requestlog_test.go`), plus the HTTP-layer
+  `TestProxy_RequestLog_WriterFailureLeavesResponseUnaffected`.
+- Usage extraction, all four cases + tee'd byte-identical passthrough:
+  - Anthropic non-stream — `TestProxy_RequestLog_AnthropicNonStream`
+    (also asserts client body == upstream body byte-for-byte).
+  - Anthropic stream (message_start 100/40, deltas 5→12) —
+    `TestProxy_RequestLog_AnthropicStream` (stream passthrough asserted
+    byte-identical).
+  - Compatible upstream, input only in `message_delta` —
+    `TestProxy_RequestLog_AnthropicStream_CompatibleUpstreamInputInDelta`.
+  - OpenAI non-stream (prompt/completion/cached/reasoning) —
+    `TestProxy_RequestLog_OpenAINonStream`.
+  - OpenAI stream, client's own `include_usage` forwarded unchanged —
+    `TestProxy_RequestLog_OpenAIStream_ClientIncludeUsageUnchanged`.
+  - OpenAI stream without it: injected upstream, client gets every chunk
+    in order — `TestProxy_RequestLog_OpenAIStream_InjectsIncludeUsage`.
+  (all `internal/server/proxy_requestlog_test.go`)
+- Outcomes: upstream 429 → `upstream_error` + verbatim upstream body
+  (`TestProxy_RequestLog_UpstreamErrorStatus`); no accounts → 503
+  `route_error`, `account_id` NULL
+  (`TestProxy_RequestLog_NoAccountsIsRouteError`); mid-stream break →
+  `aborted` with partial tokens
+  (`TestProxy_RequestLog_MidStreamAbortRecordsPartialTokens`, abort
+  semantics already covered by
+  `TestProxy_UpstreamStreamBreakAbortsDownstream`); client disconnect →
+  `client_cancelled`
+  (`TestProxy_RequestLog_ClientDisconnectRecordsClientCancelled`).
+- Over the parse cap → tokens NULL, response intact:
+  `TestProxy_RequestLog_OverResponseParseCap`.
+- Identity `Accept-Encoding` forced upstream (review fix): client sending
+  `gzip, deflate, br` still yields a plaintext upstream response with
+  usage recorded — `TestProxy_ForcesIdentityAcceptEncoding`; a misbehaving
+  upstream that gzips anyway gets byte-identical passthrough (headers and
+  body) with tokens NULL, no crash —
+  `TestProxy_GzippedUpstreamPassesBytesThrough`.
+- No API key / credential / prompt text in the raw row:
+  `TestProxy_RequestLog_NoSensitiveData`.
+- `usage.summary groupBy=account` sums, since-inclusive/until-exclusive:
+  `TestStore_SummarizeRequestLogs_GroupByAccount` (store),
+  `TestUsage_ListAndSummaryRoundTrip` (wsapi RPC layer), plus
+  `TestUsage_SummaryRequiresGroupBy` and CLI coverage
+  `TestRunUsagePrintsSummaryRows`/`TestRunUsageEmpty`/`TestRunUsageRejectsBadGroupBy`
+  (`cmd/smind/usage_test.go`).
+
+Not started: O1, O2, ADR-M, ADR-O.

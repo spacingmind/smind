@@ -143,6 +143,27 @@ CREATE TABLE IF NOT EXISTS workspace_mcp_servers (
     PRIMARY KEY (workspace_id, mcp_server_id)
 );
 
+CREATE TABLE IF NOT EXISTS request_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TIMESTAMP NOT NULL,
+    provider TEXT NOT NULL,
+    account_id INTEGER REFERENCES accounts(id),
+    session_key TEXT NOT NULL,
+    model TEXT,
+    stream INTEGER,
+    status INTEGER NOT NULL,
+    upstream_status INTEGER,
+    outcome TEXT NOT NULL,
+    error TEXT,
+    ttfb_ms INTEGER,
+    duration_ms INTEGER NOT NULL,
+    input_tokens INTEGER,
+    output_tokens INTEGER,
+    cache_read_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    reasoning_tokens INTEGER
+);
+
 CREATE INDEX IF NOT EXISTS idx_routing_decisions_session_key ON routing_decisions(session_key);
 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_account_id ON quota_snapshots(account_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_accounts_account_id ON workspace_accounts(account_id);
@@ -161,3 +182,5 @@ CREATE INDEX IF NOT EXISTS idx_runs_started_at ON runs(started_at);
 -- already exists.
 CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task_id ON terminal_sessions(task_id);
+CREATE INDEX IF NOT EXISTS idx_request_log_started_at ON request_log(started_at);
+CREATE INDEX IF NOT EXISTS idx_request_log_account_id ON request_log(account_id);

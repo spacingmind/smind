@@ -82,7 +82,7 @@ func newTestWSServerWithCoordinator(t *testing.T, wm *workspace.Manager, acctReg
 	}
 	profReg := profiles.New(db)
 
-	hs := methodHandlers(wm, acctReg, nil, reg, treg, profReg, coord)
+	hs := methodHandlers(wm, acctReg, nil, reg, treg, profReg, coord, db)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got := r.URL.Query().Get("token")
 		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
