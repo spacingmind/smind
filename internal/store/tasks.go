@@ -234,31 +234,39 @@ func (s *Store) ArchiveTask(id int64) (Task, error) {
 // terminal_sessions, and finally the tasks row itself, in that FK-safe
 // child-before-parent order (matching the schema's foreign keys, enforced
 // by _pragma=foreign_keys(1) -- see store.sqliteDSN; chats must go after
-// runs since runs.chat_id references chats(id)). It never touches
-// anything on disk; git worktree cleanup is workspace.Manager's job (see
-// workspace.Manager.DeleteTask), which calls this only after that succeeds.
-// Deleting a nonexistent task is a clear not-found error (via GetTask),
-// never a silent no-op.
+// runs since runs.chat_id references chats(id)). The task's children are
+// not deleted: their parent_task_id is set to NULL first, making them root
+// tasks (the plan's no-automatic-cascade decision), and without which the
+// final DELETE would trip the tasks.parent_task_id foreign key for any
+// task that has children. Everything runs in one transaction, so a failure
+// partway leaves the task and all of its scoped rows intact. DeleteTask
+// never touches anything on disk; git worktree cleanup is
+// workspace.Manager's job (see workspace.Manager.DeleteTask), which calls
+// this only after that succeeds. Deleting a nonexistent task is a clear
+// not-found error (via GetTask), never a silent no-op.
 func (s *Store) DeleteTask(id int64) error {
 	if _, err := s.GetTask(id); err != nil {
 		return fmt.Errorf("delete task %d: %w", id, err)
 	}
-	if _, err := s.db.Exec(
-		`DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`, id,
-	); err != nil {
-		return fmt.Errorf("delete task %d: delete run events: %w", id, err)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("delete task %d: begin: %w", id, err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM runs WHERE task_id = ?`, id); err != nil {
-		return fmt.Errorf("delete task %d: delete runs: %w", id, err)
+	for _, step := range []struct{ name, query string }{
+		{"detach children", `UPDATE tasks SET parent_task_id = NULL WHERE parent_task_id = ?`},
+		{"delete run events", `DELETE FROM run_events WHERE run_id IN (SELECT id FROM runs WHERE task_id = ?)`},
+		{"delete runs", `DELETE FROM runs WHERE task_id = ?`},
+		{"delete chats", `DELETE FROM chats WHERE task_id = ?`},
+		{"delete terminal sessions", `DELETE FROM terminal_sessions WHERE task_id = ?`},
+		{"delete task", `DELETE FROM tasks WHERE id = ?`},
+	} {
+		if _, err := tx.Exec(step.query, id); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("delete task %d: %s: %w", id, step.name, err)
+		}
 	}
-	if _, err := s.db.Exec(`DELETE FROM chats WHERE task_id = ?`, id); err != nil {
-		return fmt.Errorf("delete task %d: delete chats: %w", id, err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM terminal_sessions WHERE task_id = ?`, id); err != nil {
-		return fmt.Errorf("delete task %d: delete terminal sessions: %w", id, err)
-	}
-	if _, err := s.db.Exec(`DELETE FROM tasks WHERE id = ?`, id); err != nil {
-		return fmt.Errorf("delete task %d: %w", id, err)
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("delete task %d: commit: %w", id, err)
 	}
 	return nil
 }

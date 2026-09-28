@@ -114,6 +114,12 @@ Naming of the two new wsapi methods/CLI subcommands is left to
 implementation judgment as long as it's consistent with the
 `task permissions`/`task approve` precedent already in `cmd/smind/task.go`.
 
+- Parent-task delete detaches, not cascades: `store.DeleteTask` sets
+  children's `parent_task_id` to NULL (they become root tasks) inside the
+  same transaction as the rest of the delete, so no child is silently
+  deleted and the `tasks.parent_task_id` foreign key can never fail the
+  delete.
+
 ## Progress
 
 - [x] `internal/acp.Client.NewSession` captures `config_options` from
@@ -160,3 +166,12 @@ implementation judgment as long as it's consistent with the
   `internal/wsapi/task_hierarchy_test.go` —
   `TestServer_TaskCreateList_ParentTaskID`. CLI: `cmd/smind/task_hierarchy_test.go`
   — `TestTaskNewLs_ParentFlag`, `TestTaskNewLs_ParentFlagRejection`.
+  Delete regression (review fix): `internal/store/delete_hierarchy_test.go`
+  — `TestStore_DeleteTaskDetachesChildren` (deleting a parent leaves the
+  child with `ParentTaskID` nil), `TestStore_DeleteTaskRollsBack` (a
+  trigger-forced failure at the final DELETE leaves task + run + events +
+  terminal session intact; no store failure hook exists, so the
+  same-package test installs a `RAISE(ABORT)` trigger on `s.db`),
+  `TestStore_DeleteSpaceHierarchy` and `TestStore_DeleteWorkspaceHierarchy`
+  (root → child → grandchild trees delete cleanly through the space and
+  workspace cascades).
