@@ -124,14 +124,14 @@ implementation judgment as long as it's consistent with the
 - [x] wsapi: `run.listConfigOptions`, `run.setConfigOption`
 - [x] CLI: `smind task options <runId>`, `smind task set-option <runId>
       <optionId> <value>`
-- [ ] `store.Task.ParentTaskID` + validation (same-workspace, exists)
-- [ ] `task.create`/`smind task new` accept an optional parent task id
-- [ ] `task.list`/`smind task ls` accept an optional parent-id filter
+- [x] `store.Task.ParentTaskID` + validation (same-workspace, exists)
+- [x] `task.create`/`smind task new` accept an optional parent task id
+- [x] `task.list`/`smind task ls` accept an optional parent-id filter
 - [x] Tests (fakeagent round-trip, runs "not supported" path, CLI
-      option/set-option; store parent validation still pending with the
-      task-hierarchy items below)
+      option/set-option; store/workspace/wsapi/CLI hierarchy tests below)
 - [ ] Manual smoke test against a real GLM task (see Test Scenarios)
-- [x] Verification (config-option work; task-hierarchy items pending)
+- [x] Verification (config-option work + task-hierarchy items, see
+      Validation)
 
 ## Validation
 
@@ -144,3 +144,19 @@ implementation judgment as long as it's consistent with the
   proves the request's wire field names), `...Success` (ack round-trips),
   `...AgentError` (JSON-RPC error becomes a Go `*RPCError`). `go build
   ./...`, `go vet ./...`, gofmt, and `go test ./internal/acp/...` all clean.
+
+- Task hierarchy (branch `feat/task-hierarchy`, commits 2689856, a12ef86,
+  401cc49, 4387fe6, 2f18bc1): every test scenario covered by a real test
+  and `task test`/`task lint` green. Store scenario (cross-workspace and
+  nonexistent parent rejected; same-workspace parent succeeds and the
+  parent-filtered list includes the child):
+  `internal/store/tasks_parent_test.go` — `TestStore_CreateTaskParentValidation`,
+  `TestStore_ListTasksByParent`, `TestStore_TaskDepth`,
+  `TestStore_MigrateAddsParentTaskID`. Manager layer:
+  `internal/workspace/task_hierarchy_test.go` —
+  `TestManager_CreateTask_WithParent`, `TestManager_CreateTask_DepthLimit`,
+  `TestManager_CreateTask_DepthLimitConfigurable`,
+  `TestManager_ListTasks_WithParentFilter`. wsapi round-trip:
+  `internal/wsapi/task_hierarchy_test.go` —
+  `TestServer_TaskCreateList_ParentTaskID`. CLI: `cmd/smind/task_hierarchy_test.go`
+  — `TestTaskNewLs_ParentFlag`, `TestTaskNewLs_ParentFlagRejection`.
