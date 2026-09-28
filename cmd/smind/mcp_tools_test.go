@@ -1,7 +1,11 @@
 package main
 
 import (
+	"context"
+	"strings"
 	"testing"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // taskForTest is the created-task handle the task tools return: store.Task
@@ -9,6 +13,7 @@ import (
 type taskForTest struct {
 	ID           int64
 	WorkspaceID  int64
+	ParentTaskID *int64
 	Title        string
 	Status       string
 	WorktreePath *string
@@ -68,6 +73,113 @@ func TestMCPTools_TaskNewListRoundTrip(t *testing.T) {
 	}
 	if empty.Tasks == nil || len(empty.Tasks) != 0 {
 		t.Fatalf("task_list on an unknown workspace = %#v, want tasks: [] not null", empty.Tasks)
+	}
+}
+
+// TestMCPTools_TaskHierarchy covers O2's MCP surface
+// (docs/plans/active/orchestration-and-metering.md): task_new's optional
+// parentTaskId, task_list's parentTaskId filter (direct children only),
+// and both the cross-workspace/nonexistent-parent rejection and the depth
+// guard surfacing as an MCP tool error rather than a panic or silent
+// success.
+func TestMCPTools_TaskHierarchy(t *testing.T) {
+	env := newMCPSession(t)
+	client := dialTestClient(t, env.srvURL)
+	wsID := createTestWorkspace(t, client)
+
+	var root struct {
+		Task taskForTest `json:"task"`
+	}
+	if isErr := callMCPTool(t, env.cs, "task_new", map[string]any{
+		"workspaceId": wsID, "title": "root",
+	}, &root); isErr {
+		t.Fatal("task_new(root) returned an error result")
+	}
+
+	var child struct {
+		Task taskForTest `json:"task"`
+	}
+	if isErr := callMCPTool(t, env.cs, "task_new", map[string]any{
+		"workspaceId": wsID, "title": "child", "parentTaskId": root.Task.ID,
+	}, &child); isErr {
+		t.Fatal("task_new(child, parentTaskId) returned an error result")
+	}
+	if child.Task.ParentTaskID == nil || *child.Task.ParentTaskID != root.Task.ID {
+		t.Fatalf("task_new(child).ParentTaskID = %v, want %d", child.Task.ParentTaskID, root.Task.ID)
+	}
+
+	// An unrelated root-level task must not leak into root's filtered
+	// child list.
+	var unrelated struct {
+		Task taskForTest `json:"task"`
+	}
+	callMCPTool(t, env.cs, "task_new", map[string]any{"workspaceId": wsID, "title": "unrelated"}, &unrelated)
+
+	var kids struct {
+		Tasks []taskForTest `json:"tasks"`
+	}
+	if isErr := callMCPTool(t, env.cs, "task_list", map[string]any{
+		"workspaceId": wsID, "parentTaskId": root.Task.ID,
+	}, &kids); isErr {
+		t.Fatal("task_list(parentTaskId) returned an error result")
+	}
+	if len(kids.Tasks) != 1 || kids.Tasks[0].ID != child.Task.ID {
+		t.Fatalf("task_list(parentTaskId=%d) = %+v, want exactly [child %d]", root.Task.ID, kids.Tasks, child.Task.ID)
+	}
+
+	// A cross-workspace parent surfaces the daemon's rejection text as a
+	// tool error, not a panic or a silently-created task.
+	otherWsID := createTestWorkspace(t, client)
+	res, err := env.cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "task_new",
+		Arguments: map[string]any{"workspaceId": otherWsID, "title": "cross", "parentTaskId": root.Task.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(task_new, cross-workspace parent) error = %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("task_new with a cross-workspace parentTaskId: IsError = false, want the daemon's rejection surfaced")
+	}
+	if msg := mcpToolErrorText(res); !strings.Contains(msg, "task_new:") {
+		t.Fatalf("error text = %q, want the task_new: prefix", msg)
+	}
+
+	// A nonexistent parent is likewise a tool error, not a panic.
+	res, err = env.cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "task_new",
+		Arguments: map[string]any{"workspaceId": wsID, "title": "orphan", "parentTaskId": root.Task.ID + 999999},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(task_new, nonexistent parent) error = %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("task_new with a nonexistent parentTaskId: IsError = false, want the daemon's rejection surfaced")
+	}
+
+	// Depth guard: a grandchild (depth 2) succeeds under the default
+	// maxDepth of 2, but a great-grandchild (depth 3) is rejected through
+	// MCP as a tool error carrying the daemon's depth-limit message.
+	var grandchild struct {
+		Task taskForTest `json:"task"`
+	}
+	if isErr := callMCPTool(t, env.cs, "task_new", map[string]any{
+		"workspaceId": wsID, "title": "grandchild", "parentTaskId": child.Task.ID,
+	}, &grandchild); isErr {
+		t.Fatal("task_new(grandchild) at depth 2 returned an error result, want success")
+	}
+
+	res, err = env.cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "task_new",
+		Arguments: map[string]any{"workspaceId": wsID, "title": "great-grandchild", "parentTaskId": grandchild.Task.ID},
+	})
+	if err != nil {
+		t.Fatalf("CallTool(task_new, depth 3) error = %v", err)
+	}
+	if !res.IsError {
+		t.Fatal("task_new(great-grandchild) at depth 3: IsError = false, want the depth limit surfaced")
+	}
+	if msg := mcpToolErrorText(res); !strings.Contains(msg, "task depth limit reached (2)") {
+		t.Fatalf("error text = %q, want it to contain the depth-limit message", msg)
 	}
 }
 

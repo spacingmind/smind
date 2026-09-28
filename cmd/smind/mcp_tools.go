@@ -39,9 +39,10 @@ func callWS(ctx context.Context, client *wsclient.Client, tool, method string, p
 
 // taskNewInput is task_new's argument shape (wrapping task.create).
 type taskNewInput struct {
-	WorkspaceID int64  `json:"workspaceId" jsonschema:"id of the workspace the task is created in"`
-	SpaceID     *int64 `json:"spaceId,omitempty" jsonschema:"optional space id within the workspace to group the task under"`
-	Title       string `json:"title" jsonschema:"title for the new task"`
+	WorkspaceID  int64  `json:"workspaceId" jsonschema:"id of the workspace the task is created in"`
+	SpaceID      *int64 `json:"spaceId,omitempty" jsonschema:"optional space id within the workspace to group the task under"`
+	ParentTaskID *int64 `json:"parentTaskId,omitempty" jsonschema:"optional id of an existing task in the same workspace to make this task a child of"`
+	Title        string `json:"title" jsonschema:"title for the new task"`
 }
 
 // Output-shape note: the outputs below deliberately wrap daemon results
@@ -69,6 +70,9 @@ func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNe
 		if in.SpaceID != nil {
 			params["spaceId"] = *in.SpaceID
 		}
+		if in.ParentTaskID != nil {
+			params["parentTaskId"] = *in.ParentTaskID
+		}
 		var task map[string]any
 		if err := callWS(ctx, client, "task_new", "task.create", params, &task); err != nil {
 			return nil, taskNewOutput{}, err
@@ -79,7 +83,8 @@ func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNe
 
 // taskListInput is task_list's argument shape (wrapping task.list).
 type taskListInput struct {
-	WorkspaceID int64 `json:"workspaceId" jsonschema:"id of the workspace whose tasks to list"`
+	WorkspaceID  int64  `json:"workspaceId" jsonschema:"id of the workspace whose tasks to list"`
+	ParentTaskID *int64 `json:"parentTaskId,omitempty" jsonschema:"optional: list only the direct children of this task id, instead of every task in the workspace"`
 }
 
 // taskListOutput is task_list's structured output: the workspace's tasks
@@ -92,8 +97,12 @@ type taskListOutput struct {
 // mcpTaskList wraps task.list: {workspaceId} -> the workspace's tasks.
 func mcpTaskList(client *wsclient.Client) mcp.ToolHandlerFor[taskListInput, taskListOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskListInput) (*mcp.CallToolResult, taskListOutput, error) {
+		params := map[string]any{"workspaceId": in.WorkspaceID}
+		if in.ParentTaskID != nil {
+			params["parentTaskId"] = *in.ParentTaskID
+		}
 		var tasks []map[string]any
-		if err := callWS(ctx, client, "task_list", "task.list", map[string]any{"workspaceId": in.WorkspaceID}, &tasks); err != nil {
+		if err := callWS(ctx, client, "task_list", "task.list", params, &tasks); err != nil {
 			return nil, taskListOutput{}, err
 		}
 		if tasks == nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -95,4 +96,17 @@ func callMCPTool(t *testing.T, cs *mcp.ClientSession, name string, args any, out
 		}
 	}
 	return res.IsError
+}
+
+// mcpToolErrorText concatenates a tool result's text content, for
+// asserting on an error message's wording (e.g. that it carries the
+// daemon's rejection reason or a specific prefix).
+func mcpToolErrorText(res *mcp.CallToolResult) string {
+	var b strings.Builder
+	for _, c := range res.Content {
+		if tc, ok := c.(*mcp.TextContent); ok {
+			b.WriteString(tc.Text)
+		}
+	}
+	return b.String()
 }
