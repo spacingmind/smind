@@ -180,14 +180,15 @@ func cmdTask(args []string) int {
 }
 
 // cmdTaskNewUsage is printed on any argument error in cmdTaskNew.
-const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>]"
+const cmdTaskNewUsage = "usage: smind task new <workspaceId> <title> [--space <spaceId>] [--parent <parentTaskId>]"
 
-// cmdTaskNew accepts an optional trailing "--space <spaceId>" pair after
-// the title -- unlike cmdTaskLogs's flags, which can appear anywhere
-// relative to its positional runId, --space only needs to work in this one
-// documented position (title text comes last otherwise, so a trailing
-// "--space <id>" can be unambiguously stripped off before the remaining
-// args are joined into the title).
+// cmdTaskNew accepts optional trailing "--space <spaceId>" and/or "--parent
+// <parentTaskId>" pairs, in either order, after the title -- unlike
+// cmdTaskLogs's flags, which can appear anywhere relative to its
+// positional runId, these only need to work in this one documented
+// position (title text comes last otherwise, so trailing flag pairs can be
+// unambiguously stripped off before the remaining args are joined into the
+// title).
 func cmdTaskNew(args []string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, cmdTaskNewUsage)
@@ -200,14 +201,23 @@ func cmdTaskNew(args []string) int {
 	}
 
 	rest := args[1:]
-	var spaceID *int64
-	if len(rest) >= 2 && rest[len(rest)-2] == "--space" {
+	var spaceID, parentID *int64
+	for len(rest) >= 2 {
+		flag := rest[len(rest)-2]
+		if flag != "--space" && flag != "--parent" {
+			break
+		}
 		id, err := parseInt64(rest[len(rest)-1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "task new: invalid --space value %q: %v\n", rest[len(rest)-1], err)
+			fmt.Fprintf(os.Stderr, "task new: invalid %s value %q: %v\n", flag, rest[len(rest)-1], err)
 			return 2
 		}
-		spaceID = &id
+		switch flag {
+		case "--space":
+			spaceID = &id
+		case "--parent":
+			parentID = &id
+		}
 		rest = rest[:len(rest)-2]
 	}
 	if len(rest) == 0 {
@@ -227,6 +237,9 @@ func cmdTaskNew(args []string) int {
 	if spaceID != nil {
 		params["spaceId"] = *spaceID
 	}
+	if parentID != nil {
+		params["parentTaskId"] = *parentID
+	}
 
 	var task store.Task
 	err = client.Call(context.Background(), "task.create", params, &task)
@@ -238,15 +251,54 @@ func cmdTaskNew(args []string) int {
 	return 0
 }
 
+// cmdTaskListUsage is printed on any argument error in cmdTaskList.
+const cmdTaskListUsage = "usage: smind task ls <workspaceId> [--parent <parentTaskId>]"
+
+// cmdTaskList lists a workspace's tasks, optionally narrowed to one
+// parent's direct children via --parent -- the CLI mirror of task.list's
+// optional parentTaskId filter (omitted keeps today's flat, whole-workspace
+// listing).
 func cmdTaskList(args []string) int {
-	if len(args) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: smind task ls <workspaceId>")
+	var workspaceIDArg, parentArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--parent":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskListUsage)
+				return 2
+			}
+			i++
+			parentArg = args[i]
+		case strings.HasPrefix(a, "--parent="):
+			parentArg = strings.TrimPrefix(a, "--parent=")
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(os.Stderr, "task ls: unknown flag %q\n", a)
+			fmt.Fprintln(os.Stderr, cmdTaskListUsage)
+			return 2
+		case workspaceIDArg == "":
+			workspaceIDArg = a
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskListUsage)
+			return 2
+		}
+	}
+	if workspaceIDArg == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskListUsage)
 		return 2
 	}
-	workspaceID, err := parseInt64(args[0])
+	workspaceID, err := parseInt64(workspaceIDArg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task ls: invalid workspaceId %q: %v\n", args[0], err)
+		fmt.Fprintf(os.Stderr, "task ls: invalid workspaceId %q: %v\n", workspaceIDArg, err)
 		return 2
+	}
+	var parentID int64
+	if parentArg != "" {
+		parentID, err = parseInt64(parentArg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "task ls: invalid --parent value %q: %v\n", parentArg, err)
+			return 2
+		}
 	}
 
 	client, err := dialDaemon(context.Background())
@@ -256,8 +308,12 @@ func cmdTaskList(args []string) int {
 	}
 	defer client.Close()
 
+	params := map[string]any{"workspaceId": workspaceID}
+	if parentArg != "" {
+		params["parentTaskId"] = parentID
+	}
 	var tasks []store.Task
-	err = client.Call(context.Background(), "task.list", map[string]any{"workspaceId": workspaceID}, &tasks)
+	err = client.Call(context.Background(), "task.list", params, &tasks)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task ls: %v\n", err)
 		return 1

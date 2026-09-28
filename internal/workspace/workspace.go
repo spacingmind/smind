@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -25,6 +26,14 @@ type Manager struct {
 	// internal/runs.Registry's Notifier/SetNotifier pattern.
 	notifierMu sync.Mutex
 	notifier   Notifier
+
+	// maxTaskDepth caps a task's depth in the hierarchy (see CreateTask's
+	// depth-guard doc comment). Defaults to config.Default()'s value so
+	// every existing New(s) call site -- overwhelmingly test setups that
+	// never call SetMaxDepth -- still enforces the real default rather
+	// than an unbounded (zero-value) depth. cmd/smind/serve.go overrides
+	// it from the loaded config via SetMaxDepth.
+	maxTaskDepth int
 }
 
 // Notifier receives workspace/space/task lifecycle notifications. Every
@@ -96,7 +105,17 @@ func (m *Manager) notifyTask(t store.Task) {
 
 // New returns a Manager backed by s.
 func New(s *store.Store) *Manager {
-	return &Manager{store: s}
+	return &Manager{store: s, maxTaskDepth: config.Default().Orchestration.MaxDepth}
+}
+
+// SetMaxDepth overrides the task hierarchy depth limit CreateTask enforces
+// (default config.Default().Orchestration.MaxDepth). Nil-safe like
+// SetNotifier, for the same reason.
+func (m *Manager) SetMaxDepth(n int) {
+	if m == nil {
+		return
+	}
+	m.maxTaskDepth = n
 }
 
 // CreateWorkspace validates that path is an absolute path to an existing git

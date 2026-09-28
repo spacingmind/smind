@@ -1,6 +1,8 @@
 package workspace
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,20 @@ import (
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/store"
 )
+
+// CreateTaskOption customizes CreateTask; see WithParentTask.
+type CreateTaskOption func(*createTaskParams)
+
+type createTaskParams struct {
+	parentTaskID *int64
+}
+
+// WithParentTask makes the new task a child of parentID, which CreateTask
+// validates exists in the same workspace and would not push the hierarchy
+// past the configured depth limit (see CreateTask's doc comment).
+func WithParentTask(parentID int64) CreateTaskOption {
+	return func(p *createTaskParams) { p.parentTaskID = &parentID }
+}
 
 // CreateTask creates a task under workspaceID, materializing a real git
 // worktree checked out on a new branch before any database row exists.
@@ -31,10 +47,28 @@ import (
 // leave a DB row behind), so the id isn't known yet at creation time. A
 // slug plus a nanosecond timestamp suffix keeps the name readable while
 // guaranteeing it won't collide with another task sharing the same title.
-func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string) (store.Task, error) {
+//
+// WithParentTask(parentID) makes the new task a child of parentID: rejected
+// up front, before any worktree is touched, if parentID doesn't exist, if
+// it belongs to a different workspace, or if the new task would sit deeper
+// than maxTaskDepth allows (store.CreateTask independently re-validates
+// existence/workspace once the row is actually inserted, but the depth
+// check only lives here -- store.Task carries no config).
+func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, opts ...CreateTaskOption) (store.Task, error) {
+	var p createTaskParams
+	for _, opt := range opts {
+		opt(&p)
+	}
+
 	ws, err := m.store.GetWorkspace(workspaceID)
 	if err != nil {
 		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+
+	if p.parentTaskID != nil {
+		if err := m.validateParentDepth(workspaceID, *p.parentTaskID); err != nil {
+			return store.Task{}, err
+		}
 	}
 
 	name := slugify(title) + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
@@ -48,6 +82,7 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string) (s
 	t, err := m.store.CreateTask(store.Task{
 		WorkspaceID:  workspaceID,
 		SpaceID:      spaceID,
+		ParentTaskID: p.parentTaskID,
 		Title:        title,
 		Status:       "created",
 		WorktreePath: &worktreePath,
@@ -74,6 +109,34 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string) (s
 	}
 
 	return t, nil
+}
+
+// validateParentDepth checks that parentID names an existing task in
+// workspaceID and that a new child under it would not exceed
+// m.maxTaskDepth, returning a model/human-readable error otherwise. It
+// duplicates store.CreateTask's own existence/workspace checks (rather
+// than reusing them) so the rejection happens before CreateTask
+// materializes a worktree for a task that's about to be refused.
+func (m *Manager) validateParentDepth(workspaceID, parentID int64) error {
+	parent, err := m.store.GetTask(parentID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("create task: parent task %d: %w", parentID, store.ErrParentTaskNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("create task: parent task %d: %w", parentID, err)
+	}
+	if parent.WorkspaceID != workspaceID {
+		return fmt.Errorf("create task: parent task %d: %w", parentID, store.ErrParentTaskMismatch)
+	}
+
+	parentDepth, err := m.store.TaskDepth(parentID)
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+	if childDepth := parentDepth + 1; childDepth > m.maxTaskDepth {
+		return fmt.Errorf("create task: task depth limit reached (%d): do this work yourself or ask the user", m.maxTaskDepth)
+	}
+	return nil
 }
 
 var slugInvalidRunRE = regexp.MustCompile(`[^a-z0-9]+`)
@@ -180,15 +243,54 @@ func (m *Manager) ArchiveTask(id int64) (store.Task, error) {
 	return t, nil
 }
 
+// ListTasksOption customizes ListTasks; see WithParentFilter.
+type ListTasksOption func(*listTasksParams)
+
+type listTasksParams struct {
+	parentTaskID *int64
+}
+
+// WithParentFilter narrows ListTasks to parentID's direct children only,
+// instead of every task in the workspace.
+func WithParentFilter(parentID int64) ListTasksOption {
+	return func(p *listTasksParams) { p.parentTaskID = &parentID }
+}
+
 // ListTasks returns the workspace's non-archived tasks, ordered by id --
 // the sidebar's working set. Archived tasks stay queryable via GetTask
 // but leave the active list, mirroring how the UI treats archive as
 // removal from the tree (the crud-ui spec).
-func (m *Manager) ListTasks(workspaceID int64) ([]store.Task, error) {
-	all, err := m.store.ListTasksByWorkspace(workspaceID)
+//
+// WithParentFilter(parentID) narrows this to parentID's direct children
+// (grandchildren are not included); parentID must belong to workspaceID,
+// same cross-workspace rejection as CreateTask's WithParentTask.
+func (m *Manager) ListTasks(workspaceID int64, opts ...ListTasksOption) ([]store.Task, error) {
+	var p listTasksParams
+	for _, opt := range opts {
+		opt(&p)
+	}
+
+	var all []store.Task
+	var err error
+	if p.parentTaskID != nil {
+		parent, gerr := m.store.GetTask(*p.parentTaskID)
+		if errors.Is(gerr, sql.ErrNoRows) {
+			return nil, fmt.Errorf("list tasks: parent task %d: %w", *p.parentTaskID, store.ErrParentTaskNotFound)
+		}
+		if gerr != nil {
+			return nil, fmt.Errorf("list tasks: parent task %d: %w", *p.parentTaskID, gerr)
+		}
+		if parent.WorkspaceID != workspaceID {
+			return nil, fmt.Errorf("list tasks: parent task %d: %w", *p.parentTaskID, store.ErrParentTaskMismatch)
+		}
+		all, err = m.store.ListTasksByParent(*p.parentTaskID)
+	} else {
+		all, err = m.store.ListTasksByWorkspace(workspaceID)
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	live := all[:0]
 	for _, t := range all {
 		if t.Status != "archived" {

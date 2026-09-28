@@ -397,26 +397,36 @@ func handleSpaceDelete(wm *workspace.Manager) handlerFunc {
 func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			WorkspaceID int64  `json:"workspaceId"`
-			SpaceID     *int64 `json:"spaceId"`
-			Title       string `json:"title"`
+			WorkspaceID  int64  `json:"workspaceId"`
+			SpaceID      *int64 `json:"spaceId"`
+			ParentTaskID *int64 `json:"parentTaskId"`
+			Title        string `json:"title"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
 		}
-		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title)
+		var opts []workspace.CreateTaskOption
+		if p.ParentTaskID != nil {
+			opts = append(opts, workspace.WithParentTask(*p.ParentTaskID))
+		}
+		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
 	}
 }
 
 func handleTaskList(wm *workspace.Manager) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			WorkspaceID int64 `json:"workspaceId"`
+			WorkspaceID  int64  `json:"workspaceId"`
+			ParentTaskID *int64 `json:"parentTaskId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.list: invalid params: %w", err)
 		}
-		return wm.ListTasks(p.WorkspaceID)
+		var opts []workspace.ListTasksOption
+		if p.ParentTaskID != nil {
+			opts = append(opts, workspace.WithParentFilter(*p.ParentTaskID))
+		}
+		return wm.ListTasks(p.WorkspaceID, opts...)
 	}
 }
 
