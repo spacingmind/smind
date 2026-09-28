@@ -367,6 +367,12 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
   (`TestProxy_RequestLog_ClientDisconnectRecordsClientCancelled`).
 - Over the parse cap → tokens NULL, response intact:
   `TestProxy_RequestLog_OverResponseParseCap`.
+- Identity `Accept-Encoding` forced upstream (review fix): client sending
+  `gzip, deflate, br` still yields a plaintext upstream response with
+  usage recorded — `TestProxy_ForcesIdentityAcceptEncoding`; a misbehaving
+  upstream that gzips anyway gets byte-identical passthrough (headers and
+  body) with tokens NULL, no crash —
+  `TestProxy_GzippedUpstreamPassesBytesThrough`.
 - No API key / credential / prompt text in the raw row:
   `TestProxy_RequestLog_NoSensitiveData`.
 - `usage.summary groupBy=account` sums, since-inclusive/until-exclusive:

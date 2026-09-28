@@ -403,16 +403,21 @@ func sessionKey(r *http.Request) string {
 
 // forwardHeaders copies src into dst, dropping hop-by-hop headers (Connection,
 // Host) and the credential headers serve/injectCredentials own.
+//
+// Accept-Encoding is also dropped and forced to identity upstream: usage
+// parsing needs plaintext bodies, and our uTLS RoundTripper (unlike
+// net/http's Transport) does not transparently decompress.
 func forwardHeaders(dst, src http.Header) {
 	for k, vv := range src {
 		switch k {
-		case "Authorization", "X-Api-Key", "Connection", "Host":
+		case "Authorization", "X-Api-Key", "Connection", "Host", "Accept-Encoding":
 			continue
 		}
 		for _, v := range vv {
 			dst.Add(k, v)
 		}
 	}
+	dst.Set("Accept-Encoding", "identity")
 }
 
 // hopByHopResponseHeaders are stripped from the upstream response before

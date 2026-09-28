@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"io"
@@ -620,5 +622,100 @@ func TestProxy_RequestLog_NoSensitiveData(t *testing.T) {
 	}
 	if strings.Contains(string(raw), promptText) {
 		t.Errorf("row contains prompt text: %s", raw)
+	}
+}
+
+// TestProxy_ForcesIdentityAcceptEncoding covers the review bug: a client
+// sending "Accept-Encoding: gzip, deflate, br" must not make the upstream
+// compress its response (usage parsing needs plaintext, and our uTLS
+// RoundTripper has no transparent decompression). The upstream fake
+// asserts it received identity and returns plaintext, and usage is
+// recorded as usual.
+func TestProxy_ForcesIdentityAcceptEncoding(t *testing.T) {
+	t.Parallel()
+
+	var gotEncoding string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEncoding = r.Header.Get("Accept-Encoding")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `{"id":"msg_1","usage":{"input_tokens":10,"output_tokens":20}}`)
+	}))
+	defer upstream.Close()
+
+	s := newTestStoreForProxy(t)
+	reg, router := newTestRouting(t, s)
+	p := newProxy(reg, router, s, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	t.Cleanup(p.Close)
+	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-3"}`))
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	w := httptest.NewRecorder()
+	p.handleAnthropic(w, req)
+
+	if gotEncoding != "identity" {
+		t.Errorf("upstream Accept-Encoding = %q, want identity", gotEncoding)
+	}
+
+	row := waitForRequestLog(t, s, func(r store.RequestLog) bool { return r.Outcome != "" })
+	if int64Val(row.InputTokens) != 10 || int64Val(row.OutputTokens) != 20 {
+		t.Errorf("tokens = in=%v out=%v, want 10/20 (plaintext response parsed)", row.InputTokens, row.OutputTokens)
+	}
+}
+
+// TestProxy_GzippedUpstreamPassesBytesThrough covers the misbehaving
+// upstream that ignores the identity request and gzips anyway: the client
+// still gets the exact upstream bytes and Content-Encoding header (byte
+// passthrough is unchanged), and token fields are NULL rather than parsed
+// garbage -- with no crash.
+func TestProxy_GzippedUpstreamPassesBytesThrough(t *testing.T) {
+	t.Parallel()
+
+	var gzBody bytes.Buffer
+	zw := gzip.NewWriter(&gzBody)
+	if _, err := zw.Write([]byte(`{"id":"msg_1","usage":{"input_tokens":10,"output_tokens":20}}`)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	gzBytes := gzBody.Bytes()
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(gzBytes)
+	}))
+	defer upstream.Close()
+
+	s := newTestStoreForProxy(t)
+	reg, router := newTestRouting(t, s)
+	p := newProxy(reg, router, s, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	t.Cleanup(p.Close)
+	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-3"}`))
+	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
+	w := httptest.NewRecorder()
+	p.handleAnthropic(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if w.Header().Get("Content-Encoding") != "gzip" {
+		t.Errorf("client Content-Encoding = %q, want gzip (passthrough)", w.Header().Get("Content-Encoding"))
+	}
+	if !bytes.Equal(w.Body.Bytes(), gzBytes) {
+		t.Errorf("client body != upstream gzip bytes (len got=%d want=%d)", w.Body.Len(), len(gzBytes))
+	}
+
+	row := waitForRequestLog(t, s, func(r store.RequestLog) bool { return r.Outcome != "" })
+	if row.InputTokens != nil || row.OutputTokens != nil {
+		t.Errorf("tokens = in=%v out=%v, want nil (compressed body is not parsed)", row.InputTokens, row.OutputTokens)
+	}
+	if row.Outcome != store.RequestLogOutcomeOK {
+		t.Errorf("Outcome = %q, want ok (the response itself is fine)", row.Outcome)
 	}
 }
