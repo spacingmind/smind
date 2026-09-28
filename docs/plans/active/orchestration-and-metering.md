@@ -317,7 +317,8 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] M1: wsapi `usage.*` + `smind usage`
 - [ ] O1: run provenance
 - [ ] O1: stop/resume keeps the session
-- [ ] O2: MCP parent params + guards + guide
+- [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
+      concurrency guard and guide stay Wave 2)
 - [x] ADR-M drafted as ADR-0020 (Proposed)
 - [ ] ADR-0020 accepted
 - [x] ADR-O drafted as ADR-0021 (Proposed)
@@ -382,4 +383,19 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
   `TestRunUsagePrintsSummaryRows`/`TestRunUsageEmpty`/`TestRunUsageRejectsBadGroupBy`
   (`cmd/smind/usage_test.go`).
 
-Not started: O1, O2, ADR-M, ADR-O.
+
+- O2 (Wave 1 slice, branch `feat/task-hierarchy`, commits 401cc49,
+  4387fe6, 2f18bc1): test scenarios covered —
+  `TestMCPTools_TaskHierarchy` (`cmd/smind/mcp_tools_test.go`) proves a
+  depth-2 child succeeds and depth 3 returns the depth error through MCP
+  as a tool error, and that a cross-workspace or nonexistent parent
+  surfaces the daemon error text; `TestManager_CreateTask_DepthLimit` /
+  `..._DepthLimitConfigurable` (`internal/workspace/task_hierarchy_test.go`)
+  pin the guard itself and its configurability;
+  `TestStore_TaskDepth` pins ancestor counting; `TestDefault_OrchestrationMaxDepth`
+  / `TestLoad_OrchestrationMaxDepthOverride` (`internal/config/config_test.go`)
+  pin the default (2) and the config.yaml override. The per-tree
+  concurrency scenario ("a fifth concurrent run") and the guide are
+  Wave 2 and remain untested by design. `task test` + `task lint` green.
+
+Not started: O1, O2 Wave 2 items, ADR-0020/ADR-0021 implementation (both still Proposed).

@@ -11,7 +11,8 @@ import (
 
 // Config is the root daemon configuration.
 type Config struct {
-	Server ServerConfig `yaml:"server"`
+	Server        ServerConfig        `yaml:"server"`
+	Orchestration OrchestrationConfig `yaml:"orchestration"`
 }
 
 // ServerConfig controls the HTTP server.
@@ -20,10 +21,21 @@ type ServerConfig struct {
 	Port int `yaml:"port"`
 }
 
+// OrchestrationConfig guards agent-driven task orchestration (a task
+// spawning child tasks of its own, e.g. via the MCP task_new tool).
+type OrchestrationConfig struct {
+	// MaxDepth caps how many ancestors a task may have: a root task is at
+	// depth 0, so the default (2) allows a root task's children and
+	// grandchildren but rejects a great-grandchild. Enforced by
+	// internal/workspace.Manager.CreateTask.
+	MaxDepth int `yaml:"maxDepth"`
+}
+
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
-		Server: ServerConfig{Port: 4648},
+		Server:        ServerConfig{Port: 4648},
+		Orchestration: OrchestrationConfig{MaxDepth: 2},
 	}
 }
 

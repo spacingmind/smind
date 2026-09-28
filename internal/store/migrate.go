@@ -66,6 +66,19 @@ var migrations = []migration{
 			return backfillDefaultChats(db)
 		},
 	},
+	{
+		// Task hierarchy (docs/plans/active/smind-control-parity.md): nullable
+		// parent pointer on tasks, nil for root tasks. Pre-existing databases
+		// get the column; no backfill needed (NULL is the valid root default).
+		name: "tasks.parent_task_id",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "tasks", "parent_task_id", "INTEGER REFERENCES tasks(id)"); err != nil {
+				return err
+			}
+			_, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_parent_task_id ON tasks(parent_task_id)`)
+			return err
+		},
+	},
 }
 
 // backfillDefaultChats gives every task exactly one default chat
