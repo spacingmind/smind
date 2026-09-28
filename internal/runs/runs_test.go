@@ -1812,3 +1812,148 @@ func TestRegistry_SetPermissionMode_ConcurrentSwitchesStayConsistent(t *testing.
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
 }
+
+// runUnderTest fetches a running run's *run for tests that drive
+// applyReportedMode directly.
+func runUnderTest(t *testing.T, reg *Registry, runID string) *run {
+	t.Helper()
+	reg.mu.Lock()
+	r := reg.runs[runID]
+	reg.mu.Unlock()
+	if r == nil {
+		t.Fatalf("run %q not found in registry", runID)
+	}
+	return r
+}
+
+// TestRegistry_ApplyReportedMode_InitialAfterLiveSwitchIsDropped is the
+// stale-start-report race: once a live switch to B has begun, a start-mode
+// report for A (Initial=true, still in flight from run startup) must be
+// dropped rather than reverting both the run's recorded mode and its store
+// row to A while the agent is in B.
+func TestRegistry_ApplyReportedMode_InitialAfterLiveSwitchIsDropped(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	if err := reg.SetPermissionMode(context.Background(), runID, "accept_edits"); err != nil {
+		t.Fatalf("SetPermissionMode() error = %v", err)
+	}
+
+	r := runUnderTest(t, reg, runID)
+	reg.applyReportedMode(r, "default", true)
+
+	_, status, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if status.PermissionMode != "accept_edits" {
+		t.Fatalf("PermissionMode = %q after a stale Initial report, want accept_edits", status.PermissionMode)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.PermissionMode != "accept_edits" {
+		t.Fatalf("stored PermissionMode = %q after a stale Initial report, want accept_edits", row.PermissionMode)
+	}
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}
+
+// TestRegistry_ApplyReportedMode_InitialWithoutSwitchIsApplied proves the
+// guard only kicks in after a live switch: with no switch begun, a start
+// mode report (Initial=true) is still applied, so a run that left the agent
+// in its own start mode records which one that is.
+func TestRegistry_ApplyReportedMode_InitialWithoutSwitchIsApplied(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	r := runUnderTest(t, reg, runID)
+	reg.applyReportedMode(r, "accept_edits", true)
+
+	_, status, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if status.PermissionMode != "accept_edits" {
+		t.Fatalf("PermissionMode = %q after an Initial report, want accept_edits", status.PermissionMode)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.PermissionMode != "accept_edits" {
+		t.Fatalf("stored PermissionMode = %q after an Initial report, want accept_edits", row.PermissionMode)
+	}
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}
+
+// TestRegistry_ApplyReportedMode_NonInitialAfterSwitchIsApplied proves the
+// guard never eats agent-driven reports (current_mode_update,
+// Initial=false): even after a live switch, the agent reporting its own
+// later switch still wins.
+func TestRegistry_ApplyReportedMode_NonInitialAfterSwitchIsApplied(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "permission")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "modes:session"}))
+
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	req := waitForPermissionRequest(t, reg, runID, 5*time.Second)
+
+	if err := reg.SetPermissionMode(context.Background(), runID, "accept_edits"); err != nil {
+		t.Fatalf("SetPermissionMode() error = %v", err)
+	}
+
+	r := runUnderTest(t, reg, runID)
+	reg.applyReportedMode(r, "default", false)
+
+	_, status, err := reg.History(runID)
+	if err != nil {
+		t.Fatalf("History() error = %v", err)
+	}
+	if status.PermissionMode != "default" {
+		t.Fatalf("PermissionMode = %q after a non-initial report, want default", status.PermissionMode)
+	}
+	row, err := st.GetRun(runID)
+	if err != nil {
+		t.Fatalf("GetRun() error = %v", err)
+	}
+	if row.PermissionMode != "default" {
+		t.Fatalf("stored PermissionMode = %q after a non-initial report, want default", row.PermissionMode)
+	}
+
+	if err := reg.RespondPermission(runID, req.PermissionRequestID, "allow-1"); err != nil {
+		t.Fatalf("RespondPermission() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}

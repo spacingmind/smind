@@ -81,8 +81,9 @@ var migrations = []migration{
 	},
 	{
 		// ADR-0019: provider-native permission modes replace the legacy
-		// approval_policy (manual/auto-safe/full-access), which is kept
-		// but never read or written again (resolved decision 8).
+		// approval_policy (manual/auto-safe/full-access), which the
+		// backfill clears in the same UPDATE so each row is migrated
+		// exactly once (resolved decision 8).
 		name: "permission_modes",
 		apply: func(db *sql.DB) error {
 			for _, table := range []string{"runs", "agent_profiles"} {

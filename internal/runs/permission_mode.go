@@ -38,6 +38,7 @@ func (reg *Registry) SetPermissionMode(ctx context.Context, runID, mode string) 
 	}
 	r.modeSwitchMu.Lock()
 	defer r.modeSwitchMu.Unlock()
+	r.explicitModeSwitches.Add(1)
 	if err := r.requireRunning("set permission mode"); err != nil {
 		return err
 	}
@@ -115,7 +116,10 @@ func (r *run) requireRunning(op string) error {
 // persisted too (best-effort, like record: this runs on drive's forwarding
 // goroutine with no caller to return an error to) so the stored row keeps
 // up with the agent's own switches, not just smind-initiated ones.
-func (reg *Registry) applyReportedMode(r *run, mode string) {
+func (reg *Registry) applyReportedMode(r *run, mode string, initial bool) {
+	if initial && r.explicitModeSwitches.Load() > 0 {
+		return
+	}
 	r.mu.Lock()
 	changed := r.perm.Mode != mode
 	r.perm.Mode = mode

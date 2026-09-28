@@ -219,6 +219,10 @@ type Event struct {
 	// full wire JSON (acp.SessionUpdate.Raw), forwarded unparsed since
 	// there is no typed shape for a kind this package doesn't recognize.
 	RawPayload json.RawMessage
+
+	// Initial is set only on the EventTypePermissionModeChanged that
+	// reports the mode a run started in.
+	Initial bool
 }
 
 // PermissionResolution categorizes how an EventTypePermissionResolved

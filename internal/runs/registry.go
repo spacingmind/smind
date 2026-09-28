@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -305,6 +306,10 @@ type run struct {
 	// while holding mu.
 	modeSwitchMu sync.Mutex
 
+	// explicitModeSwitches is bumped when a live switch begins; a
+	// start-mode report seen after that is stale.
+	explicitModeSwitches atomic.Int64
+
 	history     []Event
 	subscribers map[int]*subQueue
 	nextSubID   int
@@ -530,7 +535,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 		defer close(forwardDone)
 		for e := range events {
 			if e.Type == taskrunner.EventTypePermissionModeChanged {
-				reg.applyReportedMode(r, e.Text)
+				reg.applyReportedMode(r, e.Text, e.Initial)
 				continue
 			}
 			reg.record(r, e)

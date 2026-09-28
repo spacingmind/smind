@@ -331,7 +331,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	defer r.endACPTurn(chatID)
 	if mode, ok := currentACPMode(client, sessionID, updated); ok {
 		select {
-		case events <- Event{Type: EventTypePermissionModeChanged, Text: mode}:
+		case events <- Event{Type: EventTypePermissionModeChanged, Text: mode, Initial: true}:
 		case <-ctx.Done():
 		}
 	}
