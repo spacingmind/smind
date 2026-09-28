@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.0.0](https://github.com/spacingmind/smind/compare/v0.8.0...v1.0.0) (2026-09-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* the approvalPolicy wire field, run.setApprovalPolicy, and the --approval-policy CLI flag are removed.
+
+### Features
+
+* **cli:** smind mcp serve task_wait + task_stop + stdio e2e (ADR-0017 steps 4, 5, 7) ([#228](https://github.com/spacingmind/smind/issues/228)) ([83c7eb1](https://github.com/spacingmind/smind/commit/83c7eb1165d61fb79521a8409916cf8b74a7afc3))
+* **cli:** smind mcp serve with read-only MCP tools (ADR-0017 steps 1-2) ([#223](https://github.com/spacingmind/smind/issues/223)) ([63aafc3](https://github.com/spacingmind/smind/commit/63aafc3dc71f12a774c992570b1f058cb44770d6))
+* mcp_servers wsapi + events + CLI with secret redaction (ADR-0018 step 2) ([#230](https://github.com/spacingmind/smind/issues/230)) ([b738680](https://github.com/spacingmind/smind/commit/b7386801906aaeb4f0beced973d728b93b8023d0))
+* **server:** per-request proxy request_log with token usage (M1) ([#226](https://github.com/spacingmind/smind/issues/226)) ([114e348](https://github.com/spacingmind/smind/commit/114e3484fe5b1c76424b457a5e07da0e98f771ff))
+* **store:** mcp_servers table, CRUD, and mcpservers.Registry (ADR-0018 step 1) ([#222](https://github.com/spacingmind/smind/issues/222)) ([d27b699](https://github.com/spacingmind/smind/commit/d27b699eea944aed38e059ff07ed05071820bd81))
+* task parent/child hierarchy + MCP parent params + depth guard ([#229](https://github.com/spacingmind/smind/issues/229)) ([63a4f15](https://github.com/spacingmind/smind/commit/63a4f15337329152ab5673951f14f25d38a7881b))
+
+
+### Bug Fixes
+
+* **taskrunner:** stopped runs keep their agent session (O1) ([#232](https://github.com/spacingmind/smind/issues/232)) ([1454329](https://github.com/spacingmind/smind/commit/1454329a74c9bbd0022619c3a4f85db1a7c11f90))
+
+
+### Code Refactoring
+
+* replace ApprovalPolicy with provider-native permission modes (ADR-0019) ([#231](https://github.com/spacingmind/smind/issues/231)) ([16927b9](https://github.com/spacingmind/smind/commit/16927b93df7ebf0a66629fd9e9ec4d7770a8e054))
+
 ## [0.8.0](https://github.com/spacingmind/smind/compare/v0.7.0...v0.8.0) (2026-09-27)
 
 
