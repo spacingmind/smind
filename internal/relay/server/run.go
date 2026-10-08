@@ -119,6 +119,10 @@ func Run(ctx context.Context, cfg Config) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Release idle routes/bindings even when no new traffic triggers the
+	// opportunistic sweep (bounded relay memory).
+	go srv.RunJanitor(ctx)
+
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- gs.Serve(lis)

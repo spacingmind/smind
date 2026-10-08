@@ -37,6 +37,13 @@ type harness struct {
 
 func newHarness(t *testing.T, bufferCap int) *harness {
 	t.Helper()
+	return newHarnessWithOptions(t, bufferCap)
+}
+
+// newHarnessWithOptions is newHarness with Server options (fake clock,
+// bounds) for the state-bound tests.
+func newHarnessWithOptions(t *testing.T, bufferCap int, opts ...Option) *harness {
+	t.Helper()
 	ws, secret, err := admission.NewWorkspace(testWorkspace)
 	if err != nil {
 		t.Fatalf("NewWorkspace: %v", err)
@@ -44,7 +51,7 @@ func newHarness(t *testing.T, bufferCap int) *harness {
 	verifier := admission.NewVerifier()
 	verifier.Register(ws)
 
-	srv := New(verifier, bufferCap)
+	srv := New(verifier, bufferCap, opts...)
 	listener := bufconn.Listen(64 * 1024)
 	gs := grpc.NewServer()
 	srv.Register(gs)
