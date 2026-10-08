@@ -38,7 +38,7 @@ func TestFrameRoundTrip(t *testing.T) {
 }
 
 // TestAdmitRoundTrip checks the admission transcript messages round-trip —
-// the HMAC challenge-response inputs must all survive encoding exactly, or
+// the admission proof inputs must all survive encoding exactly, or
 // the daemon's proof would not verify on the relay side.
 func TestAdmitRoundTrip(t *testing.T) {
 	chalReq := &AdmitChallengeRequest{
@@ -54,7 +54,7 @@ func TestAdmitRoundTrip(t *testing.T) {
 		ClientNonce:     chalReq.ClientNonce,
 		DaemonKeyId:     chalReq.DaemonKeyId,
 		ServerNonce:     chal.ServerNonce,
-		Hmac:            []byte("hmac-tag"),
+		Hmac:            []byte("proof"),
 	}
 	resp := &AdmitResponse{AdmissionId: []byte("admission-1")}
 

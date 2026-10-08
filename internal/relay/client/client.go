@@ -60,9 +60,10 @@ func Dial(target, fingerprint string) (*grpc.ClientConn, error) {
 }
 
 // Admit completes the admission exchange (ADR-0011) over c: obtains a
-// server nonce and proves possession of the workspace secret via
-// admission.ComputeHMAC's canonical transcript. Returns the admission ID
-// (hex) to present on subsequent streams.
+// server nonce and proves possession of the raw workspace secret with the
+// SCRAM-style proof of admission.ComputeProof (the secret itself never
+// leaves the process). Returns the admission ID (hex) to present on
+// subsequent streams.
 func Admit(ctx context.Context, c relaypb.RelayClient, workspaceID, daemonKeyID string, secret []byte) (string, error) {
 	clientNonce := make([]byte, admission.NonceSize)
 	if _, err := rand.Read(clientNonce); err != nil {
@@ -84,7 +85,7 @@ func Admit(ctx context.Context, c relaypb.RelayClient, workspaceID, daemonKeyID 
 		DaemonKeyId:     daemonKeyID,
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = admission.ComputeHMAC(admission.HashSecret(secret), req)
+	req.Hmac = admission.ComputeProof(secret, req)
 	resp, err := c.Admit(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("relay client: admit: %w", err)
@@ -134,11 +135,25 @@ func OpenControl(ctx context.Context, c relaypb.RelayClient, admissionID, worksp
 type DataConn struct {
 	channel *e2ee.Channel
 	frames  *frameConn
+	pin     []e2ee.HandshakeOption
+}
+
+// DataOption configures OpenData.
+type DataOption func(*DataConn)
+
+// WithExpectedPeerKey pins the peer's E2EE public key for this connection's
+// Handshake (see e2ee.WithExpectedPeerKey): a mobile-role connection made
+// from a pairing offer passes the offer's daemon key, so a handshake with
+// any other key fails with e2ee.ErrPeerKeyMismatch. Omit it only when no
+// offer key is known.
+func WithExpectedPeerKey(pub []byte) DataOption {
+	return func(d *DataConn) { d.pin = append(d.pin, e2ee.WithExpectedPeerKey(pub)) }
 }
 
 // Handshake runs the E2EE handshake over the relay, starting a fresh
 // session (see the DataConn doc for when to choose this over Resume).
-func (d *DataConn) Handshake(ctx context.Context) error { return d.channel.Handshake(ctx) }
+// A key pinned via WithExpectedPeerKey is enforced here.
+func (d *DataConn) Handshake(ctx context.Context) error { return d.channel.Handshake(ctx, d.pin...) }
 
 // Resume reopens the OpenData stream over a newly dialled client after a
 // transport-level drop, resuming the previously established session: the
@@ -184,7 +199,7 @@ func (d *DataConn) Close() error { return d.channel.Close() }
 // admission, wraps it as an io.ReadWriteCloser of framed ciphertext, and
 // layers an e2ee.Channel on top using the given keypair and role. The
 // returned DataConn must complete Handshake before Send/Receive.
-func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, kp *e2ee.KeyPair, role e2ee.Role) (*DataConn, error) {
+func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspaceID, sessionID, deviceID string, kp *e2ee.KeyPair, role e2ee.Role, opts ...DataOption) (*DataConn, error) {
 	sctx := metadata.AppendToOutgoingContext(ctx, metadataKeyAdmission, admissionID)
 	stream, err := c.OpenData(sctx)
 	if err != nil {
@@ -207,7 +222,11 @@ func OpenData(ctx context.Context, c relaypb.RelayClient, admissionID, workspace
 		fc.Close()
 		return nil, fmt.Errorf("relay client: e2ee channel: %w", err)
 	}
-	return &DataConn{channel: channel, frames: fc}, nil
+	d := &DataConn{channel: channel, frames: fc}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d, nil
 }
 
 func directionFor(role e2ee.Role) relaypb.Direction {

@@ -35,7 +35,7 @@ import (
 // addition carries zero risk of changing native gRPC's existing,
 // already-tested behavior; Run wires the two listeners together.
 //
-// The relay's real access control is the HMAC admission handshake
+// The relay's real access control is the SCRAM-style admission handshake
 // (internal/relay/admission) every RPC still requires, not same-origin
 // policy, so the CORS/websocket origin checks here are permissive by
 // design: tightening them would not add security (a browser's CORS

@@ -60,6 +60,12 @@ var (
 	// session, never an in-place rekey (ADR-0007 (e)), so this closes the
 	// channel instead of re-deriving keys.
 	ErrKeyRotation = errors.New("e2ee: peer re-handshaked with a different key")
+	// ErrPeerKeyMismatch marks a handshake whose peer hello carried a
+	// public key other than the one pinned with WithExpectedPeerKey — the
+	// pairing-offer pin (mobile/src/relay/e2ee.ts's daemonPublicKeyIfMobile,
+	// desktop channel.rs's ChannelError::PinMismatch). The channel is
+	// closed; no session is derived.
+	ErrPeerKeyMismatch = errors.New("e2ee: peer public key does not match the pinned key")
 	// ErrNotEstablished is returned when application traffic is attempted
 	// before the handshake completes.
 	ErrNotEstablished = errors.New("e2ee: handshake not completed")
@@ -106,6 +112,31 @@ func NewChannel(conn io.ReadWriteCloser, kp *KeyPair, role Role) (*Channel, erro
 	return &Channel{conn: conn, kp: kp, role: role, reader: bufio.NewReader(conn)}, nil
 }
 
+// HandshakeOption configures a single Handshake call.
+type HandshakeOption func(*handshakeConfig)
+
+type handshakeConfig struct {
+	pinned          bool
+	expectedPeerKey []byte
+}
+
+// WithExpectedPeerKey pins the peer's X25519 public key: if the peer's
+// hello carries any other key, Handshake fails with ErrPeerKeyMismatch
+// (and closes the channel) before deriving a session or sending ready.
+//
+// This is how a device (mobile role) that holds a pairing offer refuses to
+// complete a handshake with anything but the daemon the offer named, even
+// if the relay/admission layer let the connection through (ADR-0007). The
+// pin fails closed: pinning an empty or malformed key can never match, so
+// a missing offer key cannot silently turn into "no pin" — omit the option
+// to run unpinned. A daemon accepting any admitted device omits it.
+func WithExpectedPeerKey(pub []byte) HandshakeOption {
+	return func(c *handshakeConfig) {
+		c.pinned = true
+		c.expectedPeerKey = bytes.Clone(pub)
+	}
+}
+
 // Handshake runs the X25519 exchange: send hello, read the peer's hello,
 // derive the directional keys, then exchange ready frames. It returns only
 // once both ends have confirmed, so no application frame can be accepted
@@ -114,7 +145,11 @@ func NewChannel(conn io.ReadWriteCloser, kp *KeyPair, role Role) (*Channel, erro
 // Cancelling ctx (or its deadline expiring) closes the connection, which
 // unblocks any in-flight read — a peer that connects and then says nothing
 // cannot make the handshake hang.
-func (c *Channel) Handshake(ctx context.Context) error {
+func (c *Channel) Handshake(ctx context.Context, opts ...HandshakeOption) error {
+	var cfg handshakeConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	c.mu.Lock()
 	switch {
 	case c.closed:
@@ -136,6 +171,9 @@ func (c *Channel) Handshake(ctx context.Context) error {
 	peerPub, err := c.readHello()
 	if err != nil {
 		return c.fail(err)
+	}
+	if cfg.pinned && !bytes.Equal(peerPub, cfg.expectedPeerKey) {
+		return c.fail(ErrPeerKeyMismatch)
 	}
 	session, err := c.deriveSession(peerPub)
 	if err != nil {

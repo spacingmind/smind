@@ -26,6 +26,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -41,6 +42,37 @@ import (
 // reconnect; past the cap the oldest is evicted (ADR-0007 (a), paseo's
 // 200-frame precedent).
 const DefaultBufferCap = 200
+
+// Bounds on relay state that would otherwise grow for as long as the
+// process runs (every Admit adds a binding, every distinct
+// (workspace, session, device) adds a route). All are overridable with the
+// Options below; the defaults are far above normal use (a workspace has a
+// handful of devices, and a daemon re-admits only after a restart or
+// reconnect) and low enough that a misbehaving client cannot make the relay
+// hold unbounded memory.
+const (
+	// DefaultRouteGrace is how long a route with NO attached stream on
+	// either side is kept (with its reconnect buffers) before it is
+	// garbage-collected. Within the window the reconnect-buffer behavior of
+	// ADR-0007 (a) is unchanged; past it the peer must start a new session.
+	DefaultRouteGrace = 5 * time.Minute
+
+	// DefaultMaxBindingsPerWorkspace caps live admission bindings per
+	// workspace; past it the least-recently-used binding is evicted (its
+	// holder re-admits, which is cheap).
+	DefaultMaxBindingsPerWorkspace = 64
+
+	// DefaultBindingTTL expires a binding that has gone this long without
+	// being presented on a stream (and has no stream attached). It is
+	// refreshed on every stream open and every stream end, so
+	// DataConn.Resume after a normal drop always finds its binding.
+	DefaultBindingTTL = 24 * time.Hour
+
+	// sweepInterval rate-limits the opportunistic sweep that rides on
+	// Admit / attachRoute; Run also drives Sweep from a ticker so an idle
+	// relay releases memory too.
+	sweepInterval = 30 * time.Second
+)
 
 // MetadataKeyAdmission is the metadata key a client uses to present the
 // admission ID returned by a successful Admit on subsequent streams, as
@@ -71,11 +103,62 @@ type Server struct {
 	verifier  *admission.Verifier
 	bufferCap int
 
+	now              func() time.Time
+	routeGrace       time.Duration
+	maxBindingsPerWS int
+	bindingTTL       time.Duration
+
 	mu struct {
 		sync.Mutex
-		bindings map[string]string // admission ID -> workspace ID
-		routes   map[string]*route // routeKey -> route
+		bindings  map[string]*binding // admission ID -> binding
+		routes    map[string]*route   // routeKey -> route
+		lastSweep time.Time
 	}
+}
+
+// binding is one admission ID's workspace binding plus the bookkeeping
+// that bounds it. Guarded by Server.mu.
+type binding struct {
+	workspaceID string
+	// lastUsed is refreshed when a stream presents the binding and again
+	// when that stream ends, so the TTL measures idleness, not age.
+	lastUsed time.Time
+	// active counts streams currently holding the binding; a binding in
+	// use is never expired, however long its streams live.
+	active int
+}
+
+// Option configures a Server.
+type Option func(*Server)
+
+// WithRouteGrace sets how long a route with no attached stream on either
+// side is kept before garbage collection (<=0 keeps DefaultRouteGrace).
+func WithRouteGrace(d time.Duration) Option {
+	return func(s *Server) {
+		if d > 0 {
+			s.routeGrace = d
+		}
+	}
+}
+
+// WithBindingLimits sets the per-workspace cap on admission bindings and
+// the idle TTL after which an unused binding expires (<=0 keeps the
+// default for that bound).
+func WithBindingLimits(maxPerWorkspace int, ttl time.Duration) Option {
+	return func(s *Server) {
+		if maxPerWorkspace > 0 {
+			s.maxBindingsPerWS = maxPerWorkspace
+		}
+		if ttl > 0 {
+			s.bindingTTL = ttl
+		}
+	}
+}
+
+// WithClock injects the time source used for route grace and binding TTLs,
+// so tests advance a fake clock instead of sleeping.
+func WithClock(now func() time.Time) Option {
+	return func(s *Server) { s.now = now }
 }
 
 // route is one E2EE session's forwarding state between the daemon side
@@ -89,6 +172,10 @@ type route struct {
 	mu struct {
 		sync.Mutex
 		streams map[side]relaypb.Relay_OpenDataServer
+		// idleSince is when the last attached stream detached; zero while
+		// any stream is attached. A route idle longer than the server's
+		// route grace is garbage-collected.
+		idleSince time.Time
 		// pumpCancel stops the CURRENT send pump for a side (see
 		// attachRoute's doc comment for why a side's pump needs an
 		// independent, explicitly-cancellable context rather than reusing
@@ -101,14 +188,113 @@ type route struct {
 
 // New creates a Server using the admission Verifier and a per-side
 // reconnect buffer cap (<=0 means DefaultBufferCap).
-func New(verifier *admission.Verifier, bufferCap int) *Server {
+func New(verifier *admission.Verifier, bufferCap int, opts ...Option) *Server {
 	if bufferCap <= 0 {
 		bufferCap = DefaultBufferCap
 	}
-	s := &Server{verifier: verifier, bufferCap: bufferCap}
-	s.mu.bindings = make(map[string]string)
+	s := &Server{
+		verifier:         verifier,
+		bufferCap:        bufferCap,
+		now:              time.Now,
+		routeGrace:       DefaultRouteGrace,
+		maxBindingsPerWS: DefaultMaxBindingsPerWorkspace,
+		bindingTTL:       DefaultBindingTTL,
+	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	s.mu.bindings = make(map[string]*binding)
 	s.mu.routes = make(map[string]*route)
 	return s
+}
+
+// Sweep garbage-collects expired state now: routes idle past the grace
+// period (with their buffers) and bindings idle past the TTL. It is cheap,
+// idempotent and safe to call at any time; Run drives it from a ticker and
+// Admit/attachRoute also trigger it opportunistically, so state is
+// bounded even on a relay that sees no new traffic.
+func (s *Server) Sweep() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sweepLocked(s.now())
+}
+
+// RunJanitor calls Sweep every sweepInterval until ctx is done.
+func (s *Server) RunJanitor(ctx context.Context) {
+	t := time.NewTicker(sweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.Sweep()
+		}
+	}
+}
+
+func (s *Server) maybeSweepLocked(now time.Time) {
+	if now.Sub(s.mu.lastSweep) >= sweepInterval {
+		s.sweepLocked(now)
+	}
+}
+
+func (s *Server) sweepLocked(now time.Time) {
+	s.mu.lastSweep = now
+	for key, r := range s.mu.routes {
+		r.mu.Lock()
+		gone := len(r.mu.streams) == 0 && !r.mu.idleSince.IsZero() && now.Sub(r.mu.idleSince) > s.routeGrace
+		r.mu.Unlock()
+		if gone {
+			delete(s.mu.routes, key)
+		}
+	}
+	for id, b := range s.mu.bindings {
+		if s.bindingExpired(b, now) {
+			delete(s.mu.bindings, id)
+		}
+	}
+}
+
+func (s *Server) bindingExpired(b *binding, now time.Time) bool {
+	return b.active == 0 && now.Sub(b.lastUsed) > s.bindingTTL
+}
+
+// addBindingLocked records a new admission binding, first evicting the
+// workspace's least-recently-used binding(s) while it is at the cap.
+// Bindings with no attached stream are preferred victims; a binding in use
+// is only evicted when every one of the workspace's bindings is in use
+// (its stream keeps running — only a later Resume would need a fresh
+// admission).
+func (s *Server) addBindingLocked(id, workspaceID string, now time.Time) {
+	for {
+		count := 0
+		var victimID string
+		var victim *binding
+		for bid, b := range s.mu.bindings {
+			if b.workspaceID != workspaceID {
+				continue
+			}
+			count++
+			if victim == nil || olderVictim(b, victim) {
+				victimID, victim = bid, b
+			}
+		}
+		if count < s.maxBindingsPerWS {
+			break
+		}
+		delete(s.mu.bindings, victimID)
+	}
+	s.mu.bindings[id] = &binding{workspaceID: workspaceID, lastUsed: now}
+}
+
+// olderVictim reports whether a is a better eviction victim than b: idle
+// before in-use, then least recently used.
+func olderVictim(a, b *binding) bool {
+	if (a.active == 0) != (b.active == 0) {
+		return a.active == 0
+	}
+	return a.lastUsed.Before(b.lastUsed)
 }
 
 // Register attaches the service to a grpc.Server (in-process tests now;
@@ -129,14 +315,20 @@ func (s *Server) Admit(ctx context.Context, req *relaypb.AdmitRequest) (*relaypb
 		return nil, err
 	}
 	s.mu.Lock()
-	s.mu.bindings[hex.EncodeToString(session.AdmissionID)] = session.WorkspaceID
+	now := s.now()
+	s.maybeSweepLocked(now)
+	s.addBindingLocked(hex.EncodeToString(session.AdmissionID), session.WorkspaceID, now)
 	s.mu.Unlock()
 	return &relaypb.AdmitResponse{AdmissionId: session.AdmissionID}, nil
 }
 
 // binding resolves the workspace binding a stream presents via its
-// admission-id metadata, or fails with errNotAdmitted.
-func (s *Server) binding(ctx context.Context) (string, error) {
+// admission-id metadata, or fails with errNotAdmitted. On success the
+// binding is marked in use until the returned release func is called (once,
+// when the stream ends): a binding with a live stream never expires, and
+// its idle clock restarts when the stream ends so a reconnect/Resume within
+// the TTL still finds it.
+func (s *Server) binding(ctx context.Context) (workspaceID string, release func(), err error) {
 	id := ""
 	if md, ok := metadata.FromIncomingContext(ctx); ok {
 		if v := md.Get(MetadataKeyAdmission); len(v) == 1 {
@@ -144,15 +336,33 @@ func (s *Server) binding(ctx context.Context) (string, error) {
 		}
 	}
 	if id == "" {
-		return "", errNotAdmitted
+		return "", nil, errNotAdmitted
 	}
 	s.mu.Lock()
-	ws, ok := s.mu.bindings[id]
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	now := s.now()
+	b, ok := s.mu.bindings[id]
 	if !ok {
-		return "", errNotAdmitted
+		return "", nil, errNotAdmitted
 	}
-	return ws, nil
+	if s.bindingExpired(b, now) {
+		delete(s.mu.bindings, id)
+		return "", nil, errNotAdmitted
+	}
+	b.active++
+	b.lastUsed = now
+	var once sync.Once
+	release = func() {
+		once.Do(func() {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			// b may have been evicted meanwhile; releasing a dropped
+			// binding is a harmless no-op on an orphaned struct.
+			b.active--
+			b.lastUsed = s.now()
+		})
+	}
+	return b.workspaceID, release, nil
 }
 
 // --- Control socket ---
@@ -165,10 +375,11 @@ func (s *Server) OpenControl(stream relaypb.Relay_OpenControlServer) error {
 	if err != nil {
 		return err
 	}
-	ws, err := s.binding(stream.Context())
+	ws, release, err := s.binding(stream.Context())
 	if err != nil {
 		return err
 	}
+	defer release()
 	if first.GetWorkspaceId() != ws {
 		return errWrongBinding
 	}
@@ -225,10 +436,11 @@ func (s *Server) OpenData(stream relaypb.Relay_OpenDataServer) error {
 	if err := s.checkFrame(first); err != nil {
 		return err
 	}
-	ws, err := s.binding(stream.Context())
+	ws, release, err := s.binding(stream.Context())
 	if err != nil {
 		return err
 	}
+	defer release()
 	if first.GetWorkspaceId() != ws {
 		return errWrongBinding
 	}
@@ -365,6 +577,7 @@ func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay
 	key := routeKey(first.GetWorkspaceId(), string(first.GetSessionId()), first.GetDeviceId())
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.maybeSweepLocked(s.now())
 	r, ok := s.mu.routes[key]
 	if !ok {
 		r = &route{
@@ -386,16 +599,23 @@ func (s *Server) attachRoute(first *relaypb.Frame, sd side, stream relaypb.Relay
 	pumpCtx, cancel := context.WithCancel(stream.Context())
 	r.mu.pumpCancel[sd] = cancel
 	r.mu.streams[sd] = stream
+	r.mu.idleSince = time.Time{}
 	return r, pumpCtx
 }
 
 // detach removes this stream from the route if a reconnect has not
 // already replaced it. Queues persist in the route, which is what carries
-// frames across the disconnect gap.
+// frames across the disconnect gap — until no stream has been attached to
+// either side for routeGrace, when Sweep collects the route.
 func (s *Server) detach(sd side, r *route, stream relaypb.Relay_OpenDataServer) {
 	r.mu.Lock()
 	if r.mu.streams[sd] == stream {
 		delete(r.mu.streams, sd)
+		if len(r.mu.streams) == 0 {
+			// Start the grace clock: the route (and its reconnect buffers)
+			// is kept for routeGrace waiting for a peer, then collected.
+			r.mu.idleSince = s.now()
+		}
 	}
 	r.mu.Unlock()
 }

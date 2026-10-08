@@ -9,6 +9,7 @@ package client
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -263,7 +264,8 @@ func pairWithClients(
 	if err != nil {
 		t.Fatalf("daemon OpenData: %v", err)
 	}
-	device, err = OpenData(ctx, vc, admissionID, "ws-int", sessionID, deviceID, deviceKey, e2ee.RoleMobile)
+	// The device pins the daemon key it learned from the pairing offer.
+	device, err = OpenData(ctx, vc, admissionID, "ws-int", sessionID, deviceID, deviceKey, e2ee.RoleMobile, WithExpectedPeerKey(daemonKey.Public()))
 	if err != nil {
 		t.Fatalf("device OpenData: %v", err)
 	}
@@ -309,5 +311,47 @@ func TestIntegrationTwoDevicesFanout(t *testing.T) {
 		if !bytes.Equal(got, event) {
 			t.Fatalf("device %d mismatch: %q", i+1, got)
 		}
+	}
+}
+
+// TestIntegrationSubstitutedDaemonKeyFailsHandshake: the device holds the
+// daemon key from its pairing offer; a different daemon (another key)
+// answering on the same route must fail the device's handshake with
+// e2ee.ErrPeerKeyMismatch — parity with the TS/Rust mobile pin.
+func TestIntegrationSubstitutedDaemonKeyFailsHandshake(t *testing.T) {
+	rp, stop := startRelay(t)
+	defer stop()
+
+	offeredKey, _ := e2ee.LoadOrCreateKeyPair(t.TempDir()) // what the offer named
+	imposterKey, _ := e2ee.GenerateKeyPair()               // who actually answers
+	deviceKey, _ := e2ee.GenerateKeyPair()
+	offer := daemonOffer(t, offeredKey, rp)
+	_, admissionID := dialAdmitted(t, rp)
+
+	dc, _ := dialAdmitted(t, rp)
+	vc, _ := dialAdmitted(t, rp)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	imposter, err := OpenData(ctx, dc, admissionID, "ws-int", "sess-x", "dev-x", imposterKey, e2ee.RoleDaemon)
+	if err != nil {
+		t.Fatalf("imposter OpenData: %v", err)
+	}
+	device, err := OpenData(ctx, vc, admissionID, "ws-int", "sess-x", "dev-x", deviceKey, e2ee.RoleMobile, WithExpectedPeerKey(offer.PublicKey))
+	if err != nil {
+		t.Fatalf("device OpenData: %v", err)
+	}
+
+	hsCtx, hsCancel := context.WithCancel(ctx)
+	defer hsCancel()
+	impErr := make(chan error, 1)
+	go func() { impErr <- imposter.Handshake(hsCtx) }()
+
+	if err := device.Handshake(ctx); !errors.Is(err, e2ee.ErrPeerKeyMismatch) {
+		t.Fatalf("device Handshake against a substituted daemon key = %v, want e2ee.ErrPeerKeyMismatch", err)
+	}
+	hsCancel() // the imposter's handshake can only hang or fail; release it
+	if err := <-impErr; err == nil {
+		t.Fatal("imposter handshake completed against a device that rejected its key")
 	}
 }

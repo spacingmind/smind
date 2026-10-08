@@ -3,6 +3,7 @@ package admission
 import (
 	"bytes"
 	"crypto/hmac"
+	"encoding/hex"
 	"errors"
 	"testing"
 	"time"
@@ -11,7 +12,7 @@ import (
 )
 
 // runAdmission performs the full daemon-side exchange against v: obtains a
-// challenge, computes the HMAC the daemon would (key = SHA-256 of the raw
+// challenge, computes the SCRAM-style proof the daemon would (from the raw
 // secret), and calls Admit.
 func runAdmission(v *Verifier, workspaceID, daemonKeyID string, secret []byte) (Session, error) {
 	clientNonce := bytes.Repeat([]byte{0xa5}, NonceSize)
@@ -31,7 +32,7 @@ func runAdmission(v *Verifier, workspaceID, daemonKeyID string, secret []byte) (
 		DaemonKeyId:     daemonKeyID,
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = ComputeHMAC(HashSecret(secret), req)
+	req.Hmac = ComputeProof(secret, req)
 	return v.Admit(req)
 }
 
@@ -104,12 +105,12 @@ func TestAdmitReplayRejected(t *testing.T) {
 		DaemonKeyId:     "daemon-key-1",
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = ComputeHMAC(HashSecret(secret), req)
+	req.Hmac = ComputeProof(secret, req)
 
 	if _, err := v.Admit(req); err != nil {
 		t.Fatalf("first use: %v", err)
 	}
-	// Replay the identical transcript (same server nonce, same HMAC).
+	// Replay the identical transcript (same server nonce, same proof).
 	if _, err := v.Admit(req); !errors.Is(err, ErrRejected) {
 		t.Fatalf("replay: err = %v, want ErrRejected", err)
 	}
@@ -137,7 +138,7 @@ func TestAdmitExpiredNonceRejected(t *testing.T) {
 		DaemonKeyId:     "daemon-key-1",
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = ComputeHMAC(HashSecret(secret), req)
+	req.Hmac = ComputeProof(secret, req)
 
 	v.now = func() time.Time { return base.Add(challengeTTL + time.Second) }
 	if _, err := v.Admit(req); !errors.Is(err, ErrRejected) {
@@ -159,8 +160,8 @@ func TestAdmitTranscriptMismatchRejected(t *testing.T) {
 		t.Fatalf("challenge: %v", err)
 	}
 
-	// Correct HMAC over a *different* transcript: the nonce was issued for
-	// workspace ws-a, the request claims ws-b. A correct-for-ws-b tag must
+	// Correct proof over a *different* transcript: the nonce was issued for
+	// workspace ws-a, the request claims ws-b. A correct-for-ws-b proof must
 	// not admit (cross-workspace binding, ADR-0011).
 	other := &relaypb.AdmitRequest{
 		ProtocolVersion: ProtocolVersion,
@@ -169,7 +170,7 @@ func TestAdmitTranscriptMismatchRejected(t *testing.T) {
 		DaemonKeyId:     "daemon-key-1",
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	other.Hmac = ComputeHMAC(HashSecret(secret), other) // even if ws-b had the same secret
+	other.Hmac = ComputeProof(secret, other) // even if ws-b had the same secret
 	if _, err := v.Admit(other); !errors.Is(err, ErrRejected) {
 		t.Fatalf("cross-workspace transcript: err = %v, want ErrRejected", err)
 	}
@@ -191,7 +192,7 @@ func TestRejectionShapeIsUniform(t *testing.T) {
 		}
 	}
 
-	// Unknown workspace vs wrong secret vs tampered HMAC vs garbage nonce:
+	// Unknown workspace vs wrong secret vs tampered proof vs garbage nonce:
 	// all must be indistinguishable ErrRejected.
 	_, err := runAdmission(v, "ws-nope", "daemon-key-1", secret)
 	generic("unknown workspace", err)
@@ -217,26 +218,26 @@ func TestRejectionShapeIsUniform(t *testing.T) {
 		Hmac:            bytes.Repeat([]byte{0x00}, 32),
 	}
 	_, err = v.Admit(req)
-	generic("tampered hmac", err)
+	generic("tampered proof", err)
 
 	_, err = v.Admit(&relaypb.AdmitRequest{ServerNonce: []byte("never-issued")})
 	generic("unknown nonce", err)
 }
 
-func TestComputeHMACCanonicalForm(t *testing.T) {
+func TestProofMaskCanonicalForm(t *testing.T) {
 	// The transcript encoding must be unambiguous: length prefixes mean
 	// ("ab", "c") and ("a", "bc") style collisions are impossible, and
 	// client vs server nonce positions cannot be swapped to produce the
-	// same tag.
+	// same mask.
 	req := &relaypb.AdmitRequest{
-		ProtocolVersion: 1,
+		ProtocolVersion: ProtocolVersion,
 		WorkspaceId:     "ab",
 		ClientNonce:     []byte{1, 2, 3},
 		ServerNonce:     []byte{4, 5, 6},
 		DaemonKeyId:     "c",
 	}
 	key := []byte("k")
-	base := ComputeHMAC(key, req)
+	base := ProofMask(key, req)
 
 	swapped := &relaypb.AdmitRequest{
 		ProtocolVersion: req.GetProtocolVersion(),
@@ -245,19 +246,199 @@ func TestComputeHMACCanonicalForm(t *testing.T) {
 		ServerNonce:     req.GetClientNonce(),
 		DaemonKeyId:     req.GetDaemonKeyId(),
 	}
-	if hmac.Equal(base, ComputeHMAC(key, swapped)) {
-		t.Fatalf("swapped nonces produced the same HMAC")
+	if hmac.Equal(base, ProofMask(key, swapped)) {
+		t.Fatalf("swapped nonces produced the same mask")
 	}
 
 	boundaries := &relaypb.AdmitRequest{
-		ProtocolVersion: 1,
+		ProtocolVersion: req.GetProtocolVersion(),
 		WorkspaceId:     "a",
 		ClientNonce:     []byte{1, 2, 3},
 		ServerNonce:     []byte{4, 5, 6},
 		DaemonKeyId:     "bc",
 	}
-	if hmac.Equal(base, ComputeHMAC(key, boundaries)) {
-		t.Fatalf("different string split produced the same HMAC")
+	if hmac.Equal(base, ProofMask(key, boundaries)) {
+		t.Fatalf("different string split produced the same mask")
+	}
+}
+
+// TestProofKnownVector pins the exact proof bytes for a fixed input. The
+// identical vector is asserted by mobile/src/relay/__tests__/admission.test.ts
+// and desktop/daemon-client/src/relay/admission.rs, so a drift in any one
+// implementation's transcript/XOR construction fails that implementation's
+// own suite.
+func TestProofKnownVector(t *testing.T) {
+	secret := bytes.Repeat([]byte{0x42}, 32)
+	req := &relaypb.AdmitRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     "ws-vector",
+		ClientNonce:     bytes.Repeat([]byte{0x01}, NonceSize),
+		ServerNonce:     bytes.Repeat([]byte{0x02}, NonceSize),
+		DaemonKeyId:     "key-vector",
+	}
+	got := hex.EncodeToString(ComputeProof(secret, req))
+	if got != knownVectorProofHex {
+		t.Fatalf("proof = %s, want %s", got, knownVectorProofHex)
+	}
+	if !verifyProof(HashSecret(secret), withProof(req, ComputeProof(secret, req))) {
+		t.Fatalf("known-vector proof does not verify against its own stored key")
+	}
+}
+
+const knownVectorProofHex = "b007e940ba3c295ffd33e247373d4d150370b3702d90d9a4757d435227b37cfb"
+
+func withProof(req *relaypb.AdmitRequest, proof []byte) *relaypb.AdmitRequest {
+	cp := &relaypb.AdmitRequest{
+		ProtocolVersion: req.GetProtocolVersion(),
+		WorkspaceId:     req.GetWorkspaceId(),
+		ClientNonce:     req.GetClientNonce(),
+		ServerNonce:     req.GetServerNonce(),
+		DaemonKeyId:     req.GetDaemonKeyId(),
+		Hmac:            proof,
+	}
+	return cp
+}
+
+// TestAdmitStoredKeyAloneCannotAdmit is the regression test for the
+// version-1 flaw: the relay's workspaces.json holds StoredKey, and under
+// v1 that was the HMAC key, so reading the file was enough to admit as the
+// workspace. Under the SCRAM-style proof an attacker holding only
+// StoredKey must be rejected for every proof they can construct from it.
+func TestAdmitStoredKeyAloneCannotAdmit(t *testing.T) {
+	v, secret := newTestVerifier(t, "ws-a")
+	storedKey := HashSecret(secret) // exactly what the relay persists
+
+	attacks := map[string]func(req *relaypb.AdmitRequest) []byte{
+		"v1 style: HMAC(StoredKey, transcript)": func(req *relaypb.AdmitRequest) []byte {
+			return ProofMask(storedKey, req)
+		},
+		"StoredKey passed off as ClientKey": func(req *relaypb.AdmitRequest) []byte {
+			// ComputeProof hashes its input to get StoredKey, so feeding it
+			// StoredKey yields a mask keyed by SHA-256(StoredKey) — wrong —
+			// and the direct construction below uses the right mask but the
+			// wrong ClientKey. Both must fail.
+			return ComputeProof(storedKey, req)
+		},
+		"XOR of mask with StoredKey": func(req *relaypb.AdmitRequest) []byte {
+			mask := ProofMask(storedKey, req)
+			out := make([]byte, len(mask))
+			for i := range out {
+				out[i] = mask[i] ^ storedKey[i]
+			}
+			return out
+		},
+		"all zero":  func(*relaypb.AdmitRequest) []byte { return make([]byte, 32) },
+		"too short": func(*relaypb.AdmitRequest) []byte { return make([]byte, 31) },
+		"too long":  func(*relaypb.AdmitRequest) []byte { return make([]byte, 33) },
+		"empty":     func(*relaypb.AdmitRequest) []byte { return nil },
+		"StoredKey": func(*relaypb.AdmitRequest) []byte { return append([]byte(nil), storedKey...) },
+	}
+	for name, forge := range attacks {
+		t.Run(name, func(t *testing.T) {
+			clientNonce := bytes.Repeat([]byte{0x6b}, NonceSize)
+			chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+				ProtocolVersion: ProtocolVersion,
+				WorkspaceId:     "ws-a",
+				ClientNonce:     clientNonce,
+				DaemonKeyId:     "daemon-key-1",
+			})
+			if err != nil {
+				t.Fatalf("challenge: %v", err)
+			}
+			req := &relaypb.AdmitRequest{
+				ProtocolVersion: ProtocolVersion,
+				WorkspaceId:     "ws-a",
+				ClientNonce:     clientNonce,
+				DaemonKeyId:     "daemon-key-1",
+				ServerNonce:     chal.GetServerNonce(),
+			}
+			req.Hmac = forge(req)
+			if s, err := v.Admit(req); !errors.Is(err, ErrRejected) || s.WorkspaceID != "" {
+				t.Fatalf("forged proof admitted: session=%+v err=%v", s, err)
+			}
+		})
+	}
+
+	// Sanity: the genuine secret holder still gets in on the same verifier.
+	if _, err := runAdmission(v, "ws-a", "daemon-key-1", secret); err != nil {
+		t.Fatalf("genuine admission failed: %v", err)
+	}
+}
+
+func TestAdmitV1Rejected(t *testing.T) {
+	v, secret := newTestVerifier(t, "ws-a")
+	clientNonce := bytes.Repeat([]byte{0x21}, NonceSize)
+
+	if _, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+		ProtocolVersion: 1,
+		WorkspaceId:     "ws-a",
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+	}); !errors.Is(err, ErrRejected) {
+		t.Fatalf("v1 challenge: err = %v, want ErrRejected", err)
+	}
+
+	// A v2 challenge followed by a v1-labelled Admit (with the proof valid
+	// for that v1 transcript, and the old v1 HMAC) must not admit.
+	chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     "ws-a",
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+	})
+	if err != nil {
+		t.Fatalf("challenge: %v", err)
+	}
+	req := &relaypb.AdmitRequest{
+		ProtocolVersion: 1,
+		WorkspaceId:     "ws-a",
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+		ServerNonce:     chal.GetServerNonce(),
+	}
+	req.Hmac = ComputeProof(secret, req)
+	if _, err := v.Admit(req); !errors.Is(err, ErrRejected) {
+		t.Fatalf("v1 admit: err = %v, want ErrRejected", err)
+	}
+}
+
+// TestAdmitProofBoundToChallenge: a proof valid for one challenge cannot
+// be moved onto another challenge's server nonce.
+func TestAdmitProofBoundToChallenge(t *testing.T) {
+	v, secret := newTestVerifier(t, "ws-a")
+	clientNonce := bytes.Repeat([]byte{0x31}, NonceSize)
+	issue := func() []byte {
+		chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+			ProtocolVersion: ProtocolVersion,
+			WorkspaceId:     "ws-a",
+			ClientNonce:     clientNonce,
+			DaemonKeyId:     "daemon-key-1",
+		})
+		if err != nil {
+			t.Fatalf("challenge: %v", err)
+		}
+		return chal.GetServerNonce()
+	}
+	n1, n2 := issue(), issue()
+	mk := func(nonce []byte) *relaypb.AdmitRequest {
+		return &relaypb.AdmitRequest{
+			ProtocolVersion: ProtocolVersion,
+			WorkspaceId:     "ws-a",
+			ClientNonce:     clientNonce,
+			DaemonKeyId:     "daemon-key-1",
+			ServerNonce:     nonce,
+		}
+	}
+	proof1 := ComputeProof(secret, mk(n1))
+	moved := mk(n2)
+	moved.Hmac = proof1
+	if _, err := v.Admit(moved); !errors.Is(err, ErrRejected) {
+		t.Fatalf("proof moved to another challenge: err = %v, want ErrRejected", err)
+	}
+	ok := mk(n1)
+	ok.Hmac = proof1
+	if _, err := v.Admit(ok); err != nil {
+		t.Fatalf("original pairing: %v", err)
 	}
 }
 
@@ -274,7 +455,7 @@ func TestChallengeValidation(t *testing.T) {
 	}
 
 	bad := []*relaypb.AdmitChallengeRequest{
-		{ProtocolVersion: 2, WorkspaceId: "ws-a", ClientNonce: make([]byte, NonceSize), DaemonKeyId: "k"},
+		{ProtocolVersion: 1, WorkspaceId: "ws-a", ClientNonce: make([]byte, NonceSize), DaemonKeyId: "k"},
 		{ProtocolVersion: ProtocolVersion, WorkspaceId: "", ClientNonce: make([]byte, NonceSize), DaemonKeyId: "k"},
 		{ProtocolVersion: ProtocolVersion, WorkspaceId: "ws-a", ClientNonce: []byte{1}, DaemonKeyId: "k"},
 		{ProtocolVersion: ProtocolVersion, WorkspaceId: "ws-a", ClientNonce: make([]byte, NonceSize), DaemonKeyId: ""},
@@ -297,5 +478,97 @@ func TestNewWorkspaceSecretIsRandom(t *testing.T) {
 	}
 	if bytes.Equal(s1, s2) {
 		t.Fatalf("two generated secrets are identical")
+	}
+}
+
+// challengeFor issues one challenge for ws against v, returning the
+// request/response pair so a test can later consume or expire it.
+func challengeFor(v *Verifier, ws string, i int) (*relaypb.AdmitRequest, error) {
+	clientNonce := bytes.Repeat([]byte{byte(i)}, NonceSize)
+	chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     ws,
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &relaypb.AdmitRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     ws,
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+		ServerNonce:     chal.GetServerNonce(),
+	}, nil
+}
+
+func TestChallengeGlobalCap(t *testing.T) {
+	base := time.Now()
+	clock := base
+	v := NewVerifier(WithMaxChallenges(5, 100), WithClock(func() time.Time { return clock }))
+	for i := 0; i < 5; i++ {
+		if _, err := challengeFor(v, "ws-"+string(rune('a'+i)), i); err != nil {
+			t.Fatalf("challenge %d under cap: %v", i, err)
+		}
+	}
+	if _, err := challengeFor(v, "ws-z", 9); err != ErrRejected {
+		t.Fatalf("challenge over global cap: err = %v, want exactly ErrRejected (uniform, unwrapped)", err)
+	}
+	// Expiry frees every slot.
+	clock = base.Add(challengeTTL + time.Second)
+	if _, err := challengeFor(v, "ws-z", 9); err != nil {
+		t.Fatalf("challenge after expiry: %v", err)
+	}
+}
+
+func TestChallengePerWorkspaceCap(t *testing.T) {
+	v, secret := newTestVerifier(t, "ws-a")
+	v.maxChallengesPerW = 3
+	var reqs []*relaypb.AdmitRequest
+	for i := 0; i < 3; i++ {
+		req, err := challengeFor(v, "ws-a", i)
+		if err != nil {
+			t.Fatalf("challenge %d under cap: %v", i, err)
+		}
+		reqs = append(reqs, req)
+	}
+	if _, err := challengeFor(v, "ws-a", 7); err != ErrRejected {
+		t.Fatalf("over per-workspace cap: err = %v, want ErrRejected", err)
+	}
+	// Another workspace ID (even an unknown one) is unaffected: one ID
+	// cannot starve the rest of the global budget.
+	if _, err := challengeFor(v, "ws-other", 8); err != nil {
+		t.Fatalf("other workspace ID: %v", err)
+	}
+	// Consuming a challenge (successful Admit) frees its slot.
+	reqs[0].Hmac = ComputeProof(secret, reqs[0])
+	if _, err := v.Admit(reqs[0]); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if _, err := challengeFor(v, "ws-a", 10); err != nil {
+		t.Fatalf("challenge after a slot freed: %v", err)
+	}
+	if got := v.perWS["ws-a"]; got != 3 {
+		t.Fatalf("perWS[ws-a] = %d, want 3 (counter must track the live challenges)", got)
+	}
+}
+
+// TestChallengeBookkeepingDoesNotLeak: after everything expires, neither
+// the challenge map nor the per-workspace counters retain anything.
+func TestChallengeBookkeepingDoesNotLeak(t *testing.T) {
+	clock := time.Now()
+	v := NewVerifier(WithClock(func() time.Time { return clock }))
+	for i := 0; i < 20; i++ {
+		if _, err := challengeFor(v, "ws-"+string(rune('a'+i)), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock = clock.Add(challengeTTL + time.Second)
+	if _, err := challengeFor(v, "ws-new", 99); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.challenges) != 1 || len(v.perWS) != 1 {
+		t.Fatalf("after expiry: %d challenges, %d perWS entries; want 1 and 1", len(v.challenges), len(v.perWS))
 	}
 }

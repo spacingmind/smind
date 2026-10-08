@@ -213,7 +213,7 @@ func parseGRPCWebTrailerPayload(t *testing.T, payload []byte) grpcWebTrailers {
 }
 
 // admitOverGRPCWeb completes the full two-step admission exchange
-// (AdmitChallenge then Admit) purely over grpc-web framing, the same HMAC
+// (AdmitChallenge then Admit) purely over grpc-web framing, the same SCRAM-style proof
 // transcript internal/relay/admission's native-gRPC tests already cover --
 // proving grpc-web reaches the identical verifier logic, not a parallel
 // path.
@@ -241,7 +241,7 @@ func admitOverGRPCWeb(t *testing.T, client *http.Client, baseURL, workspaceID, d
 		DaemonKeyId:     daemonKeyID,
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = admission.ComputeHMAC(admission.HashSecret(secret), req)
+	req.Hmac = admission.ComputeProof(secret, req)
 
 	var admitResp relaypb.AdmitResponse
 	tr = grpcWebUnary(t, client, baseURL, "Admit", req, &admitResp)
