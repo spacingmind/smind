@@ -36,18 +36,32 @@ binary that serves both the API and an embedded web UI.
 
 ## Install
 
+On Linux or macOS:
+
+```sh
+curl -fsSL https://spacingmind.com/install.sh | sh
+```
+
+[`scripts/install.sh`](scripts/install.sh) downloads the latest release for
+your OS/arch, verifies it against `checksums.txt`, and installs `smind` to
+`/usr/local/bin` (or `~/.local/bin` if that isn't writable). Set
+`SMIND_VERSION=0.8.0` to pin a release or `SMIND_INSTALL_DIR` to choose the
+target directory.
+
+From source:
+
 ```sh
 go install github.com/spacingmind/smind/cmd/smind@latest
 ```
 
-### Installing the daemon from a release
+### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
 prebuilt `smind` daemon binaries for linux/amd64, linux/arm64, darwin/amd64
 and darwin/arm64, plus a `checksums.txt`. To install one:
 
 ```sh
-version=0.7.0   # match the release you're installing
+version=0.8.0   # match the release you're installing
 os=linux        # or darwin
 arch=amd64      # or arm64
 
