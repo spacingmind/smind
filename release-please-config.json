@@ -4,6 +4,7 @@
   "packages": {
     ".": {
       "release-type": "simple",
+      "bump-minor-pre-major": true,
       "package-name": "smind",
       "changelog-path": "CHANGELOG.md",
       "draft": false,
