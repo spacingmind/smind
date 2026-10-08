@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/spacingmind/smind/compare/v0.9.0...v0.9.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **relay:** SCRAM-style admission proof, bounded relay state, Go handshake key pin ([#235](https://github.com/spacingmind/smind/issues/235)) ([fdac9f4](https://github.com/spacingmind/smind/commit/fdac9f40dc1b35b92a71218294aeb255bbe26998))
+
 ## [0.9.0](https://github.com/spacingmind/smind/compare/v0.8.0...v0.9.0) (2026-10-08)
 
 
