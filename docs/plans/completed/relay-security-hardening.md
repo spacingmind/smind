@@ -152,8 +152,10 @@ Three issues from a security review of the self-hosted relay
 - **No v1 dual-accept.** v1 is the vulnerable scheme; old mobile/desktop
   builds cannot admit to a new relay and vice versa (called out in the PR).
 - **Route GC** is lazy (on route attach, rate-limited) plus an exported
-  `Sweep()` that `Run` calls from a ticker goroutine tied to its ctx, so an
-  idle relay also frees memory. Clock injected via `WithClock`.
+  `Sweep()` that `Run` calls from a ticker goroutine (`RunJanitor`) tied to
+  its ctx, so an idle relay also frees memory. Clock injected via
+  `server.WithClock` / `admission.WithClock`. Options: `WithRouteGrace`,
+  `WithBindingLimits`.
 - **Bindings** are LRU-capped per workspace and TTL'd by last use, where
   "use" = stream open *and* stream end, and bindings with live streams are
   never expired. This keeps `Resume` working for arbitrarily long-lived
@@ -164,6 +166,9 @@ Three issues from a security review of the self-hosted relay
   can make new admissions fail for up to one 30s TTL; this is a bounded
   availability trade for bounded memory and is documented in the code. Rate
   limiting remains a transport concern (unchanged).
+- **Pin fails closed.** `WithExpectedPeerKey(nil/empty/short)` can never
+  match (→ `ErrPeerKeyMismatch`) instead of silently meaning "no pin".
+  Omitting the option is the only way to run unpinned.
 - **Go pin API** is a variadic `HandshakeOption` on `Handshake` (mirrors
   Rust's `pin_peer_public_key` / TS's `daemonPublicKeyIfMobile` being a
   handshake-time argument) with sentinel `ErrPeerKeyMismatch` (Rust:
@@ -174,17 +179,50 @@ Three issues from a security review of the self-hosted relay
 
 ## Progress
 
-- [ ] Plan committed
-- [ ] Fix A: Go admission + tests
-- [ ] Fix A: proto comments, Go client, server tests, ADR amendment
-- [ ] Fix A: mobile TS
-- [ ] Fix A: desktop Rust
-- [ ] Fix B: challenge cap
-- [ ] Fix B: route GC + bindings bound
-- [ ] Fix C: Go pin + client option + tests
-- [ ] Verification
+- [x] Plan committed
+- [x] Fix A: Go admission (`ComputeProof`/`ProofMask`/`verifyProof`, v2) + tests
+- [x] Fix A: proto comments (field kept as `hmac`), Go client, server tests, ADR-0011 amendment
+- [x] Fix A: mobile TS (`computeProof`, v2, `admission.test.ts` vector)
+- [x] Fix A: desktop Rust (`compute_proof`, v2, vector test)
+- [x] Fix B: challenge caps (global 4096 / per-workspace-ID 256)
+- [x] Fix B: route GC (grace 5m) + bindings bound (64/ws LRU, 24h idle TTL, in-use never expires) + janitor in `Run`
+- [x] Fix C: Go pin (`e2ee.WithExpectedPeerKey`, `ErrPeerKeyMismatch`) + `client.WithExpectedPeerKey` + tests
+- [x] Verification
 
 ## Validation
 
-_(filled in at the end: per acceptance criterion, which test/command
-confirmed it, with results.)_
+Environment notes: `task` is not installed here, so its commands were run
+directly (`go vet ./...`; `gofmt -l`; `go test ./...`; web:
+`bun run --filter '@smind/ui' test`). `cargo` was not installed either; a
+throwaway rustup toolchain (stable 1.99) was installed under `/tmp` (not in
+the user's home) to run the Rust tests, with `CARGO_TARGET_DIR` in `/tmp`.
+
+Commands (all green):
+
+- `go vet ./...` — clean. `gofmt -l $(git ls-files '*.go')` — empty.
+- `go test ./...` — all packages ok; `go test -race -count=2 ./internal/relay/...` — ok.
+- `cd web && bun run --filter '@smind/ui' test` — 106 files / 1346 tests pass.
+- `cd mobile && npx vitest run --exclude "**/*.node.test.ts"` — 15 files / 69 tests pass; `npx tsc --noEmit` clean; `npm run test:integration` (real TS client ↔ real Go relay + bridge harness, v2) — 2/2 pass.
+- `cd desktop/daemon-client && cargo test --lib` — 182 pass (incl. proof vector + recover tests); `cargo test --test relay_harness_interop` (real Rust client ↔ real Go relay harness, v2, pin, resume) — pass.
+
+Per acceptance criterion:
+
+- A1 (stored value unchanged): `server.TestEnrolledWorkspaceFromOldStoreAdmitsV2` — a hash-only `workspaces.json` admits a v2 client.
+- A2/A3 (proof + verification, uniform rejection): `admission.TestProofKnownVector`, `TestAdmitValidBindsWorkspace`, `TestAdmitWrongSecretRejected`, `TestAdmitUnknownWorkspaceRejected`, `TestAdmitReplayRejected`, `TestAdmitExpiredNonceRejected`, `TestAdmitTranscriptMismatchRejected`, `TestAdmitProofBoundToChallenge`, `TestRejectionShapeIsUniform`, `TestProofMaskCanonicalForm`.
+- A4 (v2, no v1): `admission.TestAdmitV1Rejected`, `TestChallengeValidation` (v1 → ErrRejected); `ProtocolVersion` is 2 in Go, `mobile/src/relay/admission.ts` (`admission.test.ts` "speaks protocol v2"), and Rust (`protocol_version_is_2`).
+- A5 (all clients + cross-language agreement): same fixed vector `b007e940…7cfb` asserted in Go `TestProofKnownVector`, mobile `admission.test.ts`, Rust `proof_matches_cross_language_known_vector`; the vector was also independently reproduced with a Python HMAC/XOR. End-to-end: mobile `integration.node.test.ts` + Rust `relay_harness_interop.rs` + Go `client`/`bridge`/`server` integration tests all admit against the v2 Go relay.
+- A6 (stored hash alone cannot admit): `admission.TestAdmitStoredKeyAloneCannotAdmit` — eight forgeries from `StoredKey` (v1-style `HMAC(StoredKey,t)`, StoredKey-as-ClientKey, mask⊕StoredKey, zero, wrong lengths, StoredKey itself) all `ErrRejected`; genuine secret still admits.
+- A7 (docs): ADR-0011 "Amendment 2026-10-08"; proto + generated-Go comments + code comments say "proof".
+- B1: `server.TestRouteGCAfterGrace`, `TestRouteKeptWithinGrace` (buffered frames flushed in order inside grace), `TestRouteNotGCedWhileAttached`, `TestRouteReattachResetsGraceClock`.
+- B2: `server.TestBindingCapPerWorkspaceEvictsLRU`, `TestBindingCapPrefersEvictingIdleOverInUse`, `TestBindingTTLExpiry`, `TestBindingInUseNeverExpiresAndResumeWorks`, `TestDataStreamResumeAfterLongLivedStream` (real OpenData streams); existing `client` reconnect/Resume integration tests still pass.
+- B3: `admission.TestChallengeGlobalCap`, `TestChallengePerWorkspaceCap`, `TestChallengeBookkeepingDoesNotLeak` (cap → exactly `ErrRejected`; expiry/consumption frees slots).
+- B4: all of the above use `fakeClock`/`WithClock`; no test sleeps for a grace/TTL.
+- C1/C3: `e2ee.TestHandshakePinMismatchFails` (error class `ErrPeerKeyMismatch`, channel closed, no ready frame, no session), `TestHandshakePinMatchSucceeds`, `TestHandshakePinFailsClosed`, `TestHandshakeNoPinUnchanged`.
+- C2: `client.WithExpectedPeerKey`; used by the bridge tests' mobile-role device and `client` integration `pairWithClients`; `client.TestIntegrationSubstitutedDaemonKeyFailsHandshake` over a real relay.
+- G1: see commands above. G2: nothing in the out-of-scope list was touched.
+
+Known gaps / residuals (also in the PR description): the wire field is still
+named `hmac` (no protoc here; generated-code comments were hand-synced and
+the descriptor is unchanged); an unauthenticated `AdmitChallenge` flood can
+still fill the (bounded) challenge budget for up to one 30s TTL and make new
+admissions fail until it lapses — rate limiting stays a transport concern.
