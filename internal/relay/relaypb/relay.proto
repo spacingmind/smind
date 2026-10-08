@@ -26,11 +26,12 @@
 //
 // Relay admission (ADR-0011) is deliberately unary and separate from both
 // streams: AdmitChallenge issues a server nonce, then Admit carries the
-// daemon's HMAC over the transcript (protocol version, workspace ID, both
-// nonces, daemon key ID). The raw workspace secret never appears on the
-// wire. A connection is bound to one workspace; Frames whose workspace or
-// session ID mismatch the binding are rejected by the relay implementation
-// (not the wire contract). Admission is independent of the E2EE handshake,
+// daemon's SCRAM-style proof over the transcript (protocol version,
+// workspace ID, both nonces, daemon key ID). The raw workspace secret never
+// appears on the wire, and the hash the relay stores is not sufficient to
+// forge the proof. A connection is bound to one workspace; Frames whose
+// workspace or session ID mismatch the binding are rejected by the relay
+// implementation (not the wire contract). Admission is independent of the E2EE handshake,
 // which happens inside the encrypted payload the relay forwards blindly.
 
 syntax = "proto3";
@@ -51,9 +52,10 @@ service Relay {
   rpc AdmitChallenge(AdmitChallengeRequest) returns (AdmitChallengeResponse);
 
   // Step 2 of admission: the daemon proves possession of the workspace
-  // secret via HMAC-SHA256 over the transcript (protocol version,
-  // workspace_id, client nonce, server nonce, daemon key ID). On success
-  // the relay binds the connection's gRPC context to that workspace.
+  // secret with a SCRAM-style proof over the transcript (protocol version,
+  // workspace_id, client nonce, server nonce, daemon key ID); see
+  // AdmitRequest.hmac. On success the relay binds the connection's gRPC
+  // context to that workspace.
   rpc Admit(AdmitRequest) returns (AdmitResponse);
 
   // Control socket (ADR-0007 (b)): one persistent bidi stream per daemon.
@@ -69,7 +71,8 @@ service Relay {
 // --- Admission (ADR-0011) ---
 
 message AdmitChallengeRequest {
-  // Protocol version of the admission state machine (v1 = 1).
+  // Protocol version of the admission state machine. v2 = SCRAM-style
+  // proof; v1 (HMAC keyed by the stored hash) is rejected.
   uint32 protocol_version = 1;
   // Workspace the connection wants to be bound to.
   string workspace_id = 2;
@@ -92,10 +95,17 @@ message AdmitRequest {
   bytes client_nonce = 3;
   string daemon_key_id = 4;
   bytes server_nonce = 5;
-  // HMAC-SHA256(workspace_secret, protocol_version || workspace_id ||
-  // client_nonce || server_nonce || daemon_key_id) with a fixed canonical
-  // concatenation defined by the relay implementation. The secret itself is
-  // never sent.
+  // SCRAM-style proof (RFC 5802 idea), 32 bytes:
+  //   ClientKey = the raw workspace secret
+  //   StoredKey = SHA-256(ClientKey)        (all the relay persists)
+  //   proof     = ClientKey XOR HMAC-SHA256(StoredKey, transcript)
+  // where transcript = protocol_version (4 bytes BE) || LP(workspace_id) ||
+  // client_nonce || server_nonce || LP(daemon_key_id) and LP(s) is a
+  // 4-byte BE length prefix plus the bytes. The relay recovers ClientKey
+  // from the proof and accepts iff SHA-256(recovered) == StoredKey, so
+  // holding only the stored hash cannot forge a proof. The secret itself
+  // is never sent. The field keeps its original name "hmac" (field number
+  // 6 and bytes type are unchanged); it carries the proof, not a bare MAC.
   bytes hmac = 6;
 }
 

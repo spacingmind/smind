@@ -9,19 +9,23 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash"
 	"sync"
 	"time"
 
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 )
 
-// ProtocolVersion is the admission state machine version (ADR-0011 v1:
-// workspace-secret HMAC challenge-response only).
-const ProtocolVersion uint32 = 1
+// ProtocolVersion is the admission state machine version. Version 2
+// (ADR-0011, 2026-10-08 amendment) is the SCRAM-style proof: the client
+// proves knowledge of the raw workspace secret without the relay's stored
+// hash being sufficient to forge it. Version 1 (HMAC keyed by the stored
+// hash itself) made the relay's workspaces.json credential-equivalent and
+// is rejected outright — never dual-accepted.
+const ProtocolVersion uint32 = 2
 
 // NonceSize is the length of the client and server nonces.
 const NonceSize = 32
@@ -40,11 +44,12 @@ var ErrRejected = errors.New("admission: rejected")
 
 // Workspace is the relay's persistent record of a workspace it serves:
 // its ID and the hash of its 256-bit admission secret. The raw secret
-// exists only where it was generated (pairing time); the relay keeps only
-// the hash.
+// (SCRAM's ClientKey) exists only where it was generated (pairing time);
+// the relay keeps only StoredKey = SHA-256(ClientKey), which is not enough
+// to produce an accepted proof (see ComputeProof).
 type Workspace struct {
 	ID         string
-	SecretHash []byte // SHA-256(Secret); see NewWorkspace and ComputeHMAC
+	SecretHash []byte // StoredKey = SHA-256(Secret); see NewWorkspace and ComputeProof
 }
 
 // NewWorkspace generates a fresh workspace record with a random 256-bit
@@ -140,10 +145,11 @@ func (v *Verifier) Challenge(req *relaypb.AdmitChallengeRequest) (*relaypb.Admit
 	return &relaypb.AdmitChallengeResponse{ServerNonce: serverNonce}, nil
 }
 
-// Admit implements the Admit handler: it verifies the HMAC over the
-// challenge transcript in constant time and, on success, atomically
-// consumes the server nonce and returns a workspace-bound Session.
-// Every failure is ErrRejected (see its doc for the no-oracle rule).
+// Admit implements the Admit handler: it verifies the SCRAM-style proof
+// over the challenge transcript in constant time and, on success,
+// atomically consumes the server nonce and returns a workspace-bound
+// Session. Every failure is ErrRejected (see its doc for the no-oracle
+// rule).
 func (v *Verifier) Admit(req *relaypb.AdmitRequest) (Session, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
@@ -162,9 +168,8 @@ func (v *Verifier) Admit(req *relaypb.AdmitRequest) (Session, error) {
 		req.GetDaemonKeyId() == ch.daemonKeyID &&
 		hmac.Equal(req.GetClientNonce(), ch.clientNonce)
 
-	want, known := v.secrets[ch.workspaceID]
-	if !transcriptInputsMatch || !known ||
-		!hmac.Equal(req.GetHmac(), ComputeHMAC(want, req)) {
+	storedKey, known := v.secrets[ch.workspaceID]
+	if !transcriptInputsMatch || !known || !verifyProof(storedKey, req) {
 		return Session{}, ErrRejected
 	}
 
@@ -197,31 +202,75 @@ func (v *Verifier) evictLocked(now time.Time) {
 	}
 }
 
-// ComputeHMAC is the canonical transcript construction shared by both
-// ends: HMAC-SHA256(key, protocol_version || workspace_id || client_nonce
-// || server_nonce || daemon_key_id) where the version is a fixed-width
-// big-endian 4 bytes and workspace_id/daemon_key_id are 4-byte
-// big-endian length-prefixed so concatenation is unambiguous.
-//
-// The key is HashSecret(rawSecret) — SHA-256 of the workspace secret —
-// not the raw secret itself: the relay persists only the hash (ADR-0011),
-// so both ends must derive the same HMAC key from what they hold (the
-// daemon hashes its raw secret; the relay uses its stored hash).
-func ComputeHMAC(key []byte, req *relaypb.AdmitRequest) []byte {
-	mac := hmac.New(sha256.New, key)
+// transcript is the canonical byte string both ends bind the proof to:
+// protocol_version || workspace_id || client_nonce || server_nonce ||
+// daemon_key_id, where the version is a fixed-width big-endian 4 bytes and
+// workspace_id/daemon_key_id are 4-byte big-endian length-prefixed so the
+// concatenation is unambiguous.
+func transcript(req *relaypb.AdmitRequest) []byte {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], req.GetProtocolVersion())
-	mac.Write(buf[:])
-	writeLPString(mac, req.GetWorkspaceId())
-	mac.Write(req.GetClientNonce())
-	mac.Write(req.GetServerNonce())
-	writeLPString(mac, req.GetDaemonKeyId())
+	out := append([]byte(nil), buf[:]...)
+	out = appendLPString(out, req.GetWorkspaceId())
+	out = append(out, req.GetClientNonce()...)
+	out = append(out, req.GetServerNonce()...)
+	out = appendLPString(out, req.GetDaemonKeyId())
+	return out
+}
+
+func appendLPString(dst []byte, s string) []byte {
+	var buf [4]byte
+	binary.BigEndian.PutUint32(buf[:], uint32(len(s)))
+	dst = append(dst, buf[:]...)
+	return append(dst, s...)
+}
+
+// ProofMask is HMAC-SHA256(StoredKey, transcript): the one-time pad both
+// ends derive from what the relay stores, bound to this exchange's
+// transcript. It is exported so the client packages and tests can build
+// and check proofs; it is NOT itself an acceptable proof (that was the
+// version-1 scheme).
+func ProofMask(storedKey []byte, req *relaypb.AdmitRequest) []byte {
+	mac := hmac.New(sha256.New, storedKey)
+	mac.Write(transcript(req))
 	return mac.Sum(nil)
 }
 
-func writeLPString(mac hash.Hash, s string) {
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], uint32(len(s)))
-	mac.Write(buf[:])
-	mac.Write([]byte(s))
+// ComputeProof builds the client's admission proof, SCRAM-style (RFC 5802):
+//
+//	ClientKey = the raw 32-byte workspace secret
+//	StoredKey = SHA-256(ClientKey)            (what the relay persists)
+//	proof     = ClientKey XOR HMAC-SHA256(StoredKey, transcript)
+//
+// The relay recovers ClientKey' = proof XOR HMAC(StoredKey, transcript) and
+// accepts iff SHA-256(ClientKey') == StoredKey. Knowing only StoredKey
+// (e.g. by reading the relay's workspaces.json) gives an attacker the pad
+// but not ClientKey, so it cannot forge a proof. secret must be the raw
+// 32-byte workspace secret.
+func ComputeProof(secret []byte, req *relaypb.AdmitRequest) []byte {
+	mask := ProofMask(HashSecret(secret), req)
+	proof := make([]byte, len(mask))
+	for i := range proof {
+		var k byte
+		if i < len(secret) {
+			k = secret[i]
+		}
+		proof[i] = k ^ mask[i]
+	}
+	return proof
+}
+
+// verifyProof is the relay-side check: recover the candidate ClientKey from
+// the proof and compare its hash to the stored key in constant time.
+func verifyProof(storedKey []byte, req *relaypb.AdmitRequest) bool {
+	proof := req.GetHmac()
+	if len(proof) != sha256.Size {
+		return false
+	}
+	mask := ProofMask(storedKey, req)
+	recovered := make([]byte, sha256.Size)
+	for i := range recovered {
+		recovered[i] = proof[i] ^ mask[i]
+	}
+	return subtle.ConstantTimeCompare(HashSecret(recovered), storedKey) == 1
 }

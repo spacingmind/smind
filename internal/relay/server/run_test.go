@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/spacingmind/smind/internal/relay/admission"
 	relaypb "github.com/spacingmind/smind/internal/relay/relaypb"
 )
 
@@ -69,7 +70,7 @@ func TestRunServesTLSAndWorkspaceEnrollment(t *testing.T) {
 		c := relaypb.NewRelayClient(conn)
 		chalCtx, chalCancel := context.WithTimeout(context.Background(), time.Second)
 		_, err = c.AdmitChallenge(chalCtx, &relaypb.AdmitChallengeRequest{
-			ProtocolVersion: 1, WorkspaceId: "ws-a",
+			ProtocolVersion: admission.ProtocolVersion, WorkspaceId: "ws-a",
 			ClientNonce: make([]byte, 32), DaemonKeyId: "k",
 		})
 		chalCancel()

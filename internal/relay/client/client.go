@@ -60,9 +60,10 @@ func Dial(target, fingerprint string) (*grpc.ClientConn, error) {
 }
 
 // Admit completes the admission exchange (ADR-0011) over c: obtains a
-// server nonce and proves possession of the workspace secret via
-// admission.ComputeHMAC's canonical transcript. Returns the admission ID
-// (hex) to present on subsequent streams.
+// server nonce and proves possession of the raw workspace secret with the
+// SCRAM-style proof of admission.ComputeProof (the secret itself never
+// leaves the process). Returns the admission ID (hex) to present on
+// subsequent streams.
 func Admit(ctx context.Context, c relaypb.RelayClient, workspaceID, daemonKeyID string, secret []byte) (string, error) {
 	clientNonce := make([]byte, admission.NonceSize)
 	if _, err := rand.Read(clientNonce); err != nil {
@@ -84,7 +85,7 @@ func Admit(ctx context.Context, c relaypb.RelayClient, workspaceID, daemonKeyID 
 		DaemonKeyId:     daemonKeyID,
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = admission.ComputeHMAC(admission.HashSecret(secret), req)
+	req.Hmac = admission.ComputeProof(secret, req)
 	resp, err := c.Admit(ctx, req)
 	if err != nil {
 		return "", fmt.Errorf("relay client: admit: %w", err)

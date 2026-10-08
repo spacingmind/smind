@@ -101,7 +101,7 @@ func (h *harness) admit(ctx context.Context, workspaceID, daemonKeyID string) st
 		DaemonKeyId:     daemonKeyID,
 		ServerNonce:     chal.GetServerNonce(),
 	}
-	req.Hmac = admission.ComputeHMAC(admission.HashSecret(h.secret), req)
+	req.Hmac = admission.ComputeProof(h.secret, req)
 	resp, err := h.client.Admit(ctx, req)
 	if err != nil {
 		h.t.Fatalf("Admit: %v", err)

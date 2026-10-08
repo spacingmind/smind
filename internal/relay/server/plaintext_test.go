@@ -25,7 +25,7 @@ import (
 //     transient in-flight envelope (queues are drained by the peer's
 //     pump; what persists is routing metadata only);
 //   - every 32-byte value present is one the relay is *allowed* to hold:
-//     admission workspace-secret hashes or HMAC keys derived from them.
+//     admission workspace-secret hashes or HMAC pads derived from them.
 func TestRelayStateHoldsNoKeyOrPlaintextFields(t *testing.T) {
 	h := newHarness(t, 0)
 	daemon, device := openPair(t, h)
@@ -92,7 +92,7 @@ func TestRelayStateHoldsNoKeyOrPlaintextFields(t *testing.T) {
 // TestDecryptAttemptWithEverythingRelayHasFails forwards genuine
 // ChaCha20-Poly1305 ciphertext through the relay, then attempts to
 // decrypt it with every 32-byte value the relay actually holds — the
-// admission secret hash and HMAC keys derived from it (obtained via the
+// admission secret hash and HMAC pads derived from it (obtained via the
 // harness's enrollment), all of which must fail.
 func TestDecryptAttemptWithEverythingRelayHasFails(t *testing.T) {
 	h := newHarness(t, 0)

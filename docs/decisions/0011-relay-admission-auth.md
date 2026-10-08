@@ -72,6 +72,40 @@ change that removes the "anyone who captures one request can replay it"
 weakness, without requiring a certificate-lifecycle story before v1 can
 ship.
 
+## Amendments
+
+**Amendment 2026-10-08 — SCRAM-style proof; admission protocol v2.**
+A security review found that v1 keyed the transcript HMAC with the very
+value the relay persists (`HMAC(SHA-256(secret), transcript)`), so anyone
+who could read the relay's `workspaces.json` could admit as any workspace —
+the "relay persists only a hash" property bought nothing. The proof is now
+SCRAM-style (RFC 5802 idea), with the stored value unchanged (existing
+`workspaces.json` files keep working):
+
+- `ClientKey` = the raw 32-byte workspace secret; `StoredKey` =
+  `SHA-256(ClientKey)` (what the relay persists).
+- `proof = ClientKey XOR HMAC-SHA256(StoredKey, transcript)`, sent in
+  `AdmitRequest.hmac` (field number and name unchanged; the field now
+  carries the proof). The transcript encoding is unchanged.
+- The relay recovers `ClientKey' = proof XOR HMAC(StoredKey, transcript)`
+  and accepts iff `len(proof) == 32` and `SHA-256(ClientKey') == StoredKey`
+  (constant-time). Single-use nonce, 30s TTL, transcript-input matching and
+  the uniform rejection are unchanged.
+- `ProtocolVersion` is bumped to 2 in the Go, mobile (TS) and desktop
+  (Rust) implementations. v1 is rejected (no dual-accept: v1 *is* the
+  vulnerable scheme), so old mobile/desktop builds cannot admit to a new
+  relay and vice versa; there is no data migration.
+
+Residual (inherent to SCRAM): an attacker who has `workspaces.json` *and*
+observes a full admission exchange can recover `ClientKey`; admission runs
+over fingerprint-pinned TLS 1.3, so that requires a live relay-side
+compromise, not merely a disk read. Daemon authentication of the mobile
+key and per-device identity remain the deferred upgrade path above.
+
+Related hardening shipped alongside (no decision change): the relay bounds
+outstanding challenges, admission bindings and idle routes (see
+`docs/plans/completed/relay-security-hardening.md`).
+
 ## Cross-references
 
 - `docs/decisions/0007-relay-architecture.md` — relay architecture and
