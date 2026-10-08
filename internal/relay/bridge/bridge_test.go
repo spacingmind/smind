@@ -102,8 +102,10 @@ func newTestAPI(t *testing.T) *wsapi.API {
 // dialDeviceDataConn dials the relay as an independent "mobile" client:
 // its own admission (over the shared workspace secret), then OpenData on
 // the same (workspace, DefaultSessionID, DefaultDeviceID) route the daemon
-// bridge uses, so the two land on the same relay-side route.
-func dialDeviceDataConn(t *testing.T, ctx context.Context, cfg Config, deviceKP *e2ee.KeyPair) *client.DataConn {
+// bridge uses, so the two land on the same relay-side route. daemonPub is
+// the daemon key a pairing offer would have given the device; the
+// handshake is pinned to it (e2ee.WithExpectedPeerKey).
+func dialDeviceDataConn(t *testing.T, ctx context.Context, cfg Config, deviceKP *e2ee.KeyPair, daemonPub []byte) *client.DataConn {
 	t.Helper()
 	conn, err := client.Dial(cfg.RelayAddress, cfg.Fingerprint)
 	if err != nil {
@@ -120,7 +122,7 @@ func dialDeviceDataConn(t *testing.T, ctx context.Context, cfg Config, deviceKP 
 	if err != nil {
 		t.Fatalf("device admit: %v", err)
 	}
-	dc, err := client.OpenData(ctx, rc, admissionID, cfg.WorkspaceID, DefaultSessionID, DefaultDeviceID, deviceKP, e2ee.RoleMobile)
+	dc, err := client.OpenData(ctx, rc, admissionID, cfg.WorkspaceID, DefaultSessionID, DefaultDeviceID, deviceKP, e2ee.RoleMobile, client.WithExpectedPeerKey(daemonPub))
 	if err != nil {
 		t.Fatalf("device OpenData: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestIntegration_BridgeServesWorkspaceListToMobileRole(t *testing.T) {
 
 	admitCtx, admitCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer admitCancel()
-	device := dialDeviceDataConn(t, admitCtx, cfg, deviceKP)
+	device := dialDeviceDataConn(t, admitCtx, cfg, deviceKP, daemonKP.Public())
 
 	hsCtx, hsCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer hsCancel()
@@ -312,7 +314,7 @@ func TestIntegration_BridgeReconnectsAfterDaemonTransportDrop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("device keypair: %v", err)
 	}
-	device := dialDeviceDataConn(t, ctx, relayCfg, deviceKP)
+	device := dialDeviceDataConn(t, ctx, relayCfg, deviceKP, daemonKP.Public())
 	hsCtx, hsCancel := context.WithTimeout(ctx, 15*time.Second)
 	defer hsCancel()
 	if err := device.Handshake(hsCtx); err != nil {
