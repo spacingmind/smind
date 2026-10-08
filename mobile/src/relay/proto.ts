@@ -10,7 +10,7 @@
 
 import { ByteWriter, decodeFields, getBytes, getString, getVarint } from './varint';
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export interface AdmitChallengeRequest {
   protocolVersion: number;
@@ -43,7 +43,8 @@ export interface AdmitRequest {
   clientNonce: Uint8Array;
   daemonKeyId: string;
   serverNonce: Uint8Array;
-  hmac: Uint8Array;
+  /** The SCRAM-style admission proof (wire field 6, named `hmac` in relay.proto). */
+  proof: Uint8Array;
 }
 
 export function encodeAdmitRequest(m: AdmitRequest): Uint8Array {
@@ -53,7 +54,7 @@ export function encodeAdmitRequest(m: AdmitRequest): Uint8Array {
   w.writeBytesField(3, m.clientNonce);
   w.writeStringField(4, m.daemonKeyId);
   w.writeBytesField(5, m.serverNonce);
-  w.writeBytesField(6, m.hmac);
+  w.writeBytesField(6, m.proof);
   return w.finish();
 }
 

@@ -11,7 +11,7 @@
 //         {id, event, params}                  (request-scoped emit, e.g. run.attach chunks)
 //         {event: {topic, seq, payload}}       (no id: pushed event notification)
 
-import { computeHMAC, hashSecret, PROTOCOL_VERSION, randomNonce } from './admission';
+import { computeProof, PROTOCOL_VERSION, randomNonce } from './admission';
 import { Channel, generateKeyPair, Role } from './e2ee';
 import { GRPCWebSocketStream, grpcWebUnary } from './grpcweb';
 import { PairingOffer, parsePairingURL } from './pairing';
@@ -88,7 +88,7 @@ async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array): 
     decodeAdmitChallengeResponse
   );
 
-  const hmacValue = computeHMAC(hashSecret(secret), {
+  const proof = computeProof(secret, {
     protocolVersion: PROTOCOL_VERSION,
     workspaceId,
     clientNonce,
@@ -105,7 +105,7 @@ async function admit(baseUrl: string, workspaceId: string, secret: Uint8Array): 
       clientNonce,
       daemonKeyId: MOBILE_DAEMON_KEY_ID,
       serverNonce: challenge.serverNonce,
-      hmac: hmacValue,
+      proof,
     }),
     decodeAdmitResponse
   );
