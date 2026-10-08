@@ -35,6 +35,19 @@ const NonceSize = 32
 // headroom while keeping the replay window small.
 const challengeTTL = 30 * time.Second
 
+// Default bounds on outstanding (issued, unconsumed, unexpired) challenges.
+// Challenge is unauthenticated and, to avoid a workspace-existence oracle,
+// is answered even for unknown workspace IDs, so without a bound a flood of
+// AdmitChallenge calls grows the map without limit for one challengeTTL at
+// a time. The per-workspace cap stops one workspace ID (known or made up)
+// from consuming the global budget on its own; the global cap bounds the
+// total. A legitimate daemon/device holds a challenge for milliseconds, so
+// both defaults are far above any real load.
+const (
+	DefaultMaxChallenges             = 4096
+	DefaultMaxChallengesPerWorkspace = 256
+)
+
 // ErrRejected is the single, generic admission failure returned for every
 // rejection path (unknown workspace, wrong secret, bad transcript,
 // unknown/expired/consumed nonce, version mismatch). Distinct causes would
@@ -90,7 +103,32 @@ type Verifier struct {
 	mu         sync.Mutex
 	secrets    map[string][]byte // workspace ID -> secret hash
 	challenges map[string]challenge
+	perWS      map[string]int // workspace ID -> outstanding challenges
 	now        func() time.Time
+
+	maxChallenges     int
+	maxChallengesPerW int
+}
+
+// VerifierOption configures a Verifier.
+type VerifierOption func(*Verifier)
+
+// WithMaxChallenges overrides the global and per-workspace-ID caps on
+// outstanding challenges (<=0 keeps the default for that cap).
+func WithMaxChallenges(global, perWorkspace int) VerifierOption {
+	return func(v *Verifier) {
+		if global > 0 {
+			v.maxChallenges = global
+		}
+		if perWorkspace > 0 {
+			v.maxChallengesPerW = perWorkspace
+		}
+	}
+}
+
+// WithClock injects the time source (tests advance it instead of sleeping).
+func WithClock(now func() time.Time) VerifierOption {
+	return func(v *Verifier) { v.now = now }
 }
 
 type challenge struct {
@@ -101,11 +139,18 @@ type challenge struct {
 }
 
 // NewVerifier returns a Verifier with no workspaces registered.
-func NewVerifier() *Verifier {
-	return &Verifier{
-		secrets:    make(map[string][]byte),
-		challenges: make(map[string]challenge),
+func NewVerifier(opts ...VerifierOption) *Verifier {
+	v := &Verifier{
+		secrets:           make(map[string][]byte),
+		challenges:        make(map[string]challenge),
+		perWS:             make(map[string]int),
+		maxChallenges:     DefaultMaxChallenges,
+		maxChallengesPerW: DefaultMaxChallengesPerWorkspace,
 	}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 // Register adds (or replaces) a workspace record. Called at pairing /
@@ -119,7 +164,10 @@ func (v *Verifier) Register(ws Workspace) {
 // Challenge implements the AdmitChallenge handler: it issues a fresh
 // single-use server nonce keyed to the requested workspace and transcript
 // inputs, which Admit later requires to match exactly. The nonce expires
-// after challengeTTL.
+// after challengeTTL. When the global or per-workspace cap on outstanding
+// challenges is reached it fails with the same uniform ErrRejected as every
+// other rejection (no new oracle); slots free as challenges are consumed or
+// expire.
 func (v *Verifier) Challenge(req *relaypb.AdmitChallengeRequest) (*relaypb.AdmitChallengeResponse, error) {
 	if req.GetProtocolVersion() != ProtocolVersion ||
 		len(req.GetClientNonce()) != NonceSize ||
@@ -136,12 +184,16 @@ func (v *Verifier) Challenge(req *relaypb.AdmitChallengeRequest) (*relaypb.Admit
 	defer v.mu.Unlock()
 	now := v.nowLocked()
 	v.evictLocked(now)
+	if len(v.challenges) >= v.maxChallenges || v.perWS[req.GetWorkspaceId()] >= v.maxChallengesPerW {
+		return nil, ErrRejected
+	}
 	v.challenges[string(serverNonce)] = challenge{
 		workspaceID: req.GetWorkspaceId(),
 		daemonKeyID: req.GetDaemonKeyId(),
 		clientNonce: append([]byte(nil), req.GetClientNonce()...),
 		expiresAt:   now.Add(challengeTTL),
 	}
+	v.perWS[req.GetWorkspaceId()]++
 	return &relaypb.AdmitChallengeResponse{ServerNonce: serverNonce}, nil
 }
 
@@ -175,7 +227,7 @@ func (v *Verifier) Admit(req *relaypb.AdmitRequest) (Session, error) {
 
 	// Single use: consume the nonce so a captured transcript can never be
 	// replayed, even within its TTL.
-	delete(v.challenges, string(req.GetServerNonce()))
+	v.deleteChallengeLocked(string(req.GetServerNonce()), ch.workspaceID)
 
 	admissionID := make([]byte, 16)
 	if _, err := rand.Read(admissionID); err != nil {
@@ -191,14 +243,20 @@ func (v *Verifier) nowLocked() time.Time {
 	return time.Now()
 }
 
-// evictLocked drops expired challenges. It does not bound the map against
-// a flood of never-completed Challenge calls; that is rate limiting's job
-// (transport step), not this package's.
+// evictLocked drops expired challenges so the caps in Challenge only count
+// live ones.
 func (v *Verifier) evictLocked(now time.Time) {
 	for nonce, ch := range v.challenges {
 		if now.After(ch.expiresAt) {
-			delete(v.challenges, nonce)
+			v.deleteChallengeLocked(nonce, ch.workspaceID)
 		}
+	}
+}
+
+func (v *Verifier) deleteChallengeLocked(nonce, workspaceID string) {
+	delete(v.challenges, nonce)
+	if v.perWS[workspaceID]--; v.perWS[workspaceID] <= 0 {
+		delete(v.perWS, workspaceID)
 	}
 }
 

@@ -480,3 +480,95 @@ func TestNewWorkspaceSecretIsRandom(t *testing.T) {
 		t.Fatalf("two generated secrets are identical")
 	}
 }
+
+// challengeFor issues one challenge for ws against v, returning the
+// request/response pair so a test can later consume or expire it.
+func challengeFor(v *Verifier, ws string, i int) (*relaypb.AdmitRequest, error) {
+	clientNonce := bytes.Repeat([]byte{byte(i)}, NonceSize)
+	chal, err := v.Challenge(&relaypb.AdmitChallengeRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     ws,
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &relaypb.AdmitRequest{
+		ProtocolVersion: ProtocolVersion,
+		WorkspaceId:     ws,
+		ClientNonce:     clientNonce,
+		DaemonKeyId:     "daemon-key-1",
+		ServerNonce:     chal.GetServerNonce(),
+	}, nil
+}
+
+func TestChallengeGlobalCap(t *testing.T) {
+	base := time.Now()
+	clock := base
+	v := NewVerifier(WithMaxChallenges(5, 100), WithClock(func() time.Time { return clock }))
+	for i := 0; i < 5; i++ {
+		if _, err := challengeFor(v, "ws-"+string(rune('a'+i)), i); err != nil {
+			t.Fatalf("challenge %d under cap: %v", i, err)
+		}
+	}
+	if _, err := challengeFor(v, "ws-z", 9); err != ErrRejected {
+		t.Fatalf("challenge over global cap: err = %v, want exactly ErrRejected (uniform, unwrapped)", err)
+	}
+	// Expiry frees every slot.
+	clock = base.Add(challengeTTL + time.Second)
+	if _, err := challengeFor(v, "ws-z", 9); err != nil {
+		t.Fatalf("challenge after expiry: %v", err)
+	}
+}
+
+func TestChallengePerWorkspaceCap(t *testing.T) {
+	v, secret := newTestVerifier(t, "ws-a")
+	v.maxChallengesPerW = 3
+	var reqs []*relaypb.AdmitRequest
+	for i := 0; i < 3; i++ {
+		req, err := challengeFor(v, "ws-a", i)
+		if err != nil {
+			t.Fatalf("challenge %d under cap: %v", i, err)
+		}
+		reqs = append(reqs, req)
+	}
+	if _, err := challengeFor(v, "ws-a", 7); err != ErrRejected {
+		t.Fatalf("over per-workspace cap: err = %v, want ErrRejected", err)
+	}
+	// Another workspace ID (even an unknown one) is unaffected: one ID
+	// cannot starve the rest of the global budget.
+	if _, err := challengeFor(v, "ws-other", 8); err != nil {
+		t.Fatalf("other workspace ID: %v", err)
+	}
+	// Consuming a challenge (successful Admit) frees its slot.
+	reqs[0].Hmac = ComputeProof(secret, reqs[0])
+	if _, err := v.Admit(reqs[0]); err != nil {
+		t.Fatalf("admit: %v", err)
+	}
+	if _, err := challengeFor(v, "ws-a", 10); err != nil {
+		t.Fatalf("challenge after a slot freed: %v", err)
+	}
+	if got := v.perWS["ws-a"]; got != 3 {
+		t.Fatalf("perWS[ws-a] = %d, want 3 (counter must track the live challenges)", got)
+	}
+}
+
+// TestChallengeBookkeepingDoesNotLeak: after everything expires, neither
+// the challenge map nor the per-workspace counters retain anything.
+func TestChallengeBookkeepingDoesNotLeak(t *testing.T) {
+	clock := time.Now()
+	v := NewVerifier(WithClock(func() time.Time { return clock }))
+	for i := 0; i < 20; i++ {
+		if _, err := challengeFor(v, "ws-"+string(rune('a'+i)), i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock = clock.Add(challengeTTL + time.Second)
+	if _, err := challengeFor(v, "ws-new", 99); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.challenges) != 1 || len(v.perWS) != 1 {
+		t.Fatalf("after expiry: %d challenges, %d perWS entries; want 1 and 1", len(v.challenges), len(v.perWS))
+	}
+}
