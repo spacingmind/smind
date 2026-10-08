@@ -200,7 +200,8 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 
 /// admit completes the admission exchange (ADR-0011) over `client`:
 /// obtains a server nonce and proves possession of the workspace secret
-/// via `admission::compute_hmac`'s canonical transcript. Returns the
+/// with the SCRAM-style proof of `admission::compute_proof` (the secret
+/// itself never leaves the process). Returns the
 /// admission ID (hex) to present on subsequent streams — mirrors
 /// `client.Admit` (Go).
 pub async fn admit(
@@ -223,8 +224,8 @@ pub async fn admit(
         .map_err(|e| format!("relay client: challenge: {e}"))?
         .into_inner();
 
-    let hmac = admission::compute_hmac(
-        &admission::hash_secret(secret),
+    let proof = admission::compute_proof(
+        secret,
         &Transcript {
             protocol_version: admission::PROTOCOL_VERSION,
             workspace_id,
@@ -239,7 +240,8 @@ pub async fn admit(
         client_nonce: client_nonce.to_vec(),
         daemon_key_id: daemon_key_id.to_string(),
         server_nonce: challenge.server_nonce,
-        hmac: hmac.to_vec(),
+        // Wire field 6 is named `hmac` in relay.proto; it carries the proof.
+        hmac: proof.to_vec(),
     });
     req.set_timeout(ADMIT_TIMEOUT);
     let resp = client
