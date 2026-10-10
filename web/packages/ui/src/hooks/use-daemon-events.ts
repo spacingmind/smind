@@ -6,6 +6,9 @@ import { LIFECYCLE_TOPICS } from "@/lib/workspace-tree";
 /** ADR 0014's three agent-profile lifecycle topics -- not part of LIFECYCLE_TOPICS (workspace-tree.ts), since a profile isn't part of the workspace/space/task tree that constant describes. */
 const PROFILE_TOPICS = ["profile.created", "profile.updated", "profile.deleted"];
 
+/** ADR-0018's three MCP server registry lifecycle topics (Settings -> MCP servers reacts to these). */
+const MCP_TOPICS = ["mcpServer.created", "mcpServer.updated", "mcpServer.deleted"];
+
 /**
  * The topics the UI subscribes to -- ADR 0005's initial three, ADR 0009's
  * eight workspace/space/task lifecycle topics, and ADR 0014's three
@@ -27,6 +30,7 @@ const TOPICS = [
   "permission.pending",
   ...LIFECYCLE_TOPICS,
   ...PROFILE_TOPICS,
+  ...MCP_TOPICS,
   ...CHAT_TOPICS,
 ];
 

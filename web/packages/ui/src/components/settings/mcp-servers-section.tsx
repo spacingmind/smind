@@ -21,7 +21,12 @@ import type { McpServer } from "@/lib/types";
 export interface McpKVRow {
   key: string;
   value: string;
+  /** True for an entry loaded from the daemon: its real value is never known here, so `value` holds the "[redacted]" placeholder until the user types a replacement. */
+  stored?: boolean;
 }
+
+/** What the daemon returns for every env/headers value, and what sending it back means ("keep the stored secret"). */
+const REDACTED_PLACEHOLDER = "[redacted]";
 
 interface McpFormState {
   name: string;
@@ -33,12 +38,17 @@ interface McpFormState {
   headers: McpKVRow[];
 }
 
+/** Same charset the daemon enforces on a server name (internal/mcpservers validMcpServerName). */
+const VALID_SERVER_NAME = /^[A-Za-z0-9_-]+$/;
+
 const EMPTY_FORM: McpFormState = { name: "", transport: "stdio", command: "", args: "", env: [], url: "", headers: [] };
 
 
 /** Mirrors the daemon's own validation (internal/mcpservers.normalizeValidate) so obvious mistakes never leave the form: name always required, command for stdio, url for http/sse, and every *newly added* env/headers key needs a real value (an existing key may hold the "[redacted]" placeholder). */
 function validateForm(form: McpFormState): string | null {
-  if (!form.name.trim()) return "Name is required.";
+  const name = form.name.trim();
+  if (!name) return "Name is required.";
+  if (!VALID_SERVER_NAME.test(name)) return "Name may only contain letters, digits, '_' and '-'.";
   if (form.transport === "stdio" && !form.command.trim()) return "Command is required for stdio servers.";
   if (form.transport !== "stdio" && !form.url.trim()) return "URL is required for http/sse servers.";
   const kvError = (rows: McpKVRow[], what: string): string | null => {
@@ -62,9 +72,9 @@ function formFromServer(m: McpServer): McpFormState {
     transport: m.transport,
     command: m.command,
     args: m.args.join("\n"),
-    env: Object.entries(m.env).map(([key, value]) => ({ key, value })),
+    env: Object.entries(m.env).map(([key, value]) => ({ key, value, stored: true })),
     url: m.url,
-    headers: Object.entries(m.headers).map(([key, value]) => ({ key, value })),
+    headers: Object.entries(m.headers).map(([key, value]) => ({ key, value, stored: true })),
   };
 }
 
@@ -77,8 +87,9 @@ function formFromServer(m: McpServer): McpFormState {
  *
  * Secrets: every env/headers value the daemon returns is the literal
  * "[redacted]" (keys preserved). The list never shows values at all; the
- * edit form renders existing values as masked password inputs holding the
- * placeholder, and sending the placeholder back means "keep the stored
+ * edit form renders existing values as empty masked password inputs
+ * ("Stored — type to replace") whose underlying value stays the placeholder
+ * until the user types, and sending the placeholder back means "keep the stored
  * secret" (the daemon handles that). A newly added key must carry a real
  * value -- see the form's own validation.
  */
@@ -90,6 +101,8 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
 
   useEffect(() => {
     if (!client) return;
@@ -97,13 +110,17 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
     client
       .call<McpServer[]>("mcp.list")
       .then((list) => {
-        if (!cancelled) setServers(list ?? []);
+        if (cancelled) return;
+        setLoadError(null);
+        setServers(list ?? []);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
+      });
     return () => {
       cancelled = true;
     };
-  }, [client]);
+  }, [client, loadAttempt]);
 
   useEffect(() => {
     if (!events) return;
@@ -209,7 +226,27 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
         </div>
 
         {servers === null ? (
-          <p className="text-ui-base text-muted-foreground">Loading…</p>
+          loadError ? (
+            <div className="flex items-center gap-2">
+              <p role="alert" data-testid="mcp-load-error" className="text-ui-base text-destructive">
+                {loadError}
+              </p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                data-testid="mcp-load-retry"
+                onClick={() => {
+                  setLoadError(null);
+                  setLoadAttempt((n) => n + 1);
+                }}
+              >
+                Retry
+              </Button>
+            </div>
+          ) : (
+            <p className="text-ui-base text-muted-foreground">Loading…</p>
+          )
         ) : (
           <>
             {servers.length === 0 && openCard !== "new" && (
@@ -378,7 +415,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
  *
  * Env/Headers render as key/value rows: existing entries' values arrive as
  * the literal "[redacted]" placeholder and render as a masked password
- * input; leaving the placeholder untouched sends it back verbatim, which
+ * input that displays empty; leaving it untouched sends the placeholder back verbatim, which
  * the daemon interprets as "keep the stored secret". A newly added key
  * must have a real value.
  */
@@ -518,35 +555,45 @@ function KVEditor({
   return (
     <div className="flex flex-col gap-1" data-testid={idPrefix}>
       <span className="text-ui-sm text-foreground-muted">{label}</span>
-      {rows.map((row, i) => (
-        <div key={i} className="flex items-center gap-1" data-testid={`${idPrefix}-row-${i}`}>
-          <Input
-            aria-label={`${label} key ${i + 1}`}
-            data-testid={`${idPrefix}-key-${i}`}
-            placeholder="Key"
-            value={row.key}
-            onChange={(e) => onChange(rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))}
-          />
-          <Input
-            type="password"
-            aria-label={`${label} value ${i + 1}`}
-            data-testid={`${idPrefix}-value-${i}`}
-            placeholder="Value"
-            value={row.value}
-            onChange={(e) => onChange(rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            aria-label={`Remove ${label.toLowerCase()} row ${i + 1}`}
-            data-testid={`${idPrefix}-remove-${i}`}
-            onClick={() => onChange(rows.filter((_, j) => j !== i))}
-          >
-            Remove
-          </Button>
-        </div>
-      ))}
+      {rows.map((row, i) => {
+        const kept = row.stored === true && row.value === REDACTED_PLACEHOLDER;
+        return (
+          <div key={i} className="flex items-center gap-1" data-testid={`${idPrefix}-row-${i}`}>
+            <Input
+              aria-label={`${label} key ${i + 1}`}
+              data-testid={`${idPrefix}-key-${i}`}
+              placeholder="Key"
+              value={row.key}
+              onChange={(e) => onChange(rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))}
+            />
+            <Input
+              type="password"
+              aria-label={`${label} value ${i + 1}`}
+              data-testid={`${idPrefix}-value-${i}`}
+              placeholder={kept ? "Stored — type to replace" : "Value"}
+              value={kept ? "" : row.value}
+              onChange={(e) => {
+                // A stored entry shows empty rather than the literal
+                // placeholder, so typing replaces the secret instead of
+                // appending to "[redacted]"; clearing it again reverts to
+                // "keep the stored secret".
+                const value = e.target.value === "" && row.stored ? REDACTED_PLACEHOLDER : e.target.value;
+                onChange(rows.map((r, j) => (j === i ? { ...r, value } : r)));
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Remove ${label.toLowerCase()} row ${i + 1}`}
+              data-testid={`${idPrefix}-remove-${i}`}
+              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+            >
+              Remove
+            </Button>
+          </div>
+        );
+      })}
       <Button
         type="button"
         variant="ghost"

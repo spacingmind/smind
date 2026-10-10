@@ -253,9 +253,10 @@ describe("mcp-servers-section", () => {
     await flush();
 
     const valueInput = screen.getByTestId("mcp-edit-form-1-env-value-0") as HTMLInputElement;
-    // Prefilled with the placeholder, masked.
+    // Masked, and shows empty (never the literal placeholder) while the stored secret is kept.
     expect(valueInput).toHaveAttribute("type", "password");
-    expect(valueInput.value).toBe(REDACTED);
+    expect(valueInput.value).toBe("");
+    expect(valueInput).toHaveAttribute("placeholder", "Stored — type to replace");
     expect(screen.getByTestId("mcp-edit-form-1-name").closest("form")?.textContent ?? "").not.toContain("SUPERSECRET");
 
     // Untouched: submit sends the placeholder back ("keep the secret").
@@ -273,6 +274,76 @@ describe("mcp-servers-section", () => {
     fireEvent.click(screen.getByTestId("mcp-edit-form-1-submit"));
     await flush();
     expect(client.nth("mcp.update", 1).params).toMatchObject({ id: 1, env: { PLAYWRIGHT_API_KEY: "SUPERSECRET2" } });
+  });
+
+  it("typing into a stored masked value replaces it instead of appending to the placeholder", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("mcp.list").resolve([STDIO_SERVER]);
+    await flush();
+
+    fireEvent.pointerDown(screen.getByTestId("mcp-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("mcp-edit-1"));
+    await flush();
+
+    const valueInput = screen.getByTestId("mcp-edit-form-1-env-value-0") as HTMLInputElement;
+    fireEvent.change(valueInput, { target: { value: "abc" } });
+    expect(valueInput.value).toBe("abc");
+    fireEvent.click(screen.getByTestId("mcp-edit-form-1-submit"));
+    await flush();
+    const env = (client.nth("mcp.update").params as { env: Record<string, string> }).env;
+    expect(env).toEqual({ PLAYWRIGHT_API_KEY: "abc" });
+    expect(env.PLAYWRIGHT_API_KEY).not.toContain(REDACTED);
+
+    // Clearing a stored value again reverts to "keep the stored secret".
+    client.nth("mcp.update").resolve(STDIO_SERVER);
+    await flush();
+    fireEvent.pointerDown(screen.getByTestId("mcp-menu-1"), { button: 0 });
+    fireEvent.click(await screen.findByTestId("mcp-edit-1"));
+    await flush();
+    const again = screen.getByTestId("mcp-edit-form-1-env-value-0") as HTMLInputElement;
+    fireEvent.change(again, { target: { value: "x" } });
+    fireEvent.change(again, { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("mcp-edit-form-1-submit"));
+    await flush();
+    expect(client.nth("mcp.update", 1).params).toMatchObject({ env: { PLAYWRIGHT_API_KEY: REDACTED } });
+  });
+
+  it("shows a load error with retry when the initial mcp.list fails", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("mcp.list").reject(new Error("boom"));
+    await flush();
+    expect(screen.getByTestId("mcp-load-error")).toHaveTextContent("boom");
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("mcp-load-retry"));
+    await flush();
+    client.nth("mcp.list", 1).resolve([STDIO_SERVER]);
+    await flush();
+    expect(screen.queryByTestId("mcp-load-error")).not.toBeInTheDocument();
+    expect(screen.getByTestId("mcp-row-1")).toBeInTheDocument();
+  });
+
+  it("rejects names outside the daemon's charset before calling the daemon", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("mcp.list").resolve([]);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("mcp-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("mcp-form-name"), { target: { value: "my server.v2" } });
+    fireEvent.change(screen.getByTestId("mcp-form-command"), { target: { value: "npx" } });
+    fireEvent.click(screen.getByTestId("mcp-form-submit"));
+    await flush();
+    expect(screen.getByTestId("mcp-form-error")).toHaveTextContent("letters, digits");
+    expect(client.calls.some((c) => c.method === "mcp.create")).toBe(false);
+
+    fireEvent.change(screen.getByTestId("mcp-form-name"), { target: { value: "my_server-2" } });
+    fireEvent.click(screen.getByTestId("mcp-form-submit"));
+    await flush();
+    expect(client.calls.some((c) => c.method === "mcp.create")).toBe(true);
   });
 
   it("shows the daemon's conflict error inline", async () => {
