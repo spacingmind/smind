@@ -281,6 +281,18 @@ ported):
   default.
 - **Order:** D1 → D2 → D3 → D4. Each is its own PR into `develop`.
   D1 + D2 together give most of the visible change.
+- **D1 and D2 run in parallel (2026-10-10).** D1 is Sonnet 5.5 on
+  `feat/desktop-chrome`. D2 is GLM 5.3 on `feat/desktop-de-webview`.
+  To keep the two PRs from colliding:
+  - D1 owns every change to the window builder in
+    `desktop/src-tauri/src/lib.rs`, so **all of D2.1** (no white flash:
+    hidden window, theme background, a web-side "painted" call through
+    `lib/platform.ts`, and the timeout fallback) moves to D1. D2 does
+    not touch `lib.rs`.
+  - D1 owns the header markup in `App.tsx` and the sidebar top edge.
+  - D2 installs its context-menu handling in its own module, not in
+    `App.tsx`, and puts its CSS under a desktop-only selector in
+    `index.css`.
 
 ## Progress
 
