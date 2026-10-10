@@ -5,40 +5,57 @@
 //! OS supports it, a taskbar badge count. The count itself
 //! (`smind_daemon_client::Attention`) is updated from `ClientEvent`s in
 //! `lib.rs`; this module only renders it.
+//!
+//! On macOS there is no tray (desktop-macos-app M3): `Tray` keeps the
+//! count and drives the Dock badge only; see `lifecycle`.
 
 use std::sync::{Arc, Mutex};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
-use tauri::{AppHandle, Manager, Wry};
+use tauri::{AppHandle, Wry};
 use url::Url;
 
 use smind_daemon_client::{attention, Attention, WorkspaceCache};
 
+use crate::lifecycle::{self, Badge, WindowBadge};
 use crate::notify::{self, ClickContext};
-use crate::{show_main, MAIN_WINDOW};
+use crate::show_main;
 
 const ID_ATTENTION: &str = "attention";
 const ID_OPEN: &str = "open";
 const ID_QUIT: &str = "quit";
 
 pub struct Tray {
-    app: AppHandle,
     state: Arc<Mutex<Attention>>,
+    /// The tray icon and its first menu item -- `None` where there is no
+    /// tray (macOS).
+    ui: Option<TrayUi>,
+    badge: Badge<WindowBadge>,
+}
+
+struct TrayUi {
     icon: TrayIcon<Wry>,
     item: MenuItem<Wry>,
 }
 
 pub fn build(app: &AppHandle, cache: WorkspaceCache, proxy_url: Url) -> tauri::Result<Arc<Tray>> {
     let state = Arc::new(Mutex::new(Attention::new()));
+    let ui = if lifecycle::tray_enabled(std::env::consts::OS) {
+        Some(build_ui(app, state.clone(), cache, proxy_url)?)
+    } else {
+        None
+    };
+    Ok(Arc::new(Tray { state, ui, badge: Badge::new(WindowBadge(app.clone())) }))
+}
 
+fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: WorkspaceCache, proxy_url: Url) -> tauri::Result<TrayUi> {
     let item = MenuItem::with_id(app, ID_ATTENTION, attention::label(0), false, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let open = MenuItem::with_id(app, ID_OPEN, "Open", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, ID_QUIT, "Quit", true, None::<&str>)?;
     let tray_menu = Menu::with_items(app, &[&item, &separator, &open, &quit])?;
 
-    let click_state = state.clone();
     let icon = TrayIconBuilder::with_id("main-tray")
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&tray_menu)
@@ -62,12 +79,7 @@ pub fn build(app: &AppHandle, cache: WorkspaceCache, proxy_url: Url) -> tauri::R
         })
         .build(app)?;
 
-    Ok(Arc::new(Tray {
-        app: app.clone(),
-        state,
-        icon,
-        item,
-    }))
+    Ok(TrayUi { icon, item })
 }
 
 impl Tray {
@@ -99,16 +111,16 @@ impl Tray {
     }
 
     fn refresh(&self, count: usize) {
-        let label = attention::label(count);
-        let _ = self.item.set_text(&label);
-        let _ = self.item.set_enabled(count > 0);
-        let _ = self.icon.set_tooltip(Some(&label));
+        if let Some(ui) = &self.ui {
+            let label = attention::label(count);
+            let _ = ui.item.set_text(&label);
+            let _ = ui.item.set_enabled(count > 0);
+            let _ = ui.icon.set_tooltip(Some(&label));
+        }
         // Windows has no cross-platform badge API (only a per-window
         // overlay icon image, which this quick pass doesn't have an
-        // asset for); Linux/macOS pick this up as a launcher/dock badge
+        // asset for); macOS shows the Dock badge, Linux a launcher badge
         // where the desktop environment supports it.
-        if let Some(win) = self.app.get_webview_window(MAIN_WINDOW) {
-            let _ = win.set_badge_count(if count > 0 { Some(count as i64) } else { None });
-        }
+        self.badge.update(count);
     }
 }

@@ -8,7 +8,7 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "devtools"] }
+tauri = { version = "2", features = ["tray-icon", "devtools", "macos-private-api"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
@@ -32,6 +32,15 @@ tauri-winrt-notification = "0.8"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = "4"
+
+# desktop-macos-app M3.4: the notification plugin has no click callback on
+# desktop, so macOS drives NSUserNotification directly (the same crate the
+# plugin's own backend already pulls in) to get "clicked" back.
+[target.'cfg(target_os = "macos")'.dependencies]
+mac-notification-sys = "0.6"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lib]
 name = "smind_desktop_lib"

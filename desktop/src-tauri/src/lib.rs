@@ -22,10 +22,12 @@ mod client_watch;
 mod commands;
 mod daemon_manager;
 mod deeplink;
+mod lifecycle;
 mod menu;
 mod notify;
 mod state;
 mod tray;
+mod window_chrome;
 mod zoom_store;
 
 use state::DesktopState;
@@ -62,8 +64,20 @@ pub fn run() {
         // (fires for a window built at runtime via WebviewWindowBuilder,
         // not only ones declared in tauri.conf.json); falls back to the
         // OS's own placement when the saved monitor is gone rather than
-        // forcing an off-screen position.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // forcing an off-screen position. VISIBLE and DECORATIONS are
+        // deliberately not restored: the former would show the window
+        // before the UI has painted (D2.1), the latter would hand a
+        // previously-saved native frame back to an undecorated window
+        // (D1), leaving two sets of caption buttons.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(
+                    tauri_plugin_window_state::StateFlags::all()
+                        - tauri_plugin_window_state::StateFlags::VISIBLE
+                        - tauri_plugin_window_state::StateFlags::DECORATIONS,
+                )
+                .build(),
+        )
         // quick-wins AC2 Help > Open Log Folder: writes to the platform
         // log dir (app.path().app_log_dir()) in addition to stdout.
         .plugin(tauri_plugin_log::Builder::new().build())
@@ -88,6 +102,8 @@ pub fn run() {
             daemon_manager::daemon_restart,
             daemon_manager::take_over_daemon,
             daemon_manager::connection_version,
+            window_chrome::window_ready,
+            window_chrome::window_set_theme,
         ])
         .setup(|app| {
             // AC4: the built-in `local` entry always tracks
@@ -131,7 +147,10 @@ pub fn run() {
             // "smind on GitHub") opens in the OS browser instead of
             // navigating the window away from the app.
             let nav_origin = proxy_url.origin();
-            let win = WebviewWindowBuilder::new(
+            // D1/D2.1: per-platform chrome, created hidden and shown
+            // when the UI reports its first paint (or after the fallback).
+            app.manage(window_chrome::ShowGate::default());
+            let builder = WebviewWindowBuilder::new(
                 app,
                 MAIN_WINDOW,
                 tauri::WebviewUrl::External(initial_url),
@@ -145,8 +164,10 @@ pub fn run() {
                     let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
                     false
                 }
-            })
-            .build()?;
+            });
+            let win = window_chrome::configure(builder, window_chrome::load_surface(app.handle()))
+                .build()?;
+            window_chrome::arm_fallback(app.handle());
 
             // quick-wins AC2: restore the persisted zoom level.
             let _ = win.set_zoom(zoom_store::load(app.handle()));
@@ -217,9 +238,11 @@ pub fn run() {
 
             // AC3: hide-on-close instead of destroy.
             let close_win = win.clone();
+            let close_app = app.handle().clone();
             win.on_window_event(move |event| {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
+                    window_chrome::dismissed(&close_app);
                     let _ = close_win.hide();
                 }
             });
@@ -254,10 +277,17 @@ pub fn run() {
                 daemon_manager_platform: Mutex::new(None),
             });
 
+            // desktop-macos-app M2.3/M2.4: install + start the bundled
+            // daemon when none is reachable, or update an older managed
+            // one; macOS only (WSL2 keeps its explicit Install button).
+            #[cfg(target_os = "macos")]
+            tauri::async_runtime::spawn(daemon_manager::auto_start(app.handle().clone()));
+
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running smind desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building smind desktop")
+        .run(lifecycle::handle_run_event);
 }
 
 fn toggle_main(app: &tauri::AppHandle) {

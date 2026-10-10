@@ -11,7 +11,7 @@ export type AttentionReason = "error" | "finished" | "permission";
 export type TaskAttention = Map<number, Set<AttentionReason>>;
 
 /** Stable "nothing known yet" value, so a client-less mount doesn't hand consumers a fresh object every render. */
-const EMPTY_SIGNAL: TaskSignal = { attention: new Map(), runStatus: new Map(), runningChatsByTask: new Map() };
+const EMPTY_SIGNAL: TaskSignal = { loaded: false, attention: new Map(), runStatus: new Map(), runningChatsByTask: new Map() };
 
 /**
  * The status of each task's latest run -- "running" if any of the task's
@@ -24,6 +24,12 @@ export type TaskRunStatus = ReadonlyMap<number, RunStatusValue>;
 
 /** Both per-task signals this hook derives from the one run bookkeeping it keeps, plus ADR-0016 P3's per-task running-chats set (the concurrency banner's data source). */
 export interface TaskSignal {
+  /**
+   * Whether the current client's first run.list resync has completed --
+   * until it has, an empty runningChatsByTask means "not known yet", not
+   * "0 running" (desktop-macos-app M5.2). Resets on a client change.
+   */
+  loaded: boolean;
   attention: TaskAttention;
   runStatus: TaskRunStatus;
   /** Which of each task's chats currently have a running run -- ADR-0016 P3's concurrency banner ("Another chat is running in this worktree") is "this chat's own id is in the set but the set has more than one member". Absent taskId means "no chat of it is running". */
@@ -90,6 +96,7 @@ export function useTaskAttention(
   const seenRef = useRef<Map<number, Set<string>>>(new Map());
   /** Monotonic counter handing every live run.status an `order` above the whole run.list snapshot's. */
   const orderRef = useRef(0);
+  const loadedRef = useRef(false);
 
   const recompute = useCallback(() => {
     const runs = runsRef.current;
@@ -130,6 +137,7 @@ export function useTaskAttention(
     }
 
     setSignal({
+      loaded: loadedRef.current,
       attention,
       runStatus: new Map([...latest].map(([taskId, run]) => [taskId, run.Status])),
       runningChatsByTask,
@@ -181,6 +189,7 @@ export function useTaskAttention(
           );
           if (isStale()) return;
           pendingPermissionTasksRef.current = pending;
+          loadedRef.current = true;
           recompute();
         })
         .catch(() => {
@@ -194,12 +203,15 @@ export function useTaskAttention(
   useEffect(() => {
     if (!client) {
       runsRef.current = null;
+      loadedRef.current = false;
       pendingPermissionTasksRef.current = new Set();
       orderRef.current = 0;
       setSignal(EMPTY_SIGNAL);
       return;
     }
 
+    loadedRef.current = false;
+    setSignal((prev) => ({ ...prev, loaded: false }));
     let cancelled = false;
     resync(client, () => cancelled);
 

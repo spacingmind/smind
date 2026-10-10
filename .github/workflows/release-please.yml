@@ -17,8 +17,9 @@
 #
 # When it does create a release, the jobs below build cross-platform smind
 # daemon binaries (linux/darwin x amd64/arm64, CGO_ENABLED=0, web UI
-# embedded) and the Windows desktop installers (by calling
-# desktop-windows.yml as a reusable workflow), package everything with a
+# embedded), the Windows desktop installers and the macOS .dmg per arch (by
+# calling desktop-windows.yml / desktop-macos.yml as reusable workflows; the
+# macOS app bundles the darwin daemon built here), package everything with a
 # SHA-256 checksums.txt, and attach it all to that Release. No
 # signing/notarization (out of scope); no native Windows daemon binary yet
 # (blocked on internal/terminal, see ADR-0013). Modeled on
@@ -155,17 +156,29 @@ jobs:
       contents: read
     uses: ./.github/workflows/desktop-windows.yml
 
+  # The macOS app bundles the darwin daemon, so it waits for build-binaries
+  # and reuses that job's per-arch artifact instead of compiling Go again.
+  build-desktop-macos:
+    needs: [prepare, build-binaries]
+    if: always() && needs.prepare.result == 'success' && needs.build-binaries.result == 'success'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/desktop-macos.yml
+    with:
+      daemon-version: ${{ needs.prepare.outputs.version }}
+
   # Collects every build's artifact, computes one checksums.txt over all of
   # them, and (on a real release only) attaches everything to the Release.
   # `always()` is required for the same reason as in `prepare`: on a
   # workflow_dispatch dry run, `release-please` is skipped, and by default
   # a skipped dependency would skip this job too.
   publish:
-    needs: [release-please, prepare, build-binaries, build-desktop-windows]
+    needs: [release-please, prepare, build-binaries, build-desktop-windows, build-desktop-macos]
     if: |
       always() &&
       needs.build-binaries.result == 'success' &&
-      needs.build-desktop-windows.result == 'success'
+      needs.build-desktop-windows.result == 'success' &&
+      needs.build-desktop-macos.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -180,7 +193,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(*.tar.gz *.exe *.msi)
+          files=(*.tar.gz *.exe *.msi *.dmg)
           if [ "${#files[@]}" -eq 0 ]; then
             echo "expected release artifacts, found none" >&2
             exit 1
@@ -194,6 +207,7 @@ jobs:
             dist/*.tar.gz
             dist/*.exe
             dist/*.msi
+            dist/*.dmg
             dist/checksums.txt
           if-no-files-found: error
 
@@ -206,7 +220,7 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(*.tar.gz *.exe *.msi checksums.txt)
+          assets=(*.tar.gz *.exe *.msi *.dmg checksums.txt)
           gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
 
   # Keeps `master` meaningful as "the code that has been released": after

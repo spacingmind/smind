@@ -223,8 +223,9 @@ Web (`web/packages/ui`, vitest):
 10. **Web**: catalog-driven picker, profile form, header pill, mid-run
     control, localStorage migration, timeline legacy label (W1-W6). Then a
     light+dark screenshot pass.
-11. **MCP guard** on the ADR-0017 `task_send` (S17). Rebase onto #223 once
-    it lands on develop.
+11. [x] **MCP guard** on the ADR-0017 `task_send` (S17) -- delivered on
+    the `feat/mcp-task-send` branch (ADR-0017 step 3):
+    `TestMCPTools_TaskSendRejectsAutoApprovingMode`.
 12. **Docs**: ADR-0014/0018 notes, README. Move this
     plan to completed.
 
@@ -294,7 +295,7 @@ passed on every rerun. That's a pre-existing flake.
 | 8 | ✅ | W1-W6: `composer.test.tsx` (mode list, provider switch reset, Auto-accept, Shift+Tab, legacy localStorage), `permission-mode-cycle.test.ts`, `permission-modes.test.ts`, `profiles-section.test.tsx` W4, `task-detail.test.tsx` (live control, hidden for Codex, pill), `permission-reason`/`run-timeline` tests (auto_accept, legacy auto_safe). |
 | 9 | ✅ | S15 `TestTaskSend_ModeFlags`, `TestRunProfileAddPrintsCreatedRow` (`--mode=plan`), `TestRunProfileAddRejectsRemovedApprovalPolicyFlag`. Manual: `task send --approval-policy auto-safe` exits 2 pointing at `--mode`. |
 | 10 | ✅ | S16 (e5017dd's test). Manual: `smind task permissions` printed `-> smind task approve <runId> <requestId>`. |
-| 11 | ⏳ blocked | `task_send` isn't implemented yet (see Progress). The requirement moved to mcp-server.md step 3. |
+| 11 | ✅ | Delivered on `feat/mcp-task-send` (mcp-server.md step 3): `TestMCPTools_TaskSendRejectsAutoApprovingMode` -- bypass mode and `autoAccept: true` rejected when caller-supplied, the same bypass mode via a human-authored `profileId` accepted, `profileId` + explicit values rejected, `profileId` + mismatched provider rejected. |
 | 12 | ✅ | ADR-0014/0018 notes, ADR-0017 `task_send` row, README "Permission modes", `cmd/smind/main.go` usage. |
 | 13 | ✅ | `task test`/`task lint` green. Light and dark screenshots (Playwright against a sandbox daemon with the fake ACP agent in `modes:session`): composer mode picker (Claude catalog, GLM discovered catalog), Auto-accept toggle off/on, live mid-run control, Settings → Agents mode field. Local only (`/tmp/smind-shot/out`), not committed. |
 

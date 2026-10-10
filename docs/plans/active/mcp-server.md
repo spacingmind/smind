@@ -130,7 +130,7 @@ agent (small, independently reviewable steps; each should end with
    `TestMCPTools_TaskPermissionsShowsPendingPermission` -- each driven
    through the SDK's client type over an in-memory transport against the
    fake-agent in-process daemon.
-3. **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
+3. [x] **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
    confirms the run actually started. **Permission guard (ADR-0019
    decision 6, carried over from
@@ -160,7 +160,7 @@ agent (small, independently reviewable steps; each should end with
 7. [x] **MCP protocol round-trip test**: add the end-to-end stdio test
    scenario once enough tools exist to make it meaningful (after step 3
    or 4). `TestMCPServe_StdioRoundTrip`.
-8. **Docs**: update `AGENTS.md`'s workspace map / README if `smind mcp serve`
+8. [x] **Docs**: update `AGENTS.md`'s workspace map / README if `smind mcp serve`
    needs a one-line mention for discoverability (does not need its own
    doc page beyond the ADR + this plan).
 
@@ -230,3 +230,32 @@ Step 7's dedicated test runs the actual compiled `smind mcp serve` binary
 as a subprocess over real stdio (the SDK's `CommandTransport`) against the
 same fake-agent-backed daemon, exercising `initialize` -> `tools/list` ->
 one `tools/call` (`task_new`) end to end: `TestMCPServe_StdioRoundTrip`.
+
+Steps 3 and 8 (`task_send` + docs) validated as follows:
+
+- AC3's `task_send` row (wraps task.prompt's non-blocking half, i.e.
+  run.start, returns {runId} without blocking on run completion):
+  `TestMCPTools_TaskSendReturnsRunIdImmediately` -- runId returned at
+  once, then a direct `run.logs` call confirms the run registered and the
+  fake agent drove it to `done`.
+- ADR-0019 decision 6's permission guard (also
+  provider-native-permission-modes.md AC11/S17): `TestMCPTools_TaskSendRejectsAutoApprovingMode`
+  -- claude-native `bypassPermissions` rejected, glm ACP bypass-style id
+  rejected, `autoAccept: true` rejected, the same bypass mode via a
+  human-authored `profileId` accepted (with the `profile.get` wire keys
+  pinned against the real wsapi response first), `profileId` + explicit
+  auto-approving mode rejected, and `profileId` + contradicting
+  `provider` rejected.
+- Invalid tool args scenario for `task_send`: `TestMCPTools_TaskSendInvalidArgs`
+  -- blank prompt and missing/zero taskId are tool errors naming the
+  field, a type-invalid taskId is caught by the SDK's schema validation
+  before the handler runs, no panics.
+- Chat-scoped send scenario: `TestMCPTools_TaskSendChatScoped` -- a run
+  sent with an explicit `chatId` (from `chat_new`) reads back under that
+  chat via `run.list`'s chat filter; a foreign chatId is rejected.
+- AC7 update: `TestMCPTools_NoApprovalToolInCatalog` now also asserts
+  `task_send` is present.
+- Step 8 (docs): README gains an MCP-server feature bullet and a
+  "MCP server (`smind mcp serve`)" section covering the host config
+  shape, the tool list, the missing-approval-tools rule, and the
+  ADR-0019 permission guard.

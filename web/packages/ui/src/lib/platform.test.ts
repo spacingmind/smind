@@ -10,6 +10,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("@tauri-apps/api/core");
   vi.doUnmock("@tauri-apps/api/event");
+  vi.doUnmock("@tauri-apps/api/window");
 });
 
 describe("platform in a non-desktop build", () => {
@@ -120,6 +121,91 @@ describe("platform in a desktop build", () => {
     expect(cb).toHaveBeenCalledWith({ stage: "downloading", message: "Downloading…" });
 
     unsubscribe();
+    expect(unlisten).toHaveBeenCalled();
+  });
+});
+
+describe("window controls (desktop-native-feel D1)", () => {
+  it("platform-window-controls-stub: in a non-desktop build the window API rejects and reports no OS", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { desktopWindow, desktopOS } = await import("@/lib/platform");
+
+    expect(desktopOS).toBeNull();
+    await expect(desktopWindow.minimize()).rejects.toThrow(/unavailable/i);
+    await expect(desktopWindow.toggleMaximize()).rejects.toThrow(/unavailable/i);
+    await expect(desktopWindow.close()).rejects.toThrow(/unavailable/i);
+    await expect(desktopWindow.notifyPainted()).rejects.toThrow(/unavailable/i);
+    await expect(desktopWindow.setTheme("system", "dark")).rejects.toThrow(/unavailable/i);
+    const cb = vi.fn();
+    expect(() => desktopWindow.onStateChange(cb)()).not.toThrow();
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("detectDesktopOS reads the webview user agents of all three platforms", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "");
+    const { detectDesktopOS } = await import("@/lib/platform");
+    expect(detectDesktopOS("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15")).toBe("macos");
+    expect(detectDesktopOS("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Edg/130")).toBe("windows");
+    expect(detectDesktopOS("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15")).toBe("linux");
+  });
+
+  it("in a desktop build each method maps to exactly one Tauri window call or command", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const win = {
+      minimize: vi.fn(async () => {}),
+      toggleMaximize: vi.fn(async () => {}),
+      close: vi.fn(async () => {}),
+      destroy: vi.fn(async () => {}),
+      isMaximized: vi.fn(async () => true),
+      isFullscreen: vi.fn(async () => false),
+      onResized: vi.fn(async (_h: () => void) => () => {}),
+    };
+    const invoke = vi.fn(async () => undefined);
+    vi.doMock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => win }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+    const { desktopWindow } = await import("@/lib/platform");
+
+    await desktopWindow.minimize();
+    await desktopWindow.toggleMaximize();
+    await desktopWindow.close();
+    expect(win.minimize).toHaveBeenCalledTimes(1);
+    expect(win.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(win.close).toHaveBeenCalledTimes(1);
+    expect(win.destroy).not.toHaveBeenCalled();
+
+    await desktopWindow.notifyPainted();
+    expect(invoke).toHaveBeenCalledWith("window_ready");
+    await desktopWindow.setTheme("system", "dark");
+    expect(invoke).toHaveBeenCalledWith("window_set_theme", { preference: "system", resolved: "dark" });
+  });
+
+  it("onStateChange reads the state immediately, re-reads on resize, and unsubscribes", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    let maximized = false;
+    const unlisten = vi.fn();
+    let onResize: () => void = () => {};
+    const win = {
+      isMaximized: vi.fn(async () => maximized),
+      isFullscreen: vi.fn(async () => false),
+      onResized: vi.fn(async (h: () => void) => {
+        onResize = h;
+        return unlisten;
+      }),
+    };
+    vi.doMock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => win }));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+    const { desktopWindow } = await import("@/lib/platform");
+
+    const cb = vi.fn();
+    const stop = desktopWindow.onStateChange(cb);
+    await vi.waitFor(() => expect(cb).toHaveBeenCalledWith({ maximized: false, fullscreen: false }));
+    await vi.waitFor(() => expect(win.onResized).toHaveBeenCalled());
+
+    maximized = true;
+    onResize();
+    await vi.waitFor(() => expect(cb).toHaveBeenLastCalledWith({ maximized: true, fullscreen: false }));
+
+    stop();
     expect(unlisten).toHaveBeenCalled();
   });
 });
