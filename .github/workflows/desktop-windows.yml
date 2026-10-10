@@ -4,7 +4,7 @@ name: desktop-windows
 # uploads the installers as a workflow artifact. Unsigned; no release is
 # published here -- release-please.yml calls this as a reusable workflow
 # (workflow_call) to attach the installers to an actual GitHub Release. See
-# docs/plans/active/desktop-tauri-shell.md and
+# docs/plans/completed/desktop-tauri-shell.md and
 # docs/plans/completed/release-binaries.md.
 on:
   push:

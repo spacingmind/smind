@@ -82,7 +82,7 @@ const (
 	// resumed -- either because the provider doesn't support resume at all,
 	// or because resuming the stored id itself failed (a stale/unknown
 	// session). Never sent instead of EventTypeDone, only before it -- see
-	// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.5.
+	// ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's P2.5.
 	EventTypeSessionNote
 
 	// EventTypePermissionModeChanged reports the provider-native permission
