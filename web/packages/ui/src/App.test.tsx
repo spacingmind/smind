@@ -3,7 +3,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
-import { SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
+import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
@@ -729,7 +729,10 @@ describe("App keyboard shortcuts", () => {
     await flush();
 
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
-    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);
+    // jsdom is not a desktop build: the web-only rows render.
+    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(
+      platformBindings(SHORTCUT_BINDINGS, false).length,
+    );
   });
 
   it("Mod+, opens Settings on its default section, not the Shortcuts one a prior Shift+? left behind", async () => {

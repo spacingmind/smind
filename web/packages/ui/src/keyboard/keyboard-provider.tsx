@@ -12,6 +12,7 @@ import {
 import type { ActionHandler, ActionId, ActionPayload } from "@/keyboard/actions";
 import { resolveFocusScope } from "@/keyboard/focus-scope";
 import { isMacPlatform } from "@/keyboard/shortcut-string";
+import { desktop, isDesktop } from "@/lib/platform";
 import {
   clearOverride,
   readStoredOverrides,
@@ -21,6 +22,7 @@ import {
 import {
   CHORD_TIMEOUT_MS,
   INITIAL_CHORD_STATE,
+  platformBindings,
   resolveBindings,
   resolveChordStep,
   SHORTCUT_BINDINGS,
@@ -81,6 +83,9 @@ interface KeyboardContextValue {
   acquireModalLock: () => () => void;
 }
 
+/** How close together two runs of the same action must be for the second to count as a duplicate of the first. */
+const DEDUPE_WINDOW_MS = 300;
+
 /**
  * A standalone, fully-functional default -- the same tradeoff
  * `hooks/use-theme.tsx` documents. This codebase's component tests render
@@ -135,7 +140,12 @@ export function KeyboardProvider({
   // reads them at the moment a key is pressed.
   const handlers = useRef(new Map<ActionId, HandlerEntry[]>());
 
-  const bindings = useMemo(() => resolveBindings(SHORTCUT_BINDINGS, overrides), [overrides]);
+  // D3.1: a row gated `when.desktop` exists only on its own platform, so
+  // it neither matches keys nor appears in the help list on the other one.
+  const bindings = useMemo(
+    () => resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop), overrides),
+    [overrides],
+  );
 
   // Read per dispatch rather than memoized at mount: tests reassign
   // `navigator.platform` between cases, and the cost is one regex.
@@ -182,6 +192,34 @@ export function KeyboardProvider({
   // the listener itself being torn down and re-added.
   const chordStateRef = useRef<ChordState>(INITIAL_CHORD_STATE);
   const chordTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // D3.3, no double fire: when a native menu item carries an accelerator
+  // (macOS), the OS delivers the keystroke to the menu -- but the webview
+  // may *also* report the keydown to the page, so the same action can
+  // arrive from both sources within a few milliseconds. Whichever source
+  // runs an action first wins; a copy of the same action from the other
+  // source within DEDUPE_WINDOW_MS is ignored. A time window (rather than
+  // "skip keydown for menu-owned combos") holds on every platform,
+  // including the Windows/Linux menu items that have no accelerator at
+  // all, and stays correct even if the menu's accelerator set changes.
+  const lastRunRef = useRef<{ action: ActionId; at: number; source: "keydown" | "menu" } | null>(
+    null,
+  );
+
+  const claimAction = useCallback((action: ActionId, source: "keydown" | "menu") => {
+    const now = Date.now();
+    const last = lastRunRef.current;
+    if (
+      last &&
+      last.action === action &&
+      last.source !== source &&
+      now - last.at < DEDUPE_WINDOW_MS
+    ) {
+      return false;
+    }
+    lastRunRef.current = { action, at: now, source };
+    return true;
+  }, []);
 
   useEffect(() => {
     function resetChord() {
@@ -237,7 +275,9 @@ export function KeyboardProvider({
 
       event.preventDefault();
       event.stopPropagation();
-      runAction(resolution.match.action, resolution.match.payload);
+      if (claimAction(resolution.match.action, "keydown")) {
+        runAction(resolution.match.action, resolution.match.payload);
+      }
     }
 
     // Capture phase: xterm and CodeMirror both attach their own keydown
@@ -250,7 +290,20 @@ export function KeyboardProvider({
       window.removeEventListener("keydown", onKeyDown, true);
       if (chordTimeoutRef.current !== null) clearTimeout(chordTimeoutRef.current);
     };
-  }, [runAction]);
+  }, [runAction, claimAction]);
+
+  // D3.3: a native menu item click (or its accelerator, which the OS
+  // routes to the menu) arrives as one `menu-action` event and is
+  // dispatched through the same registry a keystroke uses. A modal owns
+  // the keyboard, so its gate applies here too. `claimAction` is what
+  // keeps an accelerator that also reached the webview from firing twice.
+  useEffect(() => {
+    if (!isDesktop) return;
+    return desktop.onMenuAction((id) => {
+      if (modalOpenRef.current) return;
+      if (claimAction(id, "menu")) runAction(id);
+    });
+  }, [runAction, claimAction]);
 
   const rebind = useCallback(
     (bindingId: string, combo: string) => {
