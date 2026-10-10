@@ -56,6 +56,8 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"chat.get":                 handleChatGet(wm),
 		"chat.rename":              handleChatRename(wm),
 		"chat.archive":             handleChatArchive(wm, reg),
+		"chat.queueList":           handleChatQueueList(reg),
+		"chat.queueCancel":         handleChatQueueCancel(reg),
 		"task.prompt":              handleTaskPrompt(wm, runner, reg),
 		"run.start":                handleRunStart(wm, runner, reg),
 		"run.list":                 handleRunList(reg),
@@ -805,6 +807,89 @@ func handleChatArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 	}
 }
 
+// handleChatQueueList returns chatID's queue items, all statuses, oldest
+// first (ADR-0021 §8).
+func handleChatQueueList(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ChatID int64 `json:"chatId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.queueList: invalid params: %w", err)
+		}
+		if p.ChatID <= 0 {
+			return nil, fmt.Errorf("chat.queueList: chatId is required")
+		}
+		items, err := reg.ListChatQueue(p.ChatID)
+		if err != nil {
+			return nil, fmt.Errorf("chat.queueList: %w", err)
+		}
+		return chatQueueListResult{Items: toChatQueueItemParams(items)}, nil
+	}
+}
+
+// chatQueueItemParams is the wire shape of one chat.queueList item and of
+// the chat.queueUpdated event's snapshot entries -- store.ChatQueueItem's
+// fields under their Go names as JSON keys (the same convention store.Chat
+// itself uses over this API), with RunConfig and the nullable columns
+// explicit so a client can splice the snapshot straight into a list.
+type chatQueueItemParams struct {
+	ID           int64     `json:"ID"`
+	ChatID       int64     `json:"ChatID"`
+	Prompt       string    `json:"Prompt"`
+	RunConfig    string    `json:"RunConfig"`
+	Source       string    `json:"Source"`
+	FromTaskID   *int64    `json:"FromTaskID"`
+	FromChatID   *int64    `json:"FromChatID"`
+	Priority     int       `json:"Priority"`
+	Status       string    `json:"Status"`
+	RunID        *string   `json:"RunID"`
+	CancelReason string    `json:"CancelReason"`
+	CreatedAt    time.Time `json:"CreatedAt"`
+	UpdatedAt    time.Time `json:"UpdatedAt"`
+}
+
+func toChatQueueItemParams(items []store.ChatQueueItem) []chatQueueItemParams {
+	out := make([]chatQueueItemParams, len(items))
+	for i, item := range items {
+		out[i] = chatQueueItemParams(item)
+	}
+	return out
+}
+
+// chatQueueListResult is the terminal result of chat.queueList.
+type chatQueueListResult struct {
+	Items []chatQueueItemParams `json:"items"`
+}
+
+// handleChatQueueCancel cancels a queued item; anything not queued
+// (delivered, cancelled, unknown) is an error (ADR-0021 §8).
+func handleChatQueueCancel(reg *runs.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ItemID int64 `json:"itemId"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("chat.queueCancel: invalid params: %w", err)
+		}
+		if p.ItemID <= 0 {
+			return nil, fmt.Errorf("chat.queueCancel: itemId is required")
+		}
+		if err := reg.CancelQueuedItem(p.ItemID); err != nil {
+			return nil, fmt.Errorf("chat.queueCancel: %w", err)
+		}
+		return struct{}{}, nil
+	}
+}
+
+// runQueuedResult is the terminal result of task.prompt/run.start when the
+// chat was busy and whenBusy was queue/interrupt (ADR-0021 §2). Only
+// reachable by explicitly passing whenBusy, so old clients never see it.
+type runQueuedResult struct {
+	Queued      bool  `json:"queued"`
+	QueueItemID int64 `json:"queueItemId"`
+}
+
 // taskPromptResult is the terminal result of a successful task.prompt (or
 // run.attach/run.start reaching StatusDone).
 type taskPromptResult struct {
@@ -932,6 +1017,10 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			// an omitted field is taskrunner.ThinkingLevelUnspecified,
 			// preserving today's behavior exactly.
 			ThinkingLevel taskrunner.ThinkingLevel `json:"thinkingLevel"`
+			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
+			// omitted or "reject" keeps today's behavior exactly, so old
+			// clients are unchanged.
+			WhenBusy runs.WhenBusy `json:"whenBusy"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
@@ -943,12 +1032,15 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0)
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
+		if out.Queued {
+			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID}, nil
+		}
 
-		return attachAndStream(ctx, rc, reg, runID, true)
+		return attachAndStream(ctx, rc, reg, out.RunID, true)
 	}
 }
 
@@ -995,6 +1087,16 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// submitPrompt), so this is where its thinking-level selector's
 			// choice lands on the wire.
 			ThinkingLevel taskrunner.ThinkingLevel `json:"thinkingLevel"`
+			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
+			// omitted or "reject" keeps today's behavior exactly.
+			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Source/FromTaskID/FromChatID are ADR-0021 §4's provenance:
+			// the wsapi default is a human caller; the MCP layer passes
+			// orchestrator, or agent plus its own task/chat ids for the
+			// [message from task #T, chat #C] delivery header.
+			Source     string `json:"source"`
+			FromTaskID int64  `json:"fromTaskId"`
+			FromChatID int64  `json:"fromChatId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1005,12 +1107,26 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.start: invalid source %q", p.Source)
+		}
+		if p.Source == store.ChatQueueSourceAgent && (p.FromTaskID == 0 || p.FromChatID == 0) {
+			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
+		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
-		return runStartResult{RunID: runID}, nil
+		if out.Queued {
+			return runQueuedResult{Queued: true, QueueItemID: out.QueueItemID}, nil
+		}
+		return runStartResult{RunID: out.RunID}, nil
 	}
 }
 

@@ -193,3 +193,20 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task_id ON terminal_sessions(task_id);
 CREATE INDEX IF NOT EXISTS idx_request_log_started_at ON request_log(started_at);
 CREATE INDEX IF NOT EXISTS idx_request_log_account_id ON request_log(account_id);
+
+CREATE TABLE IF NOT EXISTS chat_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    prompt TEXT NOT NULL,
+    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel
+    source TEXT NOT NULL,                  -- 'human' | 'orchestrator' | 'agent'
+    from_task_id INTEGER,                  -- sender, when source='agent'
+    from_chat_id INTEGER,
+    priority INTEGER NOT NULL DEFAULT 0,   -- 1 for interrupt items (delivered first)
+    status TEXT NOT NULL,                  -- 'queued' | 'delivered' | 'cancelled'
+    run_id TEXT,                           -- set on delivery
+    cancel_reason TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_queue_chat_status ON chat_queue(chat_id, status, priority DESC, id);
