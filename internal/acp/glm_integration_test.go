@@ -34,7 +34,7 @@ func TestGLMIntegration(t *testing.T) {
 		t.Fatalf("Initialize() error = %v", err)
 	}
 
-	sessionID, _, err := c.NewSession(ctx, t.TempDir())
+	sessionID, _, err := c.NewSession(ctx, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}

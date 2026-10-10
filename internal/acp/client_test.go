@@ -52,7 +52,7 @@ func TestClient_HandshakeAndStreamingPrompt(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -134,7 +134,7 @@ func TestClient_RequestPermissionAutoDeny(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -194,7 +194,7 @@ func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -257,7 +257,7 @@ func TestClient_NewSessionConfigOptions(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, opts, err := c.NewSession(ctx, cwd)
+	_, opts, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -308,7 +308,7 @@ func TestClient_SetSessionConfigOptionRequestShape(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -345,7 +345,7 @@ func TestClient_SetSessionConfigOptionSuccess(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -372,7 +372,7 @@ func TestClient_SetSessionConfigOptionAgentError(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -436,22 +436,22 @@ func TestClient_LoadSessionAndResumeSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	sid, _, err := c.NewSession(ctx, cwd)
+	sid, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 
-	if _, err := c.LoadSession(ctx, sid, cwd); err != nil {
+	if _, err := c.LoadSession(ctx, sid, cwd, nil); err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if _, err := c.ResumeSession(ctx, sid, cwd); err != nil {
+	if _, err := c.ResumeSession(ctx, sid, cwd, nil); err != nil {
 		t.Fatalf("ResumeSession() error = %v", err)
 	}
 
-	if _, err := c.LoadSession(ctx, "unknown-session", cwd); err == nil {
+	if _, err := c.LoadSession(ctx, "unknown-session", cwd, nil); err == nil {
 		t.Fatal("LoadSession() with unknown session id error = nil, want error")
 	}
-	if _, err := c.ResumeSession(ctx, "unknown-session", cwd); err == nil {
+	if _, err := c.ResumeSession(ctx, "unknown-session", cwd, nil); err == nil {
 		t.Fatal("ResumeSession() with unknown session id error = nil, want error")
 	}
 }
@@ -466,7 +466,7 @@ func TestClient_SessionModes(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	sessionID, _, err := c.NewSession(ctx, cwd)
+	sessionID, _, err := c.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}

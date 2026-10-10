@@ -88,6 +88,26 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+// mcpCaps holds the transports advertised under
+// agentCapabilities.mcpCapabilities (v1 booleans), set from
+// FAKEAGENT_MCP_CAPS. mcpDumpPath is FAKEAGENT_MCP_DUMP's value: the file
+// the raw mcpServers JSON is written to.
+var (
+	mcpCaps     []string
+	mcpDumpPath string
+)
+
+// dumpMcpServers writes the raw mcpServers JSON to mcpDumpPath (if set).
+func dumpMcpServers(raw json.RawMessage) {
+	if mcpDumpPath == "" {
+		return
+	}
+	if len(raw) == 0 {
+		raw = json.RawMessage("[]")
+	}
+	_ = os.WriteFile(mcpDumpPath, append([]byte(nil), raw...), 0o644)
+}
+
 var (
 	writeMu sync.Mutex
 	nextID  int64
@@ -135,6 +155,16 @@ func call(method string, params any) message {
 }
 
 func main() {
+	// FAKEAGENT_MCP_CAPS advertises mcp transports under
+	// agentCapabilities.mcpCapabilities (v1 booleans; "stdio,http,sse"
+	// subsets, unset advertises nothing). FAKEAGENT_MCP_DUMP, when set,
+	// makes the agent overwrite that file with the raw mcpServers JSON it
+	// received on session/new|load|resume.
+	if v := os.Getenv("FAKEAGENT_MCP_CAPS"); v != "" {
+		mcpCaps = strings.Split(v, ",")
+	}
+	mcpDumpPath = os.Getenv("FAKEAGENT_MCP_DUMP")
+
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "modes:") {
 			modesMode = strings.TrimPrefix(a, "modes:")
@@ -164,6 +194,18 @@ func handle(msg message, sessionCwd *string) {
 	switch {
 	case msg.Method == "initialize":
 		caps := map[string]any{}
+		if len(mcpCaps) > 0 {
+			m := map[string]any{}
+			for _, c := range mcpCaps {
+				switch c {
+				case "http", "sse":
+					m[c] = true
+				}
+			}
+			if len(m) > 0 {
+				caps["mcpCapabilities"] = m
+			}
+		}
 		switch capsMode {
 		case "loadSession":
 			caps["loadSession"] = true
@@ -179,9 +221,11 @@ func handle(msg message, sessionCwd *string) {
 		})
 	case msg.Method == "session/new":
 		var params struct {
-			Cwd string `json:"cwd"`
+			Cwd        string          `json:"cwd"`
+			McpServers json.RawMessage `json:"mcpServers"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
+		dumpMcpServers(params.McpServers)
 		*sessionCwd = params.Cwd
 		recordSessionInitMethod(params.Cwd, "session/new")
 		result := map[string]any{
@@ -309,10 +353,12 @@ func recordSessionInitMethod(cwd, method string) {
 // so a test can drive Runner's stale-session fallback path.
 func handleResumeSession(msg message, sessionCwd *string) {
 	var params struct {
-		SessionID string `json:"sessionId"`
-		Cwd       string `json:"cwd"`
+		SessionID  string          `json:"sessionId"`
+		Cwd        string          `json:"cwd"`
+		McpServers json.RawMessage `json:"mcpServers"`
 	}
 	_ = json.Unmarshal(msg.Params, &params)
+	dumpMcpServers(params.McpServers)
 	if params.SessionID != sessionID {
 		writeMessage(message{JSONRPC: "2.0", ID: msg.ID, Error: &rpcError{
 			Code: -32000, Message: "unknown session: " + params.SessionID,

@@ -135,7 +135,7 @@ accepted):
    `internal/wsapi/server.go`, lifecycle event topics, redaction on every
    read path, `smind mcp add|ls|rm|enable|disable` in `cmd/smind`. Depends
    on step 1 only.
-3. **ACP wiring.** `internal/acp/client.go`'s `NewSession`/`LoadSession`/
+3. [x] **ACP wiring.** `internal/acp/client.go`'s `NewSession`/`LoadSession`/
    `ResumeSession` gain a real `mcpServers` parameter; `internal/acp`'s ACP
    struct-to-wire mapping (stdio/http entries, `env`/`headers` as
    `[]{name,value}`); capability-flag filtering
@@ -145,11 +145,11 @@ accepted):
    `internal/taskrunner.Runner` resolves the enabled rows for a run's
    workspace and passes them through. Depends on step 1; independent of
    step 2 (can run in parallel).
-4. **Claude native wiring.** `internal/taskrunner.Runner`'s
+4. [x] **Claude native wiring.** `internal/taskrunner.Runner`'s
    `claudecode.New(worktreePath, opts...)` call gains
    `claudecode.WithMCPConfig(json)`, built from the same resolved rows as
    step 3. Small, depends on step 1 only.
-5. **`npx`/absolute-path resolution.** `exec.LookPath` resolution at the
+5. [x] **`npx`/absolute-path resolution.** `exec.LookPath` resolution at the
    ACP mapping layer (step 3); unresolvable command -> clear session-setup
    error. Small.
 6. ~~Codex mechanism~~ -- **deferred out of v1** (ADR-0018 resolved
@@ -159,7 +159,7 @@ accepted):
    capability-dropped servers (ACP) per ADR-0018's wsapi/UI section.
    Depends on step 2; can start once step 3's capability-drop signal has
    somewhere to report to.
-8. **Secret-redaction audit.** A focused pass confirming acceptance
+8. [x] **Secret-redaction audit.** A focused pass confirming acceptance
    criterion 9 end to end for ACP and Claude native (Codex deferred per
    ADR-0018 resolved decisions 1 and 5). Depends on steps 3, 4.
 
@@ -227,4 +227,38 @@ accepted):
   UpdatePlaceholderForNewKeyIsError` — the placeholder on a new key is a
   clear error naming the key, containing no secret, with the stored record
   untouched.
-- ACs 5-7, 9 (runner/ACP/log halves), 10: not started (steps 3-5, 8).
+- AC5/AC10 (ACP wiring, steps 3+5): `internal/acp` -- `TestClient_NewSessionSendsMcpServers`,
+  `TestClient_LoadSessionAndResumeSendMcpServers`, `TestClient_NilMcpServersSendsEmptyArray`
+  (literal `[]`, never `null`), `TestClient_McpCapabilityFlags` (real GLM v1 shape, v2 object
+  shape, malformed). `internal/taskrunner/mcp_test.go` -- `TestAcpMcpServers_MapsStdioAndHttpWireShape`,
+  `..._DropsTransportAgentDoesNotAdvertise`, `..._ResolvesBareCommandToAbsolutePath`,
+  `..._UnresolvableCommandErrorsWithoutLeakingSecrets`, and end to end through the real
+  `acp.Client` + fakeagent: `TestRunner_RunPrompt_ACPSendsConfiguredMcpServers` (absolute
+  command; other-workspace server absent), `..._ACPNoMcpWhenNoneConfiguredIsEmptyArray`
+  (regression guard), `..._ACPInactiveMcpServerEmitsSessionNote`, `..._ACPResumePathCarriesMcpServers`.
+  Mutation-checked by hand: disabling the capability gate, the LookPath resolution, or the
+  `--mcp-config` option each fails a test.
+  **Spec deviation (capability semantics):** the real `glm-acp-agent` initialize response
+  (captured live) is `agentCapabilities.mcpCapabilities: {"http": true}` -- ACP v1, bool-valued,
+  stdio never advertised because v1 makes it mandatory. Taken literally, "drop stdio unless
+  `mcp.stdio` is advertised" would have dropped Playwright for GLM. Implemented: v1 agents
+  (no top-level `mcp` key) support stdio unconditionally and http/sse per `mcpCapabilities`;
+  v2 agents (`mcp` object) are gated per transport object. So the "agent advertises no mcp
+  capability => every server dropped" scenario became "stdio kept, http/sse dropped".
+  The capability-dropped signal is an `EventTypeSessionNote` (server names only).
+- AC6 (Claude native, step 4): `TestClaudeMcpConfig_BuildsMergedMcpServersJSON`,
+  `TestRunner_RunPrompt_ClaudeNativePassesMcpConfig` (argv has `--mcp-config` + exact JSON with a
+  row, absent without), `..._ClaudeNativeWorkspaceRestriction`. `--mcp-config` carries the JSON
+  inline (SDK `WithMCPConfig`), so secrets are visible in the spawned `claude` process argv
+  (`ps`) on the local machine -- inherent in the SDK option; a temp-file variant would be a
+  follow-up if that matters.
+- AC7 (Codex, deferred): `TestRunner_RunPrompt_CodexNoteMcpServersUnsupported` -- starts
+  normally, session note names the servers, no secrets in events.
+- AC9 (step 8 audit): wsapi responses + lifecycle events covered in step 2; runner side:
+  `internal/acp` never logs request params (only the agent's stderr goes to the logWriter);
+  `TestRunner_RunPrompt_ACPInactiveMcpServerEmitsSessionNote` and
+  `TestRunner_RunPrompt_ACPActiveMcpServerSecretNeverLeaksOutsideWire` (secrets delivered on
+  the wire yet absent from every emitted Event -- what `internal/runs` persists as
+  run_events -- and from daemon log output). Not covered: Claude-native argv exposure above,
+  and secrets echoed back by a misbehaving agent in its own error text.
+- Step 6 (Codex) remains deferred out of v1 per ADR-0018 resolved decision 1.
