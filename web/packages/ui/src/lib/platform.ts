@@ -1,4 +1,5 @@
 import type { ActionId } from "@/keyboard/actions";
+import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
 
 /**
  * The desktop platform surface (ADR-0013 AC6): a single `isDesktop` /
@@ -56,9 +57,6 @@ export interface EditorInfo {
   /** "fileManager" is Finder / File Explorer / the XDG file manager (reveal); "editor" is a code editor (open). */
   kind: "fileManager" | "editor";
 }
-
-/** The id of the platform file manager in `editors_list`'s result -- Reveal passes this to `openInEditor`. */
-export const FILE_MANAGER_EDITOR_ID = "file-manager";
 
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
@@ -184,9 +182,6 @@ async function loadInvoke() {
 function asError(err: unknown): Error {
   return err instanceof Error ? err : new Error(String(err));
 }
-
-/** Fired on `window` after the saved/current connection changes (select/add/remove): switching connections doesn't reload the page, so anything derived from the current connection's kind must re-read it. */
-export const CONNECTION_CHANGED_EVENT = "smind:connection-changed";
 
 function announceConnectionChange(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT));

@@ -206,7 +206,7 @@ describe("open in editor", () => {
     }));
     const { renderHook } = await import("@testing-library/react");
     const { useLocalPathActions } = await import("@/hooks/use-local-path-actions");
-    const { CONNECTION_CHANGED_EVENT } = await import("@/lib/platform");
+    const { CONNECTION_CHANGED_EVENT } = await import("@/lib/local-paths");
     const { result } = renderHook(() => useLocalPathActions());
     await flush();
     expect(result.current?.revealLabel).toBe("Reveal in Finder");
