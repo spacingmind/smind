@@ -352,7 +352,7 @@ Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
 - [x] M2 — bundled daemon sidecar + auto-start/auto-update (Rust, built and run for real; release-path artifact reuse not yet exercised, see Validation)
 - [~] M3 — Dock lifecycle, no tray, Dock badge (implemented and partly verified; four interactions need a human, see "Not verified")
 - [x] M4 — CI workflow + release assets (PR run green for both arches; the release-please call path is wired and actionlint-clean but not run)
-- [ ] M5 — update the daemon only when idle (branch `feat/desktop-daemon-update-when-idle`)
+- [x] M5 — update the daemon only when idle (branch `feat/desktop-daemon-update-when-idle`)
 
 Commits on `feat/desktop-macos-app` (PR #238): `feat(desktop): macOS app
 build` (M1), `feat(desktop): bundled daemon sidecar` (M2), `fix(desktop):
@@ -578,3 +578,27 @@ verified, Dock rendering blocked by the notification-permission prompt;
 - `tauri_plugin_log` runs at its default (TRACE) level, so the log file
   rotates away INFO lines within seconds of a connection being open;
   this made the app's own diagnostics hard to read. Pre-existing.
+
+### M5
+
+Maps desktop-macos-app M5.1–M5.7 to its tests (branch
+`feat/desktop-daemon-update-when-idle`; `task test` and `task lint` green,
+`cargo test` 13 passed and `cargo clippy --all-targets -- -D warnings`
+clean in `desktop/src-tauri`):
+
+- **M5.1** Rust no longer restarts: `launch_decision_offers_update_instead_of_restarting`
+  and updated `macos_autostart_when_unreachable` (cargo test).
+- **M5.2** `loaded` flag: `task-attention-loaded-after-first-run-list`
+  (use-task-attention.test.ts).
+- **M5.3** auto-update when idle, once per (connection id, daemon version):
+  `daemon-update-auto-when-idle`; not before loaded:
+  `daemon-update-not-before-runs-loaded`.
+- **M5.4** defer + confirm dialog ("Running agent work will be
+  interrupted", names N) + Not now disarm + armed auto-fire:
+  `daemon-update-deferred-while-running`, `daemon-update-now-requires-confirm`,
+  `daemon-update-not-now-disarms`, `daemon-update-fires-when-last-run-finishes`.
+- **M5.5** running-run count = sum of `runningChatsByTask` set sizes,
+  passed from `App.tsx` (exercised via the `runningRuns` prop in every
+  M5 banner test).
+- **M5.6** errors + manual retry, no loop: `daemon-update-failure-no-loop`.
+- **M5.7** unchanged unmanaged/URL notice: `daemon-update-unmanaged-untouched`.
