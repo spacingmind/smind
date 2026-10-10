@@ -54,6 +54,31 @@ From source:
 go install github.com/spacingmind/smind/cmd/smind@latest
 ```
 
+### macOS desktop app
+
+Each release attaches one unsigned `.dmg` per architecture
+(`smind-desktop-<version>-macos-arm64.dmg` for Apple Silicon,
+`…-macos-x86_64.dmg` for Intel; macOS 13 or newer). The app bundles the
+matching `smind` daemon and starts it for you on first launch, so there is
+nothing else to install. Quitting the app leaves the daemon running; reopen
+it from the Dock to reconnect.
+
+The app is not signed or notarized, so Gatekeeper blocks a DMG downloaded
+through a browser. After dragging `smind.app` to `/Applications`, clear the
+quarantine flag once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/smind.app
+```
+
+To build and install it yourself (needs Go, bun and Rust; a locally built app
+has no quarantine flag and opens straight away):
+
+```sh
+task desktop:mac:install   # builds smind.app + .dmg, copies the app to /Applications
+task desktop:mac           # build only; output under desktop/src-tauri/target/<triple>/release/bundle/
+```
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships

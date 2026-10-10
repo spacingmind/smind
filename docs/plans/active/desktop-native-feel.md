@@ -157,7 +157,9 @@ ported):
 4. **Badge:** the existing tray attention count
    (`smind_daemon_client::attention`) also drives the dock badge on
    macOS (and Linux, where supported) and the taskbar overlay icon on
-   Windows. It clears when the count reaches zero.
+   Windows. It clears when the count reaches zero. (The macOS Dock badge
+   ships in `desktop-macos-app.md` M3.3. D4.4 only adds the Windows
+   overlay icon and the Linux badge.)
 5. Every new command is added one by one to `capabilities/proxy.json`'s
    allowlist (ADR-0013 §2). No wildcard, and no grant to any origin
    other than the loopback proxy. Window controls use Tauri core
