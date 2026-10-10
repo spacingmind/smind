@@ -34,6 +34,23 @@ interface McpFormState {
 const EMPTY_FORM: McpFormState = { name: "", transport: "stdio", command: "", args: "", env: [], url: "", headers: [] };
 
 
+/** Mirrors the daemon's own validation (internal/mcpservers.normalizeValidate) so obvious mistakes never leave the form: name always required, command for stdio, url for http/sse, and every *newly added* env/headers key needs a real value (an existing key may hold the "[redacted]" placeholder). */
+function validateForm(form: McpFormState): string | null {
+  if (!form.name.trim()) return "Name is required.";
+  if (form.transport === "stdio" && !form.command.trim()) return "Command is required for stdio servers.";
+  if (form.transport !== "stdio" && !form.url.trim()) return "URL is required for http/sse servers.";
+  const kvError = (rows: McpKVRow[], what: string): string | null => {
+    for (const r of rows) {
+      const key = r.key.trim();
+      if (!key && !r.value) continue;
+      if (!key) return `${what}: every entry needs a key.`;
+      if (!r.value) return `${what}: ${key} needs a value.`;
+    }
+    return null;
+  };
+  return kvError(form.env, "Environment variables") ?? kvError(form.headers, "Headers");
+}
+
 /** Which card is open: "new" for the add card, a server id for that row's inline edit, or null for none. */
 type OpenCard = number | "new" | null;
 
@@ -139,6 +156,11 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!client || openCard === null) return;
+    const invalid = validateForm(form);
+    if (invalid) {
+      setError(invalid);
+      return;
+    }
     setPending(true);
     setError(null);
     try {
