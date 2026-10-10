@@ -26,9 +26,13 @@ mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod overlay_icon;
 mod state;
 mod tray;
 mod window_chrome;
+#[cfg(test)]
+mod capability_tests;
 mod zoom_store;
 
 use state::DesktopState;

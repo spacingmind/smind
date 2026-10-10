@@ -51,19 +51,28 @@ impl<S: BadgeSetter> Badge<S> {
 
 /// WindowBadge sets the badge through the main window -- on macOS that is
 /// the Dock tile (the label stays up while the window is hidden); on Linux
-/// the launcher badge where the desktop supports it; Windows has no such
-/// API and reports an error we deliberately ignore.
+/// the launcher badge where the desktop supports it. Windows has no
+/// numeric badge API, so it gets a rendered overlay icon on the taskbar
+/// button instead (D4.4), cleared at zero.
 pub struct WindowBadge(pub AppHandle);
 
 impl BadgeSetter for WindowBadge {
     fn set(&self, count: Option<i64>) {
-        match self.0.get_webview_window(MAIN_WINDOW) {
-            Some(win) => {
-                let res = win.set_badge_count(count);
-                log::info!("badge set to {count:?}: {res:?}");
-            }
-            None => log::info!("badge set to {count:?}: no main window"),
-        }
+        let Some(win) = self.0.get_webview_window(MAIN_WINDOW) else {
+            log::info!("badge set to {count:?}: no main window");
+            return;
+        };
+        #[cfg(target_os = "windows")]
+        let res = {
+            let icon = count.map(|n| {
+                let (rgba, w, h) = crate::overlay_icon::overlay_icon_rgba(n.max(0) as usize);
+                tauri::image::Image::new_owned(rgba, w, h)
+            });
+            win.set_overlay_icon(icon)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let res = win.set_badge_count(count);
+        log::info!("badge set to {count:?}: {res:?}");
     }
 }
 
