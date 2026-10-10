@@ -473,7 +473,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-0020 accepted (2026-10-11, rewritten: usage from agent events, runs off the proxy)
 - [x] ADR-O drafted as ADR-0021 (Proposed)
 - [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
-- [ ] ADR-M implemented
+- [ ] ADR-M implemented — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
 - [x] ADR-O implemented
 - [ ] Step 3 dogfood + gap log
 
@@ -562,4 +562,16 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 
 Known limitation: when `profileId` is set, `task_send` sends `source=human` so the server's non-human guard accepts the profile's human-authored auto-approving mode — which drops agent provenance (the header) for profile sends (comment in `cmd/smind/mcp_task_send.go`).
 
-Not started: O1 (run provenance columns), O2 Wave 2 items, ADR-0020 implementation (Proposed).
+Not started: O1 (run provenance columns), O2 Wave 2 items.
+
+**ADR-M AC 1–6 + 8 — per-run usage from agent events** (branch `feat/run-usage-adr-0020`, `task test` + `task lint` green, 2026-10-11):
+
+- **AC1 type** — `internal/taskrunner/usage.go`: `Usage` / `UsageSnapshot` / `UsageSource`, every numeric field a nullable pointer; `EventTypeUsage` appended (never inserted) to the persisted event enum.
+- **AC2 claude-native** — `TestUsage_ClaudeResultParsed`. Deviation worth knowing: SDK v0.3.2's `ResultMessage` has no top-level `usage` and a non-pointer `TotalCostUSD`, so tokens are summed from `modelUsage` across models, `Model` = the model with the most tokens, a zero cost reads as "not reported", and an empty `modelUsage` is `not_reported` with every field nil.
+- **AC3 codex-native** — `TestUsage_CodexTokenUsageLastOfTurn`: two `thread/tokenUsage/updated` in one turn, the stored value is the last `tokenUsage.last`. **Known limitation:** in Codex `last_token_usage` is the usage of the last single model response (`refs/codex/codex-rs/protocol/src/protocol.rs` `TokenUsageInfo`), so a turn with several model requests (tool loops) is under-counted by ADR-0020 §2's "last of the turn". Following the ADR as written; a follow-up should difference `tokenUsage.total` per thread like ACP.
+- **AC4 ACP** — `TestUsage_ACPPromptUsageDifferenced` (100/20 → 100/20; same session 160/50 → 60/30; a new session starts from zero), `TestUsage_ACPUsageUpdateContextAndCost` (context from the last `usage_update`, cost differenced), `TestUsage_ACPNothingReportedIsNull`, `TestUsage_ACPSnapshotSurvivesNotReportedRun`, `TestDiffACPUsage` (counter reset ⇒ zero baseline; unreported field stays nil). The cumulative snapshot lives in `SessionHandle.Metadata` (so it is persisted with the chat's session handle) and is also written to `run_usage.session_snapshot`; a chat whose session predates this change has no snapshot, so its first run after upgrade is charged the session's whole cumulative figure.
+- **AC5 storage** — `run_usage` table (additive `CREATE TABLE IF NOT EXISTS`, no migration needed; old runs have no row and read back with no `usage`): `TestRunUsage_UpsertAndSummary` (`internal/store/run_usage_test.go`); the Registry upserts on each usage event (`internal/runs/usage_test.go`) and again, idempotently, on finish (no dedicated test for the finish re-upsert). A turn whose backend reports nothing still emits one usage event with source `not_reported`, so its row is all-NULL and the UI can say "usage not reported"; a run stopped before turn end gets no row.
+- **AC6 wire** — `TestRunList_CarriesUsageTotals` (`internal/runs`, `internal/wsapi`): `run.list` carries `usage`; `usage` events appear in `run.logs` and streamed events; `usage.summary` takes `scope` (default `all`; result stays an array, rows tagged `scope`, runs rows carry `costUsd`, nil when no run in the group reported a cost) — `internal/wsapi/usage_test.go`; `smind usage --scope` (`cmd/smind/usage_test.go`). With `scope=all`, `groupBy=account|day` returns proxy rows only (exactly today's rows plus the tag), `workspace|task|chat|run|provider` runs rows only, `model` both.
+- **No prompt/secret** — `TestUsageEvent_NoPromptOrSecret` (`internal/taskrunner`, `internal/runs`).
+- **AC8 no regressions** — nothing in run spawning changed (no env injection, no proxy hop); the proxy meter and its tests are untouched; the web timeline ignores `usage` events (`timeline-model.test.ts`) so they don't render as an "unknown" row. No other UI work; usage display in the web UI is a follow-up.
+- **Not verified** — against a real `claude` / `codex` / GLM process: all checks use the fake agents (the ACP fake scripts `usage_update` and `PromptResponse.usage`), so what `glm-acp-agent` really sends is unconfirmed.

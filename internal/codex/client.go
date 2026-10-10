@@ -97,6 +97,28 @@ type turnCompletedNotification struct {
 	Turn     turn   `json:"turn"`
 }
 
+// TokenUsage is the latest tokenUsage.last of a turn, decoded from
+// thread/tokenUsage/updated (ThreadTokenUsageUpdatedNotification). Every
+// field is a pointer so a field missing on the wire stays nil.
+type TokenUsage struct {
+	InputTokens           *int64 `json:"inputTokens"`
+	CachedInputTokens     *int64 `json:"cachedInputTokens"`
+	CacheWriteInputTokens *int64 `json:"cacheWriteInputTokens"`
+	OutputTokens          *int64 `json:"outputTokens"`
+	ReasoningOutputTokens *int64 `json:"reasoningOutputTokens"`
+	TotalTokens           *int64 `json:"totalTokens"`
+	// ModelContextWindow is tokenUsage.modelContextWindow.
+	ModelContextWindow *int64 `json:"-"`
+}
+
+type threadTokenUsageUpdatedNotification struct {
+	ThreadID   string `json:"threadId"`
+	TokenUsage struct {
+		Last               TokenUsage `json:"last"`
+		ModelContextWindow *int64     `json:"modelContextWindow"`
+	} `json:"tokenUsage"`
+}
+
 // turnResult is what a completed (or failed/interrupted) turn resolves to,
 // decoded from a turn/completed notification's Turn.Status/Error.
 type turnResult struct {
@@ -135,6 +157,10 @@ type Client struct {
 	mu          sync.Mutex
 	updateSubs  map[string]*updateSub
 	turnWaiters map[string]chan turnResult
+
+	// tokenUsage is each thread's latest tokenUsage.last this turn, reset
+	// by Prompt; guarded by mu.
+	tokenUsage map[string]TokenUsage
 }
 
 // updateSub tracks one thread's subscriber channel plus a WaitGroup of
@@ -181,6 +207,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		logWriter:   io.Discard,
 		updateSubs:  make(map[string]*updateSub),
 		turnWaiters: make(map[string]chan turnResult),
+		tokenUsage:  make(map[string]TokenUsage),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -196,6 +223,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 	conn.handleRequest("item/fileChange/requestApproval", c.handleFileChangeApproval)
 	conn.handleNotification("item/agentMessage/delta", c.handleAgentMessageDelta)
 	conn.handleNotification("turn/completed", c.handleTurnCompleted)
+	conn.handleNotification("thread/tokenUsage/updated", c.handleTokenUsageUpdated)
 
 	return c, nil
 }
@@ -319,6 +347,7 @@ func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan
 	c.mu.Lock()
 	c.updateSubs[threadID] = sub
 	c.turnWaiters[threadID] = waiter
+	delete(c.tokenUsage, threadID)
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -369,6 +398,31 @@ func (c *Client) handleAgentMessageDelta(raw json.RawMessage) {
 	}
 	defer sub.wg.Done()
 	sub.ch <- Update{Text: n.Delta}
+}
+
+// LastTurnTokenUsage returns the latest tokenUsage.last threadID's current
+// (or just finished) turn reported, and false if none arrived. Only the last
+// notification is kept, not a sum: each carries the turn's running figure.
+func (c *Client) LastTurnTokenUsage(threadID string) (TokenUsage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, ok := c.tokenUsage[threadID]
+	return u, ok
+}
+
+func (c *Client) handleTokenUsageUpdated(raw json.RawMessage) {
+	var n threadTokenUsageUpdatedNotification
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return
+	}
+	u := n.TokenUsage.Last
+	u.ModelContextWindow = n.TokenUsage.ModelContextWindow
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.turnWaiters[n.ThreadID]; ok {
+		c.tokenUsage[n.ThreadID] = u
+	}
 }
 
 func (c *Client) handleTurnCompleted(raw json.RawMessage) {

@@ -210,3 +210,27 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_queue_chat_status ON chat_queue(chat_id, status, priority DESC, id);
+
+-- run_usage: one row per run of what the agent itself reported (ADR-0020).
+-- Additive; NULL means "not reported", never estimated. workspace_id is
+-- denormalized from tasks at upsert time. No prompt text, no secrets.
+CREATE TABLE IF NOT EXISTS run_usage (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+    workspace_id INTEGER,
+    task_id INTEGER NOT NULL,
+    chat_id INTEGER,
+    provider TEXT NOT NULL,
+    model TEXT,
+    input_tokens INTEGER,
+    cached_input_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    output_tokens INTEGER,
+    reasoning_tokens INTEGER,
+    cost_usd REAL,
+    context_used INTEGER,
+    context_size INTEGER,
+    session_snapshot TEXT, -- JSON, ACP only
+    source TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_run_usage_task_id ON run_usage(task_id);

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -370,6 +372,11 @@ type run struct {
 	// request currently awaiting an answer, keyed by request id -- see
 	// runPermissionDecider and RespondPermission.
 	pendingPermissions map[string]chan string
+
+	// usage is the latest usage event this run recorded (ADR-0020); nil if
+	// it never emitted one, and always nil on a rehydrated run (List/History
+	// read the persisted run_usage row for those). Guarded by mu.
+	usage *taskrunner.Usage
 }
 
 // getPerm returns r's current permission settings under its mutex.
@@ -394,6 +401,55 @@ func (r *run) statusLocked() RunStatus {
 		PermissionMode: r.perm.Mode,
 		AutoAccept:     r.perm.AutoAccept,
 		ThinkingLevel:  r.thinkingLevel,
+		Usage:          UsageFromEvent(r.usage),
+	}
+}
+
+// upsertUsage persists u as r's run_usage row. Best-effort: a store failure
+// is logged, never fails the run.
+func (reg *Registry) upsertUsage(r *run, u *taskrunner.Usage) {
+	row := store.RunUsage{
+		RunID: r.id, TaskID: r.taskID, Provider: string(r.provider),
+		Model: u.Model, InputTokens: u.Input, CachedInputTokens: u.CachedInput,
+		CacheWriteTokens: u.CacheWrite, OutputTokens: u.Output, ReasoningTokens: u.Reasoning,
+		CostUSD: u.CostUSD, ContextUsed: u.ContextUsed, ContextSize: u.ContextSize,
+		Source: string(u.Source),
+	}
+	if r.chatID != 0 {
+		row.ChatID = &r.chatID
+	}
+	if u.SessionSnapshot != nil {
+		if b, err := json.Marshal(u.SessionSnapshot); err == nil {
+			snap := string(b)
+			row.SessionSnapshot = &snap
+		}
+	}
+	if err := reg.st.UpsertRunUsage(row); err != nil {
+		log.Printf("runs: persist usage for run %s: %v", r.id, err)
+	}
+}
+
+// withStoredUsage fills in Usage on finished/rehydrated summaries that have
+// none in memory, from run_usage, in one batched query.
+func (reg *Registry) withStoredUsage(out []RunSummary) {
+	var ids []string
+	for _, s := range out {
+		if s.Usage == nil && s.Status != StatusRunning {
+			ids = append(ids, s.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	rows, err := reg.st.ListRunUsage(ids)
+	if err != nil {
+		log.Printf("runs: load usage: %v", err)
+		return
+	}
+	for i := range out {
+		if u, ok := rows[out[i].ID]; ok && out[i].Usage == nil {
+			out[i].Usage = runUsageFromStore(u)
+		}
 	}
 }
 
@@ -859,6 +915,9 @@ func (reg *Registry) record(r *run, e Event) {
 	if e.Type == taskrunner.EventTypeDone {
 		r.stopReason = e.StopReason
 	}
+	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
+		r.usage = e.Usage
+	}
 	seq := r.nextEventSeq
 	r.nextEventSeq++
 	subs := make([]*subQueue, 0, len(r.subscribers))
@@ -878,6 +937,10 @@ func (reg *Registry) record(r *run, e Event) {
 		_, _ = reg.st.AppendRunEvent(r.id, seq, data)
 	}
 
+	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
+		reg.upsertUsage(r, e.Usage)
+	}
+
 	for _, q := range subs {
 		q.push(e)
 	}
@@ -889,7 +952,14 @@ func (reg *Registry) finish(r *run, err error) {
 	r.mu.Lock()
 	stopRequested := r.stopRequested
 	stopReason := r.stopReason
+	usage := r.usage
 	r.mu.Unlock()
+
+	// Idempotent re-upsert so the row reflects the final value. A run that
+	// never emitted usage gets no row.
+	if usage != nil {
+		reg.upsertUsage(r, usage)
+	}
 
 	var status Status
 	var errMsg string
@@ -1052,9 +1122,15 @@ func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 		return nil, RunStatus{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	hist := append([]Event(nil), r.history...)
-	return hist, r.statusLocked(), nil
+	status := r.statusLocked()
+	r.mu.Unlock()
+	if status.Usage == nil && status.Status != StatusRunning {
+		if u, err := reg.st.GetRunUsage(runID); err == nil {
+			status.Usage = runUsageFromStore(u)
+		}
+	}
+	return hist, status, nil
 }
 
 // Stop cancels runID's background context, from any caller regardless of
@@ -1157,6 +1233,7 @@ func (reg *Registry) List(chatID int64) []RunSummary {
 		out = append(out, r.statusLocked())
 		r.mu.Unlock()
 	}
+	reg.withStoredUsage(out)
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
 	return out
 }

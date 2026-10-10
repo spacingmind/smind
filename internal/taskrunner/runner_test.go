@@ -83,6 +83,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
@@ -121,6 +122,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
@@ -176,6 +178,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
@@ -206,6 +209,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
@@ -245,6 +249,7 @@ func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}
@@ -300,6 +305,7 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	}()
 
 	got := drainEvents(events)
+	got = withoutUsage(got) // the usage event is covered by usage_test.go
 	if err := <-errCh; err != nil {
 		t.Fatalf("RunPrompt() error = %v", err)
 	}

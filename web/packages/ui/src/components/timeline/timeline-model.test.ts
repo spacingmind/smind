@@ -89,6 +89,16 @@ describe("appendTimelineEvent", () => {
     expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "", optionId: "", reason: undefined }]);
   });
 
+  it("adds no row for a per-turn 'usage' event (ADR-0020)", () => {
+    const items = buildTimeline([
+      { type: "chunk", text: "hi" },
+      { type: "usage", usage: { source: "claude_result", inputTokens: 10 } } as unknown as RunLogEvent,
+      { type: "done", stopReason: "end_turn" },
+    ]);
+
+    expect(items.map((i) => i.kind)).not.toContain("unknown");
+  });
+
   it("renders a 'raw' event (docs/decisions/0010-preserve-unknown-acp-event-kinds.md) as a fallback row, keeping its ACP kind", () => {
     // The daemon forwards an ACP session-update kind it doesn't recognize
     // (e.g. "plan") as a "raw" wire event instead of dropping it. The wire

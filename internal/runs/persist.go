@@ -32,6 +32,7 @@ type persistedEvent struct {
 	ToolResult          json.RawMessage               `json:"toolResult,omitempty"`
 	RawKind             string                        `json:"rawKind,omitempty"`
 	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
+	Usage               *taskrunner.Usage             `json:"usage,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
@@ -51,6 +52,7 @@ func encodeEvent(e Event) (string, error) {
 		ToolResult:          e.ToolResult,
 		RawKind:             e.RawKind,
 		RawPayload:          e.RawPayload,
+		Usage:               e.Usage,
 	})
 	if err != nil {
 		return "", err
@@ -79,5 +81,6 @@ func decodeEvent(data string) (Event, error) {
 		ToolResult:          p.ToolResult,
 		RawKind:             p.RawKind,
 		RawPayload:          p.RawPayload,
+		Usage:               p.Usage,
 	}, nil
 }

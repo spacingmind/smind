@@ -1202,6 +1202,8 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 				rc.Emit("tool_call", toRunToolCallParams(e))
 			case taskrunner.EventTypeRaw:
 				rc.Emit("raw", toRunRawParams(e))
+			case taskrunner.EventTypeUsage:
+				rc.Emit("usage", runUsageParams{Usage: runs.UsageFromEvent(e.Usage)})
 			case taskrunner.EventTypePermissionRequest:
 				rc.Emit("permission_request", permissionRequestParams{
 					RequestID: e.PermissionRequestID,
@@ -1242,6 +1244,12 @@ func terminalResult(reg *runs.Registry, runID string) (any, error) {
 	}
 }
 
+// runUsageParams is the params of the "usage" event task.prompt/run.attach
+// stream when a turn reports its usage (ADR-0020).
+type runUsageParams struct {
+	Usage *runs.RunUsage `json:"usage"`
+}
+
 // runLogEvent is the wire shape of one event in a run.logs response --
 // the same fields task.prompt/run.attach's streamed events and terminal
 // results carry, just batched instead of streamed. Type is "chunk",
@@ -1275,6 +1283,8 @@ type runLogEvent struct {
 	// runRawParams for the shared shape this mirrors.
 	Kind    string          `json:"kind,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Usage is populated for a "usage" entry (ADR-0020).
+	Usage *runs.RunUsage `json:"usage,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -1305,6 +1315,8 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 	case taskrunner.EventTypeRaw:
 		p := toRunRawParams(e)
 		return runLogEvent{Type: "raw", Kind: p.Kind, Payload: p.Payload}
+	case taskrunner.EventTypeUsage:
+		return runLogEvent{Type: "usage", Usage: runs.UsageFromEvent(e.Usage)}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
 	case taskrunner.EventTypePermissionRequest:
