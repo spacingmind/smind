@@ -30,13 +30,13 @@ import (
 // an already provider-bound chatId -- mirroring how run.start binds a
 // provider to a chat on first prompt.
 type taskSendInput struct {
-	TaskID         int64   `json:"taskId" jsonschema:"id of the task to send the prompt to"`
-	Prompt         string  `json:"prompt" jsonschema:"the prompt to send"`
-	Provider       string  `json:"provider,omitempty" jsonschema:"provider id (e.g. glm, claude-native, codex-native); optional when profileId names one or chatId names an already-bound chat"`
-	ChatID         *int64  `json:"chatId,omitempty" jsonschema:"optional id of the chat (conversation thread) to send to; defaults to the task's default chat"`
-	PermissionMode string  `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
-	AutoAccept     bool    `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
-	ProfileID      *int64  `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
+	TaskID         int64  `json:"taskId" jsonschema:"id of the task to send the prompt to"`
+	Prompt         string `json:"prompt" jsonschema:"the prompt to send"`
+	Provider       string `json:"provider,omitempty" jsonschema:"provider id (e.g. glm, claude-native, codex-native); optional when profileId names one or chatId names an already-bound chat"`
+	ChatID         *int64 `json:"chatId,omitempty" jsonschema:"optional id of the chat (conversation thread) to send to; defaults to the task's default chat"`
+	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
+	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
+	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
 }
 
 // taskSendOutput is task_send's structured output: the started run's id,
