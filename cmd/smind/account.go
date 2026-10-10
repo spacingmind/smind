@@ -255,17 +255,27 @@ func cmdAccountRemove(args []string) int {
 	return 0
 }
 
-// openBrowser best-effort opens url in the local system browser. Failure is
-// silent (beyond os.Stderr) rather than fatal: the URL was already printed,
-// so a headless daemon or a missing/misconfigured browser opener doesn't
-// break the login flow, just its convenience.
-func openBrowser(url string) {
+// openBrowser is a variable so tests can stub it out: the real opener
+// would launch the developer's browser on every `go test ./...` run on
+// macOS/Windows (Linux CI just lacks xdg-open, which hid it there).
+var openBrowser = openSystemBrowser
+
+// openSystemBrowser best-effort opens url in the local system browser.
+// Failure is silent (beyond os.Stderr) rather than fatal: the URL was
+// already printed, so a headless daemon or a missing/misconfigured browser
+// opener doesn't break the login flow, just its convenience.
+//
+// Windows goes through rundll32's FileProtocolHandler rather than
+// `cmd /c start`: cmd parses the command line itself, so every `&` in the
+// URL (an OAuth authorize URL has several) is a command separator that
+// truncates the URL and runs the remainder as commands.
+func openSystemBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
 		cmd = exec.Command("open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 	default:
 		cmd = exec.Command("xdg-open", url)
 	}
