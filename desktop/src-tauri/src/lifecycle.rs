@@ -22,7 +22,9 @@ pub fn tray_enabled(target_os: &str) -> bool {
 /// BadgeSetter is the one OS call the attention badge needs: show `count`,
 /// or clear the badge on `None`.
 pub trait BadgeSetter {
-    fn set(&self, count: Option<i64>);
+    /// Returns whether the OS accepted it: a failed set is retried on the
+    /// next update/`reapply` instead of being remembered as shown.
+    fn set(&self, count: Option<i64>) -> bool;
 }
 
 /// Badge drives a `BadgeSetter` from the attention count, touching the OS
@@ -44,26 +46,48 @@ impl<S: BadgeSetter> Badge<S> {
         if *shown == count {
             return;
         }
-        *shown = count;
-        self.setter.set(if count > 0 { Some(count as i64) } else { None });
+        if self.setter.set(if count > 0 { Some(count as i64) } else { None }) {
+            *shown = count;
+        }
+    }
+
+    /// Sets the currently shown count again. Windows drops a taskbar
+    /// overlay when the window's taskbar button is re-created (hidden to
+    /// the tray, then shown), so the app calls this when the window gains
+    /// focus. A no-op while nothing is shown.
+    pub fn reapply(&self) {
+        let shown = *self.shown.lock().unwrap();
+        if shown > 0 {
+            self.setter.set(Some(shown as i64));
+        }
     }
 }
 
 /// WindowBadge sets the badge through the main window -- on macOS that is
 /// the Dock tile (the label stays up while the window is hidden); on Linux
-/// the launcher badge where the desktop supports it; Windows has no such
-/// API and reports an error we deliberately ignore.
+/// the launcher badge where the desktop supports it. Windows has no
+/// numeric badge API, so it gets a rendered overlay icon on the taskbar
+/// button instead (D4.4), cleared at zero.
 pub struct WindowBadge(pub AppHandle);
 
 impl BadgeSetter for WindowBadge {
-    fn set(&self, count: Option<i64>) {
-        match self.0.get_webview_window(MAIN_WINDOW) {
-            Some(win) => {
-                let res = win.set_badge_count(count);
-                log::info!("badge set to {count:?}: {res:?}");
-            }
-            None => log::info!("badge set to {count:?}: no main window"),
-        }
+    fn set(&self, count: Option<i64>) -> bool {
+        let Some(win) = self.0.get_webview_window(MAIN_WINDOW) else {
+            log::info!("badge set to {count:?}: no main window");
+            return false;
+        };
+        #[cfg(target_os = "windows")]
+        let res = {
+            let icon = count.map(|n| {
+                let (rgba, w, h) = crate::overlay_icon::overlay_icon_rgba(n.max(0) as usize);
+                tauri::image::Image::new_owned(rgba, w, h)
+            });
+            win.set_overlay_icon(icon)
+        };
+        #[cfg(not(target_os = "windows"))]
+        let res = win.set_badge_count(count);
+        log::info!("badge set to {count:?}: {res:?}");
+        res.is_ok()
     }
 }
 
@@ -95,9 +119,37 @@ mod tests {
     struct Recorder(RefCell<Vec<Option<i64>>>);
 
     impl BadgeSetter for &Recorder {
-        fn set(&self, count: Option<i64>) {
+        fn set(&self, count: Option<i64>) -> bool {
             self.0.borrow_mut().push(count);
+            true
         }
+    }
+
+    /// Rejects the first `n` sets, like a window with no taskbar button yet.
+    struct Flaky(RefCell<Vec<Option<i64>>>, std::cell::Cell<usize>);
+
+    impl BadgeSetter for &Flaky {
+        fn set(&self, count: Option<i64>) -> bool {
+            self.0.borrow_mut().push(count);
+            if self.1.get() > 0 {
+                self.1.set(self.1.get() - 1);
+                return false;
+            }
+            true
+        }
+    }
+
+    #[test]
+    fn badge_retries_after_a_failed_set_and_reapplies() {
+        let flaky = Flaky(RefCell::default(), std::cell::Cell::new(1));
+        let badge = Badge::new(&flaky);
+        badge.update(2); // rejected: not recorded as shown
+        badge.update(2); // retried, accepted
+        badge.update(2); // unchanged: no OS call
+        badge.reapply(); // window re-shown: set again
+        badge.update(0);
+        badge.reapply(); // nothing shown: no call
+        assert_eq!(*flaky.0.borrow(), vec![Some(2), Some(2), Some(2), None]);
     }
 
     #[test]

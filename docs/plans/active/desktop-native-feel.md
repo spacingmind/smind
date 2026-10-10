@@ -218,6 +218,10 @@ ported):
   absent.
 - `open-in-editor-error-toast` — a rejected `open_in_editor` shows an
   error toast containing the Rust error message.
+- `open-in-editor-passes-id-and-absolute-path` — choosing an editor
+  calls `openInEditor` with that editor's id and an absolute path (the
+  workspace path, or the task worktree path joined with the file's
+  relative path), never an executable or arguments.
 
 ### Rust tests (`cargo test`, unit-level, no webview)
 
@@ -228,6 +232,9 @@ ported):
 - `open_in_editor_rejects_relative_or_missing_path`.
 - `wslpath_translation_ok` and `wslpath_translation_failure_is_error` —
   run against a stubbed `wsl.exe` runner.
+- `overlay_icon_pixels` — the Windows taskbar overlay image has the
+  right size, is red in the centre and transparent in the corners, and
+  differs per count.
 - `badge_follows_attention_count` — the count goes 0 → 3 → 0 and the
   badge setter sees 3, then a clear.
 - `window_shown_after_ready_or_timeout` — the show-on-ready logic shows
@@ -301,7 +308,7 @@ ported):
 - [ ] D1 — window chrome (+ all of D2.1, no white flash): implemented on `feat/desktop-chrome`, automated checks green; native visual checks outstanding, see Validation
 - [ ] D2 — remove webview-isms (D2.1 owned/implemented by D1 above): D2.2–D2.8 implemented on `feat/desktop-de-webview` (stacked on `feat/desktop-chrome`), automated checks green; see Validation
 - [ ] D3 — desktop shortcuts + native menu: implemented on `feat/desktop-shortcuts-menu`, automated checks green; native menu check outstanding, see Validation
-- [ ] D4 — native integrations (reveal/open-in-editor, badge)
+- [ ] D4 — native integrations (reveal/open-in-editor, badge): implemented on `feat/desktop-native-integrations`, automated checks green; native Windows/Linux/WSL2 checks outstanding, see Validation
 
 ## Validation
 
@@ -412,3 +419,43 @@ Chromium with the desktop bundle, light and dark — files under
 verifiable here: real WKWebView/WebView2 menus (context menu, pinch
 zoom), Windows scrollbars, and rubber-band overscroll. Those need a
 machine with a working webview and a Windows box.
+
+### D4 (`feat/desktop-native-integrations`, 2026-10-11)
+
+Environment: macOS dev box. **No Windows, Linux or WSL2 machine was
+available.** The Windows overlay-icon call and every Windows/Linux/WSL2
+launch path are covered by unit tests against fake probes/runners only;
+none of them was executed on a real OS. UI screenshots are headless Edge
+renders of the real Vite dev bundle (`VITE_SMIND_DESKTOP=1`) against a
+live daemon with a stubbed `__TAURI_INTERNALS__` (editors: Finder, VS
+Code, Cursor) and a macOS user agent, light and dark — not the built app
+(the agent sandbox kills WKWebView's content process, see D1).
+
+Automated, green: `task test` (Go + 1419 web tests), `task lint`, `bunx
+tsc -b`, `cargo test` (27 tests), `cargo clippy --all-targets`
+(warning-free).
+
+| AC | Confirmed by |
+|---|---|
+| D4.1 Reveal / Open in editor, local only | Items on the workspace row menu (`workspace.Path`) and the file-tree file row menu (`WorktreePath` + relative path; hidden when `WorktreePath` is null). vitest `open-in-editor-hidden-for-remote` (url, relay, non-desktop absent; local present; a connection switch without reload drops them via `smind:connection-changed`), `open-in-editor-error-toast`, `open-in-editor-passes-id-and-absolute-path`. Screenshots: `workspace-menu-{light,dark}`, `file-menu-{light,dark}` (local only, `/tmp/d4-shots`). Folder rows in the tree have no context menu today, so only files get the items. |
+| D4.2 Allowlist, id-only | Rust `editors_list_only_allowlisted`, `open_in_editor_rejects_unknown_id`, `open_in_editor_rejects_relative_or_missing_path`, plus argv tests (path is always one element; file manager only reveals). The command also re-checks the connection kind on the Rust side and rejects url/relay. **Not run:** real launches of VS Code/Cursor/Zed or Finder (no accessibility, and the sandbox can't show windows). |
+| D4.3 WSL2 | `wslpath_translation_ok`, `wslpath_translation_failure_is_error` against a stubbed runner. **Not verified on Windows + WSL2** (`wsl-reveal-and-open` not run), including `wsl.exe` UTF-16 output handling. |
+| D4.4 Badge | `badge_follows_attention_count`, `overlay_icon_pixels`. macOS Dock badge shipped earlier; Linux uses `set_badge_count` (launcher support depends on the desktop environment). **Windows overlay icon never ran on Windows**, and the Windows-only `set_overlay_icon` branch could not be compiled here (re-read against tauri 2.11.6 sources only); the Windows desktop CI build is the first compile. `dock-badge` manual check not run. |
+| D4.5 Allowlist exact | `capability_allowlist_exact`, `capability_app_grants_match_build_rs_commands`. |
+
+Adversarial review (fresh Sonnet 5.5 agent, read-only) found and this PR
+fixed: **(high)** `wsl.exe ... -- wslpath` ran the path through the distro
+shell (word-splitting, `$()`/`;` injection) -> now `--exec`, test
+`wslpath_runs_without_a_shell_and_keeps_the_path_one_argument`; `open` /
+`xdg-open` failures after spawn were swallowed -> now waited on and
+surfaced as the toast error; `editors_list` ran on the main thread -> now
+`spawn_blocking`; a failed overlay/badge set was recorded as shown ->
+retried, and re-applied on window focus (`badge_retries_after_a_failed_set_and_reapplies`);
+stale `useLocalPathActions` loads could re-show items after a connection
+switch -> newest-load-wins. **Known gaps, not fixed:** Windows editor
+detection only sees `%LOCALAPPDATA%\Programs\...\*.exe` installs (system-wide
+`Program Files` installs and `.cmd` shims on PATH are not detected, so those
+editors are simply not offered); on a Windows host with WSL installed,
+`Platform::Wsl2` is chosen even if the Local daemon were a native Windows
+one, which yields an explicit "not an absolute Linux path" error.
+

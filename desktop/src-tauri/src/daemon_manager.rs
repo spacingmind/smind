@@ -6,6 +6,7 @@
 //! process, hitting the network) plus Tauri glue (app data dir, event
 //! emission, app version). See `docs/plans/active/desktop-managed-daemon.md`.
 
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -84,11 +85,15 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
 /// as `resolve_distro` caches the distro name: it's spawning `wsl.exe`
 /// (once per call, uncached) that made every `daemon_status` poll flash a
 /// console window on Windows.
-fn detect_platform(state: &DesktopState) -> Platform {
+pub(crate) fn detect_platform(state: &DesktopState) -> Platform {
+    detect_platform_cached(&state.daemon_manager_platform)
+}
+
+pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platform {
     if cfg!(target_os = "macos") {
         return Platform::Macos;
     }
-    let mut cache = state.daemon_manager_platform.lock().unwrap();
+    let mut cache = cache.lock().unwrap();
     if let Some(p) = *cache {
         return p;
     }
@@ -326,8 +331,12 @@ pub async fn auto_start(app: AppHandle) {
 /// resolve_distro detects the default WSL distro once per app run and
 /// caches it -- the default distro is not expected to change while the
 /// app is running.
-fn resolve_distro(state: &DesktopState) -> Result<String, String> {
-    let mut cache = state.daemon_manager_distro.lock().unwrap();
+pub(crate) fn resolve_distro(state: &DesktopState) -> Result<String, String> {
+    resolve_distro_cached(&state.daemon_manager_distro)
+}
+
+pub(crate) fn resolve_distro_cached(cache: &Mutex<Option<String>>) -> Result<String, String> {
+    let mut cache = cache.lock().unwrap();
     if let Some(d) = cache.as_ref() {
         return Ok(d.clone());
     }

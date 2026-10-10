@@ -411,10 +411,22 @@
           "markdownDescription": "Enables the daemon_update command without any pre-configured scope."
         },
         {
+          "description": "Enables the editors_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-editors-list",
+          "markdownDescription": "Enables the editors_list command without any pre-configured scope."
+        },
+        {
           "description": "Enables the open_external command without any pre-configured scope.",
           "type": "string",
           "const": "allow-open-external",
           "markdownDescription": "Enables the open_external command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open_in_editor command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open-in-editor",
+          "markdownDescription": "Enables the open_in_editor command without any pre-configured scope."
         },
         {
           "description": "Enables the take_over_daemon command without any pre-configured scope.",
@@ -501,10 +513,22 @@
           "markdownDescription": "Denies the daemon_update command without any pre-configured scope."
         },
         {
+          "description": "Denies the editors_list command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-editors-list",
+          "markdownDescription": "Denies the editors_list command without any pre-configured scope."
+        },
+        {
           "description": "Denies the open_external command without any pre-configured scope.",
           "type": "string",
           "const": "deny-open-external",
           "markdownDescription": "Denies the open_external command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open_in_editor command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open-in-editor",
+          "markdownDescription": "Denies the open_in_editor command without any pre-configured scope."
         },
         {
           "description": "Denies the take_over_daemon command without any pre-configured scope.",

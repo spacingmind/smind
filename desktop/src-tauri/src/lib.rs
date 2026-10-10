@@ -22,12 +22,17 @@ mod client_watch;
 mod commands;
 mod daemon_manager;
 mod deeplink;
+mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+mod overlay_icon;
 mod state;
 mod tray;
 mod window_chrome;
+#[cfg(test)]
+mod capability_tests;
 mod zoom_store;
 
 use state::DesktopState;
@@ -96,6 +101,8 @@ pub fn run() {
             commands::connections_select,
             commands::connections_get_current,
             commands::open_external,
+            editors::editors_list,
+            editors::open_in_editor,
             daemon_manager::daemon_status,
             daemon_manager::daemon_install,
             daemon_manager::daemon_update,
@@ -239,12 +246,17 @@ pub fn run() {
             // AC3: hide-on-close instead of destroy.
             let close_win = win.clone();
             let close_app = app.handle().clone();
-            win.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let badge_tray = tray.clone();
+            win.on_window_event(move |event| match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     window_chrome::dismissed(&close_app);
                     let _ = close_win.hide();
                 }
+                // Windows drops the taskbar overlay when the hidden window's
+                // button is re-created; put it back when the window returns.
+                tauri::WindowEvent::Focused(true) => badge_tray.reapply_badge(),
+                _ => {}
             });
 
             // AC5: register the toggle shortcut.
@@ -273,8 +285,8 @@ pub fn run() {
                 tray,
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
-                daemon_manager_distro: Mutex::new(None),
-                daemon_manager_platform: Mutex::new(None),
+                daemon_manager_distro: std::sync::Arc::new(Mutex::new(None)),
+                daemon_manager_platform: std::sync::Arc::new(Mutex::new(None)),
             });
 
             // desktop-macos-app M2.3/M2.4: install + start the bundled
