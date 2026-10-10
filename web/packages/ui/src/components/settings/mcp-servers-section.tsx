@@ -5,6 +5,8 @@ import { registerSettingsSection, type SettingsSectionContext } from "@/componen
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { McpServer } from "@/lib/types";
 
 /**
@@ -87,6 +89,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!client) return;
@@ -180,14 +183,14 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
 
   async function handleDelete(id: number) {
     if (!client) return;
+    setDeleteError(null);
     try {
       await client.call("mcp.delete", { id });
       setServers((prev) => (prev ? prev.filter((s) => s.id !== id) : prev));
       if (openCard === id) closeCard();
-    } catch (err) {
-      console.error("mcp.delete failed", err);
-    } finally {
       setDeleting(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -214,7 +217,11 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                 testId="mcp-empty-state"
                 title="No MCP servers yet"
                 description="Give agents tools like a browser (Playwright) — add an MCP server"
-                action={newServerButton}
+                action={
+                  <Button type="button" size="sm" data-testid="mcp-empty-new-button" onClick={openNew}>
+                    <Plus aria-hidden className="size-3.5" /> New server
+                  </Button>
+                }
               />
             )}
             {(servers.length > 0 || openCard === "new") && (
@@ -287,25 +294,53 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                             >
                               {editing ? "Close" : "Edit"}
                             </DropdownMenuItem>
-                            {deleting === m.id ? (
-                              <DropdownMenuItem
-                                data-testid={`mcp-delete-confirm-${m.id}`}
-                                className="text-destructive"
-                                onSelect={() => void handleDelete(m.id)}
-                              >
-                                Really delete {m.name}?
-                              </DropdownMenuItem>
-                            ) : (
-                              <DropdownMenuItem
-                                data-testid={`mcp-delete-${m.id}`}
-                                onSelect={() => setDeleting(m.id)}
-                              >
-                                Delete
-                              </DropdownMenuItem>
-                            )}
+                            <DropdownMenuItem
+                              data-testid={`mcp-delete-${m.id}`}
+                              onSelect={() => {
+                                setDeleting(m.id);
+                                setDeleteError(null);
+                              }}
+                            >
+                              Delete
+                            </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </div>
+                      {deleting === m.id && (
+                        <div data-testid={`mcp-delete-row-${m.id}`} className="flex flex-col gap-1 px-2">
+                          <p className="text-ui-sm text-muted-foreground">
+                            Delete {m.name}? This removes its stored env/headers.
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              data-testid={`mcp-delete-confirm-${m.id}`}
+                              onClick={() => void handleDelete(m.id)}
+                            >
+                              Delete
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              data-testid={`mcp-delete-cancel-${m.id}`}
+                              onClick={() => {
+                                setDeleting(null);
+                                setDeleteError(null);
+                              }}
+                            >
+                              Cancel
+                            </Button>
+                            {deleteError && (
+                              <span role="alert" data-testid={`mcp-delete-error-${m.id}`} className="text-ui-sm text-destructive">
+                                {deleteError}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                       {editing && (
                         <McpServerForm
                           idPrefix={`mcp-edit-form-${m.id}`}
@@ -379,36 +414,36 @@ function McpServerForm({
   return (
     <form className="flex flex-col gap-2" onSubmit={onSubmit}>
       <div className="grid grid-cols-2 gap-2">
-        <input
+        <Input
           aria-label="Server name"
           data-testid={`${idPrefix}-name`}
           placeholder="Name (e.g. playwright)"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
         />
-        <select
-          aria-label="Transport"
-          data-testid={`${idPrefix}-transport`}
+        <Select
           value={form.transport}
-          onChange={(e) => setForm((f) => ({ ...f, transport: e.target.value as McpFormState["transport"] }))}
-          className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused"
+          onValueChange={(value) => setForm((f) => ({ ...f, transport: value as McpFormState["transport"] }))}
         >
-          <option value="stdio">stdio</option>
-          <option value="http">http</option>
-          <option value="sse">sse</option>
-        </select>
+          <SelectTrigger aria-label="Transport" data-testid={`${idPrefix}-transport`} className="w-full">
+            <SelectValue placeholder="Transport" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="stdio">stdio</SelectItem>
+            <SelectItem value="http">http</SelectItem>
+            <SelectItem value="sse">sse</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {form.transport === "stdio" ? (
         <>
-          <input
+          <Input
             aria-label="Command"
             data-testid={`${idPrefix}-command`}
             placeholder="Command (e.g. npx)"
             value={form.command}
             onChange={(e) => setForm((f) => ({ ...f, command: e.target.value }))}
-            className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
           />
           <textarea
             aria-label="Arguments"
@@ -428,13 +463,12 @@ function McpServerForm({
         </>
       ) : (
         <>
-          <input
+          <Input
             aria-label="URL"
             data-testid={`${idPrefix}-url`}
             placeholder="URL (e.g. https://example.com/mcp)"
             value={form.url}
             onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
-            className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
           />
           <KVEditor
             idPrefix={`${idPrefix}-headers`}
@@ -486,22 +520,20 @@ function KVEditor({
       <span className="text-ui-sm text-foreground-muted">{label}</span>
       {rows.map((row, i) => (
         <div key={i} className="flex items-center gap-1" data-testid={`${idPrefix}-row-${i}`}>
-          <input
+          <Input
             aria-label={`${label} key ${i + 1}`}
             data-testid={`${idPrefix}-key-${i}`}
             placeholder="Key"
             value={row.key}
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))}
-            className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
           />
-          <input
+          <Input
             type="password"
             aria-label={`${label} value ${i + 1}`}
             data-testid={`${idPrefix}-value-${i}`}
             placeholder="Value"
             value={row.value}
             onChange={(e) => onChange(rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))}
-            className="h-8 w-full rounded-lg border border-input-border bg-input px-2.5 text-ui-base outline-none hover:border-input-border-hover focus-visible:border-input-border-focused focus-visible:bg-input-focused"
           />
           <Button
             type="button"
