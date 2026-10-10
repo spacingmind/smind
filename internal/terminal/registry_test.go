@@ -111,6 +111,10 @@ func TestRegistry_CreateWriteSubscribe_RealShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// Close at cleanup so the shell isn't still holding its cwd (the
+	// worktree temp dir) when t.TempDir's RemoveAll runs -- Windows
+	// refuses to delete a live process's working directory.
+	t.Cleanup(func() { _ = reg.Close(id) })
 
 	events, unsubscribe, err := reg.Subscribe(id)
 	if err != nil {
@@ -140,6 +144,9 @@ func TestRegistry_Subscribe_SecondConnectionSeesBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// See TestRegistry_CreateWriteSubscribe_RealShell for the cleanup
+	// rationale (shell cwd holds the worktree temp dir on Windows).
+	t.Cleanup(func() { _ = reg.Close(id) })
 
 	first, unsubFirst, err := reg.Subscribe(id)
 	if err != nil {
@@ -185,6 +192,10 @@ func TestRegistry_Resize_ReachesPTY(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// See TestRegistry_CreateWriteSubscribe_RealShell for the cleanup
+	// rationale (shell cwd holds the worktree temp dir on Windows).
+	t.Cleanup(func() { _ = reg.Close(id) })
+
 	events, unsubscribe, err := reg.Subscribe(id)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
