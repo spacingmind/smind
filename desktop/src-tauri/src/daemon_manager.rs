@@ -89,6 +89,19 @@ pub(crate) fn detect_platform(state: &DesktopState) -> Platform {
     detect_platform_cached(&state.daemon_manager_platform)
 }
 
+/// platform_for is the pure decision: macOS is native-capable, and only a
+/// real Windows target can be Wsl2 (with `wsl.exe` reachable). Linux --
+/// including WSLg, where Windows interop exposes a `wsl.exe` -- is
+/// Unsupported: its daemon runs natively and there is no Windows host to
+/// translate paths for or spawn from.
+fn platform_for(target_os: &str, has_wsl: impl FnOnce() -> bool) -> Platform {
+    match target_os {
+        "macos" => Platform::Macos,
+        "windows" if has_wsl() => Platform::Wsl2,
+        _ => Platform::Unsupported,
+    }
+}
+
 pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platform {
     if cfg!(target_os = "macos") {
         return Platform::Macos;
@@ -97,8 +110,9 @@ pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platfor
     if let Some(p) = *cache {
         return p;
     }
-    let has_wsl = wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false);
-    let platform = if has_wsl { Platform::Wsl2 } else { Platform::Unsupported };
+    let platform = platform_for(std::env::consts::OS, || {
+        wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false)
+    });
     *cache = Some(platform);
     platform
 }
@@ -955,6 +969,16 @@ mod tests {
         ));
         assert!(got.is_none());
         assert_eq!(calls, 5);
+    }
+
+    #[test]
+    fn wsl2_only_on_a_windows_target() {
+        assert_eq!(platform_for("windows", || true), Platform::Wsl2);
+        assert_eq!(platform_for("windows", || false), Platform::Unsupported);
+        // WSLg: a Linux app with wsl.exe interop is not a Windows host, and
+        // never even probes for it.
+        assert_eq!(platform_for("linux", || panic!("must not probe wsl.exe")), Platform::Unsupported);
+        assert_eq!(platform_for("macos", || panic!("must not probe wsl.exe")), Platform::Macos);
     }
 
     #[test]

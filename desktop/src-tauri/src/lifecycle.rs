@@ -33,32 +33,43 @@ pub trait BadgeSetter {
 /// never shown).
 pub struct Badge<S: BadgeSetter> {
     setter: S,
-    shown: Mutex<usize>,
+    state: Mutex<BadgeState>,
+}
+
+/// BadgeState separates what the OS last accepted (`shown`) from what the
+/// app last asked for (`wanted`): a failed set leaves `shown` stale, and
+/// `reapply` must follow `wanted`, not the stale value.
+#[derive(Default)]
+struct BadgeState {
+    shown: usize,
+    wanted: usize,
 }
 
 impl<S: BadgeSetter> Badge<S> {
     pub fn new(setter: S) -> Self {
-        Self { setter, shown: Mutex::new(0) }
+        Self { setter, state: Mutex::new(BadgeState::default()) }
     }
 
     pub fn update(&self, count: usize) {
-        let mut shown = self.shown.lock().unwrap();
-        if *shown == count {
+        let mut st = self.state.lock().unwrap();
+        st.wanted = count;
+        if st.shown == count {
             return;
         }
         if self.setter.set(if count > 0 { Some(count as i64) } else { None }) {
-            *shown = count;
+            st.shown = count;
         }
     }
 
-    /// Sets the currently shown count again. Windows drops a taskbar
+    /// Sets the last requested count again. Windows drops a taskbar
     /// overlay when the window's taskbar button is re-created (hidden to
     /// the tray, then shown), so the app calls this when the window gains
-    /// focus. A no-op while nothing is shown.
+    /// focus. A no-op while the requested count is zero (also when a clear
+    /// failed: a stale badge is never re-shown).
     pub fn reapply(&self) {
-        let shown = *self.shown.lock().unwrap();
-        if shown > 0 {
-            self.setter.set(Some(shown as i64));
+        let mut st = self.state.lock().unwrap();
+        if st.wanted > 0 && self.setter.set(Some(st.wanted as i64)) {
+            st.shown = st.wanted;
         }
     }
 }
@@ -150,6 +161,19 @@ mod tests {
         badge.update(0);
         badge.reapply(); // nothing shown: no call
         assert_eq!(*flaky.0.borrow(), vec![Some(2), Some(2), Some(2), None]);
+    }
+
+    #[test]
+    fn reapply_after_a_failed_clear_does_not_reshow_a_stale_badge() {
+        let flaky = Flaky(RefCell::default(), std::cell::Cell::new(0));
+        let badge = Badge::new(&flaky);
+        badge.update(2); // accepted
+        flaky.1.set(1);
+        badge.update(0); // clear rejected: shown stays 2, wanted is 0
+        badge.reapply(); // must not re-show the stale count
+        assert_eq!(*flaky.0.borrow(), vec![Some(2), None]);
+        badge.update(0); // retried clear, accepted
+        assert_eq!(*flaky.0.borrow(), vec![Some(2), None, None]);
     }
 
     #[test]

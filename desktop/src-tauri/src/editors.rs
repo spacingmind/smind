@@ -12,7 +12,9 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use serde::Serialize;
 use smind_daemon_client::daemon_manager::wsl;
@@ -44,6 +46,12 @@ pub trait EditorProbe {
     fn home_dir(&self) -> PathBuf;
     /// `%LOCALAPPDATA%` on Windows; `None` elsewhere/in tests.
     fn local_appdata(&self) -> Option<PathBuf>;
+    /// The machine-wide install roots on Windows (`%ProgramFiles%`,
+    /// `%ProgramFiles(x86)%`, ...), where all-users installers put the
+    /// editors; empty elsewhere/in tests.
+    fn program_files_dirs(&self) -> Vec<PathBuf> {
+        Vec::new()
+    }
     /// Resolves `name` through PATH to a full executable path, `None`
     /// when not on PATH. Callers only ever ask for an `.exe` on Windows
     /// (never a `.cmd`/`.bat`, which would open a console and execute
@@ -70,6 +78,17 @@ impl EditorProbe for RealProbe {
     }
     fn local_appdata(&self) -> Option<PathBuf> {
         std::env::var("LOCALAPPDATA").ok().map(PathBuf::from)
+    }
+    fn program_files_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs: Vec<PathBuf> = Vec::new();
+        for var in ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"] {
+            if let Some(d) = std::env::var_os(var).map(PathBuf::from) {
+                if !dirs.contains(&d) {
+                    dirs.push(d);
+                }
+            }
+        }
+        dirs
     }
     fn path_lookup(&self, name: &str) -> Option<String> {
         let path_var = std::env::var_os("PATH")?;
@@ -112,11 +131,12 @@ const MACOS_BUNDLES: &[(&str, &str, &str)] = &[
     ("zed", "Zed", "Zed"),
 ];
 
-/// Windows install locations under `%LOCALAPPDATA%\Programs`, plus the
-/// PATH fallback exe: (id, subpath, exe, label). Subpaths use Windows
-/// separators and are only ever combined through `win_program_path`, so
-/// the built string is the same no matter which OS the code runs (and
-/// is tested) on.
+/// Windows install locations -- the per-user `%LOCALAPPDATA%\Programs`
+/// and the machine-wide `%ProgramFiles%` / `%ProgramFiles(x86)%` roots --
+/// plus the PATH fallback exe: (id, subpath, exe, label). Subpaths use
+/// Windows separators and are only ever combined through
+/// `win_install_candidates`, so the built string is the same no matter
+/// which OS the code runs (and is tested) on.
 const WINDOWS_LOCATIONS: &[(&str, &str, &str, &str)] = &[
     ("vscode", r"Microsoft VS Code\Code.exe", "code.exe", "VS Code"),
     ("cursor", r"cursor\Cursor.exe", "cursor.exe", "Cursor"),
@@ -132,7 +152,26 @@ const LINUX_NAMES: &[(&str, &str, &str)] =
 /// *host* OS -- a macOS dev machine running the tests must see the exact
 /// string a Windows host would).
 fn win_program_path(local_appdata: &Path, subpath: &str) -> String {
-    format!("{}\\Programs\\{}", local_appdata.display().to_string().trim_end_matches('\\'), subpath)
+    win_join(local_appdata, &format!("Programs\\{subpath}"))
+}
+
+/// `<root>\<subpath>` with Windows separators regardless of host OS.
+fn win_join(root: &Path, subpath: &str) -> String {
+    format!("{}\\{}", root.display().to_string().trim_end_matches(['\\', '/']), subpath)
+}
+
+/// Every place an editor's exe may live on Windows, in preference order:
+/// per-user install first, then the machine-wide roots.
+fn win_install_candidates(probe: &dyn EditorProbe, subpath: &str) -> Vec<String> {
+    let mut out: Vec<String> =
+        probe.local_appdata().map(|la| win_program_path(&la, subpath)).into_iter().collect();
+    out.extend(probe.program_files_dirs().iter().map(|pf| win_join(pf, subpath)));
+    out
+}
+
+/// The first install candidate that exists on disk.
+fn win_installed_path(probe: &dyn EditorProbe, subpath: &str) -> Option<String> {
+    win_install_candidates(probe, subpath).into_iter().find(|p| probe.path_exists(p))
 }
 
 fn file_manager_label(os: &str) -> &'static str {
@@ -169,11 +208,7 @@ pub fn detect_editors(os: &str, probe: &dyn EditorProbe) -> Vec<EditorInfo> {
         }
         "windows" => {
             for (id, subpath, exe, label) in WINDOWS_LOCATIONS {
-                let found = probe
-                    .local_appdata()
-                    .map(|la| probe.path_exists(&win_program_path(&la, subpath)))
-                    .unwrap_or(false)
-                    || probe.path_lookup(exe).is_some();
+                let found = win_installed_path(probe, subpath).is_some() || probe.path_lookup(exe).is_some();
                 editor(found, id, label, &mut out);
             }
         }
@@ -206,11 +241,7 @@ fn resolve_editor(os: &str, id: &str, probe: &dyn EditorProbe) -> Option<Launch>
         }
         "windows" => {
             let (_, subpath, exe, _) = WINDOWS_LOCATIONS.iter().find(|(e, _, _, _)| *e == id)?;
-            let program = probe
-                .local_appdata()
-                .map(|la| win_program_path(&la, subpath))
-                .filter(|p| probe.path_exists(p))
-                .or_else(|| probe.path_lookup(exe))?;
+            let program = win_installed_path(probe, subpath).or_else(|| probe.path_lookup(exe))?;
             Some(Launch { program, prefix_args: vec![] })
         }
         _ => {
@@ -306,9 +337,9 @@ fn decode_wsl_output(raw: &[u8]) -> String {
         || chunks.iter().take(8).any(|c| c[1] == 0x00 && c[0] != 0);
     if looks_utf16 && raw.len().is_multiple_of(2) {
         let units: Vec<u16> = chunks.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-        return String::from_utf16_lossy(&units);
+        return String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_string();
     }
-    String::from_utf8_lossy(raw).into_owned()
+    String::from_utf8_lossy(raw).trim_start_matches('\u{feff}').to_string()
 }
 
 /// The full decision pipeline behind `open_in_editor`, pure over the
@@ -414,23 +445,52 @@ fn spawn_detached(argv: &[String]) -> Result<(), String> {
     // binaries stay fire-and-forget, and `explorer.exe` exits 1 even on
     // success, so neither is waited on.
     if matches!(argv[0].as_str(), "open" | "xdg-open") {
-        let out = cmd.output().map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
-        if !out.status.success() {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            let detail = stderr.trim();
-            return Err(if detail.is_empty() {
-                format!("{} failed ({})", argv[0], out.status)
-            } else {
-                format!("{} failed: {detail}", argv[0])
-            });
-        }
-        return Ok(());
+        return run_and_report(cmd, &argv[0], OPENER_WAIT);
     }
     let mut child = cmd.spawn().map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
     std::thread::spawn(move || {
         let _ = child.wait();
     });
     Ok(())
+}
+
+/// How long to wait for `open`/`xdg-open` before treating them as
+/// launched. `xdg-open` can stay alive as long as the file manager it
+/// started does.
+const OPENER_WAIT: Duration = Duration::from_secs(5);
+
+/// Runs `cmd` (an `open`/`xdg-open` launcher) and surfaces its failure.
+/// Never blocks past `wait` and never on pipe EOF: stdout is discarded,
+/// and stderr is drained on a helper thread, because a launched file
+/// manager can inherit the pipe and keep it open long after the launcher
+/// exited (what made `Command::output()` hang). A launcher still running
+/// at the deadline counts as launched; it is reaped when it exits.
+fn run_and_report(mut cmd: Command, name: &str, wait: Duration) -> Result<(), String> {
+    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    let mut child = cmd.spawn().map_err(|e: io::Error| format!("couldn't launch {name}: {e}"))?;
+    let (err_tx, err_rx) = mpsc::channel::<Vec<u8>>();
+    if let Some(mut stderr) = child.stderr.take() {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            let _ = io::Read::read_to_end(&mut stderr, &mut buf);
+            let _ = err_tx.send(buf);
+        });
+    }
+    let (status_tx, status_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = status_tx.send(child.wait());
+    });
+    match status_rx.recv_timeout(wait) {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => {
+            let stderr = err_rx.recv_timeout(Duration::from_millis(500)).unwrap_or_default();
+            let detail = String::from_utf8_lossy(&stderr).trim().to_string();
+            Err(if detail.is_empty() { format!("{name} failed ({status})") } else { format!("{name} failed: {detail}") })
+        }
+        Ok(Err(e)) => Err(format!("couldn't wait for {name}: {e}")),
+        // Still running at the deadline: launched, not failed.
+        Err(_) => Ok(()),
+    }
 }
 
 /// Async so the PATH/filesystem probing runs off the main thread (a slow
@@ -565,6 +625,89 @@ mod tests {
         }
         .with(r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe")
         .on_path("cursor.exe", r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe")
+    }
+
+    #[test]
+    fn windows_editors_are_found_under_program_files_too() {
+        struct SystemWide(FakeProbe);
+        impl EditorProbe for SystemWide {
+            fn path_exists(&self, p: &str) -> bool {
+                self.0.path_exists(p)
+            }
+            fn is_dir(&self, p: &str) -> bool {
+                self.0.is_dir(p)
+            }
+            fn canonicalize(&self, p: &str) -> Result<String, String> {
+                self.0.canonicalize(p)
+            }
+            fn home_dir(&self) -> PathBuf {
+                self.0.home_dir()
+            }
+            fn local_appdata(&self) -> Option<PathBuf> {
+                self.0.local_appdata()
+            }
+            fn program_files_dirs(&self) -> Vec<PathBuf> {
+                vec![PathBuf::from(r"C:\Program Files"), PathBuf::from(r"C:\Program Files (x86)")]
+            }
+            fn path_lookup(&self, n: &str) -> Option<String> {
+                self.0.path_lookup(n)
+            }
+        }
+        let probe = SystemWide(
+            FakeProbe { local_appdata: Some(PathBuf::from(WIN_LOCAL)), ..FakeProbe::default() }
+                .with(r"C:\Program Files\Microsoft VS Code\Code.exe")
+                .with(r"C:\Program Files (x86)\Zed\Zed.exe"),
+        );
+        let ids: Vec<String> = detect_editors("windows", &probe).iter().map(|e| e.id.clone()).collect();
+        assert_eq!(ids, vec!["file-manager", "vscode", "zed"]);
+        let argv = build_argv("windows", "vscode", r"C:\work", &probe).unwrap();
+        assert_eq!(argv[0], r"C:\Program Files\Microsoft VS Code\Code.exe");
+        let argv = build_argv("windows", "zed", r"C:\work", &probe).unwrap();
+        assert_eq!(argv[0], r"C:\Program Files (x86)\Zed\Zed.exe");
+        // A per-user install still wins over a machine-wide one.
+        let both = SystemWide(
+            FakeProbe { local_appdata: Some(PathBuf::from(WIN_LOCAL)), ..FakeProbe::default() }
+                .with(r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe")
+                .with(r"C:\Program Files\Microsoft VS Code\Code.exe"),
+        );
+        let argv = build_argv("windows", "vscode", r"C:\work", &both).unwrap();
+        assert_eq!(argv[0], r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe");
+    }
+
+    #[test]
+    fn decode_wsl_output_strips_the_bom() {
+        let mut utf16: Vec<u8> = vec![0xFF, 0xFE];
+        utf16.extend("C:\\x\n".encode_utf16().flat_map(|u| u.to_le_bytes()));
+        assert_eq!(decode_wsl_output(&utf16), "C:\\x\n");
+        // BOM-less UTF-16LE and UTF-8 (with or without a BOM) too.
+        let bare: Vec<u8> = "Ubuntu".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
+        assert_eq!(decode_wsl_output(&bare), "Ubuntu");
+        assert_eq!(decode_wsl_output(b"\xEF\xBB\xBFUbuntu"), "Ubuntu");
+        assert_eq!(decode_wsl_output(b"Ubuntu"), "Ubuntu");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opener_returns_even_when_a_grandchild_keeps_stderr_open() {
+        let started = std::time::Instant::now();
+        let mut cmd = Command::new("sh");
+        // The launcher exits 0 at once; a background child holds the pipe.
+        cmd.args(["-c", "sleep 5 & exit 0"]);
+        assert!(run_and_report(cmd, "sh", Duration::from_secs(3)).is_ok());
+        assert!(started.elapsed() < Duration::from_secs(3), "blocked on the inherited pipe");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opener_failure_carries_stderr_and_a_slow_opener_is_not_an_error() {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "echo no handler >&2; exit 3"]);
+        let err = run_and_report(cmd, "xdg-open", Duration::from_secs(3)).unwrap_err();
+        assert_eq!(err, "xdg-open failed: no handler");
+
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", "sleep 2"]);
+        assert!(run_and_report(cmd, "xdg-open", Duration::from_millis(100)).is_ok());
     }
 
     fn linux_probe() -> FakeProbe {
