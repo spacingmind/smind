@@ -677,3 +677,112 @@ html {
   width: 0;
   height: 0;
 }
+
+/*
+ * D2 -- remove webview-isms (desktop-native-feel plan). Everything in
+ * this block hangs off html[data-desktop-os], the marker main.tsx sets
+ * on <html> once at startup (only when isDesktop, via lib/platform.ts's
+ * desktopOS), so the browser build never matches any of it (D2.8).
+ *
+ * The user-select and cursor rules live in @layer base on purpose: an
+ * unlayered rule here would beat every Tailwind utility in the cascade,
+ * silently killing explicit cursor-not-allowed / cursor-grab /
+ * cursor-col-resize / select-text / select-none on components. Base is
+ * below utilities, so those still win where a component asks for one.
+ */
+@layer base {
+  /*
+   * D2.3, chrome is not selectable: user-select:none on the root, with
+   * content surfaces re-enabled below. Selectors name what those tests
+   * check (chrome-not-selectable): the sidebar, the header, the tab
+   * strip, buttons and menu items are covered by the root rule itself.
+   */
+  html[data-desktop-os] {
+    user-select: none;
+  }
+
+  /*
+   * Conversation text, code blocks, tool output, diffs and the file
+   * editor -- the surfaces D2.3 explicitly keeps selectable.
+   * input/textarea/[contenteditable] covers the composer and the file
+   * editor's CodeMirror content; pre/code covers timeline code blocks
+   * and tool output (timeline-markdown's <pre>, tool-read-preview,
+   * diff2html's <pre> rows); [data-testid="run-log-column"] is the
+   * whole timeline column; .d2h-wrapper is diff2html's root. The
+   * terminal is deliberately NOT here: xterm draws its own selection,
+   * and a native DOM selection over its rows double-highlights.
+   */
+  html[data-desktop-os] input,
+  html[data-desktop-os] textarea,
+  html[data-desktop-os] [contenteditable],
+  html[data-desktop-os] pre,
+  html[data-desktop-os] code,
+  html[data-desktop-os] [data-testid="run-log-column"],
+  html[data-desktop-os] .d2h-wrapper {
+    user-select: text;
+  }
+
+  /*
+   * Inside the selectable timeline column, controls stay unselectable,
+   * so Cmd+A or a drag doesn't highlight button labels and tool-card
+   * chrome.
+   */
+  html[data-desktop-os] [data-testid="run-log-column"] :is(button, [role="button"], [role="tab"], [role="menuitem"]) {
+    user-select: none;
+  }
+
+  /*
+   * D2.6, native-arrow cursor: every button, tab and menu item drops the
+   * pointer hand in the desktop build. Only real hyperlinks keep it --
+   * external URLs are the sole remaining <a href> pattern here (the
+   * accounts dialog's authorize link), and in-app "links" are buttons.
+   */
+  html[data-desktop-os] button,
+  html[data-desktop-os] [role="button"],
+  html[data-desktop-os] [role="tab"],
+  html[data-desktop-os] [role="menuitem"],
+  html[data-desktop-os] [role="menuitemcheckbox"],
+  html[data-desktop-os] [role="menuitemradio"],
+  html[data-desktop-os] [role="option"],
+  html[data-desktop-os] summary,
+  html[data-desktop-os] label[for] {
+    cursor: default;
+  }
+}
+
+/*
+ * The few components that ask for cursor-pointer explicitly (file-tree
+ * rows, timeline summaries) still get the native arrow in the desktop
+ * build -- D2.6's rule. Deliberately unlayered so it beats the utility,
+ * the one place D2 needs to win over an explicit ask.
+ */
+html[data-desktop-os] .cursor-pointer {
+  cursor: default;
+}
+
+/*
+ * D2.4, no rubber-band overscroll on the document root. Inner scroll
+ * containers keep the browser's default (auto), so they never chain a
+ * bounce to the document. (The html element itself carries the
+ * data-desktop-os attribute; body is its only child that scrolls.)
+ */
+html[data-desktop-os],
+html[data-desktop-os] body {
+  overscroll-behavior: none;
+}
+
+/*
+ * D2.7, thin themed scrollbars on Windows only (WebView2's classic wide
+ * grey ones otherwise). Gated on html[data-desktop-os="windows"]
+ * (main.tsx, from lib/platform.ts's desktopOS) so macOS keeps its
+ * overlay scrollbars and Linux its desktop theme; the standard
+ * scrollbar-width/scrollbar-color pair themes them with the existing
+ * border token in both light and dark. The xterm scrollbar rules above
+ * stay untouched -- this rule targets the app's scroll containers,
+ * xterm hides its own.
+ */
+html[data-desktop-os="windows"] body,
+html[data-desktop-os="windows"] body * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
