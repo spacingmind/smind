@@ -204,7 +204,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     renameTab,
   } = useTaskTabs();
   const events = useDaemonEvents(client);
-  const { attention, runStatus, runningChatsByTask } = useTaskAttention(client, selectedTask?.ID ?? null, events);
+  const { attention, runStatus, runningChatsByTask, loaded: runsLoaded } = useTaskAttention(client, selectedTask?.ID ?? null, events);
   // ADR-0016 P3: the selected task's own chats, live -- the "+" menu's
   // reopen section, the seed-or-migrate step below, and every chat tab's
   // authoritative title/provider all read from this one fetch.
@@ -855,7 +855,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         statusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
       />
-      {isDesktop && <DesktopDaemonBanner />}
+      {isDesktop && (
+        <DesktopDaemonBanner
+          runsLoaded={runsLoaded}
+          runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
+        />
+      )}
     </>
   );
 

@@ -253,8 +253,10 @@ fn install_bundled_binary(bundled: &Path, layout: &native::Layout) -> Result<(),
 enum LaunchAction {
     /// Nothing is serving: install the bundled daemon and start it.
     InstallAndStart,
-    /// A daemon *we* manage is older than the app: replace and restart it.
-    UpdateAndRestart,
+    /// A daemon *we* manage is older than the app: don't restart it here --
+    /// the UI owns the update decision, because it knows whether agent runs
+    /// are in flight (desktop-macos-app M5).
+    OfferUpdate,
     /// Leave everything as it is.
     NoOp,
     /// Something we don't manage holds the port: never touched
@@ -273,7 +275,7 @@ fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: ver
         // Our own process holds the port but isn't answering (yet): don't
         // pile a second install on top of it.
         (false, ManagedState::Managed) => LaunchAction::NoOp,
-        (true, ManagedState::Managed) if comparison == version::Comparison::Older => LaunchAction::UpdateAndRestart,
+        (true, ManagedState::Managed) if comparison == version::Comparison::Older => LaunchAction::OfferUpdate,
         (true, _) => LaunchAction::NoOp,
     }
 }
@@ -298,7 +300,7 @@ pub async fn auto_start(app: AppHandle) {
     let status = compute_status(&app, &state).await;
     let action = launch_decision(status.reachable, status.managed_state, status.comparison);
     log::info!("daemon auto-start: {action:?} (reachable={}, {:?}, {:?})", status.reachable, status.managed_state, status.comparison);
-    if !matches!(action, LaunchAction::InstallAndStart | LaunchAction::UpdateAndRestart) {
+    if !matches!(action, LaunchAction::InstallAndStart) {
         return;
     }
     match install_or_update(&app, &state).await {
@@ -882,8 +884,8 @@ mod tests {
 
         // No daemon reachable and nothing on the port -> install + start.
         assert_eq!(launch_decision(false, NotRunning, Unknown), InstallAndStart);
-        // Managed and older -> update + restart.
-        assert_eq!(launch_decision(true, Managed, Older), UpdateAndRestart);
+        // Managed and older -> the UI offers the update; Rust never restarts.
+        assert_eq!(launch_decision(true, Managed, Older), OfferUpdate);
         // Managed and same/newer (or unversioned dev build) -> no-op.
         for c in [Same, Newer, Unknown] {
             assert_eq!(launch_decision(true, Managed, c), NoOp, "managed + {c:?}");
@@ -899,6 +901,20 @@ mod tests {
         // Healthy daemon we can't attribute to a port owner (lsof blind,
         // or a non-local URL): nothing to do.
         assert_eq!(launch_decision(true, NotRunning, Older), NoOp);
+    }
+
+    #[test]
+    fn launch_decision_offers_update_instead_of_restarting() {
+        use Comparison::*;
+        use LaunchAction::*;
+        use ManagedState::*;
+
+        // An older managed daemon is never restarted by auto_start; the UI
+        // decides once it knows the run state.
+        assert_eq!(launch_decision(true, Managed, Older), OfferUpdate);
+        // Nothing serving still installs and starts the bundled daemon.
+        assert_eq!(launch_decision(false, NotRunning, Older), InstallAndStart);
+        assert_eq!(launch_decision(false, NotRunning, Unknown), InstallAndStart);
     }
 
     #[test]
