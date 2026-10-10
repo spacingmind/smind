@@ -548,6 +548,13 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
   concurrency scenario ("a fifth concurrent run") and the guide are
   Wave 2 and remain untested by design. `task test` + `task lint` green.
 
+**ADR-M AC7 — proxy, external clients only** (branch `feat/proxy-baseurl-model-routing`, `task test` + `task lint` green, 2026-10-11):
+
+- **Base-URL semantics** — `TestProxy_BaseURLSemantics` (`internal/server/proxy_routing_test.go`) and the pure `TestResolveUpstreamURL` (`internal/server/upstream_test.go`): Anthropic = base + full incoming path, OpenAI = base (with `/v1`) + path minus `/v1`; legacy full-endpoint `base_url` values (`.../v1/messages`, `.../chat/completions`, a Perplexity-style `<host>/chat/completions`) are stripped at read time and resolve to the same final URL as before (no migration); `POST /v1/messages/count_tokens` passes through and writes no `request_log` row.
+- **Model-aware routing** — `TestProxy_ModelAwareRouting`: explicit glob match wins, then no-list accounts, then a provider-shaped 400 `model_not_found` (recorded as a `route_error` row); a `glm-*` key is never picked for `claude-*`; a request with no model only matches no-list accounts. Also fixed in `internal/routing/router.go`: session affinity only holds while the pinned account is still in the (now per-request narrowed) candidate set.
+- **`accounts.models`** — additive migration (`TestMigrate_AccountsModelsColumn` old-DB read-back in `internal/store/migrate_test.go`), `account.add models` + new `account.updateModels` RPC (bad `path.Match` globs rejected; empty array clears), `smind account add --models a,b`, MODELS column in `smind account ls`.
+- Not done: web UI for editing models.
+
 **ADR-O** (branch `feat/chat-prompt-queue`, `task test` + `go test -race ./internal/runs ./internal/wsapi` + `task lint` green, 2026-10-10):
 
 - **AC1 store** — `TestChatQueue_EnqueueBoundAndOrder` (`internal/store/chat_queue_test.go`): 20-item bound with `ErrQueueFull` on the 21st, per-chat scope, FIFO order, interrupt (priority 1) jumps ahead, `NextQueued` ok=false on an empty chat.
