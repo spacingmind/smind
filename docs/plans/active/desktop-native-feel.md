@@ -300,7 +300,7 @@ ported):
 
 - [ ] D1 — window chrome (+ all of D2.1, no white flash): implemented on `feat/desktop-chrome`, automated checks green; native visual checks outstanding, see Validation
 - [ ] D2 — remove webview-isms (D2.1 owned/implemented by D1 above): D2.2–D2.8 implemented on `feat/desktop-de-webview` (stacked on `feat/desktop-chrome`), automated checks green; see Validation
-- [ ] D3 — desktop shortcuts + native menu
+- [ ] D3 — desktop shortcuts + native menu: implemented on `feat/desktop-shortcuts-menu`, automated checks green; native menu check outstanding, see Validation
 - [ ] D4 — native integrations (reveal/open-in-editor, badge)
 
 ## Validation
@@ -364,6 +364,21 @@ so `NOTICE` is unchanged.
 
 D1 stays unticked in Progress: the unchecked rows above, and Windows/Linux,
 are still outstanding.
+
+### D3 (`feat/desktop-shortcuts-menu`, 2026-10-10)
+
+Automated, all green: `bun run test` (1409 web tests, incl. the new
+`desktop-shortcuts` suite), `tsc -b`, `go vet`/gofmt/`go test`, `cargo
+test` (14 tests, incl. `menu_actions_match_web_action_ids`), `cargo
+clippy --all-targets -- -D warnings`. No new capability grant:
+`core:event:allow-listen` already covers the `menu-action` listener.
+
+| AC | Confirmed by |
+|---|---|
+| D3.1 desktop-gated rows | `BindingWhen.desktop` (`true`/`false`/absent) + `platformBindings`, filtered before matching, the help dialog and conflict checks; vitest `platformBindings keeps only rows whose desktop gate matches`. |
+| D3.2 desktop-only defaults | vitest `shortcuts-desktop-gating`: desktop fires `Mod+T` → `tab.new` and `Mod+3` → `tab.jump {digit: 3}`; web fires neither and `Alt+Shift+T` / `Mod+Alt+3` do. `shortcuts-dialog-shows-platform-combo`: the list shows Ctrl+T (desktop) vs Alt+Shift+T (web) for New tab. `Mod+W`/`Mod+,` etc. untouched on both. |
+| D3.3 menu → renderer + no double fire | `menu.rs` items (File: New/Close Tab + Settings… off-mac; View: Command Palette, Find, Toggle Sidebar) emit `menu-action` with the ActionId; `desktop.onMenuAction` dispatches through `runAction` — vitest `menu-action-dispatch` (same handler as the keystroke, exactly once). Double fire: a 300 ms same-action dedupe between the keydown and menu sources (whichever arrives first wins); `menu-accelerator-no-double-fire` covers both orders plus a 400 ms repeat running again. Accelerators on the D3 items are **macOS-only** (`renderer_accel`): on Windows/Linux `CmdOrCtrl` is Ctrl, and Ctrl+W/K/B/F/T are readline keys in the terminal pane a native accelerator would steal; the items still emit `menu-action` when clicked. |
+| D3.4 macOS app menu | App-name submenu (About, Settings… `Cmd+,`, Hide, Hide Others via `PredefinedMenuItem`, Quit `Cmd+Q`) ahead of File/Edit/View/Window/Help; Edit keeps Undo/Redo/Cut/Copy/Paste/Select All predefined. Windows/Linux unchanged besides the new items. **Not exercised in a live app** (same sandbox webview constraint as D1/D2); needs the user's native menu check. |
 
 ### D2.2–D2.8 (`feat/desktop-de-webview`, 2026-10-10)
 
