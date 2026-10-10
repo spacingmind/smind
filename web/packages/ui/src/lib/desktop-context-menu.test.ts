@@ -69,6 +69,20 @@ describe("desktop-context-menu (D2.2/D2.8)", () => {
     handleContextMenu(editableEvent);
     expect(editableEvent.defaultPrevented).toBe(false);
 
+    // A node inside contenteditable="false" is NOT editable (a read-only
+    // CodeMirror renders exactly this shape): the webview default menu is
+    // prevented there.
+    const ro = document.createElement("div");
+    ro.setAttribute("contenteditable", "false");
+    const roChild = document.createElement("span");
+    roChild.textContent = "read-only";
+    ro.appendChild(roChild);
+    document.body.appendChild(ro);
+    const roEvent = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    roChild.dispatchEvent(roEvent);
+    handleContextMenu(roEvent);
+    expect(roEvent.defaultPrevented).toBe(true);
+
     // The file editor: CodeMirror's contenteditable .cm-content.
     const cm = document.createElement("div");
     const cmContent = document.createElement("div");
@@ -106,6 +120,40 @@ describe("desktop-context-menu (D2.2/D2.8)", () => {
     text.dispatchEvent(noneEvent);
     handleContextMenu(noneEvent);
     expect(noneEvent.defaultPrevented).toBe(true);
+  });
+
+  it("context-menu-allowed-in-editable: text selected in one element does not unlock right-click on unrelated chrome", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const { handleContextMenu } = await import("@/lib/desktop-context-menu");
+
+    const timelineText = document.createElement("span");
+    timelineText.textContent = "conversation text";
+    document.body.appendChild(timelineText);
+    const range = document.createRange();
+    range.selectNodeContents(timelineText);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      // jsdom has no layout, so the rects check finds nothing and the
+      // intersectsNode fallback decides: a click on the unrelated
+      // sidebar row does not intersect the selection's range.
+      const sidebarRow = document.createElement("div");
+      sidebarRow.setAttribute("data-testid", "sidebar-task-row");
+      document.body.appendChild(sidebarRow);
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      sidebarRow.dispatchEvent(event);
+      handleContextMenu(event);
+      expect(event.defaultPrevented).toBe(true);
+
+      // ...while a click on the selected text itself still passes through.
+      const onText = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+      timelineText.dispatchEvent(onText);
+      handleContextMenu(onText);
+      expect(onText.defaultPrevented).toBe(false);
+    } finally {
+      selection.removeAllRanges();
+    }
   });
 
   it("context-menu-own-menu-still-opens: a handler that already ran (e.g. a smind ContextMenu's) is not re-prevented or blocked", async () => {

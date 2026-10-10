@@ -13,22 +13,57 @@ import { isDesktop } from "@/lib/platform";
  * isDesktop (lib/platform.ts).
  */
 
-/** True when e's target sits inside an editable field (input, textarea, or contenteditable), so the platform's native Cut/Copy/Paste menu should stay. */
+/**
+ * True when e's target sits inside an editable field (an input, a
+ * textarea, or anything the browser considers contenteditable --
+ * `isContentEditable`, which already excludes `contenteditable="false"`
+ * subtrees, e.g. a read-only CodeMirror), so the platform's native
+ * Cut/Copy/Paste menu should stay.
+ */
 function isEditableTarget(e: Event): boolean {
-  if (!(e.target instanceof Element)) return false;
-  const editable = e.target.closest(
-    "input, textarea, [contenteditable], [contenteditable] *, .cm-content",
-  );
-  if (!editable) return false;
-  return !(editable.hasAttribute("contenteditable") && editable.getAttribute("contenteditable") === "false");
+  if (!(e.target instanceof HTMLElement)) return false;
+  if (e.target.closest("input, textarea") !== null) return true;
+  if (e.target.isContentEditable) return true;
+  // jsdom never computes isContentEditable; the nearest [contenteditable]
+  // host's value decides there (and matches real browsers for the nested
+  // contenteditable="false" case too).
+  const host = e.target.closest("[contenteditable]");
+  if (!host) return false;
+  const value = host.getAttribute("contenteditable");
+  return value !== null && value !== "false";
 }
 
-/** True when the caret sits inside a non-empty collapsed selection, so Copy/Select All should stay available. */
-function hasNonEmptySelection(): boolean {
+/**
+ * True when the click lands on a non-empty selection, so Copy should stay
+ * available. A selection anywhere else on the page must NOT re-enable the
+ * default menu -- otherwise right-clicking the sidebar while timeline text
+ * happens to be selected brings back Reload/Inspect.
+ *
+ * Primary check: the click point inside one of the range's client rects.
+ * Fallback (jsdom has no layout, so getClientRects() is empty there, and
+ * it also covers a zero-area rects edge case in a real browser): the range
+ * intersects the event's target node.
+ */
+function isOverSelection(e: MouseEvent): boolean {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return false;
   for (let i = 0; i < selection.rangeCount; i++) {
-    if (!selection.getRangeAt(i).collapsed) return true;
+    const range = selection.getRangeAt(i);
+    if (range.collapsed) continue;
+    // jsdom has no layout, so Range.getClientRects doesn't even exist --
+    // treat it as "no rects" and fall through to intersectsNode below.
+    const rects = typeof range.getClientRects === "function" ? Array.from(range.getClientRects()) : [];
+    if (
+      rects.some(
+        (r) =>
+          e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom,
+      )
+    ) {
+      return true;
+    }
+    if (rects.length === 0 && e.target instanceof Node && range.intersectsNode(e.target)) {
+      return true;
+    }
   }
   return false;
 }
@@ -36,7 +71,7 @@ function hasNonEmptySelection(): boolean {
 /** The desktop context-menu policy itself -- exported for its unit tests. */
 export function handleContextMenu(e: MouseEvent): void {
   if (e.defaultPrevented) return;
-  if (isEditableTarget(e) || hasNonEmptySelection()) return;
+  if (isEditableTarget(e) || isOverSelection(e)) return;
   e.preventDefault();
 }
 
