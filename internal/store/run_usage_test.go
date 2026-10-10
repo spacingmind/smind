@@ -63,7 +63,7 @@ func TestRunUsage_UpsertAndSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SummarizeRunUsage() error = %v", err)
 	}
-	if len(sums) != 1 || sums[0].Count != 2 || sums[0].InputTokens != 150 || sums[0].OutputTokens != 20 || sums[0].CostUSD != 0.5 {
+	if len(sums) != 1 || sums[0].Count != 2 || sums[0].InputTokens != 150 || sums[0].OutputTokens != 20 || sums[0].CostUSD == nil || *sums[0].CostUSD != 0.5 {
 		t.Fatalf("task summary = %+v, want one row count=2 in=150 out=20 cost=0.5", sums)
 	}
 
@@ -72,6 +72,12 @@ func TestRunUsage_UpsertAndSummary(t *testing.T) {
 	sums, err = s.SummarizeRunUsage(&base, &until, "run")
 	if err != nil || len(sums) != 1 || sums[0].Key != "r1" {
 		t.Fatalf("windowed summary = %+v, %v; want only r1", sums, err)
+	}
+
+	// r2 alone reported no cost: its group's cost is unknown (nil), not 0.
+	sums, err = s.SummarizeRunUsage(nil, nil, "run")
+	if err != nil || len(sums) != 2 || sums[0].Key != "r1" || sums[1].Key != "r2" || sums[0].CostUSD == nil || sums[1].CostUSD != nil {
+		t.Fatalf("per-run summary = %+v, %v; want r1 cost set, r2 cost nil", sums, err)
 	}
 
 	if _, err := s.SummarizeRunUsage(nil, nil, "account"); err == nil {

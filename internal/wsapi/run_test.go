@@ -61,6 +61,9 @@ func TestServer_RunAttach_SecondConnectionMidRun(t *testing.T) {
 			texts = append(texts, p.Text)
 			continue
 		}
+		if env.Event == "usage" {
+			continue
+		}
 		term = env
 		break
 	}
@@ -384,6 +387,7 @@ func TestServer_RunLogs_Tail(t *testing.T) {
 	if err := json.Unmarshal(fullResp.Result, &full); err != nil {
 		t.Fatalf("decode run.logs result: %v", err)
 	}
+	full.Events = withoutUsage(full.Events)
 	if len(full.Events) != 3 {
 		t.Fatalf("full run.logs events = %d, want 3", len(full.Events))
 	}
@@ -443,7 +447,7 @@ func TestServer_RunLogs_StructuredEvents(t *testing.T) {
 	}
 
 	var types []string
-	for _, e := range logs.Events {
+	for _, e := range withoutUsage(logs.Events) {
 		types = append(types, e.Type)
 	}
 	want := []string{"raw", "thinking", "user_message", "tool_call", "tool_call", "chunk", "done"}
@@ -774,6 +778,9 @@ func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
 	}
 
 	term := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if term.Event == "usage" {
+		term = readEnvelopeFor(t, starter, "1", 5*time.Second)
+	}
 	if term.Error != nil {
 		t.Fatalf("task.prompt terminal error = %v, want success", term.Error.Message)
 	}
@@ -936,6 +943,7 @@ func TestServer_RunStart_KimiProvider(t *testing.T) {
 		}
 		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
 	}
+	logs.Events = withoutUsage(logs.Events)
 	if len(logs.Events) != 3 {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
@@ -981,6 +989,7 @@ func TestServer_RunStart_CodexNativeProvider(t *testing.T) {
 		}
 		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
 	}
+	logs.Events = withoutUsage(logs.Events)
 	if len(logs.Events) != 3 {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
@@ -1107,4 +1116,15 @@ func TestServer_RunConfigOptions_GLM_RealSelectRoundTrip(t *testing.T) {
 	if resp.Error == nil {
 		t.Fatal("run.setConfigOption with an unrecognized configId: error = nil, want the daemon's rejection surfaced, not a silent no-op")
 	}
+}
+
+// withoutUsage drops the turn's usage event, which these tests aren't about.
+func withoutUsage(events []runLogEvent) []runLogEvent {
+	var out []runLogEvent
+	for _, e := range events {
+		if e.Type != "usage" {
+			out = append(out, e)
+		}
+	}
+	return out
 }

@@ -32,11 +32,26 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 	r, _ := reg.get(withUsage)
 	reg.record(r, usageEvent(100, 20, 0.25))
 
-	noUsage, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	// A run that finishes without reaching turn end emits no usage event: a
+	// hung turn, stopped.
+	hangTask := newTestTask(t, wm, "hang")
+	noUsage, err := reg.Start(context.Background(), wm, runner, hangTask.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	waitForStatus(t, reg, noUsage, StatusDone, 5*time.Second)
+	waitForHistoryLen(t, reg, noUsage, 1, 5*time.Second)
+	if err := reg.Stop(noUsage); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	waitForStatus(t, reg, noUsage, StatusStopped, 5*time.Second)
+
+	// A turn that finished but whose backend reported nothing still emits a
+	// usage event: source not_reported, every number absent.
+	notReported, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg, notReported, StatusDone, 5*time.Second)
 
 	check := func(label string, reg *Registry) {
 		t.Helper()
@@ -59,6 +74,13 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 		if strings.Contains(string(b), `"usage"`) {
 			t.Errorf("%s: no-usage run JSON has a usage key: %s", label, b)
 		}
+		b, _ = json.Marshal(byID[notReported])
+		var wire struct {
+			Usage json.RawMessage `json:"usage"`
+		}
+		if err := json.Unmarshal(b, &wire); err != nil || string(wire.Usage) != `{"source":"not_reported"}` {
+			t.Errorf("%s: not-reported run usage = %s, want {\"source\":\"not_reported\"}", label, wire.Usage)
+		}
 	}
 	check("live", reg)
 	// A fresh registry rehydrates finished runs; usage comes from the store.
@@ -66,6 +88,10 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 
 	if _, err := st.GetRunUsage(noUsage); err == nil {
 		t.Error("run without a usage event got a run_usage row")
+	}
+	row, err := st.GetRunUsage(notReported)
+	if err != nil || row.Source != string(taskrunner.UsageSourceNotReported) || row.InputTokens != nil || row.CostUSD != nil {
+		t.Errorf("not-reported run_usage row = %+v, %v; want all-NULL, source not_reported", row, err)
 	}
 }
 

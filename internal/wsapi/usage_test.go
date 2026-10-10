@@ -247,18 +247,23 @@ func TestRunUsage_UpsertAndSummary(t *testing.T) {
 }
 
 // TestRunList_CarriesUsageTotals: a finished run with a run_usage row shows
-// camelCase totals under "usage" in run.list; one without has no usage key.
+// camelCase totals under "usage" in run.list; one whose backend reported
+// nothing shows only {"source":"not_reported"}. (A run that ends before turn
+// end has no usage key at all: covered in internal/runs.)
 func TestRunList_CarriesUsageTotals(t *testing.T) {
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)
-	task := newTestTask(t, wm, "")
+	tasks := []store.Task{
+		newTestTask(t, wm, "usage in=100 out=20 used=50 size=1000 cost=0.5"),
+		newTestTask(t, wm, ""),
+	}
 	srv := newTestWSServer(t, wm, newTestRunner(wm), db, "tok")
 	ws := dialWS(t, srv, "tok")
 	t.Cleanup(func() { _ = ws.Close() })
 
 	var ids []string
 	for i := 0; i < 2; i++ {
-		sendRequest(t, ws, "start", "run.start", map[string]any{"taskId": task.ID, "provider": "glm", "prompt": "hi"})
+		sendRequest(t, ws, "start", "run.start", map[string]any{"taskId": tasks[i].ID, "provider": "glm", "prompt": "hi"})
 		resp := readEnvelopeFor(t, ws, "start", 5*time.Second)
 		var res runStartResult
 		if err := json.Unmarshal(resp.Result, &res); err != nil || res.RunID == "" {
@@ -283,11 +288,6 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 			time.Sleep(20 * time.Millisecond)
 		}
 	}
-	if err := db.UpsertRunUsage(store.RunUsage{RunID: ids[0], TaskID: task.ID, Provider: "glm", Source: "claude_result",
-		InputTokens: ptr(int64(100)), OutputTokens: ptr(int64(20)), CostUSD: ptr(0.5)}); err != nil {
-		t.Fatalf("UpsertRunUsage() error = %v", err)
-	}
-
 	sendRequest(t, ws, "list", "run.list", nil)
 	resp := readEnvelopeFor(t, ws, "list", 5*time.Second)
 	var items []map[string]json.RawMessage
@@ -301,14 +301,14 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 		if id == ids[0] {
 			var u map[string]any
 			if err := json.Unmarshal(raw, &u); err != nil || u["inputTokens"] != float64(100) ||
-				u["outputTokens"] != float64(20) || u["costUsd"] != 0.5 || u["source"] != "claude_result" {
+				u["outputTokens"] != float64(20) || u["costUsd"] != 0.5 || u["source"] != "acp_prompt_usage" {
 				t.Errorf("usage = %s, want camelCase 100/20/0.5", raw)
 			}
 			if _, ok := u["cachedInputTokens"]; ok {
 				t.Errorf("unreported field present in usage: %s", raw)
 			}
-		} else if has {
-			t.Errorf("run %s without usage has a usage key: %s", id, raw)
+		} else if string(raw) != `{"source":"not_reported"}` {
+			t.Errorf("run %s usage = %s (present %v), want only {\"source\":\"not_reported\"}", id, raw, has)
 		}
 	}
 }

@@ -120,12 +120,11 @@ func usageSummaryEntryFrom(u store.UsageSummary) usageSummaryEntry {
 }
 
 func runUsageSummaryEntryFrom(u store.RunUsageSummary) usageSummaryEntry {
-	cost := u.CostUSD
 	return usageSummaryEntry{
 		Scope: usageScopeRuns,
 		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
-		ReasoningTokens: u.ReasoningTokens, CostUSD: &cost,
+		ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD,
 	}
 }
 

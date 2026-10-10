@@ -321,5 +321,6 @@ type RunUsageSummary struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
-	CostUSD          float64
+	// CostUSD is nil when no run in the group reported a cost (unknown, not 0).
+	CostUSD *float64
 }
