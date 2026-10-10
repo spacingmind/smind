@@ -110,6 +110,11 @@ impl Tray {
         self.refresh(count);
     }
 
+    /// Re-applies the shown badge (see `Badge::reapply`).
+    pub fn reapply_badge(&self) {
+        self.badge.reapply();
+    }
+
     fn refresh(&self, count: usize) {
         if let Some(ui) = &self.ui {
             let label = attention::label(count);
