@@ -54,9 +54,9 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-connections")).not.toBeInTheDocument();
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
-    // Order: General · Appearance · Agents & providers · Notifications ·
-    // Shortcuts (desktop inserts Connection between the group and
-    // Notifications).
+    // Order: General · Appearance · Agents & providers (Agents, MCP
+    // servers, Providers) · Notifications · Shortcuts (desktop inserts
+    // Connection between the group and Notifications).
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -65,6 +65,7 @@ describe("SettingsScreen shell", () => {
       "settings-nav-general",
       "settings-nav-appearance",
       "settings-nav-agents",
+      "settings-nav-mcp-servers",
       "settings-nav-providers",
       "settings-nav-notifications",
       "settings-nav-shortcuts",
