@@ -48,7 +48,7 @@ export function DesktopUnreachable({
   return (
     <div
       data-testid="desktop-unreachable"
-      className="flex h-full flex-col items-center justify-center gap-4 p-8 text-center"
+      className="flex h-full flex-col items-center justify-center gap-4 bg-background p-8 text-center"
     >
       <div className="flex flex-col gap-1">
         <h2 className="text-ui-base font-medium text-foreground">Can&apos;t reach {current?.label ?? "the daemon"}</h2>

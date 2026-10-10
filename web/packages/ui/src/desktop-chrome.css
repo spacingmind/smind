@@ -1,0 +1,24 @@
+/*
+ * Desktop-build window chrome (desktop-native-feel D1). Every rule is gated
+ * on `html[data-desktop-os]`, which main.tsx sets only in the desktop build,
+ * so none of it applies in a browser. Kept out of index.css on purpose: that
+ * file holds the shared token layer.
+ */
+
+/*
+ * macOS: the window is transparent with a native sidebar-vibrancy view behind
+ * it (window_chrome.rs). Only the sidebar shows it; every other surface stays
+ * an opaque token colour, so text contrast on the content is unchanged.
+ */
+html[data-desktop-os="macos"] body {
+  background: transparent;
+}
+
+html[data-desktop-os="macos"] [data-slot="sidebar-inner"] {
+  background: color-mix(in srgb, var(--sidebar) 72%, transparent);
+}
+
+/* The 4px sidebar/content split sits on the transparent body; keep it opaque. */
+html[data-desktop-os="macos"] #sidebar-resize-handle {
+  background: var(--background);
+}

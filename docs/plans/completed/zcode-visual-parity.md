@@ -314,7 +314,7 @@ Per-phase scenarios:
 - [x] P2 — app shell + sidebar
 - [x] P3 — chat timeline + composer + tool/permission/question cards
 - [x] P4 — panes: diff/git, terminal, files, settings
-- [ ] P5 — desktop-only chrome (blocked on ADR-0013)
+- [ ] P5 — desktop-only chrome — moved to `active/desktop-native-feel.md` (D1) once ADR-0013 shipped
 
 ## Validation
 
