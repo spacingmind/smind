@@ -93,6 +93,11 @@ const (
 	// is bookkeeping for the run's status, not transcript: internal/runs
 	// applies it to the run and never records it into history.
 	EventTypePermissionModeChanged
+
+	// EventTypeUsage carries the usage one turn consumed, normalized from
+	// the agent's own report, in Usage (ADR-0020, ADR-0008). Sent once per
+	// turn, just before EventTypeDone. Never carries prompt text.
+	EventTypeUsage
 )
 
 // Unified ToolStatus values for Event.ToolStatus, spanning both providers'
@@ -223,6 +228,9 @@ type Event struct {
 	// Initial is set only on the EventTypePermissionModeChanged that
 	// reports the mode a run started in.
 	Initial bool
+
+	// Usage is populated for EventTypeUsage.
+	Usage *Usage
 }
 
 // PermissionResolution categorizes how an EventTypePermissionResolved
