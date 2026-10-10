@@ -58,6 +58,8 @@ class FakeTerminalHandle implements TerminalHandle {
   disposed = false;
   fitCalls = 0;
   writes: (string | Uint8Array)[] = [];
+  /** Unset by default (like a handle that can't report its size); a test assigns it to exercise the send-size-on-attach path. */
+  size?: () => { cols: number; rows: number };
   private dataCallback: ((data: string) => void) | null = null;
   private resizeCallback: ((size: { cols: number; rows: number }) => void) | null = null;
   private selection = "";
@@ -228,6 +230,25 @@ describe("TerminalPane", () => {
 
     const resizeCall = client.nth("terminal.resize", 0);
     expect(resizeCall.params).toEqual({ terminalId: "term-1", cols: 120, rows: 40 });
+  });
+
+  it("sends the terminal's already-fitted size via terminal.resize on attach, before terminal.attach", async () => {
+    // The mount-time fit() resizes the widget before any session id
+    // exists, so its onResize is dropped; without this the PTY would sit
+    // at its 80x24 default until the container next resizes.
+    const client = new FakeWsClient();
+    const fake = new FakeTerminalHandle();
+    fake.size = () => ({ cols: 132, rows: 43 });
+    render(<TerminalPane client={client} task={TASK_A} createTerminal={() => fake} />);
+    await flush();
+    client.nth("terminal.list", 0).resolve([]);
+    await flush();
+    client.nth("terminal.create", 0).resolve({ terminalId: "term-1" });
+    await flush();
+
+    expect(client.nth("terminal.resize", 0).params).toEqual({ terminalId: "term-1", cols: 132, rows: 43 });
+    const methods = client.calls.map((c) => c.method);
+    expect(methods.indexOf("terminal.resize")).toBeLessThan(methods.indexOf("terminal.attach"));
   });
 
   it("debounces rapid container resize observations into a single fit() call", async () => {
