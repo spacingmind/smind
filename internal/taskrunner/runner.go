@@ -30,6 +30,8 @@ type acpBackend interface {
 	SetSessionMode(ctx context.Context, sessionID, modeID string) error
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
 	PromptUsage(sessionID string) (acp.PromptUsage, bool)
+	// InstanceID identifies the agent process behind this client.
+	InstanceID() string
 	Close() error
 }
 
@@ -51,7 +53,7 @@ type codexBackend interface {
 	NewSession(ctx context.Context, cwd string) (string, error)
 	ResumeSession(ctx context.Context, threadID, cwd string) (string, error)
 	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
-	LastTurnTokenUsage(threadID string) (codex.TokenUsage, bool)
+	ThreadTokenUsage(threadID string) (codex.TokenUsage, bool)
 	Close() error
 }
 
@@ -383,7 +385,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 
 	promptUsage, hasPromptUsage := client.PromptUsage(sessionID)
 	handle, _ := r.sessionStore.Get(chatID)
-	usage, snap := diffACPUsage(usageSnapshotFromHandle(handle), sessionID,
+	usage, snap := diffACPUsage(usageSnapshotFromHandle(handle), sessionID, client.InstanceID(),
 		newCumulativeUsage(promptUsage, hasPromptUsage, lastUsageUpdate, gotUsageUpdate))
 	if snap != nil {
 		// Marshaling a struct of numbers and strings can't fail.
@@ -399,8 +401,25 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	return nil
 }
 
+// codexTurnUsage is the turn's own usage: codex reports the thread's
+// cumulative tokenUsage.total, so it is differenced against the snapshot
+// the thread's previous turn left in the session handle's Metadata (ADR-0020
+// §2), and the new snapshot is stored back. Source not_reported with every
+// field nil if codex reported nothing.
+func (r *Runner) codexTurnUsage(chatID int64, client codexBackend, threadID string) Usage {
+	total, ok := client.ThreadTokenUsage(threadID)
+	handle, _ := r.sessionStore.Get(chatID)
+	usage, snap := diffCodexUsage(usageSnapshotFromHandle(handle), threadID, total, ok)
+	if snap != nil {
+		// Marshaling a struct of numbers and strings can't fail.
+		handle.Metadata, _ = json.Marshal(snap)
+		r.sessionStore.Set(chatID, handle)
+	}
+	return usage
+}
+
 // keepSessionHandle stores the handle for provider's sessionID like
-// sessionStore.Set, but keeps the handle's Metadata (the ACP usage snapshot)
+// sessionStore.Set, but keeps the handle's Metadata (the usage snapshot)
 // when the stored handle is for the same provider and session; a handle for
 // any other session starts without one.
 func (r *Runner) keepSessionHandle(chatID int64, provider Provider, sessionID string) {
@@ -417,24 +436,6 @@ func (r *Runner) sendUsage(ctx context.Context, events chan<- Event, u Usage) {
 	select {
 	case events <- Event{Type: EventTypeUsage, Usage: &u}:
 	case <-ctx.Done():
-	}
-}
-
-// codexUsage normalizes the last tokenUsage.last codex reported for
-// threadID's turn: Source not_reported with every field nil if none arrived.
-func codexUsage(client codexBackend, threadID string) Usage {
-	t, ok := client.LastTurnTokenUsage(threadID)
-	if !ok {
-		return Usage{Source: UsageSourceNotReported}
-	}
-	return Usage{
-		Input:       t.InputTokens,
-		CachedInput: t.CachedInputTokens,
-		CacheWrite:  t.CacheWriteInputTokens,
-		Output:      t.OutputTokens,
-		Reasoning:   t.ReasoningOutputTokens,
-		ContextSize: t.ModelContextWindow,
-		Source:      UsageSourceCodexTokenUsage,
 	}
 }
 
@@ -842,7 +843,7 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath,
 	}
 	// Stored as soon as the thread exists, not only after a successful
 	// prompt -- same stop-doesn't-lose-the-handle reasoning as runACP.
-	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
+	r.keepSessionHandle(chatID, ProviderCodexNative, threadID)
 
 	updates := make(chan codex.Update)
 	forwardDone := make(chan struct{})
@@ -861,8 +862,8 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath,
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex prompt: %w", err)
 	}
-	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
-	r.sendUsage(ctx, events, codexUsage(client, threadID))
+	r.keepSessionHandle(chatID, ProviderCodexNative, threadID)
+	r.sendUsage(ctx, events, r.codexTurnUsage(chatID, client, threadID))
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:

@@ -35,17 +35,22 @@ type Usage struct {
 	ContextSize *int64      `json:"contextSize,omitempty"`
 	Source      UsageSource `json:"source"`
 
-	// SessionSnapshot is the ACP session-cumulative counters (and the
-	// session id they belong to) as of this turn's end, kept so the next run
-	// on the same session can difference against it. ACP only; nil elsewhere.
+	// SessionSnapshot is the session-cumulative counters (and the session id
+	// and agent instance they belong to) as of this turn's end, kept so the
+	// next run on the same session can difference against it. ACP and
+	// codex-native only; nil elsewhere.
 	SessionSnapshot *UsageSnapshot `json:"sessionSnapshot,omitempty"`
 }
 
-// UsageSnapshot is the session-cumulative counters an ACP agent reported at
-// the end of a run. SessionID scopes it: a snapshot for a different session
-// is ignored (a new session starts from zero).
+// UsageSnapshot is the session-cumulative counters an agent reported at the
+// end of a run. SessionID scopes it: a snapshot for a different session is
+// ignored (a new session starts from zero). Instance scopes it likewise to
+// the agent process that reported it (acp.Client.InstanceID; empty for
+// codex, whose thread totals are the thread's, not the process's): counters
+// from a different instance may have restarted, so they are not a baseline.
 type UsageSnapshot struct {
 	SessionID   string   `json:"sessionId"`
+	Instance    string   `json:"instance,omitempty"`
 	Input       *int64   `json:"input,omitempty"`
 	CachedInput *int64   `json:"cachedInput,omitempty"`
 	CacheWrite  *int64   `json:"cacheWrite,omitempty"`

@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -324,6 +326,9 @@ type Client struct {
 	updateSubs   map[string]*updateSub
 	promptUsage  map[string]PromptUsage
 
+	// instanceID identifies this agent process: unique per New.
+	instanceID string
+
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
 }
@@ -355,6 +360,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		sessionModes: make(map[string]SessionModeState),
 		updateSubs:   make(map[string]*updateSub),
 		promptUsage:  make(map[string]PromptUsage),
+		instanceID:   newInstanceID(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -372,6 +378,19 @@ func New(command []string, opts ...Option) (*Client, error) {
 	conn.handleNotification("session/update", c.handleSessionUpdate)
 
 	return c, nil
+}
+
+// InstanceID identifies the agent process this Client spawned: unique per
+// New, so two Clients never share one even for the same command. ACP says
+// nothing about whether an agent's session-cumulative usage counters outlive
+// its process, so callers that difference them (taskrunner) treat a change
+// of InstanceID as a possible counter restart.
+func (c *Client) InstanceID() string { return c.instanceID }
+
+func newInstanceID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:]) // never fails (Go 1.24+ crashes instead)
+	return hex.EncodeToString(b[:])
 }
 
 // Initialize performs the ACP initialize handshake, advertising fs

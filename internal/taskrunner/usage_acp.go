@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 )
 
 // cumulativeUsage is what an ACP agent reported this turn, all of it
@@ -39,24 +40,27 @@ func newCumulativeUsage(prompt acp.PromptUsage, ok bool, update acp.UsageUpdate,
 
 // diffACPUsage turns an ACP agent's session-cumulative report into the
 // run's own Usage (ADR-0020 §2): cum minus prev, the snapshot stored after
-// the previous run. A nil prev or one for another session starts from zero,
-// and so does a call where any counter went down (the agent's counters
-// reset). A field cum doesn't report stays nil rather than becoming zero.
+// the previous run. A nil prev, one for another session, or one taken from
+// another agent instance (a different process, whose counters may have
+// restarted from zero even when they now exceed the snapshot) starts from
+// zero, and so does a call where any counter went down (the agent's
+// counters reset). A field cum doesn't report stays nil rather than
+// becoming zero.
 // The returned snapshot is the cumulative state to store for the next run;
 // it is nil when nothing was reported.
-func diffACPUsage(prev *UsageSnapshot, sessionID string, cum cumulativeUsage) (Usage, *UsageSnapshot) {
+func diffACPUsage(prev *UsageSnapshot, sessionID, instance string, cum cumulativeUsage) (Usage, *UsageSnapshot) {
 	if !cum.hasPrompt && !cum.hasUpdate {
 		return Usage{Source: UsageSourceNotReported}, nil
 	}
 
 	var base UsageSnapshot
-	if prev != nil && prev.SessionID == sessionID {
+	if prev != nil && prev.SessionID == sessionID && prev.Instance == instance {
 		base = *prev
 	}
 	if wentDown(base.Input, cum.Input) || wentDown(base.CachedInput, cum.CachedInput) ||
 		wentDown(base.CacheWrite, cum.CacheWrite) || wentDown(base.Output, cum.Output) ||
 		wentDown(base.Reasoning, cum.Reasoning) || wentDownF(base.CostUSD, cum.CostUSD) {
-		base = UsageSnapshot{SessionID: sessionID}
+		base = UsageSnapshot{}
 	}
 
 	u := Usage{
@@ -80,6 +84,7 @@ func diffACPUsage(prev *UsageSnapshot, sessionID string, cum cumulativeUsage) (U
 	// the next turn that reports it differences against that, not zero.
 	snap := &UsageSnapshot{
 		SessionID:   sessionID,
+		Instance:    instance,
 		Input:       latest(base.Input, cum.Input),
 		CachedInput: latest(base.CachedInput, cum.CachedInput),
 		CacheWrite:  latest(base.CacheWrite, cum.CacheWrite),
@@ -134,4 +139,23 @@ func usageSnapshotFromHandle(h SessionHandle) *UsageSnapshot {
 		return nil
 	}
 	return &s
+}
+
+// diffCodexUsage turns codex's thread-cumulative tokenUsage.total into the
+// turn's own Usage: total minus prev, the snapshot stored after the thread's
+// previous turn (same differencing and reset rules as diffACPUsage; codex
+// totals belong to the thread, so no agent instance scopes the snapshot).
+// ok is false if codex reported nothing this turn.
+func diffCodexUsage(prev *UsageSnapshot, threadID string, total codex.TokenUsage, ok bool) (Usage, *UsageSnapshot) {
+	if !ok {
+		return Usage{Source: UsageSourceNotReported}, nil
+	}
+	u, snap := diffACPUsage(prev, threadID, "", cumulativeUsage{
+		Input: total.InputTokens, CachedInput: total.CachedInputTokens,
+		CacheWrite: total.CacheWriteInputTokens, Output: total.OutputTokens,
+		Reasoning: total.ReasoningOutputTokens, ContextSize: total.ModelContextWindow,
+		hasPrompt: true,
+	})
+	u.Source = UsageSourceCodexTokenUsage
+	return u, snap
 }

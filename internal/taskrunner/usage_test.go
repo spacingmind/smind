@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
+	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
@@ -67,6 +69,29 @@ func writeScenario(t *testing.T, wm *workspace.Manager, taskID int64, scenario s
 }
 
 func i64(v int64) *int64 { return &v }
+
+// sameInstanceACP overrides the agent instance a real acp.Client reports,
+// standing in for one long-lived agent process whose session-cumulative
+// counters persist across runs. (A plain glmRunner spawns a fresh process,
+// so a fresh instance, per run.)
+type sameInstanceACP struct {
+	*acp.Client
+	id string
+}
+
+func (c sameInstanceACP) InstanceID() string { return c.id }
+
+func glmRunnerSameAgent(wm *workspace.Manager) *Runner {
+	r := New(wm)
+	r.newACPClient = func(_ []string, opts ...acp.Option) (acpBackend, error) {
+		c, err := acp.New([]string{fakeACPAgentPath}, opts...)
+		if err != nil {
+			return nil, err
+		}
+		return sameInstanceACP{Client: c, id: "long-lived-agent"}, nil
+	}
+	return r
+}
 
 func eqI(a, b *int64) bool { return (a == nil && b == nil) || (a != nil && b != nil && *a == *b) }
 
@@ -167,16 +192,46 @@ func TestUsage_ClaudeResultParsed(t *testing.T) {
 	})
 }
 
-func TestUsage_CodexTokenUsageLastOfTurn(t *testing.T) {
+func TestUsage_CodexTokenUsageDifferencedTotal(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "token-usage")
-	u := runForUsage(t, codexRunner(wm), task.ID, ProviderCodexNative, "hi")
-	// The second notification's tokenUsage.last: not the sum of both, and
-	// not total.
-	wantInts(t, u, map[string]int64{"input": 30, "cachedInput": 20, "cacheWrite": 5, "output": 7, "reasoning": 3, "contextSize": 200000})
-	if u.Source != UsageSourceCodexTokenUsage || u.CostUSD != nil || u.Model != nil || u.SessionSnapshot != nil {
+	r := codexRunner(wm)
+
+	// Turn 1 is a tool loop: three model calls (the fake's `last`s are
+	// 10/2, 30/7 and 50/8) whose thread total ends at in 90, cached 60,
+	// cache write 5, out 17, reasoning 3. The turn used all of that: not the
+	// final call's `last` (50/8, what keeping tokenUsage.last gave), and not
+	// the sum of the notifications' totals.
+	u := runForUsage(t, r, task.ID, ProviderCodexNative, "hi")
+	wantInts(t, u, map[string]int64{"input": 90, "cachedInput": 60, "cacheWrite": 5, "output": 17, "reasoning": 3, "contextSize": 200000})
+	if u.Source != UsageSourceCodexTokenUsage || u.CostUSD != nil || u.Model != nil {
 		t.Fatalf("usage = %+v", u)
 	}
+	if s := u.SessionSnapshot; s == nil || s.SessionID != "fake-thread-1" || !eqI(s.Input, i64(90)) || !eqI(s.Output, i64(17)) {
+		t.Fatalf("snapshot = %+v, want thread total 90/17 for the thread", s)
+	}
+	h, _ := r.sessionStore.Get(task.ID)
+	if s := usageSnapshotFromHandle(h); s == nil || !eqI(s.Input, i64(90)) || !eqI(s.CacheWrite, i64(5)) {
+		t.Fatalf("stored snapshot = %+v, want the thread total in the handle's Metadata", s)
+	}
+
+	// Turn 2 on the same thread (a new process, whose total continues from
+	// the first turn's): one call of 60/4. The turn's own usage is the
+	// growth of the total.
+	writeScenario(t, wm, task.ID, "token-usage-turn2")
+	u = runForUsage(t, r, task.ID, ProviderCodexNative, "again")
+	wantInts(t, u, map[string]int64{"input": 60, "cachedInput": 50, "cacheWrite": 0, "output": 4, "reasoning": 0, "contextSize": 200000})
+	if s := u.SessionSnapshot; s == nil || !eqI(s.Input, i64(150)) || !eqI(s.Output, i64(21)) {
+		t.Fatalf("turn 2 snapshot = %+v, want thread total 150/21", s)
+	}
+
+	// A stored snapshot for another thread id is no baseline: the thread's
+	// whole total (150/110/5/21/3) is charged to this turn.
+	h, _ = r.sessionStore.Get(task.ID)
+	h.SessionID = "some-older-thread"
+	r.sessionStore.Set(task.ID, h)
+	u = runForUsage(t, r, task.ID, ProviderCodexNative, "again")
+	wantInts(t, u, map[string]int64{"input": 150, "cachedInput": 110, "cacheWrite": 5, "output": 21, "reasoning": 3, "contextSize": 200000})
 
 	t.Run("missing fields stay nil", func(t *testing.T) {
 		t.Parallel()
@@ -199,7 +254,7 @@ func TestUsage_CodexTokenUsageLastOfTurn(t *testing.T) {
 func TestUsage_ACPPromptUsageDifferenced(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "usage in=100 out=20")
-	r := glmRunner(wm)
+	r := glmRunnerSameAgent(wm)
 
 	u := runForUsage(t, r, task.ID, ProviderGLM, "hi")
 	wantInts(t, u, map[string]int64{"input": 100, "output": 20})
@@ -236,7 +291,7 @@ func TestUsage_ACPPromptUsageDifferenced(t *testing.T) {
 func TestUsage_ACPUsageUpdateContextAndCost(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "usage used=4000 size=128000 cost=0.25")
-	r := glmRunner(wm)
+	r := glmRunnerSameAgent(wm)
 
 	u := runForUsage(t, r, task.ID, ProviderGLM, "hi")
 	// Context from the LAST usage_update (the fake sends a used=1 decoy first).
@@ -287,7 +342,7 @@ func TestUsage_ACPNothingReportedIsNull(t *testing.T) {
 func TestUsage_ACPSnapshotSurvivesNotReportedRun(t *testing.T) {
 	t.Parallel()
 	wm, task := newTestTask(t, "usage in=100 out=20")
-	r := glmRunner(wm)
+	r := glmRunnerSameAgent(wm)
 	runForUsage(t, r, task.ID, ProviderGLM, "hi")
 
 	writeScenario(t, wm, task.ID, "")
@@ -298,25 +353,91 @@ func TestUsage_ACPSnapshotSurvivesNotReportedRun(t *testing.T) {
 	wantInts(t, u, map[string]int64{"input": 30, "output": 5})
 }
 
+func TestUsage_ACPNewAgentProcessResetsBaseline(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "usage in=100 out=20")
+	r := glmRunner(wm) // a new agent process, so a new instance, every run
+
+	u := runForUsage(t, r, task.ID, ProviderGLM, "hi")
+	wantInts(t, u, map[string]int64{"input": 100, "output": 20})
+
+	// The resumed session's counters restarted in the new process and
+	// happen to be above the stored snapshot (130/40 vs 100/20): nothing
+	// went down, but 30/20 would under-count -- the run used 130/40.
+	writeScenario(t, wm, task.ID, "usage in=130 out=40")
+	u = runForUsage(t, r, task.ID, ProviderGLM, "hi")
+	wantInts(t, u, map[string]int64{"input": 130, "output": 40})
+	h, _ := r.sessionStore.Get(task.ID)
+	if s := usageSnapshotFromHandle(h); s == nil || s.Instance == "" || !eqI(s.Input, i64(130)) {
+		t.Fatalf("stored snapshot = %+v, want 130/40 tagged with the agent instance", s)
+	}
+}
+
+func TestDiffCodexUsage(t *testing.T) {
+	t.Parallel()
+	total := func(in, out int64) codex.TokenUsage {
+		return codex.TokenUsage{InputTokens: i64(in), OutputTokens: i64(out)}
+	}
+	prev := &UsageSnapshot{SessionID: "th", Input: i64(100), Output: i64(20)}
+
+	u, snap := diffCodexUsage(prev, "th", total(160, 50), true)
+	wantInts(t, u, map[string]int64{"input": 60, "output": 30})
+	if u.Source != UsageSourceCodexTokenUsage || !eqI(snap.Input, i64(160)) {
+		t.Fatalf("usage = %+v snapshot = %+v", u, snap)
+	}
+
+	// The thread's total went down (rollout compacted or replaced): restart
+	// from zero.
+	u, _ = diffCodexUsage(prev, "th", total(30, 5), true)
+	wantInts(t, u, map[string]int64{"input": 30, "output": 5})
+
+	u, snap = diffCodexUsage(prev, "th", codex.TokenUsage{}, false)
+	if u.Source != UsageSourceNotReported || snap != nil {
+		t.Fatalf("nothing reported: usage = %+v snap = %+v", u, snap)
+	}
+}
+
 func TestDiffACPUsage(t *testing.T) {
 	t.Parallel()
 	cum := func(in, out int64) cumulativeUsage {
 		return cumulativeUsage{Input: i64(in), Output: i64(out), hasPrompt: true}
 	}
-	prev := &UsageSnapshot{SessionID: "s", Input: i64(100), Output: i64(20), CostUSD: new(float64)}
+	prev := &UsageSnapshot{SessionID: "s", Instance: "i1", Input: i64(100), Output: i64(20), CostUSD: new(float64)}
 
 	t.Run("counter reset uses a zero baseline", func(t *testing.T) {
 		t.Parallel()
-		u, snap := diffACPUsage(prev, "s", cum(30, 25))
+		u, snap := diffACPUsage(prev, "s", "i1", cum(30, 25))
 		wantInts(t, u, map[string]int64{"input": 30, "output": 25})
 		if !eqI(snap.Input, i64(30)) {
 			t.Fatalf("snapshot = %+v", snap)
 		}
 	})
 
+	t.Run("a different agent instance uses a zero baseline", func(t *testing.T) {
+		t.Parallel()
+		// Counters restarted in the new process but already exceed the
+		// snapshot (130 >= 100, 40 >= 20): no counter went down, yet the
+		// delta must still be the whole 130/40, not 30/20.
+		u, snap := diffACPUsage(prev, "s", "i2", cum(130, 40))
+		wantInts(t, u, map[string]int64{"input": 130, "output": 40})
+		if snap.Instance != "i2" || !eqI(snap.Input, i64(130)) {
+			t.Fatalf("snapshot = %+v, want instance i2 at 130/40", snap)
+		}
+		// Same instance, same figures: the ordinary difference.
+		u, _ = diffACPUsage(prev, "s", "i1", cum(130, 40))
+		wantInts(t, u, map[string]int64{"input": 30, "output": 20})
+	})
+
+	t.Run("a snapshot without an instance (stored before instances were tagged) is not a baseline for a tagged agent", func(t *testing.T) {
+		t.Parallel()
+		legacy := &UsageSnapshot{SessionID: "s", Input: i64(100), Output: i64(20)}
+		u, _ := diffACPUsage(legacy, "s", "i2", cum(130, 40))
+		wantInts(t, u, map[string]int64{"input": 130, "output": 40})
+	})
+
 	t.Run("a field the agent omits stays nil", func(t *testing.T) {
 		t.Parallel()
-		u, snap := diffACPUsage(prev, "s", cumulativeUsage{Input: i64(150), hasPrompt: true})
+		u, snap := diffACPUsage(prev, "s", "i1", cumulativeUsage{Input: i64(150), hasPrompt: true})
 		wantInts(t, u, map[string]int64{"input": 50})
 		if !eqI(snap.Output, i64(20)) {
 			t.Fatalf("snapshot output = %v, want prior 20 kept", fmtI(snap.Output))
@@ -327,7 +448,7 @@ func TestDiffACPUsage(t *testing.T) {
 		t.Parallel()
 		p := &UsageSnapshot{SessionID: "s", CostUSD: func() *float64 { v := 5.0; return &v }()}
 		cost := 2.0
-		u, _ := diffACPUsage(p, "s", cumulativeUsage{CostUSD: &cost, hasUpdate: true})
+		u, _ := diffACPUsage(p, "s", "", cumulativeUsage{CostUSD: &cost, hasUpdate: true})
 		if !eqF(u.CostUSD, &cost) {
 			t.Fatalf("cost = %v, want 2", u.CostUSD)
 		}
@@ -335,7 +456,7 @@ func TestDiffACPUsage(t *testing.T) {
 
 	t.Run("nothing reported", func(t *testing.T) {
 		t.Parallel()
-		u, snap := diffACPUsage(prev, "s", cumulativeUsage{})
+		u, snap := diffACPUsage(prev, "s", "i1", cumulativeUsage{})
 		if u.Source != UsageSourceNotReported || snap != nil || u.SessionSnapshot != nil {
 			t.Fatalf("usage = %+v snap = %+v", u, snap)
 		}

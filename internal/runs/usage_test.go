@@ -95,6 +95,49 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 	}
 }
 
+// TestFinish_ReupsertsUsage proves finish writes the run's usage row itself:
+// the usage here is set on the run directly, never through record (which
+// upserts on every usage event), so the only writer left is finish's
+// re-upsert.
+func TestFinish_ReupsertsUsage(t *testing.T) {
+	wm, st := newTestWorkspaceManager(t)
+	reg := newTestRegistry(t, st)
+	runner := newTestRunner(wm)
+
+	task := newTestTask(t, wm, "hang")
+	id, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForHistoryLen(t, reg, id, 1, 5*time.Second)
+	if _, err := st.GetRunUsage(id); err == nil {
+		t.Fatal("run_usage row exists before any usage was recorded")
+	}
+
+	in, out := int64(7), int64(3)
+	r, err := reg.get(id)
+	if err != nil {
+		t.Fatalf("get(%s) error = %v", id, err)
+	}
+	r.mu.Lock()
+	r.usage = &taskrunner.Usage{Input: &in, Output: &out, Source: taskrunner.UsageSourceACPPromptUsage}
+	r.mu.Unlock()
+
+	if err := reg.Stop(id); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	waitForStatus(t, reg, id, StatusStopped, 5*time.Second)
+
+	row, err := st.GetRunUsage(id)
+	if err != nil {
+		t.Fatalf("GetRunUsage() after finish: %v (finish did not upsert)", err)
+	}
+	if row.InputTokens == nil || *row.InputTokens != 7 || row.OutputTokens == nil || *row.OutputTokens != 3 ||
+		row.Source != string(taskrunner.UsageSourceACPPromptUsage) {
+		t.Fatalf("run_usage row = %+v, want 7/3 acp_prompt_usage", row)
+	}
+}
+
 func TestUsageEvent_RoundTripsAndOldRowsDecode(t *testing.T) {
 	t.Parallel()
 	data, err := encodeEvent(usageEvent(1, 2, 0.5))

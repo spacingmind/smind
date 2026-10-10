@@ -97,9 +97,12 @@ type turnCompletedNotification struct {
 	Turn     turn   `json:"turn"`
 }
 
-// TokenUsage is the latest tokenUsage.last of a turn, decoded from
-// thread/tokenUsage/updated (ThreadTokenUsageUpdatedNotification). Every
-// field is a pointer so a field missing on the wire stays nil.
+// TokenUsage is one tokenUsage breakdown decoded from
+// thread/tokenUsage/updated (ThreadTokenUsageUpdatedNotification). Client
+// keeps the notification's `total`: the thread's cumulative usage so far.
+// (`last` is only the most recent single model response, so a turn that
+// loops through tools has several of them.) Every field is a pointer so a
+// field missing on the wire stays nil.
 type TokenUsage struct {
 	InputTokens           *int64 `json:"inputTokens"`
 	CachedInputTokens     *int64 `json:"cachedInputTokens"`
@@ -114,7 +117,7 @@ type TokenUsage struct {
 type threadTokenUsageUpdatedNotification struct {
 	ThreadID   string `json:"threadId"`
 	TokenUsage struct {
-		Last               TokenUsage `json:"last"`
+		Total              TokenUsage `json:"total"`
 		ModelContextWindow *int64     `json:"modelContextWindow"`
 	} `json:"tokenUsage"`
 }
@@ -158,8 +161,8 @@ type Client struct {
 	updateSubs  map[string]*updateSub
 	turnWaiters map[string]chan turnResult
 
-	// tokenUsage is each thread's latest tokenUsage.last this turn, reset
-	// by Prompt; guarded by mu.
+	// tokenUsage is each thread's latest tokenUsage.total this turn (the
+	// thread-cumulative figure), reset by Prompt; guarded by mu.
 	tokenUsage map[string]TokenUsage
 }
 
@@ -400,10 +403,12 @@ func (c *Client) handleAgentMessageDelta(raw json.RawMessage) {
 	sub.ch <- Update{Text: n.Delta}
 }
 
-// LastTurnTokenUsage returns the latest tokenUsage.last threadID's current
-// (or just finished) turn reported, and false if none arrived. Only the last
-// notification is kept, not a sum: each carries the turn's running figure.
-func (c *Client) LastTurnTokenUsage(threadID string) (TokenUsage, bool) {
+// ThreadTokenUsage returns the latest tokenUsage.total threadID's current
+// (or just finished) turn reported, and false if none arrived. It is the
+// thread's cumulative usage as of the turn's end, not the turn's own: callers
+// difference it against the previous turn's figure. Only the last
+// notification is kept, not a sum: each carries the running thread total.
+func (c *Client) ThreadTokenUsage(threadID string) (TokenUsage, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	u, ok := c.tokenUsage[threadID]
@@ -415,7 +420,7 @@ func (c *Client) handleTokenUsageUpdated(raw json.RawMessage) {
 	if err := json.Unmarshal(raw, &n); err != nil {
 		return
 	}
-	u := n.TokenUsage.Last
+	u := n.TokenUsage.Total
 	u.ModelContextWindow = n.TokenUsage.ModelContextWindow
 
 	c.mu.Lock()

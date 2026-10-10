@@ -303,15 +303,25 @@ func runTurnScript(cwd string) {
 		return
 	}
 
-	if scenario == "token-usage" {
-		// Two thread/tokenUsage/updated notifications in one turn: a client
-		// must keep the LAST tokenUsage.last, not a sum and not total.
-		tokenUsage(map[string]any{"inputTokens": 10, "outputTokens": 2, "totalTokens": 12}, 1000, 200000)
+	if scenario == "token-usage" || scenario == "token-usage-turn2" {
+		// A tool-looping turn: several model calls, each sending a
+		// thread/tokenUsage/updated whose `last` is that one call and whose
+		// `total` is the thread's running cumulative figure. A client must
+		// charge the turn the growth of `total`, not the final `last` (one
+		// call of several) and not the sum of the lasts' notifications.
+		if scenario == "token-usage-turn2" {
+			// The thread's second turn, in a new process: the total already
+			// holds what the first turn's three calls added up to.
+			seedTokenTotals(tokenCallsTurn1...)
+			modelCall(tokenCallsTurn2[0])
+			delta("Again.")
+			turnCompleted("completed")
+			return
+		}
+		modelCall(tokenCallsTurn1[0])
 		delta("Hello, ")
-		tokenUsage(map[string]any{
-			"inputTokens": 30, "cachedInputTokens": 20, "cacheWriteInputTokens": 5,
-			"outputTokens": 7, "reasoningOutputTokens": 3, "totalTokens": 37,
-		}, 5000, 200000)
+		modelCall(tokenCallsTurn1[1])
+		modelCall(tokenCallsTurn1[2])
 		delta("world!")
 		turnCompleted("completed")
 		return
@@ -338,16 +348,47 @@ func runTurnScript(cwd string) {
 	turnCompleted("completed")
 }
 
-// tokenUsage sends a thread/tokenUsage/updated notification whose last is
-// last and whose total is the (deliberately different) running total.
-func tokenUsage(last map[string]any, total, window int) {
+// tokenCallsTurn1 are one tool-looping turn's three model calls; tokenCallsTurn2
+// is the thread's next turn (one call).
+var (
+	tokenCallsTurn1 = []map[string]int{
+		{"inputTokens": 10, "outputTokens": 2, "totalTokens": 12},
+		{"inputTokens": 30, "cachedInputTokens": 20, "outputTokens": 7, "totalTokens": 37},
+		{"inputTokens": 50, "cachedInputTokens": 40, "cacheWriteInputTokens": 5, "outputTokens": 8, "reasoningOutputTokens": 3, "totalTokens": 58},
+	}
+	tokenCallsTurn2 = []map[string]int{
+		{"inputTokens": 60, "cachedInputTokens": 50, "outputTokens": 4, "totalTokens": 64},
+	}
+)
+
+// tokenTotal is the thread's cumulative usage so far, summed over every model
+// call made in it.
+var tokenTotal = map[string]int{}
+
+func seedTokenTotals(calls ...map[string]int) {
+	for _, call := range calls {
+		for k, v := range call {
+			tokenTotal[k] += v
+		}
+	}
+}
+
+// modelCall adds one model call's usage to the thread total and sends the
+// thread/tokenUsage/updated that call produces: `last` is the call alone,
+// `total` the thread's cumulative figure including it.
+func modelCall(last map[string]int) {
+	seedTokenTotals(last)
+	total := map[string]int{}
+	for k, v := range tokenTotal {
+		total[k] = v
+	}
 	notify("thread/tokenUsage/updated", map[string]any{
 		"threadId": threadID,
 		"turnId":   turnID,
 		"tokenUsage": map[string]any{
 			"last":               last,
-			"total":              map[string]any{"inputTokens": total, "totalTokens": total},
-			"modelContextWindow": window,
+			"total":              total,
+			"modelContextWindow": 200000,
 		},
 	})
 }
