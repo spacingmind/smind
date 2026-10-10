@@ -1,3 +1,5 @@
+import type { ActionId } from "@/keyboard/actions";
+
 /**
  * The desktop platform surface (ADR-0013 AC6): a single `isDesktop` /
  * `desktop` API pair components use instead of touching
@@ -65,6 +67,12 @@ export interface DesktopApi {
   connectionVersion(id: string): Promise<ConnectionVersionInfo>;
   /** Subscribes to progress events during a long-running daemon operation; returns an unsubscribe function. */
   onDaemonProgress(cb: (progress: DaemonProgress) => void): () => void;
+  /**
+   * Subscribes to native menu actions (desktop-native-feel D3.3): the
+   * app menu emits one `menu-action` event whose payload is the action
+   * id, which the UI dispatches through the keyboard action registry.
+   */
+  onMenuAction(cb: (action: ActionId) => void): () => void;
 }
 
 /** The host OS of a desktop build, read from the webview's user agent (WKWebView / WebView2 / WebKitGTK name their platform). */
@@ -126,6 +134,8 @@ function unavailable(): DesktopApi {
     takeOverDaemon: () => reject(),
     connectionVersion: () => reject(),
     onDaemonProgress: () => () => {},
+    // The browser stub never fires: there is no native menu there.
+    onMenuAction: () => () => {},
   };
 }
 
@@ -203,6 +213,23 @@ function realDesktopApi(): DesktopApi {
       let cancelled = false;
       import("@tauri-apps/api/event").then(({ listen }) =>
         listen<DaemonProgress>("daemon-progress", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onMenuAction(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<string>("menu-action", (event) => cb(event.payload as ActionId)).then((fn) => {
           if (cancelled) {
             fn();
           } else {

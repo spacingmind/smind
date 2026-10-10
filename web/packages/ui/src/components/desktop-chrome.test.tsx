@@ -44,6 +44,7 @@ function mockPlatform(opts: { desktop: boolean; os: DesktopOS | null }) {
       connectionVersion: reject,
       daemonStatus: reject,
       onDaemonProgress: () => () => {},
+      onMenuAction: () => () => {},
     },
   }));
   return win;
