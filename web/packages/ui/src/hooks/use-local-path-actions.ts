@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { toast } from "@/components/ui/toast";
-import { CONNECTION_CHANGED_EVENT, desktop, FILE_MANAGER_EDITOR_ID, isDesktop, type EditorInfo } from "@/lib/platform";
+import { CONNECTION_CHANGED_EVENT, FILE_MANAGER_EDITOR_ID } from "@/lib/local-paths";
+import { desktop, isDesktop, type EditorInfo } from "@/lib/platform";
 
 /** What the Reveal / Open-in-editor menu items need (desktop-native-feel D4.1). */
 export interface LocalPathActions {
