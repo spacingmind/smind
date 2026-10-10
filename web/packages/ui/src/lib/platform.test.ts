@@ -32,6 +32,8 @@ describe("platform in a non-desktop build", () => {
     await expect(desktop.takeOverDaemon()).rejects.toThrow(/unavailable/i);
     await expect(desktop.connectionVersion("local")).rejects.toThrow(/unavailable/i);
     expect(() => desktop.onDaemonProgress(() => {})()).not.toThrow();
+    await expect(desktop.editorsList()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.openInEditor("vscode", "/tmp/a")).rejects.toThrow(/unavailable/i);
   });
 });
 
@@ -122,6 +124,33 @@ describe("platform in a desktop build", () => {
 
     unsubscribe();
     expect(unlisten).toHaveBeenCalled();
+  });
+});
+
+describe("editors (desktop-native-feel D4)", () => {
+  it("editorsList and openInEditor call the matching tauri commands with camelCase args", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const editors = [
+      { id: "file-manager", label: "Finder", kind: "fileManager" },
+      { id: "vscode", label: "VS Code", kind: "editor" },
+    ];
+    const invoke = vi.fn(async (cmd: string) => (cmd === "editors_list" ? editors : undefined));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.editorsList()).resolves.toEqual(editors);
+    expect(invoke).toHaveBeenCalledWith("editors_list");
+    await desktop.openInEditor("vscode", "/tmp/a/main.go");
+    expect(invoke).toHaveBeenCalledWith("open_in_editor", { editorId: "vscode", path: "/tmp/a/main.go" });
+  });
+
+  it("openInEditor turns Tauri's plain-string rejection into an Error with that message", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const invoke = vi.fn(() => Promise.reject("path does not exist: /tmp/gone"));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.openInEditor("vscode", "/tmp/gone")).rejects.toThrow("path does not exist: /tmp/gone");
   });
 });
 

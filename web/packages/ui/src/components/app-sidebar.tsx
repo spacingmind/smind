@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Circle,
   FolderGit2,
+  FolderOpen,
   FolderTree,
   GitBranch,
   KeyRound,
@@ -23,6 +24,7 @@ import {
   Plus,
   Search,
   Settings,
+  SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react";
 
@@ -84,6 +86,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
+import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
 import { desktopOS, isDesktop } from "@/lib/platform";
 import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights } from "@/lib/window-chrome";
@@ -589,6 +592,7 @@ export function AppSidebar({
   // open. The tree's `expanded` set is never touched while searching, so
   // clearing the query restores exactly the expansion state it had.
   const { fullscreen } = useWindowState();
+  const localPathActions = useLocalPathActions();
   const lights = isDesktop && hasTrafficLights(desktopOS, fullscreen);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -816,6 +820,7 @@ export function AppSidebar({
                       onMoveTask={moveTask}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
                       onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
+                      localPathActions={localPathActions}
                       selectedTaskId={selectedTaskId}
                       onSelectTask={onSelectTask}
                     />
@@ -1174,6 +1179,7 @@ function WorkspaceItem({
   onMoveTask,
   onDeleteWorkspace,
   onDeleteSpace,
+  localPathActions,
   selectedTaskId,
   onSelectTask,
 }: {
@@ -1186,6 +1192,8 @@ function WorkspaceItem({
   onMoveTask: (task: Task, spaceId: number | null) => void;
   onDeleteWorkspace: () => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
+  /** Reveal / Open-in-editor for the workspace folder; null (items absent) unless the desktop app is on its local daemon. */
+  localPathActions: LocalPathActions | null;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
 }) {
@@ -1214,6 +1222,20 @@ function WorkspaceItem({
           items={[
             { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
             { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+            ...(localPathActions
+              ? [
+                  {
+                    label: localPathActions.revealLabel,
+                    icon: <FolderOpen />,
+                    onSelect: () => localPathActions.reveal(workspace.Path),
+                  },
+                  ...localPathActions.editors.map((editor) => ({
+                    label: `Open in ${editor.label}`,
+                    icon: <SquareArrowOutUpRight />,
+                    onSelect: () => localPathActions.open(editor.id, workspace.Path),
+                  })),
+                ]
+              : []),
             { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
           ]}
           triggerProps={{
