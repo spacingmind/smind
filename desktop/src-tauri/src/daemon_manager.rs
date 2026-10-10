@@ -134,6 +134,39 @@ async fn probe_healthz(base_url: &url::Url) -> (bool, Option<String>) {
     }
 }
 
+/// poll_until_ready calls `probe` up to `attempts` times, `interval` apart
+/// (no wait before the first), and returns the first `Some`.
+async fn poll_until_ready<T, F, Fut>(mut probe: F, attempts: u32, interval: std::time::Duration) -> Option<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(interval).await;
+        }
+        if let Some(v) = probe().await {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// wait_for_healthz waits (bounded, ~10s) for a freshly spawned daemon to
+/// answer `/healthz` and returns the version it reports. A fixed short
+/// sleep isn't enough: a first start creates the database and can take
+/// well over half a second, and verifying too early would record nothing
+/// and leave a perfectly good daemon looking unmanaged.
+async fn wait_for_healthz(base_url: &url::Url) -> Option<String> {
+    poll_until_ready(
+        || async { Some(probe_healthz(base_url).await).filter(|(reachable, _)| *reachable).map(|(_, v)| v) },
+        40,
+        std::time::Duration::from_millis(250),
+    )
+    .await
+    .flatten()
+}
+
 fn now_unix_seconds() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_else(|_| "0".to_string())
 }
@@ -268,9 +301,19 @@ pub async fn auto_start(app: AppHandle) {
     if !matches!(action, LaunchAction::InstallAndStart | LaunchAction::UpdateAndRestart) {
         return;
     }
-    if let Err(e) = install_or_update(&app, &state).await {
-        log::warn!("daemon auto-start failed: {e}");
-        emit_progress(&app, "error", format!("Couldn't start the daemon: {e}"));
+    match install_or_update(&app, &state).await {
+        Ok(_) => {
+            // The window usually loaded before the daemon was serving and
+            // is sitting on "Can't reach Local" (the UI has no auto-retry),
+            // so reload it now -- the same call as View -> Reload.
+            if let Some(win) = app.get_webview_window(crate::MAIN_WINDOW) {
+                let _ = win.eval("window.location.reload()");
+            }
+        }
+        Err(e) => {
+            log::warn!("daemon auto-start failed: {e}");
+            emit_progress(&app, "error", format!("Couldn't start the daemon: {e}"));
+        }
     }
 }
 
@@ -509,8 +552,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             // caught Bug 1: if the new process failed to bind because the
             // port was already taken, the port's owner is still the old
             // occupant, whose exe path won't match.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let (_, daemon_version) = probe_healthz(&base_url).await;
+            let daemon_version = wait_for_healthz(&base_url).await;
             let port_owner_after = native::find_port_owner(port).ok().flatten();
             let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
             let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
@@ -640,7 +682,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
             let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
             drop(child);
 
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = wait_for_healthz(&base_url).await;
             let port_owner_after = native::find_port_owner(port).ok().flatten();
             let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
             let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
@@ -857,6 +899,37 @@ mod tests {
         // Healthy daemon we can't attribute to a port owner (lsof blind,
         // or a non-local URL): nothing to do.
         assert_eq!(launch_decision(true, NotRunning, Older), NoOp);
+    }
+
+    #[test]
+    fn daemon_start_waits_for_slow_binder() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        // The daemon answers on the 4th probe (a first start creating its DB).
+        let mut calls = 0;
+        let got = rt.block_on(poll_until_ready(
+            || {
+                calls += 1;
+                let ready = calls >= 4;
+                async move { ready.then_some("0.9.1".to_string()) }
+            },
+            10,
+            std::time::Duration::from_millis(1),
+        ));
+        assert_eq!(got.as_deref(), Some("0.9.1"));
+        assert_eq!(calls, 4);
+
+        // Never answering gives up after exactly `attempts` probes.
+        let mut calls = 0;
+        let got: Option<()> = rt.block_on(poll_until_ready(
+            || {
+                calls += 1;
+                async { None }
+            },
+            5,
+            std::time::Duration::from_millis(1),
+        ));
+        assert!(got.is_none());
+        assert_eq!(calls, 5);
     }
 
     #[test]
