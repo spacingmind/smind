@@ -227,8 +227,9 @@ never go through the proxy. Usage comes from each agent's own events.
 
 **ADR-O acceptance criteria (implementation spec, 2026-10-10):**
 
-1. **Store.** A `chat_queue` table exactly as in ADR-0021 §1, plus an
-   index on `(chat_id, status, id)`. `internal/store` gets:
+1. **Store.** A `chat_queue` table as in ADR-0021 §1, plus a
+   `priority INTEGER NOT NULL DEFAULT 0` column (1 for `interrupt`) and an
+   index on `(chat_id, status, priority DESC, id)`. `internal/store` gets:
    - `EnqueueChatPrompt` (rejects past 20 `queued` items per chat with
      `ErrQueueFull`);
    - `NextQueued(chatID)`;
@@ -247,10 +248,10 @@ never go through the proxy. Usage comes from each agent's own events.
        (provider bound to the chat, `permissionMode` in the catalog,
        ADR-0019 decision 6 at enqueue time), then appends and returns
        `{queued: true, queueItemId}`.
-     - `interrupt` enqueues at the **front**: a smaller `id` is not
-       possible, so `NextQueued` orders an `interrupt` priority flag
-       first, then by `id`. It then calls `Stop` on the running run and
-       returns `{queued: true, queueItemId}`.
+     - `interrupt` enqueues with `priority=1`, so `NextQueued` orders by
+       `priority DESC, id` and the item goes ahead of earlier `queue`
+       items. It then calls `Stop` on the running run and returns
+       `{queued: true, queueItemId}`.
 3. **Delivery.**
    - When a run reaches a terminal state (`Registry.finish`), the oldest
      deliverable item for that chat starts through the same code path as
