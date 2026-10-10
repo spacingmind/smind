@@ -8,6 +8,11 @@ import (
 	"github.com/charmbracelet/x/xpty"
 )
 
+// newPty creates the Unix PTY (creack/pty under xpty's hood).
+func newPty(width, height int) (xpty.Pty, error) {
+	return xpty.NewPty(width, height)
+}
+
 // newPtySession finishes constructing the Unix flavor of the ptySession
 // seam: waiting is plain cmd.Wait (xpty's Unix Start is an ordinary
 // exec.Cmd.Start, and WaitProcess just calls it), and there is no

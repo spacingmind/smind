@@ -56,7 +56,7 @@ type ptySession struct {
 // via killTree -- and a failure in that setup kills and reaps what was
 // just started rather than returning a half-armed session.
 func startPty(cmd *exec.Cmd) (*ptySession, error) {
-	p, err := xpty.NewPty(80, 24)
+	p, err := newPty(80, 24)
 	if err != nil {
 		return nil, err
 	}

@@ -9,9 +9,31 @@ import (
 	"sync"
 	"unsafe"
 
+	"github.com/charmbracelet/x/conpty"
 	"github.com/charmbracelet/x/xpty"
 	"golang.org/x/sys/windows"
 )
+
+// pseudoconsoleResizeQuirk is CreatePseudoConsole's undocumented
+// PSEUDOCONSOLE_RESIZE_QUIRK flag (Windows Terminal's conpty-static.h),
+// telling ConPTY the attached terminal reflows on resize itself so it
+// doesn't fight that with its own repaint. Codex passes it
+// unconditionally with a build-17763 minimum (refs/codex
+// utils/pty/src/win/psuedocon.rs).
+const pseudoconsoleResizeQuirk = 0x2
+
+// newPty creates the ConPTY directly rather than via xpty.NewPty:
+// xpty v0.1.4's PtyOption takes its Options by value, so no option can
+// ever set the CreatePseudoConsole flags. xpty.ConPty's embedded
+// *conpty.ConPty is exported, so wrapping it keeps every other xpty
+// behavior (Start, Resize, Close) unchanged.
+func newPty(width, height int) (xpty.Pty, error) {
+	c, err := conpty.New(width, height, pseudoconsoleResizeQuirk)
+	if err != nil {
+		return nil, err
+	}
+	return &xpty.ConPty{ConPty: c}, nil
+}
 
 // newPtySession finishes constructing the Windows flavor of the
 // ptySession seam: the shell is assigned to a kill-on-close Job Object
