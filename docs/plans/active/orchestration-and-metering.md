@@ -474,7 +474,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-O drafted as ADR-0021 (Proposed)
 - [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
 - [ ] ADR-M implemented
-- [ ] ADR-O implemented
+- [x] ADR-O implemented
 - [ ] Step 3 dogfood + gap log
 
 ## Validation
@@ -548,4 +548,18 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
   concurrency scenario ("a fifth concurrent run") and the guide are
   Wave 2 and remain untested by design. `task test` + `task lint` green.
 
-Not started: O1, O2 Wave 2 items, ADR-0020/ADR-0021 implementation (both still Proposed).
+**ADR-O** (branch `feat/chat-prompt-queue`, `task test` + `go test -race ./internal/runs ./internal/wsapi` + `task lint` green, 2026-10-10):
+
+- **AC1 store** — `TestChatQueue_EnqueueBoundAndOrder` (`internal/store/chat_queue_test.go`): 20-item bound with `ErrQueueFull` on the 21st, per-chat scope, FIFO order, interrupt (priority 1) jumps ahead, `NextQueued` ok=false on an empty chat.
+- **AC2 whenBusy** — `TestRunStart_WhenBusyReject_Unchanged` and `TestRunStart_WhenBusyQueue_DeliversOnFinish`, `TestRunStart_WhenBusyInterrupt_StopsAndDeliversFirst` (`internal/runs/queue_test.go`): byte-identical legacy busy error with no/`reject` `whenBusy`; idle chat starts immediately under every mode; `queue` returns `{queued, queueItemId}` and auto-starts at the finished run's `finish`; `interrupt` enqueues priority 1, stops the running run, delivers ahead of earlier queue items onto the chat's persisted (resumed) session. `TestChatQueue_ValidationAtEnqueue` pins ADR-0019 decision 6 at enqueue time (non-human sources; unknown mode via claude-native's static catalog).
+- **AC3 delivery** — `TestRunStart_WhenBusyQueue_DeliversOnFinish` (auto-start after finish), `TestChatQueue_BadItemCancelledNotLooped` (provider-mismatch item cancelled with reason, next delivers, delivery-attempt counter proves no tight loop), `TestChatQueue_ConcurrentDeliveryNoDuplicate` (concurrent `deliverOne` calls start exactly one run — `deliverMu`), `TestChatQueue_NoDeliveryDuringCloseAll` (CloseAll's closing latch: nothing delivers during shutdown; a fresh Registry + `DeliverQueued` delivers afterwards).
+- **AC4 provenance** — `TestChatQueue_AgentProvenanceHeader` and `TestRunStart_AgentProvenanceHeaderOverWire`: `[message from task #T, chat #C]
+` header on delivered prompts (queued and immediate), human/orchestrator verbatim, invalid `source` and agent-without-from-ids rejected over the wire.
+- **AC5 restart** — `TestChatQueue_RestartKeepsDelivering`: persisted queued item + stale running row → fresh Registry reconciles to `interrupted`, starter wired via `SetStarter`, `DeliverQueued` delivers; the interrupted run is not retried. Wiring lives in `wsapi.New` (the Registry's construction site), same place as `SetNotifier`.
+- **AC6 wire** — `TestChatQueue_ListCancelAndEvent` (`internal/wsapi/chat_queue_test.go`): `chat.queueList` returns items oldest-first, `chat.queueCancel` works on queued and errors on delivered, `chat.queueUpdated` carries the full snapshot on enqueue/deliver/cancel. `run.status` untouched.
+- **AC7 clients** — `TestMCPTools_TaskSendDefaultsToQueue` (`cmd/smind/mcp_task_queue_test.go`): MCP `task_send` defaults to `queue`, returns `{queued:true, queueItemId}`, delivers after the first run finishes, `fromTaskId`/`fromChatId` stamp agent provenance. `TestTaskSend_WhenBusyFlag` (`cmd/smind/task_queue_test.go`): `--when-busy=queue` passes through, default reject surfaces the legacy error verbatim, invalid value exits 2; `task queue ls`/`cancel` round-trip.
+- **AC8 no regressions** — `TestRunStart_WhenBusyReject_Unchanged` pins the byte-identical legacy error; the full existing `runs`/`wsapi`/`cmd/smind` suites (including `task_wait`) pass unchanged; `task_wait` code untouched.
+
+Known limitation: when `profileId` is set, `task_send` sends `source=human` so the server's non-human guard accepts the profile's human-authored auto-approving mode — which drops agent provenance (the header) for profile sends (comment in `cmd/smind/mcp_task_send.go`).
+
+Not started: O1 (run provenance columns), O2 Wave 2 items, ADR-0020 implementation (Proposed).
