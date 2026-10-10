@@ -3,7 +3,6 @@ module github.com/spacingmind/smind
 go 1.27.0
 
 require (
-	github.com/charmbracelet/x/conpty v0.2.0
 	github.com/charmbracelet/x/xpty v0.1.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
@@ -23,6 +22,7 @@ require (
 require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/charmbracelet/x/conpty v0.2.0 // indirect
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/creack/pty v1.1.24 // indirect

@@ -3,65 +3,53 @@
 package terminal
 
 import (
-	"context"
-	"fmt"
 	"os/exec"
 	"sync"
 	"unsafe"
 
-	"github.com/charmbracelet/x/conpty"
-	"github.com/charmbracelet/x/xpty"
 	"golang.org/x/sys/windows"
 )
 
-// pseudoconsoleResizeQuirk is CreatePseudoConsole's undocumented
-// PSEUDOCONSOLE_RESIZE_QUIRK flag (Windows Terminal's conpty-static.h),
-// telling ConPTY the attached terminal reflows on resize itself so it
-// doesn't fight that with its own repaint. Codex passes it
-// unconditionally with a build-17763 minimum (refs/codex
-// utils/pty/src/win/psuedocon.rs).
-const pseudoconsoleResizeQuirk = 0x2
-
-// newPty creates the ConPTY directly rather than via xpty.NewPty:
-// xpty v0.1.4's PtyOption takes its Options by value, so no option can
-// ever set the CreatePseudoConsole flags. xpty.ConPty's embedded
-// *conpty.ConPty is exported, so wrapping it keeps every other xpty
-// behavior (Start, Resize, Close) unchanged.
-func newPty(width, height int) (xpty.Pty, error) {
-	c, err := conpty.New(width, height, pseudoconsoleResizeQuirk)
+// startPty creates a ConPTY (this package's own wrapper, ADR-0022) and
+// spawns cmd attached to it, already inside a fresh kill-on-close Job
+// Object (see killHandle's doc comment) -- the job is created first and
+// handed to CreateProcess, so there is no window in which the shell or
+// anything it spawns runs outside it. onExit closes only the
+// pseudoconsole: ConPTY does NOT close its output pipe when the child
+// exits, and closing the pseudoconsole is what makes conhost flush and
+// exit, so readLoop drains the final output and then reads EOF (AC4).
+func startPty(cmd *exec.Cmd) (*ptySession, error) {
+	job, err := newKillOnCloseJob()
 	if err != nil {
 		return nil, err
 	}
-	return &xpty.ConPty{ConPty: c}, nil
-}
-
-// newPtySession finishes constructing the Windows flavor of the
-// ptySession seam: the shell is assigned to a kill-on-close Job Object
-// immediately after start (see killHandle's doc comment), and onExit is
-// set to close the pty once the process exits -- ConPTY does NOT close
-// its output pipe when the child exits, so readLoop's Read would
-// otherwise block forever and the session would never reach
-// StatusClosed (AC4). Assignment failure fails Create entirely: a
-// session that can't be killed tree-wide must not be created, so the
-// just-started process is killed and reaped before returning the error.
-func newPtySession(p xpty.Pty, cmd *exec.Cmd) (*ptySession, error) {
-	job, err := assignJobObject(cmd)
+	c, err := newConPty(80, 24, pseudoconsoleResizeQuirk)
 	if err != nil {
-		// WaitProcess with a canceled ctx kills + reaps (see killAndReap);
-		// closing the pty alone would leak the process handle.
-		ctx, cancel := context.WithCancel(context.Background())
-		cancel()
-		_ = xpty.WaitProcess(ctx, cmd)
-		_ = p.Close()
-		return nil, fmt.Errorf("terminal: create: assign job object: %w", err)
+		_ = windows.CloseHandle(job)
+		return nil, err
 	}
-
+	if err := c.spawn(cmd, job); err != nil {
+		_ = c.Close()
+		_ = windows.CloseHandle(job)
+		return nil, err
+	}
 	return &ptySession{
-		Pty:    p,
+		ptyIO:  c,
 		cmd:    cmd,
-		onExit: func() { _ = p.Close() },
+		onExit: c.closeConsole,
 		job:    newKillHandle(job),
 	}, nil
+}
+
+// wait blocks until the started process has exited, recording its
+// ProcessState like exec.Cmd.Wait would. cmd.Wait itself can't be used:
+// the process wasn't started by exec.Cmd.Start (see conPty.spawn).
+// Called exactly once per session, by waitLoop (or killAndReap for
+// never-registered sessions).
+func (s *ptySession) wait() error {
+	state, err := s.cmd.Process.Wait()
+	s.cmd.ProcessState = state
+	return err
 }
 
 // killHandle is the Windows flavor of the per-OS kill bookkeeping a
@@ -90,9 +78,9 @@ func newKillHandle(job windows.Handle) killHandle {
 // tree that's already gone (natural exit) is exactly the desired end
 // state, so every error is ignored. Note the handle has no pid
 // parameter: the handle, which only the session holds, is the kill
-// switch. Termination is asynchronous from this call; waitLoop's
-// WaitProcess observes the shell's actual exit and then closes the pty,
-// unblocking readLoop.
+// switch. Termination is asynchronous from this call; waitLoop observes
+// the shell's actual exit and then closes the pseudoconsole, letting
+// readLoop finish.
 func (h *killHandle) killTree(_ int) {
 	h.closeOnce.Do(func() { _ = windows.CloseHandle(h.job) })
 }
@@ -108,18 +96,10 @@ func (h *killHandle) release() {
 	h.killTree(0)
 }
 
-// assignJobObject creates a Job Object whose processes are killed when
-// its last handle closes, assigns the just-started shell to it, and
-// returns our handle -- deliberately the only handle, so closing it is
-// what triggers the kill. cmd.Process's handle came from xpty setting
-// it via os.FindProcess(pid) (see xpty's conpty_windows.go), which is a
-// full process handle, so a leaner PROCESS_SET_QUOTA|PROCESS_TERMINATE
-// handle is opened on the pid just for the assignment and closed right
-// after. Accepted window: descendants the shell spawns between start
-// and this assignment are outside the job -- that's shell startup only
-// (microseconds), before the shell has run a single command, so there
-// is nothing to miss in practice.
-func assignJobObject(cmd *exec.Cmd) (windows.Handle, error) {
+// newKillOnCloseJob creates a Job Object whose processes are killed when
+// its last handle closes, and returns our handle -- deliberately the only
+// one, so closing it is what triggers the kill.
+func newKillOnCloseJob() (windows.Handle, error) {
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
 	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
 
@@ -133,22 +113,6 @@ func assignJobObject(cmd *exec.Cmd) (windows.Handle, error) {
 		uintptr(unsafe.Pointer(&info)),
 		uint32(unsafe.Sizeof(info)),
 	); err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, err
-	}
-
-	h, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
-		false,
-		uint32(cmd.Process.Pid),
-	)
-	if err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, err
-	}
-	defer windows.CloseHandle(h)
-
-	if err := windows.AssignProcessToJobObject(job, h); err != nil {
 		_ = windows.CloseHandle(job)
 		return 0, err
 	}

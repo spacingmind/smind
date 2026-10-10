@@ -8,20 +8,30 @@ import (
 	"github.com/charmbracelet/x/xpty"
 )
 
-// newPty creates the Unix PTY (creack/pty under xpty's hood).
-func newPty(width, height int) (xpty.Pty, error) {
-	return xpty.NewPty(width, height)
+// startPty creates a Unix PTY (creack/pty under xpty's hood) and starts
+// cmd attached to it, returning the session seam. There is no
+// waiter-side exit hook: readLoop's final Read errors with EOF once the
+// shell (session leader on the slave side) exits and the kernel closes
+// the slave side, and readLoop then waits on reaped (which waitLoop
+// closes) before finish.
+func startPty(cmd *exec.Cmd) (*ptySession, error) {
+	p, err := xpty.NewPty(80, 24)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.Start(cmd); err != nil {
+		_ = p.Close()
+		return nil, err
+	}
+	return &ptySession{ptyIO: p, cmd: cmd}, nil
 }
 
-// newPtySession finishes constructing the Unix flavor of the ptySession
-// seam: waiting is plain cmd.Wait (xpty's Unix Start is an ordinary
-// exec.Cmd.Start, and WaitProcess just calls it), and there is no
-// waiter-side exit hook -- readLoop's final Read errors with EOF once
-// the shell (session leader on the slave side) exits and the kernel
-// closes the slave side, and readLoop then waits on reaped (which
-// waitLoop, running the same WaitProcess, closes) before finish.
-func newPtySession(p xpty.Pty, cmd *exec.Cmd) (*ptySession, error) {
-	return &ptySession{Pty: p, cmd: cmd}, nil
+// wait blocks until the started process has exited and been reaped
+// (xpty's Unix Start is an ordinary exec.Cmd.Start). Called exactly once
+// per session, by waitLoop (or killAndReap for never-registered
+// sessions).
+func (s *ptySession) wait() error {
+	return s.cmd.Wait()
 }
 
 // killHandle is the Unix flavor of the per-OS kill bookkeeping a
