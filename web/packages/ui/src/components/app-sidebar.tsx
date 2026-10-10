@@ -80,11 +80,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
-import { DesktopSidebarInset } from "@/components/desktop-sidebar-inset";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
+import { useWindowState } from "@/hooks/use-window-state";
+import { desktopOS, isDesktop } from "@/lib/platform";
+import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights } from "@/lib/window-chrome";
 import {
   Sidebar,
   SidebarContent,
@@ -586,6 +588,8 @@ export function AppSidebar({
   // dismissing someone's search by accident is worse than leaving a field
   // open. The tree's `expanded` set is never touched while searching, so
   // clearing the query restores exactly the expansion state it had.
+  const { fullscreen } = useWindowState();
+  const lights = isDesktop && hasTrafficLights(desktopOS, fullscreen);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLDivElement | null>(null);
@@ -620,15 +624,22 @@ export function AppSidebar({
        * under the rail. Rendering the buttons (rather than removing the
        * header) keeps every affordance reachable in collapsed mode.
        */}
-      <DesktopSidebarInset />
-      <SidebarHeader>
+      <SidebarHeader className={lights ? "gap-0 p-0" : undefined}>
         <div
           data-testid="sidebar-expanded-header"
-          className="flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden"
+          // macOS: this row is the window's title bar over the sidebar --
+          // the same 48px and bottom border as the main header, left-padded
+          // past the native traffic lights, draggable around its buttons.
+          data-tauri-drag-region={lights ? "deep" : undefined}
+          className={cn(
+            "flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden",
+            lights && "h-12 border-b py-0",
+          )}
+          style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
         >
           <img src="/logo.png" alt="" className="size-5 shrink-0" />
-          <span className="text-ui-base font-semibold tracking-tight">smind</span>
-          <div className="ml-auto flex items-center gap-1">
+          <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          <div className="ml-auto flex shrink-0 items-center gap-1">
             <ThemeToggle />
             <Button
               variant="ghost"
@@ -641,6 +652,16 @@ export function AppSidebar({
             </Button>
           </div>
         </div>
+        {lights && (
+          // Collapsed rail: the lights overhang the 48px rail, so keep the
+          // rail's icons below them. No border -- the main header's own
+          // border carries the line across.
+          <div
+            data-testid="sidebar-rail-inset"
+            data-tauri-drag-region
+            className="hidden h-12 shrink-0 group-data-[collapsible=icon]:block"
+          />
+        )}
         <div
           data-testid="sidebar-collapsed-header-actions"
           className="hidden flex-col items-center gap-0.5 px-0 py-1.5 group-data-[collapsible=icon]:flex"

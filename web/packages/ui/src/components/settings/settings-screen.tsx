@@ -91,7 +91,7 @@ export function SettingsScreen({
   const active = sections.find((s) => s.id === activeId) ?? null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col" data-testid="settings-screen">
+    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="settings-screen">
       <PaneHeader
         title="Settings"
         testId="settings-screen-header"

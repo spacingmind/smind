@@ -30,7 +30,7 @@ export function AppHeader({ statusText, sidebarPx }: { statusText: string; sideb
     <header
       data-testid="app-header"
       data-tauri-drag-region={isDesktop ? "deep" : undefined}
-      className="flex h-12 shrink-0 items-center gap-2 border-b p-2"
+      className="flex h-12 shrink-0 items-center gap-2 border-b bg-background p-2"
       style={leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined}
     >
       <SidebarTrigger />
