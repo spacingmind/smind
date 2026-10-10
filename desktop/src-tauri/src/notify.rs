@@ -6,8 +6,9 @@
 //! tracker: no click callback ships for desktop Windows/Linux), so each
 //! platform's own notification crate is used directly instead:
 //! `tauri-winrt-notification::Toast::on_activated` on Windows,
-//! `notify_rust`'s `wait_for_action` on Linux. Neither is invoked by the
-//! remote (daemon-origin) webview, so neither needs a capability grant.
+//! `notify_rust`'s `wait_for_action` on Linux, and `mac-notification-sys`'s
+//! `wait_for_click` on macOS. None is invoked by the
+//! remote (daemon-origin) webview, so none needs a capability grant.
 
 use tauri::AppHandle;
 use url::Url;
@@ -38,7 +39,9 @@ pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
     windows::show(ctx, title, body, task_id);
     #[cfg(target_os = "linux")]
     linux::show(ctx, title, body, task_id);
-    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    #[cfg(target_os = "macos")]
+    macos::show(ctx, title, body, task_id);
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
     fallback::show(ctx, title, body);
 }
 
@@ -127,7 +130,35 @@ mod linux {
     }
 }
 
-#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+/// macOS: `mac-notification-sys` blocks in `send` until the notification is
+/// clicked or dismissed, so each one waits on its own thread. The click
+/// path is the shared `navigate_to_task`, which shows the window first --
+/// the main window is only ever *hidden* by the close button, never
+/// destroyed, so it works from the Dock-only state too. If the system
+/// refuses the notification (e.g. the app isn't a registered bundle, as in
+/// an unbundled dev run) it falls back to the click-less plugin one.
+#[cfg(target_os = "macos")]
+mod macos {
+    use mac_notification_sys::{set_application, Notification, NotificationResponse};
+
+    use super::{fallback, navigate_to_task, ClickContext};
+
+    pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+        std::thread::spawn(move || {
+            // Attribute the notification to this app (default would be
+            // Finder). Only the first call sets it; `AlreadySet` is fine.
+            let bundle_id = ctx.app.config().identifier.clone();
+            let _ = set_application(&bundle_id);
+            match Notification::new().title(&title).message(&body).wait_for_click(true).send() {
+                Ok(NotificationResponse::Click) => navigate_to_task(&ctx, task_id),
+                Ok(_) => {}
+                Err(_) => fallback::show(ctx, title, body),
+            }
+        });
+    }
+}
+
+#[cfg(any(target_os = "macos", not(any(target_os = "windows", target_os = "linux"))))]
 mod fallback {
     use tauri_plugin_notification::NotificationExt;
 

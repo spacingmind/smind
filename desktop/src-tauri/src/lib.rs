@@ -22,6 +22,7 @@ mod client_watch;
 mod commands;
 mod daemon_manager;
 mod deeplink;
+mod lifecycle;
 mod menu;
 mod notify;
 mod state;
@@ -284,8 +285,9 @@ pub fn run() {
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running smind desktop");
+        .build(tauri::generate_context!())
+        .expect("error while building smind desktop")
+        .run(lifecycle::handle_run_event);
 }
 
 fn toggle_main(app: &tauri::AppHandle) {
