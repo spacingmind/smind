@@ -20,11 +20,14 @@ import (
 // code always gets it from acp.New, whose real *acp.Client satisfies it.
 type acpBackend interface {
 	Initialize(ctx context.Context) error
-	NewSession(ctx context.Context, cwd string) (string, []acp.ConfigOption, error)
-	LoadSession(ctx context.Context, sessionID, cwd string) ([]acp.ConfigOption, error)
-	ResumeSession(ctx context.Context, sessionID, cwd string) ([]acp.ConfigOption, error)
+	NewSession(ctx context.Context, cwd string, mcpServers []any) (string, []acp.ConfigOption, error)
+	LoadSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]acp.ConfigOption, error)
+	ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]acp.ConfigOption, error)
 	SupportsLoadSession() bool
 	SupportsResumeSession() bool
+	SupportsMcpStdio() bool
+	SupportsMcpHttp() bool
+	SupportsMcpSSE() bool
 	SetSessionConfigOption(ctx context.Context, sessionID, configID, value string) ([]acp.ConfigOption, error)
 	SessionModes(sessionID string) (acp.SessionModeState, bool)
 	SetSessionMode(ctx context.Context, sessionID, modeID string) error
@@ -314,7 +317,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, events)
+	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, nil, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
@@ -397,10 +400,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 // The stored handle is keyed by chatID, not taskID: a chat's resumable
 // session is its own, distinct from any sibling chat of the same task (see
 // SessionStore's doc comment).
-func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, events chan<- Event) (string, []acp.ConfigOption, error) {
+func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, mcpServers []any, events chan<- Event) (string, []acp.ConfigOption, error) {
 	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != provider || handle.SessionID == "" {
-		return client.NewSession(ctx, worktreePath)
+		return client.NewSession(ctx, worktreePath, mcpServers)
 	}
 
 	var (
@@ -411,15 +414,15 @@ func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provid
 	switch {
 	case client.SupportsLoadSession():
 		method = "session/load"
-		configOptions, err = client.LoadSession(ctx, handle.SessionID, worktreePath)
+		configOptions, err = client.LoadSession(ctx, handle.SessionID, worktreePath, mcpServers)
 	case client.SupportsResumeSession():
 		method = "session/resume"
-		configOptions, err = client.ResumeSession(ctx, handle.SessionID, worktreePath)
+		configOptions, err = client.ResumeSession(ctx, handle.SessionID, worktreePath, mcpServers)
 	default:
 		r.sendSessionNote(ctx, events, fmt.Sprintf(
 			"%s does not support resuming a session (no loadSession or sessionCapabilities.resume); starting a new session -- prior context from session %s is not available this turn",
 			provider, handle.SessionID))
-		return client.NewSession(ctx, worktreePath)
+		return client.NewSession(ctx, worktreePath, mcpServers)
 	}
 	if err == nil {
 		return handle.SessionID, configOptions, nil
@@ -428,7 +431,7 @@ func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provid
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
 		"could not resume %s session %s via %s (%v); starting a new session instead",
 		provider, handle.SessionID, method, err))
-	return client.NewSession(ctx, worktreePath)
+	return client.NewSession(ctx, worktreePath, mcpServers)
 }
 
 // sendSessionNote logs note and, unless ctx is already done, forwards it as
