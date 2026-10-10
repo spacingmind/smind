@@ -558,3 +558,48 @@ func TestChatQueue_ConcurrentDeliveryNoDuplicate(t *testing.T) {
 		t.Fatalf("the one run = %s, want the delivered item's run %s", runs[0].ID, *delivered.RunID)
 	}
 }
+
+// TestChatQueue_NoDeliveryDuringCloseAll pins the shutdown rule: CloseAll
+// sets the closing latch before stopping runs, so no run's finish delivers
+// the chat's next queued item (a run started there would miss CloseAll's
+// own stop pass and its item would be marked delivered, losing it for the
+// restart's redelivery, ADR-0021 §5). A fresh Registry over the same store
+// delivers the item instead.
+func TestChatQueue_NoDeliveryDuringCloseAll(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "hang")
+	runID := e.startRun(t, "a")
+	chatID := e.chatIDOf(t, runID)
+	waitForHistoryLen(t, e.reg, runID, 1, 5*time.Second)
+
+	out, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "next", taskrunner.PermissionSettings{}, "", WhenBusyQueue, store.ChatQueueSourceHuman, 0, 0)
+	if err != nil {
+		t.Fatalf("queue error = %v", err)
+	}
+
+	e.reg.CloseAll()
+
+	// No new run started and the item stayed queued.
+	runs := e.reg.List(chatID)
+	if len(runs) != 1 {
+		t.Fatalf("runs for chat after CloseAll = %d, want only the original 1: %+v", len(runs), runs)
+	}
+	item, err := e.st.GetChatQueueItem(out.QueueItemID)
+	if err != nil {
+		t.Fatalf("GetChatQueueItem() error = %v", err)
+	}
+	if item.Status != store.ChatQueueStatusQueued {
+		t.Fatalf("item status after CloseAll = %q, want still queued", item.Status)
+	}
+
+	// A restart delivers it (AC5 loop): clear the hang scenario first so
+	// the delivered run can finish.
+	if err := os.WriteFile(filepath.Join(*e.task.WorktreePath, "scenario"), []byte(""), 0o644); err != nil {
+		t.Fatalf("clear scenario: %v", err)
+	}
+	reg2 := newTestRegistry(t, e.st)
+	reg2.SetStarter(e.wm, e.runner)
+	reg2.DeliverQueued()
+	delivered := e.waitForQueuedStatus(t, out.QueueItemID, store.ChatQueueStatusDelivered)
+	waitForStatus(t, reg2, *delivered.RunID, StatusDone, 5*time.Second)
+}

@@ -209,6 +209,9 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 // retried -- New has already reconciled it to a terminal state; only the
 // queued prompts start.
 func (reg *Registry) DeliverQueued() {
+	if reg.closing.Load() {
+		return
+	}
 	chats, err := reg.st.ChatsWithQueued()
 	if err != nil {
 		return
@@ -237,6 +240,9 @@ func (reg *Registry) DeliverQueued() {
 // item is never returned by NextQueued again), capped at chatQueueDeliveryCap
 // items so a pathological queue can't keep one lock holder spinning.
 func (reg *Registry) deliverOne(chatID int64) {
+	if reg.closing.Load() {
+		return
+	}
 	wm, runner, ok := reg.starterDeps()
 	if !ok {
 		return

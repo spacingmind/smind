@@ -104,6 +104,13 @@ type Registry struct {
 	// enqueue path's race-coverage call) can't both start the same item.
 	// Lock ordering: deliverMu before mu, never the reverse.
 	deliverMu sync.Mutex
+
+	// closing latches once CloseAll begins: queue delivery must not start
+	// a chat's next prompt while the daemon is shutting down (a run
+	// started there would miss CloseAll's snapshot and its subprocess
+	// could outlive the daemon; the item would also be marked delivered,
+	// losing it for the restart's redelivery, ADR-0021 §5).
+	closing atomic.Bool
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -1102,6 +1109,8 @@ func (reg *Registry) Stop(runID string) error {
 // (blocking on each run's closedCh, mirroring
 // internal/terminal.Registry.CloseAll's exact same reasoning and shape).
 func (reg *Registry) CloseAll() {
+	reg.closing.Store(true)
+
 	reg.mu.Lock()
 	running := make([]*run, 0, len(reg.runs))
 	for _, r := range reg.runs {
