@@ -36,6 +36,8 @@ fn main() {
             "connections_select",
             "connections_get_current",
             "open_external",
+            "editors_list",
+            "open_in_editor",
             "daemon_status",
             "daemon_install",
             "daemon_update",

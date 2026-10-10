@@ -22,6 +22,7 @@ mod client_watch;
 mod commands;
 mod daemon_manager;
 mod deeplink;
+mod editors;
 mod lifecycle;
 mod menu;
 mod notify;
@@ -96,6 +97,8 @@ pub fn run() {
             commands::connections_select,
             commands::connections_get_current,
             commands::open_external,
+            editors::editors_list,
+            editors::open_in_editor,
             daemon_manager::daemon_status,
             daemon_manager::daemon_install,
             daemon_manager::daemon_update,
@@ -273,8 +276,8 @@ pub fn run() {
                 tray,
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
-                daemon_manager_distro: Mutex::new(None),
-                daemon_manager_platform: Mutex::new(None),
+                daemon_manager_distro: std::sync::Arc::new(Mutex::new(None)),
+                daemon_manager_platform: std::sync::Arc::new(Mutex::new(None)),
             });
 
             // desktop-macos-app M2.3/M2.4: install + start the bundled
