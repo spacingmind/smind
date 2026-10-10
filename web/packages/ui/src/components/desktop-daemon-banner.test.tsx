@@ -282,9 +282,31 @@ describe("DesktopDaemonBanner", () => {
     render(<DesktopDaemonBanner />);
     await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
 
+    // runsLoaded defaults to false: run state unknown, so it asks first.
     fireEvent.click(screen.getByTestId("desktop-daemon-banner-update"));
+    await flush();
+    expect(daemonUpdate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("desktop-daemon-banner-confirm")).toHaveTextContent(/may be running/);
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-confirm-update"));
     await flush();
 
     expect(daemonUpdate).toHaveBeenCalled();
+  });
+
+  it("daemon-update-manual-confirms-while-runs-unknown", async () => {
+    const daemonUpdate = vi.fn(() => Promise.resolve({ managedState: "managed" }));
+    mockPlatform({
+      current: LOCAL,
+      connectionVersion: () => Promise.resolve({ reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" }),
+      daemonStatus: () => Promise.resolve({ managedState: "managed", comparison: "older" }),
+      daemonUpdate,
+    });
+    const { DesktopDaemonBanner } = await import("@/components/desktop-daemon-banner");
+    render(<DesktopDaemonBanner runsLoaded={false} runningRuns={0} />);
+    await waitFor(() => expect(screen.getByTestId("desktop-daemon-banner-update")).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId("desktop-daemon-banner-update"));
+    await flush();
+    expect(daemonUpdate).not.toHaveBeenCalled();
+    expect(screen.getByTestId("desktop-daemon-banner-confirm")).toBeInTheDocument();
   });
 });

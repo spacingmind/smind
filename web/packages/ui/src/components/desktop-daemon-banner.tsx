@@ -101,7 +101,9 @@ export function DesktopDaemonBanner({ runsLoaded = false, runningRuns = 0 }: { r
   }
 
   function handleManualUpdate() {
-    if (runningRuns > 0) setConfirmOpen(true);
+    // Until the run snapshot is loaded, "0 running" is unknown, not idle --
+    // ask first rather than risk interrupting work we can't see yet.
+    if (!runsLoaded || runningRuns > 0) setConfirmOpen(true);
     else void runUpdate();
   }
 
@@ -153,7 +155,9 @@ export function DesktopDaemonBanner({ runsLoaded = false, runningRuns = 0 }: { r
           <DialogHeader>
             <DialogTitle>Update daemon now?</DialogTitle>
             <DialogDescription>
-              Running agent work will be interrupted — {runningRuns} {runningRuns === 1 ? "agent is" : "agents are"} currently running.
+              {runsLoaded
+                ? `Running agent work will be interrupted — ${runningRuns} ${runningRuns === 1 ? "agent is" : "agents are"} currently running.`
+                : "Running agent work will be interrupted. Agent status is still loading, so some agents may be running."}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
