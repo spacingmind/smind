@@ -206,7 +206,7 @@ never go through the proxy. Usage comes from each agent's own events.
    and no proxy hop. The M1 proxy metering is unchanged for unattributed
    external traffic.
 
-### ADR-O — per-chat prompt queue ([ADR-0021](../../decisions/0021-per-chat-prompt-queue.md), Proposed)
+### ADR-O — per-chat prompt queue ([ADR-0021](../../decisions/0021-per-chat-prompt-queue.md), Accepted 2026-10-10)
 - `task.prompt`/`run.start` to a chat with a running run takes
   `whenBusy`:
   - `reject` keeps today's behavior and stays the default for old
@@ -221,8 +221,76 @@ never go through the proxy. Usage comes from each agent's own events.
   peer escalations as its next turn. An external lead sees peer results
   through `task_wait` on the peer's run; no `task_wait` change
   (ADR-0021 §10).
-- After a daemon restart the queue is paused until a human resumes it,
-  and each chat holds at most 20 queued items (ADR-0021 §5, §7).
+- After a daemon restart the queue keeps delivering automatically (user,
+  2026-10-10, ADR-0021 §5), and each chat holds at most 20 queued items
+  (§7).
+
+**ADR-O acceptance criteria (implementation spec, 2026-10-10):**
+
+1. **Store.** A `chat_queue` table exactly as in ADR-0021 §1, plus an
+   index on `(chat_id, status, id)`. `internal/store` gets:
+   - `EnqueueChatPrompt` (rejects past 20 `queued` items per chat with
+     `ErrQueueFull`);
+   - `NextQueued(chatID)`;
+   - `MarkDelivered(id, runID)`;
+   - `MarkCancelled(id, reason)`;
+   - `ListChatQueue(chatID)` (all statuses, newest last);
+   - `ChatsWithQueued()`.
+2. **`whenBusy` on `run.start` and `task.prompt`** (wsapi params:
+   `whenBusy: "reject"|"queue"|"interrupt"`, default `reject`).
+   - **Idle chat:** all three start immediately and return `{runId}`,
+     unchanged.
+   - **Busy chat:**
+     - `reject` returns today's "already has a running run" error,
+       byte-identical.
+     - `queue` validates the run config exactly as a direct start would
+       (provider bound to the chat, `permissionMode` in the catalog,
+       ADR-0019 decision 6 at enqueue time), then appends and returns
+       `{queued: true, queueItemId}`.
+     - `interrupt` enqueues at the **front**: a smaller `id` is not
+       possible, so `NextQueued` orders an `interrupt` priority flag
+       first, then by `id`. It then calls `Stop` on the running run and
+       returns `{queued: true, queueItemId}`.
+3. **Delivery.**
+   - When a run reaches a terminal state (`Registry.finish`), the oldest
+     deliverable item for that chat starts through the same code path as
+     `Registry.Start`, with its stored `run_config`, and is marked
+     `delivered` with the new `run_id`.
+   - Delivery runs **after** the finished run is recorded and its lock
+     released, so it can never deadlock with `finish`.
+   - An item that fails at delivery (provider mismatch, validation, start
+     error) is marked `cancelled` with `cancel_reason`, and delivery moves
+     on to the next item in the same pass. It never loops on one item.
+   - `Registry` gets the dependencies it needs to start runs (workspace
+     manager and runner) through a setter wired in `cmd/smind serve`, in
+     the same way as `SetNotifier`.
+4. **Provenance.** An item with `source='agent'` is delivered with the
+   header line `[message from task #T, chat #C]` and then a newline before
+   the prompt. `human` and `orchestrator` items are delivered verbatim.
+   MCP `task_send` enqueues with `source='agent'` when the caller passes
+   `fromTaskId`/`fromChatId`, and with `orchestrator` otherwise. wsapi
+   callers default to `human`.
+5. **Restart.** After `runs.New` reconciles `running` rows to
+   `interrupted`, and once the start dependencies are wired, the daemon
+   delivers the next item of every chat returned by `ChatsWithQueued()`
+   (ADR-0021 §5 as amended). The interrupted run is not retried.
+6. **Wire.**
+   - `chat.queueList {chatId}` returns the items.
+   - `chat.queueCancel {itemId}` cancels only a `queued` item; anything
+     else is an error.
+   - Event `chat.queueUpdated {chatId, items}` carries a full snapshot in
+     the ADR-0009 shape. It is emitted on enqueue, deliver, cancel and
+     auto-cancel.
+   - `run.status` is unchanged.
+7. **Clients.**
+   - MCP `task_send` gains `whenBusy`, defaulting to `queue`, and returns
+     either `{runId}` or `{queued:true, queueItemId}`.
+   - CLI: `smind task send --when-busy=reject|queue|interrupt` (default
+     `reject`) and `smind task queue ls|cancel`.
+   - The web composer's server-queue migration is a **separate
+     follow-up**, not part of this step.
+8. **No regressions.** Old clients that never pass `whenBusy` see
+   byte-identical behaviour. `task_wait` is unchanged.
 - The web composer's client-side queue moves to the server queue.
   Queued items are visible, and cancellable, in every client.
 
@@ -311,7 +379,38 @@ provenance (O1) gives the runner (or internal/runs) that context.
   account with no list, then 400 `model_not_found`; a `glm-*` key is
   never picked for `claude-*`.
 
-**ADR-O:** written with ADR-0021's plan section.
+**ADR-O** (store tests plus fake-agent registry/wsapi tests; exact names):
+- `TestChatQueue_EnqueueBoundAndOrder`: 20 enqueues ok, the 21st gives
+  `ErrQueueFull`; FIFO order; an `interrupt` item jumps ahead of earlier
+  `queue` items.
+- `TestRunStart_WhenBusyReject_Unchanged`: busy chat with no `whenBusy`
+  gives the exact legacy error; idle chat with each mode starts at once.
+- `TestRunStart_WhenBusyQueue_DeliversOnFinish`: run A running, queue B,
+  get `{queued, queueItemId}`; A finishes, B starts automatically on the
+  same chat; the item is `delivered` with B's run id.
+- `TestRunStart_WhenBusyInterrupt_StopsAndDeliversFirst`: A running, `q1`
+  queued, then interrupt `i1`. A is stopped, `i1` is delivered before
+  `q1`, and `i1` resumes A's session (O1).
+- `TestChatQueue_ValidationAtEnqueue`: queueing an auto-approving mode
+  from an orchestrator source is rejected at enqueue (ADR-0019 decision
+  6); an unknown mode is rejected.
+- `TestChatQueue_BadItemCancelledNotLooped`: an item whose provider no
+  longer matches the chat is `cancelled` with a reason, the next item
+  delivers, and no tight loop happens (a delivery-attempt counter
+  asserts it).
+- `TestChatQueue_AgentProvenanceHeader`: an agent-source item's prompt
+  begins with `[message from task #T, chat #C]`; human items are
+  verbatim.
+- `TestChatQueue_RestartKeepsDelivering`: persist a queued item and a
+  `running` run row, construct a fresh Registry and wire dependencies;
+  the run becomes `interrupted` and the queued item is delivered.
+- `TestChatQueue_ListCancelAndEvent`: `chat.queueList` returns items;
+  `chat.queueCancel` on a queued item works, and on a delivered one
+  errors; `chat.queueUpdated` is emitted with the full snapshot.
+- `TestMCPTools_TaskSendDefaultsToQueue`: `task_send` to a busy chat
+  returns `{queued:true}`, and the run starts after the first finishes.
+- `TestTaskSend_WhenBusyFlag` (CLI): the flag is passed through; the
+  default is reject.
 
 ## Decisions
 
@@ -372,7 +471,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-M drafted as ADR-0020 (Proposed)
 - [x] ADR-0020 accepted (2026-10-11, rewritten: usage from agent events, runs off the proxy)
 - [x] ADR-O drafted as ADR-0021 (Proposed)
-- [ ] ADR-0021 accepted
+- [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
 - [ ] ADR-M implemented
 - [ ] ADR-O implemented
 - [ ] Step 3 dogfood + gap log

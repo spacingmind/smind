@@ -2,12 +2,14 @@
 
 ## Status
 
-Proposed (2026-09-28). The user accepted the direction with
+Accepted (2026-10-10). The user accepted the direction with
 `docs/plans/active/orchestration-and-metering.md` on 2026-09-28: one
 persisted per-chat queue with `reject|queue|interrupt` delivery modes, in
-place of a separate inbox and a separate steering mechanism. The
-sub-decisions below await review. Depends on ADR-0019 (run-config fields)
-and on the plan's O1 fix (a stopped run keeps its session).
+place of a separate inbox and a separate steering mechanism. On
+2026-10-10 the user reviewed the sub-decisions and accepted them, with one
+change: decision 5. After a daemon restart the queue **keeps delivering**
+instead of pausing. Depends on ADR-0019 (run-config fields) and on the
+plan's O1 fix (a stopped run keeps its session).
 
 ## Context
 
@@ -84,12 +86,20 @@ How the references handle a message to a busy agent (verified
    verbatim. Provenance is self-declared by the MCP caller; it is not
    authentication, because every caller shares the daemon's trust domain
    (ADR-0017).
-5. **After a daemon restart the queue is paused, not auto-delivered.** The
-   restart killed the running turn. Auto-starting agent work nobody is
-   watching would be surprising, and it would spend quota. Queued items
-   survive (this is the reliability lesson from Paseo's restart data
-   loss), and the chat shows "queue paused" until a human sends a prompt
-   or calls `chat.queueResume`.
+5. **After a daemon restart the queue keeps delivering** (user,
+   2026-10-10). Queued items survive the restart. This is the reliability
+   lesson from Paseo's restart data loss.
+   - Once `runs.New` has reconciled `running` rows to `interrupted`, the
+     daemon delivers the oldest `queued` item of every chat that has one,
+     through the same path as decision 3. The interrupted run is not
+     retried.
+   - The delivered prompt starts on the chat's resumed session (O1), so
+     the agent still sees the earlier context.
+   - There is no paused state and no `chat.queueResume`. To stop pending
+     work, a user cancels items with `chat.queueCancel`.
+   - Rationale: work the user queued was meant to run. Restarts are rarer
+     now that the desktop app no longer restarts a daemon that has runs
+     in flight (`desktop-macos-app` M5).
 6. **Permission rules apply at enqueue time.** An item's
    `permissionMode` is validated exactly like a direct prompt, including
    ADR-0019 resolved decision 6: an orchestrator cannot queue an
@@ -100,7 +110,6 @@ How the references handle a message to a busy agent (verified
 8. **Wire additions**, all additive:
    - `chat.queueList {chatId}` returns the items;
    - `chat.queueCancel {itemId}` cancels one;
-   - `chat.queueResume {chatId}` resumes a paused queue;
    - event `chat.queueUpdated {chatId, items}` carries a full snapshot
      (ADR-0009 shape).
    - `run.status` is unchanged.
