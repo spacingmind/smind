@@ -100,9 +100,8 @@ tasks:
     cmds:
       - ./scripts/check-version-sync.sh
 
-  desktop:mac:
-    desc: Build the unsigned macOS app (smind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
-    platforms: [darwin]
+  desktop:mac:daemon:
+    desc: Build the darwin smind daemon the macOS app bundles, for TARGET (default host arch), into desktop/src-tauri/binaries
     deps: [build:web]
     vars:
       TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
@@ -124,6 +123,15 @@ tasks:
         mkdir -p desktop/src-tauri/binaries
         echo "building bundled smind $v ($short) for darwin/$goarch"
         CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o desktop/src-tauri/binaries/smind-{{.TARGET}} ./cmd/smind
+
+  desktop:mac:
+    desc: Build the unsigned macOS app (smind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
+    platforms: [darwin]
+    vars:
+      TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
+    cmds:
+      - task: desktop:mac:daemon
+        vars: { TARGET: "{{.TARGET}}" }
       - cd desktop && npm ci && npx tauri build --target {{.TARGET}}
       - |
         echo "built:"
