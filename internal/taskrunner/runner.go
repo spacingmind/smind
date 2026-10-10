@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
@@ -175,6 +177,13 @@ type Runner struct {
 	modeMu        sync.Mutex
 	acpModeProbe  bool
 
+	// mcpServers, when set via WithMcpServers, supplies the configured
+	// MCP servers passed to ACP and Claude-native turns (ADR-0018). Nil
+	// means the feature is fully off. lookPath resolves a stdio server's
+	// bare command (defaults to exec.LookPath; injectable for tests).
+	mcpServers McpServerSource
+	lookPath   func(string) (string, error)
+
 	// sessionStore holds the resumable SessionHandle each provider's
 	// RunPrompt call reads before a turn and writes after one, keyed by
 	// chat ID -- see SessionHandle/SessionStore's doc comments. Defaults to
@@ -205,6 +214,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 			ProviderKimi: acp.KimiCommand(),
 		},
 		codexCommand: codex.DefaultCommand(),
+		lookPath:     exec.LookPath,
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -219,6 +229,15 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		opt(r)
 	}
 	return r
+}
+
+// lookPathFunc returns the Runner's command resolver, defaulting to
+// exec.LookPath on a hand-built zero-value Runner.
+func (r *Runner) lookPathFunc() func(string) (string, error) {
+	if r.lookPath == nil {
+		return exec.LookPath
+	}
+	return r.lookPath
 }
 
 // RunPrompt looks up taskID, spawns the agent backend named by provider
@@ -277,11 +296,11 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, chatID, provider, worktreePath, prompt, decider, perm, events)
+		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, events)
 	case ProviderClaudeNative:
 		return r.runClaudeNative(ctx, chatID, worktreePath, prompt, decider, perm, thinkingLevel, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, chatID, worktreePath, prompt, decider, perm, events)
+		return r.runCodexNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -292,7 +311,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -317,7 +336,22 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize %s agent: %w", provider, err)
 	}
-	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, nil, events)
+
+	rows, err := r.mcpServersForWorkspace(workspaceID)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
+	}
+	mcpWire, inactive, err := acpMcpServers(rows, client, r.lookPathFunc())
+	if err != nil {
+		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
+	}
+	if len(inactive) > 0 {
+		r.sendSessionNote(ctx, events, fmt.Sprintf(
+			"MCP servers configured but not active for %s (agent does not support their transport): %s",
+			provider, strings.Join(inactive, ", ")))
+	}
+
+	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, events)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
 	}
@@ -536,6 +570,7 @@ const claudeDialogTimeoutMS = "3600000"
 
 func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
+
 	switch thinkingLevel {
 	case ThinkingLevelOff:
 		opts = append(opts, claudecode.WithDisabledThinking())
@@ -751,7 +786,7 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
 	mode := perm.Mode
 	if mode == "" {
 		mode = CodexModeAuto
@@ -778,6 +813,16 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath,
 
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("taskrunner: initialize codex agent: %w", err)
+	}
+	if rows, err := r.mcpServersForWorkspace(workspaceID); err != nil {
+		return fmt.Errorf("taskrunner: codex mcp servers: %w", err)
+	} else if len(rows) > 0 {
+		names := make([]string, len(rows))
+		for i, row := range rows {
+			names[i] = row.Name
+		}
+		r.sendSessionNote(ctx, events, fmt.Sprintf(
+			"MCP servers configured but not supported for codex-native yet: %s", strings.Join(names, ", ")))
 	}
 	threadID, err := r.newOrResumeCodexThread(ctx, chatID, client, worktreePath, events)
 	if err != nil {
