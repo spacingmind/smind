@@ -332,3 +332,25 @@ func (reg *Registry) notifyQueueUpdated(chatID int64) {
 	}
 	n.NotifyChatQueueUpdated(chatID, items)
 }
+
+// ListChatQueue returns chatID's queue items (all statuses, oldest first)
+// for the chat.queueList RPC (ADR-0021 §8).
+func (reg *Registry) ListChatQueue(chatID int64) ([]store.ChatQueueItem, error) {
+	return reg.st.ListChatQueue(chatID)
+}
+
+// CancelQueuedItem cancels a still-queued item by id, for the
+// chat.queueCancel RPC (ADR-0021 §8). Anything not queued (already
+// delivered, already cancelled, unknown) is an error, never a silent
+// no-op.
+func (reg *Registry) CancelQueuedItem(id int64) error {
+	item, err := reg.st.GetChatQueueItem(id)
+	if err != nil {
+		return err
+	}
+	if item.Status != store.ChatQueueStatusQueued {
+		return fmt.Errorf("queue item %d is %s, not queued", id, item.Status)
+	}
+	reg.cancelQueuedItem(id, "cancelled by user")
+	return nil
+}

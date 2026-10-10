@@ -98,6 +98,13 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	profReg.SetNotifier(busProfileNotifier{bus: bus})
 	mcpReg.SetNotifier(busMcpServerNotifier{bus: bus})
 
+	// ADR-0021 §3/§5: give the Registry the dependencies its queue
+	// delivery needs (the same wm/runner every Start caller passes in),
+	// then deliver every chat's oldest queued prompt -- items that
+	// survived a daemon restart keep delivering (decision 5, as amended).
+	reg.SetStarter(wm, runner)
+	reg.DeliverQueued()
+
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
 	hs := methodHandlers(wm, acctReg, runner, reg, treg, profReg, mcpReg, coord, db)
@@ -253,6 +260,12 @@ func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int
 	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
 		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Summary: summary,
 		Options: toPermissionOptionParams(options),
+	}})
+}
+
+func (b busRunNotifier) NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem) {
+	b.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: chatQueueUpdatedPayload{
+		ChatID: chatID, Items: toChatQueueItemParams(items),
 	}})
 }
 

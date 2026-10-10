@@ -32,6 +32,7 @@ const (
 	TopicChatCreated       = "chat.created"
 	TopicChatUpdated       = "chat.updated"
 	TopicChatArchived      = "chat.archived"
+	TopicChatQueueUpdated  = "chat.queueUpdated"
 	TopicProfileCreated    = "profile.created"
 	TopicProfileUpdated    = "profile.updated"
 	TopicProfileDeleted    = "profile.deleted"
@@ -59,6 +60,7 @@ var knownTopics = map[string]bool{
 	TopicChatCreated:       true,
 	TopicChatUpdated:       true,
 	TopicChatArchived:      true,
+	TopicChatQueueUpdated:  true,
 	TopicProfileCreated:    true,
 	TopicProfileUpdated:    true,
 	TopicProfileDeleted:    true,
@@ -191,6 +193,15 @@ type chatUpdatedPayload struct {
 // {chat: store.Chat}.
 type chatArchivedPayload struct {
 	Chat store.Chat `json:"chat"`
+}
+
+// chatQueueUpdatedPayload is the payload of chat.queueUpdated events
+// (ADR-0021 §8, ADR-0009 snapshot shape): the chat plus its full queue
+// snapshot, newest last -- emitted on enqueue, deliver, cancel, and
+// auto-cancel.
+type chatQueueUpdatedPayload struct {
+	ChatID int64                 `json:"chatId"`
+	Items  []chatQueueItemParams `json:"items"`
 }
 
 // Agent-profile lifecycle event payloads (ADR 0014), shaped the same way as
