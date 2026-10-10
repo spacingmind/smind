@@ -114,6 +114,58 @@ func nameValues(objJSON string) ([]acp.NameValue, error) {
 	return out, nil
 }
 
+// claudeMcpConfig builds Claude CLI --mcp-config JSON from the enabled
+// rows: {"mcpServers":{"<name>":{...}}}. A stdio command stays bare (no
+// LookPath -- the CLI resolves it in the spawned server's own
+// environment); empty args/env/headers are omitted. Returns "" with no
+// error when rows is empty, so the caller adds no option at all.
+func claudeMcpConfig(rows []store.McpServer) (string, error) {
+	servers := map[string]any{}
+	for _, row := range rows {
+		switch row.Transport {
+		case "stdio":
+			srv := map[string]any{"type": "stdio", "command": row.Command}
+			var args []string
+			if err := json.Unmarshal([]byte(row.Args), &args); err != nil && strings.TrimSpace(row.Args) != "" {
+				return "", fmt.Errorf("mcp server %q: args: %w", row.Name, err)
+			}
+			if len(args) > 0 {
+				srv["args"] = args
+			}
+			env := map[string]string{}
+			if strings.TrimSpace(row.Env) != "" {
+				if err := json.Unmarshal([]byte(row.Env), &env); err != nil {
+					return "", fmt.Errorf("mcp server %q: env: %w", row.Name, err)
+				}
+			}
+			if len(env) > 0 {
+				srv["env"] = env
+			}
+			servers[row.Name] = srv
+		case "http", "sse":
+			srv := map[string]any{"type": row.Transport, "url": row.URL}
+			headers := map[string]string{}
+			if strings.TrimSpace(row.Headers) != "" {
+				if err := json.Unmarshal([]byte(row.Headers), &headers); err != nil {
+					return "", fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
+				}
+			}
+			if len(headers) > 0 {
+				srv["headers"] = headers
+			}
+			servers[row.Name] = srv
+		}
+	}
+	if len(servers) == 0 {
+		return "", nil
+	}
+	data, err := json.Marshal(map[string]any{"mcpServers": servers})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 // mcpServersForWorkspace lists the enabled MCP servers for workspaceID,
 // or an empty slice when no source is configured (feature off).
 func (r *Runner) mcpServersForWorkspace(workspaceID int64) ([]store.McpServer, error) {

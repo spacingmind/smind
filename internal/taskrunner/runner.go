@@ -298,7 +298,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, chatID, worktreePath, prompt, decider, perm, thinkingLevel, events)
+		return r.runClaudeNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, thinkingLevel, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, events)
 	default:
@@ -568,8 +568,22 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
+
+	rows, err := r.mcpServersForWorkspace(workspaceID)
+	if err != nil {
+		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
+	}
+	if len(rows) > 0 {
+		mcpConfig, err := claudeMcpConfig(rows)
+		if err != nil {
+			return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
+		}
+		if mcpConfig != "" {
+			opts = append(opts, claudecode.WithMCPConfig(mcpConfig))
+		}
+	}
 
 	switch thinkingLevel {
 	case ThinkingLevelOff:
