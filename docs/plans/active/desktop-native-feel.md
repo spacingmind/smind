@@ -348,7 +348,17 @@ internal command on double-click), so D4's `capability_allowlist_exact`
 must include them. No ZCode code was copied (layout and approach only),
 so `NOTICE` is unchanged.
 
-Still to do before D1 can be ticked: `macos-traffic-lights-in-header`
-(light/dark, expanded/collapsed, in the real webview), `no-white-flash`,
-`close-hides-to-tray`, `windows-caption-buttons`, `linux-frameless-resize`,
-and the Windows desktop CI build.
+#### Native checks on a real Mac (commit `49060a7`, run by the coordinator outside the sandbox)
+
+| Check | Result |
+|---|---|
+| `macos-traffic-lights-in-header`, **dark, expanded** | **PASS (native).** Lights vertically centred in the 48px sidebar header row, left of the logo. Sidebar header border and main header border are level. |
+| macOS vibrancy (D1.8), dark | **PASS (native).** Blurred content from windows behind shows through the sidebar; the main content area is opaque. |
+| `no-white-flash` (D2.1) | **PASS (native).** 12 burst screen captures from launch: luminance went straight from the background windows (avg 0.237) to the dark window (0.126); bright-pixel fraction stayed 0.003–0.005 in every frame. No white frame. |
+| `macos-traffic-lights-in-header`, light theme and collapsed rail | **Not checked** (no accessibility permission to click). Needs the user. |
+| Drag / double-click on the header (D1.4) | **Not checked.** Needs the user. |
+| `close-hides-to-tray` (D1.3) | **Not checked.** Needs the user. |
+| `windows-caption-buttons`, `linux-frameless-resize`, Windows desktop CI build | **Not run.** No Windows/Linux machine. |
+
+D1 stays unticked in Progress: the unchecked rows above, and Windows/Linux,
+are still outstanding.
