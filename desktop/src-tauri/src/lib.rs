@@ -276,6 +276,12 @@ pub fn run() {
                 daemon_manager_platform: Mutex::new(None),
             });
 
+            // desktop-macos-app M2.3/M2.4: install + start the bundled
+            // daemon when none is reachable, or update an older managed
+            // one; macOS only (WSL2 keeps its explicit Install button).
+            #[cfg(target_os = "macos")]
+            tauri::async_runtime::spawn(daemon_manager::auto_start(app.handle().clone()));
+
             Ok(())
         })
         .run(tauri::generate_context!())
