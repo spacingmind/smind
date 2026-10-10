@@ -32,7 +32,8 @@ jobs:
 
       - name: Test full suite (non-blocking, input for runtime-parity plan)
         continue-on-error: true
-        run: go test ./...
+        timeout-minutes: 15
+        run: go test -timeout 8m ./...
 
   ci:
     runs-on: ubuntu-latest
