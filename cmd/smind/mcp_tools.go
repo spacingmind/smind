@@ -24,6 +24,7 @@ func registerMCPTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_list", Description: "List a workspace's smind tasks (id, title, status, branch)."}, mcpTaskList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_list", Description: "List a task's chats (conversation threads)."}, mcpChatList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_new", Description: "Create a new chat (conversation thread) under a task."}, mcpChatNew(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_send", Description: "Send a prompt to a task, starting a run. Returns {runId} immediately -- never blocks on the run; follow up with task_wait/task_status/task_logs. Optional provider-native permission settings (permissionMode/autoAccept) may not name an auto-approving configuration (bypass modes, autoAccept) -- an orchestrating agent cannot pick those itself; pass profileId to use a human-authored profile's settings instead."}, mcpTaskSend(client))
 	registerMCPRunTools(srv, client)
 }
 
