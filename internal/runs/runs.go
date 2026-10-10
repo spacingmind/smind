@@ -13,6 +13,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -88,6 +89,46 @@ type RunStatus struct {
 	// a higher tier left to retry at (docs/plans/active/mid-run-approval-
 	// and-retry-effort.md's Item B).
 	ThinkingLevel taskrunner.ThinkingLevel
+
+	// Usage is what the agent itself reported this run consumed (ADR-0020);
+	// nil until the run has emitted a usage event (a run whose backend
+	// reports nothing never gets one).
+	Usage *RunUsage `json:"usage,omitempty"`
+}
+
+// RunUsage is RunStatus's usage totals. Every numeric field is nil when the
+// backend didn't report it -- never estimated, and nil is not 0.
+type RunUsage struct {
+	InputTokens       *int64   `json:"inputTokens,omitempty"`
+	CachedInputTokens *int64   `json:"cachedInputTokens,omitempty"`
+	CacheWriteTokens  *int64   `json:"cacheWriteTokens,omitempty"`
+	OutputTokens      *int64   `json:"outputTokens,omitempty"`
+	ReasoningTokens   *int64   `json:"reasoningTokens,omitempty"`
+	CostUSD           *float64 `json:"costUsd,omitempty"`
+	Model             *string  `json:"model,omitempty"`
+	ContextUsed       *int64   `json:"contextUsed,omitempty"`
+	ContextSize       *int64   `json:"contextSize,omitempty"`
+	Source            string   `json:"source"`
+}
+
+// UsageFromEvent converts a usage event's payload to its wire/summary shape.
+func UsageFromEvent(u *taskrunner.Usage) *RunUsage {
+	if u == nil {
+		return nil
+	}
+	return &RunUsage{
+		InputTokens: u.Input, CachedInputTokens: u.CachedInput, CacheWriteTokens: u.CacheWrite,
+		OutputTokens: u.Output, ReasoningTokens: u.Reasoning, CostUSD: u.CostUSD, Model: u.Model,
+		ContextUsed: u.ContextUsed, ContextSize: u.ContextSize, Source: string(u.Source),
+	}
+}
+
+func runUsageFromStore(u store.RunUsage) *RunUsage {
+	return &RunUsage{
+		InputTokens: u.InputTokens, CachedInputTokens: u.CachedInputTokens, CacheWriteTokens: u.CacheWriteTokens,
+		OutputTokens: u.OutputTokens, ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD, Model: u.Model,
+		ContextUsed: u.ContextUsed, ContextSize: u.ContextSize, Source: u.Source,
+	}
 }
 
 // RunSummary is the shape List returns; it's the same information as

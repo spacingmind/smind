@@ -24,21 +24,21 @@ const (
 // from the agent's own events (ADR-0020). Every numeric field is a pointer:
 // nil means the backend did not report it. Values are never estimated.
 type Usage struct {
-	Input       *int64
-	CachedInput *int64 // cache read
-	CacheWrite  *int64
-	Output      *int64
-	Reasoning   *int64
-	CostUSD     *float64
-	Model       *string
-	ContextUsed *int64
-	ContextSize *int64
-	Source      UsageSource
+	Input       *int64      `json:"input,omitempty"`
+	CachedInput *int64      `json:"cachedInput,omitempty"` // cache read
+	CacheWrite  *int64      `json:"cacheWrite,omitempty"`
+	Output      *int64      `json:"output,omitempty"`
+	Reasoning   *int64      `json:"reasoning,omitempty"`
+	CostUSD     *float64    `json:"costUsd,omitempty"`
+	Model       *string     `json:"model,omitempty"`
+	ContextUsed *int64      `json:"contextUsed,omitempty"`
+	ContextSize *int64      `json:"contextSize,omitempty"`
+	Source      UsageSource `json:"source"`
 
 	// SessionSnapshot is the ACP session-cumulative counters (and the
 	// session id they belong to) as of this turn's end, kept so the next run
 	// on the same session can difference against it. ACP only; nil elsewhere.
-	SessionSnapshot *UsageSnapshot
+	SessionSnapshot *UsageSnapshot `json:"sessionSnapshot,omitempty"`
 }
 
 // UsageSnapshot is the session-cumulative counters an ACP agent reported at

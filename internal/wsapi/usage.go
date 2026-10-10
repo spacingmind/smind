@@ -95,29 +95,57 @@ func handleUsageList(db *store.Store) handlerFunc {
 }
 
 // usageSummaryEntry is the wire shape of one usage.summary row --
-// store.UsageSummary field-for-field, camelCase.
+// store.UsageSummary (scope "proxy") or store.RunUsageSummary (scope
+// "runs") field-for-field, camelCase. CostUSD is only carried by runs rows
+// (the proxy meter never computes cost).
 type usageSummaryEntry struct {
-	Key              string `json:"key"`
-	Count            int64  `json:"count"`
-	InputTokens      int64  `json:"inputTokens"`
-	OutputTokens     int64  `json:"outputTokens"`
-	CacheReadTokens  int64  `json:"cacheReadTokens"`
-	CacheWriteTokens int64  `json:"cacheWriteTokens"`
-	ReasoningTokens  int64  `json:"reasoningTokens"`
+	Scope            string   `json:"scope"`
+	Key              string   `json:"key"`
+	Count            int64    `json:"count"`
+	InputTokens      int64    `json:"inputTokens"`
+	OutputTokens     int64    `json:"outputTokens"`
+	CacheReadTokens  int64    `json:"cacheReadTokens"`
+	CacheWriteTokens int64    `json:"cacheWriteTokens"`
+	ReasoningTokens  int64    `json:"reasoningTokens"`
+	CostUSD          *float64 `json:"costUsd,omitempty"`
 }
 
 func usageSummaryEntryFrom(u store.UsageSummary) usageSummaryEntry {
 	return usageSummaryEntry{
-		Key: u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		Scope: usageScopeProxy,
+		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
 		ReasoningTokens: u.ReasoningTokens,
 	}
 }
 
-// handleUsageSummary aggregates request_log rows matching since/until
-// (since inclusive, until exclusive) into one row per distinct value of
-// groupBy ("account", "model", or "day" -- store.SummarizeRequestLogs
-// validates it).
+func runUsageSummaryEntryFrom(u store.RunUsageSummary) usageSummaryEntry {
+	cost := u.CostUSD
+	return usageSummaryEntry{
+		Scope: usageScopeRuns,
+		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
+		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
+		ReasoningTokens: u.ReasoningTokens, CostUSD: &cost,
+	}
+}
+
+// usage.summary scopes (ADR-0020): the proxy meter (request_log), per-run
+// usage reported by agents (run_usage), or both.
+const (
+	usageScopeProxy = "proxy"
+	usageScopeRuns  = "runs"
+	usageScopeAll   = "all"
+)
+
+// proxyGroupBys are the groupBy values the proxy meter accepts.
+var proxyGroupBys = map[string]bool{"account": true, "model": true, "day": true}
+
+// handleUsageSummary aggregates usage matching since/until (since
+// inclusive, until exclusive) into one row per distinct value of groupBy.
+// scope picks the family: "proxy" (groupBy account|model|day), "runs"
+// (groupBy workspace|task|chat|run|provider|model), or "all" (the default),
+// which concatenates proxy rows then run rows for whichever families accept
+// groupBy. The result is always an array, each row tagged with its scope.
 func handleUsageSummary(db *store.Store) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		if db == nil {
@@ -127,12 +155,27 @@ func handleUsageSummary(db *store.Store) handlerFunc {
 			Since   string `json:"since"`
 			Until   string `json:"until"`
 			GroupBy string `json:"groupBy"`
+			Scope   string `json:"scope"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("usage.summary: invalid params: %w", err)
 		}
 		if p.GroupBy == "" {
 			return nil, fmt.Errorf("usage.summary: groupBy is required")
+		}
+		if p.Scope == "" {
+			p.Scope = usageScopeAll
+		}
+		switch p.Scope {
+		case usageScopeProxy, usageScopeRuns, usageScopeAll:
+		default:
+			return nil, fmt.Errorf("usage.summary: invalid scope %q (want proxy, runs, or all)", p.Scope)
+		}
+
+		wantProxy := p.Scope != usageScopeRuns && proxyGroupBys[p.GroupBy]
+		wantRuns := p.Scope != usageScopeProxy && store.IsRunUsageGroupBy(p.GroupBy)
+		if !wantProxy && !wantRuns {
+			return nil, fmt.Errorf("usage.summary: invalid groupBy %q for scope %q", p.GroupBy, p.Scope)
 		}
 
 		since, err := parseUsageTime("usage.summary", "since", p.Since)
@@ -144,13 +187,24 @@ func handleUsageSummary(db *store.Store) handlerFunc {
 			return nil, err
 		}
 
-		rows, err := db.SummarizeRequestLogs(since, until, p.GroupBy)
-		if err != nil {
-			return nil, fmt.Errorf("usage.summary: %w", err)
+		result := []usageSummaryEntry{}
+		if wantProxy {
+			rows, err := db.SummarizeRequestLogs(since, until, p.GroupBy)
+			if err != nil {
+				return nil, fmt.Errorf("usage.summary: %w", err)
+			}
+			for _, r := range rows {
+				result = append(result, usageSummaryEntryFrom(r))
+			}
 		}
-		result := make([]usageSummaryEntry, len(rows))
-		for i, r := range rows {
-			result[i] = usageSummaryEntryFrom(r)
+		if wantRuns {
+			rows, err := db.SummarizeRunUsage(since, until, p.GroupBy)
+			if err != nil {
+				return nil, fmt.Errorf("usage.summary: %w", err)
+			}
+			for _, r := range rows {
+				result = append(result, runUsageSummaryEntryFrom(r))
+			}
 		}
 		return result, nil
 	}
