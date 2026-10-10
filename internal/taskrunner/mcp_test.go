@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"os/exec"
@@ -42,7 +43,7 @@ func TestAcpMcpServers_MapsStdioAndHttpWireShape(t *testing.T) {
 		{Transport: "http", Name: "pplx", URL: "https://mcp.pplx.ai/mcp", Headers: `{"Authorization":"Bearer t"}`, Enabled: true},
 		{Transport: "sse", Name: "legacy", URL: "https://old/mcp", Headers: `{"X":"1"}`, Enabled: true},
 	}
-	wire, inactive, err := acpMcpServers(rows, all, look)
+	wire, inactive, _, err := acpMcpServers(rows, all, look)
 	if err != nil {
 		t.Fatalf("acpMcpServers() error = %v", err)
 	}
@@ -80,7 +81,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 
 	t.Run("v2 agent advertising only http", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, err := acpMcpServers(rows, staticMcpCaps{http: true}, look)
+		wire, inactive, _, err := acpMcpServers(rows, staticMcpCaps{http: true}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -100,7 +101,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 	// filter here just honors whatever the backend reports.
 	t.Run("v1 agent advertising nothing keeps stdio, drops http", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, err := acpMcpServers(rows, staticMcpCaps{stdio: true}, look)
+		wire, inactive, _, err := acpMcpServers(rows, staticMcpCaps{stdio: true}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -117,7 +118,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 
 	t.Run("agent advertising nothing yields non-nil empty wire", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, err := acpMcpServers([]store.McpServer{stdioRow("s", "/x"), {Transport: "http", Name: "h", URL: "u", Enabled: true}}, staticMcpCaps{}, look)
+		wire, inactive, _, err := acpMcpServers([]store.McpServer{stdioRow("s", "/x"), {Transport: "http", Name: "h", URL: "u", Enabled: true}}, staticMcpCaps{}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -139,7 +140,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 
 	t.Run("injected lookPath", func(t *testing.T) {
-		wire, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "npx")}, staticMcpCaps{stdio: true}, func(cmd string) (string, error) {
+		wire, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "npx")}, staticMcpCaps{stdio: true}, func(cmd string) (string, error) {
 			if cmd != "npx" {
 				t.Errorf("lookPath called with %q, want npx", cmd)
 			}
@@ -163,7 +164,7 @@ func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 		}
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-		wire, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "fakenpx")}, staticMcpCaps{stdio: true}, exec.LookPath)
+		wire, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "fakenpx")}, staticMcpCaps{stdio: true}, exec.LookPath)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -174,10 +175,11 @@ func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 	})
 }
 
-// TestAcpMcpServers_UnresolvableCommandErrorsWithoutLeakingSecrets: a
-// bare command not on PATH fails with an error naming only the server
-// name and command -- never env/args values like SUPERSECRET.
-func TestAcpMcpServers_UnresolvableCommandErrorsWithoutLeakingSecrets(t *testing.T) {
+// TestAcpMcpServers_UnresolvableCommandIsSkippedWithoutLeakingSecrets: a
+// bare command not on PATH is skipped (not an error, so the run goes on),
+// reported naming only the server name and command -- never env/args
+// values like SUPERSECRET -- while the other servers are still mapped.
+func TestAcpMcpServers_UnresolvableCommandIsSkippedWithoutLeakingSecrets(t *testing.T) {
 	t.Parallel()
 	row := store.McpServer{
 		Name:      "playwright",
@@ -187,15 +189,22 @@ func TestAcpMcpServers_UnresolvableCommandErrorsWithoutLeakingSecrets(t *testing
 		Env:       `{"TOKEN":"SUPERSECRET"}`,
 		Enabled:   true,
 	}
-	_, _, err := acpMcpServers([]store.McpServer{row}, staticMcpCaps{stdio: true}, exec.LookPath)
-	if err == nil {
-		t.Fatal("acpMcpServers() error = nil, want unresolvable-command error")
+	good := stdioRow("good", "/abs/tool")
+	wire, inactive, unresolved, err := acpMcpServers([]store.McpServer{row, good}, staticMcpCaps{stdio: true}, exec.LookPath)
+	if err != nil {
+		t.Fatalf("acpMcpServers() error = %v, want the unresolvable command skipped, not failed", err)
 	}
-	if !strings.Contains(err.Error(), "playwright") || !strings.Contains(err.Error(), "no-such-command-xyz") {
-		t.Fatalf("error = %v, want it to name the server and command", err)
+	if len(inactive) != 0 {
+		t.Fatalf("inactive = %v, want none", inactive)
 	}
-	if strings.Contains(err.Error(), "SUPERSECRET") {
-		t.Fatalf("error = %v, leaked a secret", err)
+	if len(wire) != 1 || wire[0].(acp.McpServerStdio).Name != "good" {
+		t.Fatalf("wire = %v, want only the resolvable server", wire)
+	}
+	if len(unresolved) != 1 || !strings.Contains(unresolved[0], "playwright") || !strings.Contains(unresolved[0], "no-such-command-xyz") {
+		t.Fatalf("unresolved = %v, want one entry naming the server and command", unresolved)
+	}
+	if strings.Contains(unresolved[0], "SUPERSECRET") {
+		t.Fatalf("unresolved = %v, leaked a secret", unresolved)
 	}
 }
 
@@ -520,6 +529,222 @@ func TestRunner_RunPrompt_ACPActiveMcpServerSecretNeverLeaksOutsideWire(t *testi
 		if strings.Contains(string(raw), "SUPERSECRET") {
 			t.Fatalf("event leaked a secret: %s", raw)
 		}
+	}
+	if strings.Contains(logs.String(), "SUPERSECRET") {
+		t.Fatalf("log output leaked a secret: %s", logs.String())
+	}
+}
+
+// TestRunner_RunPrompt_ACPUnresolvableMcpCommandDegradesToNote: one stdio
+// server whose command isn't on PATH is skipped with a session note
+// naming it (and its command, never its secrets), and the run still
+// executes with the remaining servers instead of failing.
+func TestRunner_RunPrompt_ACPUnresolvableMcpCommandDegradesToNote(t *testing.T) {
+	r, st, task, dump := newMcpTestEnv(t, "stdio,http")
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "broken", Transport: "stdio", Command: "no-such-command-xyz", Env: `{"TOKEN":"SUPERSECRET"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(broken): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "good", Transport: "stdio", Command: "go", Enabled: true}); err != nil {
+		t.Fatalf("Create(good): %v", err)
+	}
+
+	events := runMcpPrompt(t, r, task)
+
+	var notes []string
+	var done bool
+	for _, e := range events {
+		switch e.Type {
+		case EventTypeSessionNote:
+			notes = append(notes, e.Text)
+		case EventTypeDone:
+			done = true
+		}
+		raw, _ := json.Marshal(e)
+		if strings.Contains(string(raw), "SUPERSECRET") {
+			t.Fatalf("event leaked a secret: %s", raw)
+		}
+	}
+	if !done {
+		t.Fatalf("no done event: the prompt did not run; events %+v", events)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "broken") || !strings.Contains(notes[0], "no-such-command-xyz") {
+		t.Fatalf("session notes = %v, want one naming broken and its command", notes)
+	}
+	got := readMcpDump(t, dump)
+	if strings.Contains(got, "broken") || !strings.Contains(got, `"good"`) {
+		t.Fatalf("dump = %s, want only the good server", got)
+	}
+}
+
+func TestMcpSecretsAndScrub(t *testing.T) {
+	t.Parallel()
+	rows := []store.McpServer{
+		{Name: "pw", Transport: "stdio", Command: "npx", Args: `["-y","--token=ARGSECRET99","POSITIONALSECRET"]`, Env: `{"TOKEN":"ENVSECRET123","N":"1"}`},
+		{Name: "r", Transport: "http", URL: "https://r/mcp", Headers: `{"Authorization":"Bearer HDRSECRET456"}`},
+	}
+	secrets := mcpSecrets(rows)
+	text := "failed: ENVSECRET123 Bearer HDRSECRET456 HDRSECRET456 ARGSECRET99 POSITIONALSECRET -y"
+	got := scrubSecrets(text, secrets)
+	for _, leak := range []string{"ENVSECRET123", "HDRSECRET456", "ARGSECRET99", "POSITIONALSECRET"} {
+		if strings.Contains(got, leak) {
+			t.Fatalf("scrubSecrets() = %q, still contains %q", got, leak)
+		}
+	}
+	if !strings.Contains(got, "-y") {
+		t.Fatalf("scrubSecrets() = %q, want bare flags untouched", got)
+	}
+	if got := scrubSecrets("nothing here", nil); got != "nothing here" {
+		t.Fatalf("scrubSecrets(no secrets) = %q", got)
+	}
+}
+
+// scrubStubACP is an acpBackend whose session setup fails with an error
+// echoing a secret, as an agent that reflects its MCP env back might.
+type scrubStubACP struct {
+	acpBackend
+	loadSupported bool
+	secret        string
+}
+
+func (scrubStubACP) Initialize(context.Context) error { return nil }
+func (scrubStubACP) Close() error                     { return nil }
+func (scrubStubACP) SupportsMcpStdio() bool           { return true }
+func (scrubStubACP) SupportsMcpHttp() bool            { return true }
+func (scrubStubACP) SupportsMcpSSE() bool             { return true }
+func (s scrubStubACP) SupportsLoadSession() bool      { return s.loadSupported }
+func (s scrubStubACP) NewSession(context.Context, string, []any) (string, []acp.ConfigOption, error) {
+	return "", nil, errors.New("new failed with " + s.secret)
+}
+func (s scrubStubACP) LoadSession(context.Context, string, string, []any) ([]acp.ConfigOption, error) {
+	return nil, errors.New("load failed with " + s.secret)
+}
+
+// TestRunner_RunPrompt_ACPSessionErrorsScrubMcpSecrets: a secret an agent
+// echoes in a session/new or session/load error must reach neither the
+// session note, the logs, nor the returned run error.
+func TestRunner_RunPrompt_ACPSessionErrorsScrubMcpSecrets(t *testing.T) {
+	const secret = "SUPERSECRET-ENV"
+	for _, resume := range []bool{false, true} {
+		name := "session/new"
+		if resume {
+			name = "session/load then session/new"
+		}
+		t.Run(name, func(t *testing.T) {
+			st, wm, _ := newTestStoreAndManager(t)
+			task := newTestTaskUnder(t, wm)
+			if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Env: `{"TOKEN":"` + secret + `"}`, Enabled: true}); err != nil {
+				t.Fatalf("Create(): %v", err)
+			}
+			r := New(wm, WithMcpServers(mcpservers.New(st)))
+			r.newACPClient = func([]string, ...acp.Option) (acpBackend, error) {
+				return scrubStubACP{loadSupported: resume, secret: secret}, nil
+			}
+			if resume {
+				r.sessionStore.Set(task.ID, SessionHandle{Provider: ProviderGLM, SessionID: "old"})
+			}
+
+			var logs bytes.Buffer
+			log.SetOutput(&logs)
+			t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+			events := make(chan Event)
+			errCh := make(chan error, 1)
+			go func() {
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+			}()
+			got := drainEvents(events)
+			err := <-errCh
+			if err == nil || !strings.Contains(err.Error(), "new failed") {
+				t.Fatalf("RunPrompt() error = %v, want the new-session failure", err)
+			}
+			if strings.Contains(err.Error(), secret) {
+				t.Fatalf("run error leaked a secret: %v", err)
+			}
+			for _, e := range got {
+				raw, _ := json.Marshal(e)
+				if strings.Contains(string(raw), secret) {
+					t.Fatalf("event leaked a secret: %s", raw)
+				}
+			}
+			if strings.Contains(logs.String(), secret) {
+				t.Fatalf("log leaked a secret: %s", logs.String())
+			}
+			if resume {
+				var noted bool
+				for _, e := range got {
+					noted = noted || (e.Type == EventTypeSessionNote && strings.Contains(e.Text, "load failed"))
+				}
+				if !noted {
+					t.Fatalf("events %+v, want a resume-failure note carrying the scrubbed error", got)
+				}
+			}
+		})
+	}
+}
+
+func TestClaudeFailedMcpServers(t *testing.T) {
+	t.Parallel()
+	raw := json.RawMessage(`{"type":"system","subtype":"init","mcp_servers":[{"name":"b","status":"failed"},{"name":"ok","status":"connected"},{"name":"a","status":"failed"},{"name":"auth","status":"needs-auth"}]}`)
+	got := claudeFailedMcpServers(raw)
+	if strings.Join(got, ",") != "a,b" {
+		t.Fatalf("claudeFailedMcpServers() = %v, want [a b]", got)
+	}
+	if got := claudeFailedMcpServers(json.RawMessage(`{"type":"system"}`)); got != nil {
+		t.Fatalf("claudeFailedMcpServers(no mcp_servers) = %v, want nil", got)
+	}
+	if got := claudeFailedMcpServers(json.RawMessage(`not json`)); got != nil {
+		t.Fatalf("claudeFailedMcpServers(bad json) = %v, want nil", got)
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets:
+// the CLI's init message reports a failed server; the run surfaces its
+// name as a session note, and neither events nor logs carry the secret
+// seeded into the servers' env/headers (it legitimately reaches only the
+// CLI's --mcp-config argv).
+func TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets(t *testing.T) {
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("mcp-init"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	r := claudeNativeRunner(t, wm)
+	WithMcpServers(mcpservers.New(st))(r)
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Env: `{"TOKEN":"SUPERSECRET-ENV"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "broken", Transport: "http", URL: "https://b/mcp", Headers: `{"Authorization":"Bearer SUPERSECRET-HDR"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(broken): %v", err)
+	}
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	var notes []string
+	for _, e := range got {
+		if e.Type == EventTypeSessionNote {
+			notes = append(notes, e.Text)
+		}
+		raw, _ := json.Marshal(e)
+		if strings.Contains(string(raw), "SUPERSECRET") {
+			t.Fatalf("event leaked a secret: %s", raw)
+		}
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "broken") || strings.Contains(notes[0], "pw") {
+		t.Fatalf("session notes = %v, want one naming only the failed server", notes)
 	}
 	if strings.Contains(logs.String(), "SUPERSECRET") {
 		t.Fatalf("log output leaked a secret: %s", logs.String())

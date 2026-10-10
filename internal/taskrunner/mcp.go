@@ -35,10 +35,10 @@ type mcpCapableBackend interface {
 // acpMcpServers maps enabled store rows to ACP wire entries, dropping
 // (and naming in inactive) each server whose transport the agent doesn't
 // advertise. lookPath resolves a stdio server's bare command to an
-// absolute path; a command that can't be resolved fails with an error
-// naming only the server name and command -- never env/headers/args
-// values, which may carry secrets.
-func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath func(string) (string, error)) (wire []any, inactive []string, err error) {
+// absolute path; a command that can't be resolved is skipped (degrade,
+// don't fail the run) and reported in unresolved as `name (command "x")`
+// -- never env/headers/args values, which may carry secrets.
+func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath func(string) (string, error)) (wire []any, inactive, unresolved []string, err error) {
 	wire = []any{}
 	for _, row := range rows {
 		switch row.Transport {
@@ -50,22 +50,22 @@ func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath fu
 			command := row.Command
 			if !filepath.IsAbs(command) {
 				resolved, err := lookPath(command)
-				if err != nil {
-					return nil, inactive, fmt.Errorf("mcp server %q: command %q not found in PATH", row.Name, row.Command)
+				if err == nil {
+					resolved, err = filepath.Abs(resolved)
 				}
-				resolved, err = filepath.Abs(resolved)
 				if err != nil {
-					return nil, inactive, fmt.Errorf("mcp server %q: command %q not found in PATH", row.Name, row.Command)
+					unresolved = append(unresolved, fmt.Sprintf("%s (command %q not found in PATH)", row.Name, row.Command))
+					continue
 				}
 				command = resolved
 			}
 			var args []string
 			if err := json.Unmarshal([]byte(row.Args), &args); err != nil && strings.TrimSpace(row.Args) != "" {
-				return nil, inactive, fmt.Errorf("mcp server %q: args: %w", row.Name, err)
+				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: args: %w", row.Name, err)
 			}
 			env, err := nameValues(row.Env)
 			if err != nil {
-				return nil, inactive, fmt.Errorf("mcp server %q: env: %w", row.Name, err)
+				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: env: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerStdio{Type: "stdio", Name: row.Name, Command: command, Args: args, Env: env})
 		case "http":
@@ -75,7 +75,7 @@ func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath fu
 			}
 			headers, err := nameValues(row.Headers)
 			if err != nil {
-				return nil, inactive, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
+				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerHttp{Type: "http", Name: row.Name, URL: row.URL, Headers: headers})
 		case "sse":
@@ -85,12 +85,12 @@ func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath fu
 			}
 			headers, err := nameValues(row.Headers)
 			if err != nil {
-				return nil, inactive, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
+				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerHttp{Type: "sse", Name: row.Name, URL: row.URL, Headers: headers})
 		}
 	}
-	return wire, inactive, nil
+	return wire, inactive, unresolved, nil
 }
 
 // nameValues decodes a row's env/headers JSON object into []NameValue
@@ -177,4 +177,118 @@ func (r *Runner) mcpServersForWorkspace(workspaceID int64) ([]store.McpServer, e
 		return nil, err
 	}
 	return rows, nil
+}
+
+// redactedPlaceholder replaces a known MCP secret inside scrubbed text.
+const redactedPlaceholder = "[redacted]"
+
+// minSecretLen is the shortest value scrubbed: shorter ones ("1", "on")
+// would mangle ordinary text and are not meaningfully secret.
+const minSecretLen = 4
+
+// mcpSecrets collects the values in rows that may be secret -- env and
+// header values, plus stdio args that aren't flags (for `--k=v` flags,
+// just the `v`; positional args are scrubbed too, so a package name there
+// may be over-redacted in error text, which is harmless) -- so agent-originated error text can be scrubbed of them
+// before it reaches a session note, log line, or run error. A header
+// value like "Bearer tok" also contributes its last word, since an agent
+// may echo just the token.
+func mcpSecrets(rows []store.McpServer) []string {
+	var out []string
+	add := func(v string) {
+		if len(v) >= minSecretLen {
+			out = append(out, v)
+		}
+	}
+	addMap := func(objJSON string) {
+		m := map[string]string{}
+		if strings.TrimSpace(objJSON) == "" || json.Unmarshal([]byte(objJSON), &m) != nil {
+			return
+		}
+		for _, v := range m {
+			add(v)
+			if f := strings.Fields(v); len(f) > 1 {
+				add(f[len(f)-1])
+			}
+		}
+	}
+	for _, row := range rows {
+		addMap(row.Env)
+		addMap(row.Headers)
+		var args []string
+		if json.Unmarshal([]byte(row.Args), &args) != nil {
+			continue
+		}
+		for _, a := range args {
+			if strings.HasPrefix(a, "-") {
+				if _, v, ok := strings.Cut(a, "="); ok {
+					add(v)
+				}
+				continue
+			}
+			add(a)
+		}
+	}
+	return out
+}
+
+// scrubSecrets replaces every occurrence of each secret in s with
+// redactedPlaceholder. Longer secrets go first so one that contains
+// another is replaced whole.
+func scrubSecrets(s string, secrets []string) string {
+	if len(secrets) == 0 {
+		return s
+	}
+	sorted := append([]string(nil), secrets...)
+	sort.Slice(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
+	for _, sec := range sorted {
+		s = strings.ReplaceAll(s, sec, redactedPlaceholder)
+	}
+	return s
+}
+
+// scrubbedError is err with its message scrubbed of secrets; it still
+// unwraps to err so errors.Is/As keep working.
+type scrubbedError struct {
+	msg string
+	err error
+}
+
+func (e *scrubbedError) Error() string { return e.msg }
+func (e *scrubbedError) Unwrap() error { return e.err }
+
+// scrubError returns err unchanged when it carries no secret, else a
+// scrubbedError. nil stays nil.
+func scrubError(err error, secrets []string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if scrubbed := scrubSecrets(msg, secrets); scrubbed != msg {
+		return &scrubbedError{msg: scrubbed, err: err}
+	}
+	return err
+}
+
+// claudeFailedMcpServers returns the names of MCP servers a Claude CLI
+// "init" system message reports with status "failed" (the CLI tolerates
+// a failing server and carries on without it). Names only, sorted.
+func claudeFailedMcpServers(raw json.RawMessage) []string {
+	var w struct {
+		McpServers []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"mcp_servers"`
+	}
+	if json.Unmarshal(raw, &w) != nil {
+		return nil
+	}
+	var failed []string
+	for _, s := range w.McpServers {
+		if s.Status == "failed" && s.Name != "" {
+			failed = append(failed, s.Name)
+		}
+	}
+	sort.Strings(failed)
+	return failed
 }

@@ -341,9 +341,16 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
-	mcpWire, inactive, err := acpMcpServers(rows, client, r.lookPathFunc())
+	mcpWire, inactive, unresolved, err := acpMcpServers(rows, client, r.lookPathFunc())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
+	}
+	if len(unresolved) > 0 {
+		// One unresolvable server must not block the whole run: skip it
+		// and tell the user, as for a capability-dropped server.
+		r.sendSessionNote(ctx, events, fmt.Sprintf(
+			"MCP servers configured but not active for %s (skipped): %s",
+			provider, strings.Join(unresolved, ", ")))
 	}
 	if len(inactive) > 0 {
 		r.sendSessionNote(ctx, events, fmt.Sprintf(
@@ -351,9 +358,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 			provider, strings.Join(inactive, ", ")))
 	}
 
-	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, events)
+	secrets := mcpSecrets(rows)
+	sessionID, configOptions, err := r.newOrResumeACPSession(ctx, chatID, provider, client, worktreePath, mcpWire, secrets, events)
 	if err != nil {
-		return fmt.Errorf("taskrunner: %s new session: %w", provider, err)
+		return fmt.Errorf("taskrunner: %s new session: %w", provider, scrubError(err, secrets))
 	}
 	// Stored as soon as the session exists, not only after a successful
 	// prompt: a cancelled turn (ctx cancellation aborting Prompt) must not
@@ -405,7 +413,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	stopReason, err := client.Prompt(ctx, sessionID, prompt, updates)
 	<-forwardDone
 	if err != nil {
-		return fmt.Errorf("taskrunner: %s prompt: %w", provider, err)
+		return fmt.Errorf("taskrunner: %s prompt: %w", provider, scrubError(err, secrets))
 	}
 	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: sessionID})
 
@@ -434,7 +442,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 // The stored handle is keyed by chatID, not taskID: a chat's resumable
 // session is its own, distinct from any sibling chat of the same task (see
 // SessionStore's doc comment).
-func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, mcpServers []any, events chan<- Event) (string, []acp.ConfigOption, error) {
+//
+// secrets (see mcpSecrets) are scrubbed from agent error text placed in a
+// session note: an agent may echo configured MCP env/header values back.
+func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provider Provider, client acpBackend, worktreePath string, mcpServers []any, secrets []string, events chan<- Event) (string, []acp.ConfigOption, error) {
 	handle, ok := r.sessionStore.Get(chatID)
 	if !ok || handle.Provider != provider || handle.SessionID == "" {
 		return client.NewSession(ctx, worktreePath, mcpServers)
@@ -464,7 +475,7 @@ func (r *Runner) newOrResumeACPSession(ctx context.Context, chatID int64, provid
 
 	r.sendSessionNote(ctx, events, fmt.Sprintf(
 		"could not resume %s session %s via %s (%v); starting a new session instead",
-		provider, handle.SessionID, method, err))
+		provider, handle.SessionID, method, scrubError(err, secrets)))
 	return client.NewSession(ctx, worktreePath, mcpServers)
 }
 
@@ -657,6 +668,12 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 				}
 				if json.Unmarshal(sys.Raw, &w) == nil && w.SessionID != "" {
 					r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: w.SessionID})
+				}
+				// The CLI tolerates a failing MCP server and runs on
+				// without it; surface that, naming servers only.
+				if failed := claudeFailedMcpServers(sys.Raw); len(failed) > 0 {
+					r.sendSessionNote(ctx, events, fmt.Sprintf(
+						"MCP servers failed to start for claude-native: %s", strings.Join(failed, ", ")))
 				}
 			}
 			for _, e := range claudeEvents(msg) {

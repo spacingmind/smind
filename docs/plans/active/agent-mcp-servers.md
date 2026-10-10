@@ -99,7 +99,8 @@ question is unresolved.
 - **`npx` resolution (ACP path).** A stdio server configured with
   `command: "npx"`: the ACP wire payload's `command` field is an absolute
   path (`exec.LookPath("npx")`'s result), not the literal string `"npx"`;
-  an unresolvable command fails session setup with a clear error.
+  an unresolvable command is skipped (the run continues) and surfaced as a
+  session note naming the server and command, never its secrets.
 - **Codex (deferred out of v1).** A Codex run with MCP servers configured
   starts normally and reports them as unsupported for the provider; no
   servers reach Codex.
@@ -150,8 +151,8 @@ accepted):
    `claudecode.WithMCPConfig(json)`, built from the same resolved rows as
    step 3. Small, depends on step 1 only.
 5. [x] **`npx`/absolute-path resolution.** `exec.LookPath` resolution at the
-   ACP mapping layer (step 3); unresolvable command -> clear session-setup
-   error. Small.
+   ACP mapping layer (step 3); unresolvable command -> skipped with a clear
+   session note (review fix: it no longer fails the run). Small.
 6. ~~Codex mechanism~~ -- **deferred out of v1** (ADR-0018 resolved
    decision 1). Codex runs report configured servers as unsupported.
 7. **UI.** Settings section for CRUD (mirroring Accounts/Profiles
@@ -250,7 +251,7 @@ accepted):
   (literal `[]`, never `null`), `TestClient_McpCapabilityFlags` (real GLM v1 shape, v2 object
   shape, malformed). `internal/taskrunner/mcp_test.go` -- `TestAcpMcpServers_MapsStdioAndHttpWireShape`,
   `..._DropsTransportAgentDoesNotAdvertise`, `..._ResolvesBareCommandToAbsolutePath`,
-  `..._UnresolvableCommandErrorsWithoutLeakingSecrets`, and end to end through the real
+  `..._UnresolvableCommandIsSkippedWithoutLeakingSecrets`, `TestRunner_RunPrompt_ACPUnresolvableMcpCommandDegradesToNote`, and end to end through the real
   `acp.Client` + fakeagent: `TestRunner_RunPrompt_ACPSendsConfiguredMcpServers` (absolute
   command; other-workspace server absent), `..._ACPNoMcpWhenNoneConfiguredIsEmptyArray`
   (regression guard), `..._ACPInactiveMcpServerEmitsSessionNote`, `..._ACPResumePathCarriesMcpServers`.
@@ -280,3 +281,17 @@ accepted):
   run_events -- and from daemon log output). Not covered: Claude-native argv exposure above,
   and secrets echoed back by a misbehaving agent in its own error text.
 - Step 6 (Codex) remains deferred out of v1 per ADR-0018 resolved decision 1.
+
+### Review fixes (PR #251)
+
+- An unresolvable stdio command degrades to a session note instead of failing
+  the run (a deliberate refinement of ADR-0018 resolved decision 2's "fails the
+  session setup"; the ADR text is unchanged and may want a follow-up edit).
+- Claude-native: failed servers reported in the CLI's `init` message
+  (`mcp_servers[].status == "failed"`) surface as a session note (names only);
+  `TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets`
+  also audits events/logs for secrets.
+- Known env/header/arg values are scrubbed from agent error text in session
+  notes and run errors (`TestRunner_RunPrompt_ACPSessionErrorsScrubMcpSecrets`).
+- `internal/acp` puts the agent in its own process group (unix) and kills the
+  group on close timeout (`TestConnClose_KillsGrandchildrenOnTimeout`).
