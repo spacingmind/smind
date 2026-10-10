@@ -303,9 +303,53 @@ func runTurnScript(cwd string) {
 		return
 	}
 
+	if scenario == "token-usage" {
+		// Two thread/tokenUsage/updated notifications in one turn: a client
+		// must keep the LAST tokenUsage.last, not a sum and not total.
+		tokenUsage(map[string]any{"inputTokens": 10, "outputTokens": 2, "totalTokens": 12}, 1000, 200000)
+		delta("Hello, ")
+		tokenUsage(map[string]any{
+			"inputTokens": 30, "cachedInputTokens": 20, "cacheWriteInputTokens": 5,
+			"outputTokens": 7, "reasoningOutputTokens": 3, "totalTokens": 37,
+		}, 5000, 200000)
+		delta("world!")
+		turnCompleted("completed")
+		return
+	}
+
+	if scenario == "token-usage-partial" {
+		// Only some fields on the wire and no modelContextWindow: the rest
+		// must stay unreported.
+		notify("thread/tokenUsage/updated", map[string]any{
+			"threadId": threadID,
+			"turnId":   turnID,
+			"tokenUsage": map[string]any{
+				"last":  map[string]any{"inputTokens": 4, "outputTokens": 1},
+				"total": map[string]any{"inputTokens": 4, "outputTokens": 1},
+			},
+		})
+		delta("Hello, ")
+		turnCompleted("completed")
+		return
+	}
+
 	delta("Hello, ")
 	delta("world!")
 	turnCompleted("completed")
+}
+
+// tokenUsage sends a thread/tokenUsage/updated notification whose last is
+// last and whose total is the (deliberately different) running total.
+func tokenUsage(last map[string]any, total, window int) {
+	notify("thread/tokenUsage/updated", map[string]any{
+		"threadId": threadID,
+		"turnId":   turnID,
+		"tokenUsage": map[string]any{
+			"last":               last,
+			"total":              map[string]any{"inputTokens": total, "totalTokens": total},
+			"modelContextWindow": window,
+		},
+	})
 }
 
 // recordThreadPolicy writes the approvalPolicy/sandbox a thread/start or

@@ -30,6 +30,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -519,7 +520,63 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	if strings.HasPrefix(scenario, "usage ") {
+		runUsageScript(promptMsg, scenario)
+		return
+	}
+
 	sessionUpdate("Hello, ")
 	sessionUpdate("world!")
 	respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+}
+
+// runUsageScript scripts ACP usage reporting from a scenario line of
+// space-separated key=value pairs: in/out/thought/cacheread/cachewrite are
+// PromptResponse.usage's session-cumulative counters (omit in and out to
+// send no usage at all), used/size/cost[/currency] make the turn send
+// usage_update notifications -- a decoy first, so a client must keep the
+// last one. Keys left out stay absent on the wire.
+func runUsageScript(promptMsg message, scenario string) {
+	kv := map[string]string{}
+	for _, f := range strings.Fields(scenario)[1:] {
+		k, v, _ := strings.Cut(f, "=")
+		kv[k] = v
+	}
+	num := func(k string) (int64, bool) {
+		v, err := strconv.ParseInt(kv[k], 10, 64)
+		return v, err == nil
+	}
+
+	sessionUpdate("Hello, ")
+	if size, ok := num("size"); ok {
+		used, _ := num("used")
+		update := func(used int64) map[string]any {
+			u := map[string]any{"sessionUpdate": "usage_update", "used": used, "size": size}
+			if cost, err := strconv.ParseFloat(kv["cost"], 64); err == nil {
+				currency := kv["currency"]
+				if currency == "" {
+					currency = "USD"
+				}
+				u["cost"] = map[string]any{"amount": cost, "currency": currency}
+			}
+			return u
+		}
+		notify("session/update", map[string]any{"sessionId": sessionID, "update": update(1)})
+		notify("session/update", map[string]any{"sessionId": sessionID, "update": update(used)})
+	}
+
+	result := map[string]any{"stopReason": "end_turn"}
+	if _, ok := num("in"); ok {
+		usage := map[string]any{}
+		for key, wire := range map[string]string{
+			"in": "inputTokens", "out": "outputTokens", "thought": "thoughtTokens",
+			"cacheread": "cachedReadTokens", "cachewrite": "cachedWriteTokens",
+		} {
+			if v, ok := num(key); ok {
+				usage[wire] = v
+			}
+		}
+		result["usage"] = usage
+	}
+	respond(promptMsg.ID, result)
 }

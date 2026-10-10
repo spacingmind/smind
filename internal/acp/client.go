@@ -268,7 +268,46 @@ type promptParams struct {
 }
 
 type promptResult struct {
-	StopReason string `json:"stopReason"`
+	StopReason string       `json:"stopReason"`
+	Usage      *PromptUsage `json:"usage"`
+}
+
+// PromptUsage is PromptResponse.usage (ACP's unstable end-of-turn token
+// usage). The counters are cumulative for the session, not per turn. Every
+// field is a pointer so a field the agent left out stays nil.
+type PromptUsage struct {
+	InputTokens       *int64 `json:"inputTokens"`
+	OutputTokens      *int64 `json:"outputTokens"`
+	ThoughtTokens     *int64 `json:"thoughtTokens"`
+	CachedReadTokens  *int64 `json:"cachedReadTokens"`
+	CachedWriteTokens *int64 `json:"cachedWriteTokens"`
+	TotalTokens       *int64 `json:"totalTokens"`
+}
+
+// SessionUpdateUsageUpdate is the agent reporting context used/size and
+// optionally cumulative session cost (ACP's UsageUpdate).
+const SessionUpdateUsageUpdate = "usage_update"
+
+// UsageUpdate is a usage_update session notification's payload. Used and
+// Size are the context window's current fill and total; Cost, if present,
+// is cumulative for the session.
+type UsageUpdate struct {
+	Used *int64 `json:"used"`
+	Size *int64 `json:"size"`
+	Cost *struct {
+		Amount   *float64 `json:"amount"`
+		Currency string   `json:"currency"`
+	} `json:"cost"`
+}
+
+// ParseUsageUpdate decodes u as a usage_update, reporting false for any
+// other update type or an undecodable payload.
+func ParseUsageUpdate(u SessionUpdate) (UsageUpdate, bool) {
+	var uu UsageUpdate
+	if u.Type != SessionUpdateUsageUpdate || json.Unmarshal(u.Raw, &uu) != nil {
+		return UsageUpdate{}, false
+	}
+	return uu, true
 }
 
 // Client is an ACP client: it spawns an agent subprocess, performs the
@@ -283,6 +322,7 @@ type Client struct {
 	sessionCwd   map[string]string
 	sessionModes map[string]SessionModeState
 	updateSubs   map[string]*updateSub
+	promptUsage  map[string]PromptUsage
 
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
@@ -314,6 +354,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		sessionCwd:   make(map[string]string),
 		sessionModes: make(map[string]SessionModeState),
 		updateSubs:   make(map[string]*updateSub),
+		promptUsage:  make(map[string]PromptUsage),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -533,6 +574,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 	sub := &updateSub{ch: updates}
 	c.mu.Lock()
 	c.updateSubs[sessionID] = sub
+	delete(c.promptUsage, sessionID)
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -554,7 +596,21 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return "", fmt.Errorf("acp: session/prompt: decode response: %w", err)
 	}
+	if res.Usage != nil {
+		c.mu.Lock()
+		c.promptUsage[sessionID] = *res.Usage
+		c.mu.Unlock()
+	}
 	return res.StopReason, nil
+}
+
+// PromptUsage returns the PromptResponse.usage of sessionID's latest Prompt
+// (session-cumulative), and false if that response carried none.
+func (c *Client) PromptUsage(sessionID string) (PromptUsage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, ok := c.promptUsage[sessionID]
+	return u, ok
 }
 
 func (c *Client) handleSessionUpdate(raw json.RawMessage) {
