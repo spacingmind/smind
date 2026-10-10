@@ -195,3 +195,53 @@ func TestRunAccountRemoveBadArgs(t *testing.T) {
 		t.Fatalf("run(account rm not-a-number) = %d, want 2", code)
 	}
 }
+
+func TestRunAccountAddForwardsModelsFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	registry := accounts.New(s)
+	token, err := auth.LoadOrCreateToken(home)
+	if err != nil {
+		t.Fatalf("LoadOrCreateToken() error = %v", err)
+	}
+	handler, err := wsapi.Handler(workspace.New(s), registry, nil, s, token)
+	if err != nil {
+		t.Fatalf("wsapi.Handler() error = %v", err)
+	}
+	srv := httptest.NewServer(handler)
+	t.Cleanup(srv.Close)
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("server:\n  port: "+u.Port()+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdin := withStdin(t, "sk-test-glm\n")
+	defer stdin()
+
+	if code := run([]string{"account", "add", "--models", "glm-*,claude-3-?", "anthropic", "glm"}); code != 0 {
+		t.Fatalf("run(account add --models) = %d, want 0", code)
+	}
+
+	list, err := registry.List()
+	if err != nil {
+		t.Fatalf("registry.List() error = %v", err)
+	}
+	if len(list) != 1 || len(list[0].Models) != 2 || list[0].Models[0] != "glm-*" || list[0].Models[1] != "claude-3-?" {
+		t.Fatalf("stored accounts = %+v, want models [glm-* claude-3-?]", list)
+	}
+
+	stdin2 := withStdin(t, "sk-test-bad\n")
+	defer stdin2()
+	if code := run([]string{"account", "add", "--models", "[bad", "anthropic", "bad"}); code == 0 {
+		t.Fatal("run(account add --models [bad) = 0, want failure for bad glob")
+	}
+}

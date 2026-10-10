@@ -24,9 +24,7 @@ const (
 	providerAnthropic = "anthropic"
 	providerOpenAI    = "openai"
 
-	anthropicMessagesURL     = "https://api.anthropic.com/v1/messages"
-	openaiChatCompletionsURL = "https://api.openai.com/v1/chat/completions"
-	defaultProxySessionKey   = "default"
+	defaultProxySessionKey = "default"
 
 	// maxLoggedErrorLen bounds request_log.error, per M1's "error (short
 	// message, never a body)" column: these are smind's own wrapped error
@@ -126,17 +124,29 @@ func (p *proxy) Close() {
 }
 
 func (p *proxy) handleAnthropic(w http.ResponseWriter, r *http.Request) {
-	p.serve(w, r, providerAnthropic, anthropicMessagesURL, p.anthropicClient, p.anthropicRefresher)
+	p.serve(w, r, providerAnthropic, false, p.anthropicClient, p.anthropicRefresher)
+}
+
+// handleAnthropicCountTokens serves POST /v1/messages/count_tokens: routed
+// and forwarded like /v1/messages (model-aware routing included) but
+// unmetered -- no request_log row, no usage extraction.
+func (p *proxy) handleAnthropicCountTokens(w http.ResponseWriter, r *http.Request) {
+	p.serve(w, r, providerAnthropic, true, p.anthropicClient, p.anthropicRefresher)
 }
 
 func (p *proxy) handleOpenAI(w http.ResponseWriter, r *http.Request) {
-	p.serve(w, r, providerOpenAI, openaiChatCompletionsURL, p.openaiClient, p.openaiRefresher)
+	p.serve(w, r, providerOpenAI, false, p.openaiClient, p.openaiRefresher)
 }
 
 // serve routes r to an account for provider and forwards it over client,
-// injecting that account's credentials. The upstream is
-// providerDefaultURL unless the routed account's api_key credential
-// carries a base_url override (see accounts.ValidateBaseURL).
+// injecting that account's credentials. The upstream is the routed
+// account's api_key base_url (else the provider default base) joined with
+// the incoming path -- see resolveUpstreamURL. Candidates are narrowed by
+// the request's model against accounts' model globs first (ADR-0020 §5):
+// explicit glob matches, else accounts with no list, else a 400
+// model_not_found.
+//
+// countTokens requests are unmetered: no request_log row is written.
 //
 // Errors that mean smind itself can't route the request (no accounts, all
 // exhausted, refresh failure) are reported as 503: they're a temporary
@@ -150,7 +160,7 @@ func (p *proxy) handleOpenAI(w http.ResponseWriter, r *http.Request) {
 // every route-failure exit (nothing was ever routed to), and set for
 // every exit from the point an account was actually chosen onward,
 // including an upstream-side failure.
-func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, providerDefaultURL string, client *http.Client, refresher accounts.OAuthRefresher) {
+func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, countTokens bool, client *http.Client, refresher accounts.OAuthRefresher) {
 	ctx := r.Context()
 	start := time.Now()
 
@@ -159,12 +169,17 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 		Provider:   provider,
 		SessionKey: sessionKey(r),
 	}
+	enqueue := func(row store.RequestLog) {
+		if !countTokens {
+			p.reqLog.enqueue(row)
+		}
+	}
 	routeError := func(status int, err error) {
 		row.Status = status
 		row.Outcome = store.RequestLogOutcomeRouteError
 		row.Error = truncatedError(err)
 		row.DurationMs = time.Since(start).Milliseconds()
-		p.reqLog.enqueue(row)
+		enqueue(row)
 		writeProviderError(w, provider, status, err.Error())
 	}
 
@@ -184,14 +199,25 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 		return
 	}
 
-	var candidateIDs []int64
+	var providerAccounts []accounts.Account
 	for _, a := range all {
 		if a.Provider == provider {
-			candidateIDs = append(candidateIDs, a.ID)
+			providerAccounts = append(providerAccounts, a)
 		}
 	}
-	if len(candidateIDs) == 0 {
+	if len(providerAccounts) == 0 {
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("no %s accounts configured", provider))
+		return
+	}
+	candidateIDs := selectModelCandidates(providerAccounts, meta.Model)
+	if len(candidateIDs) == 0 {
+		err := fmt.Errorf("no %s account serves model %q", provider, meta.Model)
+		row.Status = http.StatusBadRequest
+		row.Outcome = store.RequestLogOutcomeRouteError
+		row.Error = truncatedError(err)
+		row.DurationMs = time.Since(start).Milliseconds()
+		enqueue(row)
+		writeProviderModelNotFound(w, provider, err.Error())
 		return
 	}
 
@@ -205,10 +231,11 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 		return
 	}
 
-	upstreamURL := providerDefaultURL
-	if account.APIKey != nil && account.APIKey.BaseURL != "" {
-		upstreamURL = account.APIKey.BaseURL
+	var base string
+	if account.APIKey != nil {
+		base = account.APIKey.BaseURL
 	}
+	upstreamURL := resolveUpstreamURL(provider, base, r.URL.Path)
 
 	outReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, forwardBody)
 	if err != nil {
@@ -234,7 +261,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 		row.Outcome = store.RequestLogOutcomeUpstreamError
 		row.Error = truncatedError(fmt.Errorf("upstream request: %w", err))
 		row.DurationMs = time.Since(start).Milliseconds()
-		p.reqLog.enqueue(row)
+		enqueue(row)
 		writeProviderError(w, provider, http.StatusBadGateway, fmt.Sprintf("upstream request: %v", err))
 		return
 	}
@@ -243,13 +270,19 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 	upstreamStatus := resp.StatusCode
 	row.UpstreamStatus = &upstreamStatus
 
-	capture := newResponseCapture(provider, resp)
+	var capture *responseCapture
+	if !countTokens {
+		capture = newResponseCapture(provider, resp)
+	}
 	ttfb, ttfbOK, copyErr := copyResponse(w, resp, capture)
 	if ttfbOK {
 		ms := ttfb.Milliseconds()
 		row.TTFBMs = &ms
 	}
-	usage := capture.finalUsage()
+	usage := &tokenUsage{}
+	if capture != nil {
+		usage = capture.finalUsage()
+	}
 	row.InputTokens = usage.Input
 	row.OutputTokens = usage.Output
 	row.CacheReadTokens = usage.CacheRead
@@ -275,7 +308,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 			row.Outcome = store.RequestLogOutcomeAborted
 		}
 		row.Error = truncatedError(copyErr)
-		p.reqLog.enqueue(row)
+		enqueue(row)
 		log.Printf("proxy: warn: upstream stream for %s account %d broke mid-response, aborting downstream: %v", provider, account.ID, copyErr)
 		panic(http.ErrAbortHandler)
 	}
@@ -285,7 +318,27 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider, provider
 	} else {
 		row.Outcome = store.RequestLogOutcomeOK
 	}
-	p.reqLog.enqueue(row)
+	enqueue(row)
+}
+
+// selectModelCandidates narrows providerAccounts to the account ids that may
+// serve model (ADR-0020 §5): accounts whose globs explicitly match; else
+// accounts with no list; else none. An empty model matches only no-list
+// accounts.
+func selectModelCandidates(providerAccounts []accounts.Account, model string) []int64 {
+	var matched, unlisted []int64
+	for _, a := range providerAccounts {
+		switch {
+		case len(a.Models) == 0:
+			unlisted = append(unlisted, a.ID)
+		case a.MatchesModel(model):
+			matched = append(matched, a.ID)
+		}
+	}
+	if len(matched) > 0 {
+		return matched
+	}
+	return unlisted
 }
 
 // readRequestBody buffers up to requestBodyParseCap bytes of r's body to
@@ -499,6 +552,31 @@ func (fw flushWriter) Write(p []byte) (int, error) {
 		fw.f.Flush()
 	}
 	return n, err
+}
+
+// writeProviderModelNotFound writes a 400 shaped like the provider's own
+// unknown-model error (Anthropic not_found_error; OpenAI code
+// model_not_found).
+func writeProviderModelNotFound(w http.ResponseWriter, provider string, message string) {
+	switch provider {
+	case providerAnthropic:
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "not_found_error",
+				"message": message,
+			},
+		})
+	case providerOpenAI:
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error": map[string]any{
+				"message": message,
+				"type":    "invalid_request_error",
+				"param":   "model",
+				"code":    "model_not_found",
+			},
+		})
+	}
 }
 
 // writeProviderError writes a JSON error shaped like the given provider's

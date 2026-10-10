@@ -183,3 +183,36 @@ func TestStore_DeleteAccountMissing(t *testing.T) {
 		t.Fatalf("DeleteAccount(999) error = %v, want sql.ErrNoRows", err)
 	}
 }
+
+func TestStore_AccountModelsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	plain := newTestAccount(t, s, "anthropic", "plain")
+	if got, _ := s.GetAccount(plain.ID); got.Models != "" {
+		t.Fatalf("new account Models = %q, want none", got.Models)
+	}
+
+	created, err := s.CreateAccount(Account{
+		Provider: "anthropic", Label: "glm", CredentialType: "api_key",
+		CredentialData: `{"key":"k"}`, Models: `["glm-*"]`,
+	})
+	if err != nil {
+		t.Fatalf("CreateAccount() error = %v", err)
+	}
+	if got, _ := s.GetAccount(created.ID); got.Models != `["glm-*"]` {
+		t.Fatalf("GetAccount() Models = %q", got.Models)
+	}
+
+	updated, err := s.SetAccountModels(plain.ID, `["claude-*"]`)
+	if err != nil || updated.Models != `["claude-*"]` {
+		t.Fatalf("SetAccountModels() = %+v, %v", updated, err)
+	}
+	cleared, err := s.SetAccountModels(plain.ID, "")
+	if err != nil || cleared.Models != "" {
+		t.Fatalf("SetAccountModels(clear) = %+v, %v", cleared, err)
+	}
+	if _, err := s.SetAccountModels(9999, `["x"]`); err == nil {
+		t.Fatal("SetAccountModels(missing id) succeeded, want not-found")
+	}
+}

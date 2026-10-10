@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     credential_type TEXT NOT NULL,
     credential_data TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    -- JSON array of path.Match globs this account serves (ADR-0020 §5);
+    -- NULL = no list.
+    models TEXT
 );
 
 CREATE TABLE IF NOT EXISTS routing_decisions (

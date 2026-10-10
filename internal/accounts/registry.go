@@ -17,10 +17,13 @@ type Account struct {
 	Provider       string
 	Label          string
 	CredentialType string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	APIKey         *APIKeyCredential
-	OAuth          *OAuthCredential
+	// Models are path.Match globs of the models this account serves
+	// (empty = no list); see MatchesModel.
+	Models    []string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	APIKey    *APIKeyCredential
+	OAuth     *OAuthCredential
 }
 
 // Notifier receives account lifecycle notifications (ADR-0015): update
@@ -113,7 +116,17 @@ func (r *Registry) AddOAuth(provider, label string, cred OAuthCredential) (store
 // account.updateCredential go through that one parser, so the two RPCs can
 // never drift apart.
 func (r *Registry) AddWithCredential(provider, label, credential, baseURL string) (store.Account, error) {
+	return r.AddWithCredentialModels(provider, label, credential, baseURL, nil)
+}
+
+// AddWithCredentialModels is AddWithCredential plus a model-glob list (see
+// ValidateModels; empty = no list).
+func (r *Registry) AddWithCredentialModels(provider, label, credential, baseURL string, models []string) (store.Account, error) {
 	credentialType, credentialData, err := r.ParseCredential(credential, baseURL)
+	if err != nil {
+		return store.Account{}, err
+	}
+	modelsJSON, err := EncodeModels(models)
 	if err != nil {
 		return store.Account{}, err
 	}
@@ -122,7 +135,25 @@ func (r *Registry) AddWithCredential(provider, label, credential, baseURL string
 		Label:          label,
 		CredentialType: credentialType,
 		CredentialData: credentialData,
+		Models:         modelsJSON,
 	})
+}
+
+// SetModels replaces the account's model globs (empty clears), firing
+// NotifyAccountUpdated on success. Globs are validated by ValidateModels.
+func (r *Registry) SetModels(id int64, models []string) (store.Account, error) {
+	modelsJSON, err := EncodeModels(models)
+	if err != nil {
+		return store.Account{}, err
+	}
+	updated, err := r.store.SetAccountModels(id, modelsJSON)
+	if err != nil {
+		return store.Account{}, err
+	}
+	if n := r.getNotifier(); n != nil {
+		n.NotifyAccountUpdated(updated)
+	}
+	return updated, nil
 }
 
 // ParseCredential is the single account.add/account.updateCredential
@@ -239,6 +270,11 @@ func decodeAccount(a store.Account) (Account, error) {
 		CredentialType: a.CredentialType,
 		CreatedAt:      a.CreatedAt,
 		UpdatedAt:      a.UpdatedAt,
+	}
+	if a.Models != "" {
+		if err := json.Unmarshal([]byte(a.Models), &out.Models); err != nil {
+			return Account{}, fmt.Errorf("decode models for account %d: %w", a.ID, err)
+		}
 	}
 	switch a.CredentialType {
 	case CredentialTypeAPIKey:

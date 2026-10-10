@@ -368,3 +368,57 @@ func TestEvents_AccountUpdatedReachesSecondClient(t *testing.T) {
 		t.Fatalf("account.updated payload label = %q, want new", p.Account.Label)
 	}
 }
+
+func TestAccount_ModelsRoundTrip(t *testing.T) {
+	t.Parallel()
+	srv, _, _ := newAccountTestServer(t)
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "add", "account.add", map[string]any{
+		"provider": "anthropic", "label": "glm", "credential": "sk-glm",
+		"models": []string{"glm-*"},
+	})
+	resp := readEnvelopeFor(t, ws, "add", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.add error = %v", resp.Error.Message)
+	}
+	var created accountResult
+	mustDecode(t, resp.Result, &created)
+	if len(created.Models) != 1 || created.Models[0] != "glm-*" {
+		t.Fatalf("account.add models = %v", created.Models)
+	}
+
+	sendRequest(t, ws, "upd", "account.updateModels", map[string]any{
+		"id": created.ID, "models": []string{"claude-*", "gpt-?"},
+	})
+	resp = readEnvelopeFor(t, ws, "upd", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("account.updateModels error = %v", resp.Error.Message)
+	}
+	sendRequest(t, ws, "list", "account.list", nil)
+	var listed []accountResult
+	mustDecode(t, readEnvelopeFor(t, ws, "list", 5*time.Second).Result, &listed)
+	if len(listed) != 1 || len(listed[0].Models) != 2 || listed[0].Models[0] != "claude-*" {
+		t.Fatalf("account.list = %+v", listed)
+	}
+
+	sendRequest(t, ws, "bad", "account.updateModels", map[string]any{
+		"id": created.ID, "models": []string{"[bad"},
+	})
+	if resp := readEnvelopeFor(t, ws, "bad", 5*time.Second); resp.Error == nil {
+		t.Fatal("account.updateModels with bad glob succeeded, want error")
+	}
+	sendRequest(t, ws, "badadd", "account.add", map[string]any{
+		"provider": "anthropic", "label": "x", "credential": "k", "models": []string{"[bad"},
+	})
+	if resp := readEnvelopeFor(t, ws, "badadd", 5*time.Second); resp.Error == nil {
+		t.Fatal("account.add with bad glob succeeded, want error")
+	}
+
+	sendRequest(t, ws, "clr", "account.updateModels", map[string]any{"id": created.ID, "models": []string{}})
+	var cleared accountResult
+	mustDecode(t, readEnvelopeFor(t, ws, "clr", 5*time.Second).Result, &cleared)
+	if len(cleared.Models) != 0 {
+		t.Fatalf("cleared models = %v, want empty", cleared.Models)
+	}
+}

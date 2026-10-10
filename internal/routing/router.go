@@ -6,6 +6,7 @@ package routing
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
@@ -80,7 +81,11 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 	if err != nil {
 		return accounts.Account{}, fmt.Errorf("latest routing decision for session %q: %w", sessionKey, err)
 	}
-	if found && time.Now().UTC().Before(decision.ExpiresAt) {
+	// Affinity only holds while the pinned account is still a candidate:
+	// model-aware routing (ADR-0020 §5) narrows candidates per request, and
+	// a pin to an account outside that set (e.g. a glm-* account for a
+	// claude-* request) must not override it.
+	if found && time.Now().UTC().Before(decision.ExpiresAt) && slices.Contains(candidateAccountIDs, decision.AccountID) {
 		exhausted, err := r.isExhausted(ctx, decision.AccountID)
 		if err != nil {
 			return accounts.Account{}, err
