@@ -1,13 +1,9 @@
 package terminal
 
 import (
-	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
-
-	"github.com/creack/pty"
 
 	"github.com/spacingmind/smind/internal/store"
 )
@@ -34,13 +30,6 @@ func waitForPersistedScrollback(t *testing.T, st *store.Store, id, want string, 
 	}
 }
 
-// killShellForCleanup kills a session's shell process directly by pid --
-// used by tests simulating a crash (discarding a Registry without calling
-// Close/CloseAll) so the real spawned shell doesn't linger past the test.
-func killShellForCleanup(pid int) {
-	_ = syscall.Kill(pid, syscall.SIGKILL)
-}
-
 // TestRegistry_Checkpoint_PersistsScrollback proves the bounded-cadence
 // checkpoint write path for real: real PTY output through a session, then
 // waiting for a real checkpointCadence tick to land, confirms the
@@ -65,7 +54,7 @@ func TestRegistry_Checkpoint_PersistsScrollback(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	if err := reg.Write(id, []byte("echo checkpoint-marker\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo checkpoint-marker"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "checkpoint-marker", 5*time.Second)
@@ -113,7 +102,7 @@ func TestRegistry_GracefulClose_PersistsFinalState(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	if err := reg.Write(id, []byte("echo before-graceful-close\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo before-graceful-close"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "before-graceful-close", 5*time.Second)
@@ -163,7 +152,7 @@ func TestRegistry_RestartSimulation_ScrollbackSurvivesAcrossRegistries(t *testin
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
 	}
-	if err := reg1.Write(id, []byte("echo restart-sim-marker\n")); err != nil {
+	if err := reg1.Write(id, []byte(writeLine("echo restart-sim-marker"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "restart-sim-marker", 5*time.Second)
@@ -218,7 +207,7 @@ drain:
 		t.Fatalf("rehydrated Subscribe backfill = %q, want it to contain the pre-restart output", backfill.String())
 	}
 
-	if err := reg2.Write(id, []byte("echo x\n")); err == nil {
+	if err := reg2.Write(id, []byte(writeLine("echo x"))); err == nil {
 		t.Fatal("reg2.Write() against a rehydrated session: error = nil, want an error")
 	}
 	if err := reg2.Resize(id, 80, 24); err == nil {
@@ -249,8 +238,7 @@ func TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint(t *test
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
-	pid := pidOf(t, reg1, id)
-	t.Cleanup(func() { killShellForCleanup(pid) })
+	t.Cleanup(func() { _ = reg1.Close(id) })
 
 	events, unsubscribe, err := reg1.Subscribe(id)
 	if err != nil {
@@ -258,7 +246,7 @@ func TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint(t *test
 	}
 	defer unsubscribe()
 
-	if err := reg1.Write(id, []byte("echo before-checkpoint\n")); err != nil {
+	if err := reg1.Write(id, []byte(writeLine("echo before-checkpoint"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "before-checkpoint", 5*time.Second)
@@ -270,7 +258,7 @@ func TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint(t *test
 	// well within checkpointCadence of the next tick, then simulate a crash
 	// (discard reg1, no Close/CloseAll) before that next tick can land --
 	// this output must NOT survive.
-	if err := reg1.Write(id, []byte("echo after-checkpoint-before-crash\n")); err != nil {
+	if err := reg1.Write(id, []byte(writeLine("echo after-checkpoint-before-crash"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "after-checkpoint-before-crash", 5*time.Second)
@@ -322,7 +310,7 @@ func TestRegistry_InterruptedReconciliation_LosesOnlySinceLastCheckpoint(t *test
 	// The rehydrated session must behave like any other terminal session:
 	// write/resize return a clear error rather than a hang or silent
 	// success.
-	if err := reg2.Write(id, []byte("echo x\n")); err == nil {
+	if err := reg2.Write(id, []byte(writeLine("echo x"))); err == nil {
 		t.Fatal("reg2.Write() against an interrupted session: error = nil, want an error")
 	}
 	if err := reg2.Resize(id, 80, 24); err == nil {
@@ -386,7 +374,7 @@ func TestRegistry_Finish_SupersedesInFlightStaleCheckpoint(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	if err := reg.Write(id, []byte("echo before-tick\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo before-tick"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "before-tick", 5*time.Second)
@@ -416,7 +404,7 @@ func TestRegistry_Finish_SupersedesInFlightStaleCheckpoint(t *testing.T) {
 
 	// The paused checkpoint's snapshot was taken before this -- append the
 	// session's real final output now, in memory only.
-	if err := reg.Write(id, []byte("echo final-output\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo final-output"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, events, "final-output", 5*time.Second)
@@ -472,36 +460,4 @@ func TestRegistry_Finish_SupersedesInFlightStaleCheckpoint(t *testing.T) {
 	if !strings.Contains(row.Scrollback, "before-tick") {
 		t.Fatalf("Scrollback = %q, missing earlier output too", row.Scrollback)
 	}
-}
-
-// TestKillAndReap_NoZombieLeft is a direct, deterministic test of the
-// killAndReap helper introduced to fix a zombie-process leak: Create's
-// error paths (a newSessionID failure, a CreateTerminalSession failure)
-// both run after a real shell has already been spawned via pty.Start, and
-// used to kill it without ever calling Wait -- leaving a zombie process
-// under the daemon, since nothing else ever reaps it. This spawns a real
-// long-running process the same way Create does (pty.Start), calls
-// killAndReap directly, and confirms both that Wait was actually called
-// (cmd.ProcessState is only ever set once Wait has completed) and that the
-// process is genuinely gone, not just a lingering zombie.
-func TestKillAndReap_NoZombieLeft(t *testing.T) {
-	t.Parallel()
-	forceTestShell(t)
-
-	cmd := exec.Command(resolveShell(), "-c", "sleep 300")
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
-		t.Fatalf("pty.Start() error = %v", err)
-	}
-	pid := cmd.Process.Pid
-	if !processAlive(pid) {
-		t.Fatalf("pid %d not alive right after Start", pid)
-	}
-
-	killAndReap(ptmx, cmd)
-
-	if cmd.ProcessState == nil {
-		t.Fatal("cmd.ProcessState = nil, want set -- killAndReap did not call Wait")
-	}
-	waitGone(t, pid, 2*time.Second)
 }

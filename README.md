@@ -72,9 +72,10 @@ tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
 ./smind --version
 ```
 
-There is no native Windows daemon binary yet (blocked on `internal/terminal`,
-see ADR-0013); Windows users run the desktop app, which manages the daemon
-via WSL2.
+There is no native Windows daemon binary yet; `internal/terminal` is now
+cross-platform (see docs/plans/active/windows-native-terminal.md), but the
+rest of the daemon's Windows runtime parity is still follow-up work. Windows
+users run the desktop app, which manages the daemon via WSL2.
 
 ## Quickstart
 
