@@ -97,6 +97,13 @@ type Registry struct {
 	// a test can prove delivery never tight-loops on one bad item
 	// (ADR-0021 §3: cancel and move on). Guarded by mu.
 	deliveryAttempts map[int64]int
+
+	// deliverMu serializes queue delivery per Registry (see queue.go's
+	// deliverOne): the busy-check -> NextQueued -> Start -> MarkDelivered
+	// sequence must be atomic, so concurrent callers (finish and the
+	// enqueue path's race-coverage call) can't both start the same item.
+	// Lock ordering: deliverMu before mu, never the reverse.
+	deliverMu sync.Mutex
 }
 
 // SetPermissionTimeout overrides how long a pending permission request

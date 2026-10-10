@@ -20,11 +20,11 @@ func TestChatQueue_EnqueueBoundAndOrder(t *testing.T) {
 
 	// 20 enqueues ok; the 21st gives ErrQueueFull.
 	for i := 0; i < 20; i++ {
-		if _, err := s.EnqueueChatPrompt(chat.ID, "p", "{}", ChatQueueSourceHuman, 0); err != nil {
+		if _, err := s.EnqueueChatPrompt(chat.ID, "p", "{}", ChatQueueSourceHuman, 0, 0, 0); err != nil {
 			t.Fatalf("EnqueueChatPrompt #%d error = %v", i+1, err)
 		}
 	}
-	if _, err := s.EnqueueChatPrompt(chat.ID, "one too many", "{}", ChatQueueSourceHuman, 0); !errors.Is(err, ErrQueueFull) {
+	if _, err := s.EnqueueChatPrompt(chat.ID, "one too many", "{}", ChatQueueSourceHuman, 0, 0, 0); !errors.Is(err, ErrQueueFull) {
 		t.Fatalf("EnqueueChatPrompt #21 error = %v, want ErrQueueFull", err)
 	}
 
@@ -41,7 +41,7 @@ func TestChatQueue_EnqueueBoundAndOrder(t *testing.T) {
 	if err := s.MarkDelivered(first.ID, "run-1"); err != nil {
 		t.Fatalf("MarkDelivered() error = %v", err)
 	}
-	if _, err := s.EnqueueChatPrompt(chat.ID, "freed", "{}", ChatQueueSourceHuman, 0); err != nil {
+	if _, err := s.EnqueueChatPrompt(chat.ID, "freed", "{}", ChatQueueSourceHuman, 0, 0, 0); err != nil {
 		t.Fatalf("EnqueueChatPrompt after a delivery error = %v, err", err)
 	}
 
@@ -50,7 +50,7 @@ func TestChatQueue_EnqueueBoundAndOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateChat(other) error = %v", err)
 	}
-	if _, err := s.EnqueueChatPrompt(other.ID, "other chat", "{}", ChatQueueSourceHuman, 0); err != nil {
+	if _, err := s.EnqueueChatPrompt(other.ID, "other chat", "{}", ChatQueueSourceHuman, 0, 0, 0); err != nil {
 		t.Fatalf("EnqueueChatPrompt on a second chat error = %v", err)
 	}
 
@@ -64,7 +64,7 @@ func TestChatQueue_EnqueueBoundAndOrder(t *testing.T) {
 	}
 
 	// An interrupt item (priority=1) goes ahead of earlier queue items.
-	if _, err := s.EnqueueChatPrompt(chat.ID, "interrupt me", "{}", ChatQueueSourceHuman, 1); err != nil {
+	if _, err := s.EnqueueChatPrompt(chat.ID, "interrupt me", "{}", ChatQueueSourceHuman, 1, 0, 0); err != nil {
 		t.Fatalf("EnqueueChatPrompt(interrupt) error = %v", err)
 	}
 	next, ok, err := s.NextQueued(chat.ID)

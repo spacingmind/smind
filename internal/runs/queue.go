@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -23,6 +24,10 @@ const (
 	WhenBusyQueue     WhenBusy = "queue"
 	WhenBusyInterrupt WhenBusy = "interrupt"
 )
+
+// chatQueueDeliveryCap bounds one deliverOne pass's item consumption, so
+// a pathological queue can't keep the delivery lock held indefinitely.
+const chatQueueDeliveryCap = 20
 
 func (m WhenBusy) valid() bool {
 	return m == WhenBusyReject || m == WhenBusyQueue || m == WhenBusyInterrupt
@@ -80,6 +85,9 @@ func (reg *Registry) starterDeps() (*workspace.Manager, *taskrunner.Runner, bool
 // orchestrator source may not enqueue an auto-approving permission
 // configuration (ADR-0019 decision 6, at enqueue time per ADR-0021 §6).
 func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, whenBusy WhenBusy, source string, fromTaskID, fromChatID int64) (StartOutcome, error) {
+	if whenBusy == "" {
+		whenBusy = WhenBusyReject // the wire default: old clients unchanged
+	}
 	if !whenBusy.valid() {
 		return StartOutcome{}, fmt.Errorf("runs: start: invalid whenBusy %q", whenBusy)
 	}
@@ -88,8 +96,12 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if err != nil {
 		return StartOutcome{}, err
 	}
-	if source == store.ChatQueueSourceOrchestrator && taskrunner.ModeAutoApproves(p.catalog, p.perm) {
-		return StartOutcome{}, fmt.Errorf("runs: start: an orchestrating agent may not pick an auto-approving permission configuration (ADR-0019); ask a human, or use a human-authored profile")
+	// ADR-0019 decision 6 at enqueue time (ADR-0021 §6): every non-human
+	// caller (orchestrator or agent) is barred from auto-approving
+	// permission configurations; only a human-authored profile may carry
+	// one, and a human source here is the interactive wire caller.
+	if source != store.ChatQueueSourceHuman && taskrunner.ModeAutoApproves(p.catalog, p.perm) {
+		return StartOutcome{}, fmt.Errorf("runs: start: a non-human caller may not pick an auto-approving permission configuration (ADR-0019); ask a human, or use a human-authored profile")
 	}
 	taskID, chatID, provider, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.provider, p.prompt, p.perm, p.thinkingLevel
 
@@ -170,14 +182,9 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	if whenBusy == WhenBusyInterrupt {
 		priority = 1
 	}
-	item, err := reg.st.EnqueueChatPrompt(chatID, prompt, string(cfg), source, priority)
+	item, err := reg.st.EnqueueChatPrompt(chatID, prompt, string(cfg), source, priority, fromTaskID, fromChatID)
 	if err != nil {
 		return StartOutcome{}, fmt.Errorf("runs: start: %w", err)
-	}
-	if source == store.ChatQueueSourceAgent && fromTaskID != 0 && fromChatID != 0 {
-		if err := reg.st.SetChatQueueItemProvenance(item.ID, fromTaskID, fromChatID); err != nil {
-			return StartOutcome{}, fmt.Errorf("runs: start: %w", err)
-		}
 	}
 	reg.notifyQueueUpdated(chatID)
 
@@ -214,54 +221,72 @@ func (reg *Registry) DeliverQueued() {
 // deliverOne delivers chatID's oldest queued item through the same code
 // path as a direct Start (Registry.Start), marking it delivered with the
 // new run id -- or cancelled with the reason when it can no longer start,
-// moving on to the next item in the same pass. It never loops on one bad
-// item: each pass consumes (delivers or cancels) at most one item per
-// attempt, and a cancelled item is never returned by NextQueued again.
-// A no-op whenever the chat has a running run or nothing queued.
+// moving on to the next item in the same pass.
+//
+// The whole decision sequence (busy check, NextQueued, Start, MarkDelivered)
+// runs under reg.deliverMu, so two concurrent callers -- finish's delivery
+// and the enqueue path's race-coverage call -- can never both pull the
+// same item and start it twice. Start returns as soon as the run is
+// registered (drive is a background goroutine), so holding the lock is
+// cheap. reg.mu is never held while taking deliverMu (ordering:
+// deliverMu -> reg.mu only).
+//
+// A no-op whenever the starter isn't wired, the chat has a running run, or
+// nothing is queued. The per-pass loop consumes (delivers or cancels) at
+// most one item per attempt and never retries the same item (a cancelled
+// item is never returned by NextQueued again), capped at chatQueueDeliveryCap
+// items so a pathological queue can't keep one lock holder spinning.
 func (reg *Registry) deliverOne(chatID int64) {
 	wm, runner, ok := reg.starterDeps()
 	if !ok {
 		return
 	}
-	if _, busy := reg.runningRunForChat(chatID); busy {
-		return
-	}
-	item, ok, err := reg.st.NextQueued(chatID)
-	if err != nil || !ok {
-		return
-	}
 
-	reg.mu.Lock()
-	reg.deliveryAttempts[item.ID]++
-	reg.mu.Unlock()
+	reg.deliverMu.Lock()
+	defer reg.deliverMu.Unlock()
 
-	var cfg chatQueueRunConfig
-	if err := json.Unmarshal([]byte(item.RunConfig), &cfg); err != nil {
-		cfg = chatQueueRunConfig{}
-	}
-	chat, err := wm.GetChat(chatID)
-	if err != nil {
-		reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
-		reg.deliverOne(chatID)
-		return
-	}
-
-	runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel))
-	if err != nil {
-		var busyErr *ChatBusyError
-		if errors.As(err, &busyErr) {
-			// Someone else's run won the start race; their finish will
-			// deliver this item. Leave it queued.
+	for i := 0; i < chatQueueDeliveryCap; i++ {
+		if _, busy := reg.runningRunForChat(chatID); busy {
 			return
 		}
-		reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
-		reg.deliverOne(chatID)
+		item, ok, err := reg.st.NextQueued(chatID)
+		if err != nil || !ok {
+			return
+		}
+
+		reg.mu.Lock()
+		reg.deliveryAttempts[item.ID]++
+		reg.mu.Unlock()
+
+		var cfg chatQueueRunConfig
+		if err := json.Unmarshal([]byte(item.RunConfig), &cfg); err != nil {
+			cfg = chatQueueRunConfig{}
+		}
+		chat, err := wm.GetChat(chatID)
+		if err != nil {
+			reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
+			continue
+		}
+
+		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel))
+		if err != nil {
+			var busyErr *ChatBusyError
+			if errors.As(err, &busyErr) {
+				// Someone else's run won the start race; their finish will
+				// deliver this item. Leave it queued.
+				return
+			}
+			reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
+			continue
+		}
+		if err := reg.st.MarkDelivered(item.ID, runID); err != nil {
+			log.Printf("runs: mark queue item %d delivered (run %s): %v", item.ID, runID, err)
+			return
+		}
+		reg.notifyQueueUpdated(chatID)
 		return
 	}
-	if err := reg.st.MarkDelivered(item.ID, runID); err != nil {
-		return
-	}
-	reg.notifyQueueUpdated(chatID)
+	log.Printf("runs: chat %d queue delivery pass hit the %d-item cap; will resume at the next finish", chatID, chatQueueDeliveryCap)
 }
 
 // deliverPrompt applies ADR-0021 §4's provenance header: an agent-source

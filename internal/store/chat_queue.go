@@ -47,11 +47,14 @@ type ChatQueueItem struct {
 	UpdatedAt    time.Time
 }
 
-// EnqueueChatPrompt appends an item to chatID's queue. It rejects (with
+// EnqueueChatPrompt appends an item to chatID's queue in one statement
+// (prompt, provenance, and status all land atomically). It rejects (with
 // ErrQueueFull) once the chat already holds chatQueueBound queued items.
 // priority is 0 for a normal FIFO item and 1 for an interrupt item
-// (delivered ahead of earlier queue items, ADR-0021 §2).
-func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string, priority int) (ChatQueueItem, error) {
+// (delivered ahead of earlier queue items, ADR-0021 §2). fromTaskID and
+// fromChatID (the agent sender, ADR-0021 §4) are stored as NULL when 0 --
+// only meaningful for source='agent'.
+func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string, priority int, fromTaskID, fromChatID int64) (ChatQueueItem, error) {
 	var queued int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM chat_queue WHERE chat_id = ? AND status = 'queued'`, chatID).Scan(&queued); err != nil {
 		return ChatQueueItem{}, fmt.Errorf("count queued prompts for chat %d: %w", chatID, err)
@@ -63,8 +66,8 @@ func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string
 	now := time.Now().UTC()
 	res, err := s.db.Exec(
 		`INSERT INTO chat_queue (chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, NULL, NULL, ?, 'queued', NULL, '', ?, ?)`,
-		chatID, prompt, runConfig, source, priority, now, now,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', NULL, '', ?, ?)`,
+		chatID, prompt, runConfig, source, nullID(fromTaskID), nullID(fromChatID), priority, now, now,
 	)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("insert chat queue item for chat %d: %w", chatID, err)
@@ -76,17 +79,12 @@ func (s *Store) EnqueueChatPrompt(chatID int64, prompt, runConfig, source string
 	return s.GetChatQueueItem(id)
 }
 
-// SetChatQueueItemProvenance records an agent sender (fromTaskId/fromChatId)
-// on a queued item, for the [message from task #T, chat #C] delivery header
-// (ADR-0021 §4).
-func (s *Store) SetChatQueueItemProvenance(id, fromTaskID, fromChatID int64) error {
-	if _, err := s.db.Exec(
-		`UPDATE chat_queue SET from_task_id = ?, from_chat_id = ?, updated_at = ? WHERE id = ?`,
-		fromTaskID, fromChatID, time.Now().UTC(), id,
-	); err != nil {
-		return fmt.Errorf("set chat queue item %d provenance: %w", id, err)
+// nullID maps 0 ("no sender") onto SQL NULL for the from_*_id columns.
+func nullID(id int64) any {
+	if id == 0 {
+		return nil
 	}
-	return nil
+	return id
 }
 
 // GetChatQueueItem returns the queue item with the given id.
