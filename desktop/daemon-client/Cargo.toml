@@ -1,6 +1,6 @@
 [package]
 name = "smind-daemon-client"
-version = "0.9.1" # x-release-please-version
+version = "0.10.0" # x-release-please-version
 edition = "2021"
 description = "Pure-logic daemon client for the smind desktop shell (no GUI deps, tests run without webkit)"
 

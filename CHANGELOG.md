@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.10.0](https://github.com/spacingmind/smind/compare/v0.9.1...v0.10.0) (2026-10-10)
+
+
+### Features
+
+* **cli:** smind mcp serve task_send with permission guard (ADR-0017 step 3) ([#246](https://github.com/spacingmind/smind/issues/246)) ([9be4864](https://github.com/spacingmind/smind/commit/9be48640a74eba43a1adef534ca590dc7247d8ff))
+* **desktop:** black squircle macOS app icon ([#241](https://github.com/spacingmind/smind/issues/241)) ([e4a1aac](https://github.com/spacingmind/smind/commit/e4a1aacbb140ac9452f0124e7fed983e3799899a))
+* **desktop:** desktop shortcuts and native menu actions (D3) ([#247](https://github.com/spacingmind/smind/issues/247)) ([ecf2f1a](https://github.com/spacingmind/smind/commit/ecf2f1ab53556623c91f964a56225428927c3605))
+* **desktop:** macOS app — dmg, bundled daemon, Dock lifecycle ([#238](https://github.com/spacingmind/smind/issues/238)) ([0aff47c](https://github.com/spacingmind/smind/commit/0aff47cc10e4c97823912298f1b9483886a1941e))
+* **desktop:** update the managed daemon only when no runs are in flight ([#243](https://github.com/spacingmind/smind/issues/243)) ([b37a9fd](https://github.com/spacingmind/smind/commit/b37a9fdc6df4a7a6a348219167056a101051e192))
+* **desktop:** ZCode-style window chrome + no launch flash (D1) ([#237](https://github.com/spacingmind/smind/issues/237)) ([986bcc0](https://github.com/spacingmind/smind/commit/986bcc043bd7217d07e58d5fef7c82f8d6ad9035))
+* per-chat prompt queue with whenBusy reject|queue|interrupt (ADR-0021) ([#248](https://github.com/spacingmind/smind/issues/248)) ([a499fa7](https://github.com/spacingmind/smind/commit/a499fa7c63a5ff51884152d68ff5e7b4a589db8a))
+* **terminal:** native Windows terminal backend with own ConPTY wrapper (ADR-0022) ([#245](https://github.com/spacingmind/smind/issues/245)) ([da05483](https://github.com/spacingmind/smind/commit/da054831707b33ed3d45ed74116e99cb86669092))
+* **web:** desktop build drops webview-isms (D2) ([#240](https://github.com/spacingmind/smind/issues/240)) ([0c42566](https://github.com/spacingmind/smind/commit/0c42566bcbd17b486460cdc42468ecdeb2562f35))
+
 ## [0.9.1](https://github.com/spacingmind/smind/compare/v0.9.0...v0.9.1) (2026-10-08)
 
 
