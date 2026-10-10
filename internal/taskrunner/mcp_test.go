@@ -394,3 +394,96 @@ func TestRunner_RunPrompt_CodexNoteMcpServersUnsupported(t *testing.T) {
 		t.Fatalf("session note = %q, want one naming playwright for codex", note)
 	}
 }
+
+func TestClaudeMcpConfig_BuildsMergedMcpServersJSON(t *testing.T) {
+	rows := []store.McpServer{
+		{Name: "pw", Transport: "stdio", Command: "npx", Args: `["-y","pw"]`, Env: `{"B":"2","A":"1"}`},
+		{Name: "bare", Transport: "stdio", Command: "tool", Args: `[]`, Env: `{}`},
+		{Name: "remote", Transport: "http", URL: "https://r/mcp", Headers: `{"Authorization":"x"}`},
+		{Name: "events", Transport: "sse", URL: "https://e/sse"},
+	}
+	got, err := claudeMcpConfig(rows)
+	if err != nil {
+		t.Fatalf("claudeMcpConfig() error = %v", err)
+	}
+	want := `{"mcpServers":{"bare":{"command":"tool","type":"stdio"},"events":{"type":"sse","url":"https://e/sse"},"pw":{"args":["-y","pw"],"command":"npx","env":{"A":"1","B":"2"},"type":"stdio"},"remote":{"headers":{"Authorization":"x"},"type":"http","url":"https://r/mcp"}}}`
+	if got != want {
+		t.Fatalf("claudeMcpConfig() =\n%s\nwant\n%s", got, want)
+	}
+	if got, err := claudeMcpConfig(nil); err != nil || got != "" {
+		t.Fatalf("claudeMcpConfig(nil) = %q, %v; want empty", got, err)
+	}
+}
+
+// runClaudeMcp runs a claude-native turn with the echo-args fake CLI and
+// returns the CLI's argv.
+func runClaudeMcp(t *testing.T, r *Runner, task store.Task) []string {
+	t.Helper()
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(*task.WorktreePath, "args"))
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	return strings.Split(string(data), "\n")
+}
+
+func newClaudeMcpEnv(t *testing.T) (*Runner, *store.Store, store.Task) {
+	t.Helper()
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("echo-args"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	r := claudeNativeRunner(t, wm)
+	WithMcpServers(mcpservers.New(st))(r)
+	return r, st, task
+}
+
+func TestRunner_RunPrompt_ClaudeNativePassesMcpConfig(t *testing.T) {
+	t.Parallel()
+	r, st, task := newClaudeMcpEnv(t)
+
+	args := runClaudeMcp(t, r, task)
+	if _, ok := flagValue(args, "--mcp-config"); ok {
+		t.Fatalf("--mcp-config present with no rows: %v", args)
+	}
+
+	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Args: `["-y"]`, Enabled: true}); err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	args = runClaudeMcp(t, r, task)
+	want := `{"mcpServers":{"pw":{"args":["-y"],"command":"npx","type":"stdio"}}}`
+	if v, ok := flagValue(args, "--mcp-config"); !ok || v != want {
+		t.Fatalf("--mcp-config = %q (present %v), want %q; args %q", v, ok, want, args)
+	}
+}
+
+func TestRunner_RunPrompt_ClaudeNativeWorkspaceRestriction(t *testing.T) {
+	t.Parallel()
+	r, st, task := newClaudeMcpEnv(t)
+	reg := mcpservers.New(st)
+	other, err := st.CreateWorkspace(store.Workspace{Title: "Other"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace(): %v", err)
+	}
+	restricted, err := reg.Create(store.McpServer{Name: "elsewhere", Transport: "http", URL: "https://o/mcp", Enabled: true})
+	if err != nil {
+		t.Fatalf("Create(): %v", err)
+	}
+	if err := st.AddWorkspaceMcpServer(other.ID, restricted.ID); err != nil {
+		t.Fatalf("AddWorkspaceMcpServer(): %v", err)
+	}
+
+	args := runClaudeMcp(t, r, task)
+	if v, ok := flagValue(args, "--mcp-config"); ok {
+		t.Fatalf("--mcp-config = %q, want none for a server restricted to another workspace", v)
+	}
+}
