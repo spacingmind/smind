@@ -48,7 +48,7 @@ How the references handle a message to a busy agent (verified
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        chat_id INTEGER NOT NULL REFERENCES chats(id),
        prompt TEXT NOT NULL,
-       run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, thinkingLevel, viaProxy
+       run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel
        source TEXT NOT NULL,                  -- 'human' | 'orchestrator' | 'agent'
        from_task_id INTEGER,                  -- sender, when source='agent'
        from_chat_id INTEGER,
@@ -160,5 +160,5 @@ field.
 - ADR-0016 §4 (one running run per chat, which this keeps).
 - ADR-0017 (MCP `task_send`/`task_wait`).
 - ADR-0019 (permission-mode validation).
-- ADR-0020 (`viaProxy` in `run_config`).
+- ADR-0020 (per-run usage from agent events; no `viaProxy`).
 - `docs/plans/active/orchestration-and-metering.md` (O1, Step 2).

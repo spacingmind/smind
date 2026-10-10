@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL REFERENCES chats(id),
     prompt TEXT NOT NULL,
-    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, thinkingLevel, viaProxy
+    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel
     source TEXT NOT NULL,                  -- 'human' | 'orchestrator' | 'agent'
     from_task_id INTEGER,                  -- sender, when source='agent'
     from_chat_id INTEGER,
