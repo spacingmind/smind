@@ -296,11 +296,59 @@ ported):
 
 ## Progress
 
-- [ ] D1 — window chrome
+- [ ] D1 — window chrome (+ all of D2.1, no white flash): implemented on `feat/desktop-chrome`, automated checks green; native visual checks outstanding, see Validation
 - [ ] D2 — remove webview-isms
 - [ ] D3 — desktop shortcuts + native menu
 - [ ] D4 — native integrations (reveal/open-in-editor, badge)
 
 ## Validation
 
-_Not started._
+### D1 + D2.1 (`feat/desktop-chrome`, 2026-10-10)
+
+Environment: macOS dev box, Rust 1.99 / Tauri 2.11.6. **No Windows or
+Linux machine was available, so nothing below claims Windows/Linux
+behaviour beyond the unit tests and a Chromium render with a Windows UA.**
+The agent sandbox also kills WKWebView's content process ("web content
+process terminated"), so the built app's *webview content* was blank even
+with chrome disabled, same as the baseline window. Native window chrome
+(traffic lights) was observable; the in-webview UI was not, so UI
+screenshots come from headless Edge rendering the real `build:desktop`
+bundle (Vite dev, `VITE_SMIND_DESKTOP=1`) against a live daemon, with a
+macOS or Windows user agent and a stubbed `__TAURI_INTERNALS__`.
+
+Automated, all green: `bun run test` (1364 web tests), `tsc -b`,
+`go vet` + gofmt + `go test ./...`, `cargo test` (4 new tests), `cargo
+clippy --all-targets` (only the pre-existing `notify.rs` unused-variable
+warning on macOS). `task` itself is not installed here; its underlying
+commands were run directly. `cargo fmt --check` is not clean on `develop`
+already (not touched); the new module is rustfmt-formatted.
+
+| AC | Confirmed by |
+|---|---|
+| D1.1 macOS overlay title bar, traffic lights in header | `window_chrome::configure` (`TitleBarStyle::Overlay`, `hidden_title`, `traffic_light_position`). **Manual:** native screenshot of the built app shows the lights vertically centred on the 48px row (y≈24, x 16–76), no title text/strip. Light/dark and expanded/collapsed of the *webview content* could not be captured natively (see above). Chromium renders of the macOS layout, light + dark, expanded + collapsed + narrow: `/tmp/smind-d1-shots/w-mac-*.png` (local only). |
+| D1.2 Win/Linux undecorated + drawn buttons, restore glyph | `decorations(false)` on non-macOS; vitest `window-controls-maximize-glyph`. Chromium render with a Windows UA, restored + maximized, light: `w-win-*.png`. **Not run on real Windows/Linux:** OS snap / double-click / keyboard maximize rely on Tauri's resize event; unverified. |
+| D1.3 Close = hide to tray, not quit | vitest `window-controls-click-dispatch` (calls `close`, never `quit`/`destroy`); Rust path is `core:window:allow-close` → `CloseRequested` → the existing `prevent_close` + `hide` handler, which now also marks the show-gate dismissed. **Manual `close-hides-to-tray` not run** (no working webview here). |
+| D1.4 Drag + double-click | vitest `header-drag-region-excludes-controls` (`data-tauri-drag-region="deep"` on the header; Tauri's drag script, read in `tauri-2.11.6/src/window/scripts/drag.js`, refuses to drag from buttons/inputs/links/`role=tab`). Double-click uses Tauri's `internal_toggle_maximize` (zoom on macOS); it does **not** read the system "double-click title bar" setting, since Tauri doesn't expose it. **Not exercised in a live window.** |
+| D1.5 Resize from all edges | Relies on tao's undecorated-resize handling (`tauri-runtime-wry` `undecorated_resizing`). **Unverified** on Windows/Linux (`linux-frameless-resize` not run). macOS keeps its native frame. |
+| D1.6 Header/sidebar insets | vitest `header-reserves-traffic-light-space`, `header-reserves-caption-space`, `window-chrome` maths tests, fullscreen test. **Deviation from the scenario text:** with the sidebar *expanded* the header needs no left inset, because the sidebar's own 48px top strip (`DesktopSidebarInset`) holds the lights; the test asserts that instead. Collapsed rail → header pads 32px; sidebar hidden (narrow) → 84px. |
+| D1.7 Web build unchanged | vitest `platform-window-controls-stub` (platform + component), "web build unchanged" test; `@tauri-apps/api/window` is only dynamically imported inside the `isDesktop` branch of `platform.ts`. |
+| D1.8 Materials | **macOS:** `Effect::Sidebar` + transparent window, sidebar background `color-mix(var(--sidebar) 72%, transparent)`, everything else opaque (`desktop-chrome.css`). Requires the `macos-private-api` Cargo feature + `macOSPrivateApi` config. The vibrancy itself was **not** seen composited with the UI (webview blank in the sandbox); the native window shows the vibrancy view. **Windows 11 Mica/Acrylic: not implemented**, untestable here, and it needs a transparent undecorated window that I would not ship blind; Windows stays opaque. Linux opaque. Follow-up. |
+| D2.1 No white flash | Rust `window_shown_after_ready_or_timeout`, `fallback_is_at_most_three_seconds`, `surface_colors_match_index_css`; vitest `DesktopPaintedSignal` tests. Window is created `visible(false)` with the last session's surface colour (persisted by `window_set_theme`; dark on first ever launch), shown on `window_ready` or after 3 s. The signal is a post-commit timer, **not** `requestAnimationFrame`: a hidden webview suspends rAF. **Manual `no-white-flash` not run** (frame-checking needs a working webview). |
+
+Also done, not in the spec: `tauri-plugin-window-state` no longer restores
+`VISIBLE` (it would show the window before paint on every launch after the
+first) or `DECORATIONS` (an existing saved `decorated: true` would put the
+native frame back on an undecorated Windows/Linux window, giving two sets
+of caption buttons). New capability grants in `proxy.json`: `allow-window-ready`,
+`allow-window-set-theme`, and `core:window:allow-{minimize,toggle-maximize,
+internal-toggle-maximize,close,start-dragging,is-maximized,is-fullscreen}`.
+`is-fullscreen` and `internal-toggle-maximize` go beyond the list in D4.5
+(macOS hides the lights in fullscreen; Tauri's drag script calls the
+internal command on double-click), so D4's `capability_allowlist_exact`
+must include them. No ZCode code was copied (layout and approach only),
+so `NOTICE` is unchanged.
+
+Still to do before D1 can be ticked: `macos-traffic-lights-in-header`
+(light/dark, expanded/collapsed, in the real webview), `no-white-flash`,
+`close-hides-to-tray`, `windows-caption-buttons`, `linux-frameless-resize`,
+and the Windows desktop CI build.

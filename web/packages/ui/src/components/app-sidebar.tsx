@@ -80,6 +80,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { DesktopSidebarInset } from "@/components/desktop-sidebar-inset";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -619,6 +620,7 @@ export function AppSidebar({
        * under the rail. Rendering the buttons (rather than removing the
        * header) keeps every affordance reachable in collapsed mode.
        */}
+      <DesktopSidebarInset />
       <SidebarHeader>
         <div
           data-testid="sidebar-expanded-header"

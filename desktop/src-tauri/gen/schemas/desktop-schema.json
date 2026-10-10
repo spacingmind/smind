@@ -423,6 +423,18 @@
           "markdownDescription": "Enables the take_over_daemon command without any pre-configured scope."
         },
         {
+          "description": "Enables the window_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-ready",
+          "markdownDescription": "Enables the window_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the window_set_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-window-set-theme",
+          "markdownDescription": "Enables the window_set_theme command without any pre-configured scope."
+        },
+        {
           "description": "Denies the connection_version command without any pre-configured scope.",
           "type": "string",
           "const": "deny-connection-version",
@@ -499,6 +511,18 @@
           "type": "string",
           "const": "deny-take-over-daemon",
           "markdownDescription": "Denies the take_over_daemon command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_ready command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-ready",
+          "markdownDescription": "Denies the window_ready command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the window_set_theme command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-window-set-theme",
+          "markdownDescription": "Denies the window_set_theme command without any pre-configured scope."
         },
         {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",

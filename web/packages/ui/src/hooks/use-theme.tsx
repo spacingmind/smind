@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { desktopWindow, isDesktop } from "@/lib/platform";
 import {
   applyResolvedTheme,
   readStoredThemePreference,
@@ -75,6 +76,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyResolvedTheme(resolved);
   }, [resolved]);
+
+  // Desktop build: mirror the theme into the native window (vibrancy and
+  // chrome appearance follow it, and the next launch paints this surface
+  // before the UI loads -- desktop-native-feel D2.1). Best-effort.
+  useEffect(() => {
+    if (!isDesktop) return;
+    desktopWindow.setTheme(preference, resolved).catch(() => {});
+  }, [preference, resolved]);
 
   // Only listens while "system" is selected, so a light/dark-pinned user
   // never has the OS query silently steer them back -- matches the plan's

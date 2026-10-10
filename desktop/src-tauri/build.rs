@@ -19,6 +19,8 @@ fn main() {
             "daemon_restart",
             "take_over_daemon",
             "connection_version",
+            "window_ready",
+            "window_set_theme",
         ]),
     );
     tauri_build::try_build(attributes).expect("smind desktop: tauri_build::try_build failed");

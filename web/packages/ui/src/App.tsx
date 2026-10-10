@@ -22,6 +22,7 @@ import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
+import { AppHeader } from "@/components/app-header";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
@@ -33,9 +34,8 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { Separator } from "@/components/ui/separator";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@/components/ui/resizable";
-import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
@@ -851,14 +851,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   const headerElement = (
     <>
-      {/* h-12/border-b/p-2 matches ZCode's WorkspaceHeader.tsx (zcode-visual-parity plan P2). */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b p-2">
-        <SidebarTrigger />
-        <Separator orientation="vertical" className="h-4" />
-        <span className="text-ui-base text-muted-foreground" data-testid="app-connection-status">
-          {connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
-        </span>
-      </header>
+      <AppHeader
+        statusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+        sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
+      />
       {isDesktop && <DesktopDaemonBanner />}
     </>
   );
