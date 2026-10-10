@@ -148,7 +148,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|options|set-option|chat> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -176,6 +176,8 @@ func cmdTask(args []string) int {
 		return cmdTaskSetOption(args[1:])
 	case "chat":
 		return cmdTaskChat(args[1:])
+	case "queue":
+		return cmdTaskQueue(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2
@@ -336,7 +338,7 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--when-busy reject|queue|interrupt]"
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
@@ -362,12 +364,21 @@ func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, mode, chatArg string
+	var taskIDArg, provider, mode, chatArg, whenBusy string
 	var autoAccept bool
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--when-busy":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			whenBusy = args[i]
+		case strings.HasPrefix(a, "--when-busy="):
+			whenBusy = strings.TrimPrefix(a, "--when-busy=")
 		case a == "--chat":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -451,11 +462,30 @@ func cmdTaskSend(args []string) int {
 	if chatID != 0 {
 		params["chatId"] = chatID
 	}
-	var start runStartResult
+	// --when-busy is ADR-0021 §2's busy-chat delivery mode; the CLI
+	// default is reject (today's behavior) unless the flag says otherwise.
+	if whenBusy != "" {
+		switch whenBusy {
+		case "reject", "queue", "interrupt":
+			params["whenBusy"] = whenBusy
+		default:
+			fmt.Fprintf(os.Stderr, "task send: invalid --when-busy %q (want reject, queue, or interrupt)\n", whenBusy)
+			return 2
+		}
+	}
+	var start struct {
+		RunID       string `json:"runId"`
+		Queued      bool   `json:"queued"`
+		QueueItemID int64  `json:"queueItemId"`
+	}
 	err = client.Call(ctx, "run.start", params, &start)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task send: %v\n", err)
 		return 1
+	}
+	if start.Queued {
+		fmt.Fprintf(os.Stderr, "queued as item %d -- it runs when the chat's current run finishes (smind task queue ls to watch, task queue cancel %d to undo)\n", start.QueueItemID, start.QueueItemID)
+		return 0
 	}
 	fmt.Fprintf(os.Stderr, "run %s started\n", start.RunID)
 
@@ -1305,5 +1335,128 @@ func cmdTaskRuns(args []string) int {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, r.Status)
 	}
 	tw.Flush()
+	return 0
+}
+
+// cmdTaskQueueUsage is printed on any argument error in the queue group.
+const cmdTaskQueueUsage = "usage: smind task queue <ls --chat <chatId>|cancel <itemId>>"
+
+// cmdTaskQueue dispatches the queue subcommands (ADR-0021 §8's CLI).
+func cmdTaskQueue(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+	switch args[0] {
+	case "ls":
+		return cmdTaskQueueLs(args[1:])
+	case "cancel":
+		return cmdTaskQueueCancel(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "smind task queue: unknown subcommand %q\n", args[0])
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+}
+
+// queueItemRow is one entry of a chat.queueList result -- the CLI-side
+// mirror of the wire shape, same convention as chatRow.
+type queueItemRow struct {
+	ID           int64     `json:"ID"`
+	Prompt       string    `json:"Prompt"`
+	Source       string    `json:"Source"`
+	Priority     int       `json:"Priority"`
+	Status       string    `json:"Status"`
+	RunID        *string   `json:"RunID"`
+	CancelReason string    `json:"CancelReason"`
+	CreatedAt    time.Time `json:"CreatedAt"`
+}
+
+// cmdTaskQueueLs lists a chat's queue items, all statuses, oldest first.
+func cmdTaskQueueLs(args []string) int {
+	var chatArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--chat":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+				return 2
+			}
+			i++
+			chatArg = args[i]
+		case strings.HasPrefix(a, "--chat="):
+			chatArg = strings.TrimPrefix(a, "--chat=")
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+			return 2
+		}
+	}
+	if chatArg == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+	chatID, err := parseInt64(chatArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task queue ls: invalid --chat value %q: %v\n", chatArg, err)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var result struct {
+		Items []queueItemRow `json:"items"`
+	}
+	if err := client.Call(context.Background(), "chat.queueList", map[string]any{"chatId": chatID}, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "task queue ls: %v\n", err)
+		return 1
+	}
+	if len(result.Items) == 0 {
+		fmt.Println("queue empty")
+		return 0
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tPROMPT")
+	for _, item := range result.Items {
+		prompt := item.Prompt
+		if len(prompt) > 40 {
+			prompt = prompt[:40] + "..."
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, prompt)
+	}
+	tw.Flush()
+	return 0
+}
+
+// cmdTaskQueueCancel cancels a still-queued item by id. Cancelling a
+// delivered or already-cancelled item is the daemon's error to surface.
+func cmdTaskQueueCancel(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: smind task queue cancel <itemId>")
+		return 2
+	}
+	itemID, err := parseInt64(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task queue cancel: invalid itemId %q: %v\n", args[0], err)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	if err := client.Call(context.Background(), "chat.queueCancel", map[string]any{"itemId": itemID}, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "task queue cancel: %v\n", err)
+		return 1
+	}
+	fmt.Printf("queue item %d cancelled\n", itemID)
 	return 0
 }
