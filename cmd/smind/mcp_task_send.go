@@ -37,12 +37,21 @@ type taskSendInput struct {
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
 	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
 	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
+	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
+	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
+	FromChatID     *int64 `json:"fromChatId,omitempty" jsonschema:"optional: your own chat id, paired with fromTaskId"`
 }
 
-// taskSendOutput is task_send's structured output: the started run's id,
-// and nothing else -- this tool never blocks on the run finishing.
+// taskSendOutput is task_send's structured output: either the started
+// run's id, or (when the chat was busy and whenBusy was queue/interrupt --
+// the default) {queued: true, queueItemId} -- this tool never blocks on
+// the run finishing either way.
 type taskSendOutput struct {
-	RunID string `json:"runId"`
+	RunID string `json:"runId,omitempty"`
+	// Queued/QueueItemID are set instead of RunID when the prompt was
+	// queued (ADR-0021 §2).
+	Queued      bool  `json:"queued,omitempty"`
+	QueueItemID int64 `json:"queueItemId,omitempty"`
 }
 
 // mcpTaskSend wraps run.start (the non-blocking half of task.prompt, the
@@ -111,18 +120,46 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 			}
 		}
 
+		whenBusy := in.WhenBusy
+		if whenBusy == "" {
+			// ADR-0021 §9: MCP task_send defaults to queue, so a peer
+			// escalation to a busy lead is never lost.
+			whenBusy = "queue"
+		}
+		// Provenance (ADR-0021 §4): an agent names itself with
+		// fromTaskId/fromChatId; anything else is an orchestrator. A
+		// profileId send is the one non-human call that may carry
+		// auto-approving settings, because the profile itself is the
+		// human-authored authorization (ADR-0019 decision 6) -- so it
+		// rides as a human-sourced item.
+		source := "orchestrator"
+		if in.FromTaskID != nil && in.FromChatID != nil {
+			source = "agent"
+		}
+		if in.ProfileID != nil {
+			source = "human"
+		}
 		params := map[string]any{
 			"taskId": in.TaskID, "provider": provider, "prompt": in.Prompt,
 			"permissionMode": settings.Mode, "autoAccept": settings.AutoAccept,
+			"whenBusy": whenBusy, "source": source,
 		}
 		if in.ChatID != nil {
 			params["chatId"] = *in.ChatID
 		}
-		var start runStartResult
+		if source == "agent" {
+			params["fromTaskId"] = *in.FromTaskID
+			params["fromChatId"] = *in.FromChatID
+		}
+		var start struct {
+			RunID       string `json:"runId"`
+			Queued      bool   `json:"queued"`
+			QueueItemID int64  `json:"queueItemId"`
+		}
 		if err := callWS(ctx, client, "task_send", "run.start", params, &start); err != nil {
 			return nil, taskSendOutput{}, err
 		}
-		return nil, taskSendOutput{RunID: start.RunID}, nil
+		return nil, taskSendOutput{RunID: start.RunID, Queued: start.Queued, QueueItemID: start.QueueItemID}, nil
 	}
 }
 

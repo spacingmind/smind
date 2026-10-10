@@ -105,12 +105,23 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 	taskID, chatID, provider, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.provider, p.prompt, p.perm, p.thinkingLevel
 
+	// An agent-sourced prompt carries its provenance header on an
+	// immediate start too (ADR-0021 §4) -- the queued path stamps it at
+	// delivery via deliverPrompt instead, so it is only prepended here
+	// for the run we start ourselves.
+	// startPrompt is what an immediate start sends; the stored queue item
+	// keeps the bare prompt so deliverPrompt doesn't stamp the header twice.
+	startPrompt := prompt
+	if source == store.ChatQueueSourceAgent && fromTaskID != 0 && fromChatID != 0 {
+		startPrompt = fmt.Sprintf("[message from task #%d, chat #%d]\n%s", fromTaskID, fromChatID, prompt)
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	r := &run{
 		taskID:             taskID,
 		chatID:             chatID,
 		provider:           provider,
-		prompt:             prompt,
+		prompt:             startPrompt,
 		runner:             runner,
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,

@@ -1090,6 +1090,13 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
 			// omitted or "reject" keeps today's behavior exactly.
 			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Source/FromTaskID/FromChatID are ADR-0021 §4's provenance:
+			// the wsapi default is a human caller; the MCP layer passes
+			// orchestrator, or agent plus its own task/chat ids for the
+			// [message from task #T, chat #C] delivery header.
+			Source     string `json:"source"`
+			FromTaskID int64  `json:"fromTaskId"`
+			FromChatID int64  `json:"fromChatId"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.start: invalid params: %w", err)
@@ -1100,8 +1107,19 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 		if !p.ThinkingLevel.IsValid() {
 			return nil, fmt.Errorf("run.start: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.start: invalid source %q", p.Source)
+		}
+		if p.Source == store.ChatQueueSourceAgent && (p.FromTaskID == 0 || p.FromChatID == 0) {
+			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
+		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID)
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
