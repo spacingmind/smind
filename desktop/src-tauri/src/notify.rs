@@ -58,6 +58,7 @@ pub fn navigate_to_task(ctx: &ClickContext, task_id: i64) {
     let proxy_url = ctx.proxy_url.clone();
     let _ = ctx.app.run_on_main_thread(move || {
         use tauri::Manager;
+        log::info!("notification click: task {task_id}, workspace {:?}", cache.get(task_id));
         let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
             return;
         };

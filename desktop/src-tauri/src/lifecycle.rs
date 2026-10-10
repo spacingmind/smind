@@ -57,8 +57,12 @@ pub struct WindowBadge(pub AppHandle);
 
 impl BadgeSetter for WindowBadge {
     fn set(&self, count: Option<i64>) {
-        if let Some(win) = self.0.get_webview_window(MAIN_WINDOW) {
-            let _ = win.set_badge_count(count);
+        match self.0.get_webview_window(MAIN_WINDOW) {
+            Some(win) => {
+                let res = win.set_badge_count(count);
+                log::info!("badge set to {count:?}: {res:?}");
+            }
+            None => log::info!("badge set to {count:?}: no main window"),
         }
     }
 }
@@ -69,7 +73,8 @@ impl BadgeSetter for WindowBadge {
 /// even when it was hidden by the close button or minimized.
 pub fn handle_run_event(app: &AppHandle, event: RunEvent) {
     #[cfg(target_os = "macos")]
-    if let RunEvent::Reopen { .. } = event {
+    if let RunEvent::Reopen { has_visible_windows, .. } = event {
+        log::info!("dock reopen (has_visible_windows={has_visible_windows}): showing the main window");
         if let Some(win) = app.get_webview_window(MAIN_WINDOW) {
             let _ = win.unminimize();
             let _ = win.show();
