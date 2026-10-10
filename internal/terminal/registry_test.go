@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -184,6 +185,9 @@ func TestRegistry_Subscribe_SecondConnectionSeesBackfill(t *testing.T) {
 // size`, which queries the terminal driver directly rather than any
 // shell-side cached $COLUMNS/$LINES.
 func TestRegistry_Resize_ReachesPTY(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("stty is Unix-only; TestWindows_Resize covers ConPTY resize via `mode con`")
+	}
 	t.Parallel()
 	reg := newTestRegistry(t)
 	worktree := t.TempDir()

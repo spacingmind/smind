@@ -3,26 +3,39 @@
 package terminal
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
 
-// forceTestShell points the Windows tests at cmd.exe for determinism
-// (the spec's Test Scenarios note): a fixed, prompt-stable shell whose
-// `echo` and `exit` semantics the shared tests rely on. Unlike the Unix
-// flavor it sets nothing in the environment -- resolveShell ignores
-// $SHELL on Windows -- so it's just a skip guard plus documentation of
-// the invariant, and the per-test write helper below appends \r\n.
+// init points every session the Windows tests spawn at cmd.exe for
+// determinism (the spec's Test Scenarios note): a fixed, prompt-stable
+// shell whose `echo` and `exit` semantics the shared tests rely on.
+// Without it the tests ran whatever resolveShell found -- pwsh on CI,
+// Windows PowerShell 5.1 elsewhere -- whose PSReadLine redraws and
+// drops early keystrokes, which made the persistence tests flaky. Set in
+// init rather than in forceTestShell because not every test calls
+// forceTestShell, and a write racing parallel tests' reads would be a
+// data race; init runs before any test.
+func init() {
+	shellOverride = filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe")
+}
+
+// forceTestShell is a no-op on Windows: init above already forced
+// cmd.exe for the whole test binary.
 func forceTestShell(t *testing.T) {
 	t.Helper()
 }
 
 // writeLine returns the line-terminated form of a shell command line for
-// the platform's test shell: \n on Unix, \r\n on Windows (cmd.exe's
-// console input requires the carriage return).
+// the platform's test shell: \n on Unix, \r on Windows -- what a real
+// terminal (xterm.js) sends for Enter. A trailing \n there would reach
+// the shell as a second keystroke (an extra empty command in cmd.exe, a
+// `>>` continuation line in PSReadLine).
 func writeLine(cmd string) string {
-	return cmd + "\r\n"
+	return cmd + "\r"
 }
 
 func pidOf(t *testing.T, reg *Registry, id string) int {

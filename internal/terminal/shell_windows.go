@@ -16,16 +16,18 @@ import (
 // as the Unix flavor: cmd.exe is the guaranteed-last fallback, exactly
 // like /bin/sh there.
 func resolveShell() string {
-	for _, name := range []string{"pwsh.exe", "powershell.exe"} {
-		if path, err := exec.LookPath(name); err == nil {
-			return path
-		}
-	}
-	if comspec := os.Getenv("COMSPEC"); comspec != "" {
-		return comspec
+	if shellOverride != "" {
+		return shellOverride
 	}
 	return resolveShellWindows(exec.LookPath, os.Getenv("COMSPEC"), os.Getenv("SystemRoot"))
 }
+
+// shellOverride, when non-empty, is returned by resolveShell as-is. It is
+// the Windows counterpart of the Unix tests setting $SHELL (which Windows
+// ignores): helpers_windows_test.go sets it to cmd.exe in an init func, so
+// it is written once before any test runs and only read afterwards.
+// Never set in production.
+var shellOverride string
 
 // resolveShellWindows is the testable core of resolveShell: same
 // decision order, but with the PATH lookup and COMSPEC value injected so

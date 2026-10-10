@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,8 +19,8 @@ import (
 // gotcha), Job Object tree kill (AC5), concurrent CloseAll, and resize
 // (AC7). resolveShell's own table test (AC6) lives here too.
 //
-// All of them force cmd.exe (helpers_windows_test.go's forceTestShell)
-// for deterministic prompts, and send input with \r\n (writeLine).
+// All of them run cmd.exe (forced by helpers_windows_test.go's init) for
+// deterministic prompts, and send input with \r (writeLine).
 
 func TestWindows_CreateEchoRoundTrip(t *testing.T) {
 	t.Parallel()
@@ -230,11 +231,18 @@ func TestWindows_Resize(t *testing.T) {
 	}
 
 	// Prove the resize reached ConPTY by asking the shell its own size:
-	// cmd.exe's `mode con` reports the live console dimensions.
-	if err := reg.Write(id, []byte(writeLine("mode con"))); err != nil {
+	// cmd.exe's `mode con` reports the live console dimensions. The
+	// trailing echo marks the end of mode's output (the caret makes the
+	// printed marker differ from the typed one), and the Columns line is
+	// matched as a whole -- a bare "120" could come from the random temp
+	// dir name in the prompt.
+	if err := reg.Write(id, []byte(writeLine("mode con & echo resize^-done"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
-	collectUntil(t, events, "120", 10*time.Second)
+	out := collectUntil(t, events, "resize-done", 10*time.Second)
+	if !modeConColumns120.MatchString(out) {
+		t.Fatalf("mode con output has no `Columns: 120` line; got %q", out)
+	}
 
 	if err := reg.Close(id); err != nil {
 		t.Fatalf("Close() error = %v", err)
@@ -242,6 +250,61 @@ func TestWindows_Resize(t *testing.T) {
 	if err := reg.Resize(id, 80, 24); err == nil {
 		t.Fatal("Resize() on a closed session: error = nil, want the not-running error")
 	}
+}
+
+// modeConColumns120 matches mode con's "Columns: 120" line, allowing
+// ConPTY to render the padding as spaces or cursor-movement sequences.
+var modeConColumns120 = regexp.MustCompile(`Columns:(?:\s|\x1b\[[0-9;]*[A-Za-z])*120\b`)
+
+// TestWindows_TrailingOutputSurvivesExit guards the known AC4 risk:
+// xpty's ConPty.Close closes the read pipe right after
+// ClosePseudoConsole, so output printed just before the shell exits
+// could be dropped. The marker is printed and exited in one command line
+// (no chance to read it before exit), and the caret makes the printed
+// TAILMARK differ from the typed TAIL^MARK, so only real output matches.
+func TestWindows_TrailingOutputSurvivesExit(t *testing.T) {
+	t.Parallel()
+	st := newTestStore(t)
+	newTestTaskID(t, st)
+	reg, err := New(st)
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	id, err := reg.Create(1, t.TempDir())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	events, unsubscribe, err := reg.Subscribe(id)
+	if err != nil {
+		t.Fatalf("Subscribe() error = %v", err)
+	}
+	defer unsubscribe()
+
+	if err := reg.Write(id, []byte(writeLine("echo ready^-marker"))); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	collectUntil(t, events, "ready-marker", 10*time.Second)
+
+	if err := reg.Write(id, []byte(writeLine("echo TAIL^MARK & exit"))); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		row, err := st.GetTerminalSession(id)
+		if err != nil {
+			t.Fatalf("GetTerminalSession() error = %v", err)
+		}
+		if row.Status == string(StatusClosed) {
+			if !strings.Contains(row.Scrollback, "TAILMARK") {
+				t.Fatalf("persisted scrollback lost the output printed right before exit: %q", row.Scrollback)
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("session did not reach StatusClosed within 10s of `exit`")
 }
 
 // combinedOutput runs a command and returns its trimmed combined output.
