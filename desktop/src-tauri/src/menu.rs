@@ -65,7 +65,9 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     let window = SubmenuBuilder::new(app, "Window")
         .item(&MenuItem::with_id(app, ID_MINIMIZE, "Minimize", true, Some("CmdOrCtrl+M"))?)
-        .item(&MenuItem::with_id(app, ID_HIDE, "Hide to Tray", true, None::<&str>)?)
+        // No tray on macOS (desktop-macos-app M3): the window just hides
+        // and the Dock icon brings it back.
+        .item(&MenuItem::with_id(app, ID_HIDE, if cfg!(target_os = "macos") { "Hide" } else { "Hide to Tray" }, true, None::<&str>)?)
         .build()?;
 
     let help = SubmenuBuilder::new(app, "Help")

@@ -244,7 +244,10 @@ References:
   crate the notification plugin's own backend already depends on), since
   the plugin has no click callback on desktop. This is new work: the spec's
   "*still* focuses and navigates" assumed a macOS click path that did not
-  exist in `notify.rs`.
+  exist in `notify.rs`. Each waiter parks an OS thread until clicked or
+  dismissed, so waiters are capped at 4 (`should_wait_for_click`, unit test
+  `click_waiters_are_capped`); beyond the cap a notification is shown without
+  click-to-navigate and the fact is logged.
 
 ## Progress
 
@@ -473,8 +476,7 @@ verified, Dock rendering blocked by the notification-permission prompt;
 
 ### Notes for D1 / D3 (not changed by this plan)
 
-- `menu.rs` still labels the Window item "Hide to Tray"; on macOS there is
-  no tray. Left for D3, which owns the macOS menu.
+- The Window menu item reads "Hide" on macOS (was "Hide to Tray"); other platforms unchanged. D3 still owns the rest of the macOS menu.
 - `tauri_plugin_log` runs at its default (TRACE) level, so the log file
   rotates away INFO lines within seconds of a connection being open;
   this made the app's own diagnostics hard to read. Pre-existing.

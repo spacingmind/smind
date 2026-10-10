@@ -131,30 +131,80 @@ mod linux {
     }
 }
 
-/// macOS: `mac-notification-sys` blocks in `send` until the notification is
-/// clicked or dismissed, so each one waits on its own thread. The click
-/// path is the shared `navigate_to_task`, which shows the window first --
-/// the main window is only ever *hidden* by the close button, never
-/// destroyed, so it works from the Dock-only state too. If the system
-/// refuses the notification (e.g. the app isn't a registered bundle, as in
-/// an unbundled dev run) it falls back to the click-less plugin one.
+/// MAX_CLICK_WAITERS bounds how many macOS notifications may be parked
+/// waiting for a click at once.
+#[cfg(any(target_os = "macos", test))]
+const MAX_CLICK_WAITERS: usize = 4;
+
+/// should_wait_for_click is the pure cap policy: a notification only gets
+/// click-to-navigate while fewer than `cap` waiters are outstanding.
+/// Beyond that it is still shown, just without a click handler.
+#[cfg(any(target_os = "macos", test))]
+fn should_wait_for_click(outstanding: usize, cap: usize) -> bool {
+    outstanding < cap
+}
+
+/// macOS: `mac-notification-sys` blocks in `send(wait_for_click)` until the
+/// notification is clicked or dismissed, and unanswered ones sit in
+/// Notification Center indefinitely -- so each waiter parks an OS thread
+/// for as long as that lasts. The number of parked waiters is therefore
+/// capped (`MAX_CLICK_WAITERS`); past the cap a notification is sent
+/// without `wait_for_click` (it shows, but a click does nothing) and that
+/// is logged. The click path is the shared `navigate_to_task`, which shows
+/// the window first -- the main window is only ever *hidden* by the close
+/// button, never destroyed, so it works from the Dock-only state too. If
+/// the system refuses the notification (e.g. the app isn't a registered
+/// bundle, as in an unbundled dev run) it falls back to the click-less
+/// plugin one.
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use mac_notification_sys::{set_application, Notification, NotificationResponse};
 
-    use super::{fallback, navigate_to_task, ClickContext};
+    use super::{fallback, navigate_to_task, should_wait_for_click, ClickContext, MAX_CLICK_WAITERS};
+
+    static WAITERS: AtomicUsize = AtomicUsize::new(0);
+
+    /// Releases a waiter slot when the waiting thread finishes, however it ends.
+    struct Slot;
+    impl Drop for Slot {
+        fn drop(&mut self) {
+            WAITERS.fetch_sub(1, Ordering::SeqCst);
+        }
+    }
+
+    /// try_reserve atomically claims a waiter slot if the cap allows.
+    fn try_reserve() -> Option<Slot> {
+        let mut current = WAITERS.load(Ordering::SeqCst);
+        loop {
+            if !should_wait_for_click(current, MAX_CLICK_WAITERS) {
+                return None;
+            }
+            match WAITERS.compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return Some(Slot),
+                Err(actual) => current = actual,
+            }
+        }
+    }
 
     pub fn show(ctx: ClickContext, title: String, body: String, task_id: i64) {
+        let slot = try_reserve();
+        if slot.is_none() {
+            log::info!("notification for task {task_id}: {MAX_CLICK_WAITERS} click waiters already outstanding, sending without click-to-navigate");
+        }
         std::thread::spawn(move || {
             // Attribute the notification to this app (default would be
             // Finder). Only the first call sets it; `AlreadySet` is fine.
             let bundle_id = ctx.app.config().identifier.clone();
             let _ = set_application(&bundle_id);
-            match Notification::new().title(&title).message(&body).wait_for_click(true).send() {
+            let wait = slot.is_some();
+            match Notification::new().title(&title).message(&body).wait_for_click(wait).send() {
                 Ok(NotificationResponse::Click) => navigate_to_task(&ctx, task_id),
                 Ok(_) => {}
                 Err(_) => fallback::show(ctx, title, body),
             }
+            drop(slot);
         });
     }
 }
@@ -167,5 +217,21 @@ mod fallback {
 
     pub fn show(ctx: ClickContext, title: String, body: String) {
         let _ = ctx.app.notification().builder().title(title).body(body).show();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn click_waiters_are_capped() {
+        let cap = 4;
+        for outstanding in 0..cap {
+            assert!(should_wait_for_click(outstanding, cap), "{outstanding} outstanding is under the cap");
+        }
+        assert!(!should_wait_for_click(cap, cap));
+        assert!(!should_wait_for_click(cap + 10, cap));
+        assert!(!should_wait_for_click(0, 0), "a zero cap never waits");
     }
 }
