@@ -33,6 +33,10 @@ binary that serves both the API and an embedded web UI.
 - **CLI** — `workspace`/`space`/`task` management and `task
   send`/`attach`/`logs`/`stop`, modeled on real-world daemon CLIs (detaching
   never stops a run in progress).
+- **MCP server** — `smind mcp serve` exposes the same orchestration surface
+  ([ADR-0017](docs/decisions/0017-mcp-server.md)) to agent harnesses over
+  stdio, so an orchestrating agent can drive sub-agents without shelling
+  out to the CLI.
 
 ## Install
 
@@ -128,6 +132,32 @@ Each run uses its provider's own permission modes
 
 Anything the chosen mode still escalates waits for a human in the web UI or
 `smind task approve`. The web UI's prompt form has the same mode picker.
+
+### MCP server (`smind mcp serve`)
+
+`smind mcp serve` ([ADR-0017](docs/decisions/0017-mcp-server.md)) runs an
+MCP server over stdio, for orchestrating agents (Claude Code, Cursor, ...)
+to drive smind sub-agents without the CLI shell-and-poll loop:
+
+```json
+{ "mcpServers": { "smind": { "command": "smind", "args": ["mcp", "serve"] } } }
+```
+
+The daemon (`smind serve`) must already be running; the server reuses the
+CLI's own token and fails fast if it can't connect. Tools:
+`task_new`, `task_list`, `chat_list`, `chat_new`, `task_send`,
+`task_wait`, `task_status`, `task_logs`, `task_permissions`, `task_stop`.
+`task_send` returns a `runId` immediately; `task_wait` blocks until the run
+finishes, a permission goes pending, or its timeout elapses.
+
+There are deliberately **no approval tools** — an orchestrating agent must
+never resolve a sub-agent's permission request; it surfaces it (via
+`task_permissions`/`task_wait`) and the human approves in the web UI or
+with `smind task approve`. For the same reason ([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)
+decision 6), `task_send` rejects an auto-approving `permissionMode`
+(bypass modes) or `autoAccept: true` chosen by the caller itself — to run
+with such settings, pass a human-authored agent profile's `profileId`
+instead.
 
 ## Dev quickstart
 

@@ -80,7 +80,7 @@ would reuse.
 
 ## Cross-references
 
-- `docs/plans/active/desktop-tauri-shell.md` — implementation plan
+- `docs/plans/completed/desktop-tauri-shell.md` — implementation plan
   (user decisions, research findings, acceptance criteria).
 - `docs/decisions/0005-*.md` — wsapi event notification wire shape the
   Rust client parses (`{"event": {"topic", "seq", "payload"}}`).

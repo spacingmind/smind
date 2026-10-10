@@ -390,7 +390,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, provider Provider, wo
 // fallback cases, a human-readable EventTypeSessionNote is sent on events
 // first, so a stale/unsupported resume degrades to "new session, and the
 // UI says so" rather than either failing the prompt or silently losing
-// context. See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// context. See ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's
 // P2.3/P2.5, modeled on
 // refs/paseo/packages/server/src/server/agent/providers/acp-agent.ts:1757-1800.
 //
@@ -638,7 +638,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID int64, worktreePath
 // the CLI's own initialize handshake, surfacing as claudecode.New itself
 // erroring, before any prompt is ever sent -- degrades to a fresh session
 // instead of failing the turn, surfacing an EventTypeSessionNote first.
-// See ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// See ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's
 // P2.2/P2.5.
 func (r *Runner) newClaudeClientWithResume(ctx context.Context, chatID int64, worktreePath string, opts []claudecode.Option, events chan<- Event) (claudeBackend, error) {
 	handle, ok := r.sessionStore.Get(chatID)
@@ -817,7 +817,7 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID int64, worktreePath,
 // a fresh thread/start -- surfacing an EventTypeSessionNote first whenever
 // the stored thread couldn't be resumed (a stale/unknown/deleted thread
 // id), so that degrades gracefully rather than failing the prompt. See
-// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's
+// ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's
 // P2.4/P2.5.
 func (r *Runner) newOrResumeCodexThread(ctx context.Context, chatID int64, client codexBackend, worktreePath string, events chan<- Event) (string, error) {
 	handle, ok := r.sessionStore.Get(chatID)
