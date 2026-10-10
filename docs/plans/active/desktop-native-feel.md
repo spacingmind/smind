@@ -218,6 +218,10 @@ ported):
   absent.
 - `open-in-editor-error-toast` — a rejected `open_in_editor` shows an
   error toast containing the Rust error message.
+- `open-in-editor-passes-id-and-absolute-path` — choosing an editor
+  calls `openInEditor` with that editor's id and an absolute path (the
+  workspace path, or the task worktree path joined with the file's
+  relative path), never an executable or arguments.
 
 ### Rust tests (`cargo test`, unit-level, no webview)
 
@@ -228,6 +232,9 @@ ported):
 - `open_in_editor_rejects_relative_or_missing_path`.
 - `wslpath_translation_ok` and `wslpath_translation_failure_is_error` —
   run against a stubbed `wsl.exe` runner.
+- `overlay_icon_pixels` — the Windows taskbar overlay image has the
+  right size, is red in the centre and transparent in the corners, and
+  differs per count.
 - `badge_follows_attention_count` — the count goes 0 → 3 → 0 and the
   badge setter sees 3, then a clear.
 - `window_shown_after_ready_or_timeout` — the show-on-ready logic shows
