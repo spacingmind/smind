@@ -70,7 +70,7 @@ outcomes, ceremony that only burns tokens).
 ```
 Step 0  land in-flight: mcp-server, agent-mcp-servers, task hierarchy
 Step 1  (parallel, no ADR)  M1 request log | O1 run provenance + stop/resume | O2 MCP hierarchy + guards
-Step 2  ADRs: ADR-M "smind runs through the proxy"  |  ADR-O "per-chat prompt queue"
+Step 2  ADRs: ADR-M "per-run usage from agent events"  |  ADR-O "per-chat prompt queue"
 Step 3  implement both ADRs → dogfood: lead + ≥2 peers on a non-smind project, via smind only
 Step 4  demand-gated backlog, driven by the dogfood gap log
 ```
@@ -163,36 +163,48 @@ and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
   MCP server (ADR-0018), so a peer can read sibling tasks. Peers still
   get no approve/deny tool (ADR-0017 decision 1).
 
-### ADR-M — smind runs through the proxy ([ADR-0020](../../decisions/0020-runs-through-proxy.md), Proposed)
-- `task.prompt` gains an opt-in per-run `viaProxy` knob, default off,
-  stored on `runs`. When on, the daemon mints a per-run bearer token
-  (revoked when the run ends) and spawns:
-  - claude-native with `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`;
-  - GLM with `ACP_GLM_BASE_URL` and `Z_AI_API_KEY`. This needs a
-    `WithEnv` option in `internal/acp` that sets `cmd.Env` in `rpc.go`.
-  - Codex rejects `viaProxy` with a clear "not supported yet" error
-    (Responses API only).
-- The proxy accepts the daemon token or a live run token. `request_log`
-  gains nullable `workspace_id`, `task_id`, `chat_id`, and `run_id`,
-  filled from the run token. `usage.summary` gains
-  `groupBy: workspace|task|run`.
-- With a workspace known, the proxy honors `workspace_accounts`.
-- **Base-URL semantics.** `base_url` becomes a true base URL and the
-  incoming path is appended. A stored value that ends in the legacy full
-  endpoint (`/v1/messages` or `/chat/completions`) has that suffix
-  stripped, so existing accounts keep working.
-  `POST /v1/messages/count_tokens` is added as a pass-through (not
-  metered).
-- **Model-aware routing.** An account can declare `models` globs.
-  Candidates are accounts of the provider whose globs match the requested
-  model. If none match explicitly, fall back to accounts with no `models`
-  list. If there is still no candidate, return a provider-shaped 400
-  `model_not_found`. A GLM key declared `glm-*` is never picked for
-  `claude-*`.
-- Known trade-off, recorded in the ADR: `viaProxy` switches claude-native
-  from the user's own login to smind-managed accounts. Claude Code also
-  disables some claude.ai-only features when `ANTHROPIC_AUTH_TOKEN` is
-  set.
+### ADR-M — per-run usage from agent events ([ADR-0020](../../decisions/0020-run-usage-from-agent-events.md), Accepted 2026-10-11)
+
+The 2026-09-28 "runs through the proxy" draft was rejected. The user won't
+trade claude-native's login and claude.ai features for metering, and the
+proxy is for account management only, as Paseo also needs no proxy. Runs
+never go through the proxy. Usage comes from each agent's own events.
+
+**ADR-M acceptance criteria (implementation spec, 2026-10-11):**
+
+1. **Normalized usage type** in `internal/taskrunner`: input, cached
+   input, cache write, output, reasoning, cost USD, model, context
+   used/size, source. Every field is a nullable pointer, and nothing is
+   estimated.
+2. **claude-native.** Parse the turn's `result` message (`usage`,
+   `total_cost_usd`, `modelUsage`) into AC1 and emit it as a `usage` run
+   event.
+3. **codex-native.** Take `thread/tokenUsage/updated` and keep the last
+   `tokenUsage.last` of the turn. Emit it at turn end.
+4. **ACP.**
+   - Take `PromptResponse.usage` when present. It is session-cumulative,
+     so store the per-run difference from the previous run's snapshot for
+     the same session; the snapshot is persisted with the run.
+   - Take `usage_update` for context used/size and cumulative cost,
+     differenced the same way.
+   - If neither arrives, the usage is NULL.
+5. **Storage.** A `run_usage` table, one row per run, upserted at each
+   turn end and on finish. It has workspace/task/chat ids, provider,
+   model, the token fields, cost, context, `session_snapshot` (JSON, ACP
+   only) and `source`. No prompt text and no secrets.
+6. **Wire.**
+   - `RunSummary` (`run.list`) carries token and cost totals.
+   - Structured run event `usage` (ADR-0008).
+   - `usage.summary` gains `scope: proxy|runs|all` and, for runs,
+     `groupBy: workspace|task|chat|run|provider|model`.
+   - `smind usage --scope`.
+7. **Proxy, for external clients only.** Base-URL semantics, the
+   `count_tokens` pass-through, and model-aware routing exactly as
+   ADR-0020 §5. Existing accounts, including the Perplexity one, keep
+   working with no migration.
+8. **No regressions.** No change to how runs spawn, so no env injection
+   and no proxy hop. The M1 proxy metering is unchanged for unattributed
+   external traffic.
 
 ### ADR-O — per-chat prompt queue ([ADR-0021](../../decisions/0021-per-chat-prompt-queue.md), Proposed)
 - `task.prompt`/`run.start` to a chat with a running run takes
@@ -272,7 +284,34 @@ provenance (O1) gives the runner (or internal/runs) that context.
   succeeds.
 - A cross-workspace or nonexistent parent returns the daemon error text.
 
-**ADR-M / ADR-O:** written with each ADR's plan section.
+**ADR-M** (fake-agent/fake-transport tests; exact names):
+- `TestUsage_ClaudeResultParsed`: a `result` message with all four token
+  fields, the cost and `modelUsage` maps onto AC1; a missing field stays
+  nil.
+- `TestUsage_CodexTokenUsageLastOfTurn`: two
+  `thread/tokenUsage/updated` notifications in one turn; the stored value
+  is the last `tokenUsage.last`.
+- `TestUsage_ACPPromptUsageDifferenced`: run 1 reports cumulative 100/20
+  and stores 100/20; run 2 on the same session reports 160/50 and stores
+  60/30; a new session starts from zero.
+- `TestUsage_ACPUsageUpdateContextAndCost`: context used/size comes from
+  the last `usage_update`, and cumulative cost is differenced per run.
+- `TestUsage_ACPNothingReportedIsNull`: no usage messages give all-NULL
+  fields and the "not reported" source.
+- `TestRunUsage_UpsertAndSummary`: rows upsert per turn;
+  `usage.summary scope=runs groupBy=task` sums correctly; `scope=all`
+  includes proxy rows.
+- `TestRunList_CarriesUsageTotals`.
+- `TestUsageEvent_NoPromptOrSecret`: the stored row and event JSON
+  contain no prompt text and no API key.
+- `TestProxy_BaseURLSemantics`: Anthropic and OpenAI families; a legacy
+  suffix is stripped; the Perplexity account still routes;
+  `count_tokens` passes through without metering.
+- `TestProxy_ModelAwareRouting`: an explicit glob match wins, then an
+  account with no list, then 400 `model_not_found`; a `glm-*` key is
+  never picked for `claude-*`.
+
+**ADR-O:** written with ADR-0021's plan section.
 
 ## Decisions
 
@@ -283,16 +322,15 @@ Resolved:
 Proposed (research-backed; confirm or override):
 1. Pull a slice of ROADMAP Phase 5 "Subagents" forward. Steps 0–1 are
    cheap and mostly finish in-flight work; Steps 2+ are gated.
-2. Attribution uses a **per-run bearer token** (cliproxyapi's
-   per-client-key pattern). It works with any client that only lets you
-   set a base URL and key, and it can be revoked when the run ends.
+2. ~~Attribution uses a per-run bearer token~~ -- **superseded
+   2026-10-11 by ADR-0020's rewrite**: runs stay off the proxy, and
+   per-run usage comes from agent events (Paseo-style).
 3. Compatible upstreams use **model-aware routing, explicit-match-first**
    (cliproxyapi's model registry, plus a guard it lacks). No new provider
    ids.
 4. **Inject `include_usage`** (cliproxyapi precedent).
-5. **`viaProxy` is opt-in per run.** Codex is deferred until a
-   `/v1/responses` route exists; revisit after the Codex quota reset
-   (2026-10-07).
+5. ~~`viaProxy` is opt-in per run~~ -- **dropped 2026-10-11** (ADR-0020
+   rewrite): there is no `viaProxy` at all.
 6. **One queue primitive** with `reject|queue|interrupt` replaces the
    separate "inbox" and "steering" ideas (Codex/dsh precedent;
    persisted, unlike Codex).
@@ -317,7 +355,7 @@ Free-text task brief visible to child tasks; per-task token budget (on
 top of `request_log`, like Codex's `ThreadGoal.token_budget`);
 composer usage pill; feeding the router's `TokensUsed` from locally
 counted tokens instead of the stubbed `quota.Fetcher`; per-workspace audit
-log; `/v1/responses` + Codex `viaProxy`; `/v1/models`; a bundled
+log; `/v1/responses`; `/v1/models`; a bundled
 orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 `request_log` retention; push notifications for queued escalations.
 
@@ -332,7 +370,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] O2: MCP parent params + depth guard (Wave 1 slice; per-tree
       concurrency guard and guide stay Wave 2)
 - [x] ADR-M drafted as ADR-0020 (Proposed)
-- [ ] ADR-0020 accepted
+- [x] ADR-0020 accepted (2026-10-11, rewritten: usage from agent events, runs off the proxy)
 - [x] ADR-O drafted as ADR-0021 (Proposed)
 - [ ] ADR-0021 accepted
 - [ ] ADR-M implemented
