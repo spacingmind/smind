@@ -3,7 +3,7 @@ module github.com/spacingmind/smind
 go 1.27.0
 
 require (
-	github.com/creack/pty v1.1.24
+	github.com/charmbracelet/x/xpty v0.1.4
 	github.com/gorilla/websocket v1.5.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/refraction-networking/utls v1.8.2
@@ -11,6 +11,7 @@ require (
 	github.com/traefik/grpc-web v0.16.0
 	golang.org/x/crypto v0.55.0
 	golang.org/x/oauth2 v0.36.0
+	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
@@ -21,6 +22,10 @@ require (
 require (
 	github.com/andybalholm/brotli v1.0.6 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
+	github.com/charmbracelet/x/conpty v0.2.0 // indirect
+	github.com/charmbracelet/x/term v0.2.2 // indirect
+	github.com/charmbracelet/x/termios v0.1.1 // indirect
+	github.com/creack/pty v1.1.24 // indirect
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
@@ -35,7 +40,6 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 	golang.org/x/text v0.41.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260526163538-3dc84a4a5aaa // indirect
