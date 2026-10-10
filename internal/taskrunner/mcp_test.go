@@ -1,8 +1,10 @@
 package taskrunner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -485,5 +487,41 @@ func TestRunner_RunPrompt_ClaudeNativeWorkspaceRestriction(t *testing.T) {
 	args := runClaudeMcp(t, r, task)
 	if v, ok := flagValue(args, "--mcp-config"); ok {
 		t.Fatalf("--mcp-config = %q, want none for a server restricted to another workspace", v)
+	}
+}
+
+// TestRunner_RunPrompt_ACPActiveMcpServerSecretNeverLeaksOutsideWire is the
+// ADR-0018 / AC9 audit for the path where the secret IS legitimately sent:
+// a stdio server and an http server both reach the agent (so the dump file
+// carries the values), yet no emitted Event (the only thing internal/runs
+// persists as run_events) and no daemon log line may contain them.
+func TestRunner_RunPrompt_ACPActiveMcpServerSecretNeverLeaksOutsideWire(t *testing.T) {
+	r, st, task, dump := newMcpTestEnv(t, "stdio,http")
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Env: `{"TOKEN":"SUPERSECRET-ENV"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "remote", Transport: "http", URL: "https://r/mcp", Headers: `{"Authorization":"Bearer SUPERSECRET-HDR"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(remote): %v", err)
+	}
+
+	var logs bytes.Buffer
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(os.Stderr) })
+
+	events := runMcpPrompt(t, r, task)
+
+	wire := readMcpDump(t, dump)
+	if !strings.Contains(wire, "SUPERSECRET-ENV") || !strings.Contains(wire, "SUPERSECRET-HDR") {
+		t.Fatalf("wire dump = %s, want both secrets delivered to the agent", wire)
+	}
+	for _, e := range events {
+		raw, _ := json.Marshal(e)
+		if strings.Contains(string(raw), "SUPERSECRET") {
+			t.Fatalf("event leaked a secret: %s", raw)
+		}
+	}
+	if strings.Contains(logs.String(), "SUPERSECRET") {
+		t.Fatalf("log output leaked a secret: %s", logs.String())
 	}
 }
