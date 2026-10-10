@@ -1,38 +1,15 @@
 package terminal
 
 import (
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/spacingmind/smind/internal/store"
 )
-
-// forceTestShell sets $SHELL to /bin/bash for the whole test process
-// (once), so every session these tests spawn runs bash regardless of the
-// developer's own $SHELL (interactive zsh, dash, etc. can print different
-// job-control chatter that would make output assertions flaky). A plain
-// os.Setenv rather than t.Setenv deliberately: t.Setenv forbids
-// t.Parallel in the same test, and every test in this file wants to run
-// in parallel; $SHELL is only ever read (never restored) by resolveShell,
-// and every test here wants the same value anyway, so process-wide is
-// fine.
-var forceTestShellOnce sync.Once
-
-func forceTestShell(t *testing.T) {
-	t.Helper()
-	if _, err := os.Stat("/bin/bash"); err != nil {
-		t.Skip("/bin/bash not available")
-	}
-	forceTestShellOnce.Do(func() {
-		os.Setenv("SHELL", "/bin/bash")
-	})
-}
 
 // newTestStore returns a real temp-file store (not :memory: -- see
 // internal/runs' identical helper, since a restart simulation needs to
@@ -109,25 +86,6 @@ func collectUntil(t *testing.T, events <-chan Event, want string, timeout time.D
 	}
 }
 
-func pidOf(t *testing.T, reg *Registry, id string) int {
-	t.Helper()
-	reg.mu.Lock()
-	s, ok := reg.sessions[id]
-	reg.mu.Unlock()
-	if !ok {
-		t.Fatalf("session %s not found", id)
-	}
-	return s.cmd.Process.Pid
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
-}
-
 func waitGone(t *testing.T, pid int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -153,6 +111,10 @@ func TestRegistry_CreateWriteSubscribe_RealShell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// Close at cleanup so the shell isn't still holding its cwd (the
+	// worktree temp dir) when t.TempDir's RemoveAll runs -- Windows
+	// refuses to delete a live process's working directory.
+	t.Cleanup(func() { _ = reg.Close(id) })
 
 	events, unsubscribe, err := reg.Subscribe(id)
 	if err != nil {
@@ -160,7 +122,7 @@ func TestRegistry_CreateWriteSubscribe_RealShell(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	if err := reg.Write(id, []byte("echo hello-smind-terminal\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo hello-smind-terminal"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
@@ -182,6 +144,9 @@ func TestRegistry_Subscribe_SecondConnectionSeesBackfill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// See TestRegistry_CreateWriteSubscribe_RealShell for the cleanup
+	// rationale (shell cwd holds the worktree temp dir on Windows).
+	t.Cleanup(func() { _ = reg.Close(id) })
 
 	first, unsubFirst, err := reg.Subscribe(id)
 	if err != nil {
@@ -189,7 +154,7 @@ func TestRegistry_Subscribe_SecondConnectionSeesBackfill(t *testing.T) {
 	}
 	defer unsubFirst()
 
-	if err := reg.Write(id, []byte("echo before-second-subscriber\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo before-second-subscriber"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, first, "before-second-subscriber", 5*time.Second)
@@ -207,7 +172,7 @@ func TestRegistry_Subscribe_SecondConnectionSeesBackfill(t *testing.T) {
 	}
 
 	// ...and then new output live, without needing to resubscribe.
-	if err := reg.Write(id, []byte("echo after-second-subscriber\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo after-second-subscriber"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	collectUntil(t, second, "after-second-subscriber", 5*time.Second)
@@ -227,6 +192,10 @@ func TestRegistry_Resize_ReachesPTY(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create() error = %v", err)
 	}
+	// See TestRegistry_CreateWriteSubscribe_RealShell for the cleanup
+	// rationale (shell cwd holds the worktree temp dir on Windows).
+	t.Cleanup(func() { _ = reg.Close(id) })
+
 	events, unsubscribe, err := reg.Subscribe(id)
 	if err != nil {
 		t.Fatalf("Subscribe() error = %v", err)
@@ -238,7 +207,7 @@ func TestRegistry_Resize_ReachesPTY(t *testing.T) {
 		t.Fatalf("Resize() error = %v", err)
 	}
 
-	if err := reg.Write(id, []byte("stty size\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("stty size"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
@@ -388,7 +357,7 @@ func TestRegistry_WriteAfterClose(t *testing.T) {
 	if err := reg.Close(id); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	if err := reg.Write(id, []byte("echo x\n")); err == nil {
+	if err := reg.Write(id, []byte(writeLine("echo x"))); err == nil {
 		t.Fatal("Write() after Close: error = nil, want an error")
 	}
 }
@@ -483,7 +452,7 @@ func TestRegistry_ConcurrentReadWrite(t *testing.T) {
 	// test's own wait bounded instead of racing its own Write against
 	// goroutine scheduling).
 	time.Sleep(20 * time.Millisecond)
-	if err := reg.Write(id, []byte("echo marker\n")); err != nil {
+	if err := reg.Write(id, []byte(writeLine("echo marker"))); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 
