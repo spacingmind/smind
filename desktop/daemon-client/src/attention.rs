@@ -2,7 +2,7 @@
 //! tasks currently have an unresolved `permission.pending`.
 //!
 //! No `permission.resolved` event exists (see
-//! `docs/plans/active/desktop-quick-wins.md`'s Context). A task's entry
+//! `docs/plans/completed/desktop-quick-wins.md`'s Context). A task's entry
 //! clears when its run transitions back to "running" -- the same signal
 //! `web/packages/ui/src/hooks/use-task-attention.ts` uses to clear its
 //! own permission badge -- or on a fresh reconnect, which resets the

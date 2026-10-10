@@ -723,3 +723,16 @@ relationship with the daemon.
   - Any live verification on macOS or native Windows (no such host in
     this sandbox).
   - Opening a PR (out of scope per the task's own instructions).
+
+### Follow-up status (2026-10-10)
+
+- **AC5 (macOS native) is now verified live** by `desktop-macos-app`
+  (PR #238). Running the real app on a Mac found and fixed three bugs in
+  this plan's macOS path: the `ps` identity check broke on paths with
+  spaces, the 500 ms start wait was too short (now polls `/healthz`), and
+  the window never reloaded after auto-start. macOS has also switched from
+  downloading the release to installing the bundled sidecar, per that
+  plan's M2.
+- **Still open, and the reason this plan stays active:** a live WSL2
+  end-to-end run of AC4 (download → verify → install → start →
+  find-pid → restart through `wsl.exe`) on a Windows host.
