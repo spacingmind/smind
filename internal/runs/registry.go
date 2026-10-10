@@ -32,6 +32,20 @@ import (
 // persistence for this pass.
 const finishedRetentionCap = 200
 
+// ChatBusyError is the "one running run per chat" rejection (ADR-0016
+// §4): a typed error so the queue's delivery path can distinguish "someone
+// else won the race" (leave the item queued; that run's finish will
+// deliver) from a real validation failure (cancel the item). Its text is
+// byte-identical to the pre-queue error, so old clients see no change.
+type ChatBusyError struct {
+	ChatID int64
+	RunID  string
+}
+
+func (e *ChatBusyError) Error() string {
+	return fmt.Sprintf("runs: start: chat %d already has a running run (%s)", e.ChatID, e.RunID)
+}
+
 // defaultPermissionTimeout is how long a pending permission request (see
 // runPermissionDecider.Decide) waits for either a human response
 // (RespondPermission) before it
@@ -70,6 +84,19 @@ type Registry struct {
 	// permissionTimeout overrides defaultPermissionTimeout when non-zero --
 	// see SetPermissionTimeout.
 	permissionTimeout time.Duration
+
+	// starterWM/starterRunner, wired via SetStarter (ADR-0021 §3), are the
+	// dependencies queue delivery needs to start runs itself -- the same
+	// wm/runner Start's callers pass in. Nil until wsapi.New wires them;
+	// delivery is a no-op before that (except in tests, which call
+	// SetStarter explicitly).
+	starterWM     *workspace.Manager
+	starterRunner *taskrunner.Runner
+
+	// deliveryAttempts counts delivery attempts per chat_queue item id, so
+	// a test can prove delivery never tight-loops on one bad item
+	// (ADR-0021 §3: cancel and move on). Guarded by mu.
+	deliveryAttempts map[int64]int
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -102,6 +129,7 @@ func (reg *Registry) getPermissionTimeout() time.Duration {
 type Notifier interface {
 	NotifyRunStatus(s RunStatus)
 	NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption)
+	NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem)
 }
 
 // SetNotifier registers n; nil-safe (notifications with no notifier are
@@ -155,7 +183,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int)}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -392,53 +420,11 @@ func (r *run) statusLocked() RunStatus {
 // string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
 // exactly.
 func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
-	if _, err := wm.GetTask(taskID); err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
-	}
-
-	chat, err := resolveChat(wm, taskID, chatID)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel)
 	if err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
+		return "", err
 	}
-	if chat.ArchivedAt != nil {
-		return "", fmt.Errorf("runs: start: chat %d is archived", chat.ID)
-	}
-	if chat.Provider == nil {
-		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
-			return "", fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
-		}
-	}
-	// Re-checked against chat as BindChatProvider actually left it, not
-	// just the pre-bind read above: store.BindChatProvider is a
-	// write-if-still-NULL, so two concurrent first prompts to the same
-	// unbound chat with different providers both reach this point seeing
-	// Provider == nil, but only one of them actually wins the bind -- the
-	// other's write silently no-ops and must still be rejected here rather
-	// than proceeding as if it had bound its own value.
-	if *chat.Provider != string(provider) {
-		return "", fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
-	}
-	chatID = chat.ID
-
-	catalog, ok := runner.ProviderCatalogFor(provider)
-	if !ok {
-		return "", fmt.Errorf("runs: start: unknown provider %q", provider)
-	}
-	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
-	}
-	// An empty mode resolves to the provider default -- for an ACP agent
-	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
-	// treats as "leave the agent in its own start mode" unless the agent
-	// really has a mode by that name; the run then records the agent's
-	// actual mode as soon as its session reports it (applyReportedMode).
-	if perm.Mode == "" {
-		perm.Mode = catalog.DefaultMode
-	}
-
-	if !thinkingLevel.IsValid() {
-		return "", fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
-	}
+	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
 
 	id, err := newRunID()
 	if err != nil {
@@ -469,7 +455,132 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// concurrent Start calls for the same chat can't both observe "no
 	// running run yet" and both proceed -- whichever acquires reg.mu first
 	// registers and the other sees it on its own check.
+	if busyRunID, busy := reg.runningRunForChat(chatID); busy {
+		cancel()
+		return "", &ChatBusyError{ChatID: chatID, RunID: busyRunID}
+	}
+
+	if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
+		cancel()
+		return "", err
+	}
+	return id, nil
+}
+
+// registerAndDrive is Start's tail after a run is registered in the
+// in-memory map under reg.mu: persist the run row (rolling the in-memory
+// registration back on failure, so the concurrency guard stays correct and
+// no subprocess is started for a run whose row didn't reach disk), notify,
+// and launch the driving goroutine. Shared by Start and the queue's
+// delivery path so a delivered prompt runs through the exact same code
+// (ADR-0021 §3).
+func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *taskrunner.Runner) error {
 	reg.mu.Lock()
+	reg.runs[r.id] = r
+	reg.mu.Unlock()
+
+	// Persisted after registration but before driving the turn: a
+	// persistence failure here still leaves the concurrency guard above
+	// correct (this run is removed again immediately), and never starts an
+	// agent subprocess for a run whose row didn't make it to disk.
+	if _, err := reg.st.CreateRun(store.Run{
+		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
+		Status: string(StatusRunning), StartedAt: r.startedAt,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept,
+	}); err != nil {
+		reg.mu.Lock()
+		delete(reg.runs, r.id)
+		reg.mu.Unlock()
+		return fmt.Errorf("runs: start: persist run: %w", err)
+	}
+
+	reg.notifyRunStatus(r)
+
+	go reg.drive(runCtx, r, runner)
+	return nil
+}
+
+// startParams is everything a validated Start needs: the inputs after
+// resolution/normalization (chatID resolved to a concrete chat, an empty
+// permission mode filled in with the provider default). Extracted so the
+// queue's enqueue path (StartWhenBusy) validates exactly like a direct
+// Start -- ADR-0021 AC2's "validates the run config exactly as a direct
+// start would".
+type startParams struct {
+	taskID        int64
+	chatID        int64
+	provider      taskrunner.Provider
+	prompt        string
+	perm          taskrunner.PermissionSettings
+	thinkingLevel taskrunner.ThinkingLevel
+	// catalog is the resolved provider catalog StartWhenBusy's
+	// orchestrator guard (ADR-0019 decision 6 at enqueue time,
+	// ADR-0021 §6) checks against.
+	catalog taskrunner.ProviderInfo
+}
+
+// prepareStart is Start's validation half: unknown task, chat resolution
+// and archiving, provider bind/match, the provider catalog, permission
+// settings (with default-mode normalization), and thinking level. Every
+// error is wrapped "runs: start: ..." exactly as before.
+func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (startParams, error) {
+	if _, err := wm.GetTask(taskID); err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+
+	chat, err := resolveChat(wm, taskID, chatID)
+	if err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	if chat.ArchivedAt != nil {
+		return startParams{}, fmt.Errorf("runs: start: chat %d is archived", chat.ID)
+	}
+	if chat.Provider == nil {
+		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
+			return startParams{}, fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
+		}
+	}
+	// Re-checked against chat as BindChatProvider actually left it, not
+	// just the pre-bind read above: store.BindChatProvider is a
+	// write-if-still-NULL, so two concurrent first prompts to the same
+	// unbound chat with different providers both reach this point seeing
+	// Provider == nil, but only one of them actually wins the bind -- the
+	// other's write silently no-ops and must still be rejected here rather
+	// than proceeding as if it had bound its own value.
+	if *chat.Provider != string(provider) {
+		return startParams{}, fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
+	}
+
+	catalog, ok := runner.ProviderCatalogFor(provider)
+	if !ok {
+		return startParams{}, fmt.Errorf("runs: start: unknown provider %q", provider)
+	}
+	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	// An empty mode resolves to the provider default -- for an ACP agent
+	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
+	// treats as "leave the agent in its own start mode" unless the agent
+	// really has a mode by that name; the run then records the agent's
+	// actual mode as soon as its session reports it (applyReportedMode).
+	if perm.Mode == "" {
+		perm.Mode = catalog.DefaultMode
+	}
+
+	if !thinkingLevel.IsValid() {
+		return startParams{}, fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
+	}
+
+	return startParams{taskID: taskID, chatID: chat.ID, provider: provider, prompt: prompt, perm: perm, thinkingLevel: thinkingLevel, catalog: catalog}, nil
+}
+
+// runningRunForChat reports whether chatID has a StatusRunning run, and
+// that run's id. The scan happens under reg.mu so the "busy, so enqueue"
+// vs "idle, so start" decision in StartWhenBusy is atomic with every other
+// Start and with finish's own state transitions.
+func (reg *Registry) runningRunForChat(chatID int64) (string, bool) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
 	for _, existing := range reg.runs {
 		if existing.chatID != chatID {
 			continue
@@ -478,35 +589,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		running := existing.status == StatusRunning
 		existing.mu.Unlock()
 		if running {
-			reg.mu.Unlock()
-			cancel()
-			return "", fmt.Errorf("runs: start: chat %d already has a running run (%s)", chatID, existing.id)
+			return existing.id, true
 		}
 	}
-	reg.runs[id] = r
-	reg.mu.Unlock()
-
-	// Persisted after registration but before driving the turn: a
-	// persistence failure here still leaves the concurrency guard above
-	// correct (this run is removed again immediately), and never starts an
-	// agent subprocess for a run whose row didn't make it to disk.
-	if _, err := reg.st.CreateRun(store.Run{
-		ID: id, TaskID: taskID, ChatID: chatID, Provider: string(provider), Prompt: prompt,
-		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept,
-	}); err != nil {
-		reg.mu.Lock()
-		delete(reg.runs, id)
-		reg.mu.Unlock()
-		cancel()
-		return "", fmt.Errorf("runs: start: persist run: %w", err)
-	}
-
-	reg.notifyRunStatus(r)
-
-	go reg.drive(runCtx, r, runner)
-
-	return id, nil
+	return "", false
 }
 
 // resolveChat returns the chat Start should use: wm.DefaultChat(taskID) if
@@ -837,6 +923,14 @@ func (reg *Registry) finish(r *run, err error) {
 	}
 
 	reg.retain(r.id)
+
+	// Queue delivery (ADR-0021 §3): the finished run is recorded and every
+	// lock (reg.mu, r.mu) has been released by this point, so starting the
+	// chat's next queued prompt here can never deadlock against finish.
+	// Runs after retain but before the closedCh signal so a CloseAll
+	// caller that waits on closedCh still sees "this run is fully done"
+	// including its queue hand-off.
+	reg.deliverOne(r.chatID)
 
 	// Signal last, same reasoning as internal/terminal.Registry's own
 	// finish: CloseAll blocks on this to know the run's subprocess is
