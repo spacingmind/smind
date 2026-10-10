@@ -246,12 +246,17 @@ pub fn run() {
             // AC3: hide-on-close instead of destroy.
             let close_win = win.clone();
             let close_app = app.handle().clone();
-            win.on_window_event(move |event| {
-                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            let badge_tray = tray.clone();
+            win.on_window_event(move |event| match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
                     api.prevent_close();
                     window_chrome::dismissed(&close_app);
                     let _ = close_win.hide();
                 }
+                // Windows drops the taskbar overlay when the hidden window's
+                // button is re-created; put it back when the window returns.
+                tauri::WindowEvent::Focused(true) => badge_tray.reapply_badge(),
+                _ => {}
             });
 
             // AC5: register the toggle shortcut.

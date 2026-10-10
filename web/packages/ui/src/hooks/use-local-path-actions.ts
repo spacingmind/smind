@@ -31,10 +31,15 @@ export function useLocalPathActions(): LocalPathActions | null {
   useEffect(() => {
     if (!isDesktop) return;
     let cancelled = false;
+    // Overlapping loads (a quick local -> url switch) must not let the older
+    // one finish last and re-show the items, so only the newest may commit.
+    let latest = 0;
     const load = () => {
+      const mine = ++latest;
+      const stale = () => cancelled || mine !== latest;
       (async () => {
         const current = await desktop.getCurrentConnection();
-        if (cancelled) return;
+        if (stale()) return;
         if (current.kind !== "local") {
           setState(null);
           return;
@@ -42,11 +47,11 @@ export function useLocalPathActions(): LocalPathActions | null {
         const list = await desktop.editorsList();
         const fileManager =
           list.find((e) => e.id === FILE_MANAGER_EDITOR_ID) ?? list.find((e) => e.kind === "fileManager");
-        if (cancelled) return;
+        if (stale()) return;
         setState(fileManager ? { fileManager, editors: list.filter((e) => e.kind === "editor") } : null);
       })().catch(() => {
         // Best-effort: these items are a convenience, never load-bearing.
-        if (!cancelled) setState(null);
+        if (!stale()) setState(null);
       });
     };
     load();

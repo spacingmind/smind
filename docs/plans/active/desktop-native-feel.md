@@ -443,3 +443,19 @@ tsc -b`, `cargo test` (27 tests), `cargo clippy --all-targets`
 | D4.4 Badge | `badge_follows_attention_count`, `overlay_icon_pixels`. macOS Dock badge shipped earlier; Linux uses `set_badge_count` (launcher support depends on the desktop environment). **Windows overlay icon never ran on Windows**, and the Windows-only `set_overlay_icon` branch could not be compiled here (re-read against tauri 2.11.6 sources only); the Windows desktop CI build is the first compile. `dock-badge` manual check not run. |
 | D4.5 Allowlist exact | `capability_allowlist_exact`, `capability_app_grants_match_build_rs_commands`. |
 
+Adversarial review (fresh Sonnet 5.5 agent, read-only) found and this PR
+fixed: **(high)** `wsl.exe ... -- wslpath` ran the path through the distro
+shell (word-splitting, `$()`/`;` injection) -> now `--exec`, test
+`wslpath_runs_without_a_shell_and_keeps_the_path_one_argument`; `open` /
+`xdg-open` failures after spawn were swallowed -> now waited on and
+surfaced as the toast error; `editors_list` ran on the main thread -> now
+`spawn_blocking`; a failed overlay/badge set was recorded as shown ->
+retried, and re-applied on window focus (`badge_retries_after_a_failed_set_and_reapplies`);
+stale `useLocalPathActions` loads could re-show items after a connection
+switch -> newest-load-wins. **Known gaps, not fixed:** Windows editor
+detection only sees `%LOCALAPPDATA%\Programs\...\*.exe` installs (system-wide
+`Program Files` installs and `.cmd` shims on PATH are not detected, so those
+editors are simply not offered); on a Windows host with WSL installed,
+`Platform::Wsl2` is chosen even if the Local daemon were a native Windows
+one, which yields an explicit "not an absolute Linux path" error.
+
