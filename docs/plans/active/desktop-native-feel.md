@@ -297,7 +297,7 @@ ported):
 ## Progress
 
 - [ ] D1 — window chrome (+ all of D2.1, no white flash): implemented on `feat/desktop-chrome`, automated checks green; native visual checks outstanding, see Validation
-- [ ] D2 — remove webview-isms
+- [ ] D2 — remove webview-isms (D2.1 owned/implemented by D1 above): D2.2–D2.8 implemented on `feat/desktop-de-webview` (stacked on `feat/desktop-chrome`), automated checks green; see Validation
 - [ ] D3 — desktop shortcuts + native menu
 - [ ] D4 — native integrations (reveal/open-in-editor, badge)
 
@@ -362,3 +362,36 @@ so `NOTICE` is unchanged.
 
 D1 stays unticked in Progress: the unchecked rows above, and Windows/Linux,
 are still outstanding.
+
+### D2.2–D2.8 (`feat/desktop-de-webview`, 2026-10-10)
+
+Environment: same macOS dev box and constraints as D1's entry above (no
+Windows/Linux machine; WKWebView content process killed in the sandbox,
+so visual checks use headless Chromium rendering the real
+`build:desktop` bundle with `VITE_SMIND_DESKTOP=1`, a macOS/Windows user
+agent and a stubbed `__TAURI_INTERNALS__`).
+
+Automated, all green: `bun run test` (1372 web tests, incl. the new
+`desktop-context-menu`, `desktop-webview` and `desktop-webview-css`
+suites), `tsc -b`, `go vet`/gofmt/`go test`. jsdom has no CSS cascade,
+so the CSS rules are guarded by source tests over `index.css`
+(`src/test/desktop-webview-css.test.ts`), the same pattern
+`no-hardcoded-colors.test.ts` uses.
+
+| AC | Confirmed by |
+|---|---|
+| D2.2 context menu | vitest `context-menu-suppressed-on-chrome` (sidebar row, pane space → `preventDefault`), `context-menu-allowed-in-editable` (input/textarea/contenteditable/`.cm-content` file editor pass through; a non-empty selection only keeps the menu when the click lands *on* it — rects hit-test with an `intersectsNode` fallback — and a selection elsewhere does not unlock right-click on chrome; `contenteditable="false"` subtrees are suppressed), `context-menu-own-menu-still-opens` (an already-`defaultPrevented` event — Radix `ContextMenuTrigger` on the file-explorer rows — is left alone). Release-build only in principle: the policy runs whenever `isDesktop`, which is exactly the bundled builds. DevTools stays on the View menu (D3 scope). |
+| D2.3 non-selectable chrome | vitest `chrome-not-selectable` (root `user-select: none` under `html[data-desktop-os]`, inside `@layer base` so explicit `select-text`/`select-none` utilities still win; re-enabled on input/textarea/contenteditable, `pre`/`code`, the timeline column, `.d2h-wrapper` diffs). Controls inside the timeline column stay unselectable. The terminal is deliberately NOT re-enabled: xterm draws its own selection and DOM selection would double-highlight. **Cmd+A over the sidebar not screenshot-verified** (sandbox webview constraint, see above); covered by the CSS guard + Chromium render check. |
+| D2.4 no overscroll | `overscroll-behavior: none` on `html`/`body` only, guarded by `desktop-webview-css` ("applies to the document root only"; nothing outside the desktop gate). Inner containers keep the default. Not verifiable in jsdom; rubber-banding is a WebKit/Chromium visual behavior — **not screenshot-verified**. |
+| D2.5 zoom guard | vitest in `desktop-webview.test.ts`: ctrl/meta+wheel `preventDefault` (listener registered `passive: false`), plain wheel/shift pass through; WebKit `gesturestart/change/end` prevented (jsdom has no `GestureEvent`, so a plain `Event` stands in — the guard only calls `preventDefault`). WebView2 pinch reports as a synthetic ctrlKey wheel, covered by the wheel branch. Web-side only; `lib.rs` untouched per the ownership split. View → Zoom (`zoom_store.rs`) untouched. **Manual `ctrl-wheel-no-zoom` (real trackpad pinch) not run.** |
+| D2.6 default cursor | `cursor: default` on `button`, `[role=button|tab|menuitem|menuitemcheckbox|menuitemradio|option]`, `summary`, `label[for]` — in `@layer base` so `cursor-grab`/`cursor-col-resize`/`cursor-not-allowed` utilities still win — plus one deliberate unlayered `html[data-desktop-os] .cursor-pointer { cursor: default; }` for the file-tree rows / timeline summaries that ask for the hand. Real `<a href>` hyperlinks (the accounts dialog's authorize link) keep the pointer. All guarded by `desktop-webview-css`. |
+| D2.7 Windows scrollbars | `scrollbar-width: thin; scrollbar-color: var(--color-border) transparent` gated to `html[data-desktop-os="windows"]` — **rationale for the OS gating:** macOS must keep its overlay scrollbars (spec: "visually consistent with macOS overlay scrollbars"), and Linux uses the desktop theme, so a global thin-scrollbar rule would be a regression on both; the same `data-desktop-os` marker D1's `desktop-chrome.css` established is the gate. Guarded by `desktop-webview-css` (Windows-only; the browser build's only `scrollbar-width` is xterm's own hiding rule, which is untouched). **Not verified on real Windows/WebView2** — no Windows machine. |
+| D2.8 desktop-only gating | Every D2 path is behind `isDesktop` (`lib/platform.ts`): the context-menu and zoom-guard installs are no-ops in the browser build (each has a vitest "inert in the browser build" case), and every CSS rule hangs off `html[data-desktop-os]`, which `main.tsx` sets only when `desktopOS` is non-null. `desktop-webview-css` asserts no `user-select`/`cursor: default`/`overscroll-behavior`/`scrollbar-width` outside the gate. Reuses D1's `detectDesktopOS`/`desktopOS` (this branch's duplicate `data-smind-desktop` marker and UA detector were dropped during integration). |
+
+Screenshots: `no-webview-context-menu` (right-click on chrome vs in the
+composer) and the Cmd+A-over-sidebar check were rendered in headless
+Chromium with the desktop bundle, light and dark — files under
+`/tmp/smind-d2-shots/` (local only, like D1's). What was **not**
+verifiable here: real WKWebView/WebView2 menus (context menu, pinch
+zoom), Windows scrollbars, and rubber-band overscroll. Those need a
+machine with a working webview and a Windows box.
