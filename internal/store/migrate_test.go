@@ -632,3 +632,45 @@ func TestMigrate_PermissionModesBackfillRunsOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrate_AccountsModelsColumn: a database whose accounts table predates
+// accounts.models gets the column on Open, and its old rows read back as
+// "no list".
+func TestMigrate_AccountsModelsColumn(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-accounts.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open raw db error = %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.Exec(`CREATE TABLE accounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, label TEXT NOT NULL,
+		credential_type TEXT NOT NULL, credential_data TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatalf("create old accounts table: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO accounts (id, provider, label, credential_type, credential_data, created_at, updated_at)
+		 VALUES (1, 'anthropic', 'old', 'api_key', '{"key":"k"}', ?, ?)`, now, now,
+	); err != nil {
+		t.Fatalf("seed old account: %v", err)
+	}
+	db.Close()
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		got, err := s.GetAccount(1)
+		if err != nil {
+			t.Fatalf("GetAccount() error = %v", err)
+		}
+		if got.Models != "" || got.Label != "old" {
+			t.Fatalf("migrated account = %+v, want no models", got)
+		}
+		s.Close()
+	}
+}

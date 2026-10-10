@@ -97,6 +97,14 @@ var migrations = []migration{
 			return backfillPermissionModes(db)
 		},
 	},
+	{
+		// ADR-0020 §5: model-aware routing globs on accounts. NULL (no
+		// list) is the valid default for every pre-existing row.
+		name: "accounts.models",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "accounts", "models", "TEXT")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
