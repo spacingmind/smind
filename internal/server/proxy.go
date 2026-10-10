@@ -209,7 +209,20 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("no %s accounts configured", provider))
 		return
 	}
-	candidateIDs := selectModelCandidates(providerAccounts, meta.Model)
+	// When the model couldn't be determined (body over requestBodyParseCap
+	// or not parseable JSON), skip model narrowing and consider every
+	// provider account -- the pre-model-routing behavior of forwarding
+	// rather than rejecting a legitimate request we merely couldn't read.
+	// A parseable body that simply has no "model" still narrows (to
+	// no-list accounts only), per ADR-0020 §5(b).
+	var candidateIDs []int64
+	if metaOK {
+		candidateIDs = selectModelCandidates(providerAccounts, meta.Model)
+	} else {
+		for _, a := range providerAccounts {
+			candidateIDs = append(candidateIDs, a.ID)
+		}
+	}
 	if len(candidateIDs) == 0 {
 		err := fmt.Errorf("no %s account serves model %q", provider, meta.Model)
 		row.Status = http.StatusBadRequest
@@ -235,7 +248,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	if account.APIKey != nil {
 		base = account.APIKey.BaseURL
 	}
-	upstreamURL := resolveUpstreamURL(provider, base, r.URL.Path)
+	upstreamURL := resolveUpstreamURL(provider, base, r.URL.Path, r.URL.RawQuery)
 
 	outReq, err := http.NewRequestWithContext(ctx, r.Method, upstreamURL, forwardBody)
 	if err != nil {
@@ -324,7 +337,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 // selectModelCandidates narrows providerAccounts to the account ids that may
 // serve model (ADR-0020 §5): accounts whose globs explicitly match; else
 // accounts with no list; else none. An empty model matches only no-list
-// accounts.
+// accounts. Callers skip this entirely when the model is undeterminable.
 func selectModelCandidates(providerAccounts []accounts.Account, model string) []int64 {
 	var matched, unlisted []int64
 	for _, a := range providerAccounts {

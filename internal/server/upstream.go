@@ -29,8 +29,9 @@ func normalizeBaseURL(provider, base string) string {
 
 // resolveUpstreamURL returns the upstream URL for an incoming request path
 // given the account's base ("" = provider default). Anthropic: base +
-// incomingPath. OpenAI: base + incomingPath minus its leading "/v1".
-func resolveUpstreamURL(provider, base, incomingPath string) string {
+// incomingPath. OpenAI: base + incomingPath minus its leading "/v1". A
+// non-empty rawQuery (e.g. Claude Code's "?beta=true") is preserved.
+func resolveUpstreamURL(provider, base, incomingPath, rawQuery string) string {
 	if base == "" {
 		switch provider {
 		case providerAnthropic:
@@ -43,5 +44,9 @@ func resolveUpstreamURL(provider, base, incomingPath string) string {
 	if provider == providerOpenAI {
 		incomingPath = strings.TrimPrefix(incomingPath, "/v1")
 	}
-	return base + incomingPath
+	u := base + incomingPath
+	if rawQuery != "" {
+		u += "?" + rawQuery
+	}
+	return u
 }
