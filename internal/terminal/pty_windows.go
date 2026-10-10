@@ -3,6 +3,7 @@
 package terminal
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"sync"
@@ -24,6 +25,11 @@ import (
 func newPtySession(p xpty.Pty, cmd *exec.Cmd) (*ptySession, error) {
 	job, err := assignJobObject(cmd)
 	if err != nil {
+		// WaitProcess with a canceled ctx kills + reaps (see killAndReap);
+		// closing the pty alone would leak the process handle.
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = xpty.WaitProcess(ctx, cmd)
 		_ = p.Close()
 		return nil, fmt.Errorf("terminal: create: assign job object: %w", err)
 	}
