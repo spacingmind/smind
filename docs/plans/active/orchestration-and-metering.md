@@ -284,7 +284,34 @@ provenance (O1) gives the runner (or internal/runs) that context.
   succeeds.
 - A cross-workspace or nonexistent parent returns the daemon error text.
 
-**ADR-M / ADR-O:** written with each ADR's plan section.
+**ADR-M** (fake-agent/fake-transport tests; exact names):
+- `TestUsage_ClaudeResultParsed`: a `result` message with all four token
+  fields, the cost and `modelUsage` maps onto AC1; a missing field stays
+  nil.
+- `TestUsage_CodexTokenUsageLastOfTurn`: two
+  `thread/tokenUsage/updated` notifications in one turn; the stored value
+  is the last `tokenUsage.last`.
+- `TestUsage_ACPPromptUsageDifferenced`: run 1 reports cumulative 100/20
+  and stores 100/20; run 2 on the same session reports 160/50 and stores
+  60/30; a new session starts from zero.
+- `TestUsage_ACPUsageUpdateContextAndCost`: context used/size comes from
+  the last `usage_update`, and cumulative cost is differenced per run.
+- `TestUsage_ACPNothingReportedIsNull`: no usage messages give all-NULL
+  fields and the "not reported" source.
+- `TestRunUsage_UpsertAndSummary`: rows upsert per turn;
+  `usage.summary scope=runs groupBy=task` sums correctly; `scope=all`
+  includes proxy rows.
+- `TestRunList_CarriesUsageTotals`.
+- `TestUsageEvent_NoPromptOrSecret`: the stored row and event JSON
+  contain no prompt text and no API key.
+- `TestProxy_BaseURLSemantics`: Anthropic and OpenAI families; a legacy
+  suffix is stripped; the Perplexity account still routes;
+  `count_tokens` passes through without metering.
+- `TestProxy_ModelAwareRouting`: an explicit glob match wins, then an
+  account with no list, then 400 `model_not_found`; a `glm-*` key is
+  never picked for `claude-*`.
+
+**ADR-O:** written with ADR-0021's plan section.
 
 ## Decisions
 
