@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ShortcutRows } from "@/components/shortcuts-dialog";
 import { KeyboardProvider } from "@/keyboard/keyboard-provider";
-import { SECTION_TITLES, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
+import { platformBindings, SECTION_TITLES, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 
 function renderRows(query?: string) {
   return render(
@@ -26,11 +26,14 @@ describe("ShortcutRows", () => {
   it("lists every registered binding", () => {
     renderRows();
     const rows = screen.getAllByTestId("shortcut-row");
-    expect(rows).toHaveLength(SHORTCUT_BINDINGS.length);
+    // jsdom is not a desktop build: the web-only rows render, the
+    // desktop-gated Mod+T / Mod+Digit ones do not.
+    const webBindings = platformBindings(SHORTCUT_BINDINGS, false);
+    expect(rows).toHaveLength(webBindings.length);
     expect(rows.map((r) => r.dataset.bindingId).sort()).toEqual(
-      SHORTCUT_BINDINGS.map((b) => b.id).sort(),
+      webBindings.map((b) => b.id).sort(),
     );
-    for (const binding of SHORTCUT_BINDINGS) {
+    for (const binding of webBindings) {
       expect(screen.getByText(binding.label)).toBeInTheDocument();
     }
   });
@@ -69,7 +72,9 @@ describe("ShortcutRows", () => {
       .getAllByTestId("shortcut-row")
       .map((r) => r.dataset.bindingId);
     expect(tabsRowIds).toEqual(
-      SHORTCUT_BINDINGS.filter((b) => b.section === "tabs").map((b) => b.id),
+      platformBindings(SHORTCUT_BINDINGS, false)
+        .filter((b) => b.section === "tabs")
+        .map((b) => b.id),
     );
   });
 
