@@ -592,7 +592,15 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 			return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 		}
 		if mcpConfig != "" {
-			opts = append(opts, claudecode.WithMCPConfig(mcpConfig))
+			// The JSON can carry secrets (env values, auth headers), so
+			// hand the CLI a path to a private file instead of the inline
+			// string, which would be visible in the process argv (ps).
+			path, cleanup, err := writeClaudeMcpConfigFile(mcpConfig)
+			if err != nil {
+				return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
+			}
+			defer cleanup()
+			opts = append(opts, claudecode.WithMCPConfig(path))
 		}
 	}
 

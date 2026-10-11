@@ -223,6 +223,22 @@ func runFakeClaudeCLI() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
 			os.Exit(1)
 		}
+		// When --mcp-config names a file, snapshot its contents and the
+		// file/dir permission bits at spawn time (the runner removes the
+		// file once the run ends), so a test can assert on them.
+		for i, a := range os.Args[1:] {
+			if a != "--mcp-config" || i+2 >= len(os.Args) {
+				continue
+			}
+			cfg := os.Args[i+2]
+			if data, err := os.ReadFile(cfg); err == nil {
+				_ = os.WriteFile(filepath.Join(wd, "mcp-config-content"), data, 0o644)
+				fi, _ := os.Stat(cfg)
+				di, _ := os.Stat(filepath.Dir(cfg))
+				modes := fmt.Sprintf("%o %o", fi.Mode().Perm(), di.Mode().Perm())
+				_ = os.WriteFile(filepath.Join(wd, "mcp-config-modes"), []byte(modes), 0o644)
+			}
+		}
 		stdin.Scan() // consume the prompt line
 		writeLine(map[string]any{
 			"type":       "assistant",
