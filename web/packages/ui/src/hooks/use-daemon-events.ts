@@ -22,7 +22,7 @@ const MCP_TOPICS = ["mcpServer.created", "mcpServer.updated", "mcpServer.deleted
  * `subscribe("event.dropped", ...)` listeners like any other topic.
  */
 /** ADR-0016's three chat lifecycle topics (P3: chat tabs, rename, archive all react to these). */
-const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived"];
+const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived", "chat.queueUpdated"];
 
 const TOPICS = [
   "task.status",
