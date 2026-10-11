@@ -15,7 +15,10 @@ import (
 // real pre-change smind.db had on disk, derived from the live schema so
 // this test can't drift from it.
 func schemaWithoutMcpServers() string {
-	stripped := schema
+	// Normalize CRLF: on a core.autocrlf=true checkout schema.sql (and
+	// thus the embedded schema string) has Windows line endings, which
+	// would defeat the exact-match index removal below.
+	stripped := strings.ReplaceAll(schema, "\r\n", "\n")
 	for _, block := range []struct{ start, end string }{
 		{"CREATE TABLE IF NOT EXISTS mcp_servers (", ");"},
 		{"CREATE TABLE IF NOT EXISTS workspace_mcp_servers (", ");"},
