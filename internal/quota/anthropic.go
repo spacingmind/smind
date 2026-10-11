@@ -243,8 +243,8 @@ func anthropicScopedLimitFromEntry(e anthropicLimitEntry) (anthropicScopedLimit,
 		if d.label == nil {
 			continue
 		}
-		id := strings.TrimSpace(anthropicDerefOrEmpty(d.label.ID))
-		name := strings.TrimSpace(anthropicDerefOrEmpty(d.label.DisplayName))
+		id := capText(anthropicDerefOrEmpty(d.label.ID))
+		name := capText(anthropicDerefOrEmpty(d.label.DisplayName))
 		if name == "" {
 			name = id
 		}

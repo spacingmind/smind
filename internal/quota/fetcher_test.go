@@ -262,3 +262,32 @@ func TestDisplayNameNeverInKeyOrLogs(t *testing.T) {
 		}
 	}
 }
+
+func TestFetcherZeroExpiryIsUsedWithoutRefresh(t *testing.T) {
+	t.Parallel()
+	h := newFetcherHarness(t)
+	acc := h.oauthAccount(t, "anthropic", "a", time.Time{})
+
+	got, err := h.fetcher.Fetch(context.Background(), acc)
+	if err != nil || got.Status != StatusAvailable {
+		t.Fatalf("Fetch() = %+v, %v, want available", got, err)
+	}
+	if n := h.refresher.calls.Load(); n != 0 {
+		t.Errorf("refresher called %d times for an unknown expiry, want 0", n)
+	}
+}
+
+func TestFetcherRefreshFailureInsideBufferUsesCurrentToken(t *testing.T) {
+	t.Parallel()
+	h := newFetcherHarness(t)
+	h.refresher.err = errors.New("boom")
+	acc := h.oauthAccount(t, "anthropic", "a", time.Now().Add(10*time.Second))
+
+	got, err := h.fetcher.Fetch(context.Background(), acc)
+	if err != nil || got.Status != StatusAvailable {
+		t.Fatalf("Fetch() = %+v, %v, want available using the still-valid token", got, err)
+	}
+	if auth, _ := h.lastAuth.Load().(string); auth != "Bearer access-old" {
+		t.Errorf("Authorization = %q, want the current token", auth)
+	}
+}

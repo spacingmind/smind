@@ -2,6 +2,7 @@ package quota
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -135,3 +136,37 @@ func TestParseRFC3339(t *testing.T) {
 }
 
 func strptr(s string) *string { return &s }
+
+func TestParseRFC3339RejectsUnmarshalableYears(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{"0000-01-01T00:00:00+05:00", "9999-12-31T23:59:59-05:00"} {
+		v := s
+		if got := parseRFC3339(&v); got != nil {
+			t.Errorf("parseRFC3339(%q) = %v, want nil", s, got)
+		}
+	}
+	ok := "2026-10-12T05:00:00.5+00:00"
+	if got := parseRFC3339(&ok); got == nil {
+		t.Errorf("parseRFC3339(%q) = nil, want a time", ok)
+	}
+}
+
+func TestParseRetryAfterNaNAndInf(t *testing.T) {
+	t.Parallel()
+	for _, v := range []string{"NaN", "nan", "Inf", "+Inf", "-Inf"} {
+		if got := parseRetryAfter(v, time.Unix(0, 0)); got != 0 {
+			t.Errorf("parseRetryAfter(%q) = %v, want 0", v, got)
+		}
+	}
+}
+
+func TestCapText(t *testing.T) {
+	t.Parallel()
+	if got := capText("  hi  "); got != "hi" {
+		t.Errorf("capText trim = %q", got)
+	}
+	long := strings.Repeat("é", 500)
+	if got := capText(long); len([]rune(got)) != maxTextLen {
+		t.Errorf("capText length = %d runes, want %d", len([]rune(got)), maxTextLen)
+	}
+}

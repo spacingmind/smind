@@ -65,5 +65,6 @@ func providerDefaultName(provider string) string {
 	if provider == "" {
 		return "Account"
 	}
-	return strings.ToUpper(provider[:1]) + provider[1:]
+	r := []rune(provider)
+	return strings.ToUpper(string(r[:1])) + string(r[1:])
 }

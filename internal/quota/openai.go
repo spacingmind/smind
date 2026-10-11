@@ -148,11 +148,11 @@ func parseOpenAIUsage(body []byte, now time.Time) (Report, bool) {
 		return Report{}, false
 	}
 	var top struct {
-		PlanType            string            `json:"plan_type"`
-		RateLimit           json.RawMessage   `json:"rate_limit"`
-		AdditionalRateLimit []json.RawMessage `json:"additional_rate_limits"`
-		CodeReviewRateLimit json.RawMessage   `json:"code_review_rate_limit"`
-		Credits             json.RawMessage   `json:"credits"`
+		PlanType            json.RawMessage `json:"plan_type"`
+		RateLimit           json.RawMessage `json:"rate_limit"`
+		AdditionalRateLimit json.RawMessage `json:"additional_rate_limits"`
+		CodeReviewRateLimit json.RawMessage `json:"code_review_rate_limit"`
+		Credits             json.RawMessage `json:"credits"`
 	}
 	if err := json.Unmarshal(body, &top); err != nil {
 		return Report{}, false
@@ -161,12 +161,12 @@ func parseOpenAIUsage(body []byte, now time.Time) (Report, bool) {
 	r := Report{
 		Version:   ReportVersion,
 		Status:    StatusAvailable,
-		PlanLabel: strings.TrimSpace(top.PlanType),
+		PlanLabel: openaiPlanLabel(top.PlanType),
 		FetchedAt: now.UTC(),
 	}
 
 	openaiAppendRateLimit(&r, top.RateLimit, nil, true)
-	for _, entry := range top.AdditionalRateLimit {
+	for _, entry := range openaiRawList(top.AdditionalRateLimit) {
 		var e struct {
 			LimitName      string          `json:"limit_name"`
 			MeteredFeature string          `json:"metered_feature"`
@@ -175,14 +175,14 @@ func parseOpenAIUsage(body []byte, now time.Time) (Report, bool) {
 		if json.Unmarshal(entry, &e) != nil {
 			continue // malformed entry: skipped, siblings survive
 		}
-		identity := e.MeteredFeature
+		identity := capText(e.MeteredFeature)
 		if identity == "" {
-			identity = e.LimitName
+			identity = capText(e.LimitName)
 		}
 		if identity == "" {
 			continue // an unnamed limit has no stable quota identity
 		}
-		name := e.LimitName
+		name := capText(e.LimitName)
 		if name == "" {
 			name = identity
 		}
@@ -324,9 +324,31 @@ func openaiEpochTime(raw json.RawMessage) *time.Time {
 }
 
 // openaiEscapeIdentity matches JS encodeURIComponent for the scope id:
-// net/url's QueryEscape, except spaces become %20 instead of +.
+// net/url's QueryEscape, except spaces become %20 instead of + and the
+// characters encodeURIComponent leaves alone (! ' ( ) *) stay literal.
 func openaiEscapeIdentity(s string) string {
-	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+	s = strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+	return strings.NewReplacer("%21", "!", "%27", "'", "%28", "(", "%29", ")", "%2A", "*").Replace(s)
+}
+
+// openaiPlanLabel reads plan_type when it is a string; any other shape gives
+// "" without failing the report.
+func openaiPlanLabel(raw json.RawMessage) string {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return ""
+	}
+	return capText(s)
+}
+
+// openaiRawList splits a JSON array into raw entries; any other shape gives
+// nil without failing the report.
+func openaiRawList(raw json.RawMessage) []json.RawMessage {
+	var list []json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &list) != nil {
+		return nil
+	}
+	return list
 }
 
 func openaiHasWindow(r *Report, id string) bool {

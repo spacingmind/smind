@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -86,18 +85,21 @@ func (r *OAuth2Refresher) Refresh(ctx context.Context, cred OAuthCredential) (OA
 	}, nil
 }
 
-func (r *Registry) accountRefreshLock(id int64) *sync.Mutex {
+// accountRefreshLock returns the account's lock: a one-slot channel rather
+// than a sync.Mutex so a waiter can give up when its context ends (a proxied
+// request must not wait past its own cancellation behind a slow refresh).
+func (r *Registry) accountRefreshLock(id int64) chan struct{} {
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
 	if r.refreshLocks == nil {
-		r.refreshLocks = make(map[int64]*sync.Mutex)
+		r.refreshLocks = make(map[int64]chan struct{})
 	}
-	mu, ok := r.refreshLocks[id]
+	ch, ok := r.refreshLocks[id]
 	if !ok {
-		mu = &sync.Mutex{}
-		r.refreshLocks[id] = mu
+		ch = make(chan struct{}, 1)
+		r.refreshLocks[id] = ch
 	}
-	return mu
+	return ch
 }
 
 // EnsureFresh returns the account with id, refreshing and persisting its
@@ -105,9 +107,13 @@ func (r *Registry) accountRefreshLock(id int64) *sync.Mutex {
 // Concurrent calls for the same account are serialized so the refresher
 // runs at most once; the losers re-read the already-fresh credential.
 func (r *Registry) EnsureFresh(ctx context.Context, id int64, refresher OAuthRefresher) (Account, error) {
-	mu := r.accountRefreshLock(id)
-	mu.Lock()
-	defer mu.Unlock()
+	lock := r.accountRefreshLock(id)
+	select {
+	case lock <- struct{}{}:
+	case <-ctx.Done():
+		return Account{}, ctx.Err()
+	}
+	defer func() { <-lock }()
 
 	acc, err := r.Get(id)
 	if err != nil {

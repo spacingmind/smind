@@ -111,26 +111,28 @@ func (f *AccountFetcher) Fetch(ctx context.Context, account accounts.Account) (R
 	}
 
 	cred := account.OAuth
-	if !now.Add(expiryBuffer).Before(cred.ExpiresAt) {
+	// An unknown expiry (zero) is used as is: refreshing on every fetch would
+	// burn a rotating refresh token, and a dead token answers 401 anyway.
+	if !cred.ExpiresAt.IsZero() && !now.Add(expiryBuffer).Before(cred.ExpiresAt) {
 		expiredAt := cred.ExpiresAt
 		fresh, err := f.creds.EnsureFresh(ctx, account.ID, spec.refresher)
-		if err != nil {
-			if ctx.Err() != nil {
-				return Report{}, ctx.Err()
+		switch {
+		case err == nil:
+			if fresh.OAuth == nil {
+				return unavailableReport(Problem{Kind: ProblemNoQuota, Detail: detailNoCredData}, now), nil
 			}
+			cred = fresh.OAuth
+		case ctx.Err() != nil:
+			return Report{}, ctx.Err()
+		case now.Before(expiredAt):
+			// Only inside the pre-expiry buffer: the current token still
+			// works, so use it rather than reporting the login as expired.
+		default:
 			// The error text is not copied: it can carry provider response
 			// text. A refresh failure is "login expired".
-			p := Problem{Kind: ProblemExpired, Detail: detailExpired}
-			if !expiredAt.IsZero() {
-				t := expiredAt.UTC()
-				p.ExpiresAt = &t
-			}
-			return unavailableReport(p, now), nil
+			t := expiredAt.UTC()
+			return unavailableReport(Problem{Kind: ProblemExpired, ExpiresAt: &t, Detail: detailExpired}, now), nil
 		}
-		if fresh.OAuth == nil {
-			return unavailableReport(Problem{Kind: ProblemNoQuota, Detail: detailNoCredData}, now), nil
-		}
-		cred = fresh.OAuth
 	}
 	if cred.AccessToken == "" {
 		return unavailableReport(Problem{Kind: ProblemNoQuota, Detail: detailNoCredData}, now), nil

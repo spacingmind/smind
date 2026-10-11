@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"strconv"
@@ -132,7 +133,7 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 		return 0
 	}
 	if secs, err := strconv.ParseFloat(v, 64); err == nil {
-		if secs < 0 || secs > float64(1<<31) {
+		if math.IsNaN(secs) || secs < 0 || secs > float64(1<<31) {
 			return 0
 		}
 		return time.Duration(secs * float64(time.Second))

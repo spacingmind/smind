@@ -677,3 +677,31 @@ func TestOpenai_absurd_numbers_are_ignored(t *testing.T) {
 		t.Errorf("window = %+v, want no reset/duration and id unknown_primary", w)
 	}
 }
+
+func TestOpenai_reshaped_top_level_fields_keep_windows(t *testing.T) {
+	t.Parallel()
+
+	for name, body := range map[string]string{
+		"plan_type_object":      `{"plan_type":{"name":"plus"},"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}`,
+		"additional_is_object":  `{"additional_rate_limits":{},"rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}`,
+		"credits_is_string":     `{"credits":"x","rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}`,
+		"additional_wrong_type": `{"additional_rate_limits":"nope","rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r, ok := parseOpenAIUsage([]byte(body), time.Unix(1_700_000_000, 0))
+			if !ok || len(r.Windows) != 1 || r.Windows[0].ID != "five_hour" {
+				t.Fatalf("parse ok=%v windows=%+v, want the five_hour window kept", ok, r.Windows)
+			}
+			if r.PlanLabel != "" {
+				t.Errorf("PlanLabel = %q, want empty for a non-string plan_type", r.PlanLabel)
+			}
+		})
+	}
+}
+
+func TestOpenai_escape_identity_matches_encodeURIComponent(t *testing.T) {
+	t.Parallel()
+	if got, want := openaiEscapeIdentity("a b/c!'()*~é"), "a%20b%2Fc!'()*~%C3%A9"; got != want {
+		t.Errorf("openaiEscapeIdentity = %q, want %q", got, want)
+	}
+}

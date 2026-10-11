@@ -51,7 +51,22 @@ func parseRFC3339(s *string) *time.Time {
 		return nil
 	}
 	t = t.UTC()
+	if y := t.Year(); y < 1 || y > 9999 {
+		return nil // time.Time cannot marshal it, which would lose the whole report
+	}
 	return &t
+}
+
+// maxTextLen caps provider-supplied display text copied into a Report.
+const maxTextLen = 128
+
+// capText trims s and truncates it to maxTextLen runes.
+func capText(s string) string {
+	s = strings.TrimSpace(s)
+	if r := []rune(s); len(r) > maxTextLen {
+		return string(r[:maxTextLen])
+	}
+	return s
 }
 
 // looksLikeHTML reports whether body starts (after whitespace) with '<'.

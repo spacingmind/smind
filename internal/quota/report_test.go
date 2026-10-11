@@ -181,3 +181,11 @@ func TestNewWindowDerivesFields(t *testing.T) {
 		}
 	})
 }
+
+func TestNewWindowRemainingIsClamped(t *testing.T) {
+	t.Parallel()
+	neg := -50.0
+	if w := newWindow("w", "W", "", false, &neg, nil); w.RemainingPct == nil || *w.RemainingPct != 100 {
+		t.Errorf("RemainingPct for -50%% used = %v, want 100", w.RemainingPct)
+	}
+}

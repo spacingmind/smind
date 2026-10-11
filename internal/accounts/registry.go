@@ -50,12 +50,12 @@ type Registry struct {
 	// lifetime rather than dropped when unused: account counts are small
 	// and pinning avoids lock-reuse races.
 	refreshMu    sync.Mutex
-	refreshLocks map[int64]*sync.Mutex
+	refreshLocks map[int64]chan struct{}
 }
 
 // New returns a Registry backed by s.
 func New(s *store.Store) *Registry {
-	return &Registry{store: s, refreshLocks: make(map[int64]*sync.Mutex)}
+	return &Registry{store: s, refreshLocks: make(map[int64]chan struct{})}
 }
 
 // SetNotifier registers n. Nil-safe, matching profiles.Registry.

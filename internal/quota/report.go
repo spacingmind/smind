@@ -222,6 +222,8 @@ func newWindow(id, label, shortLabel string, summary bool, usedPct *float64, res
 		rem := 100 - *usedPct
 		if rem < 0 {
 			rem = 0
+		} else if rem > 100 {
+			rem = 100
 		}
 		w.RemainingPct = &rem
 	}
