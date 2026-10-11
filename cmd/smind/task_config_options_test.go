@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -265,6 +266,13 @@ func startTestRun(t *testing.T, srvURL, provider string, scenarios ...string) st
 		}
 		if err := os.WriteFile(filepath.Join(*got.WorktreePath, "scenario"), []byte(scenarios[0]), 0o644); err != nil {
 			t.Fatalf("write scenario: %v", err)
+		}
+		if scenarios[0] == "permission-write" {
+			// The file the fake agent's Write permission overwrites.
+			existing := strings.Repeat("existing line\n", 240)
+			if err := os.WriteFile(filepath.Join(*got.WorktreePath, "existing.txt"), []byte(existing), 0o644); err != nil {
+				t.Fatalf("write existing.txt: %v", err)
+			}
 		}
 	}
 

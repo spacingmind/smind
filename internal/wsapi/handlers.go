@@ -1108,6 +1108,9 @@ type permissionRequestParams struct {
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`
+	// Detail says what an edit/execute request will do (ACP only); omitted
+	// when the provider supplied none.
+	Detail *taskrunner.PermissionDetail `json:"detail,omitempty"`
 }
 
 // permissionResolvedParams is the params payload of a "permission_resolved"
@@ -1371,6 +1374,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 					RequestID: e.PermissionRequestID,
 					Summary:   e.PermissionSummary,
 					Options:   toPermissionOptionParams(e.PermissionOptions),
+					Detail:    e.PermissionDetail,
 				})
 			case taskrunner.EventTypePermissionResolved:
 				rc.Emit("permission_resolved", permissionResolvedParams{
@@ -1437,7 +1441,9 @@ type runLogEvent struct {
 	RequestID  string                   `json:"requestId,omitempty"`
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
-	OptionID   string                   `json:"optionId,omitempty"`
+	// Detail is populated for a "permission_request" entry that has one.
+	Detail   *taskrunner.PermissionDetail `json:"detail,omitempty"`
+	OptionID string                       `json:"optionId,omitempty"`
 	// Reason is the wire form of taskrunner.PermissionResolution, populated
 	// for a "permission_resolved" entry -- see permissionResolvedParams.
 	Reason string `json:"reason,omitempty"`
@@ -1501,6 +1507,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			RequestID: e.PermissionRequestID,
 			Summary:   e.PermissionSummary,
 			Options:   toPermissionOptionParams(e.PermissionOptions),
+			Detail:    e.PermissionDetail,
 		}
 	case taskrunner.EventTypePermissionResolved:
 		return runLogEvent{

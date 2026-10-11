@@ -656,6 +656,26 @@ func TestChatQueue_NoDeliveryDuringCloseAll(t *testing.T) {
 	waitForStatus(t, reg2, *delivered.RunID, StatusDone, 5*time.Second)
 }
 
+// TestStartWhenBusy_AutoApprovingErrorPointsToProfiles pins that the
+// ADR-0019 rejection tells a non-human caller what to do instead.
+func TestStartWhenBusy_AutoApprovingErrorPointsToProfiles(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "hang")
+	runID := e.startRun(t, "hi")
+	chatID := e.chatIDOf(t, runID)
+	t.Cleanup(func() { _ = e.reg.Stop(runID) })
+
+	_, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "x", taskrunner.PermissionSettings{Mode: "bypass_permissions"}, "", WhenBusyQueue, store.ChatQueueSourceOrchestrator, 0, 0)
+	if err == nil {
+		t.Fatal("StartWhenBusy error = nil, want the ADR-0019 rejection")
+	}
+	for _, want := range []string{"pass profileId of a human-authored profile", "profile_list", "autoApproves", "provider_list"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+}
+
 // TestChatQueue_ModelPreserved: a queued item keeps its requested model in
 // its run config and the delivered run starts with it (ADR-0025).
 func TestChatQueue_ModelPreserved(t *testing.T) {

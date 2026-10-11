@@ -13,9 +13,16 @@ The loop:
 2. task_new: create a task in it; the result carries the task id, its
    worktree path, and its branch.
 3. task_send: send the prompt; it returns {runId} immediately.
-4. task_wait: block on the runId until the run finishes, a permission
-   request goes pending, or it times out (a timeout is not a failure --
-   re-issue task_wait; use task_status for a non-blocking check).
+4. task_wait: block on the runId, then read its ` + "`state`" + `:
+   - waiting_permission: a permission request is pending and a HUMAN must
+     approve or deny it. This is NOT completion. Loop: task_wait, then
+     (the human approves), then task_wait again -- passing
+     ignorePermissionIds for the requests you already surfaced.
+   - done / error / stopped: the run ended. A done run with a stopNote
+     (e.g. it hit the agent's turn limit) may be incomplete: send a
+     follow-up prompt such as "continue".
+   - timed_out: still running -- a timeout is not a failure; re-issue
+     task_wait. task_status is the non-blocking check.
 5. Review: task_logs for the transcript, or read the git state in the
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.
@@ -41,13 +48,20 @@ in order.
 
 Permissions are answered by humans ONLY. When task_wait/task_status/
 task_permissions report a pending permission request, surface it to the
-human (they respond via ` + "`smind task approve`" + ` or the smind web UI).
+human (they respond via ` + "`smind task approve` / `smind task deny`" + ` or the
+smind web UI). Show them the request's detail
+as is: for a write it carries the path, the size change, replacesExisting
+and a diff or preview. A write that replaces an existing file with much
+less content (largeShrink) is likely destructive; recommend rejecting it.
 There is no tool here that approves, denies, or responds to a permission
 request, and you must never claim to have resolved one.
 
-Auto-approving permission modes (marked autoApproves in provider_list)
-and autoAccept may not be picked by you: they require a human-authored
-profile -- see profile_list and pass its id as task_send's profileId.
+In a provider's default mode nearly every command asks (even grep and
+ls). To cut prompts, pass profileId of a human-authored profile with the
+right mode, or pick a mode that is not marked autoApproves in
+provider_list yourself (GLM accept_edits covers file writes but not
+commands). Auto-approving modes (autoApproves) and autoAccept may not be
+picked by you: they require a human-authored profile -- see profile_list.
 
 If you lose a run id (e.g. after a crash), run_list {taskId} (or
 {status: "running"}) recovers it, newest first.
