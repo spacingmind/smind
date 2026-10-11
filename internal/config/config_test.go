@@ -86,4 +86,33 @@ func TestLoad_WorktreesBadRangeRejected(t *testing.T) {
 			t.Fatalf("range %q accepted, want error", r)
 		}
 	}
+func TestLoad_GLMMaxTurns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg, err := Load()
+	if err != nil || cfg.Agents.GLM.MaxTurns != nil {
+		t.Fatalf("missing file: MaxTurns = %v, err %v, want unset", cfg.Agents.GLM.MaxTurns, err)
+	}
+	write("agents:\n  glm:\n    maxTurns: 40\n")
+	cfg, err = Load()
+	if err != nil || cfg.Agents.GLM.MaxTurns == nil || *cfg.Agents.GLM.MaxTurns != 40 {
+		t.Fatalf("MaxTurns = %v, err %v, want 40", cfg.Agents.GLM.MaxTurns, err)
+	}
+	for _, v := range []string{"0", "-3", "10001"} {
+		write("agents:\n  glm:\n    maxTurns: " + v + "\n")
+		if _, err := Load(); err == nil {
+			t.Fatalf("maxTurns %s accepted, want a load error", v)
+		}
+	}
+	write("agents:\n  glm:\n    maxTurns: 10000\n")
+	if _, err := Load(); err != nil {
+		t.Fatalf("maxTurns 10000: %v", err)
+	}
 }

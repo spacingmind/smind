@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/mcpservers"
@@ -76,6 +77,9 @@ func cmdServe(args []string) int {
 
 	// A second Registry over the same db is fine: it only reads.
 	runnerOpts := []taskrunner.Option{taskrunner.WithSessionStore(taskrunner.NewChatSessionStore(db)), taskrunner.WithACPModeProbe(), taskrunner.WithMcpServers(mcpservers.New(db))}
+	if mt := cfg.Agents.GLM.MaxTurns; mt != nil {
+		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, acp.GLMCommand(acp.WithMaxTurns(*mt))))
+	}
 	if cmd := os.Getenv("SMIND_ACP_COMMAND"); cmd != "" {
 		// Testing-only hook: lets a manual/integration test point
 		// ProviderGLM turns at a fake ACP agent binary (see

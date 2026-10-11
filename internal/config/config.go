@@ -44,7 +44,24 @@ func (p PortsConfig) PortRange() (lo, hi int, ok bool, err error) {
 		return 0, 0, false, fmt.Errorf("worktrees.ports.range %q: need 1024 <= lo <= hi <= 65535", p.Range)
 	}
 	return lo, hi, true, nil
+	Agents        AgentsConfig        `yaml:"agents"`
 }
+
+// AgentsConfig holds per-agent tuning.
+type AgentsConfig struct {
+	GLM GLMAgentConfig `yaml:"glm"`
+}
+
+// GLMAgentConfig tunes the GLM ACP agent.
+type GLMAgentConfig struct {
+	// MaxTurns, when set, is passed to the agent as --max-turns <n> so one
+	// long prompt cannot exhaust its output budget. Unset (nil) keeps the
+	// agent's own default; Load rejects values outside [1, 10000].
+	MaxTurns *int `yaml:"maxTurns"`
+}
+
+// MaxGLMTurns is the upper bound accepted for agents.glm.maxTurns.
+const MaxGLMTurns = 10000
 
 // ServerConfig controls the HTTP server.
 type ServerConfig struct {
@@ -107,6 +124,8 @@ func Load() (Config, error) {
 	}
 	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
+		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)
 	}
 	return cfg, nil
 }
