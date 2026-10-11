@@ -17,7 +17,7 @@ import (
 func registerMCPDiscoveryTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "workspace_list", Description: "List every workspace (id, title, path) registered with the daemon -- the first call of the orchestration loop, since task_new needs a workspaceId."}, mcpWorkspaceList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_get", Description: "Get one task by id (id, title, status, branch, worktreePath, parentTaskId) -- the worktreePath is where to review a task's work with git."}, mcpTaskGet(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first, optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send."}, mcpRunList(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "run_list", Description: "List runs, newest first (at most 200), optionally filtered by taskId (across all of that task's chats), chatId, or status (e.g. \"running\"). Use this to recover a lost run id after task_send."}, mcpRunList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "provider_list", Description: "List the daemon's supported providers, each with its permission modes (id, autoApproves) and defaultMode. An orchestrator may not pick an auto-approving mode or autoAccept itself -- pass profileId (a human-authored profile) instead."}, mcpProviderList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "profile_list", Description: "List the human-authored agent profiles (id, name, provider, permissionMode, autoAccept, thinkingLevel, notes). Pass a profile's id as task_send's profileId to run with its settings."}, mcpProfileList(client))
 }
@@ -70,6 +70,26 @@ func mcpTaskGet(client *wsclient.Client) mcp.ToolHandlerFor[taskGetInput, taskGe
 
 // runListInput is run_list's argument shape (wrapping run.list): all
 // filters optional -- none set means every run, newest first.
+
+// mcpRunListCap bounds run_list's result client-side: the daemon's
+// filtered run.list path already caps at 200, but the unfiltered path
+// (no taskId/status) is the registry's full retention set -- truncate
+// here to the newest mcpRunListCap so the tool's bound holds either way.
+const mcpRunListCap = 200
+
+// capRuns empties nil into an empty list (never null) and truncates to
+// the newest mcpRunListCap entries; runs must already be newest first,
+// which every run.list path guarantees.
+func capRuns(runs []map[string]any) []map[string]any {
+	if runs == nil {
+		return []map[string]any{}
+	}
+	if len(runs) > mcpRunListCap {
+		runs = runs[len(runs)-mcpRunListCap:]
+	}
+	return runs
+}
+
 type runListInput struct {
 	TaskID *int64 `json:"taskId,omitempty" jsonschema:"optional: restrict to one task's runs, across all of its chats"`
 	ChatID *int64 `json:"chatId,omitempty" jsonschema:"optional: restrict to one chat's runs"`
@@ -102,10 +122,7 @@ func mcpRunList(client *wsclient.Client) mcp.ToolHandlerFor[runListInput, runLis
 		if err := callWS(ctx, client, "run_list", "run.list", params, &runs); err != nil {
 			return nil, runListOutput{}, err
 		}
-		if runs == nil {
-			runs = []map[string]any{}
-		}
-		return nil, runListOutput{Runs: runs}, nil
+		return nil, runListOutput{Runs: capRuns(runs)}, nil
 	}
 }
 

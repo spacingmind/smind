@@ -387,3 +387,29 @@ func TestMCPTools_RunListUnknownStatusRejected(t *testing.T) {
 		}
 	}
 }
+
+// TestCapRuns proves capRuns truncates to the newest mcpRunListCap
+// entries, preserving order (the daemon already returns newest first).
+func TestCapRuns(t *testing.T) {
+	var runs []map[string]any
+	for i := range 250 {
+		runs = append(runs, map[string]any{"ID": i})
+	}
+	capped := capRuns(runs)
+	if len(capped) != mcpRunListCap {
+		t.Fatalf("capRuns len = %d, want %d", len(capped), mcpRunListCap)
+	}
+	// Newest first means the last mcpRunListCap of 0..249, i.e. 50..249.
+	if got, want := capped[0]["ID"], 50; got != want {
+		t.Fatalf("capRuns[0] ID = %v, want %d (the newest of the tail)", got, want)
+	}
+	if got, want := capped[len(capped)-1]["ID"], 249; got != want {
+		t.Fatalf("capRuns last ID = %v, want %d", got, want)
+	}
+
+	// Under the cap: untouched.
+	small := []map[string]any{{"ID": 1}, {"ID": 2}}
+	if got := capRuns(small); len(got) != 2 || got[0]["ID"] != 1 {
+		t.Fatalf("capRuns under cap = %+v, want unchanged", got)
+	}
+}
