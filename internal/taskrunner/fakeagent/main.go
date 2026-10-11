@@ -169,6 +169,8 @@ func main() {
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "modes:") {
 			modesMode = strings.TrimPrefix(a, "modes:")
+		} else if a == "live-opts" {
+			liveOpts = true
 		} else {
 			capsMode = a
 		}
@@ -278,6 +280,10 @@ func handle(msg message, sessionCwd *string) {
 	}
 }
 
+// liveOpts, set by a "live-opts" os.Args entry, adds an uncategorized
+// boolean option to defaultConfigOptions.
+var liveOpts bool
+
 // defaultConfigOptions is a select-kind option with its own enumerated
 // choices (mirrors GLM's real thinking-level tiers), so Runner/Registry/
 // wsapi tests can drive a real config-option round trip end to end rather
@@ -286,6 +292,7 @@ func defaultConfigOptions() []map[string]any {
 	opts := []map[string]any{{
 		"configId":     "thinking-level",
 		"name":         "Thinking Level",
+		"category":     "thought_level",
 		"type":         "select",
 		"currentValue": "medium",
 		"options": []map[string]any{
@@ -295,6 +302,16 @@ func defaultConfigOptions() []map[string]any {
 			{"value": "high", "name": "High"},
 		},
 	}}
+	if liveOpts {
+		// An option with no category: the wsapi source guard must reject
+		// it for a non-human caller (fail-closed) while a human may set it.
+		opts = append(opts, map[string]any{
+			"configId":     "web-search",
+			"name":         "Web Search",
+			"type":         "boolean",
+			"currentValue": true,
+		})
+	}
 	if modesMode == "config" {
 		choices := make([]map[string]any, len(fakeModeIDs))
 		for i, id := range fakeModeIDs {

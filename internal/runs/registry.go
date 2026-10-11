@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -100,6 +101,11 @@ type Registry struct {
 	// (ADR-0021 §3: cancel and move on). Guarded by mu.
 	deliveryAttempts map[int64]int
 
+	// testAfterSetupCheck, when non-nil, runs in StartWhenBusy between the
+	// task's setup-status read and the enqueue. Test seam only; nil in
+	// production.
+	testAfterSetupCheck func()
+
 	// deliverMu serializes queue delivery per Registry (see queue.go's
 	// deliverOne): the busy-check -> NextQueued -> Start -> MarkDelivered
 	// sequence must be atomic, so concurrent callers (finish and the
@@ -107,12 +113,27 @@ type Registry struct {
 	// Lock ordering: deliverMu before mu, never the reverse.
 	deliverMu sync.Mutex
 
+	// testHookAfterLatch, when non-nil, is called by TryBeginArchive
+	// between setting the archive latch and the active-run check -- a test
+	// seam so a test can deterministically attempt a run start inside the
+	// exact window the latch must close. Nil in production. Guarded by mu
+	// for writes; read on the TryBeginArchive path only.
+	testHookAfterLatch func()
+
 	// closing latches once CloseAll begins: queue delivery must not start
 	// a chat's next prompt while the daemon is shutting down (a run
 	// started there would miss CloseAll's snapshot and its subprocess
 	// could outlive the daemon; the item would also be marked delivered,
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
+
+	// archiving holds the task ids currently mid-archive (TryBeginArchive
+	// adds, its release func removes). While a task id is in it, every
+	// run-start path (Start, StartWhenBusy, queue delivery) refuses with
+	// ErrTaskArchiving: closing the TOCTOU window where the archive guard
+	// sees no active run but a run starts between the check and the
+	// worktree removal. Guarded by mu.
+	archiving map[int64]bool
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -199,7 +220,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int)}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool)}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -496,6 +517,12 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	}
 	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
 
+	// ADR-0024 §2: never start a run in a worktree whose setup script is
+	// still running (StartWhenBusy and the queue check this too).
+	if t, terr := wm.GetTask(taskID); terr == nil && t.SetupStatus == workspace.SetupRunning {
+		return "", &SetupBusyError{TaskID: taskID}
+	}
+
 	id, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
@@ -524,12 +551,40 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// registration happen under the same reg.mu critical section, so two
 	// concurrent Start calls for the same chat can't both observe "no
 	// running run yet" and both proceed -- whichever acquires reg.mu first
-	// registers and the other sees it on its own check.
-	if busyRunID, busy := reg.runningRunForChat(chatID); busy {
+	// registers and the other sees it on its own check. The same section
+	// also refuses a task mid-archive (TryBeginArchive), closing the
+	// guard-vs-removal TOCTOU window on the start side.
+	var busyRunID string
+	var archiving bool
+	func() {
+		reg.mu.Lock()
+		defer reg.mu.Unlock()
+		if reg.taskArchivingLocked(taskID) {
+			archiving = true
+			return
+		}
+		for _, existing := range reg.runs {
+			if existing.chatID != chatID {
+				continue
+			}
+			existing.mu.Lock()
+			running := existing.status == StatusRunning
+			existing.mu.Unlock()
+			if running {
+				busyRunID = existing.id
+				return
+			}
+		}
+		reg.runs[id] = r
+	}()
+	if archiving {
+		cancel()
+		return "", fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if busyRunID != "" {
 		cancel()
 		return "", &ChatBusyError{ChatID: chatID, RunID: busyRunID}
 	}
-
 	if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
 		cancel()
 		return "", err
@@ -594,8 +649,12 @@ type startParams struct {
 // settings (with default-mode normalization), and thinking level. Every
 // error is wrapped "runs: start: ..." exactly as before.
 func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (startParams, error) {
-	if _, err := wm.GetTask(taskID); err != nil {
+	task, err := wm.GetTask(taskID)
+	if err != nil {
 		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	if task.ArchivedAt != nil {
+		return startParams{}, fmt.Errorf("runs: start: task %d is archived", taskID)
 	}
 
 	chat, err := resolveChat(wm, taskID, chatID)
@@ -1252,4 +1311,118 @@ func newRunID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// ErrTaskArchiving is the run-start refusal while a task is mid-archive:
+// starting a run inside a worktree that is being checkpointed and removed
+// would destroy the run's working directory out from under it.
+var ErrTaskArchiving = errors.New("task is being archived")
+
+// TryBeginArchive is the archive path's half of closing the TOCTOU window
+// around the active-run guard: under reg.mu it refuses (nil, error) when
+// the task already has an active run or queued prompt (the same
+// ActiveRunForTask outcome), and otherwise marks the task as archiving --
+// from that instant until the returned release func runs, every run-start
+// path (Start, StartWhenBusy, queue delivery) refuses with
+// ErrTaskArchiving. The caller must call release exactly once, typically
+// via defer, whether or not the archive itself succeeds.
+func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
+	// The latch is set BEFORE the active-run check, and that order is the
+	// whole point: once reg.archiving[taskID] is set (under reg.mu), no
+	// run-start path -- Start, StartWhenBusy, queue delivery -- can
+	// register a run for the task, because each refuses with
+	// ErrTaskArchiving while the latch is held. The subsequent
+	// ActiveRunForTask scan therefore sees every run that existed before
+	// the latch, and none can appear after it; a run racing in before the
+	// latch is either already in reg.runs (seen by the scan) or blocked
+	// by it. Had the check run first, a run starting between the check
+	// and the latch would be invisible -- the exact TOCTOU this closes.
+	reg.mu.Lock()
+	if reg.archiving[taskID] {
+		reg.mu.Unlock()
+		return nil, fmt.Errorf("task %d is already being archived", taskID)
+	}
+	reg.archiving[taskID] = true
+	hook := reg.testHookAfterLatch
+	reg.mu.Unlock()
+
+	if hook != nil {
+		hook()
+	}
+
+	unlatch := func() {
+		reg.mu.Lock()
+		delete(reg.archiving, taskID)
+		reg.mu.Unlock()
+	}
+
+	runID, queued, active, err := reg.ActiveRunForTask(taskID)
+	if err != nil {
+		unlatch()
+		return nil, err
+	}
+	if active {
+		unlatch()
+		if queued {
+			return nil, fmt.Errorf("has a queued prompt waiting to run; cancel it or let it finish first")
+		}
+		return nil, fmt.Errorf("has a running run (%s); stop it (run.stop) first", runID)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(unlatch)
+	}, nil
+}
+
+// taskArchivingLocked reports whether taskID is mid-archive; callers must
+// hold reg.mu.
+func (reg *Registry) taskArchivingLocked(taskID int64) bool {
+	return reg.archiving[taskID]
+}
+
+// ActiveRunForTask reports whether any of taskID's chats has an active
+// run: one that is StatusRunning, or (queued=true) a chat_queue item
+// still waiting to be delivered. It exists for the daemon's archive
+// guard (task.archive must refuse while work is in flight), scanning the
+// registry's in-memory runs plus the persisted queue, since queued items
+// belong to chats that have no run yet. The runID of the running run is
+// returned when one exists; for the queued case it is "" and queued is
+// true.
+//
+// A store failure is returned as err rather than silently reported as
+// "not active": the archive guard must fail closed -- answering "no
+// active runs" off a broken store read could archive a task out from
+// under a live run.
+func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, active bool, err error) {
+	reg.mu.Lock()
+	for _, r := range reg.runs {
+		if r.taskID != taskID {
+			continue
+		}
+		r.mu.Lock()
+		running := r.status == StatusRunning
+		r.mu.Unlock()
+		if running {
+			reg.mu.Unlock()
+			return r.id, false, true, nil
+		}
+	}
+	reg.mu.Unlock()
+
+	chats, err := reg.st.ListChatsByTask(taskID, true)
+	if err != nil {
+		return "", false, false, fmt.Errorf("list chats for task %d: %w", taskID, err)
+	}
+	for _, c := range chats {
+		items, err := reg.st.ListChatQueue(c.ID)
+		if err != nil {
+			return "", false, false, fmt.Errorf("list queue for chat %d: %w", c.ID, err)
+		}
+		for _, item := range items {
+			if item.Status == store.ChatQueueStatusQueued {
+				return "", true, true, nil
+			}
+		}
+	}
+	return "", false, false, nil
 }

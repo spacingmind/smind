@@ -1245,7 +1245,7 @@ func TestRunACP_WritePermissionCarriesDetail(t *testing.T) {
 	if decider.detail == nil || !decider.detail.ReplacesExisting || !decider.detail.LargeShrink {
 		t.Fatalf("detail = %+v", decider.detail)
 	}
-	if !strings.Contains(decider.summary, "240 -> 7 lines") || !strings.Contains(decider.summary, "OVERWRITES") {
+	if !strings.Contains(decider.summary, "240 -> 7 lines") || !strings.Contains(decider.summary, "overwrites existing file") {
 		t.Fatalf("summary = %q", decider.summary)
 	}
 }

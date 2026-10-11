@@ -183,14 +183,14 @@ func TestRenderPermissionRequest(t *testing.T) {
 	}
 }
 
-func TestRenderPermissionRequest_RejectHint(t *testing.T) {
+func TestRenderPermissionRequest_DenyHint(t *testing.T) {
 	t.Parallel()
 
 	got := renderPermissionRequest("run-1", "req-2", "x", []permissionOptionParams{
 		{ID: "opt-allow", Label: "Allow", Kind: "allow_once"},
 		{ID: "opt-no", Label: "Deny", Kind: "reject_once"},
 	}, nil)
-	if !strings.Contains(got, "-> reject:  smind task approve run-1 req-2 opt-no\n") {
-		t.Fatalf("renderPermissionRequest() = %q, want a reject hint with the reject option id", got)
+	if !strings.Contains(got, "-> deny:    smind task deny run-1 req-2\n") {
+		t.Fatalf("renderPermissionRequest() = %q, want a deny hint", got)
 	}
 }

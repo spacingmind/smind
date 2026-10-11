@@ -72,7 +72,7 @@ func TestTaskWait_ListsEveryPendingPermission(t *testing.T) {
 		{Type: "permission_request", RequestID: "req-3", Summary: "three", Options: opts},
 		{Type: "permission_resolved", RequestID: "req-2", OptionID: "a"},
 	}}
-	out := buildTaskWaitOutput(result, false)
+	out := buildTaskWaitOutput(result, nil, false)
 	if out.State != "waiting_permission" {
 		t.Fatalf("state = %q, want waiting_permission", out.State)
 	}
@@ -115,7 +115,7 @@ func staleRequestRun(status string) runLogsResult {
 
 func TestTaskWait_TerminalRunWithStalePermissionIsNotWaiting(t *testing.T) {
 	for _, status := range []string{"done", "error", "stopped"} {
-		out := buildTaskWaitOutput(staleRequestRun(status), false)
+		out := buildTaskWaitOutput(staleRequestRun(status), nil, false)
 		if out.State != status {
 			t.Errorf("status %s: state = %q, want %q", status, out.State, status)
 		}
@@ -150,5 +150,20 @@ func TestMCPTaskPermissions_FinishedRunWithStaleRequestIsEmpty(t *testing.T) {
 	}
 	if got := pendingPermissionsFrom(staleRequestRun("running")); len(got) != 1 {
 		t.Errorf("running: pending = %+v, want 1", got)
+	}
+}
+
+// A pending request the caller already surfaced (ignorePermissionIds) does
+// not make task_wait report waiting_permission: the run is still running.
+func TestTaskWait_IgnoredPermissionDoesNotReportWaiting(t *testing.T) {
+	result := runLogsResult{RunID: "r", Status: "running", Events: []runLogEvent{
+		{Type: "permission_request", RequestID: "q1", Summary: "Write file x"},
+	}}
+	if out := buildTaskWaitOutput(result, map[string]bool{"q1": true}, false); out.State != "running" || out.PendingPermission != nil {
+		t.Fatalf("ignored request: %+v, want running with no pending", out)
+	}
+	fresh := buildTaskWaitOutput(result, map[string]bool{"other": true}, false)
+	if fresh.State != "waiting_permission" || len(fresh.PendingPermissions) != 1 {
+		t.Fatalf("fresh request: %+v, want waiting_permission", fresh)
 	}
 }

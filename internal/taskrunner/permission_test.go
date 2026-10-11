@@ -195,12 +195,12 @@ func (d *detailRecordingDecider) DecideDetailed(ctx context.Context, summary str
 	return d.Decide(ctx, summary, options)
 }
 
-func TestACPDeciderAdapter_SummaryIncludesHeadlineAndPassesDetail(t *testing.T) {
+func TestACPDeciderAdapter_SummaryDescribesWriteAndPassesDetail(t *testing.T) {
 	t.Parallel()
 	wt := t.TempDir()
 	mustWrite(t, wt+"/schema.sql", numberedLines(240))
 	d := &detailRecordingDecider{recordingDecider: recordingDecider{optionID: "o"}}
-	adapter := acpDeciderAdapter{decider: d, worktree: wt}
+	adapter := acpDeciderAdapter{decider: d, cwd: wt}
 	raw := writeCall(t, "edit", "schema.sql", numberedLines(7))
 	req := acp.RequestPermissionParams{ToolCall: raw, Options: []acp.PermissionOption{{OptionID: "o", Name: "Allow", Kind: acp.PermissionAllowOnce}}}
 	if _, err := adapter.Decide(context.Background(), req); err != nil {
@@ -209,7 +209,7 @@ func TestACPDeciderAdapter_SummaryIncludesHeadlineAndPassesDetail(t *testing.T) 
 	if d.gotDetail == nil || !d.gotDetail.ReplacesExisting {
 		t.Fatalf("detail = %+v", d.gotDetail)
 	}
-	for _, want := range []string{"Write file: schema.sql (", "240 -> 7 lines", "OVERWRITES"} {
+	for _, want := range []string{"Write file: schema.sql (", "240 -> 7 lines", "overwrites existing file"} {
 		if !strings.Contains(d.gotSummary, want) {
 			t.Fatalf("summary %q missing %q", d.gotSummary, want)
 		}

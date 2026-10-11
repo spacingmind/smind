@@ -148,10 +148,35 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 	r.id = id
 
+	// ADR-0024 §2: a task whose worktree setup script is still running is
+	// busy -- nothing may start in a half-installed worktree. reject errors
+	// naming the setup; queue and interrupt (there is no run to stop)
+	// enqueue, and the setup-finish hook delivers.
+	setupBusy := false
+	if t, terr := wm.GetTask(taskID); terr == nil && t.SetupStatus == workspace.SetupRunning {
+		setupBusy = true
+		if whenBusy == WhenBusyReject {
+			cancel()
+			return StartOutcome{}, &SetupBusyError{TaskID: taskID}
+		}
+	}
+
+	if reg.testAfterSetupCheck != nil {
+		reg.testAfterSetupCheck()
+	}
+
 	var busyRunID string
+	var archiving bool
 	func() {
+		if setupBusy {
+			return
+		}
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
+		if reg.taskArchivingLocked(taskID) {
+			archiving = true
+			return
+		}
 		for _, existing := range reg.runs {
 			if existing.chatID != chatID {
 				continue
@@ -166,8 +191,12 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		}
 		reg.runs[id] = r
 	}()
+	if archiving {
+		cancel()
+		return StartOutcome{}, fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
 
-	if busyRunID == "" {
+	if busyRunID == "" && !setupBusy {
 		// Idle: every mode starts immediately, exactly like Start's tail.
 		if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
 			cancel()
@@ -199,7 +228,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 	reg.notifyQueueUpdated(chatID)
 
-	if whenBusy == WhenBusyInterrupt {
+	if whenBusy == WhenBusyInterrupt && busyRunID != "" {
 		if err := reg.Stop(busyRunID); err != nil {
 			return StartOutcome{}, fmt.Errorf("runs: start: stop running run: %w", err)
 		}
@@ -208,7 +237,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// Cover the finish-between-check-and-enqueue race: if the chat has gone
 	// idle since (e.g. its run finished while we were enquequeueing, before
 	// our item existed for finish's own delivery pass), deliver now.
-	// deliverOne is a no-op while the chat is busy.
+	// deliverOne is a no-op while the chat is busy. This also covers setup
+	// finishing between the setup-status read above and the enqueue (its
+	// finish hook ran over an empty queue): deliverOne re-reads setup status
+	// from the store. Pinned by TestSetup_QueuedPromptNotStranded...
 	reg.deliverOne(chatID)
 
 	return StartOutcome{Queued: true, QueueItemID: item.ID}, nil
@@ -266,6 +298,10 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if _, busy := reg.runningRunForChat(chatID); busy {
 			return
 		}
+		if setupRunningForChat(wm, chatID) {
+			// Setup finish (ok or failed) delivers via DeliverQueued.
+			return
+		}
 		item, ok, err := reg.st.NextQueued(chatID)
 		if err != nil || !ok {
 			return
@@ -288,9 +324,21 @@ func (reg *Registry) deliverOne(chatID int64) {
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel))
 		if err != nil {
 			var busyErr *ChatBusyError
+			var setupErr *SetupBusyError
+			if errors.As(err, &setupErr) {
+				// Setup was re-run since the check above; its finish delivers.
+				return
+			}
 			if errors.As(err, &busyErr) {
 				// Someone else's run won the start race; their finish will
 				// deliver this item. Leave it queued.
+				return
+			}
+			if errors.Is(err, ErrTaskArchiving) {
+				// The task entered archive between this item being queued
+				// and now; leave it queued -- if the archive completes the
+				// task is gone (redelivery will then fail loudly), and if
+				// the archive aborts the next finish/enqueue delivers it.
 				return
 			}
 			reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, fmt.Sprintf("delivery failed: %v", err))
@@ -304,6 +352,25 @@ func (reg *Registry) deliverOne(chatID int64) {
 		return
 	}
 	log.Printf("runs: chat %d queue delivery pass hit the %d-item cap; will resume at the next finish", chatID, chatQueueDeliveryCap)
+}
+
+// SetupBusyError is the whenBusy=reject rejection while a task's worktree
+// setup script is still running (ADR-0024 §2).
+type SetupBusyError struct{ TaskID int64 }
+
+func (e *SetupBusyError) Error() string {
+	return fmt.Sprintf("runs: start: task %d's worktree setup script is still running; wait for it to finish or pass whenBusy=queue", e.TaskID)
+}
+
+// setupRunningForChat reports whether chatID's task has a setup script
+// still running.
+func setupRunningForChat(wm *workspace.Manager, chatID int64) bool {
+	chat, err := wm.GetChat(chatID)
+	if err != nil {
+		return false
+	}
+	t, err := wm.GetTask(chat.TaskID)
+	return err == nil && t.SetupStatus == workspace.SetupRunning
 }
 
 // deliverPrompt applies ADR-0021 §4's provenance header: an agent-source

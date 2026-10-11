@@ -497,3 +497,19 @@ func TestClient_SessionModes(t *testing.T) {
 		t.Fatal("SessionModes(unknown) ok = true, want false")
 	}
 }
+
+func TestGLMCommand_PassesMaxTurns(t *testing.T) {
+	got := GLMCommand(WithMaxTurns(40))
+	want := []string{"npx", "-y", "glm-acp-agent@1.14.0", "--max-turns", "40"}
+	if len(got) != len(want) {
+		t.Fatalf("GLMCommand(WithMaxTurns(40)) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("GLMCommand(WithMaxTurns(40)) = %v, want %v", got, want)
+		}
+	}
+	if got := GLMCommand(WithMaxTurns(0)); len(got) != 3 {
+		t.Fatalf("GLMCommand(WithMaxTurns(0)) = %v, want no --max-turns", got)
+	}
+}

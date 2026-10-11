@@ -23,7 +23,7 @@ func TestMCPTools_NoApprovalToolInCatalog(t *testing.T) {
 			t.Fatalf("tools/list contains approval tool %q", name)
 		}
 	}
-	want := []string{"task_new", "task_list", "chat_list", "chat_new", "task_send", "task_status", "task_logs", "task_permissions", "task_wait", "task_stop", "workspace_list", "task_get", "run_list", "provider_list", "profile_list"}
+	want := []string{"task_new", "task_list", "chat_list", "chat_new", "task_send", "task_status", "task_logs", "task_permissions", "task_wait", "task_stop", "workspace_list", "task_get", "run_list", "provider_list", "profile_list", "task_archive", "task_set_mode", "task_options", "task_set_option", "task_diff", "queue_list", "queue_cancel", "usage_summary"}
 	got := mcpToolNames(t, env.cs)
 	for _, w := range want {
 		found := false

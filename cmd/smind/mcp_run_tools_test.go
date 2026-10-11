@@ -143,6 +143,56 @@ func waitForPendingPermission(t *testing.T, client *wsclient.Client, runID strin
 	}
 }
 
+// structuredToolCallEvent returns the first tool_call event with an input.
+func structuredToolCallEvent(t *testing.T, events []mcpRunEvent) mcpRunEvent {
+	t.Helper()
+	for _, e := range events {
+		if e.Type == "tool_call" && e.Input != nil {
+			return e
+		}
+	}
+	t.Fatalf("no tool_call event with an input in %+v", events)
+	return mcpRunEvent{}
+}
+
+// TestMCPTools_TaskStatusWithEvents drives a real run that emits a
+// tool_call with an object input (D-G1: the SDK used to infer an array
+// schema for json.RawMessage and reject the object at output validation).
+func TestMCPTools_TaskStatusWithEvents(t *testing.T) {
+	env := newMCPSession(t)
+	client := dialTestClient(t, env.srvURL)
+	runID := startTestRun(t, env.srvURL, "glm", "structured")
+	waitForRunStatus(t, client, runID, "done")
+
+	var status taskStatusOutput
+	if isErr := callMCPTool(t, env.cs, "task_status", map[string]any{"runId": runID}, &status); isErr {
+		t.Fatal("task_status returned an error result")
+	}
+	e := structuredToolCallEvent(t, status.Events)
+	in, ok := e.Input.(map[string]any)
+	if !ok || in["command"] != "go test ./..." {
+		t.Fatalf("tool_call input = %#v, want object with command", e.Input)
+	}
+}
+
+// TestMCPTools_TaskLogsWithEvents is the task_logs twin of the above.
+func TestMCPTools_TaskLogsWithEvents(t *testing.T) {
+	env := newMCPSession(t)
+	client := dialTestClient(t, env.srvURL)
+	runID := startTestRun(t, env.srvURL, "glm", "structured")
+	waitForRunStatus(t, client, runID, "done")
+
+	var logs taskLogsOutput
+	if isErr := callMCPTool(t, env.cs, "task_logs", map[string]any{"runId": runID}, &logs); isErr {
+		t.Fatal("task_logs returned an error result")
+	}
+	e := structuredToolCallEvent(t, logs.Events)
+	in, ok := e.Input.(map[string]any)
+	if !ok || in["command"] != "go test ./..." {
+		t.Fatalf("tool_call input = %#v, want object with command", e.Input)
+	}
+}
+
 // TestMCPTaskPermissions_IncludesDetail: the daemon's detail on a Write over
 // an existing file survives the MCP round trip (and output-schema
 // validation) on task_permissions.
@@ -161,8 +211,8 @@ func TestMCPTaskPermissions_IncludesDetail(t *testing.T) {
 		t.Fatalf("pending = %+v, want exactly one", perms.Pending)
 	}
 	req := perms.Pending[0]
-	if !strings.Contains(req.Summary, "OVERWRITES") {
-		t.Errorf("summary = %q, want OVERWRITES", req.Summary)
+	if !strings.Contains(req.Summary, "overwrites existing file") {
+		t.Errorf("summary = %q, want overwrites existing file", req.Summary)
 	}
 	if d := req.Detail; d == nil || !d.ReplacesExisting || d.Diff == "" {
 		t.Fatalf("detail = %+v, want replacesExisting and a diff", d)

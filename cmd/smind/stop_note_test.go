@@ -26,11 +26,11 @@ func TestStopNote_MaxTurnRequests(t *testing.T) {
 
 func TestMCPTaskWait_StopNoteOnTurnCap(t *testing.T) {
 	t.Parallel()
-	out := buildTaskWaitOutput(runLogsResult{RunID: "r", Status: "done", StopReason: "max_turn_requests"}, false)
+	out := buildTaskWaitOutput(runLogsResult{RunID: "r", Status: "done", StopReason: "max_turn_requests"}, nil, false)
 	if out.State != "done" || out.StopNote == "" {
 		t.Fatalf("out = %+v, want state done with a stopNote", out)
 	}
-	if clean := buildTaskWaitOutput(runLogsResult{RunID: "r", Status: "done", StopReason: "end_turn"}, false); clean.StopNote != "" {
+	if clean := buildTaskWaitOutput(runLogsResult{RunID: "r", Status: "done", StopReason: "end_turn"}, nil, false); clean.StopNote != "" {
 		t.Errorf("end_turn stopNote = %q, want empty", clean.StopNote)
 	}
 }

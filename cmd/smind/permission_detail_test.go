@@ -73,7 +73,7 @@ func TestRenderPermissionRequest_NoDetailUnchanged(t *testing.T) {
 		"  - a: Allow (allow_once)\n" +
 		"  - n: Deny (reject_once)\n" +
 		"  -> approve: smind task approve run-1 req-2\n" +
-		"  -> reject:  smind task approve run-1 req-2 n\n"
+		"  -> deny:    smind task deny run-1 req-2\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

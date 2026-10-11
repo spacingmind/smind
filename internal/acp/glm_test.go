@@ -46,13 +46,13 @@ func TestGLMCommand_MaxTurnsFlag(t *testing.T) {
 	t.Parallel()
 	base := GLMCommand()
 	for _, n := range []int{0, -3} {
-		if got := GLMCommandWithMaxTurns(n); !slices.Equal(got, base) {
-			t.Errorf("GLMCommandWithMaxTurns(%d) = %v, want %v", n, got, base)
+		if got := GLMCommand(WithMaxTurns(n)); !slices.Equal(got, base) {
+			t.Errorf("GLMCommand(WithMaxTurns(%d)) = %v, want %v", n, got, base)
 		}
 	}
-	got := GLMCommandWithMaxTurns(7)
+	got := GLMCommand(WithMaxTurns(7))
 	want := append(slices.Clone(base), "--max-turns", "7")
 	if !slices.Equal(got, want) {
-		t.Errorf("GLMCommandWithMaxTurns(7) = %v, want %v", got, want)
+		t.Errorf("GLMCommand(WithMaxTurns(7)) = %v, want %v", got, want)
 	}
 }

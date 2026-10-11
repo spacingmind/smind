@@ -58,16 +58,9 @@ type PermissionDecider interface {
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
-	// worktree resolves relative tool-call paths for BuildPermissionDetail.
-	worktree string
-}
-
-// DetailedPermissionDecider is an optional extension of PermissionDecider:
-// a decider that implements it also receives the PermissionDetail derived
-// from the tool call (nil when none). Only the ACP adapter supplies detail;
-// the Claude/Codex adapters call plain Decide.
-type DetailedPermissionDecider interface {
-	DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error)
+	// cwd is the run's worktree, used to resolve a relative write path when
+	// summarizing a file write; empty falls back to the process cwd.
+	cwd string
 }
 
 func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermissionParams) (string, error) {
@@ -75,15 +68,22 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
-	detail := BuildPermissionDetail(a.worktree, req.ToolCall)
-	summary := summarizeACPToolCall(req.ToolCall)
-	if h := detail.Headline(); h != "" {
-		summary += " (" + h + ")"
-	}
+	summary := summarizeACPToolCallIn(a.cwd, req.ToolCall)
+	// detail is the structured counterpart of the summary's write
+	// description (path, sizes, overwrite flags, capped diff/preview).
+	detail := BuildPermissionDetail(a.cwd, req.ToolCall)
 	if dd, ok := a.decider.(DetailedPermissionDecider); ok {
 		return dd.DecideDetailed(ctx, summary, detail, opts)
 	}
 	return a.decider.Decide(ctx, summary, opts)
+}
+
+// DetailedPermissionDecider is an optional extension of PermissionDecider: a
+// decider that implements it also receives the PermissionDetail derived from
+// the tool call (nil when none). Only the ACP adapter supplies detail; the
+// Claude/Codex adapters call plain Decide.
+type DetailedPermissionDecider interface {
+	DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error)
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a
@@ -93,19 +93,50 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 // agent that omits it, so a request is never presented with no context at
 // all.
 func summarizeACPToolCall(raw json.RawMessage) string {
+	return summarizeACPToolCallIn("", raw)
+}
+
+// summarizeACPToolCallIn is summarizeACPToolCall plus, for a file write,
+// its size and old -> new line counts (see describeWrite). The write detail
+// comes from an ACP diff content block when the agent sent one, else from a
+// rawInput carrying the path and new content.
+func summarizeACPToolCallIn(cwd string, raw json.RawMessage) string {
 	var tc struct {
 		Title      string `json:"title"`
 		ToolCallID string `json:"toolCallId"`
+		Content    []struct {
+			Type    string  `json:"type"`
+			Path    string  `json:"path"`
+			OldText *string `json:"oldText"`
+			NewText string  `json:"newText"`
+		} `json:"content"`
+		RawInput map[string]any `json:"rawInput"`
 	}
-	if err := json.Unmarshal(raw, &tc); err == nil {
-		if tc.Title != "" {
-			return tc.Title
-		}
-		if tc.ToolCallID != "" {
-			return fmt.Sprintf("tool call %s", tc.ToolCallID)
+	if err := json.Unmarshal(raw, &tc); err != nil {
+		return "tool call"
+	}
+	summary := ""
+	switch {
+	case tc.Title != "":
+		summary = tc.Title
+	case tc.ToolCallID != "":
+		summary = fmt.Sprintf("tool call %s", tc.ToolCallID)
+	default:
+		return "tool call"
+	}
+	for _, c := range tc.Content {
+		if c.Type == "diff" {
+			old := ""
+			if c.OldText != nil {
+				old = *c.OldText
+			}
+			return fmt.Sprintf("%s (%s)", summary, describeWrite(cwd, c.Path, c.NewText, c.OldText != nil, old))
 		}
 	}
-	return "tool call"
+	if content, ok := tc.RawInput["content"].(string); ok {
+		return fmt.Sprintf("%s (%s)", summary, describeWrite(cwd, writeInputPath(tc.RawInput), content, false, ""))
+	}
+	return summary
 }
 
 // Synthesized PermissionOption IDs for Claude Code native turns, whose own
@@ -133,6 +164,8 @@ const claudeFixedDenyMessage = "denied by human reviewer"
 // allow/deny is all PermissionDecider's two-option shape can express.
 type claudeDeciderAdapter struct {
 	decider PermissionDecider
+	// cwd is the run's worktree, used to resolve a relative Write path.
+	cwd string
 }
 
 func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseToolRequest) (bool, map[string]any, string, []claudecode.PermissionUpdate, bool, error) {
@@ -141,6 +174,10 @@ func (a claudeDeciderAdapter) Decide(ctx context.Context, req claudecode.CanUseT
 		{ID: claudeOptionDeny, Label: "Deny", Kind: "reject_once"},
 	}
 	summary := fmt.Sprintf("run %s", req.ToolName)
+	if content, ok := req.Input["content"].(string); ok && req.ToolName == "Write" {
+		path := writeInputPath(req.Input)
+		summary = fmt.Sprintf("run Write %s (%s)", path, describeWrite(a.cwd, path, content, false, ""))
+	}
 
 	optionID, err := a.decider.Decide(ctx, summary, opts)
 	if err != nil {

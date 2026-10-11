@@ -19,6 +19,10 @@ type CreateTaskOption func(*createTaskParams)
 
 type createTaskParams struct {
 	parentTaskID *int64
+	baseRef      string
+	branch       string
+	prNumber     int
+	prSupplied   bool
 }
 
 // WithParentTask makes the new task a child of parentID, which CreateTask
@@ -48,6 +52,17 @@ func WithParentTask(parentID int64) CreateTaskOption {
 // slug plus a nanosecond timestamp suffix keeps the name readable while
 // guaranteeing it won't collide with another task sharing the same title.
 //
+// The task's starting point is chosen with exactly one optional ref mode:
+// WithBaseRef (new branch smind/task-<slug> at that ref's commit),
+// WithExistingBranch (check out an existing branch into the worktree, no
+// new branch), or WithPullRequest (new branch smind/pr-<n>-<slug> from the
+// PR head, GitHub only). Omitting all three keeps the default behavior
+// (new branch off the checkout's current HEAD). Supplying more than one is
+// rejected up front, before any git command runs. Every user-supplied
+// ref/branch is validated (empty, leading '-', whitespace/control chars,
+// '..', git check-ref-format, rev-parse --verify) before a worktree is
+// touched; git is only ever invoked with discrete argv, never a shell.
+//
 // WithParentTask(parentID) makes the new task a child of parentID: rejected
 // up front, before any worktree is touched, if parentID doesn't exist, if
 // it belongs to a different workspace, or if the new task would sit deeper
@@ -71,12 +86,59 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		}
 	}
 
+	refModes := 0
+	if p.baseRef != "" {
+		refModes++
+	}
+	if p.branch != "" {
+		refModes++
+	}
+	if p.prSupplied {
+		refModes++
+	}
+	if refModes > 1 {
+		return store.Task{}, fmt.Errorf("create task: pass at most one of baseRef, branch, prNumber")
+	}
+	if p.prSupplied && p.prNumber <= 0 {
+		return store.Task{}, fmt.Errorf("create task: prNumber must be > 0")
+	}
+
+	if err := m.checkSetupSupported(ws.SetupScript); err != nil {
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+
 	name := slugify(title) + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
 
-	if err := gitWorktreeAdd(ws.Path, worktreePath, branch); err != nil {
-		return store.Task{}, fmt.Errorf("create task worktree: %w", err)
+	// createdBranch is the branch this call itself creates ("" when it
+	// checks out a pre-existing one): the only branch discardTask may ever
+	// delete. A task from an existing branch must never delete the user's
+	// own branch on a later failure.
+	createdBranch := branch
+	var wtErr error
+	switch {
+	case p.baseRef != "":
+		wtErr = createTaskFromBaseRef(ws.Path, worktreePath, branch, p.baseRef)
+	case p.branch != "":
+		wtErr = createTaskFromBranch(ws.Path, worktreePath, p.branch)
+		branch = p.branch
+		createdBranch = ""
+	case p.prSupplied:
+		branch = "smind/pr-" + strconv.Itoa(p.prNumber) + "-" + name
+		createdBranch = branch
+		wtErr = createTaskFromPR(ws.Path, worktreePath, branch, p.prNumber)
+	default:
+		wtErr = gitWorktreeAdd(ws.Path, worktreePath, branch)
+	}
+	if wtErr != nil {
+		// A half-created worktree directory must not outlive the failure:
+		// no task row exists yet, so nothing but this cleanup stands
+		// between the caller and a stray directory.
+		if dirExists(worktreePath) {
+			_, _ = runGitOutput(ws.Path, "worktree", "remove", "--force", worktreePath)
+		}
+		return store.Task{}, fmt.Errorf("create task worktree: %w", wtErr)
 	}
 
 	t, err := m.store.CreateTask(store.Task{
@@ -89,6 +151,24 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		Branch:       &branch,
 	})
 	if err != nil {
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+
+	// ADR-0024: per-task port, then (if the workspace has a setup script)
+	// mark setup running before the task is announced; the script itself
+	// starts below, once the task is fully materialized.
+	if _, err := m.claimPort(t.ID); err != nil {
+		// branch is generated above, so CreateTask created it. Any future
+		// mode that checks out a pre-existing branch must pass "" here.
+		m.discardTask(ws, t, createdBranch)
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+	if ws.SetupScript != "" {
+		if _, err := m.store.UpdateTaskSetup(t.ID, SetupRunning, "", ""); err != nil {
+			return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
+		}
+	}
+	if t, err = m.store.GetTask(t.ID); err != nil {
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
 	if n := m.getNotifier(); n != nil {
@@ -105,10 +185,33 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	// CreateWorkspace's own doc comment already documents for this
 	// codebase.
 	if _, err := m.createDefaultChat(t.ID); err != nil {
+		if ws.SetupScript != "" {
+			_, _ = m.store.UpdateTaskSetup(t.ID, SetupFailed, "setup not started: task creation failed", "")
+		}
 		return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
 	}
 
+	if ws.SetupScript != "" {
+		m.startSetup(t, ws)
+	}
 	return t, nil
+}
+
+// discardTask undoes a just-created task whose port allocation failed: the
+// row, the worktree, and createdBranch.
+//
+// createdBranch must be the branch CreateTask itself created for this task,
+// or "" when the task's branch pre-existed (e.g. a user's own branch checked
+// out into the worktree). Only a branch we created may be force-deleted
+// here: `git branch -D` on a user's branch would destroy their work.
+func (m *Manager) discardTask(ws store.Workspace, t store.Task, createdBranch string) {
+	if t.WorktreePath != nil {
+		_ = gitWorktreeRemove(ws.Path, *t.WorktreePath)
+	}
+	if createdBranch != "" {
+		_ = runGit(ws.Path, "branch", "-D", createdBranch)
+	}
+	_ = m.store.DeleteTask(t.ID)
 }
 
 // validateParentDepth checks that parentID names an existing task in

@@ -112,14 +112,7 @@ func renderPermissionRequest(runID, requestID, summary string, options []permiss
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
 	fmt.Fprintf(&b, "  -> approve: smind task approve %s %s\n", runID, requestID)
-	rejectID := "<optionId>"
-	for _, o := range options {
-		if strings.HasPrefix(o.Kind, "reject") {
-			rejectID = o.ID
-			break
-		}
-	}
-	fmt.Fprintf(&b, "  -> reject:  smind task approve %s %s %s\n", runID, requestID, rejectID)
+	fmt.Fprintf(&b, "  -> deny:    smind task deny %s %s\n", runID, requestID)
 	return b.String()
 }
 
@@ -158,7 +151,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|options|set-option|chat|queue> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -180,6 +173,8 @@ func cmdTask(args []string) int {
 		return cmdTaskPermissions(args[1:])
 	case "approve":
 		return cmdTaskApprove(args[1:])
+	case "deny":
+		return cmdTaskDeny(args[1:])
 	case "options":
 		return cmdTaskOptions(args[1:])
 	case "set-option":
@@ -262,7 +257,15 @@ func cmdTaskNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "task new: %v\n", err)
 		return 1
 	}
+	// First line stays "id<TAB>title<TAB>status" for existing parsers; the
+	// branch and worktree path follow on their own labelled lines.
 	fmt.Printf("%d\t%s\t%s\n", task.ID, task.Title, task.Status)
+	if task.Branch != nil {
+		fmt.Printf("branch\t%s\n", *task.Branch)
+	}
+	if task.WorktreePath != nil {
+		fmt.Printf("worktree\t%s\n", *task.WorktreePath)
+	}
 	return 0
 }
 
@@ -865,8 +868,7 @@ func cmdTaskPermissions(args []string) int {
 }
 
 // cmdTaskApproveUsage is printed on any argument error in cmdTaskApprove.
-const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]\n" +
-	"  optionId defaults to the first allow option; pass a reject option's id to deny instead"
+const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]"
 
 // cmdTaskApprove answers a run's pending permission request via
 // run.respondPermission -- closing the gap where a run whose provider
@@ -880,12 +882,31 @@ const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [opti
 // internal/runs.firstOptionByKind's own selection so `task approve
 // <runId>` with no further arguments does the obvious thing.
 func cmdTaskApprove(args []string) int {
-	if len(args) >= 1 && (args[0] == "--help" || args[0] == "-h") {
-		fmt.Println(cmdTaskApproveUsage)
+	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, args)
+}
+
+// cmdTaskDenyUsage is printed on any argument error in cmdTaskDeny.
+const cmdTaskDenyUsage = "usage: smind task deny <runId> [requestId]"
+
+// cmdTaskDeny is the human-only counterpart of cmdTaskApprove: it rejects a
+// run's pending permission request with the request's own reject option.
+// CLI only -- there is deliberately no MCP deny tool (ADR-0017 #1).
+func cmdTaskDeny(args []string) int {
+	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, args)
+}
+
+// isHelpArg reports whether a CLI argument asks for usage.
+func isHelpArg(a string) bool { return a == "-h" || a == "--help" || a == "help" }
+
+// cmdTaskDecide answers a pending permission request, picking the first
+// allow option (allow=true) or the first reject option (allow=false).
+func cmdTaskDecide(verb, usage string, allow bool, args []string) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Println(usage)
 		return 0
 	}
-	if len(args) < 1 || len(args) > 3 {
-		fmt.Fprintln(os.Stderr, cmdTaskApproveUsage)
+	if len(args) < 1 || len(args) > 2 {
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
 	runID := args[0]
@@ -899,16 +920,16 @@ func cmdTaskApprove(args []string) int {
 
 	pending, err := fetchPendingPermissions(context.Background(), client, runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "task %s: %v\n", verb, err)
 		return 1
 	}
 	if len(pending) == 0 {
-		fmt.Fprintln(os.Stderr, "task approve: no pending permission request")
+		fmt.Fprintf(os.Stderr, "task %s: no pending permission request\n", verb)
 		return 1
 	}
 
 	var target *pendingPermission
-	if len(args) >= 2 {
+	if len(args) == 2 {
 		requestID := args[1]
 		for i := range pending {
 			if pending[i].RequestID == requestID {
@@ -917,7 +938,7 @@ func cmdTaskApprove(args []string) int {
 			}
 		}
 		if target == nil {
-			fmt.Fprintf(os.Stderr, "task approve: request %q is not pending\n", requestID)
+			fmt.Fprintf(os.Stderr, "task %s: request %q is not pending\n", verb, requestID)
 			return 1
 		}
 	} else {
@@ -925,31 +946,20 @@ func cmdTaskApprove(args []string) int {
 	}
 
 	optionID := ""
-	if len(args) == 3 {
-		for _, o := range target.Options {
-			if o.ID == args[2] {
-				optionID = o.ID
-				break
-			}
-		}
-		if optionID == "" {
-			ids := make([]string, 0, len(target.Options))
-			for _, o := range target.Options {
-				ids = append(ids, o.ID)
-			}
-			fmt.Fprintf(os.Stderr, "task approve: request %q has no option %q; valid option ids: %s\n", target.RequestID, args[2], strings.Join(ids, ", "))
-			return 1
-		}
-	} else {
-		for _, o := range target.Options {
-			if o.Kind == "allow_once" || o.Kind == "allow_always" {
-				optionID = o.ID
-				break
-			}
+	for _, o := range target.Options {
+		isAllow := o.Kind == "allow_once" || o.Kind == "allow_always"
+		isReject := o.Kind == "reject_once" || o.Kind == "reject_always"
+		if (allow && isAllow) || (!allow && isReject) {
+			optionID = o.ID
+			break
 		}
 	}
 	if optionID == "" {
-		fmt.Fprintf(os.Stderr, "task approve: request %q has no allow option: %+v\n", target.RequestID, target.Options)
+		kind := "allow"
+		if !allow {
+			kind = "reject"
+		}
+		fmt.Fprintf(os.Stderr, "task %s: request %q has no %s option: %+v\n", verb, target.RequestID, kind, target.Options)
 		return 1
 	}
 
@@ -957,7 +967,7 @@ func cmdTaskApprove(args []string) int {
 		"runId": runID, "requestId": target.RequestID, "optionId": optionID,
 	}, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "task %s: %v\n", verb, err)
 		return 1
 	}
 	fmt.Printf("request %s -> %s\n", target.RequestID, optionID)
@@ -1458,13 +1468,17 @@ func cmdTaskQueueLs(args []string) int {
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tPROMPT")
+	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tRUN\tPROMPT")
 	for _, item := range result.Items {
 		prompt := item.Prompt
 		if len(prompt) > 40 {
 			prompt = prompt[:40] + "..."
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, prompt)
+		runID := "-"
+		if item.RunID != nil && *item.RunID != "" {
+			runID = *item.RunID
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, runID, prompt)
 	}
 	tw.Flush()
 	return 0

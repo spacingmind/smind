@@ -16,7 +16,8 @@ The loop:
 4. task_wait: block on the runId, then read its ` + "`state`" + `:
    - waiting_permission: a permission request is pending and a HUMAN must
      approve or deny it. This is NOT completion. Loop: task_wait, then
-     (the human approves), then task_wait again.
+     (the human approves), then task_wait again -- passing
+     ignorePermissionIds for the requests you already surfaced.
    - done / error / stopped: the run ended. A done run with a stopNote
      (e.g. it hit the agent's turn limit) may be incomplete: send a
      follow-up prompt such as "continue".
@@ -26,6 +27,20 @@ The loop:
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.
 6. task_stop: stop a run that should not continue.
+7. task_archive: when a task's work is done, archive it (uncommitted changes are
+   committed to its branch as a checkpoint; refused while a run is active, so
+   task_stop first). task_new also takes baseRef (e.g. origin/develop), branch,
+   or prNumber to choose the worktree's starting point.
+   task_set_mode / task_options / task_set_option change a live run's settings
+   (never to an auto-approving mode; only thinking-level or model options).
+   task_wait also takes runIds to wait for the first of several runs, and
+   ignorePermissionIds (request ids you already surfaced) to keep waiting
+   past a pending permission until a NEW one, a terminal status, or timeout.
+   task_diff reads a task's worktree diff (capped at 256 KiB); queue_list
+   and queue_cancel inspect and cancel your own queued prompts;
+   usage_summary reports token/cost usage. task_send also accepts
+   promptFile (a path relative to the task's worktree, max 64 KiB) instead
+   of prompt.
 
 If a task is busy with a running run, task_send queues the prompt on that
 chat by default -- you may keep sending and the daemon will deliver them
@@ -33,8 +48,8 @@ in order.
 
 Permissions are answered by humans ONLY. When task_wait/task_status/
 task_permissions report a pending permission request, surface it to the
-human (they respond via ` + "`smind task approve`" + ` -- add an option id such as
-reject to deny -- or the smind web UI). Show them the request's detail
+human (they respond via ` + "`smind task approve` / `smind task deny`" + ` or the
+smind web UI). Show them the request's detail
 as is: for a write it carries the path, the size change, replacesExisting
 and a diff or preview. A write that replaces an existing file with much
 less content (largeShrink) is likely destructive; recommend rejecting it.

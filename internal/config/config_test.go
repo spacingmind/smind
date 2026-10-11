@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -44,40 +43,78 @@ func TestLoad_OrchestrationMaxDepthOverride(t *testing.T) {
 	}
 }
 
-// TestConfig_GLMMaxTurns proves agents.glm.maxTurns parses, defaults to
-// zero (the agent's own cap), and a missing file is fine.
-func TestConfig_GLMMaxTurns(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SMIND_HOME", home)
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+func TestDefault_WorktreesConfig(t *testing.T) {
+	t.Parallel()
+	w := Default().Worktrees
+	if w.SetupTimeoutSeconds != 600 || w.TeardownTimeoutSeconds != 120 {
+		t.Fatalf("timeouts = %d/%d, want 600/120", w.SetupTimeoutSeconds, w.TeardownTimeoutSeconds)
 	}
-	if got := cfg.Agents.GLM.MaxTurns; got != 0 {
-		t.Fatalf("missing file: MaxTurns = %d, want 0", got)
-	}
-
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("agents:\n  glm:\n    maxTurns: 150\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-	cfg, err = Load()
-	if err != nil {
-		t.Fatalf("Load() error = %v", err)
-	}
-	if got := cfg.Agents.GLM.MaxTurns; got != 150 {
-		t.Fatalf("MaxTurns = %d, want 150", got)
+	if _, _, ok, err := w.Ports.PortRange(); ok || err != nil {
+		t.Fatalf("default range ok=%v err=%v, want unset", ok, err)
 	}
 }
 
-func TestConfig_GLMMaxTurnsNegativeRejected(t *testing.T) {
+func TestLoad_WorktreesConfigOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
-	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("agents:\n  glm:\n    maxTurns: -1\n"), 0o600); err != nil {
-		t.Fatalf("write config: %v", err)
+	y := "worktrees:\n  ports:\n    range: \"31000-31999\"\n  setupTimeoutSeconds: 5\n  teardownTimeoutSeconds: 7\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(y), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	_, err := Load()
-	if err == nil || !strings.Contains(err.Error(), "agents.glm.maxTurns") {
-		t.Fatalf("Load() error = %v, want one naming agents.glm.maxTurns", err)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lo, hi, ok, err := cfg.Worktrees.Ports.PortRange()
+	if err != nil || !ok || lo != 31000 || hi != 31999 {
+		t.Fatalf("range = %d-%d ok=%v err=%v", lo, hi, ok, err)
+	}
+	if cfg.Worktrees.SetupTimeoutSeconds != 5 || cfg.Worktrees.TeardownTimeoutSeconds != 7 {
+		t.Fatalf("timeouts = %+v", cfg.Worktrees)
+	}
+}
+
+func TestLoad_WorktreesBadRangeRejected(t *testing.T) {
+	for _, r := range []string{"500-600", "40000-31000", "abc", "1024-70000"} {
+		home := t.TempDir()
+		t.Setenv("SMIND_HOME", home)
+		y := "worktrees:\n  ports:\n    range: \"" + r + "\"\n"
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("range %q accepted, want error", r)
+		}
+	}
+}
+
+func TestLoad_GLMMaxTurns(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	write := func(body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg, err := Load()
+	if err != nil || cfg.Agents.GLM.MaxTurns != nil {
+		t.Fatalf("missing file: MaxTurns = %v, err %v, want unset", cfg.Agents.GLM.MaxTurns, err)
+	}
+	write("agents:\n  glm:\n    maxTurns: 40\n")
+	cfg, err = Load()
+	if err != nil || cfg.Agents.GLM.MaxTurns == nil || *cfg.Agents.GLM.MaxTurns != 40 {
+		t.Fatalf("MaxTurns = %v, err %v, want 40", cfg.Agents.GLM.MaxTurns, err)
+	}
+	for _, v := range []string{"0", "-3", "10001"} {
+		write("agents:\n  glm:\n    maxTurns: " + v + "\n")
+		if _, err := Load(); err == nil {
+			t.Fatalf("maxTurns %s accepted, want a load error", v)
+		}
+	}
+	write("agents:\n  glm:\n    maxTurns: 10000\n")
+	if _, err := Load(); err != nil {
+		t.Fatalf("maxTurns 10000: %v", err)
 	}
 }

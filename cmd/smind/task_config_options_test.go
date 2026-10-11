@@ -86,6 +86,13 @@ func captureStderr(t *testing.T, f func()) string {
 // config.yaml port. Mirrors the account_test.go setup in this package.
 func newConfigOptionTestEnv(t *testing.T, home string) string {
 	t.Helper()
+	return newConfigOptionTestEnvArgs(t, home)
+}
+
+// newConfigOptionTestEnvArgs is newConfigOptionTestEnv with extra argv
+// for the fake agent (e.g. "modes:session", "live-opts").
+func newConfigOptionTestEnvArgs(t *testing.T, home string, agentArgs ...string) string {
+	t.Helper()
 	dir, err := os.MkdirTemp("", "smind-cli-configopt-")
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +120,7 @@ func newConfigOptionTestEnv(t *testing.T, home string) string {
 	t.Cleanup(func() { _ = s.Close() })
 
 	wm := workspace.New(s)
-	handler, err := wsapi.Handler(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeAgent})), s, token)
+	handler, err := wsapi.Handler(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, append([]string{fakeAgent}, agentArgs...))), s, token)
 	if err != nil {
 		t.Fatalf("wsapi.Handler() error = %v", err)
 	}

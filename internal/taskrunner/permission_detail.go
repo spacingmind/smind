@@ -2,7 +2,6 @@ package taskrunner
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -155,51 +154,6 @@ func BuildPermissionDetail(worktree string, toolCall json.RawMessage) *Permissio
 	d.Diff, tr = capDiff(unifiedDiff(old, content))
 	d.Truncated = d.Truncated || tr
 	return d
-}
-
-// Headline is a one-line human summary, e.g.
-// "replaces 240 -> 7 lines (3.1 KB -> 0.2 KB) OVERWRITES".
-func (d *PermissionDetail) Headline() string {
-	if d == nil {
-		return ""
-	}
-	switch d.Kind {
-	case "write":
-		if d.ReplacesExisting && d.ExistingLines != nil && d.ExistingBytes != nil {
-			return fmt.Sprintf("replaces %d -> %d lines (%s -> %s) OVERWRITES",
-				*d.ExistingLines, d.NewLines, kb(*d.ExistingBytes), kb(d.NewBytes))
-		}
-		if d.ReplacesExisting {
-			why := "sensitive path"
-			if d.OutsideWorktree {
-				why = "outside worktree"
-			}
-			if !d.Redacted {
-				return fmt.Sprintf("replaces existing file with %d lines (%s) OVERWRITES", d.NewLines, kb(d.NewBytes))
-			}
-			return fmt.Sprintf("replaces existing file with %d lines (%s); existing contents hidden (%s) OVERWRITES", d.NewLines, kb(d.NewBytes), why)
-		}
-		if d.OutsideWorktree {
-			return fmt.Sprintf("new file, %d lines (%s), outside worktree", d.NewLines, kb(d.NewBytes))
-		}
-		return fmt.Sprintf("new file, %d lines (%s)", d.NewLines, kb(d.NewBytes))
-	case "edit":
-		return fmt.Sprintf("edit, %d new lines (%s)", d.NewLines, kb(d.NewBytes))
-	}
-	return ""
-}
-
-func kb(n int) string { return fmt.Sprintf("%.1f KB", float64(n)/1024) }
-
-func countLines(s string) int {
-	if s == "" {
-		return 0
-	}
-	n := strings.Count(s, "\n")
-	if !strings.HasSuffix(s, "\n") {
-		n++
-	}
-	return n
 }
 
 // capBytes cuts s to at most max bytes on a UTF-8 boundary.

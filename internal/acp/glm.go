@@ -2,6 +2,17 @@ package acp
 
 import "strconv"
 
+// GLMOption customises the command GLMCommand returns.
+type GLMOption func(*glmOptions)
+
+type glmOptions struct{ maxTurns int }
+
+// WithMaxTurns passes --max-turns n to the GLM agent, capping the turns of
+// one prompt (n <= 0 leaves the agent's own default).
+func WithMaxTurns(n int) GLMOption {
+	return func(o *glmOptions) { o.maxTurns = n }
+}
+
 // GLMCommand returns the command to spawn the GLM ACP agent
 // (glm-acp-agent, see https://github.com/stefandevo/glm-acp-agent), for use
 // with New. It requires npx (Node.js) to be available on $PATH; this
@@ -13,17 +24,14 @@ import "strconv"
 // under-metered. 1.6.1+ accepts --max-turns; 1.11+ reports the prompt's
 // summed usage across all its model calls. Never pin below 1.11.0 (see
 // docs/plans/active/dogfood-gap-fixes.md).
-func GLMCommand() []string {
-	return []string{"npx", "-y", "glm-acp-agent@1.14.0"}
-}
-
-// GLMCommandWithMaxTurns is GLMCommand plus `--max-turns <n>` when n > 0;
-// otherwise (0 = unset, or negative) it is plain GLMCommand() and the agent
-// keeps its own default turn cap.
-func GLMCommandWithMaxTurns(maxTurns int) []string {
-	cmd := GLMCommand()
-	if maxTurns > 0 {
-		cmd = append(cmd, "--max-turns", strconv.Itoa(maxTurns))
+func GLMCommand(opts ...GLMOption) []string {
+	var o glmOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	cmd := []string{"npx", "-y", "glm-acp-agent@1.14.0"}
+	if o.maxTurns > 0 {
+		cmd = append(cmd, "--max-turns", strconv.Itoa(o.maxTurns))
 	}
 	return cmd
 }

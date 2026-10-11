@@ -9,6 +9,30 @@ at the end of that file. Fold it back in when #265 lands.
 Source: the Step 3 dogfood run (2026-10-11), one GLM peer driven through
 `smind mcp serve`. Gap numbers below are that log's.
 
+## Overlap with PR #273 (merged first)
+
+#273 (orchestration-parity PR-G) landed the same G1/G4/G6 fixes and a basic
+write summary while this work was in flight. On merge, **#273's versions were
+kept** for: the `mcpRunEvent` schema fix, `ignorePermissionIds`, `smind task
+deny` (this PR's three-argument `task approve <run> <req> <optionId>` and its
+tests were dropped), `agents.glm.maxTurns` (`*int`, 1..10000, `GLMCommand(
+acp.WithMaxTurns(n))`), and the write summary text (`overwrites existing file:
+240 -> 7 lines, N bytes`, `describeWrite`). What this PR still adds on top:
+
+- the **GLM pin bump** to 1.14.0 -- without it #273's `--max-turns` is
+  silently ignored (measured: 1.3.0 ignores the flag), and usage is last-call
+  only;
+- `task_wait` **`state`** / `pendingPermissions` / `message` (#273's
+  `ignorePermissionIds` lets a driver wait past a surfaced request but the
+  result still has no explicit "this is not completion" state), and a finished
+  run never reports a pending permission (#273 would still return a stale
+  unresolved request of a stopped run as pending: a looping driver never
+  ends);
+- the structured **`detail`** (daemon, CLI, MCP, web card) with capped diff,
+  redaction rules and `outsideWorktree`/`largeShrink` flags;
+- the **stop note** (CLI, MCP) and the web "Turn limit reached" label;
+- GLM usage tests and the ADR-0020 note; server-instructions wording.
+
 ## Scope
 
 In: G1 (MCP output schema), G4 (`task_wait` while a permission is pending),

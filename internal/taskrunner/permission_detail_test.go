@@ -46,11 +46,11 @@ func mustWrite(t *testing.T, p, s string) {
 }
 
 // assertHiddenOverwrite checks the danger signal survives redaction: the
-// overwrite is flagged and headlined, but no existing contents leak.
+// overwrite is flagged, but no existing contents leak.
 func assertHiddenOverwrite(t *testing.T, d *PermissionDetail) {
 	t.Helper()
-	if !d.ReplacesExisting || d.Diff != "" || d.ExistingBytes != nil || d.ExistingLines != nil || !strings.Contains(d.Headline(), "OVERWRITES") {
-		t.Fatalf("want hidden-but-flagged overwrite, got %+v (headline %q)", d, d.Headline())
+	if !d.ReplacesExisting || d.Diff != "" || d.ExistingBytes != nil || d.ExistingLines != nil || !d.Redacted {
+		t.Fatalf("want hidden-but-flagged overwrite, got %+v", d)
 	}
 }
 
@@ -78,8 +78,8 @@ func TestPermissionDetail_WriteNewFile(t *testing.T) {
 	if d == nil || d.ReplacesExisting || d.ExistingBytes != nil || d.Diff != "" || d.Redacted {
 		t.Fatalf("detail = %+v", d)
 	}
-	if h := d.Headline(); !strings.HasPrefix(h, "new file, 2 lines") {
-		t.Fatalf("headline = %q", h)
+	if d.NewLines != 2 {
+		t.Fatalf("newLines = %d, want 2", d.NewLines)
 	}
 }
 
@@ -192,25 +192,12 @@ func TestPermissionDetail_EditToolShowsOldNewDiff(t *testing.T) {
 	}
 }
 
-func TestPermissionDetail_HeadlineWording(t *testing.T) {
-	wt := t.TempDir()
-	mustWrite(t, filepath.Join(wt, "schema.sql"), numberedLines(240))
-	d := BuildPermissionDetail(wt, writeCall(t, "edit", "schema.sql", numberedLines(7)))
-	h := d.Headline()
-	if !strings.Contains(h, "240 -> 7 lines") || !strings.Contains(h, "OVERWRITES") {
-		t.Fatalf("headline = %q", h)
-	}
-	if (*PermissionDetail)(nil).Headline() != "" {
-		t.Fatal("nil headline")
-	}
-}
-
 func TestPermissionDetail_NewFileOutsideWorktreeIsFlagged(t *testing.T) {
 	wt, other := t.TempDir(), t.TempDir()
 	for _, p := range []string{filepath.Join(other, "new.txt"), "../" + filepath.Base(other) + "/new.txt"} {
 		d := BuildPermissionDetail(wt, writeCall(t, "edit", p, "x\n"))
-		if d == nil || !d.OutsideWorktree || d.ReplacesExisting || !strings.HasSuffix(d.Headline(), ", outside worktree") {
-			t.Fatalf("%s: %+v (%q)", p, d, d.Headline())
+		if d == nil || !d.OutsideWorktree || d.ReplacesExisting {
+			t.Fatalf("%s: %+v", p, d)
 		}
 	}
 	if d := BuildPermissionDetail(wt, writeCall(t, "edit", "sub/new.txt", "x\n")); d.OutsideWorktree {

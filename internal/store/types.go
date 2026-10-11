@@ -44,8 +44,16 @@ type Workspace struct {
 	Path          string
 	Title         string
 	RoutingPolicy string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// SetupScript/TeardownScript are the human-authored worktree
+	// setup/teardown shell scripts (ADR-0024); "" = none.
+	// The script text is never serialised (ADR-0024: only workspace.get
+	// returns it, via its own result type); the Has* flags are.
+	SetupScript       string `json:"-"`
+	TeardownScript    string `json:"-"`
+	HasSetupScript    bool
+	HasTeardownScript bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own
@@ -77,6 +85,13 @@ type Task struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	ArchivedAt   *time.Time
+	// SetupStatus is "" (no setup script), "running", "ok" or "failed"
+	// (ADR-0024); SetupError/SetupLog hold the failure reason and the
+	// output tail; Port is the allocated SMIND_PORT, nil when none.
+	SetupStatus string
+	SetupError  string
+	SetupLog    string
+	Port        *int64
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a
