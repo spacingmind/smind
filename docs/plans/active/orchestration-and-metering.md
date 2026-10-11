@@ -329,7 +329,7 @@ backend change. Mobile is out of scope.
   (non-empty and not `"cancelled by user"`, i.e. the `delivery failed:`
   family from `internal/runs/queue.go`) shows with that reason for 10 s,
   then disappears. A user cancel just disappears. The reason strings are
-  server-defined, so this coupling is noted in the hook's comment.
+  server-defined, so this coupling is noted in the hook's comment. (Superseded 2026-10-11 by the structured `cancel_kind`; see the follow-up below.)
 - **Cancel.** A real `<button>` per row, focusable, with
   `aria-label="Cancel queued prompt: <first 40 chars>"`, calls
   `chat.queueCancel {itemId}`. The row is not removed optimistically: it
@@ -682,7 +682,8 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [ ] ADR-M implemented — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
 - [x] ADR-O implemented
 - [x] ADR-O web composer follow-up (server queue replaces the client-side queue; branch `feat/composer-server-queue`, see Validation). Mobile not done.
-- [ ] Step 3 dogfood + gap log
+- [ ] Step 3 dogfood + gap log — first pass done 2026-10-11 (one GLM peer on the smind repo, via MCP; see "Step 3 dogfood gap log"). The full Step 3 shape (lead + ≥2 peers on a non-smind project) is not done.
+- [x] ADR-O follow-up: structured `cancel_kind` (implemented by GLM through smind; branch `feat/queue-cancel-kind`, see Validation)
 
 ## Validation
 
@@ -805,3 +806,137 @@ Not started: O1 (run provenance columns), O2 Wave 2 items.
 - **No prompt/secret** — `TestUsageEvent_NoPromptOrSecret` (`internal/taskrunner`, `internal/runs`).
 - **AC8 no regressions** — nothing in run spawning changed (no env injection, no proxy hop); the proxy meter and its tests are untouched; the web timeline ignores `usage` events (`timeline-model.test.ts`) so they don't render as an "unknown" row. No other UI work; usage display in the web UI is a follow-up.
 - **Not verified** — against a real `claude` / `codex` / GLM process: all checks use the fake agents (the ACP fake scripts `usage_update` and `PromptResponse.usage`), so what `glm-acp-agent` really sends is unconfirmed.
+
+**ADR-O follow-up: structured `cancel_kind`** (branch `feat/queue-cancel-kind`; `task test` + `task lint` + `cd web && bunx tsc -b packages/ui` green, 2026-10-11). Written by a GLM agent driven through smind (see the gap log), reviewed by the leader line by line, cherry-picked from the task worktree.
+
+- **AC1 migration** — `TestMigrate_ChatQueueCancelKind` (`internal/store/migrate_test.go`): seeds a database from before the column (it drops `cancel_kind` from a fresh one), then checks that Open adds it, backfills `cancelled by user` to `user` and any other cancelled row to `auto`, leaves queued/delivered rows `''`, and is idempotent over two Opens. Also run live: the sandbox daemon's own `chat_queue` table (created by the pre-change binary) gained the column when restarted on the new binary.
+- **AC2 stamps** — `TestChatQueue_MarkCancelledStampsKind` (store) and `TestChatQueue_CancelKindUserVsAuto` (`internal/runs/queue_test.go`: a user cancel via `CancelQueuedItem` gives `user`, a provider-mismatch auto-cancel gives `auto`, reasons unchanged). Live: `smind task queue cancel 2` on the new binary wrote `cancelled | cancelled by user | user` to the sandbox DB.
+- **AC3 wire** — `TestChatQueue_ListCancelAndEvent` (`internal/wsapi/chat_queue_test.go`) asserts `CancelKind == "user"` on the `chat.queueUpdated` snapshot and on `chat.queueList`, and `""` while queued. Live: a raw `chat.queueList` against the sandbox returned `"CancelKind":""` for a delivered item.
+- **AC4 web** — `use-chat-queue.ts` decides on `CancelKind !== "auto"`; no `CancelReason` string compare is left in production code (`grep -rn '"cancelled by user"' web/packages/ui/src` finds only the type comment and test fixtures). Tests: `does not show a user-cancelled item`, `shows an auto-cancelled item with its reason for 10s then drops it` (both on `CancelKind`), `hides a cancelled item with an empty CancelKind`, and the composer's `renders an auto-cancelled item's reason`.
+- **AC5 no regressions** — full `task test` (Go + 1479 web tests) and `task lint` pass.
+- **Not verified** — the auto-cancel row in a browser (no screenshot pass: the change is a one-field swap in a hook, covered by unit tests only); an older web client against the new daemon, or the new web against an older daemon (an empty kind hides the row by design, which is the safe default, but no test drives that pairing across versions); the migration on a database with real `delivery failed:` rows (the test seeds one, the live DB had none).
+
+## Step 3 dogfood gap log (2026-10-11)
+
+**What was done.** One real task, the `cancel_kind` follow-up above, was implemented end to end by a GLM agent running inside smind, with Claude Code (Sonnet, headless `claude -p`) as the driver over `smind mcp serve`. Everything ran against a sandbox daemon (`SMIND_HOME=/tmp/smind-dogfood/home`, port 4801, real `HOME` so `glm-acp-agent` found its credentials; PID recorded and the only process stopped, twice).
+
+- **Shape.** Five GLM runs on one chat (the fifth a live probe, stopped on purpose) and three driver sessions (about 0.31 USD of driver tokens in total).
+  - Run 1 explored and made zero edits.
+  - Run 2 made all the edits and tests.
+  - Run 3 fixed a comment and committed.
+  - Run 4 was a prompt that had been queued behind run 3 and was delivered by the queue.
+- **Driver.** `task_send` (`provider=glm`, `whenBusy=queue`), `task_wait`, `task_permissions`. `task_status` and `task_logs` do not work (G1), so the leader read logs through the CLI.
+- **Leader review.** The leader (me) read every permission request and the final diff, ran the tests in the task worktree, then cherry-picked the commit onto this branch.
+- **Corrections sent through smind, not by editing code.** "Stop exploring", "Write replaces the whole file, use targeted edits", and "fix this comment, then commit".
+- **Never edited by hand.** The leader wrote no code in the task worktree. The only manual edits are the spec and this log.
+- **Never fell back to Paseo.** GLM ran, so the claude-native fallback was not needed.
+
+**Process disclosure.** I first wrote a small script that auto-approved read-only commands (`grep`/`sed`/`ls`/`git status`) by pattern. It approved 8 requests before I stopped it and re-did every later approval by hand. The auto-mode classifier blocked the script's next edit as "Create Unsafe Agents". That is the same self-approval concern as ADR-0017/0019, so it was correct to stop. In total about 43 requests were approved (8 by that script, the rest individually after reading them), 1 was rejected, and none was left to time out.
+
+Severity: **Blocker** = the workflow cannot work without a fix; **High** = works only with large manual effort or risks damage; **Med** = friction that a real user hits; **Low** = papercut.
+
+### G1 [Blocker] MCP `task_status` and `task_logs` always fail
+- **What happened.** Both tools return `validating tool output: ... /properties/events/items/properties/input: type: map[...] has type "object", want one of "null, array"` (and the same for `payload`). It reproduced for every run I tried with at least one event, three runs, both tools.
+- **Why.** The event `input`/`payload` fields are raw JSON, and the generated MCP output schema calls them an array.
+- **Impact.** Through MCP a leader can see a run only via `task_wait` (status, `stopReason`) and `task_permissions`. It cannot read a single line of what the agent did. I fell back to `smind task logs` over the CLI, which works only because the leader shares a machine and `SMIND_HOME` with the daemon.
+- **Fix.** Declare those fields as `any` (an empty schema) in the tool's output type. Add a stdio e2e test that reads `task_status` and `task_logs` on a run that has events (the ADR-0017 step 7 test evidently did not).
+- **Ownership.** smind (`cmd/smind/mcp_tools*.go`).
+
+### G2 [High] The permission wall makes unattended orchestration impossible
+- **What happened.**
+  - With GLM (ACP) in default mode, every `Run command` asks a human, even `grep`, `sed -n`, `ls` and `git status`. Only `Read file` is auto-allowed.
+  - Run 1 made about 53 command calls and about 23 reads. One small task needed about 43 approvals, each blocking the agent until a human acted.
+- **Why.** This is ADR-0019 decision 6 working as designed. An orchestrator may not choose `autoAccept`, and smind has no allowlist.
+- **Impact.** The only sanctioned unattended route is a human-authored profile with `autoAccept`, passed as `profileId`. I did not create one because that is the user's decision, so the leader became the approval bottleneck. The ergonomics are the problem: nothing sits between "approve every `ls`" and "auto-approve everything".
+- **Fix options, as a product decision, not an architecture one.**
+  - Document the human-authored "worktree sandbox" profile recipe.
+  - Add a CLI command a human can use to flip `autoAccept` live on one run. `run.setPermissionMode` exists; I did not find it in `smind --help`.
+  - Show approval counts on the run, so a human can see when a run is mostly read-only noise.
+  - Do not add `task_approve` for orchestrators; ADR-0017 rules it out.
+
+### G3 [High] A write prompt hides what it will write, and GLM can only overwrite whole files
+- **What happened.**
+  - GLM's tools are `Read file`, `Run command` and `Write file`, with no edit or patch tool, and `Write file` replaces the whole file.
+  - Run 1's only write attempt targeted `internal/store/schema.sql` with a 7-line fragment, which would have replaced a roughly 240-line file.
+  - The permission summary showed only `Write file: internal/store/schema.sql`. The content was visible only in `task logs`. I rejected it after reading that log line.
+- **Impact.** A reviewer who approves from the prompt alone destroys the file.
+- **Fix.**
+  - Put the content size and, for an existing file, the line-count change (`240 -> 7 lines`) in the permission summary.
+  - Flag "overwrites existing file".
+  - Show a diff in the web approval card.
+  - Longer term: give the GLM provider an edit tool, or tell it in the system prompt to use patch-style edits.
+- **Ownership.** smind (summary), `glm-acp-agent` (tools).
+
+### G4 [High] `task_wait` returns at once while a permission is pending, so an MCP driver cannot wait
+- **What happened.** `task_wait` returned in under a second with `timedOut:false` and the pending permission. Calling it again returns the same thing again. My first driver (Sonnet) reported "blocked on a permission I can't approve" after one call and exited, with the run still going. A looping driver would spin at full speed.
+- **Fix.**
+  - Add an optional `ignorePermissionIds` or `sinceEventSeq` argument, so it blocks until a new permission, a terminal state, or the timeout.
+  - Alternatively return the same permission at most once per caller.
+  - The tool description should also say how a human is expected to approve out of band.
+
+### G5 [High] GLM hit its 100-turn limit and ended "done" without a result
+- **What happened.**
+  - Run 1 ended `done (max_turn_requests)` after exploring, with zero edits. In the CLI and `task_wait` the status is `done`, with only the `stopReason` field telling the truth.
+  - Run 2 also ended `max_turn_requests` right after its last tool call, with no final report and no commit, even though the daemon had `ACP_GLM_MAX_TURNS=300` set.
+  - I think the variable is ignored: in `glm-acp-agent@1.3.0`, `parseMaxTurnsFlag` returns the default 100 when no `--max-turns` flag is given, and that shadows the env var (`dist/cli-args.js`, `protocol/agent.js:128`). I have not proven that run 2 hit a 100 cap; I only know it ended on that stop reason well under 300 tool calls.
+  - smind hardcodes the command (`internal/acp/glm.go`: `npx -y glm-acp-agent@1.3.0`), so there is no way to pass `--max-turns`.
+- **Impact.** A normal first-time exploration of this repo spends the whole budget. The agent can stop mid-task with nothing to show.
+- **Fix.**
+  - Add a config key (for example `agents.glm.maxTurns`) that smind passes as `--max-turns`.
+  - Treat `max_turn_requests` as a distinct terminal state (`needs-continue`) in `run.status`, the CLI and `task_wait`.
+  - Optionally auto-queue "continue" once.
+- **Also.** The leader prompt must pin file and line pointers to save turns. My follow-up prompt did that, and run 2 then finished the whole implementation.
+
+### G6 [Med] The CLI can approve but not reject
+- **What happened.** `smind task approve` is documented as `<runId> [requestId] [optionId]`, but the code rejects a third argument (`cmd/smind/task.go`, `len(args) > 2`). So `reject` and `Skip` cannot be chosen from the CLI, and an unreviewable request can only time out after 5 minutes or be killed with `task stop`. I rejected the dangerous write by sending `run.respondPermission` with `optionId:"reject"` over the raw WebSocket from a scratch script. `task approve --help` treats `--help` as a run id.
+- **Fix.** Accept the third argument, or add `smind task deny <runId> [requestId]`. Make `--help` work.
+
+### G7 [Med] The MCP surface is too thin for a leader to review work
+- **What the leader needed and did not get through MCP.**
+  - **Task detail.** There is no `task_get` for the worktree path, branch and head SHA. `task_list` happens to include the path.
+  - **Runs.** No `run_list` or `task_runs`. After the queue delivered an item, the new run's id was discoverable only through the CLI (`task runs`), and even `task queue ls` has no RunID column.
+  - **Queue.** No queue list or cancel tool, only the CLI.
+  - **Diff.** No `task_diff` or `task_commit_list`, so a leader that cannot read the worktree cannot review at all.
+  - **Usage.** No usage tool. And no provider or mode list.
+- **Fix.** Add `task_get` (with head SHA), `run_list`, `task_diff`, `queue_list` and `queue_cancel`, `usage_summary`, `provider_list`. Add `RunID` to `queue ls`.
+
+### G8 [Med] GLM usage numbers look low, and there is no cost
+- **What happened.** `smind usage --scope runs --by run` works and is easy to read. For GLM, run 1 (about 100 model turns) reports `input=81403 output=97 cacheRead=81216`, and all four runs show similarly small output with input of about 81k to 95k.
+- **Why this looks wrong.** The input figure is about one context window, and 97 output tokens is implausible for 100 turns, so I suspect these are the last request's figures rather than the run's total. I have not checked whether the fault is in `glm-acp-agent`'s reported usage or in smind's snapshot differencing (AC4). Cost is `-` for every run. This is the "what `glm-acp-agent` really sends is unconfirmed" gap noted under ADR-M, now with real data.
+- **Fix.** Capture one raw `PromptResponse.usage` and `usage_update` from a multi-turn GLM run, and decide. Add a test from that capture.
+
+### G9 [Med] The driver pays twice for every long prompt
+- **What happened.** A 3 to 4 KB task prompt had to be passed through the driver model as a verbatim tool argument. Sonnet did this faithfully, but every extra prompt costs driver tokens, and the prompt text appears in both the driver transcript and the run.
+- **Fix.** Let `task_send` take `promptFile` (a path readable by the daemon) or a `specPath` relative to the task worktree, or add a `smind task send --prompt-file` CLI path as the driver alternative.
+
+### G10 [Med] Setup frictions
+Each one is small.
+- The port can only be set in `config.yaml`; there is no `--port` and no env var. A sandbox needs a config file written first.
+- `workspace create <path> <name> <policy>` needs a policy and nothing says `pool` is valid.
+- `smind task new` prints only `created`, not the id, path or branch; I had to `task ls` and ask MCP for the worktree path.
+- The task worktree starts from the repo's HEAD, so the uncommitted spec was invisible to the agent. I inlined it in the prompt.
+- The task worktree has no `node_modules`, so the agent ran `bun install` (an approval, plus network).
+- `smind account test glm` only checks that `npx` exists, not that credentials are present. GLM credentials from the real `HOME` worked the first time.
+- `claude -p` defers MCP tool schemas behind a `ToolSearch` call, one extra driver turn per session. Not smind's problem, but it shapes how a driver prompt should be written.
+
+### G11 [Low] `task logs` is very noisy for GLM
+Run 2's log is about 3,500 lines for about 20 tool calls: the model's reasoning streams in as plain text, each tool call appears two or three times, and permission blocks repeat. Add `--tail`-style filtering of reasoning and de-duplicate tool lines, or a `--compact` view. A `--no-reasoning` flag would help the leader.
+
+### What worked (so the next pass does not re-test it)
+- **GLM runs with no provider setup.** Credentials from the real `HOME` were picked up, and `npx glm-acp-agent@1.3.0` started cleanly.
+- **MCP `task_send` with `whenBusy=queue`.**
+  - On an idle chat it starts at once and returns `{runId}`.
+  - On a busy chat it returned `{"queued":true,"queueItemId":1}`.
+  - `smind task queue ls` showed the item, and when the first run finished the item was delivered automatically as a new run with no action from me.
+- **Session resume across a daemon restart.** I killed and restarted the daemon (PID only), and the next prompt on the same chat resumed the GLM session with context, so the agent did not re-read anything.
+- **Migration on a real database.** Restarting on the new binary migrated the sandbox DB, which had the old table shape.
+- **Reject and approve.** Both worked over `run.respondPermission`, and the agent recovered from the rejected write by switching to scripted edits.
+- **Final state.** A correct, tested change with a clean commit in the task worktree. The only manual intervention was one comment nit, sent back through smind.
+
+### Suggested order
+1. G1 (a one-line schema fix plus an e2e test; nothing else works without it).
+2. G4 (`task_wait` while a permission is pending).
+3. G3 (show what a write will write) and G6 (a CLI reject). Both are small and remove a safety hazard.
+4. G5 (turn cap: a config key and a distinct stop state).
+5. G7 (the review tools), G2 (a documented human-authored profile recipe), G8 (a real GLM usage capture).
+
