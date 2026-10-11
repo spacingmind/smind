@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -365,15 +366,38 @@ func TestUsage_SummaryRowsNameUnreportedFields(t *testing.T) {
 		t.Errorf("fully reported proxy row has unreported = %v, want key absent", proxyRows[0]["unreported"])
 	}
 
+	// Grouped by model, the row with no model is the one that reported
+	// nothing: all five token fields are unreported, in wire order.
+	modelRows := call("proxymodel", "proxy", "model")
+	sawEmpty := false
+	for _, row := range modelRows {
+		if row["key"] != "" {
+			if _, ok := row["unreported"]; ok {
+				t.Errorf("fully reported model row has unreported = %v, want key absent", row["unreported"])
+			}
+			continue
+		}
+		sawEmpty = true
+		want := []any{"inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}
+		if !reflect.DeepEqual(row["unreported"], want) {
+			t.Errorf("empty-model proxy row unreported = %v, want %v", row["unreported"], want)
+		}
+	}
+	if !sawEmpty {
+		t.Fatalf("proxy model summary has no empty-model row: %v", modelRows)
+	}
+
 	runsRows := call("runs", "runs", "task")
 	if len(runsRows) != 2 {
 		t.Fatalf("runs summary = %d rows, want 2", len(runsRows))
 	}
+	sawUnreported := false
 	for _, row := range runsRows {
 		un, ok := row["unreported"]
 		if !ok {
 			continue // taskB reported everything it summed
 		}
+		sawUnreported = true
 		names, ok := un.([]any)
 		if !ok {
 			t.Fatalf("unreported is %T, want array", un)
@@ -386,5 +410,8 @@ func TestUsage_SummaryRowsNameUnreportedFields(t *testing.T) {
 		if len(got) != 3 || got[0] != "cacheReadTokens" || got[1] != "cacheWriteTokens" || got[2] != "reasoningTokens" {
 			t.Errorf("run row unreported = %v, want [cacheReadTokens cacheWriteTokens reasoningTokens]", got)
 		}
+	}
+	if !sawUnreported {
+		t.Error("no runs row carried unreported; taskA's ra2 row reports only input+cost")
 	}
 }
