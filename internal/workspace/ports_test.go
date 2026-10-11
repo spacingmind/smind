@@ -5,6 +5,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -27,10 +28,14 @@ func portTestTasks(t *testing.T, m *Manager, n int) []int64 {
 	return ids
 }
 
-// freeRange finds a run of n consecutive loopback-free ports.
+var portBlock atomic.Int64
+
+// freeRange finds a run of n consecutive loopback-free ports. Each call
+// searches its own 100-port block so parallel tests never share ports.
 func freeRange(t *testing.T, n int) int {
 	t.Helper()
-	for base := 41000; base < 60000; base += 50 {
+	start := 41000 + int(portBlock.Add(1))*100
+	for base := start; base < start+100-n; base++ {
 		ok := true
 		for p := base; p < base+n; p++ {
 			if !probePort(p) {

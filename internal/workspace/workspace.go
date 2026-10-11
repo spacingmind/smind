@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +42,13 @@ type Manager struct {
 	wtMu   sync.Mutex
 	wt     WorktreesSettings
 	portMu sync.Mutex
+
+	// Setup-script runtime (setup_run.go): tracked goroutines so archive and
+	// shutdown can cancel them; goos is the OS seam for the Windows check.
+	setupMu       sync.Mutex
+	setupRuns     map[int64]*setupRun
+	setupFinished func(taskID int64)
+	goos          string
 }
 
 // WorktreesSettings is the Manager's view of config.WorktreesConfig with the
@@ -122,14 +130,18 @@ func (m *Manager) notifyTask(t store.Task) {
 // New returns a Manager backed by s.
 func New(s *store.Store) *Manager {
 	d := config.Default().Worktrees
-	return &Manager{
+	m := &Manager{
 		store:        s,
 		maxTaskDepth: config.Default().Orchestration.MaxDepth,
 		wt: WorktreesSettings{
 			SetupTimeout:    time.Duration(d.SetupTimeoutSeconds) * time.Second,
 			TeardownTimeout: time.Duration(d.TeardownTimeoutSeconds) * time.Second,
 		},
+		setupRuns: map[int64]*setupRun{},
+		goos:      runtime.GOOS,
 	}
+	m.failInterruptedSetups()
+	return m
 }
 
 // SetMaxDepth overrides the task hierarchy depth limit CreateTask enforces

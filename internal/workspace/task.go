@@ -103,6 +103,10 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		return store.Task{}, fmt.Errorf("create task: prNumber must be > 0")
 	}
 
+	if err := m.checkSetupSupported(ws.SetupScript); err != nil {
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+
 	name := slugify(title) + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
@@ -142,6 +146,22 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	if err != nil {
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
+
+	// ADR-0024: per-task port, then (if the workspace has a setup script)
+	// mark setup running before the task is announced; the script itself
+	// starts below, once the task is fully materialized.
+	if _, err := m.claimPort(t.ID); err != nil {
+		m.discardTask(ws, t, branch)
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
+	if ws.SetupScript != "" {
+		if _, err := m.store.UpdateTaskSetup(t.ID, SetupRunning, "", ""); err != nil {
+			return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
+		}
+	}
+	if t, err = m.store.GetTask(t.ID); err != nil {
+		return store.Task{}, fmt.Errorf("create task: %w", err)
+	}
 	if n := m.getNotifier(); n != nil {
 		n.NotifyTaskCreated(t)
 	}
@@ -156,10 +176,26 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	// CreateWorkspace's own doc comment already documents for this
 	// codebase.
 	if _, err := m.createDefaultChat(t.ID); err != nil {
+		if ws.SetupScript != "" {
+			_, _ = m.store.UpdateTaskSetup(t.ID, SetupFailed, "setup not started: task creation failed", "")
+		}
 		return store.Task{}, fmt.Errorf("create task %d: %w", t.ID, err)
 	}
 
+	if ws.SetupScript != "" {
+		m.startSetup(t, ws)
+	}
 	return t, nil
+}
+
+// discardTask undoes a just-created task whose port allocation failed: the
+// row, the worktree and its branch, so a failed CreateTask leaves nothing.
+func (m *Manager) discardTask(ws store.Workspace, t store.Task, branch string) {
+	if t.WorktreePath != nil {
+		_ = gitWorktreeRemove(ws.Path, *t.WorktreePath)
+	}
+	_ = runGit(ws.Path, "branch", "-D", branch)
+	_ = m.store.DeleteTask(t.ID)
 }
 
 // validateParentDepth checks that parentID names an existing task in
