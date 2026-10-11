@@ -28,13 +28,13 @@ describe("ShortcutRows", () => {
     const rows = screen.getAllByTestId("shortcut-row");
     // jsdom is not a desktop build: the web-only rows render, the
     // desktop-gated Mod+T / Mod+Digit ones do not.
-    const webBindings = platformBindings(SHORTCUT_BINDINGS, false);
+    const webBindings = platformBindings(SHORTCUT_BINDINGS, false, false);
     expect(rows).toHaveLength(webBindings.length);
     expect(rows.map((r) => r.dataset.bindingId).sort()).toEqual(
       webBindings.map((b) => b.id).sort(),
     );
     for (const binding of webBindings) {
-      expect(screen.getByText(binding.label)).toBeInTheDocument();
+      expect(screen.getAllByText(binding.label).length).toBeGreaterThan(0);
     }
   });
 
@@ -43,7 +43,7 @@ describe("ShortcutRows", () => {
     for (const binding of SHORTCUT_BINDINGS) {
       const section = screen.getByTestId(`shortcut-section-${binding.section}`);
       expect(within(section).getByText(SECTION_TITLES[binding.section])).toBeInTheDocument();
-      expect(within(section).getByText(binding.label)).toBeInTheDocument();
+      expect(within(section).getAllByText(binding.label).length).toBeGreaterThan(0);
     }
   });
 
@@ -60,7 +60,7 @@ describe("ShortcutRows", () => {
   it("narrows to rows matching a search query", () => {
     renderRows("close current tab");
     const rowIds = screen.getAllByTestId("shortcut-row").map((r) => r.dataset.bindingId);
-    expect(rowIds).toEqual(["tab-close"]);
+    expect(rowIds).toEqual(["tab-close", "tab-close-terminal"]);
   });
 
   it("keeps every row of a section whose own title matches the query", () => {
@@ -72,7 +72,7 @@ describe("ShortcutRows", () => {
       .getAllByTestId("shortcut-row")
       .map((r) => r.dataset.bindingId);
     expect(tabsRowIds).toEqual(
-      platformBindings(SHORTCUT_BINDINGS, false)
+      platformBindings(SHORTCUT_BINDINGS, false, false)
         .filter((b) => b.section === "tabs")
         .map((b) => b.id),
     );
@@ -86,7 +86,7 @@ describe("ShortcutRows", () => {
 
   it("rebinds a shortcut from the captured key press", () => {
     renderRows();
-    fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Change shortcut for Open command palette")[0]!);
     expect(screen.getByTestId("shortcut-capturing")).toBeInTheDocument();
 
     fireEvent.keyDown(window, { key: "j", code: "KeyJ", ctrlKey: true, shiftKey: true });
@@ -101,7 +101,7 @@ describe("ShortcutRows", () => {
 
   it("stays in capture for a bare modifier press and cancels on Escape", () => {
     renderRows();
-    fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Change shortcut for Open command palette")[0]!);
 
     fireEvent.keyDown(window, { key: "Shift", shiftKey: true });
     expect(screen.getByTestId("shortcut-capturing")).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe("ShortcutRows", () => {
   it("flags a rebind that collides with another binding", () => {
     renderRows();
     // Put "Close current tab" onto Ctrl+K, which "Open command palette" has.
-    fireEvent.click(screen.getByLabelText("Change shortcut for Close current tab"));
+    fireEvent.click(screen.getAllByLabelText("Change shortcut for Close current tab")[0]!);
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
 
     const conflicts = screen.getAllByTestId("shortcut-conflict");
@@ -136,9 +136,9 @@ describe("ShortcutRows", () => {
       screen.queryByLabelText("Reset shortcut for Open command palette"),
     ).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Change shortcut for Open command palette")[0]!);
     fireEvent.keyDown(window, { key: "j", code: "KeyJ", ctrlKey: true });
-    fireEvent.click(screen.getByLabelText("Reset shortcut for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Reset shortcut for Open command palette")[0]!);
 
     const row = screen
       .getByTestId("shortcut-sections")
@@ -153,7 +153,7 @@ describe("ShortcutRows", () => {
     renderRows();
     expect(screen.queryByText("Reset all to defaults")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("Change shortcut for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Change shortcut for Open command palette")[0]!);
     fireEvent.keyDown(window, { key: "j", code: "KeyJ", ctrlKey: true });
     fireEvent.click(screen.getByText("Reset all to defaults"));
 
@@ -166,7 +166,7 @@ describe("ShortcutRows", () => {
 
   it("records a chord across two key presses and commits on Enter", () => {
     renderRows();
-    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Record a chord for Open command palette")[0]!);
     expect(screen.getByTestId("shortcut-capturing")).toHaveTextContent("Recording a chord");
 
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
@@ -193,9 +193,9 @@ describe("ShortcutRows", () => {
     // Cancel button, not Escape, is how a chord recording in progress is
     // aborted after its first step.
     renderRows();
-    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Record a chord for Open command palette")[0]!);
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
-    fireEvent.click(screen.getByLabelText("Cancel rebinding Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Cancel rebinding Open command palette")[0]!);
 
     expect(screen.queryByTestId("shortcut-capturing")).not.toBeInTheDocument();
     const row = screen
@@ -206,7 +206,7 @@ describe("ShortcutRows", () => {
 
   it("Escape cancels a chord recording that hasn't captured a first step yet", () => {
     renderRows();
-    fireEvent.click(screen.getByLabelText("Record a chord for Open command palette"));
+    fireEvent.click(screen.getAllByLabelText("Record a chord for Open command palette")[0]!);
     fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
 
     expect(screen.queryByTestId("shortcut-capturing")).not.toBeInTheDocument();
@@ -214,5 +214,25 @@ describe("ShortcutRows", () => {
       .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("K")).toBeInTheDocument();
+  });
+});
+
+describe("terminal hatch rows", () => {
+  it("shortcuts-dialog-lists-terminal-hatch-rows", () => {
+    renderRows();
+    const row = screen.getByTestId("shortcut-sections").querySelector<HTMLElement>(
+      '[data-binding-id="palette-open-terminal"]',
+    )!;
+    expect(within(row).getByText("Shift")).toBeInTheDocument();
+    expect(within(row).getByText("P")).toBeInTheDocument();
+    expect(within(row).getByText(/while a terminal has focus/)).toBeInTheDocument();
+  });
+
+  it("omits them on Mac", () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    renderRows();
+    expect(
+      screen.getByTestId("shortcut-sections").querySelector('[data-binding-id="palette-open-terminal"]'),
+    ).toBeNull();
   });
 });

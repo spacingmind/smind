@@ -531,3 +531,27 @@ describe("rebinding", () => {
     expect(fire).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("KeyboardProvider terminal scope", () => {
+  it("terminal-scope-ctrl-letters-pass-through: a Ctrl+letter/bracket in a terminal surface is left alone", () => {
+    const fire = vi.fn();
+    render(
+      <KeyboardProvider>
+        <Claim action="palette.open" onFire={fire} />
+        <Claim action="task.prev" onFire={fire} />
+        <div data-keyboard-terminal>
+          <textarea data-testid="term" />
+        </div>
+      </KeyboardProvider>,
+    );
+    const target = screen.getByTestId("term");
+    for (const [key, code] of [["k", "KeyK"], ["[", "BracketLeft"]] as const) {
+      const notPrevented = fireEvent.keyDown(target, { key, code, ctrlKey: true });
+      expect(notPrevented).toBe(true);
+    }
+    expect(fire).not.toHaveBeenCalled();
+    // the escape hatch still fires there
+    fireEvent.keyDown(target, { key: "p", code: "KeyP", ctrlKey: true, shiftKey: true });
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+});

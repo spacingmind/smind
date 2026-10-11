@@ -15,7 +15,7 @@ import {
   type ChordState,
   type ShortcutBinding,
 } from "@/keyboard/shortcuts";
-import type { KeyEventLike } from "@/keyboard/shortcut-string";
+import { canonicalChord, type KeyEventLike } from "@/keyboard/shortcut-string";
 
 function event(over: Partial<KeyEventLike> & { key: string }): KeyEventLike {
   return { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...over };
@@ -48,7 +48,9 @@ describe("SHORTCUT_BINDINGS", () => {
     // The web table: jsdom is not a desktop build, and the desktop-only
     // Mod+T / Mod+Digit rows would shadow the web defaults in the map.
     const byAction = new Map(
-      platformBindings(SHORTCUT_BINDINGS, false).map((b) => [b.action, b.combo]),
+      platformBindings(SHORTCUT_BINDINGS, false, false)
+        .filter((b) => !b.id.endsWith("-terminal"))
+        .map((b) => [b.action, b.combo]),
     );
     expect(byAction.get("sidebar.toggle")).toBe("Mod+B");
     expect(byAction.get("palette.open")).toBe("Mod+K");
@@ -290,7 +292,7 @@ describe("pane-focus defaults vs. a rebind, in an editable field", () => {
 
 describe("sidebar.task-jump (Alt+Digit) vs. tab.jump (Mod+Alt+Digit)", () => {
   // The web table: the desktop-only Mod+Digit row would match Ctrl+2.
-    const bindings = resolveBindings(platformBindings(SHORTCUT_BINDINGS, false));
+    const bindings = resolveBindings(platformBindings(SHORTCUT_BINDINGS, false, false));
   const NON_MAC_2 = { isMac: false, scope: "other" } as const;
 
   it("Alt+2 alone fires sidebar.task-jump, not tab.jump", () => {
@@ -484,5 +486,120 @@ describe("override migration between single-combo and chord", () => {
         NON_MAC,
       )?.action,
     ).toBe("shortcuts.help");
+  });
+});
+
+const code = (c: string, key: string, mods: Partial<KeyEventLike> = {}) =>
+  event({ key, code: c, ...mods });
+const ctrl = { ctrlKey: true };
+const TERM = (isMac: boolean) => ({ isMac, scope: "terminal" }) as const;
+const resolved = (isDesktop: boolean, isMac: boolean, overrides = {}) =>
+  resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop, isMac), overrides);
+
+describe("terminal scope keeps shell keys", () => {
+  it("terminal-scope-ctrl-letters-pass-through", () => {
+    const b = resolved(false, false);
+    for (const l of ["K", "B", "W", "L", "P", "F"]) {
+      expect(matchShortcut(b, code(`Key${l}`, l.toLowerCase(), ctrl), TERM(false))).toBeNull();
+      // same keys still fire outside the terminal
+      expect(matchShortcut(b, code(`Key${l}`, l.toLowerCase(), ctrl), NON_MAC)).not.toBeNull();
+    }
+    const rebound = resolved(false, false, { "palette-open": "Ctrl+J" });
+    expect(matchShortcut(rebound, code("KeyJ", "j", ctrl), TERM(false))).toBeNull();
+    expect(matchShortcut(rebound, code("KeyJ", "j", ctrl), NON_MAC)?.action).toBe("palette.open");
+
+    const chord = resolved(false, false, { "palette-open": "Mod+Shift+K Mod+S" });
+    const first = resolveChordStep(chord, code("KeyK", "k", { ...ctrl, shiftKey: true }), TERM(false));
+    expect(first.pending).toBe(true);
+    const second = resolveChordStep(chord, code("KeyS", "s", ctrl), TERM(false), first.nextChordState);
+    expect(second.match).toBeNull();
+    const other = resolveChordStep(chord, code("KeyK", "k", { ...ctrl, shiftKey: true }), NON_MAC);
+    expect(resolveChordStep(chord, code("KeyS", "s", ctrl), NON_MAC, other.nextChordState).match?.action).toBe("palette.open");
+  });
+
+  it("terminal-scope-ctrl-bracket-passes-through", () => {
+    const b = resolved(false, false);
+    expect(matchShortcut(b, code("BracketLeft", "[", ctrl), TERM(false))).toBeNull();
+    expect(matchShortcut(b, code("BracketRight", "]", ctrl), TERM(false))).toBeNull();
+    expect(matchShortcut(b, code("Backslash", "\\", ctrl), TERM(false))).toBeNull();
+    expect(matchShortcut(b, code("BracketLeft", "[", ctrl), NON_MAC)?.action).toBe("task.prev");
+    const mac = resolved(false, true);
+    expect(matchShortcut(mac, code("BracketLeft", "[", { metaKey: true }), TERM(true))?.action).toBe("task.prev");
+    expect(matchShortcut(mac, code("BracketRight", "]", { metaKey: true }), TERM(true))?.action).toBe("task.next");
+    const shift = { ...ctrl, shiftKey: true };
+    expect(matchShortcut(b, code("BracketLeft", "{", shift), TERM(false))?.action).toBe("task.prev");
+    expect(matchShortcut(b, code("BracketRight", "}", shift), TERM(false))?.action).toBe("task.next");
+    expect(matchShortcut(b, code("Backslash", "\\", { altKey: true, shiftKey: true }), TERM(false))?.action).toBe("pane.split.right");
+  });
+
+  it("terminal-scope-mac-cmd-still-fires", () => {
+    const b = resolved(false, true);
+    for (const [c, k, a] of [["KeyK", "k", "palette.open"], ["KeyB", "b", "sidebar.toggle"], ["KeyW", "w", "tab.close"]]) {
+      expect(matchShortcut(b, code(c!, k!, { metaKey: true }), TERM(true))?.action).toBe(a);
+    }
+  });
+
+  it("terminal-scope-ctrl-shift-and-non-letter-still-fire", () => {
+    const b = resolved(false, false);
+    expect(matchShortcut(b, code("KeyW", "w", { ...ctrl, shiftKey: true }), TERM(false))?.action).toBe("pane.close");
+    expect(matchShortcut(b, code("Backslash", "|", { ...ctrl, shiftKey: true }), TERM(false))?.action).toBe("pane.split.down");
+    expect(matchShortcut(b, code("Comma", ",", ctrl), TERM(false))?.action).toBe("settings.open");
+  });
+
+  it("non-terminal-scopes-ctrl-letters-unchanged", () => {
+    const b = resolved(false, false);
+    for (const scope of ["other", "editable"] as const) {
+      for (const [c, k, a] of [["KeyK", "k", "palette.open"], ["KeyB", "b", "sidebar.toggle"], ["KeyW", "w", "tab.close"]]) {
+        expect(matchShortcut(b, code(c!, k!, ctrl), { isMac: false, scope })?.action).toBe(a);
+      }
+    }
+  });
+
+  const HATCH_TABLE: [string, string, KeyEventLike][] = [
+    ["palette.open", "palette-open-terminal", code("KeyP", "p", { ...ctrl, shiftKey: true })],
+    ["tab.close", "tab-close-terminal", code("KeyW", "w", { altKey: true, shiftKey: true })],
+    ["sidebar.toggle", "sidebar-toggle-terminal", code("KeyB", "b", { ...ctrl, shiftKey: true })],
+    ["pane.find", "pane-find-terminal", code("KeyF", "f", { ...ctrl, shiftKey: true })],
+    ["composer.focus", "composer-focus-terminal", code("KeyL", "l", { ...ctrl, shiftKey: true })],
+    ["quick-open.open", "quick-open-open-terminal", code("KeyO", "o", { ...ctrl, shiftKey: true })],
+    ["task.prev", "task-prev-terminal", code("BracketLeft", "{", { ...ctrl, shiftKey: true })],
+    ["task.next", "task-next-terminal", code("BracketRight", "}", { ...ctrl, shiftKey: true })],
+    ["pane.split.right", "pane-split-right-terminal", code("Backslash", "\\", { altKey: true, shiftKey: true })],
+    ["tab.new", "tab-new-terminal", code("KeyT", "t", { ...ctrl, shiftKey: true })],
+  ];
+
+  it("terminal-escape-hatch-fires-in-terminal", () => {
+    for (const [action, id, ev] of HATCH_TABLE) {
+      const desktop = id === "tab-new-terminal";
+      const m = matchShortcut(resolved(desktop, false), ev, TERM(false));
+      expect(m?.action, id).toBe(action);
+      expect(m?.binding.id, id).toBe(id);
+    }
+    // tab.new hatch is desktop-only
+    expect(resolved(false, false).some((b) => b.id === "tab-new-terminal")).toBe(false);
+  });
+
+  it("escape-hatch-rows-hidden-on-mac", () => {
+    for (const isDesktop of [false, true]) {
+      expect(resolved(isDesktop, true).some((b) => b.id.endsWith("-terminal"))).toBe(false);
+      const ids = resolved(isDesktop, false).map((b) => b.id);
+      for (const [, id] of HATCH_TABLE) {
+        if (id === "tab-new-terminal" && !isDesktop) expect(ids).not.toContain(id);
+        else expect(ids).toContain(id);
+      }
+    }
+  });
+
+  it("no-duplicate-default-combos", () => {
+    for (const isMac of [false, true]) {
+      for (const isDesktop of [false, true]) {
+        const seen = new Map<string, string>();
+        for (const b of platformBindings(SHORTCUT_BINDINGS, isDesktop, isMac)) {
+          const key = canonicalChord(b.combo, isMac);
+          expect(seen.get(key), `${b.id} vs ${seen.get(key)}`).toBeUndefined();
+          seen.set(key, b.id);
+        }
+      }
+    }
   });
 });

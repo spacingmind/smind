@@ -79,8 +79,8 @@ describe("shortcuts-desktop-gating", () => {
 
   it("platformBindings keeps only rows whose desktop gate matches", async () => {
     const { SHORTCUT_BINDINGS, platformBindings } = await import("@/keyboard/shortcuts");
-    const desktopRows = platformBindings(SHORTCUT_BINDINGS, true);
-    const webRows = platformBindings(SHORTCUT_BINDINGS, false);
+    const desktopRows = platformBindings(SHORTCUT_BINDINGS, true, false);
+    const webRows = platformBindings(SHORTCUT_BINDINGS, false, false);
     expect(desktopRows.map((b) => b.id)).toContain("tab-new-desktop");
     expect(desktopRows.map((b) => b.id)).toContain("tab-jump-desktop");
     expect(desktopRows.map((b) => b.id)).not.toContain("tab-new");

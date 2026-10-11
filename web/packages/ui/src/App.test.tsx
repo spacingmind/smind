@@ -731,7 +731,7 @@ describe("App keyboard shortcuts", () => {
     expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
     // jsdom is not a desktop build: the web-only rows render.
     expect(screen.getAllByTestId("shortcut-row")).toHaveLength(
-      platformBindings(SHORTCUT_BINDINGS, false).length,
+      platformBindings(SHORTCUT_BINDINGS, false, false).length,
     );
   });
 
