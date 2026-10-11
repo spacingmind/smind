@@ -19,10 +19,10 @@ import (
 // registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
 // to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request."}, mcpTaskStatus(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here."}, mcpTaskPermissions(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
 
@@ -270,6 +270,41 @@ type taskWaitOutput struct {
 	Err               string                `json:"err,omitempty"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
+	// State is the unambiguous summary of why task_wait returned:
+	// waiting_permission | running | done | error | stopped | timed_out.
+	// Only done/error/stopped mean the run ended.
+	State string `json:"state"`
+	// PendingPermissions lists every pending request, in order
+	// (PendingPermission is just the first).
+	PendingPermissions []pendingPermissionOut `json:"pendingPermissions,omitempty"`
+	Message            string                 `json:"message,omitempty"`
+}
+
+// buildTaskWaitOutput derives task_wait's output from one run.logs
+// snapshot. timedOut marks the deadline having passed with the run still
+// going.
+func buildTaskWaitOutput(result runLogsResult, timedOut bool) taskWaitOutput {
+	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
+	if pending := pendingPermissionsFrom(result); len(pending) > 0 {
+		out.PendingPermission = &pending[0]
+		out.PendingPermissions = pending
+		out.State = "waiting_permission"
+		out.Message = "Run " + result.RunID + " is waiting for a permission decision: a human must approve or deny this via `smind task approve <runId> [requestId] [optionId]` or the smind web UI. This is NOT completion; surface it to the human, then call task_wait again with the same runId."
+		return out
+	}
+	switch {
+	case isTerminalRunStatus(result.Status):
+		out.State = result.Status
+		if out.State != "done" && out.State != "stopped" {
+			out.State = "error"
+		}
+	case timedOut:
+		out.TimedOut = true
+		out.State = "timed_out"
+	default:
+		out.State = "running"
+	}
+	return out
 }
 
 // mcpTaskWait implements ADR-0017's one genuinely new capability: block
@@ -292,18 +327,8 @@ func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, task
 			if err != nil {
 				return nil, taskWaitOutput{}, err
 			}
-			out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
-			if pending := pendingPermissionsFrom(result); len(pending) > 0 {
-				out.PendingPermission = &pending[0]
-				return nil, out, nil
-			}
-			if isTerminalRunStatus(result.Status) {
-				return nil, out, nil
-			}
-
 			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				out.TimedOut = true
+			if out := buildTaskWaitOutput(result, remaining <= 0); out.State != "running" {
 				return nil, out, nil
 			}
 			sleep := interval
