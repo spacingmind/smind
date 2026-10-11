@@ -21,7 +21,7 @@ import (
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). Each carries a `detail` when the daemon has one (path, old/new sizes, replacesExisting/largeShrink/outsideWorktree flags, and a diff or preview): surface it to the human so they can see what an approval would change. The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
@@ -55,6 +55,7 @@ type mcpRunEvent struct {
 	RequestID  string                   `json:"requestId,omitempty"`
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
+	Detail     *permissionDetail        `json:"detail,omitempty"`
 	OptionID   string                   `json:"optionId,omitempty"`
 	Reason     string                   `json:"reason,omitempty"`
 	ToolCallID string                   `json:"toolCallId"`
@@ -87,7 +88,7 @@ func toMCPRunEvents(events []runLogEvent) []mcpRunEvent {
 	for _, e := range events {
 		out = append(out, mcpRunEvent{
 			Type: e.Type, Text: e.Text, StopReason: e.StopReason,
-			RequestID: e.RequestID, Summary: e.Summary, Options: e.Options,
+			RequestID: e.RequestID, Summary: e.Summary, Options: e.Options, Detail: e.Detail,
 			OptionID: e.OptionID, Reason: e.Reason,
 			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Title: e.Title, Status: e.Status,
 			Input: rawToAny(e.Input), Result: rawToAny(e.Result),
@@ -174,6 +175,7 @@ type pendingPermissionOut struct {
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`
+	Detail    *permissionDetail        `json:"detail,omitempty"`
 }
 
 // pendingPermissionsFrom derives the still-pending permission requests
@@ -198,7 +200,7 @@ func pendingPermissionsFrom(result runLogsResult) []pendingPermissionOut {
 	for _, e := range result.Events {
 		if e.Type == "permission_request" && !resolved[e.RequestID] {
 			pending = append(pending, pendingPermissionOut{
-				RequestID: e.RequestID, Summary: e.Summary, Options: e.Options,
+				RequestID: e.RequestID, Summary: e.Summary, Options: e.Options, Detail: e.Detail,
 			})
 		}
 	}
