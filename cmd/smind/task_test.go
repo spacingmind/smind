@@ -171,7 +171,7 @@ func TestRenderPermissionRequest(t *testing.T) {
 
 	got := renderPermissionRequest("run-1", "req-2", "Bash(git push)", []permissionOptionParams{
 		{ID: "opt-allow", Label: "Allow once", Kind: "allow_once"},
-	})
+	}, nil)
 	if !strings.Contains(got, "-> approve: smind task approve run-1 req-2\n") {
 		t.Fatalf("renderPermissionRequest() = %q, want a hint line `-> approve: smind task approve run-1 req-2`", got)
 	}
@@ -189,7 +189,7 @@ func TestRenderPermissionRequest_RejectHint(t *testing.T) {
 	got := renderPermissionRequest("run-1", "req-2", "x", []permissionOptionParams{
 		{ID: "opt-allow", Label: "Allow", Kind: "allow_once"},
 		{ID: "opt-no", Label: "Deny", Kind: "reject_once"},
-	})
+	}, nil)
 	if !strings.Contains(got, "-> reject:  smind task approve run-1 req-2 opt-no\n") {
 		t.Fatalf("renderPermissionRequest() = %q, want a reject hint with the reject option id", got)
 	}

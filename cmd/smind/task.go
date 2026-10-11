@@ -104,9 +104,10 @@ type permissionOptionParams struct {
 // includes the runId so it is copy-pasteable as-is: cmdTaskApprove's real
 // usage is `smind task approve <runId> [requestId] [optionId]` -- a hint
 // printing only the requestId would paste into nothing.
-func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams) string {
+func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams, detail *permissionDetail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
+	b.WriteString(renderPermissionDetail(detail))
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
@@ -139,6 +140,7 @@ type runLogEvent struct {
 	RequestID  string                   `json:"requestId,omitempty"`
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
+	Detail     *permissionDetail        `json:"detail,omitempty"`
 	OptionID   string                   `json:"optionId,omitempty"`
 	Reason     string                   `json:"reason,omitempty"`
 	toolCallEventParams
@@ -572,11 +574,12 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 				RequestID string                   `json:"requestId"`
 				Summary   string                   `json:"summary"`
 				Options   []permissionOptionParams `json:"options"`
+				Detail    *permissionDetail        `json:"detail"`
 			}
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
+			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
 		case "permission_resolved":
 			var p struct {
 				RequestID string `json:"requestId"`
@@ -746,7 +749,7 @@ func printRunLogs(result runLogsResult) {
 		case "raw":
 			fmt.Print(renderRaw(e.rawEventParams))
 		case "permission_request":
-			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options))
+			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options, e.Detail))
 		case "permission_resolved":
 			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 		}
@@ -798,6 +801,7 @@ type pendingPermission struct {
 	RequestID string
 	Summary   string
 	Options   []permissionOptionParams
+	Detail    *permissionDetail
 }
 
 // fetchPendingPermissions calls run.logs for runID and returns every
@@ -817,7 +821,7 @@ func fetchPendingPermissions(ctx context.Context, client *wsclient.Client, runID
 	var pending []pendingPermission
 	for _, e := range result.Events {
 		if e.Type == "permission_request" && !resolved[e.RequestID] {
-			pending = append(pending, pendingPermission{RequestID: e.RequestID, Summary: e.Summary, Options: e.Options})
+			pending = append(pending, pendingPermission{RequestID: e.RequestID, Summary: e.Summary, Options: e.Options, Detail: e.Detail})
 		}
 	}
 	return pending, nil
@@ -852,7 +856,7 @@ func cmdTaskPermissions(args []string) int {
 		return 0
 	}
 	for _, p := range pending {
-		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
+		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
 	}
 	return 0
 }
