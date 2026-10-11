@@ -670,11 +670,11 @@ describe("TaskDetailPane", () => {
     expect(within(screen.getByTestId("composer-toolbar-row")).getByLabelText("Thinking Level")).toBeInTheDocument();
   });
 
-  it("omits the config-options control entirely for a Claude run", async () => {
+  it("omits the config-options control entirely for a Codex run (its model applies from the next run, ADR-0025)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "codex-native" })]);
     await flush();
     client.emit("run.attach", 0, "chunk", { text: "hi" });
     await flush();
@@ -756,6 +756,37 @@ describe("TaskDetailPane", () => {
     });
 
     expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("High");
+  });
+
+  it("model option change calls run.setConfigOption", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [
+        {
+          configId: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "default",
+          options: [
+            { value: "default", name: "Default" },
+            { value: "opus", name: "Opus (latest)" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    // Named apart from the composer's own (next-run) Model picker.
+    fireEvent.click(screen.getByLabelText("Model (this session)"));
+    fireEvent.click(await screen.findByRole("option", { name: "Opus (latest)" }));
+    await flush();
+
+    expect(client.nth("run.setConfigOption", 0).params).toEqual({ runId: "run-1", configId: "model", value: "opus" });
   });
 
   it("surfaces a failed run.setConfigOption as an error instead of silently no-op'ing", async () => {
@@ -1001,7 +1032,7 @@ describe("run-config pill (run-config IA)", () => {
 });
 
 describe("runConfigPillLabel", () => {
-  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
+  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
   const providers: ProviderInfo[] = [
     { id: "claude-native", label: "Claude Code" },
     { id: "glm", label: "GLM" },

@@ -72,6 +72,23 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
   });
 
+  it("run header shows the requested model", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-model-chip")).toHaveTextContent("claude-opus-5-5");
+
+    // A default run (no model requested) has no chip.
+    rerender(
+      <ul>
+        <RunTimeline run={run([], { model: "" })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-model-chip")).not.toBeInTheDocument();
+  });
+
   it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {
     const { rerender } = render(
       <ul>

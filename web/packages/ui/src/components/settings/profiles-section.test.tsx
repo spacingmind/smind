@@ -257,6 +257,69 @@ describe("profiles-section", () => {
   });
 });
 
+describe("profiles-section model field (ADR-0025)", () => {
+  const PROVIDERS = {
+    providers: [
+      {
+        id: "claude-native",
+        label: "Claude Code",
+        models: [
+          { id: "sonnet", label: "Sonnet" },
+          { id: "opus", label: "Opus" },
+        ],
+      },
+      { id: "glm", label: "GLM" },
+    ],
+  };
+
+  it("profile editor saves model", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    fireEvent.change(screen.getByTestId("profile-form-name"), { target: { value: "Cheap" } });
+    fireEvent.click(screen.getByTestId("profile-form-model"));
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["Provider default", "Sonnet", "Opus"]);
+    fireEvent.click(options[1]);
+    await flush();
+    fireEvent.click(screen.getByTestId("profile-form-submit"));
+    await flush();
+
+    expect(client.nth("profile.create").params).toMatchObject({ name: "Cheap", provider: "claude-native", model: "sonnet" });
+  });
+
+  it("profile editor hides the model field for a provider with no models", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    fireEvent.click(screen.getByTestId("profile-new-button"));
+    await flush();
+    expect(screen.getByTestId("profile-form-model")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("profile-form-provider"));
+    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    await flush();
+    expect(screen.queryByTestId("profile-form-model")).not.toBeInTheDocument();
+  });
+
+  it("profile list shows the model", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([{ ...PROFILE, Model: "opus" }]);
+    client.nth("provider.list").resolve(PROVIDERS);
+    await flush();
+
+    expect(screen.getByTestId("profile-row-1")).toHaveTextContent("Opus");
+  });
+});
+
 describe("profiles-section ★ default agent (run-config IA)", () => {
   it("marks a profile default, and clicking its star again clears it", async () => {
     const client = new FakeWsClient();

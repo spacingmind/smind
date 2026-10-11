@@ -40,6 +40,8 @@ function toRunConfigState(value: unknown): RunConfigState | null {
     permissionMode: legacy ? "" : (v.permissionMode as string),
     autoAccept: legacy ? false : (v.autoAccept as boolean),
     thinkingLevel: v.thinkingLevel as ThinkingLevel,
+    // Absent in state persisted before ADR-0025 -> the provider default.
+    model: typeof v.model === "string" ? v.model : "",
   };
 }
 

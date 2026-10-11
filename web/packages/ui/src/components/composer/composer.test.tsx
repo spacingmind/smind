@@ -484,6 +484,107 @@ describe("Composer", () => {
     expect(submissions).toEqual([{ provider: "glm", prompt: "unattended", permissionMode: "", autoAccept: true }]);
   });
 
+  describe("model picker (ADR-0025)", () => {
+    const MODEL_PROVIDERS = {
+      providers: [
+        {
+          id: "claude-native",
+          label: "Claude Code",
+          models: [
+            { id: "sonnet", label: "Sonnet", description: "Balanced" },
+            { id: "opus", label: "Opus" },
+          ],
+        },
+        { id: "glm", label: "GLM" },
+      ],
+    };
+
+    function renderWithModels() {
+      const models: (string | undefined)[] = [];
+      const client = new FakeWsClient();
+      renderComposer({
+        client,
+        onSubmit: async (_p, _prompt, _perm, _t, _w, model) => {
+          models.push(model);
+          return { kind: "started", runId: "run-test" };
+        },
+      });
+      client.nth("provider.list", 0).resolve(MODEL_PROVIDERS);
+      return { client, models };
+    }
+
+    async function send(text: string) {
+      fireEvent.change(textarea(), { target: { value: text } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await flush();
+    }
+
+    it("composer sends model on run.start", async () => {
+      const { models } = renderWithModels();
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Model"));
+      const options = await screen.findAllByRole("option");
+      expect(options.map((o) => o.textContent)).toEqual(["Default", "Sonnet", "Opus"]);
+      fireEvent.click(options[2]);
+      await flush();
+
+      await send("hello");
+      expect(models).toEqual(["opus"]);
+    });
+
+    it("composer omits model when default is selected", async () => {
+      const { models } = renderWithModels();
+      await flush();
+
+      expect(screen.getByLabelText("Model")).toHaveTextContent("Default");
+      await send("hello");
+      expect(models).toEqual([undefined]);
+
+      // Picking a model and then going back to Default omits it again.
+      fireEvent.click(screen.getByLabelText("Model"));
+      fireEvent.click((await screen.findAllByRole("option"))[1]);
+      await flush();
+      fireEvent.click(screen.getByLabelText("Model"));
+      fireEvent.click((await screen.findAllByRole("option"))[0]);
+      await flush();
+      await send("again");
+      expect(models).toEqual([undefined, undefined]);
+    });
+
+    it("composer hides the model picker when the provider lists no models", async () => {
+      renderWithModels();
+      await flush();
+      expect(screen.getByLabelText("Model")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText("Provider"));
+      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+      await flush();
+      expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
+    });
+
+    it("switching provider resets an unavailable model", async () => {
+      const { models } = renderWithModels();
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Model"));
+      fireEvent.click((await screen.findAllByRole("option"))[1]);
+      await flush();
+
+      fireEvent.click(screen.getByLabelText("Provider"));
+      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+      await flush();
+      await send("on glm");
+      expect(models).toEqual([undefined]);
+
+      // Back on Claude the model starts from Default, not the stale pick.
+      fireEvent.click(screen.getByLabelText("Provider"));
+      fireEvent.click(await screen.findByRole("option", { name: "Claude Code" }));
+      await flush();
+      expect(screen.getByLabelText("Model")).toHaveTextContent("Default");
+    });
+  });
+
   it("shows a thinking-level selector only for claude-native, and omits the field entirely for every other provider", async () => {
     const client = new FakeWsClient();
     renderComposer({ client });
