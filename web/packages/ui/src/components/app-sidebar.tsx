@@ -75,6 +75,7 @@ import {
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1248,16 +1249,28 @@ function WorkspaceItem({
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={onToggleExpanded}
-        data-testid="sidebar-workspace-row"
-        data-workspace-id={workspace.ID}
-      >
-        <FolderGit2 />
-        <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-        <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
-        <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
-      </SidebarMenuButton>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+        <SidebarMenuButton
+          onClick={onToggleExpanded}
+          data-testid="sidebar-workspace-row"
+          data-workspace-id={workspace.ID}
+        >
+          <FolderGit2 />
+          <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
+          <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+          <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
+        </SidebarMenuButton>
+        </ContextMenuTrigger>
+        <ContextMenuContent data-testid="sidebar-workspace-context-menu">
+          {items.map((item) => (
+            <ContextMenuItem key={item.label} onSelect={item.onSelect}>
+              {item.icon}
+              {item.label}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      </ContextMenu>
       <SidebarMenuAction>
         <RowMenu
           items={items}
