@@ -1110,4 +1110,3 @@ describe("MCP servers pill", () => {
     expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
   });
 });
-;

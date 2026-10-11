@@ -134,11 +134,11 @@ export function TaskDetailPane({
   // between the scrolling log and the prompt form (see below) rather than
   // inline per-run, so it can't be scrolled out of view while log chunks
   // keep streaming in above/below it.
+  const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
+
   // The chat's most recent run only -- the header pill shows that run's
   // MCP servers, never an older run's (no fallback when it reported none).
   const latestRun = runs?.[runs.length - 1];
-
-  const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
 
   // The task's live run, if any. A task has at most one at a time, so the
   // first match is the one the composer's Stop and queue drain act on.
