@@ -1,5 +1,8 @@
 import { useCallback, useState } from "react";
 
+import { Bell } from "lucide-react";
+
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
@@ -54,7 +57,7 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-notifications">
       <section className="flex flex-col gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Notifications</h3>
+        <SettingsSectionTitle title="Notifications" />
         <div className="flex items-center justify-between gap-4">
           <p className="max-w-sm text-ui-base text-muted-foreground">{PERMISSION_DESCRIPTION[permission]}</p>
           <Button
@@ -136,6 +139,8 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
 registerSettingsSection({
   id: "notifications",
   label: "Notifications",
-  order: 250,
+  // Ungrouped, so it sorts with General/Appearance above every group heading.
+  order: 110,
+  icon: <Bell aria-hidden className="size-3.5" />,
   render: (ctx) => <NotificationsSection {...ctx} />,
 });

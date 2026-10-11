@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -146,21 +147,21 @@ function UsageSection({ client }: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-usage">
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-ui-base font-medium text-foreground">Usage</h3>
-            <p className="text-ui-sm text-muted-foreground">Tokens and cost per run and proxy request</p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid="usage-refresh"
-            onClick={() => setRefreshTick((n) => n + 1)}
-          >
-            <RefreshCw aria-hidden className="size-3.5" /> Refresh
-          </Button>
-        </div>
+        <SettingsSectionTitle
+          title="Usage"
+          description="Tokens and cost per run and proxy request"
+          actions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="usage-refresh"
+              onClick={() => setRefreshTick((n) => n + 1)}
+            >
+              <RefreshCw aria-hidden className="size-3.5" /> Refresh
+            </Button>
+          }
+        />
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
             <span className="text-ui-sm text-muted-foreground">Scope</span>

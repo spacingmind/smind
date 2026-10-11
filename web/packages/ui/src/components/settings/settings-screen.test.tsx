@@ -1,6 +1,6 @@
 import { act } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
@@ -62,9 +62,9 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-connections")).not.toBeInTheDocument();
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
-    // Order: General · Appearance · Agents & providers (Agents, MCP
-    // servers, Providers) · Notifications · Shortcuts (desktop inserts
-    // Connection between the group and Notifications).
+    // Order (Paseo-style): the ungrouped app sections first (General ·
+    // Appearance · Notifications · Shortcuts), then groups -- Connection
+    // (desktop only), then Agents & providers.
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -72,13 +72,61 @@ describe("SettingsScreen shell", () => {
     expect(ids).toEqual([
       "settings-nav-general",
       "settings-nav-appearance",
+      "settings-nav-notifications",
+      "settings-nav-shortcuts",
       "settings-nav-agents",
       "settings-nav-mcp-servers",
       "settings-nav-providers",
       "settings-nav-usage",
-      "settings-nav-notifications",
-      "settings-nav-shortcuts",
     ]);
+  });
+
+  it("keeps Notifications and Shortcuts out of the Agents & providers group (they precede its heading)", () => {
+    renderScreen();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const heading = within(nav).getByText("Agents & providers");
+    for (const id of ["notifications", "shortcuts"]) {
+      const item = within(nav).getByTestId(`settings-nav-${id}`);
+      expect(item.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    for (const id of ["agents", "mcp-servers", "providers", "usage"]) {
+      const item = within(nav).getByTestId(`settings-nav-${id}`);
+      expect(heading.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("an ungrouped section registered after a group is set off by a separator", () => {
+    const unregister = registerSettingsSection({ id: "late", label: "Late", order: 900, render: () => null });
+    try {
+      renderScreen();
+      const nav = screen.getByRole("navigation", { name: "Settings sections" });
+      const separator = within(nav).getByRole("separator");
+      const late = within(nav).getByTestId("settings-nav-late");
+      expect(separator.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(nav).getAllByRole("separator")).toHaveLength(1);
+    } finally {
+      unregister();
+    }
+  });
+
+  it("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", () => {
+    renderScreen();
+
+    for (const [id, label, action] of [
+      ["agents", "Agents", "profile-new-button"],
+      ["mcp-servers", "MCP servers", "mcp-new-button"],
+      ["providers", "Providers", "providers-connect-toggle"],
+      ["usage", "Usage", "usage-refresh"],
+    ] as const) {
+      fireEvent.click(screen.getByTestId(`settings-nav-${id}`));
+      expect(screen.getByRole("heading", { level: 1, name: label })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { level: 3, name: label })).not.toBeInTheDocument();
+      expect(screen.getByTestId(action)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("settings-nav-notifications"));
+    expect(screen.queryByRole("heading", { level: 3, name: "Notifications" })).not.toBeInTheDocument();
   });
 
   it("the Providers nav entry renders ADR-0015's real Providers section, not the old open-accounts stub", () => {
@@ -304,5 +352,204 @@ describe("SettingsScreen Notifications section (AC3)", () => {
     fireEvent.click(screen.getByTestId("settings-notifications-test-button"));
 
     expect(await screen.findByTestId("settings-notifications-test-error")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsScreen narrow", () => {
+  // Same shape as App.responsive.test.tsx: useIsMobile reads
+  // window.innerWidth inside an effect, so each render is followed by a
+  // flush to let it settle.
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 390 });
+    window.matchMedia = vi.fn().mockImplementation(
+      (query: string) =>
+        ({
+          matches: window.innerWidth < 768,
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1024 });
+  });
+
+  async function renderNarrow(props: Partial<Parameters<typeof SettingsScreen>[0]> = {}) {
+    render(<SettingsScreen client={null} onNavigateBack={props.onNavigateBack ?? (() => {})} initialSectionId={props.initialSectionId} />);
+    await flush();
+  }
+
+  it("shows only the section list first, then a detail page after tapping a row", async () => {
+    await renderNarrow();
+
+    // List first: nav visible, no content pane, no sidebar.
+    expect(screen.getByTestId("settings-nav-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-nav-appearance"));
+    await flush();
+
+    expect(screen.queryByTestId("settings-nav-appearance")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-content")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("back from the detail returns to the list, and back from the list calls onNavigateBack", async () => {
+    const onNavigateBack = vi.fn();
+    await renderNarrow({ onNavigateBack });
+
+    fireEvent.click(screen.getByTestId("settings-nav-shortcuts"));
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-back-button")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-detail-back"));
+    await flush();
+    expect(screen.getByTestId("settings-nav-shortcuts")).toBeInTheDocument();
+    expect(onNavigateBack).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("initialSectionId lands directly on that section's detail", async () => {
+    await renderNarrow({ initialSectionId: "shortcuts" });
+
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-nav-shortcuts")).not.toBeInTheDocument();
+  });
+
+  it("Escape on the detail returns to the list; Escape on the list calls onNavigateBack", async () => {
+    const onNavigateBack = vi.fn();
+    await renderNarrow({ onNavigateBack });
+
+    fireEvent.click(screen.getByTestId("settings-nav-general"));
+    await flush();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await flush();
+    expect(screen.getByTestId("settings-nav-general")).toBeInTheDocument();
+    expect(onNavigateBack).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("SettingsScreen layout", () => {
+  it("renders a settings sidebar with a back control above the grouped nav and a content view", () => {
+    renderScreen();
+
+    const sidebar = screen.getByTestId("settings-sidebar");
+    expect(sidebar).toBeInTheDocument();
+
+    const back = screen.getByTestId("settings-back-button");
+    expect(back).toHaveAccessibleName("Back to app");
+    expect(back).toHaveTextContent("Back to app");
+
+    const top = screen.getByTestId("settings-sidebar-top");
+    const nav = within(sidebar).getByRole("navigation", { name: "Settings sections" });
+    // top strip < back row < nav, in DOM order.
+    expect(top.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(back.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    expect(screen.getByTestId("settings-content-frame")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-content")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+  });
+
+  it("marks the active section with aria-current and switches content on nav click", () => {
+    renderScreen();
+
+    expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("settings-nav-appearance")).toHaveAttribute("aria-current", "false");
+
+    fireEvent.click(screen.getByTestId("settings-nav-appearance"));
+
+    expect(screen.getByTestId("settings-nav-appearance")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "false");
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-general")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("Back button calls onNavigateBack", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape calls onNavigateBack when no dialog is open", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape does not call onNavigateBack when a dialog is open", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    try {
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onNavigateBack).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+  });
+
+  it("Escape does not call onNavigateBack when the event was default-prevented", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    event.preventDefault();
+    document.dispatchEvent(event);
+    expect(onNavigateBack).not.toHaveBeenCalled();
+  });
+
+  it("Escape ignores an open dialog that sits inside an inert subtree", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const inert = document.createElement("div");
+    inert.setAttribute("inert", "");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    inert.appendChild(dialog);
+    document.body.appendChild(inert);
+    try {
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onNavigateBack).toHaveBeenCalledTimes(1);
+    } finally {
+      inert.remove();
+    }
+  });
+
+  it("gives every registered section a nav icon so the labels align", () => {
+    renderScreen();
+
+    const navItems = document.querySelectorAll('[data-testid^="settings-nav-"]');
+    expect(navItems.length).toBeGreaterThan(0);
+    for (const item of navItems) {
+      expect(item.querySelector("svg")).not.toBeNull();
+    }
   });
 });

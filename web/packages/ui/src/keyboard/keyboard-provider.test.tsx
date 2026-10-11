@@ -6,6 +6,7 @@ import {
   KeyboardProvider,
   useActionHandler,
   useKeyboard,
+  useActionRestriction,
   useModalKeyboardLock,
 } from "@/keyboard/keyboard-provider";
 import type { ActionId } from "@/keyboard/actions";
@@ -619,5 +620,57 @@ describe("menu-dispatched actions", () => {
     panes.run("pane.find", null, { source: "menu" });
     expect(fireB).toHaveBeenCalledTimes(1);
     expect(fireA).not.toHaveBeenCalled();
+  });
+});
+
+describe("useActionRestriction", () => {
+  function Restrict({ allowed }: { allowed: readonly ActionId[] | null }) {
+    useActionRestriction(allowed);
+    return null;
+  }
+  const ALLOWED: readonly ActionId[] = ["palette.open"];
+
+  it("lets only the allowed actions dispatch, then lifts when the restriction is removed", () => {
+    const palette = vi.fn();
+    const sidebar = vi.fn();
+    const ui = (allowed: readonly ActionId[] | null) => (
+      <KeyboardProvider>
+        <Claim action="palette.open" onFire={palette} />
+        <Claim action="sidebar.toggle" onFire={sidebar} />
+        <Restrict allowed={allowed} />
+      </KeyboardProvider>
+    );
+    const { rerender } = render(ui(ALLOWED));
+
+    pressCtrl("k", "KeyK");
+    pressCtrl("b", "KeyB");
+    expect(palette).toHaveBeenCalledTimes(1);
+    expect(sidebar).not.toHaveBeenCalled();
+
+    rerender(ui(null));
+    pressCtrl("b", "KeyB");
+    expect(sidebar).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves a restricted key to the browser (no preventDefault) and makes runAction a no-op", () => {
+    const sidebar = vi.fn();
+    let run: ReturnType<typeof useKeyboard>["runAction"] | null = null;
+    function Probe() {
+      run = useKeyboard().runAction;
+      return null;
+    }
+    render(
+      <KeyboardProvider>
+        <Claim action="sidebar.toggle" onFire={sidebar} />
+        <Restrict allowed={ALLOWED} />
+        <Probe />
+      </KeyboardProvider>,
+    );
+
+    const event = new KeyboardEvent("keydown", { key: "b", code: "KeyB", ctrlKey: true, bubbles: true, cancelable: true });
+    document.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(false);
+    expect(run!("sidebar.toggle")).toBe(false);
+    expect(sidebar).not.toHaveBeenCalled();
   });
 });
