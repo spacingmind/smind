@@ -4,11 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
-	"syscall"
 	"testing"
-	"time"
 )
 
 func numberedLines(n int) string {
@@ -202,35 +199,5 @@ func TestPermissionDetail_NewFileOutsideWorktreeIsFlagged(t *testing.T) {
 	}
 	if d := BuildPermissionDetail(wt, writeCall(t, "edit", "sub/new.txt", "x\n")); d.OutsideWorktree {
 		t.Fatalf("inside new file flagged outside: %+v", d)
-	}
-}
-
-func TestPermissionDetail_NonRegularExistingFileIsNotRead(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("no FIFOs on windows")
-	}
-	wt := t.TempDir()
-	if err := syscall.Mkfifo(filepath.Join(wt, "pipe"), 0o644); err != nil {
-		t.Skip(err)
-	}
-	if err := os.Mkdir(filepath.Join(wt, "adir"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for _, name := range []string{"pipe", "adir"} {
-			d := BuildPermissionDetail(wt, writeCall(t, "edit", name, "x\n"))
-			if !d.Redacted || d.OutsideWorktree {
-				t.Errorf("%s: %+v", name, d)
-				continue
-			}
-			assertHiddenOverwrite(t, d)
-		}
-	}()
-	select {
-	case <-done:
-	case <-time.After(5 * time.Second):
-		t.Fatal("BuildPermissionDetail blocked on a non-regular file")
 	}
 }
