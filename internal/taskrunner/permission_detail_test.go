@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func numberedLines(n int) string {
@@ -39,6 +42,15 @@ func mustWrite(t *testing.T, p, s string) {
 	}
 	if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// assertHiddenOverwrite checks the danger signal survives redaction: the
+// overwrite is flagged and headlined, but no existing contents leak.
+func assertHiddenOverwrite(t *testing.T, d *PermissionDetail) {
+	t.Helper()
+	if !d.ReplacesExisting || d.Diff != "" || d.ExistingBytes != nil || d.ExistingLines != nil || !strings.Contains(d.Headline(), "OVERWRITES") {
+		t.Fatalf("want hidden-but-flagged overwrite, got %+v (headline %q)", d, d.Headline())
 	}
 }
 
@@ -117,12 +129,14 @@ func TestPermissionDetail_SensitivePathRedactsExisting(t *testing.T) {
 	if !d.Redacted || d.Diff != "" || d.Preview != "" || d.ExistingBytes != nil || d.ExistingLines != nil || d.NewLines != 1 {
 		t.Fatalf("detail = %+v", d)
 	}
+	assertHiddenOverwrite(t, d)
 	for _, name := range []string{"server.pem", "id_rsa", "My_Credentials.json", "app.key", "client-SECRET.txt"} {
 		mustWrite(t, filepath.Join(wt, name), "hunter2\n")
 		d := BuildPermissionDetail(wt, writeCall(t, "edit", name, "x\n"))
 		if !d.Redacted || d.Diff != "" || d.ExistingBytes != nil {
 			t.Fatalf("%s: %+v", name, d)
 		}
+		assertHiddenOverwrite(t, d)
 	}
 }
 
@@ -132,9 +146,10 @@ func TestPermissionDetail_PathOutsideWorktreeRedactsExisting(t *testing.T) {
 	mustWrite(t, outside, "hunter2\n")
 	for _, p := range []string{outside, "../" + filepath.Base(other) + "/o.txt"} {
 		d := BuildPermissionDetail(wt, writeCall(t, "edit", p, "x\n"))
-		if !d.Redacted || d.Diff != "" || d.ExistingBytes != nil || d.ReplacesExisting && d.Diff != "" {
+		if !d.Redacted || d.Diff != "" || d.ExistingBytes != nil || !d.OutsideWorktree {
 			t.Fatalf("%s: %+v", p, d)
 		}
+		assertHiddenOverwrite(t, d)
 	}
 }
 
@@ -146,9 +161,10 @@ func TestPermissionDetail_SymlinkEscapeRedacts(t *testing.T) {
 		t.Skip(err)
 	}
 	d := BuildPermissionDetail(wt, writeCall(t, "edit", "link.txt", "x\n"))
-	if !d.Redacted || d.Diff != "" || d.ExistingBytes != nil {
+	if !d.Redacted || d.Diff != "" || d.ExistingBytes != nil || !d.OutsideWorktree {
 		t.Fatalf("detail = %+v", d)
 	}
+	assertHiddenOverwrite(t, d)
 }
 
 func TestPermissionDetail_NonWriteToolHasNoDetail(t *testing.T) {
@@ -186,5 +202,48 @@ func TestPermissionDetail_HeadlineWording(t *testing.T) {
 	}
 	if (*PermissionDetail)(nil).Headline() != "" {
 		t.Fatal("nil headline")
+	}
+}
+
+func TestPermissionDetail_NewFileOutsideWorktreeIsFlagged(t *testing.T) {
+	wt, other := t.TempDir(), t.TempDir()
+	for _, p := range []string{filepath.Join(other, "new.txt"), "../" + filepath.Base(other) + "/new.txt"} {
+		d := BuildPermissionDetail(wt, writeCall(t, "edit", p, "x\n"))
+		if d == nil || !d.OutsideWorktree || d.ReplacesExisting || !strings.HasSuffix(d.Headline(), ", outside worktree") {
+			t.Fatalf("%s: %+v (%q)", p, d, d.Headline())
+		}
+	}
+	if d := BuildPermissionDetail(wt, writeCall(t, "edit", "sub/new.txt", "x\n")); d.OutsideWorktree {
+		t.Fatalf("inside new file flagged outside: %+v", d)
+	}
+}
+
+func TestPermissionDetail_NonRegularExistingFileIsNotRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no FIFOs on windows")
+	}
+	wt := t.TempDir()
+	if err := syscall.Mkfifo(filepath.Join(wt, "pipe"), 0o644); err != nil {
+		t.Skip(err)
+	}
+	if err := os.Mkdir(filepath.Join(wt, "adir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, name := range []string{"pipe", "adir"} {
+			d := BuildPermissionDetail(wt, writeCall(t, "edit", name, "x\n"))
+			if !d.Redacted || d.OutsideWorktree {
+				t.Errorf("%s: %+v", name, d)
+				continue
+			}
+			assertHiddenOverwrite(t, d)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("BuildPermissionDetail blocked on a non-regular file")
 	}
 }

@@ -23,7 +23,7 @@ const (
 	// detailDiffMaxCells bounds the LCS table so a pathological pair of
 	// large files can't burn memory/time; beyond it the diff is a plain
 	// delete-all/add-all.
-	detailDiffMaxCells = 4_000_000
+	detailDiffMaxCells = 1_000_000
 )
 
 // PermissionDetail describes what an edit/execute tool call will do, so a
@@ -39,6 +39,9 @@ type PermissionDetail struct {
 	ExistingBytes    *int   `json:"existingBytes,omitempty"`
 	ExistingLines    *int   `json:"existingLines,omitempty"`
 	ReplacesExisting bool   `json:"replacesExisting,omitempty"`
+	// OutsideWorktree: the resolved target lies outside the task worktree
+	// (absolute path, `..` escape or symlink out), whether or not it exists.
+	OutsideWorktree bool `json:"outsideWorktree,omitempty"`
 	// LargeShrink: existing >= 20 lines and the new content has under half
 	// of the existing line count.
 	LargeShrink bool   `json:"largeShrink,omitempty"`
@@ -117,16 +120,16 @@ func BuildPermissionDetail(worktree string, toolCall json.RawMessage) *Permissio
 	}
 
 	resolved, inside, exists := resolveInWorktree(worktree, path)
+	d.OutsideWorktree = !inside
 	if !exists {
 		return d
 	}
-	if !inside || sensitive {
-		d.Redacted = true
-		return d
-	}
+	// Existence is not secret: an overwrite is always flagged, even when
+	// the existing contents are hidden.
 	d.ReplacesExisting = true
 	fi, err := os.Stat(resolved)
-	if err != nil {
+	if !inside || sensitive || err != nil || !fi.Mode().IsRegular() {
+		d.Redacted = true
 		return d
 	}
 	if fi.Size() > detailExistingMaxRead {
@@ -167,10 +170,17 @@ func (d *PermissionDetail) Headline() string {
 				*d.ExistingLines, d.NewLines, kb(*d.ExistingBytes), kb(d.NewBytes))
 		}
 		if d.ReplacesExisting {
-			return fmt.Sprintf("replaces existing file with %d lines (%s) OVERWRITES", d.NewLines, kb(d.NewBytes))
+			why := "sensitive path"
+			if d.OutsideWorktree {
+				why = "outside worktree"
+			}
+			if !d.Redacted {
+				return fmt.Sprintf("replaces existing file with %d lines (%s) OVERWRITES", d.NewLines, kb(d.NewBytes))
+			}
+			return fmt.Sprintf("replaces existing file with %d lines (%s); existing contents hidden (%s) OVERWRITES", d.NewLines, kb(d.NewBytes), why)
 		}
-		if d.Redacted {
-			return fmt.Sprintf("writes %d lines (%s), path restricted", d.NewLines, kb(d.NewBytes))
+		if d.OutsideWorktree {
+			return fmt.Sprintf("new file, %d lines (%s), outside worktree", d.NewLines, kb(d.NewBytes))
 		}
 		return fmt.Sprintf("new file, %d lines (%s)", d.NewLines, kb(d.NewBytes))
 	case "edit":
@@ -256,22 +266,40 @@ func resolveInWorktree(worktree, path string) (resolved string, inside, exists b
 		abs = filepath.Join(worktree, abs)
 	}
 	abs = filepath.Clean(abs)
-	if _, err := os.Lstat(abs); err != nil {
-		return abs, true, false
+	root, rerr := filepath.EvalSymlinks(worktree)
+	if rerr != nil {
+		root = filepath.Clean(worktree)
 	}
-	root, err := filepath.EvalSymlinks(worktree)
-	if err != nil {
+	within := func(p string) bool {
+		rel, err := filepath.Rel(root, p)
+		return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+	}
+	if _, err := os.Lstat(abs); err != nil {
+		// Not there yet: resolve the nearest existing ancestor and judge
+		// the remainder lexically.
+		anc, rest := abs, ""
+		for {
+			if rp, err := filepath.EvalSymlinks(anc); err == nil {
+				anc = rp
+				break
+			}
+			next := filepath.Dir(anc)
+			if next == anc {
+				break
+			}
+			rest = filepath.Join(filepath.Base(anc), rest)
+			anc = next
+		}
+		return abs, within(filepath.Join(anc, rest)), false
+	}
+	if rerr != nil {
 		return abs, false, true
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
 		return abs, false, true
 	}
-	rel, err := filepath.Rel(root, real)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return real, false, true
-	}
-	return real, true, true
+	return real, within(real), true
 }
 
 func splitLines(s string) []string {
