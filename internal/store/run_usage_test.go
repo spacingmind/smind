@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -82,5 +83,76 @@ func TestRunUsage_UpsertAndSummary(t *testing.T) {
 
 	if _, err := s.SummarizeRunUsage(nil, nil, "account"); err == nil {
 		t.Error("SummarizeRunUsage(groupBy=account) error = nil, want invalid groupBy")
+	}
+}
+
+// TestSummarizeRunUsage_UnreportedFields covers the U0 scenario: a summary
+// group names the token fields no row in the group reported (NULL in every
+// row), while a reported 0 keeps the field off the list.
+func TestSummarizeRunUsage_UnreportedFields(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	ws, err := s.CreateWorkspace(Workspace{Path: "/repo", Title: "repo", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+	taskA, err := s.CreateTask(Task{WorkspaceID: ws.ID, Title: "a", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	taskB, err := s.CreateTask(Task{WorkspaceID: ws.ID, Title: "b", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	seed := func(runID string, taskID int64, u RunUsage) {
+		t.Helper()
+		newTestRunFor(t, s, taskID, runID, base)
+		u.RunID, u.TaskID, u.Provider, u.Source = runID, taskID, "glm", "claude_result"
+		if err := s.UpsertRunUsage(u); err != nil {
+			t.Fatalf("UpsertRunUsage(%s) error = %v", runID, err)
+		}
+	}
+
+	// Group A: reasoning is NULL in every row; everything else reported.
+	seed("a1", taskA.ID, RunUsage{Model: ptr("m"), InputTokens: ptr(int64(1)), OutputTokens: ptr(int64(2)),
+		CachedInputTokens: ptr(int64(3)), CacheWriteTokens: ptr(int64(4))})
+	seed("a2", taskA.ID, RunUsage{Model: ptr("m"), InputTokens: ptr(int64(10)), OutputTokens: ptr(int64(20)),
+		CachedInputTokens: ptr(int64(30)), CacheWriteTokens: ptr(int64(40))})
+	// Group B: an explicit reasoning 0 counts as reported.
+	seed("b1", taskB.ID, RunUsage{Model: ptr("m"), InputTokens: ptr(int64(5)), OutputTokens: ptr(int64(6)),
+		CachedInputTokens: ptr(int64(7)), CacheWriteTokens: ptr(int64(8)), ReasoningTokens: ptr(int64(0))})
+
+	sums, err := s.SummarizeRunUsage(nil, nil, "task")
+	if err != nil {
+		t.Fatalf("SummarizeRunUsage() error = %v", err)
+	}
+	byTask := map[string]RunUsageSummary{}
+	for _, u := range sums {
+		byTask[u.Key] = u
+	}
+
+	gotA := byTask[fmt.Sprintf("%d", taskA.ID)]
+	if len(gotA.Unreported) != 1 || gotA.Unreported[0] != "reasoningTokens" {
+		t.Errorf("group A Unreported = %v, want [reasoningTokens]", gotA.Unreported)
+	}
+	gotB := byTask[fmt.Sprintf("%d", taskB.ID)]
+	if len(gotB.Unreported) != 0 {
+		t.Errorf("group B Unreported = %v, want nil (reasoning 0 is reported)", gotB.Unreported)
+	}
+
+	// A fully reported group and a NULL+reported mix, per run.
+	seed("a3", taskA.ID, RunUsage{Model: ptr("m"), InputTokens: ptr(int64(1)), OutputTokens: ptr(int64(2)),
+		CachedInputTokens: ptr(int64(3)), CacheWriteTokens: ptr(int64(4)), ReasoningTokens: ptr(int64(9))})
+	sums, err = s.SummarizeRunUsage(nil, nil, "task")
+	if err != nil {
+		t.Fatalf("SummarizeRunUsage() error = %v", err)
+	}
+	for _, u := range sums {
+		if u.Key == fmt.Sprintf("%d", taskA.ID) && len(u.Unreported) != 0 {
+			t.Errorf("fully reported group Unreported = %v, want nil", u.Unreported)
+		}
 	}
 }

@@ -11,6 +11,7 @@ import type {
   PermissionResolvedEventParams,
   McpServerState,
   Provider,
+  RunUsage,
   RunAttachResult,
   RunLogEvent,
   RunLogsResult,
@@ -270,6 +271,13 @@ export interface RunEntry {
    * event (live or backfilled). Undefined when the run reported none.
    */
   mcpServers?: McpServerState[];
+  /**
+   * The run's usage (ADR-0020): one value per run, REPLACED and never
+   * added -- seeded from run.list's `usage`, replaced by a live "usage"
+   * event, and by the latest "usage" event of a run.logs backfill.
+   * Undefined when the run has no usage row (not an empty object).
+   */
+  usage?: RunUsage;
 }
 
 /** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
@@ -283,6 +291,15 @@ export function latestMcpServers(events: RunLogEvent[]): McpServerState[] | unde
 
 /** submitPrompt's result: a run that started, or a prompt the daemon queued (ADR-0021 §2). */
 export type SubmitResult = { kind: "started"; runId: string } | { kind: "queued"; queueItemId: number };
+
+/** The latest usage event's RunUsage in events, or undefined when no event carried one (ADR-0020: multiple usage events per run are possible, latest wins). */
+export function latestUsage(events: RunLogEvent[]): RunUsage | undefined {
+  let latest: RunUsage | undefined;
+  for (const event of events) {
+    if (event.type === "usage") latest = event.usage;
+  }
+  return latest;
+}
 
 interface TimelineState {
   /** null while the initial run.list fetch for the current task is in flight. */
@@ -456,6 +473,10 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         if (event === "mcp_servers") {
           patch(setRuns, runId, { mcpServers: (params as { mcpServers: McpServerState[] }).mcpServers });
         }
+        if (event === "usage") {
+          const usage = (params as { usage?: RunUsage }).usage;
+          if (usage !== undefined) patch(setRuns, runId, { usage });
+        }
         if (event === "permission_resolved") {
           clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
           // Also falls through to appendEvent below, so the resolution
@@ -512,6 +533,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     autoAccept: r.AutoAccept,
     thinkingLevel: r.ThinkingLevel,
     model: r.Model ?? "",
+    ...(r.usage ? { usage: r.usage } : {}),
   };
 }
 
@@ -587,9 +609,14 @@ export function useRunTimeline(
               .call<RunLogsResult>("run.logs", { runId: r.ID })
               .then((logs) => {
                 if (session.cancelled) return;
+                const usage = latestUsage(logs.events);
                 patch(setRuns, r.ID, {
                   items: buildTimeline(logs.events),
                   mcpServers: latestMcpServers(logs.events),
+                  // Only set the key when a usage event exists, so a
+                  // backfill never overwrites a list-seeded value with
+                  // undefined.
+                  ...(usage !== undefined ? { usage } : {}),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   err: logs.err,

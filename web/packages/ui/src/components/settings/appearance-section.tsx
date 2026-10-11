@@ -1,10 +1,9 @@
 import { registerSettingsSection } from "@/components/settings/settings-registry";
-import { Button } from "@/components/ui/button";
+import { StepGroup } from "@/components/ui/step-group";
 import { useFontSizes } from "@/hooks/use-font-sizes";
 import { useTheme } from "@/hooks/use-theme";
 import type { FontSizes, FontSizeStep } from "@/lib/settings-preferences";
 import type { ThemePreference } from "@/lib/theme";
-import { cn } from "@/lib/utils";
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "light", label: "Light" },
@@ -23,38 +22,6 @@ const FONT_SIZE_AXES: { axis: keyof FontSizes; label: string; description: strin
   { axis: "content", label: "Content", description: "Chat and task prose" },
   { axis: "code", label: "Code", description: "Diffs, file contents and the terminal" },
 ];
-
-/** A row of mutually-exclusive step buttons -- the same shape for the theme picker and each font-size axis, so the section reads as one control family rather than three different widget kinds. */
-function StepGroup<T extends string>({
-  options,
-  value,
-  onChange,
-  groupLabel,
-}: {
-  options: { value: T; label: string }[];
-  value: T;
-  onChange: (value: T) => void;
-  groupLabel: string;
-}) {
-  return (
-    <div role="group" aria-label={groupLabel} className="inline-flex rounded-lg border border-input-border p-0.5">
-      {options.map((opt) => (
-        <Button
-          key={opt.value}
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-pressed={opt.value === value}
-          data-testid={`settings-${groupLabel}-${opt.value}`}
-          onClick={() => onChange(opt.value)}
-          className={cn("h-7 rounded-md px-3 text-ui-sm", opt.value === value && "bg-selected")}
-        >
-          {opt.label}
-        </Button>
-      ))}
-    </div>
-  );
-}
 
 /**
  * Item 13's Appearance section: theme plus the interface/content/code

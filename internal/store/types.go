@@ -306,6 +306,10 @@ type UsageSummary struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	// Unreported lists the token fields for which no row in the group had a
+	// non-NULL value (nil when every token field had at least one reported
+	// value). A reported 0 is not unreported.
+	Unreported []string
 }
 
 // RunUsage is one run's usage row (ADR-0020): what the agent itself
@@ -348,4 +352,8 @@ type RunUsageSummary struct {
 	ReasoningTokens  int64
 	// CostUSD is nil when no run in the group reported a cost (unknown, not 0).
 	CostUSD *float64
+	// Unreported lists the token fields for which no run in the group had a
+	// non-NULL value (nil when every token field had at least one reported
+	// value). A reported 0 is not unreported.
+	Unreported []string
 }

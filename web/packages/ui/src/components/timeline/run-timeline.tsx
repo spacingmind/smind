@@ -5,6 +5,7 @@ import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-le
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
 import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
+import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import { describeStopReason } from "@/components/timeline/stop-reason";
@@ -124,6 +125,7 @@ export const RunTimeline = memo(function RunTimeline({
             {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
           </span>
         )}
+        <RunUsagePill usage={run.usage} />
         <CopyTurnButton run={run} />
       </div>
     </li>

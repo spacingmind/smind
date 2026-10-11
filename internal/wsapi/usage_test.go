@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -310,5 +311,107 @@ func TestRunList_CarriesUsageTotals(t *testing.T) {
 		} else if string(raw) != `{"source":"not_reported"}` {
 			t.Errorf("run %s usage = %s (present %v), want only {\"source\":\"not_reported\"}", id, raw, has)
 		}
+	}
+}
+
+// TestUsage_SummaryRowsNameUnreportedFields covers U0 over the RPC layer:
+// scope=runs and scope=proxy rows carry an "unreported" array naming token
+// fields no row in the group reported, and omit the key entirely when
+// everything was reported.
+func TestUsage_SummaryRowsNameUnreportedFields(t *testing.T) {
+	t.Parallel()
+	srv, registry, db := newUsageTestServer(t)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	acct, err := registry.AddAPIKey("anthropic", "a1", "sk-test")
+	if err != nil {
+		t.Fatalf("AddAPIKey() error = %v", err)
+	}
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// Proxy: one fully reported row, one row reporting nothing.
+	mustCreateRequestLog(t, db, store.RequestLog{
+		StartedAt: base, Provider: "anthropic", AccountID: &acct.ID, SessionKey: "s1",
+		Model: ptr("claude-3"), Stream: ptr(false), Status: 200, Outcome: store.RequestLogOutcomeOK,
+		DurationMs: 5, InputTokens: ptr(int64(1)), OutputTokens: ptr(int64(2)),
+		CacheReadTokens: ptr(int64(3)), CacheWriteTokens: ptr(int64(4)), ReasoningTokens: ptr(int64(5)),
+	})
+	mustCreateRequestLog(t, db, store.RequestLog{
+		StartedAt: base.Add(time.Minute), Provider: "anthropic", AccountID: &acct.ID, SessionKey: "s1",
+		Status: 503, Outcome: store.RequestLogOutcomeRouteError, DurationMs: 1,
+	})
+
+	seedRunUsage(t, db, base) // taskA's ra2 row reports only input+cost
+
+	call := func(id, scope, groupBy string) []map[string]any {
+		t.Helper()
+		sendRequest(t, ws, id, "usage.summary", map[string]any{"scope": scope, "groupBy": groupBy})
+		resp := readEnvelopeFor(t, ws, id, 5*time.Second)
+		if resp.Error != nil {
+			t.Fatalf("usage.summary error = %v", resp.Error.Message)
+		}
+		var rows []map[string]any
+		if err := json.Unmarshal(resp.Result, &rows); err != nil {
+			t.Fatalf("decode usage.summary result: %v", err)
+		}
+		return rows
+	}
+
+	proxyRows := call("proxy", "proxy", "account")
+	if len(proxyRows) != 1 {
+		t.Fatalf("proxy summary = %d rows, want 1", len(proxyRows))
+	}
+	if _, ok := proxyRows[0]["unreported"]; ok {
+		t.Errorf("fully reported proxy row has unreported = %v, want key absent", proxyRows[0]["unreported"])
+	}
+
+	// Grouped by model, the row with no model is the one that reported
+	// nothing: all five token fields are unreported, in wire order.
+	modelRows := call("proxymodel", "proxy", "model")
+	sawEmpty := false
+	for _, row := range modelRows {
+		if row["key"] != "" {
+			if _, ok := row["unreported"]; ok {
+				t.Errorf("fully reported model row has unreported = %v, want key absent", row["unreported"])
+			}
+			continue
+		}
+		sawEmpty = true
+		want := []any{"inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}
+		if !reflect.DeepEqual(row["unreported"], want) {
+			t.Errorf("empty-model proxy row unreported = %v, want %v", row["unreported"], want)
+		}
+	}
+	if !sawEmpty {
+		t.Fatalf("proxy model summary has no empty-model row: %v", modelRows)
+	}
+
+	runsRows := call("runs", "runs", "task")
+	if len(runsRows) != 2 {
+		t.Fatalf("runs summary = %d rows, want 2", len(runsRows))
+	}
+	sawUnreported := false
+	for _, row := range runsRows {
+		un, ok := row["unreported"]
+		if !ok {
+			continue // taskB reported everything it summed
+		}
+		sawUnreported = true
+		names, ok := un.([]any)
+		if !ok {
+			t.Fatalf("unreported is %T, want array", un)
+		}
+		var got []string
+		for _, n := range names {
+			s, _ := n.(string)
+			got = append(got, s)
+		}
+		if len(got) != 3 || got[0] != "cacheReadTokens" || got[1] != "cacheWriteTokens" || got[2] != "reasoningTokens" {
+			t.Errorf("run row unreported = %v, want [cacheReadTokens cacheWriteTokens reasoningTokens]", got)
+		}
+	}
+	if !sawUnreported {
+		t.Error("no runs row carried unreported; taskA's ra2 row reports only input+cost")
 	}
 }

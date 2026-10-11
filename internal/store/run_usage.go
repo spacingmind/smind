@@ -144,7 +144,9 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 	query := fmt.Sprintf(`SELECT %s AS grp, COUNT(*),
 		COALESCE(SUM(u.input_tokens), 0), COALESCE(SUM(u.output_tokens), 0),
 		COALESCE(SUM(u.cached_input_tokens), 0), COALESCE(SUM(u.cache_write_tokens), 0),
-		COALESCE(SUM(u.reasoning_tokens), 0), SUM(u.cost_usd)
+		COALESCE(SUM(u.reasoning_tokens), 0), SUM(u.cost_usd),
+		COUNT(u.input_tokens), COUNT(u.output_tokens), COUNT(u.cached_input_tokens),
+		COUNT(u.cache_write_tokens), COUNT(u.reasoning_tokens)
 		FROM run_usage u JOIN runs r ON r.id = u.run_id%s GROUP BY grp ORDER BY grp`, col, where)
 
 	rows, err := s.db.Query(query, args...)
@@ -157,13 +159,16 @@ func (s *Store) SummarizeRunUsage(since, until *time.Time, groupBy string) ([]Ru
 	for rows.Next() {
 		var u RunUsageSummary
 		var cost sql.NullFloat64
+		var inCount, outCount, cacheReadCount, cacheWriteCount, reasoningCount int64
 		if err := rows.Scan(&u.Key, &u.Count, &u.InputTokens, &u.OutputTokens,
-			&u.CacheReadTokens, &u.CacheWriteTokens, &u.ReasoningTokens, &cost); err != nil {
+			&u.CacheReadTokens, &u.CacheWriteTokens, &u.ReasoningTokens, &cost,
+			&inCount, &outCount, &cacheReadCount, &cacheWriteCount, &reasoningCount); err != nil {
 			return nil, fmt.Errorf("scan run usage summary: %w", err)
 		}
 		if cost.Valid {
 			u.CostUSD = &cost.Float64
 		}
+		u.Unreported = unreportedTokenFields(inCount, outCount, cacheReadCount, cacheWriteCount, reasoningCount)
 		out = append(out, u)
 	}
 	return out, rows.Err()
