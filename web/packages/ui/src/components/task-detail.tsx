@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
@@ -51,6 +53,7 @@ export function TaskDetailPane({
   otherRunningChat,
   onJumpToChat,
   connectionStatus = "connected",
+  events,
   onOpenFile,
   onOpenDiffTab,
 }: {
@@ -66,6 +69,8 @@ export function TaskDetailPane({
   onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
+  /** The app's single-subscription event stream, optional so existing tests/mounts render unchanged: feeds both run.status adoption and the chat's queue view. */
+  events?: DaemonEvents | null;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
   onOpenFile?: (path: string) => void;
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
@@ -75,7 +80,11 @@ export function TaskDetailPane({
     client,
     task.ID,
     chat.ID,
+    events,
   );
+  // The daemon's per-chat prompt queue (ADR-0021 §9) -- one owner here,
+  // the composer only renders/cancels what it's handed.
+  const queue = useChatQueue(client, events ?? null, chat.ID);
   // provider.list's id→label map for the run headers ("label ?? id",
   // run-config IA): run entries carry only the wire provider id, and the
   // header should say "Claude Code", not "claude-native". Empty until the
@@ -376,6 +385,9 @@ export function TaskDetailPane({
         runningRunId={runningRunId}
         diffStat={wholeDiff.stat}
         onOpenDiff={onOpenDiffTab}
+        queuedItems={queue.items}
+        onCancelQueued={queue.cancel}
+        onQueued={queue.refresh}
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}

@@ -2047,6 +2047,7 @@ function TabContent({
         otherRunningChat={otherRunningChat}
         onJumpToChat={(chatId) => onOpenChat(chatId)}
         connectionStatus={connectionStatus}
+        events={events}
         onOpenFile={onOpenFile}
         onOpenDiffTab={onRevealInDiff}
       />

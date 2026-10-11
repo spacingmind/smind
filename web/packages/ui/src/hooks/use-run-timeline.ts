@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from "react";
 
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
 import type {
   PermissionSettings,
@@ -14,10 +15,12 @@ import type {
   RunLogsResult,
   RunSetPermissionModeResult,
   RunStartResult,
+  RunStatusEventPayload,
   RunStatusValue,
   RunSummary,
   ThinkingLevel,
   ToolCallStatus,
+  WhenBusy,
 } from "@/lib/types";
 
 /** A still-unanswered permission request on a run, as shown by the detail pane. */
@@ -273,6 +276,9 @@ export function latestMcpServers(events: RunLogEvent[]): McpServerState[] | unde
   return latest;
 }
 
+/** submitPrompt's result: a run that started, or a prompt the daemon queued (ADR-0021 §2). */
+export type SubmitResult = { kind: "started"; runId: string } | { kind: "queued"; queueItemId: number };
+
 interface TimelineState {
   /** null while the initial run.list fetch for the current task is in flight. */
   runs: RunEntry[] | null;
@@ -290,7 +296,8 @@ interface TimelineState {
     prompt: string,
     permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
-  ) => Promise<void>;
+    whenBusy?: WhenBusy,
+  ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
    * unmount, which only ever detach. The run's own active run.attach
@@ -482,6 +489,24 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
     });
 }
 
+/** Maps one run.list entry to its timeline entry -- shared by the initial load and the adopt-unknown-runs path below, so the two can't drift. */
+function toRunEntry(r: RunSummary): RunEntry {
+  return {
+    id: r.ID,
+    provider: r.Provider,
+    prompt: r.Prompt,
+    status: r.Status,
+    startedAt: r.StartedAt,
+    finishedAt: r.FinishedAt ?? undefined,
+    items: [],
+    stopReason: r.StopReason || undefined,
+    err: r.Err || undefined,
+    permissionMode: r.PermissionMode,
+    autoAccept: r.AutoAccept,
+    thinkingLevel: r.ThinkingLevel,
+  };
+}
+
 /**
  * Loads chatId's run history and keeps it live. run.list's chatId filter
  * (ADR-0016 P1.4) does the scoping server-side; sorting chronologically
@@ -498,10 +523,25 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
  * app-sidebar.tsx's useWorkspaceTree already established, extended here to
  * also cover live subscriptions (not just one-shot fetches).
  */
-export function useRunTimeline(client: WsClientLike | null, taskId: number | null, chatId: number | null): TimelineState {
+export function useRunTimeline(
+  client: WsClientLike | null,
+  taskId: number | null,
+  chatId: number | null,
+  events: DaemonEvents | null = null,
+): TimelineState {
   const [runs, setRuns] = useState<RunEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const sessionRef = useRef<Session | null>(null);
+  // Every run id this selection has already appended and/or attached a
+  // stream to -- the dedupe that keeps a run.status racing submitPrompt's
+  // run.start response from producing a duplicate entry or a second
+  // run.attach (ADR-0021 §9).
+  const knownRuns = useRef<Set<string>>(new Set());
+  // runIds whose adoption run.list is already in flight -- collapses a
+  // burst of run.status events for the same run into one merge without
+  // pre-adding the id to knownRuns (which would filter the run out of
+  // the very list it's being adopted from).
+  const adopting = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setRuns(null);
@@ -514,6 +554,8 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
 
     const session: Session = { cancelled: false, controller: new AbortController() };
     sessionRef.current = session;
+    knownRuns.current = new Set();
+    adopting.current = new Set();
 
     client
       .call<RunSummary[]>("run.list", { chatId })
@@ -522,23 +564,14 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
 
         const mine = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
 
-        const initial: RunEntry[] = mine.map((r) => ({
-          id: r.ID,
-          provider: r.Provider,
-          prompt: r.Prompt,
-          status: r.Status,
-          startedAt: r.StartedAt,
-          finishedAt: r.FinishedAt ?? undefined,
-          items: [],
-          stopReason: r.StopReason || undefined,
-          err: r.Err || undefined,
-          permissionMode: r.PermissionMode,
-          autoAccept: r.AutoAccept,
-          thinkingLevel: r.ThinkingLevel,
-        }));
-        setRuns(initial);
+        // An adoption may have landed while this fetch was in flight;
+        // only the entries it doesn't already know about are new. Fresh
+        // (older) history goes first, adopted entries after.
+        const fresh = mine.filter((r) => !knownRuns.current.has(r.ID));
+        for (const r of fresh) knownRuns.current.add(r.ID);
+        setRuns((prev) => [...fresh.map(toRunEntry), ...(prev ?? [])]);
 
-        for (const r of mine) {
+        for (const r of fresh) {
           if (r.Status === "running") {
             streamRun(client, session, setRuns, r.ID);
           } else {
@@ -572,40 +605,115 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
   }, [client, taskId, chatId]);
 
   const submitPrompt = useCallback(
-    async (provider: Provider, prompt: string, permission?: PermissionSettings, thinkingLevel?: ThinkingLevel) => {
+    async (
+      provider: Provider,
+      prompt: string,
+      permission?: PermissionSettings,
+      thinkingLevel?: ThinkingLevel,
+      whenBusy: WhenBusy = "queue",
+    ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
         throw new Error("no chat selected");
       }
 
-      const { runId } = await client.call<RunStartResult>("run.start", {
+      const result = await client.call<RunStartResult>("run.start", {
         taskId,
         chatId,
         provider,
         prompt,
+        whenBusy,
         ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
-      if (session.cancelled) return;
+      // ADR-0021 §2: a queued result has no run yet -- no entry is
+      // appended; the server delivers it later and run.status adopts it.
+      if (!("runId" in result)) return { kind: "queued" as const, queueItemId: result.queueItemId };
+      const runId = result.runId;
 
-      const entry: RunEntry = {
-        id: runId,
-        provider,
-        prompt,
-        status: "running",
-        startedAt: new Date().toISOString(),
-        items: [],
-        permissionMode: permission?.permissionMode ?? "",
-        autoAccept: permission?.autoAccept ?? false,
-        thinkingLevel: thinkingLevel ?? "",
-      };
-      setRuns((prev) => (prev ? [...prev, entry] : [entry]));
+      // A superseded selection still gets the truthful result -- the
+      // server already started the run -- but no UI mutation, which is
+      // now the new selection's to make.
+      if (session.cancelled) return { kind: "started" as const, runId };
 
-      streamRun(client, session, setRuns, runId);
+      // A run.status that arrived while the run.start response was in
+      // flight may already have adopted (and attached) this run.
+      if (!knownRuns.current.has(runId)) {
+        knownRuns.current.add(runId);
+        const entry: RunEntry = {
+          id: runId,
+          provider,
+          prompt,
+          status: "running",
+          startedAt: new Date().toISOString(),
+          items: [],
+          permissionMode: permission?.permissionMode ?? "",
+          autoAccept: permission?.autoAccept ?? false,
+          thinkingLevel: thinkingLevel ?? "",
+        };
+        setRuns((prev) => (prev ? [...prev, entry] : [entry]));
+
+        streamRun(client, session, setRuns, runId);
+      }
+      return { kind: "started" as const, runId };
     },
     [client, taskId, chatId],
   );
+
+  // Server-delivered queue items (ADR-0021 §9): the daemon starts the
+  // run itself, so an unknown runId on this chat's run.status is the
+  // signal to merge run.list's unknown entries in -- a running one gets
+  // streamed exactly once, a terminal one gets its run.logs, both
+  // guarded against duplicates by knownRuns.
+  useEffect(() => {
+    if (!client || taskId === null || chatId === null || !events) return;
+    return events.subscribe("run.status", (payload) => {
+      const p = payload as Partial<RunStatusEventPayload>;
+      const runId = p.runId;
+      if (p.chatId !== chatId || !runId) return;
+      if (knownRuns.current.has(runId)) return;
+      const session = sessionRef.current;
+      if (!session || adopting.current.has(runId)) return;
+      adopting.current.add(runId);
+
+      client
+        .call<RunSummary[]>("run.list", { chatId })
+        .then((list) => {
+          if (session.cancelled) return;
+          const unknown = [...list]
+            .sort((a, b) => a.StartedAt.localeCompare(b.StartedAt))
+            .filter((r) => !knownRuns.current.has(r.ID));
+          if (unknown.length === 0) return;
+          for (const r of unknown) knownRuns.current.add(r.ID);
+          setRuns((prev) => (prev ? [...prev, ...unknown.map(toRunEntry)] : unknown.map(toRunEntry)));
+          for (const r of unknown) {
+            if (r.Status === "running") {
+              streamRun(client, session, setRuns, r.ID);
+            } else {
+              client
+                .call<RunLogsResult>("run.logs", { runId: r.ID })
+                .then((logs) => {
+                  if (session.cancelled) return;
+                  patch(setRuns, r.ID, {
+                    items: buildTimeline(logs.events),
+                    status: logs.status,
+                    stopReason: logs.stopReason,
+                    err: logs.err,
+                  });
+                })
+                .catch(() => {});
+            }
+          }
+        })
+        .catch(() => {})
+        // An empty/error answer may simply predate the run's arrival --
+        // allow the next run.status for this run to try again.
+        .finally(() => {
+          adopting.current.delete(runId);
+        });
+    });
+  }, [client, taskId, chatId, events]);
 
   const stopRun = useCallback(
     async (runId: string) => {

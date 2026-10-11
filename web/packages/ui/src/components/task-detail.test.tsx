@@ -214,7 +214,7 @@ describe("TaskDetailPane", () => {
     expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
 
     // run.attach must not have been issued before run.start resolves.
     expect(client.calls.some((c) => c.method === "run.attach")).toBe(false);
@@ -590,7 +590,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
   });
 
   it("defaults the permission-mode selector to the provider default and omits permissionMode from run.start", async () => {
@@ -607,7 +607,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
   });
 
   it("sends the picked permissionMode in run.start", async () => {
@@ -630,6 +630,7 @@ describe("TaskDetailPane", () => {
       provider: "claude-native",
       prompt: "do the thing",
       permissionMode: "plan",
+      whenBusy: "queue",
     });
   });
 
@@ -893,6 +894,7 @@ describe("TaskDetailPane", () => {
       prompt: "do the thing",
       permissionMode: "plan",
       thinkingLevel: "standard",
+      whenBusy: "queue",
     });
   });
 
