@@ -24,6 +24,31 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
   };
 }
 
+describe("RunTimeline stop reason", () => {
+  it("labels a max_turn_requests run as turn limit reached", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "max_turn_requests" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.getAttribute("data-tone")).toBe("warning");
+    expect(el.textContent).toContain("Turn limit reached");
+    expect(el.textContent).toContain("Send a message to continue");
+  });
+
+  it("shows other stop reasons verbatim", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.textContent).toBe("cancelled");
+    expect(el.getAttribute("data-tone")).toBe("neutral");
+  });
+});
+
 describe("RunTimeline", () => {
   it("renders each event kind as its own row", () => {
     render(
