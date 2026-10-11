@@ -5,11 +5,13 @@ import type { WsClientLike } from "@/lib/ws-client";
 import type {
   PermissionSettings,
   PermissionQuestion,
+  PermissionDetail,
   PermissionRequestEventParams,
   PermissionResolutionReason,
   PermissionResolvedEventParams,
   McpServerState,
   Provider,
+  RunUsage,
   RunAttachResult,
   RunLogEvent,
   RunLogsResult,
@@ -32,6 +34,8 @@ export interface PendingPermission {
   questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request. */
   plan?: string;
+  /** Structured write/edit/execute detail from the daemon, when it sent one. */
+  detail?: PermissionDetail;
 }
 
 /**
@@ -250,6 +254,8 @@ export interface RunEntry {
    * retryWithHigherEffort below for how a *new* run gets a higher tier).
    */
   thinkingLevel: ThinkingLevel;
+  /** ADR-0025: the model the run was asked to use, "" for the provider's default. */
+  model?: string;
   /**
    * The run's most recent still-unanswered permission request, or
    * undefined if none is currently pending. Set when a "permission_request"
@@ -265,6 +271,13 @@ export interface RunEntry {
    * event (live or backfilled). Undefined when the run reported none.
    */
   mcpServers?: McpServerState[];
+  /**
+   * The run's usage (ADR-0020): one value per run, REPLACED and never
+   * added -- seeded from run.list's `usage`, replaced by a live "usage"
+   * event, and by the latest "usage" event of a run.logs backfill.
+   * Undefined when the run has no usage row (not an empty object).
+   */
+  usage?: RunUsage;
 }
 
 /** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
@@ -278,6 +291,15 @@ export function latestMcpServers(events: RunLogEvent[]): McpServerState[] | unde
 
 /** submitPrompt's result: a run that started, or a prompt the daemon queued (ADR-0021 §2). */
 export type SubmitResult = { kind: "started"; runId: string } | { kind: "queued"; queueItemId: number };
+
+/** The latest usage event's RunUsage in events, or undefined when no event carried one (ADR-0020: multiple usage events per run are possible, latest wins). */
+export function latestUsage(events: RunLogEvent[]): RunUsage | undefined {
+  let latest: RunUsage | undefined;
+  for (const event of events) {
+    if (event.type === "usage") latest = event.usage;
+  }
+  return latest;
+}
 
 interface TimelineState {
   /** null while the initial run.list fetch for the current task is in flight. */
@@ -297,6 +319,7 @@ interface TimelineState {
     permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
     whenBusy?: WhenBusy,
+    model?: string,
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -396,6 +419,7 @@ function setPendingPermission(
       options: params.options,
       questions: params.questions,
       plan: params.plan,
+      detail: params.detail,
     },
   });
 }
@@ -448,6 +472,10 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
         }
         if (event === "mcp_servers") {
           patch(setRuns, runId, { mcpServers: (params as { mcpServers: McpServerState[] }).mcpServers });
+        }
+        if (event === "usage") {
+          const usage = (params as { usage?: RunUsage }).usage;
+          if (usage !== undefined) patch(setRuns, runId, { usage });
         }
         if (event === "permission_resolved") {
           clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
@@ -504,6 +532,8 @@ function toRunEntry(r: RunSummary): RunEntry {
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
     thinkingLevel: r.ThinkingLevel,
+    model: r.Model ?? "",
+    ...(r.usage ? { usage: r.usage } : {}),
   };
 }
 
@@ -579,9 +609,14 @@ export function useRunTimeline(
               .call<RunLogsResult>("run.logs", { runId: r.ID })
               .then((logs) => {
                 if (session.cancelled) return;
+                const usage = latestUsage(logs.events);
                 patch(setRuns, r.ID, {
                   items: buildTimeline(logs.events),
                   mcpServers: latestMcpServers(logs.events),
+                  // Only set the key when a usage event exists, so a
+                  // backfill never overwrites a list-seeded value with
+                  // undefined.
+                  ...(usage !== undefined ? { usage } : {}),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   err: logs.err,
@@ -611,6 +646,7 @@ export function useRunTimeline(
       permission?: PermissionSettings,
       thinkingLevel?: ThinkingLevel,
       whenBusy: WhenBusy = "queue",
+      model?: string,
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
@@ -626,6 +662,7 @@ export function useRunTimeline(
         ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(model ? { model } : {}),
       });
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
@@ -651,6 +688,7 @@ export function useRunTimeline(
           permissionMode: permission?.permissionMode ?? "",
           autoAccept: permission?.autoAccept ?? false,
           thinkingLevel: thinkingLevel ?? "",
+          model: model ?? "",
         };
         setRuns((prev) => (prev ? [...prev, entry] : [entry]));
 
@@ -668,7 +706,12 @@ export function useRunTimeline(
   // guarded against duplicates by knownRuns.
   useEffect(() => {
     if (!client || taskId === null || chatId === null || !events) return;
-    return events.subscribe("run.status", (payload) => {
+    // A permission.pending for an already-known run is ignored here: the
+    // attach stream owns pendingPermission, and applying the bus event too
+    // could resurrect a card the stream already resolved. For an unknown
+    // run it is an adoption trigger exactly like run.status -- the attach
+    // backfill replays the unresolved permission_request.
+    const adopt = (payload: unknown) => {
       const p = payload as Partial<RunStatusEventPayload>;
       const runId = p.runId;
       if (p.chatId !== chatId || !runId) return;
@@ -712,7 +755,13 @@ export function useRunTimeline(
         .finally(() => {
           adopting.current.delete(runId);
         });
-    });
+    };
+    const offStatus = events.subscribe("run.status", adopt);
+    const offPermission = events.subscribe("permission.pending", adopt);
+    return () => {
+      offStatus();
+      offPermission();
+    };
   }, [client, taskId, chatId, events]);
 
   const stopRun = useCallback(

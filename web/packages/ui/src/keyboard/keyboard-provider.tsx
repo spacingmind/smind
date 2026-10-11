@@ -142,14 +142,14 @@ export function KeyboardProvider({
 
   // D3.1: a row gated `when.desktop` exists only on its own platform, so
   // it neither matches keys nor appears in the help list on the other one.
-  const bindings = useMemo(
-    () => resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop), overrides),
-    [overrides],
-  );
-
   // Read per dispatch rather than memoized at mount: tests reassign
   // `navigator.platform` between cases, and the cost is one regex.
   const isMac = isMacPlatform();
+
+  const bindings = useMemo(
+    () => resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop, isMac), overrides),
+    [overrides, isMac],
+  );
 
   const register = useCallback((action: ActionId, handler: ActionHandler, enabled: boolean) => {
     const token = Symbol("handler");

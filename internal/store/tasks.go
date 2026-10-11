@@ -57,7 +57,7 @@ func (s *Store) CreateTask(t Task) (Task, error) {
 // GetTask returns the task with the given id.
 func (s *Store) GetTask(id int64) (Task, error) {
 	row := s.db.QueryRow(
-		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT `+taskCols+`
 		 FROM tasks WHERE id = ?`, id,
 	)
 	t, err := scanTask(row)
@@ -70,7 +70,7 @@ func (s *Store) GetTask(id int64) (Task, error) {
 // ListTasksByWorkspace returns all tasks for workspaceID, ordered by id.
 func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT `+taskCols+`
 		 FROM tasks WHERE workspace_id = ? ORDER BY id`,
 		workspaceID,
 	)
@@ -93,7 +93,7 @@ func (s *Store) ListTasksByWorkspace(workspaceID int64) ([]Task, error) {
 // ListTasksBySpace returns all tasks in spaceID, ordered by id.
 func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT `+taskCols+`
 		 FROM tasks WHERE space_id = ? ORDER BY id`,
 		spaceID,
 	)
@@ -118,7 +118,7 @@ func (s *Store) ListTasksBySpace(spaceID int64) ([]Task, error) {
 // included; callers walk one level at a time.
 func (s *Store) ListTasksByParent(parentID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT `+taskCols+`
 		 FROM tasks WHERE parent_task_id = ? ORDER BY id`,
 		parentID,
 	)
@@ -163,7 +163,7 @@ func (s *Store) TaskDepth(id int64) (int, error) {
 // (i.e. with no space), ordered by id.
 func (s *Store) ListUngroupedTasksByWorkspace(workspaceID int64) ([]Task, error) {
 	rows, err := s.db.Query(
-		`SELECT id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at
+		`SELECT `+taskCols+`
 		 FROM tasks WHERE workspace_id = ? AND space_id IS NULL ORDER BY id`,
 		workspaceID,
 	)
@@ -272,6 +272,9 @@ func (s *Store) DeleteTask(id int64) error {
 	return nil
 }
 
+// taskCols is the column list scanTask reads.
+const taskCols = "id, workspace_id, space_id, parent_task_id, title, status, worktree_path, branch, created_at, updated_at, archived_at, setup_status, setup_error, setup_log, port"
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -279,11 +282,13 @@ type rowScanner interface {
 func scanTask(row rowScanner) (Task, error) {
 	var t Task
 	var spaceID, parentTaskID sql.NullInt64
-	var worktreePath, branch sql.NullString
+	var worktreePath, branch, setupStatus, setupError, setupLog sql.NullString
 	var archivedAt sql.NullTime
+	var port sql.NullInt64
 
 	if err := row.Scan(&t.ID, &t.WorkspaceID, &spaceID, &parentTaskID, &t.Title, &t.Status,
-		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt); err != nil {
+		&worktreePath, &branch, &t.CreatedAt, &t.UpdatedAt, &archivedAt,
+		&setupStatus, &setupError, &setupLog, &port); err != nil {
 		return Task{}, err
 	}
 
@@ -292,6 +297,10 @@ func scanTask(row rowScanner) (Task, error) {
 	t.WorktreePath = nullToStringPtr(worktreePath)
 	t.Branch = nullToStringPtr(branch)
 	t.ArchivedAt = nullToTimePtr(archivedAt)
+	t.SetupStatus = setupStatus.String
+	t.SetupError = setupError.String
+	t.SetupLog = setupLog.String
+	t.Port = nullToInt64Ptr(port)
 	return t, nil
 }
 
@@ -338,4 +347,10 @@ func nullToTimePtr(n sql.NullTime) *time.Time {
 	}
 	v := n.Time
 	return &v
+}
+
+// nullString maps "" to SQL NULL, for optional TEXT columns where empty
+// means "unset" (runs.model, agent_profiles.model).
+func nullString(v string) sql.NullString {
+	return sql.NullString{String: v, Valid: v != ""}
 }

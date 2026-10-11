@@ -63,3 +63,7 @@ reuses the existing envelope and connection multiplexing
 structural (no `id` + `event` object vs `id` + `result`), and locks in
 only what v1 consumers need — topic streams over one shared connection —
 while leaving the topic set open-ended.
+
+## Addendum 2026-10-11
+
+New topic `permission.resolved`, payload `{runId, taskId, chatId, requestId, optionId?, reason}` with `reason` one of `human|timeout|providerCancelled|runEnded`, published when a pending permission request leaves the pending state (never for AutoAccept). Additive; no existing payload changes.

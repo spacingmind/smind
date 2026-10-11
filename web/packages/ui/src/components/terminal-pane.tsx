@@ -56,6 +56,8 @@ export interface TerminalHandle {
   write(data: string | Uint8Array): void;
   /** Resizes the terminal to fit `container`'s current dimensions (wraps FitAddon.fit()); firing onResize if the size actually changed. */
   fit(): void;
+  /** The terminal's current size in cells, sent once on attach -- the mount-time fit() fires onResize before any session id exists, so that resize never reaches the PTY. Optional for the same reason setTheme is. */
+  size?(): { cols: number; rows: number };
   /** Re-applies the terminal's chrome colors (background/foreground/cursor/selection) -- optional so FakeTerminalHandle (this file's own test suite) doesn't need to implement it; xterm.js's own `options.theme` setter triggers a redraw. */
   setTheme?(theme: ITheme): void;
   /** The currently selected text, for the Copy affordance (Item 20). Optional for the same reason setTheme is. */
@@ -92,6 +94,7 @@ function createRealTerminal({ scrollback }: { scrollback: number }): TerminalHan
     onResize: (callback) => term.onResize(callback),
     write: (data) => term.write(data),
     fit: () => fit.fit(),
+    size: () => ({ cols: term.cols, rows: term.rows }),
     setTheme: (theme) => {
       term.options.theme = theme;
     },
@@ -336,6 +339,17 @@ export function TerminalPane({
       bindTerminal(key, id);
       terminalIdRef.current = id;
       setTerminalId(id);
+
+      // The mount-time fit() already sized the widget, but its onResize
+      // fired before this id existed and was dropped -- without this the
+      // PTY stays at its 80x24 default until the container next resizes
+      // (badly garbled under ConPTY, which repaints to its own width).
+      const size = termRef.current?.size?.();
+      if (size) {
+        client!.call("terminal.resize", { terminalId: id, ...size }).catch(() => {
+          // Best-effort, same reasoning as terminal.resize below.
+        });
+      }
 
       client!
         .callStream<TerminalAttachResult>(

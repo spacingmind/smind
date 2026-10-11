@@ -35,6 +35,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.create":         handleWorkspaceCreate(wm),
 		"workspace.list":           handleWorkspaceList(wm),
 		"workspace.get":            handleWorkspaceGet(wm),
+		"workspace.setScripts":     handleWorkspaceSetScripts(wm),
 		"workspace.delete":         handleWorkspaceDelete(wm),
 		"space.create":             handleSpaceCreate(wm),
 		"space.list":               handleSpaceList(wm),
@@ -43,8 +44,9 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.create":              handleTaskCreate(wm),
 		"task.list":                handleTaskList(wm),
 		"task.get":                 handleTaskGet(wm),
-		"task.archive":             handleTaskArchive(wm),
+		"task.archive":             handleTaskArchive(wm, reg),
 		"task.move":                handleTaskMove(wm),
+		"task.retrySetup":          handleTaskRetrySetup(wm),
 		"task.diff":                handleTaskDiff(wm),
 		"task.files":               handleTaskFiles(wm),
 		"task.fileDiff":            handleTaskFileDiff(wm),
@@ -347,7 +349,43 @@ func handleWorkspaceGet(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("workspace.get: invalid params: %w", err)
 		}
-		return wm.GetWorkspace(p.ID)
+		ws, err := wm.GetWorkspace(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		// The only wire method that returns the script text (ADR-0024),
+		// for the human-facing CLI `workspace setup show` and the web
+		// settings editor.
+		return workspaceGetResult{Workspace: ws, SetupScript: ws.SetupScript, TeardownScript: ws.TeardownScript}, nil
+	}
+}
+
+// workspaceGetResult is workspace.get's result: the workspace plus its
+// setup/teardown script text, which store.Workspace never serialises.
+type workspaceGetResult struct {
+	store.Workspace
+	SetupScript    string
+	TeardownScript string
+}
+
+// handleWorkspaceSetScripts edits a workspace's setup/teardown scripts.
+// Omitted or null keeps the stored script, an empty string clears it
+// (ADR-0024). The result carries only the Has* flags, never the text.
+func handleWorkspaceSetScripts(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			WorkspaceID    int64   `json:"workspaceId"`
+			SetupScript    *string `json:"setupScript"`
+			TeardownScript *string `json:"teardownScript"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("workspace.setScripts: invalid params: %w", err)
+		}
+		ws, err := wm.SetWorkspaceScripts(p.WorkspaceID, p.SetupScript, p.TeardownScript)
+		if err != nil {
+			return nil, fmt.Errorf("workspace.setScripts: %w", err)
+		}
+		return ws, nil
 	}
 }
 
@@ -446,13 +484,44 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 			SpaceID      *int64 `json:"spaceId"`
 			ParentTaskID *int64 `json:"parentTaskId"`
 			Title        string `json:"title"`
+			// BaseRef/Branch/PRNumber pick the task's starting point
+			// (exactly one of the three; all omitted = off HEAD) --
+			// validated again inside workspace.CreateTask.
+			BaseRef string `json:"baseRef"`
+			Branch  string `json:"branch"`
+			PRNum   *int64 `json:"prNumber"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
 		}
+		refModes := 0
+		if p.BaseRef != "" {
+			refModes++
+		}
+		if p.Branch != "" {
+			refModes++
+		}
+		if p.PRNum != nil {
+			if *p.PRNum <= 0 {
+				return nil, fmt.Errorf("task.create: prNumber must be > 0")
+			}
+			refModes++
+		}
+		if refModes > 1 {
+			return nil, fmt.Errorf("task.create: pass at most one of baseRef, branch, prNumber")
+		}
 		var opts []workspace.CreateTaskOption
 		if p.ParentTaskID != nil {
 			opts = append(opts, workspace.WithParentTask(*p.ParentTaskID))
+		}
+		if p.BaseRef != "" {
+			opts = append(opts, workspace.WithBaseRef(p.BaseRef))
+		}
+		if p.Branch != "" {
+			opts = append(opts, workspace.WithExistingBranch(p.Branch))
+		}
+		if p.PRNum != nil {
+			opts = append(opts, workspace.WithPullRequest(int(*p.PRNum)))
 		}
 		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
 	}
@@ -504,7 +573,15 @@ func handleTaskMove(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-func handleTaskArchive(wm *workspace.Manager) handlerFunc {
+// handleTaskArchive archives a task, refusing while any of its chats has
+// a running run or a queued prompt (see Registry.ActiveRunForTask): the
+// run's subprocess sits inside the task's worktree, so archiving under it
+// would destroy the directory a live agent is working in. The caller must
+// run.stop (and cancel queued items) first. The guard lives here, in the
+// daemon layer that holds both the workspace manager and the runs
+// registry, so the web UI gets it too. Past the guard, ArchiveTask's
+// checkpoint-first ordering is unchanged.
+func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
@@ -512,7 +589,33 @@ func handleTaskArchive(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
 		}
-		return wm.ArchiveTask(p.ID)
+		release, err := reg.TryBeginArchive(p.ID)
+		if err != nil {
+			// Fail closed, naming what is in the way: an unreadable store
+			// refuses the archive, never answers "no active runs" on a
+			// broken read, and a running/queued run is named outright.
+			return nil, fmt.Errorf("task.archive: task %d: %w", p.ID, err)
+		}
+		defer release()
+		t, err := wm.ArchiveTask(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("task.archive: %w", err)
+		}
+		return t, nil
+	}
+}
+
+// handleTaskRetrySetup re-runs the workspace's setup script on a
+// non-running task (ADR-0024 §3).
+func handleTaskRetrySetup(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.retrySetup: invalid params: %w", err)
+		}
+		return wm.RetrySetup(p.ID)
 	}
 }
 
@@ -881,6 +984,7 @@ type chatQueueItemParams struct {
 	Status       string    `json:"Status"`
 	RunID        *string   `json:"RunID"`
 	CancelReason string    `json:"CancelReason"`
+	CancelKind   string    `json:"CancelKind"`
 	CreatedAt    time.Time `json:"CreatedAt"`
 	UpdatedAt    time.Time `json:"UpdatedAt"`
 }
@@ -1004,6 +1108,9 @@ type permissionRequestParams struct {
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`
+	// Detail says what an edit/execute request will do (ACP only); omitted
+	// when the provider supplied none.
+	Detail *taskrunner.PermissionDetail `json:"detail,omitempty"`
 }
 
 // permissionResolvedParams is the params payload of a "permission_resolved"
@@ -1057,6 +1164,10 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			// omitted or "reject" keeps today's behavior exactly, so old
 			// clients are unchanged.
 			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Model (ADR-0025) is the model the run is asked to use; omitted or
+			// empty means the provider's default. Validated against the
+			// provider's catalog by the runs registry before any spawn.
+			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
@@ -1068,7 +1179,7 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0, runs.WithModel(p.Model))
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -1126,6 +1237,10 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
 			// omitted or "reject" keeps today's behavior exactly.
 			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Model (ADR-0025) is the model the run is asked to use; omitted or
+			// empty means the provider's default. Validated against the
+			// provider's catalog by the runs registry before any spawn.
+			Model string `json:"model"`
 			// Source/FromTaskID/FromChatID are ADR-0021 §4's provenance:
 			// the wsapi default is a human caller; the MCP layer passes
 			// orchestrator, or agent plus its own task/chat ids for the
@@ -1155,7 +1270,7 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, runs.WithModel(p.Model))
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
@@ -1169,17 +1284,29 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 // handleRunList returns every run the Registry knows about, or (with
 // chatId set) just that chat's runs -- ADR-0016 P1.4's additive filter;
 // an omitted/zero chatId preserves today's unfiltered behavior exactly.
+// taskId (nonzero) restricts to that task's runs across all of its chats,
+// and status (non-empty) to runs in exactly that status ("running",
+// "done", ...) -- both additive filters for the discovery path; a call
+// naming neither keeps the exact pre-filter reg.List behavior (no cap).
 func handleRunList(reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			ChatID int64 `json:"chatId"`
+			ChatID int64  `json:"chatId"`
+			TaskID int64  `json:"taskId"`
+			Status string `json:"status"`
 		}
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, fmt.Errorf("run.list: invalid params: %w", err)
 			}
 		}
-		return reg.List(p.ChatID), nil
+		if p.Status != "" && !runs.ValidRunListStatus(runs.Status(p.Status)) {
+			return nil, fmt.Errorf("run.list: unknown status %q (valid: running, done, error, stopped, interrupted)", p.Status)
+		}
+		if p.TaskID == 0 && p.Status == "" {
+			return reg.List(p.ChatID), nil
+		}
+		return reg.ListFiltered(p.TaskID, p.ChatID, runs.Status(p.Status)), nil
 	}
 }
 
@@ -1247,6 +1374,7 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 					RequestID: e.PermissionRequestID,
 					Summary:   e.PermissionSummary,
 					Options:   toPermissionOptionParams(e.PermissionOptions),
+					Detail:    e.PermissionDetail,
 				})
 			case taskrunner.EventTypePermissionResolved:
 				rc.Emit("permission_resolved", permissionResolvedParams{
@@ -1313,7 +1441,9 @@ type runLogEvent struct {
 	RequestID  string                   `json:"requestId,omitempty"`
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
-	OptionID   string                   `json:"optionId,omitempty"`
+	// Detail is populated for a "permission_request" entry that has one.
+	Detail   *taskrunner.PermissionDetail `json:"detail,omitempty"`
+	OptionID string                       `json:"optionId,omitempty"`
 	// Reason is the wire form of taskrunner.PermissionResolution, populated
 	// for a "permission_resolved" entry -- see permissionResolvedParams.
 	Reason string `json:"reason,omitempty"`
@@ -1377,6 +1507,7 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 			RequestID: e.PermissionRequestID,
 			Summary:   e.PermissionSummary,
 			Options:   toPermissionOptionParams(e.PermissionOptions),
+			Detail:    e.PermissionDetail,
 		}
 	case taskrunner.EventTypePermissionResolved:
 		return runLogEvent{
@@ -1504,12 +1635,42 @@ func handleRunSetPermissionMode(reg *runs.Registry) handlerFunc {
 			RunID      string `json:"runId"`
 			ModeID     string `json:"modeId"`
 			AutoAccept *bool  `json:"autoAccept"`
+			Source     string `json:"source"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.setPermissionMode: invalid params: %w", err)
 		}
 		if p.ModeID == "" && p.AutoAccept == nil {
 			return nil, fmt.Errorf("run.setPermissionMode: modeId or autoAccept is required")
+		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.setPermissionMode: invalid source %q", p.Source)
+		}
+		// ADR-0019 decision 6 (via ADR-0021's source provenance): an
+		// auto-approving mode or autoAccept=true picked by a non-human
+		// caller would amount to the orchestrator approving its own tool
+		// calls, so both are rejected here -- the same guard runs.start
+		// applies at enqueue time.
+		if p.Source != store.ChatQueueSourceHuman {
+			if p.ModeID != "" {
+				// Fail closed: if the catalog can't be resolved we can't
+				// tell whether the mode auto-approves, so reject.
+				catalog, err := reg.ProviderCatalogForRun(p.RunID)
+				if err != nil {
+					return nil, fmt.Errorf("run.setPermissionMode: %w", err)
+				}
+				if taskrunner.ModeAutoApproves(catalog, taskrunner.PermissionSettings{Mode: p.ModeID}) {
+					return nil, fmt.Errorf("run.setPermissionMode: a non-human caller may not pick an auto-approving permission mode (ADR-0019 decision 6); ask a human to switch modes")
+				}
+			}
+			if p.AutoAccept != nil && *p.AutoAccept {
+				return nil, fmt.Errorf("run.setPermissionMode: a non-human caller may not set autoAccept=true (ADR-0019 decision 6); ask a human to enable it")
+			}
 		}
 		if p.ModeID != "" {
 			if err := reg.SetPermissionMode(ctx, p.RunID, p.ModeID); err != nil {
@@ -1615,9 +1776,45 @@ func handleRunSetConfigOption(reg *runs.Registry) handlerFunc {
 			RunID    string `json:"runId"`
 			ConfigID string `json:"configId"`
 			Value    string `json:"value"`
+			Source   string `json:"source"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.setConfigOption: invalid params: %w", err)
+		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.setConfigOption: invalid source %q", p.Source)
+		}
+		// ADR-0019 decision 6, fail-closed: a non-human caller may only
+		// change live settings that cannot widen permissions -- options in
+		// the thought_level or model categories. Anything else (category
+		// "mode", an empty/unknown category, or an unknown configId) is
+		// rejected before the session is touched.
+		if p.Source != store.ChatQueueSourceHuman {
+			opts, err := reg.ListConfigOptions(p.RunID)
+			if err != nil {
+				return nil, fmt.Errorf("run.setConfigOption: %w", err)
+			}
+			var category string
+			found := false
+			for _, o := range opts {
+				if o.ConfigID == p.ConfigID {
+					category, found = o.Category, true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("run.setConfigOption: unknown configId %q for run %q (ADR-0019 decision 6: a non-human caller may only set thought_level or model options)", p.ConfigID, p.RunID)
+			}
+			switch category {
+			case "thought_level", "model":
+			default:
+				return nil, fmt.Errorf("run.setConfigOption: a non-human caller may only set options in the thought_level or model categories, not %q (ADR-0019 decision 6)", category)
+			}
 		}
 		opts, err := reg.SetConfigOption(ctx, p.RunID, p.ConfigID, p.Value)
 		if err != nil {
@@ -1780,6 +1977,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			ThinkingLevel        string          `json:"thinkingLevel"`
+			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -1794,6 +1992,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			PermissionMode: p.PermissionMode,
 			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
+			Model:          p.Model,
 			Notes:          p.Notes,
 		})
 	}
@@ -1832,6 +2031,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			ThinkingLevel        string          `json:"thinkingLevel"`
+			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -1847,6 +2047,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			PermissionMode: p.PermissionMode,
 			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
+			Model:          p.Model,
 			Notes:          p.Notes,
 		})
 	}

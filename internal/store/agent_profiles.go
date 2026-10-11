@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -13,9 +14,9 @@ func (s *Store) CreateAgentProfile(p AgentProfile) (AgentProfile, error) {
 	p.CreatedAt, p.UpdatedAt = now, now
 
 	res, err := s.db.Exec(
-		`INSERT INTO agent_profiles (name, provider, permission_mode, auto_accept, thinking_level, notes, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, p.Notes, p.CreatedAt, p.UpdatedAt,
+		`INSERT INTO agent_profiles (name, provider, permission_mode, auto_accept, thinking_level, model, notes, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.CreatedAt, p.UpdatedAt,
 	)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("insert agent profile: %w", err)
@@ -31,20 +32,22 @@ func (s *Store) CreateAgentProfile(p AgentProfile) (AgentProfile, error) {
 // GetAgentProfile returns the agent profile with the given id.
 func (s *Store) GetAgentProfile(id int64) (AgentProfile, error) {
 	var p AgentProfile
+	var model sql.NullString
 	err := s.db.QueryRow(
-		`SELECT id, name, provider, permission_mode, auto_accept, thinking_level, notes, created_at, updated_at
+		`SELECT id, name, provider, permission_mode, auto_accept, thinking_level, model, notes, created_at, updated_at
 		 FROM agent_profiles WHERE id = ?`, id,
-	).Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
+	).Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &model, &p.Notes, &p.CreatedAt, &p.UpdatedAt)
 	if err != nil {
 		return AgentProfile{}, fmt.Errorf("get agent profile %d: %w", id, err)
 	}
+	p.Model = model.String
 	return p, nil
 }
 
 // ListAgentProfiles returns every agent profile, ordered by id.
 func (s *Store) ListAgentProfiles() ([]AgentProfile, error) {
 	rows, err := s.db.Query(
-		`SELECT id, name, provider, permission_mode, auto_accept, thinking_level, notes, created_at, updated_at
+		`SELECT id, name, provider, permission_mode, auto_accept, thinking_level, model, notes, created_at, updated_at
 		 FROM agent_profiles ORDER BY id`,
 	)
 	if err != nil {
@@ -55,9 +58,11 @@ func (s *Store) ListAgentProfiles() ([]AgentProfile, error) {
 	profiles := make([]AgentProfile, 0)
 	for rows.Next() {
 		var p AgentProfile
-		if err := rows.Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &p.Notes, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var model sql.NullString
+		if err := rows.Scan(&p.ID, &p.Name, &p.Provider, &p.PermissionMode, &p.AutoAccept, &p.ThinkingLevel, &model, &p.Notes, &p.CreatedAt, &p.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan agent profile: %w", err)
 		}
+		p.Model = model.String
 		profiles = append(profiles, p)
 	}
 	return profiles, rows.Err()
@@ -76,9 +81,9 @@ func (s *Store) UpdateAgentProfile(p AgentProfile) (AgentProfile, error) {
 	p.UpdatedAt = time.Now().UTC()
 
 	if _, err := s.db.Exec(
-		`UPDATE agent_profiles SET name = ?, provider = ?, permission_mode = ?, auto_accept = ?, thinking_level = ?, notes = ?, updated_at = ?
+		`UPDATE agent_profiles SET name = ?, provider = ?, permission_mode = ?, auto_accept = ?, thinking_level = ?, model = ?, notes = ?, updated_at = ?
 		 WHERE id = ?`,
-		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, p.Notes, p.UpdatedAt, p.ID,
+		p.Name, p.Provider, p.PermissionMode, p.AutoAccept, p.ThinkingLevel, nullString(p.Model), p.Notes, p.UpdatedAt, p.ID,
 	); err != nil {
 		return AgentProfile{}, fmt.Errorf("update agent profile %d: %w", p.ID, err)
 	}

@@ -47,6 +47,8 @@ func run(args []string) int {
 		return cmdUsage(args[1:])
 	case "mcp":
 		return cmdMcp(args[1:])
+	case "skill":
+		return cmdSkill(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
@@ -71,6 +73,8 @@ Usage:
 
   smind workspace create <repoPath> <name> <policy>       register a workspace
   smind workspace ls                                      list workspaces
+  smind workspace setup show|set|clear <workspaceId>      worktree setup/teardown scripts
+                                                           [--setup-file F|-] [--teardown-file F|-]
 
   smind account add [--base-url <url>] <provider> <label> < credential
                                                            register an account (credential from stdin)
@@ -96,14 +100,19 @@ Usage:
   smind task stop <runId>                                  stop a running run
 
   smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept]
-      [--thinking-level=<level>] [--notes=<text>]         create an agent profile
+      [--thinking-level=<level>] [--model=<model>]
+      [--notes=<text>]                                    create an agent profile
   smind profile ls                                         list agent profiles
   smind profile rm <id>                                    remove an agent profile
 
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]
 
-Every subcommand except "serve" talks to a locally running daemon over its
+  smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
+  smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)
+  smind skill uninstall [--target ...] [name...]          remove only the files smind installed
+
+Every subcommand except "serve" and "skill" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.spacingmind/token (override the home directory with $SMIND_HOME).
 `)

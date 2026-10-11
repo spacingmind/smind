@@ -28,7 +28,7 @@ describe("ShortcutRows", () => {
     const rows = screen.getAllByTestId("shortcut-row");
     // jsdom is not a desktop build: the web-only rows render, the
     // desktop-gated Mod+T / Mod+Digit ones do not.
-    const webBindings = platformBindings(SHORTCUT_BINDINGS, false);
+    const webBindings = platformBindings(SHORTCUT_BINDINGS, false, false);
     expect(rows).toHaveLength(webBindings.length);
     expect(rows.map((r) => r.dataset.bindingId).sort()).toEqual(
       webBindings.map((b) => b.id).sort(),
@@ -40,7 +40,7 @@ describe("ShortcutRows", () => {
 
   it("groups rows under their section headings", () => {
     renderRows();
-    for (const binding of SHORTCUT_BINDINGS) {
+    for (const binding of platformBindings(SHORTCUT_BINDINGS, false, false)) {
       const section = screen.getByTestId(`shortcut-section-${binding.section}`);
       expect(within(section).getByText(SECTION_TITLES[binding.section])).toBeInTheDocument();
       expect(within(section).getByText(binding.label)).toBeInTheDocument();
@@ -60,7 +60,7 @@ describe("ShortcutRows", () => {
   it("narrows to rows matching a search query", () => {
     renderRows("close current tab");
     const rowIds = screen.getAllByTestId("shortcut-row").map((r) => r.dataset.bindingId);
-    expect(rowIds).toEqual(["tab-close"]);
+    expect(rowIds).toEqual(["tab-close", "tab-close-terminal"]);
   });
 
   it("keeps every row of a section whose own title matches the query", () => {
@@ -72,7 +72,7 @@ describe("ShortcutRows", () => {
       .getAllByTestId("shortcut-row")
       .map((r) => r.dataset.bindingId);
     expect(tabsRowIds).toEqual(
-      platformBindings(SHORTCUT_BINDINGS, false)
+      platformBindings(SHORTCUT_BINDINGS, false, false)
         .filter((b) => b.section === "tabs")
         .map((b) => b.id),
     );
@@ -214,5 +214,25 @@ describe("ShortcutRows", () => {
       .getByTestId("shortcut-sections")
       .querySelector<HTMLElement>('[data-binding-id="palette-open"]')!;
     expect(within(row).getByText("K")).toBeInTheDocument();
+  });
+});
+
+describe("terminal hatch rows", () => {
+  it("shortcuts-dialog-lists-terminal-hatch-rows", () => {
+    renderRows();
+    const row = screen.getByTestId("shortcut-sections").querySelector<HTMLElement>(
+      '[data-binding-id="palette-open-terminal"]',
+    )!;
+    expect(within(row).getByText("Shift")).toBeInTheDocument();
+    expect(within(row).getByText("P")).toBeInTheDocument();
+    expect(within(row).getByText(/while a terminal has focus/)).toBeInTheDocument();
+  });
+
+  it("omits them on Mac", () => {
+    vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
+    renderRows();
+    expect(
+      screen.getByTestId("shortcut-sections").querySelector('[data-binding-id="palette-open-terminal"]'),
+    ).toBeNull();
   });
 });

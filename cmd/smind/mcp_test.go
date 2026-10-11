@@ -30,9 +30,16 @@ type mcpTestEnv struct {
 // client, and connects an MCP client session to it.
 func newMCPSession(t *testing.T) *mcpTestEnv {
 	t.Helper()
+	return newMCPSessionWithAgentArgs(t)
+}
+
+// newMCPSessionWithAgentArgs is newMCPSession with extra argv for the
+// daemon's fake GLM agent (e.g. "modes:session", "live-opts").
+func newMCPSessionWithAgentArgs(t *testing.T, agentArgs ...string) *mcpTestEnv {
+	t.Helper()
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
-	srvURL := newConfigOptionTestEnv(t, home)
+	srvURL := newConfigOptionTestEnvArgs(t, home, agentArgs...)
 	writeTestConfig(t, home, srvURL)
 
 	client := dialTestClient(t, srvURL)
@@ -109,4 +116,11 @@ func mcpToolErrorText(res *mcp.CallToolResult) string {
 		}
 	}
 	return b.String()
+}
+
+// newMCPSessionArgs is kept for the model-selection tests: an MCP session
+// whose fake agent gets extra argv (e.g. "models").
+func newMCPSessionArgs(t *testing.T, agentArgs ...string) *mcpTestEnv {
+	t.Helper()
+	return newMCPSessionWithAgentArgs(t, agentArgs...)
 }

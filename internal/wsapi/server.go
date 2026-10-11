@@ -104,6 +104,9 @@ func New(wm *workspace.Manager, acctReg *accounts.Registry, runner *taskrunner.R
 	// survived a daemon restart keep delivering (decision 5, as amended).
 	reg.SetStarter(wm, runner)
 	reg.DeliverQueued()
+	// ADR-0024 §2: a prompt queued while a task's setup script ran is
+	// delivered when setup finishes (ok or failed).
+	wm.SetSetupFinishedHook(func(int64) { reg.DeliverQueued() })
 
 	acctReg.SetNotifier(busAccountNotifier{bus: bus})
 	coord := accounts.NewDefaultLoginCoordinator(acctReg)
@@ -260,6 +263,12 @@ func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int
 	b.bus.Publish(Event{Topic: TopicPermissionPending, Payload: permissionPendingPayload{
 		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, Summary: summary,
 		Options: toPermissionOptionParams(options),
+	}})
+}
+
+func (b busRunNotifier) NotifyPermissionResolved(runID string, taskID, chatID int64, requestID, optionID, reason string) {
+	b.bus.Publish(Event{Topic: TopicPermissionResolved, Payload: permissionResolvedPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, OptionID: optionID, Reason: reason,
 	}})
 }
 

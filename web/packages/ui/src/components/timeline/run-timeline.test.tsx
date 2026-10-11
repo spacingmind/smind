@@ -24,6 +24,31 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
   };
 }
 
+describe("RunTimeline stop reason", () => {
+  it("labels a max_turn_requests run as turn limit reached", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "max_turn_requests" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.getAttribute("data-tone")).toBe("warning");
+    expect(el.textContent).toContain("Turn limit reached");
+    expect(el.textContent).toContain("Send a message to continue");
+  });
+
+  it("shows other stop reasons verbatim", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.textContent).toBe("cancelled");
+    expect(el.getAttribute("data-tone")).toBe("neutral");
+  });
+});
+
 describe("RunTimeline", () => {
   it("renders each event kind as its own row", () => {
     render(
@@ -45,6 +70,23 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("the answer");
     expect(screen.getByTestId("timeline-tool-call")).toHaveTextContent("Bash");
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
+  });
+
+  it("run header shows the requested model", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-model-chip")).toHaveTextContent("claude-opus-5-5");
+
+    // A default run (no model requested) has no chip.
+    rerender(
+      <ul>
+        <RunTimeline run={run([], { model: "" })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-model-chip")).not.toBeInTheDocument();
   });
 
   it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {
@@ -150,6 +192,28 @@ describe("RunTimeline", () => {
 
     expect(screen.getAllByTestId("timeline-assistant")).toHaveLength(2);
     expect(screen.getByTestId("timeline-unknown")).toBeInTheDocument();
+  });
+
+  it("run footer shows the usage pill", () => {
+    render(
+      <ul>
+        <RunTimeline
+          run={run([], {
+            stopReason: "end_turn",
+            usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.042, source: "claude_result" },
+          })}
+        />
+      </ul>,
+    );
+
+    const footer = screen.getByTestId("run-footer");
+    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("12.3k in · 1.2k out · $0.042");
+    // The pill sits between the stop reason and the Copy button.
+    const stop = within(footer).getByTestId("run-stop-reason");
+    const pill = within(footer).getByTestId("run-usage-pill");
+    const copy = within(footer).getByTestId("run-copy-button");
+    expect(stop.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pill.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows the turn's elapsed time and copies the turn as plain text", async () => {

@@ -233,7 +233,7 @@ func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
 
 func TestGLMCommand(t *testing.T) {
 	got := GLMCommand()
-	want := []string{"npx", "-y", "glm-acp-agent@1.3.0"}
+	want := []string{"npx", "-y", "glm-acp-agent@1.14.0"}
 	if len(got) != len(want) {
 		t.Fatalf("GLMCommand() = %v, want %v", got, want)
 	}
@@ -495,5 +495,21 @@ func TestClient_SessionModes(t *testing.T) {
 
 	if _, ok := c.SessionModes("unknown-session"); ok {
 		t.Fatal("SessionModes(unknown) ok = true, want false")
+	}
+}
+
+func TestGLMCommand_PassesMaxTurns(t *testing.T) {
+	got := GLMCommand(WithMaxTurns(40))
+	want := []string{"npx", "-y", "glm-acp-agent@1.14.0", "--max-turns", "40"}
+	if len(got) != len(want) {
+		t.Fatalf("GLMCommand(WithMaxTurns(40)) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("GLMCommand(WithMaxTurns(40)) = %v, want %v", got, want)
+		}
+	}
+	if got := GLMCommand(WithMaxTurns(0)); len(got) != 3 {
+		t.Fatalf("GLMCommand(WithMaxTurns(0)) = %v, want no --max-turns", got)
 	}
 }

@@ -202,3 +202,40 @@ func TestRunProfileAddAutoAcceptRejectsNonBoolean(t *testing.T) {
 		t.Fatalf("stored profiles = %+v, want none", list)
 	}
 }
+
+// TestProfile_ModelFlag: `profile add --model` stores the model, `profile
+// ls` shows it in a MODEL column, and a malformed model exits nonzero.
+func TestProfile_ModelFlag(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+
+	var code int
+	captureStdout(t, func() {
+		code = run([]string{"profile", "add", "Cheap", "claude-native", "--model", "haiku"})
+	})
+	if code != 0 {
+		t.Fatalf("run(profile add --model) = %d, want 0", code)
+	}
+	captureStdout(t, func() {
+		code = run([]string{"profile", "add", "Opus", "claude-native", "--model=claude-opus-5-5"})
+	})
+	if code != 0 {
+		t.Fatalf("run(profile add --model=) = %d, want 0", code)
+	}
+	list, err := profiles.New(s).List()
+	if err != nil || len(list) != 2 || list[0].Model != "haiku" || list[1].Model != "claude-opus-5-5" {
+		t.Fatalf("stored profiles = %+v, %v, want models haiku and claude-opus-5-5", list, err)
+	}
+
+	var out string
+	out = captureStdout(t, func() { code = run([]string{"profile", "ls"}) })
+	if code != 0 || !strings.Contains(out, "MODEL") || !strings.Contains(out, "haiku") || !strings.Contains(out, "claude-opus-5-5") {
+		t.Fatalf("profile ls = %d, %q, want a MODEL column listing both models", code, out)
+	}
+
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() { code = run([]string{"profile", "add", "Bad", "claude-native", "--model", "has space"}) })
+	})
+	if code == 0 || !strings.Contains(stderr, "model") {
+		t.Fatalf("run(profile add --model 'has space') = %d, stderr %q, want a rejection naming the model", code, stderr)
+	}
+}

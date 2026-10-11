@@ -8,9 +8,21 @@ export interface Workspace {
   Path: string;
   Title: string;
   RoutingPolicy: string;
+  /** Whether a worktree setup/teardown script is configured (ADR-0024); the script text itself is only returned by workspace.get. */
+  HasSetupScript?: boolean;
+  HasTeardownScript?: boolean;
   CreatedAt: string;
   UpdatedAt: string;
 }
+
+/** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
+export interface WorkspaceWithScripts extends Workspace {
+  SetupScript: string;
+  TeardownScript: string;
+}
+
+/** A task's worktree setup state (ADR-0024): "" = no setup script ran. */
+export type SetupStatus = "" | "running" | "ok" | "failed";
 
 export interface Task {
   ID: number;
@@ -23,6 +35,14 @@ export interface Task {
   CreatedAt: string;
   UpdatedAt: string;
   ArchivedAt: string | null;
+  /** The setup/port fields are optional only so an older daemon (and bare test fixtures) still type-check; read them as ""/null when absent. */
+  SetupStatus?: SetupStatus;
+  /** Failure reason when SetupStatus is "failed". */
+  SetupError?: string;
+  /** Tail of the setup script's merged stdout/stderr (capped daemon-side). */
+  SetupLog?: string;
+  /** The allocated SMIND_PORT, or null when no port range is configured. */
+  Port?: number | null;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
@@ -45,9 +65,8 @@ export interface Space {
 // ThinkingLevel), not scoped to any workspace. PermissionMode/ThinkingLevel
 // may be "" (unset -- the provider's own default mode applies):
 // the composer's own default applies in that case, same as an omitted
-// task.prompt field does today. No `Model` field -- dropped from v1 per the
-// ADR's 2026-09-25 review (task.prompt has no model parameter to apply it
-// to).
+// task.prompt field does today. Model (ADR-0025) is the profile's requested
+// model id, "" (NULL) meaning the provider's default.
 export interface AgentProfile {
   ID: number;
   Name: string;
@@ -57,6 +76,8 @@ export interface AgentProfile {
   /** ACP providers only: approve every permission prompt. */
   AutoAccept: boolean;
   ThinkingLevel: string;
+  /** ADR-0025: a model id from the provider's catalog, or "" for the provider's default (absent on an older daemon). */
+  Model?: string;
   Notes: string;
   CreatedAt: string;
   UpdatedAt: string;
@@ -113,6 +134,16 @@ export interface PermissionSettings {
 // all. "" (omitted) preserves today's SDK default exactly.
 export type ThinkingLevel = "" | "off" | "standard" | "extended";
 
+// One entry of a provider's model catalog (internal/taskrunner.ModelInfo,
+// ADR-0025). `default` marks the model the provider uses when none is
+// requested.
+export interface ModelInfo {
+  id: string;
+  label: string;
+  description?: string;
+  default?: boolean;
+}
+
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
 // spawned as an external CLI subprocess managing its own authentication out
 // of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no
@@ -156,6 +187,10 @@ export interface ProviderInfo {
   supportsAutoAccept?: boolean;
   /** Whether a running run's mode can be switched (run.setPermissionMode) -- false for Codex. */
   liveModeSwitch?: boolean;
+  /** ADR-0025: the provider's model catalog. Empty/absent when none is known (an ACP agent not probed yet). */
+  models?: ModelInfo[];
+  /** True once `models` came from the agent itself rather than a static catalog. */
+  modelsDiscovered?: boolean;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
@@ -176,6 +211,23 @@ export interface ProviderTestResult {
 // over the wire as their underlying string, same as any other Go string
 // enum with no json tag remapping.
 export type RunStatusValue = "running" | "done" | "error" | "stopped";
+
+// Mirrors internal/runs.RunUsage (ADR-0020): a run's reported usage from
+// its own agent events. Every field but `source` is optional/null and
+// null means "not reported" -- NEVER 0, which is a real reported value.
+// `source` names which agent surface produced it.
+export interface RunUsage {
+  inputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+  costUsd?: number | null;
+  model?: string | null;
+  contextUsed?: number | null;
+  contextSize?: number | null;
+  source: string;
+}
 
 // Mirrors internal/runs.RunStatus (aliased as RunSummary for run.list's
 // result) field-for-field. Like Workspace/Task, this struct carries no
@@ -198,6 +250,10 @@ export interface RunSummary {
   AutoAccept: boolean;
   /** Claude-only; "" (unset) for every other provider or a run started before the thinking-level selector was touched. Not persisted across a daemon restart -- a rehydrated run always reports "". */
   ThinkingLevel: ThinkingLevel;
+  /** ADR-0025: the model this run was asked to use; "" (or absent on an older daemon) means the provider's default. */
+  Model?: string;
+  /** ADR-0020: the run's usage totals -- lowercase json tag, so unlike the PascalCase fields above. Absent for an old run or one that reported nothing. */
+  usage?: RunUsage;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -217,7 +273,7 @@ export type RunStartResult = { runId: string } | { queued: true; queueItemId: nu
 // (internal/wsapi/handlers.go's chatQueueItemParams, ADR-0021 §8) --
 // store.ChatQueueItem's fields under their Go names as JSON keys, same
 // convention as Chat above. Status covers the item's whole lifecycle;
-// RunID is set once delivered, CancelReason once cancelled.
+// RunID is set once delivered, CancelReason/CancelKind once cancelled.
 export interface ChatQueueItem {
   ID: number;
   ChatID: number;
@@ -230,8 +286,10 @@ export interface ChatQueueItem {
   Priority: number;
   Status: "queued" | "delivered" | "cancelled";
   RunID: string | null;
-  /** "cancelled by user", or the server's "delivery failed: ..." family. */
+  /** Display text only ("cancelled by user", "delivery failed: ..."); branch on CancelKind, never on this string. */
   CancelReason: string;
+  /** Who cancelled: "user" (vanishes at once) or "auto" (shows its reason for the TTL); "" while queued/delivered. */
+  CancelKind: "" | "user" | "auto";
   CreatedAt: string;
   UpdatedAt: string;
 }
@@ -324,6 +382,33 @@ export interface PermissionQuestion {
   allowOther?: boolean;
 }
 
+/**
+ * Structured detail the daemon attaches to a permission_request (wire event
+ * params and run.logs entries alike). Every field but `kind` is optional.
+ */
+export interface PermissionDetail {
+  kind: "write" | "edit" | "execute" | "other";
+  path?: string;
+  newBytes?: number;
+  newLines?: number;
+  existingBytes?: number;
+  existingLines?: number;
+  /** The target file exists and this write replaces it entirely. */
+  replacesExisting?: boolean;
+  /** The target is outside the task worktree. */
+  outsideWorktree?: boolean;
+  /** Existing >= 20 lines and the new content is under half of it. */
+  largeShrink?: boolean;
+  preview?: string;
+  /** Unified-style text: lines start with ' ', '+', '-' or '@@'. */
+  diff?: string;
+  command?: string;
+  /** The preview/diff was cut. */
+  truncated?: boolean;
+  /** Existing contents deliberately not shown (sensitive/outside path). */
+  redacted?: boolean;
+}
+
 export interface PermissionRequestEventParams {
   requestId: string;
   summary: string;
@@ -332,6 +417,7 @@ export interface PermissionRequestEventParams {
   questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request: the plan as markdown, reviewed via Chat about it / Refuse / Approve rather than a plain option list. Same "additive, no producer yet" status as `questions`. */
   plan?: string;
+  detail?: PermissionDetail;
 }
 
 // Wire form of taskrunner.PermissionResolution (internal/taskrunner/event.go).
@@ -406,6 +492,7 @@ export type RunEventType =
   | "permission_request"
   | "permission_resolved"
   | "mcp_servers"
+  | "usage"
   | "raw";
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
@@ -426,6 +513,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   requestId?: string;
   summary?: string;
   options?: PermissionOption[];
+  /** Populated for a "permission_request" entry -- see PermissionDetail. */
+  detail?: PermissionDetail;
   optionId?: string;
   reason?: PermissionResolutionReason;
   /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */
@@ -434,6 +523,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   payload?: unknown;
   /** Populated for an "mcp_servers" entry -- the run's current per-server state, latest event wins. */
   mcpServers?: McpServerState[];
+  /** Populated for a "usage" entry (ADR-0020) -- the run's usage, latest event wins. */
+  usage?: RunUsage;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).
@@ -696,3 +787,25 @@ export interface McpServer {
 // internal/store.McpServer's transport values, carried over the wire as
 // their underlying strings (ADR-0018).
 export type McpTransport = "stdio" | "http" | "sse";
+
+// One row of a usage.summary response (internal/wsapi's usage summary
+// row, ADR-0020): per-group sums. Token sums are COALESCE(SUM, 0) on the
+// server, so a group where no row reported a field reads 0 -- the
+// `unreported` array names those fields (absent when everything was
+// reported) and a null costUsd means no run reported a cost.
+export interface UsageSummaryRow {
+  scope: "proxy" | "runs";
+  key: string;
+  count: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  costUsd?: number | null;
+  unreported?: Array<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens">;
+}
+
+export type UsageScope = "runs" | "proxy" | "all";
+export type UsageGroupBy = "task" | "provider" | "model" | "workspace";
+export type UsageRange = "today" | "7d" | "30d";

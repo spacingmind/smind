@@ -30,19 +30,20 @@ func (s *Store) CreateWorkspace(w Workspace) (Workspace, error) {
 func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 	var w Workspace
 	err := s.db.QueryRow(
-		`SELECT id, path, title, routing_policy, created_at, updated_at
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, '')
 		 FROM workspaces WHERE id = ?`, id,
-	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt)
+	).Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript)
 	if err != nil {
 		return Workspace{}, fmt.Errorf("get workspace %d: %w", id, err)
 	}
+	w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
 	return w, nil
 }
 
 // ListWorkspaces returns all workspaces, ordered by id.
 func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	rows, err := s.db.Query(
-		`SELECT id, path, title, routing_policy, created_at, updated_at
+		`SELECT id, path, title, routing_policy, created_at, updated_at, COALESCE(setup_script, ''), COALESCE(teardown_script, '')
 		 FROM workspaces ORDER BY id`,
 	)
 	if err != nil {
@@ -53,9 +54,10 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 	workspaces := make([]Workspace, 0)
 	for rows.Next() {
 		var w Workspace
-		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt); err != nil {
+		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript); err != nil {
 			return nil, fmt.Errorf("scan workspace: %w", err)
 		}
+		w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
 		workspaces = append(workspaces, w)
 	}
 	return workspaces, rows.Err()

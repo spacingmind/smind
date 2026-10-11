@@ -44,8 +44,16 @@ type Workspace struct {
 	Path          string
 	Title         string
 	RoutingPolicy string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	// SetupScript/TeardownScript are the human-authored worktree
+	// setup/teardown shell scripts (ADR-0024); "" = none.
+	// The script text is never serialised (ADR-0024: only workspace.get
+	// returns it, via its own result type); the Has* flags are.
+	SetupScript       string `json:"-"`
+	TeardownScript    string `json:"-"`
+	HasSetupScript    bool
+	HasTeardownScript bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own
@@ -77,6 +85,13 @@ type Task struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	ArchivedAt   *time.Time
+	// SetupStatus is "" (no setup script), "running", "ok" or "failed"
+	// (ADR-0024); SetupError/SetupLog hold the failure reason and the
+	// output tail; Port is the allocated SMIND_PORT, nil when none.
+	SetupStatus string
+	SetupError  string
+	SetupLog    string
+	Port        *int64
 }
 
 // Run is a persisted record of one internal/runs.Registry Run: a
@@ -113,6 +128,10 @@ type Run struct {
 	ErrMsg         string
 	PermissionMode string
 	AutoAccept     bool
+	// Model is the model the run was *asked* to use (ADR-0025); "" (stored
+	// as NULL) means the provider's default. Distinct from run_usage.model,
+	// which records what the agent reported using.
+	Model string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was
@@ -167,9 +186,12 @@ type AgentProfile struct {
 	PermissionMode string
 	AutoAccept     bool
 	ThinkingLevel  string
-	Notes          string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Model is the profile's requested model (ADR-0025); "" (NULL) is the
+	// provider's default.
+	Model     string
+	Notes     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // McpServer is a named, daemon-global MCP server definition (docs/
@@ -284,6 +306,10 @@ type UsageSummary struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+	// Unreported lists the token fields for which no row in the group had a
+	// non-NULL value (nil when every token field had at least one reported
+	// value). A reported 0 is not unreported.
+	Unreported []string
 }
 
 // RunUsage is one run's usage row (ADR-0020): what the agent itself
@@ -326,4 +352,8 @@ type RunUsageSummary struct {
 	ReasoningTokens  int64
 	// CostUSD is nil when no run in the group reported a cost (unknown, not 0).
 	CostUSD *float64
+	// Unreported lists the token fields for which no run in the group had a
+	// non-NULL value (nil when every token field had at least one reported
+	// value). A reported 0 is not unreported.
+	Unreported []string
 }

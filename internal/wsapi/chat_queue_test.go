@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
 // TestChatQueue_ListCancelAndEvent pins ADR-0021 §8's wire surface:
@@ -119,6 +120,26 @@ func TestChatQueue_ListCancelAndEvent(t *testing.T) {
 	decodePayload(t, ev, &snap)
 	if len(snap.Items) != 2 || snap.Items[1].Status != "cancelled" {
 		t.Fatalf("post-cancel snapshot = %+v, want q2 cancelled", snap)
+	}
+	if snap.Items[1].CancelKind != "user" {
+		t.Fatalf("post-cancel snapshot CancelKind = %q, want \"user\"", snap.Items[1].CancelKind)
+	}
+
+	// The queueList answer carries the same structured kind.
+	sendRequest(t, ws, "ls2", "chat.queueList", map[string]any{"chatId": chatID})
+	resp = ec.nextResponse("ls2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("chat.queueList(after cancel) error = %v", resp.Error.Message)
+	}
+	var listAfter chatQueueListResult
+	if err := json.Unmarshal(resp.Result, &listAfter); err != nil {
+		t.Fatalf("decode chat.queueList(after cancel): %v", err)
+	}
+	if len(listAfter.Items) != 2 || listAfter.Items[1].CancelKind != "user" || listAfter.Items[1].Status != "cancelled" {
+		t.Fatalf("chat.queueList(after cancel) = %+v, want q2 cancelled with CancelKind user", listAfter)
+	}
+	if listAfter.Items[0].CancelKind != "" {
+		t.Fatalf("queued item CancelKind = %q, want \"\" while queued", listAfter.Items[0].CancelKind)
 	}
 
 	// Deliver q1 by stopping the running run, then cancel it again:
@@ -260,5 +281,63 @@ func waitRunDone(t *testing.T, ws *websocket.Conn, runID string) {
 			t.Fatalf("run %s still running", runID)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestRunStart_ModelPersistedOverWire: run.start with a model applies it
+// (the fake agent records the model option it was sent), persists it on the
+// run row (run.list reports it), keeps it on a queued item, and rejects a
+// malformed model or one outside a discovered catalog before any spawn.
+func TestRunStart_ModelPersistedOverWire(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath, "models"}))
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	sendRequest(t, ws, "m1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi", "model": "fake-model-b",
+	})
+	resp := readEnvelopeFor(t, ws, "m1", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start(model) error = %v", resp.Error.Message)
+	}
+	var started runStartResult
+	_ = json.Unmarshal(resp.Result, &started)
+	waitRunDone(t, ws, started.RunID)
+
+	var listed []struct {
+		ID    string `json:"ID"`
+		Model string `json:"Model"`
+	}
+	sendRequest(t, ws, "rl", "run.list", map[string]any{})
+	resp = readEnvelopeFor(t, ws, "rl", 5*time.Second)
+	if err := json.Unmarshal(resp.Result, &listed); err != nil {
+		t.Fatalf("decode run.list: %v", err)
+	}
+	if len(listed) != 1 || listed[0].ID != started.RunID || listed[0].Model != "fake-model-b" {
+		t.Fatalf("run.list = %+v, want the run with model fake-model-b", listed)
+	}
+	row, err := db.GetRun(started.RunID)
+	if err != nil || row.Model != "fake-model-b" {
+		t.Fatalf("stored run = %+v, %v, want model fake-model-b", row, err)
+	}
+
+	// The first run discovered the agent's models: an unknown id is now
+	// rejected up front, and a malformed one always is.
+	for name, model := range map[string]string{"unknown": "nope", "flag": "--model", "space": "a b"} {
+		sendRequest(t, ws, "bad-"+name, "run.start", map[string]any{
+			"taskId": task.ID, "provider": "glm", "prompt": "x", "model": model,
+		})
+		if resp := readEnvelopeFor(t, ws, "bad-"+name, 5*time.Second); resp.Error == nil {
+			t.Errorf("run.start(model=%q) error = nil, want rejected", model)
+		}
+	}
+	runs, err := db.ListRecentRuns(10)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs after rejected starts = %d (%v), want 1", len(runs), err)
 	}
 }

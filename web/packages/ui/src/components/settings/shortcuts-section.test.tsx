@@ -34,7 +34,7 @@ describe("Settings Shortcuts section", () => {
     });
 
     const rows = screen.getAllByTestId("shortcut-row");
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(rows[0]).toHaveAttribute("data-binding-id", "tab-close");
   });
 
@@ -43,7 +43,7 @@ describe("Settings Shortcuts section", () => {
     const search = screen.getByTestId("settings-shortcuts-search");
 
     fireEvent.change(search, { target: { value: "close current tab" } });
-    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(1);
+    expect(screen.getAllByTestId("shortcut-row")).toHaveLength(2);
 
     fireEvent.change(search, { target: { value: "" } });
     expect(screen.getAllByTestId("shortcut-row")).toHaveLength(SHORTCUT_BINDINGS.length);

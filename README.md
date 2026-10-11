@@ -177,6 +177,27 @@ decision 6), `task_send` rejects an auto-approving `permissionMode`
 with such settings, pass a human-authored agent profile's `profileId`
 instead.
 
+## Orchestration skills
+
+smind bundles five agent skills (`smind`, `smind-leader`, `smind-handoff`,
+`smind-advisor`, `smind-committee`) that teach an orchestrating agent the
+MCP tool loop and the leader/coder pattern. They are plain `SKILL.md` files
+embedded in the binary and installed only when you ask:
+
+```sh
+smind skill ls                       # bundled skills x targets: installed/modified/missing
+smind skill install [--target claude|agents|codex|all] [--force]
+smind skill uninstall
+```
+
+Install writes only under `~/.claude/skills`, `~/.agents/skills` and
+`~/.codex/skills`, tracks what it wrote in a per-skill
+`.smind-managed-files.json` manifest, never overwrites a file you edited
+(without `--force`) and never touches other skills. No daemon is needed.
+To let an agent drive smind, add the MCP server: `smind mcp add smind stdio
+--command smind --arg mcp --arg serve` (or run `smind mcp serve` as a stdio
+server).
+
 ## Dev quickstart
 
 ```sh

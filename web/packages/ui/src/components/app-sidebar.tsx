@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Circle,
   FolderGit2,
+  SquareTerminal,
   FolderOpen,
   FolderTree,
   GitBranch,
@@ -71,7 +72,10 @@ import {
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { SetupBadge } from "@/components/task-setup";
+import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -302,6 +306,7 @@ type CrudTarget =
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "scripts"; workspace: WorkspaceWithTree }
   | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
   | { kind: "deleteSpace"; space: SpaceWithTasks };
 
@@ -823,6 +828,7 @@ export function AppSidebar({
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                       onMoveTask={moveTask}
+                      onEditScripts={() => setCrud({ kind: "scripts", workspace: ws })}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
                       onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
                       localPathActions={localPathActions}
@@ -941,6 +947,15 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "scripts" && (
+            <WorkspaceScriptsDialog
+              client={client}
+              workspace={crud.workspace}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onSaved={refresh}
             />
           )}
           {crud?.kind === "deleteWorkspace" && (
@@ -1182,6 +1197,7 @@ function WorkspaceItem({
   onAddTask,
   onArchiveTask,
   onMoveTask,
+  onEditScripts,
   onDeleteWorkspace,
   onDeleteSpace,
   localPathActions,
@@ -1195,6 +1211,7 @@ function WorkspaceItem({
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
   onMoveTask: (task: Task, spaceId: number | null) => void;
+  onEditScripts: () => void;
   onDeleteWorkspace: () => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
   /** Reveal / Open-in-editor for the workspace folder; null (items absent) unless the desktop app is on its local daemon. */
@@ -1209,40 +1226,54 @@ function WorkspaceItem({
   const flat = workspace.spaces.length === 0;
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
+  const items = [
+    { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
+    { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+    ...(localPathActions
+      ? [
+          {
+            label: localPathActions.revealLabel,
+            icon: <FolderOpen />,
+            onSelect: () => localPathActions.reveal(workspace.Path),
+          },
+          ...localPathActions.editors.map((editor) => ({
+            label: `Open in ${editor.label}`,
+            icon: <SquareArrowOutUpRight />,
+            onSelect: () => localPathActions.open(editor.id, workspace.Path),
+          })),
+        ]
+      : []),
+    { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
+    { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
+  ];
 
   return (
     <SidebarMenuItem>
-      <SidebarMenuButton
-        onClick={onToggleExpanded}
-        data-testid="sidebar-workspace-row"
-        data-workspace-id={workspace.ID}
-      >
-        <FolderGit2 />
-        <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-        <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
-        <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
-      </SidebarMenuButton>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <SidebarMenuButton
+            onClick={onToggleExpanded}
+            data-testid="sidebar-workspace-row"
+            data-workspace-id={workspace.ID}
+          >
+            <FolderGit2 />
+            <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
+            <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+            <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
+          </SidebarMenuButton>
+        </ContextMenuTrigger>
+        <ContextMenuContent data-testid="sidebar-workspace-context-menu">
+          {items.map((item) => (
+            <ContextMenuItem key={item.label} onSelect={item.onSelect}>
+              {item.icon}
+              {item.label}
+            </ContextMenuItem>
+          ))}
+        </ContextMenuContent>
+      </ContextMenu>
       <SidebarMenuAction>
         <RowMenu
-          items={[
-            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
-            { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
-            ...(localPathActions
-              ? [
-                  {
-                    label: localPathActions.revealLabel,
-                    icon: <FolderOpen />,
-                    onSelect: () => localPathActions.reveal(workspace.Path),
-                  },
-                  ...localPathActions.editors.map((editor) => ({
-                    label: `Open in ${editor.label}`,
-                    icon: <SquareArrowOutUpRight />,
-                    onSelect: () => localPathActions.open(editor.id, workspace.Path),
-                  })),
-                ]
-              : []),
-            { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
-          ]}
+          items={items}
           triggerProps={{
             "data-testid": "sidebar-workspace-actions-trigger",
             "data-workspace-id": workspace.ID,
@@ -1636,7 +1667,8 @@ function TaskRows({
                * in the accessible name, so neither a test nor a screen
                * reader has to tell them apart by colour.
                */}
-              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
+              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
                 {reason && (
                   <StatusDot
                     status={attentionDotStatus(reason)}

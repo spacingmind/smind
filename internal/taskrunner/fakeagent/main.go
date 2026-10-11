@@ -61,6 +61,16 @@ var capsMode string
 // file in the session's cwd, so tests can observe it.
 var modesMode string
 
+// modelsMode is set by a "models" argument: the agent then advertises a
+// category-"model" select config option (fakeModelIDs, current
+// fakeModelIDs[0]) in session/new and session/load. Applying one via
+// set_config_option records "set_config_option:model:<value>" to a
+// "session-model" file in the session's cwd; a value starting "bad-" is
+// rejected with an invalid-params error.
+var modelsMode bool
+
+var fakeModelIDs = []string{"fake-model-a", "fake-model-b"}
+
 var fakeModeIDs = []string{"default", "accept_edits", "bypass_permissions"}
 
 // noDefaultModeIDs is modes:nodefault's catalog -- deliberately no
@@ -169,6 +179,10 @@ func main() {
 	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "modes:") {
 			modesMode = strings.TrimPrefix(a, "modes:")
+		} else if a == "live-opts" {
+			liveOpts = true
+		} else if a == "models" {
+			modelsMode = true
 		} else {
 			capsMode = a
 		}
@@ -278,6 +292,10 @@ func handle(msg message, sessionCwd *string) {
 	}
 }
 
+// liveOpts, set by a "live-opts" os.Args entry, adds an uncategorized
+// boolean option to defaultConfigOptions.
+var liveOpts bool
+
 // defaultConfigOptions is a select-kind option with its own enumerated
 // choices (mirrors GLM's real thinking-level tiers), so Runner/Registry/
 // wsapi tests can drive a real config-option round trip end to end rather
@@ -286,6 +304,7 @@ func defaultConfigOptions() []map[string]any {
 	opts := []map[string]any{{
 		"configId":     "thinking-level",
 		"name":         "Thinking Level",
+		"category":     "thought_level",
 		"type":         "select",
 		"currentValue": "medium",
 		"options": []map[string]any{
@@ -295,6 +314,16 @@ func defaultConfigOptions() []map[string]any {
 			{"value": "high", "name": "High"},
 		},
 	}}
+	if liveOpts {
+		// An option with no category: the wsapi source guard must reject
+		// it for a non-human caller (fail-closed) while a human may set it.
+		opts = append(opts, map[string]any{
+			"configId":     "web-search",
+			"name":         "Web Search",
+			"type":         "boolean",
+			"currentValue": true,
+		})
+	}
 	if modesMode == "config" {
 		choices := make([]map[string]any, len(fakeModeIDs))
 		for i, id := range fakeModeIDs {
@@ -306,6 +335,20 @@ func defaultConfigOptions() []map[string]any {
 			"category":     "mode",
 			"type":         "select",
 			"currentValue": "default",
+			"options":      choices,
+		})
+	}
+	if modelsMode {
+		choices := make([]map[string]any, len(fakeModelIDs))
+		for i, id := range fakeModelIDs {
+			choices[i] = map[string]any{"value": id, "name": "Model " + id}
+		}
+		opts = append(opts, map[string]any{
+			"configId":     "model",
+			"name":         "Model",
+			"category":     "model",
+			"type":         "select",
+			"currentValue": fakeModelIDs[0],
 			"options":      choices,
 		})
 	}
@@ -390,6 +433,38 @@ func runPromptScript(promptMsg message, cwd string) {
 	if scenario == "hang" {
 		sessionUpdate("before hang")
 		time.Sleep(time.Hour)
+		return
+	}
+
+	if scenario == "permission-write" {
+		// A GLM-style whole-file Write permission on "existing.txt" (relative
+		// to the worktree), proving the daemon surfaces what it overwrites.
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall": map[string]any{
+				"toolCallId": "tc-write-1",
+				"title":      "Write file: existing.txt",
+				"kind":       "edit",
+				"locations":  []map[string]any{{"path": "existing.txt"}},
+				"rawInput":   map[string]any{"path": "existing.txt", "content": "only\nseven\nlines\nhere\nnow\nplease\nok\n"},
+			},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
 	}
 
@@ -508,7 +583,21 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
-	if scenario == "structured" {
+	if scenario == "structured" || scenario == "structured-permission" {
+		if scenario == "structured-permission" {
+			// Same as "structured" but behind a permission request, with a
+			// trailing usage_update, so one run carries every run.logs
+			// event type (tool_call, permission_*, chunk, thinking, raw,
+			// usage).
+			call("session/request_permission", map[string]any{
+				"sessionId": sessionID,
+				"toolCall":  map[string]any{"toolCallId": "tc-1", "title": "Run tests"},
+				"options": []map[string]any{
+					{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+					{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+				},
+			})
+		}
 		// Exercises every new ACP session/update kind
 		// docs/decisions/0008-structured-run-events.md added support for:
 		// a thought chunk, a user-message chunk, and a tool call reported
@@ -561,6 +650,12 @@ func runPromptScript(promptMsg message, cwd string) {
 				},
 			},
 		})
+		if scenario == "structured-permission" {
+			notify("session/update", map[string]any{
+				"sessionId": sessionID,
+				"update":    map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 1000},
+			})
+		}
 		sessionUpdate("done")
 		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return

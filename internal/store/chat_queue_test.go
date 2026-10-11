@@ -80,3 +80,80 @@ func TestChatQueue_EnqueueBoundAndOrder(t *testing.T) {
 		t.Fatalf("NextQueued(unknown chat) = %v, %v, want false, nil", ok, err)
 	}
 }
+
+// TestChatQueue_MarkCancelledStampsKind pins MarkCancelled's kind
+// parameter: the kind lands next to the reason on the cancelled row, and
+// every other status keeps cancel_kind ”.
+func TestChatQueue_MarkCancelledStampsKind(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+
+	user, err := s.EnqueueChatPrompt(chat.ID, "user cancel", "{}", ChatQueueSourceHuman, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("EnqueueChatPrompt() error = %v", err)
+	}
+	auto, err := s.EnqueueChatPrompt(chat.ID, "auto cancel", "{}", ChatQueueSourceHuman, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("EnqueueChatPrompt() error = %v", err)
+	}
+	delivered, err := s.EnqueueChatPrompt(chat.ID, "delivered", "{}", ChatQueueSourceHuman, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("EnqueueChatPrompt() error = %v", err)
+	}
+
+	if err := s.MarkCancelled(user.ID, ChatQueueCancelUser, "cancelled by user"); err != nil {
+		t.Fatalf("MarkCancelled(user) error = %v", err)
+	}
+	if err := s.MarkCancelled(auto.ID, ChatQueueCancelAuto, "delivery failed: boom"); err != nil {
+		t.Fatalf("MarkCancelled(auto) error = %v", err)
+	}
+	if err := s.MarkDelivered(delivered.ID, "run-1"); err != nil {
+		t.Fatalf("MarkDelivered() error = %v", err)
+	}
+
+	want := map[int64]struct{ status, kind, reason string }{
+		user.ID:      {ChatQueueStatusCancelled, ChatQueueCancelUser, "cancelled by user"},
+		auto.ID:      {ChatQueueStatusCancelled, ChatQueueCancelAuto, "delivery failed: boom"},
+		delivered.ID: {ChatQueueStatusDelivered, "", ""},
+	}
+	items, err := s.ListChatQueue(chat.ID)
+	if err != nil {
+		t.Fatalf("ListChatQueue() error = %v", err)
+	}
+	for _, item := range items {
+		w := want[item.ID]
+		if item.Status != w.status || item.CancelKind != w.kind || item.CancelReason != w.reason {
+			t.Errorf("item %d = %q/%q/%q, want %q/%q/%q", item.ID, item.Status, item.CancelKind, item.CancelReason, w.status, w.kind, w.reason)
+		}
+	}
+
+	// Only a queued item can be cancelled, kind or no kind.
+	if err := s.MarkCancelled(delivered.ID, ChatQueueCancelUser, "x"); err == nil {
+		t.Error("MarkCancelled on a delivered item: error = nil, want an error")
+	}
+}
+
+// TestChatQueue_ModelPreserved: a queued item's run_config JSON (which
+// carries the requested model, ADR-0025) reads back byte-for-byte.
+func TestChatQueue_ModelPreserved(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+	cfg := `{"provider":"claude-native","permissionMode":"","autoAccept":false,"thinkingLevel":"","model":"claude-opus-5-5"}`
+	if _, err := s.EnqueueChatPrompt(chat.ID, "p", cfg, ChatQueueSourceHuman, 0, 0, 0); err != nil {
+		t.Fatalf("EnqueueChatPrompt() error = %v", err)
+	}
+	got, ok, err := s.NextQueued(chat.ID)
+	if err != nil || !ok || got.RunConfig != cfg {
+		t.Fatalf("NextQueued() = %+v, %v, %v, want run_config %s", got, ok, err, cfg)
+	}
+}

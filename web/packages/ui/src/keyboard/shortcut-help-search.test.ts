@@ -30,6 +30,12 @@ describe("filterShortcutHelpSections", () => {
     }
   });
 
+  it("matches the terminal escape-hatch rows by 'terminal'", () => {
+    const rowIds = filterShortcutHelpSections(sections, "terminal").flatMap((s) => s.rows.map((r) => r.id));
+    expect(rowIds).toContain("palette-open-terminal");
+    expect(rowIds).not.toContain("palette-open");
+  });
+
   it("keeps every row of a section whose own title matches", () => {
     const filtered = filterShortcutHelpSections(sections, "tabs");
     const tabsSection = filtered.find((s) => s.id === "tabs")!;
