@@ -293,7 +293,12 @@ describe("opaque surfaces on macOS (the body is transparent over vibrancy)", () 
     const { SettingsScreen } = await import("@/components/settings/settings-screen");
     const { FakeWsClient } = await import("@/test/fake-ws-client");
     render(<SettingsScreen client={new FakeWsClient() as never} events={null} onNavigateBack={() => {}} />);
-    expect(screen.getByTestId("settings-screen")).toHaveClass("bg-background");
+    // The screen's root is transparent on purpose (its sidebar is the macOS
+    // vibrancy surface); the content pane, which fills the rest, is opaque.
+    const frame = screen.getByTestId("settings-content-frame");
+    expect(frame).toHaveClass("bg-background");
+    expect(frame.parentElement).toHaveClass("bg-background");
+    expect(screen.getByTestId("settings-sidebar")).toHaveAttribute("data-settings-sidebar");
   });
 });
 
