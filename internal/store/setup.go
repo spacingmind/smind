@@ -100,3 +100,22 @@ func (s *Store) ListTasksSetupRunning() ([]Task, error) {
 	}
 	return out, rows.Err()
 }
+
+// BeginTaskSetup atomically moves a task's setup_status to "running"
+// (clearing the previous error and log) unless it is already running. It
+// reports whether a row changed, so concurrent retries can't both win.
+func (s *Store) BeginTaskSetup(id int64) (bool, error) {
+	res, err := s.db.Exec(
+		`UPDATE tasks SET setup_status = 'running', setup_error = NULL, setup_log = NULL, updated_at = ?
+		 WHERE id = ? AND (setup_status IS NULL OR setup_status != 'running')`,
+		time.Now().UTC(), id,
+	)
+	if err != nil {
+		return false, fmt.Errorf("begin task %d setup: %w", id, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("begin task %d setup: %w", id, err)
+	}
+	return n == 1, nil
+}

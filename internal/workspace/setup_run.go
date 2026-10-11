@@ -190,8 +190,15 @@ func (m *Manager) RetrySetup(id int64) (store.Task, error) {
 	if err := m.checkSetupSupported(ws.SetupScript); err != nil {
 		return store.Task{}, fmt.Errorf("retry setup: %w", err)
 	}
-	t, err = m.store.UpdateTaskSetup(id, SetupRunning, "", "")
+	// Atomic check-and-set: of N concurrent retries exactly one wins.
+	began, err := m.store.BeginTaskSetup(id)
 	if err != nil {
+		return store.Task{}, fmt.Errorf("retry setup: %w", err)
+	}
+	if !began {
+		return store.Task{}, fmt.Errorf("retry setup: task %d: setup is already running", id)
+	}
+	if t, err = m.store.GetTask(id); err != nil {
 		return store.Task{}, fmt.Errorf("retry setup: %w", err)
 	}
 	m.setupChanged(t)

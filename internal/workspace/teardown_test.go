@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -169,5 +171,49 @@ func TestSetup_RetryWhileRunningRejected(t *testing.T) {
 	t2, _ := m.CreateTask(w2.ID, nil, "noscript")
 	if _, err := m.RetrySetup(t2.ID); err == nil {
 		t.Fatal("retry with no script should error")
+	}
+}
+
+func TestSetup_RetryConcurrentOnlyOneRuns(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	runLog := filepath.Join(t.TempDir(), "runs.log")
+	w := setupWorkspace(t, m, `echo run >> `+runLog+`; sleep 1`)
+	task, err := m.CreateTask(w.ID, nil, "race")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitSetup(t, m, task.ID, SetupOK)
+	if err := os.Remove(runLog); err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 8
+	var wg sync.WaitGroup
+	var ok, rejected atomic.Int32
+	start := make(chan struct{})
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			if _, err := m.RetrySetup(task.ID); err == nil {
+				ok.Add(1)
+			} else if strings.Contains(err.Error(), "already running") {
+				rejected.Add(1)
+			} else {
+				t.Errorf("unexpected error: %v", err)
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	if ok.Load() != 1 || rejected.Load() != n-1 {
+		t.Fatalf("ok=%d rejected=%d, want 1 and %d", ok.Load(), rejected.Load(), n-1)
+	}
+	waitSetup(t, m, task.ID, SetupOK)
+	b, _ := os.ReadFile(runLog)
+	if got := strings.Count(string(b), "run"); got != 1 {
+		t.Fatalf("script ran %d times, want 1", got)
 	}
 }

@@ -102,3 +102,22 @@ func TestStore_PortUniqueAmongLiveTasks(t *testing.T) {
 		t.Fatalf("after archive: %v", err)
 	}
 }
+
+func TestStore_BeginTaskSetupAtomic(t *testing.T) {
+	t.Parallel()
+	s := newTestStore(t)
+	ws, _ := s.CreateWorkspace(Workspace{Path: "/r", Title: "r", RoutingPolicy: "hard"})
+	task := newTestTaskInWorkspace(t, s, ws.ID, "a")
+	if ok, err := s.BeginTaskSetup(task.ID); err != nil || !ok {
+		t.Fatalf("first begin = %v, %v", ok, err)
+	}
+	if ok, err := s.BeginTaskSetup(task.ID); err != nil || ok {
+		t.Fatalf("second begin while running = %v, %v", ok, err)
+	}
+	if _, err := s.UpdateTaskSetup(task.ID, "failed", "e", "l"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, _ := s.BeginTaskSetup(task.ID); !ok {
+		t.Fatal("begin after failed should succeed")
+	}
+}
