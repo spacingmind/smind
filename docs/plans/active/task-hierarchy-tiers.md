@@ -235,14 +235,15 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
   (`lib/task-tree.test.ts`): `nests children under parent in id order`,
   `orphan whose parent is missing is a root`, `child in another space
   nests under its parent`, `cycle does not loop`, `depth is derived from
-  the chain`, `rollup counts permission before error before finished`,
+  the chain`, `rollup uses the same precedence as a row dot` (error > permission > finished, as a row's own dot),
   `rollup counts every descendant once`, `rollup ignores a seen finished
   child`, `tierOf table`.
 - **U1-AC3** the sidebar tree view renders nested rows: depth indent with a
   guide line per level (no change to root rows' geometry), a chevron on a
   parent row to collapse/expand (default expanded; state kept per task in
   `localStorage`, key `smind.sidebar.collapsedTasks`), a child-count chip,
-  and a tier chip (`supervisor`/`leader`/`coder`, muted, no new colour). A
+  and a tier label (`supervisor`/`leader`/`coder`, muted, no new colour; it sits
+  on the row's second line so the title keeps the width). A
   **collapsed** parent shows an attention rollup (the most urgent
   descendant reason's dot + the count of descendants needing attention) in
   the row's reserved attention slot area; an expanded parent shows none
@@ -288,7 +289,9 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
   `usage rollup shows em dash when nothing reported and never 0`,
   `usage rollup does not double count own runs`.
 - **U2-AC2** `ArchiveTaskDialog` fetches the task's live children when
-  opened; if any, lists them (title + status) under "These tasks will stay
+  opened (`task.tree`, so each shows its run state: running / needs you /
+  failed / done / idle; titles only if that call fails; never the raw
+  `Task.Status`, which only means "has ever run"); if any, lists them under "These tasks will stay
   and become top-level" and the confirm button reads "Archive parent only";
   no children → today's dialog unchanged; a child-list fetch failure
   blocks nothing but says it could not check. Tests
@@ -334,12 +337,51 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
 
 ## Decisions (during the build)
 
-(none yet)
+- **Tier label location.** A first browser pass showed the label in the title
+  row crushed titles to 2-5 characters at the default 256px sidebar. It
+  moved to the row's second line.
+- **Nested list margins.** Each nesting level also lost ~24px on the right
+  (the default `SidebarMenuSub` `mr-3.5`/`pr-2.5` was kept). Zeroed; titles
+  now get ~90px at every depth. Siblings of a parent reserve an empty chevron
+  slot (aligned titles); lists with no parents keep today's geometry.
+- **Pill urgency.** A child pill's dot shows the most urgent state of the child
+  and its subtree (failed > needs permission > running > own state) so a calm
+  leader cannot hide a failing coder.
+- **Archive dialog statuses** come from `task.tree` run state, never
+  `Task.Status`.
+- **`Task.ParentTaskID` is declared identically at the same position in both
+  web PRs** (#293, #295) so they merge without a duplicate-identifier error
+  (found by integrating the branches; one placed it elsewhere at first).
+- **No cascade, no `role` column**, as decided in section 3 / 6.
+- **`running` and `waiting_permission` share the warning hue** (the design
+  system's StatusDot: `running` pulses, `warning` is static). Kept; the text
+  summary ("1 running · 1 needs you") disambiguates.
 
 ## Progress
 
-- 2026-10-11 Phase A: gap analysis and this spec written.
+- 2026-10-11 Phase A: gap analysis and this spec (#286).
+- 2026-10-11 Phase B: PR-G #289 (guard), PR-T #291 (`task.tree`, `task_tree`,
+  `task_wait childrenOf`), PR-U1 #293 (sidebar tree), PR-U2 #295 (header +
+  archive confirm), all based on `origin/develop`, none stacked, none merged.
 
 ## Validation
 
-(filled as each criterion is confirmed)
+How each criterion was satisfied (evidence, 2026-10-11). Sandbox: isolated
+`SMIND_HOME` and port, a 3-tier tree (supervisor → 2 leaders → 5 coders, an
+archived leader with an orphaned child, a plain task), the `fakeagent` ACP
+binary, and all four branches merged in a scratch worktree (not a PR).
+
+| AC | Evidence |
+|---|---|
+| G-AC1 config | `TestDefault_/TestLoad_OrchestrationMaxConcurrentRunsPerTree*` (3). |
+| G-AC2/3 guard, atomic | 8 `TestTreeGuard_*` under `-race`; **mutation check**: disabling the limit comparison fails all 8; the 32-goroutine tests admit exactly 4. |
+| G-AC4 surfaced | `TestRunStart_TreeBusyErrorIsReturnedToWSClient`; live: with 4 runs running in the sandbox tree, `smind task send` of a 5th run returned `task tree concurrency limit reached (4 of 4 runs already running in task tree #1): wait for one to finish (task_wait) or stop one (task_stop), then try again`. |
+| T-AC1 builder | 9 `TestBuild_*`/`TestTierOf_Table`; **mutation check**: counting a child's usage twice fails 4 of them. Live `task_tree`: supervisor subtree cost $1.03 = 0.62 + 0.41 (no double count). |
+| T-AC2 wsapi | 7 `TestTaskTree_*` incl. the 200-child wide tree, archived/unknown task errors. |
+| T-AC3 MCP | 6 `TestMCP*` tests; live: `smind mcp serve` over stdio returned the nested tree and `3 running, 1 waiting_permission, 1 error, 3 done, 2 idle`. |
+| U1 sidebar | 9 + 4 + 13 vitest cases; screenshots light/dark (expanded, leaders collapsed with rollup, all collapsed) viewed by the leader; two layout defects found that way and fixed (see Decisions). |
+| U2 header/dialog | helper, hook, component and dialog tests (RPC-level assertion that archive calls `task.archive` once for the parent only); screenshots light/dark (leader, coder, supervisor header; archive dialog) viewed by the leader. |
+| Integration | All four branches merged: `go vet ./...`, `bunx tsc -b packages/ui` clean, 1653 web tests pass; each PR passes `task test`/`task lint` on its own. |
+
+Not covered: a long-running real agent (only the fake ACP agent); the
+hover-card/context-menu paths of nested rows beyond the existing tests.
