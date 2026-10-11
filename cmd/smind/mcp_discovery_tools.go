@@ -78,14 +78,15 @@ func mcpTaskGet(client *wsclient.Client) mcp.ToolHandlerFor[taskGetInput, taskGe
 const mcpRunListCap = 200
 
 // capRuns empties nil into an empty list (never null) and truncates to
-// the newest mcpRunListCap entries; runs must already be newest first,
-// which every run.list path guarantees.
+// the newest mcpRunListCap entries; runs must already be newest first
+// (index 0 is the newest), which every run.list path guarantees, so the
+// cap drops from the tail -- the oldest -- end.
 func capRuns(runs []map[string]any) []map[string]any {
 	if runs == nil {
 		return []map[string]any{}
 	}
 	if len(runs) > mcpRunListCap {
-		runs = runs[len(runs)-mcpRunListCap:]
+		runs = runs[:mcpRunListCap]
 	}
 	return runs
 }

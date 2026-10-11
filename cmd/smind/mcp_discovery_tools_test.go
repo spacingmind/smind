@@ -399,11 +399,12 @@ func TestCapRuns(t *testing.T) {
 	if len(capped) != mcpRunListCap {
 		t.Fatalf("capRuns len = %d, want %d", len(capped), mcpRunListCap)
 	}
-	// Newest first means the last mcpRunListCap of 0..249, i.e. 50..249.
-	if got, want := capped[0]["ID"], 50; got != want {
-		t.Fatalf("capRuns[0] ID = %v, want %d (the newest of the tail)", got, want)
+	// Newest first means index 0 is the newest, so the cap keeps the
+	// first mcpRunListCap of 0..249 (0..199) and drops the oldest tail.
+	if got, want := capped[0]["ID"], 0; got != want {
+		t.Fatalf("capRuns[0] ID = %v, want %d (the newest entry)", got, want)
 	}
-	if got, want := capped[len(capped)-1]["ID"], 249; got != want {
+	if got, want := capped[len(capped)-1]["ID"], 199; got != want {
 		t.Fatalf("capRuns last ID = %v, want %d", got, want)
 	}
 
