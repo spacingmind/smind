@@ -36,10 +36,9 @@ jobs:
       - name: Test terminal package
         run: go test -v ./internal/terminal/...
 
-      - name: Test full suite (non-blocking, input for runtime-parity plan)
-        continue-on-error: true
-        timeout-minutes: 15
-        run: go test -timeout 8m ./...
+      # The full Windows suite (still mostly red: daemon runtime parity is
+      # follow-up work) runs nightly and on demand in windows-full-suite.yml,
+      # not here -- as a step it timed out at 15 min on every PR.
 
   ci:
     runs-on: ubuntu-latest
