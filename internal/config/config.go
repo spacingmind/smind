@@ -13,6 +13,37 @@ import (
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
 	Orchestration OrchestrationConfig `yaml:"orchestration"`
+	Worktrees     WorktreesConfig     `yaml:"worktrees"`
+}
+
+// WorktreesConfig holds daemon-wide knobs for task worktree setup/teardown
+// scripts and per-task ports (ADR-0024).
+type WorktreesConfig struct {
+	Ports PortsConfig `yaml:"ports"`
+	// SetupTimeoutSeconds bounds a setup script (default 600).
+	SetupTimeoutSeconds int `yaml:"setupTimeoutSeconds"`
+	// TeardownTimeoutSeconds bounds a teardown script (default 120).
+	TeardownTimeoutSeconds int `yaml:"teardownTimeoutSeconds"`
+}
+
+// PortsConfig configures per-task port allocation.
+type PortsConfig struct {
+	// Range is "lo-hi" within 1024-65535; empty disables port allocation.
+	Range string `yaml:"range"`
+}
+
+// PortRange parses Ports.Range. ok is false when no range is configured.
+func (p PortsConfig) PortRange() (lo, hi int, ok bool, err error) {
+	if p.Range == "" {
+		return 0, 0, false, nil
+	}
+	if _, err := fmt.Sscanf(p.Range, "%d-%d", &lo, &hi); err != nil {
+		return 0, 0, false, fmt.Errorf("worktrees.ports.range %q: want \"lo-hi\"", p.Range)
+	}
+	if lo < 1024 || hi > 65535 || lo > hi {
+		return 0, 0, false, fmt.Errorf("worktrees.ports.range %q: need 1024 <= lo <= hi <= 65535", p.Range)
+	}
+	return lo, hi, true, nil
 }
 
 // ServerConfig controls the HTTP server.
@@ -36,6 +67,10 @@ func Default() Config {
 	return Config{
 		Server:        ServerConfig{Port: 4648},
 		Orchestration: OrchestrationConfig{MaxDepth: 2},
+		Worktrees: WorktreesConfig{
+			SetupTimeoutSeconds:    600,
+			TeardownTimeoutSeconds: 120,
+		},
 	}
 }
 
@@ -69,6 +104,9 @@ func Load() (Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config %s: %w", Path(), err)
+	}
+	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
+		return cfg, fmt.Errorf("config %s: %w", Path(), err)
 	}
 	return cfg, nil
 }

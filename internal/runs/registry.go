@@ -101,6 +101,11 @@ type Registry struct {
 	// (ADR-0021 §3: cancel and move on). Guarded by mu.
 	deliveryAttempts map[int64]int
 
+	// testAfterSetupCheck, when non-nil, runs in StartWhenBusy between the
+	// task's setup-status read and the enqueue. Test seam only; nil in
+	// production.
+	testAfterSetupCheck func()
+
 	// deliverMu serializes queue delivery per Registry (see queue.go's
 	// deliverOne): the busy-check -> NextQueued -> Start -> MarkDelivered
 	// sequence must be atomic, so concurrent callers (finish and the
@@ -511,6 +516,12 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		return "", err
 	}
 	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
+
+	// ADR-0024 §2: never start a run in a worktree whose setup script is
+	// still running (StartWhenBusy and the queue check this too).
+	if t, terr := wm.GetTask(taskID); terr == nil && t.SetupStatus == workspace.SetupRunning {
+		return "", &SetupBusyError{TaskID: taskID}
+	}
 
 	id, err := newRunID()
 	if err != nil {

@@ -302,7 +302,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 	case ProviderGLM, ProviderKimi:
 		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, thinkingLevel, events)
+		return r.runClaudeNative(ctx, chatID, task.WorkspaceID, worktreePath, workspace.TaskEnv(task), prompt, decider, perm, thinkingLevel, events)
 	case ProviderCodexNative:
 		return r.runCodexNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, events)
 	default:
@@ -645,8 +645,12 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath string, taskEnv []string, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
 	var opts []claudecode.Option
+	// ADR-0024: the task's SMIND_PORT (when a port range is configured).
+	if len(taskEnv) > 0 {
+		opts = append(opts, claudecode.WithEnv(taskEnv...))
+	}
 
 	rows, err := r.mcpServersForWorkspace(workspaceID)
 	if err != nil {

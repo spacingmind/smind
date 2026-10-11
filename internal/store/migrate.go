@@ -128,6 +128,29 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0024: per-workspace setup/teardown scripts, per-task setup
+		// state and port. All NULL (none) for pre-existing rows. The partial
+		// unique index lives here, not in schema.sql, because it needs the
+		// port column to exist first.
+		name: "worktree_setup",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ table, col, ddl string }{
+				{"workspaces", "setup_script", "TEXT"},
+				{"workspaces", "teardown_script", "TEXT"},
+				{"tasks", "setup_status", "TEXT"},
+				{"tasks", "setup_error", "TEXT"},
+				{"tasks", "setup_log", "TEXT"},
+				{"tasks", "port", "INTEGER"},
+			} {
+				if err := addColumnIfMissing(db, c.table, c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_port_live ON tasks(port) WHERE port IS NOT NULL AND archived_at IS NULL`)
+			return err
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

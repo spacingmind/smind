@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS workspaces (
     title TEXT NOT NULL,
     routing_policy TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    setup_script TEXT,
+    teardown_script TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workspace_accounts (
@@ -63,7 +65,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch TEXT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    archived_at TIMESTAMP
+    archived_at TIMESTAMP,
+    setup_status TEXT,
+    setup_error TEXT,
+    setup_log TEXT,
+    port INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS chats (

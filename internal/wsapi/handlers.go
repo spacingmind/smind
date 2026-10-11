@@ -35,6 +35,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"workspace.create":         handleWorkspaceCreate(wm),
 		"workspace.list":           handleWorkspaceList(wm),
 		"workspace.get":            handleWorkspaceGet(wm),
+		"workspace.setScripts":     handleWorkspaceSetScripts(wm),
 		"workspace.delete":         handleWorkspaceDelete(wm),
 		"space.create":             handleSpaceCreate(wm),
 		"space.list":               handleSpaceList(wm),
@@ -45,6 +46,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.get":                 handleTaskGet(wm),
 		"task.archive":             handleTaskArchive(wm, reg),
 		"task.move":                handleTaskMove(wm),
+		"task.retrySetup":          handleTaskRetrySetup(wm),
 		"task.diff":                handleTaskDiff(wm),
 		"task.files":               handleTaskFiles(wm),
 		"task.fileDiff":            handleTaskFileDiff(wm),
@@ -347,7 +349,43 @@ func handleWorkspaceGet(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("workspace.get: invalid params: %w", err)
 		}
-		return wm.GetWorkspace(p.ID)
+		ws, err := wm.GetWorkspace(p.ID)
+		if err != nil {
+			return nil, err
+		}
+		// The only wire method that returns the script text (ADR-0024),
+		// for the human-facing CLI `workspace setup show` and the web
+		// settings editor.
+		return workspaceGetResult{Workspace: ws, SetupScript: ws.SetupScript, TeardownScript: ws.TeardownScript}, nil
+	}
+}
+
+// workspaceGetResult is workspace.get's result: the workspace plus its
+// setup/teardown script text, which store.Workspace never serialises.
+type workspaceGetResult struct {
+	store.Workspace
+	SetupScript    string
+	TeardownScript string
+}
+
+// handleWorkspaceSetScripts edits a workspace's setup/teardown scripts.
+// Omitted or null keeps the stored script, an empty string clears it
+// (ADR-0024). The result carries only the Has* flags, never the text.
+func handleWorkspaceSetScripts(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			WorkspaceID    int64   `json:"workspaceId"`
+			SetupScript    *string `json:"setupScript"`
+			TeardownScript *string `json:"teardownScript"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("workspace.setScripts: invalid params: %w", err)
+		}
+		ws, err := wm.SetWorkspaceScripts(p.WorkspaceID, p.SetupScript, p.TeardownScript)
+		if err != nil {
+			return nil, fmt.Errorf("workspace.setScripts: %w", err)
+		}
+		return ws, nil
 	}
 }
 
@@ -564,6 +602,20 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("task.archive: %w", err)
 		}
 		return t, nil
+	}
+}
+
+// handleTaskRetrySetup re-runs the workspace's setup script on a
+// non-running task (ADR-0024 §3).
+func handleTaskRetrySetup(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.retrySetup: invalid params: %w", err)
+		}
+		return wm.RetrySetup(p.ID)
 	}
 }
 
