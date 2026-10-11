@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -85,9 +86,29 @@ func (r *OAuth2Refresher) Refresh(ctx context.Context, cred OAuthCredential) (OA
 	}, nil
 }
 
+func (r *Registry) accountRefreshLock(id int64) *sync.Mutex {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	if r.refreshLocks == nil {
+		r.refreshLocks = make(map[int64]*sync.Mutex)
+	}
+	mu, ok := r.refreshLocks[id]
+	if !ok {
+		mu = &sync.Mutex{}
+		r.refreshLocks[id] = mu
+	}
+	return mu
+}
+
 // EnsureFresh returns the account with id, refreshing and persisting its
 // OAuth credential first if it is expired or within expiryBuffer of expiry.
+// Concurrent calls for the same account are serialized so the refresher
+// runs at most once; the losers re-read the already-fresh credential.
 func (r *Registry) EnsureFresh(ctx context.Context, id int64, refresher OAuthRefresher) (Account, error) {
+	mu := r.accountRefreshLock(id)
+	mu.Lock()
+	defer mu.Unlock()
+
 	acc, err := r.Get(id)
 	if err != nil {
 		return Account{}, err
