@@ -76,6 +76,11 @@ export interface BindingWhen {
    * while a terminal has focus.
    */
   mac?: false;
+  /**
+   * `true` = fires like `global` (including while typing in a text field)
+   * except in the `terminal` scope, where the combo belongs to the shell.
+   */
+  notInTerminal?: true;
 }
 
 export interface ShortcutBinding {
@@ -424,6 +429,20 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     note: "Use this while a terminal has focus: Ctrl+F goes to the shell there",
   },
   {
+    // Windows/Linux only: the window is undecorated, so the native menu's
+    // Ctrl+Q accelerator never dispatches (no menu bar is attached). The
+    // renderer owns it instead and calls `desktop.quit()`. Ctrl+Q is XON
+    // (resume output) in a terminal, so it is not claimed while the
+    // terminal pane has focus -- the user quits from the app menu or the
+    // tray there. macOS keeps Cmd+Q on the native app menu.
+    id: "app-quit",
+    action: "app.quit",
+    combo: "Ctrl+Q",
+    section: "general",
+    label: "Quit smind",
+    when: { desktop: true, mac: false, notInTerminal: true },
+  },
+  {
     id: "run-interrupt",
     action: "run.interrupt",
     combo: "Escape",
@@ -521,6 +540,7 @@ export function bindingAllowedInScope(
   // No binding fires inside a modal: a dialog owns its own keyboard, down
   // to Escape (which closes it rather than interrupting a run).
   if (scope === "modal") return false;
+  if (binding.when?.notInTerminal === true) return scope !== "terminal";
   if (binding.when?.global === true) return true;
   if (scope === "editable") {
     return binding.when?.editableWhenRebound === true && binding.overridden === true;

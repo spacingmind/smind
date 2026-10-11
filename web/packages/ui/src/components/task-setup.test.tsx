@@ -117,12 +117,18 @@ describe("task setup status", () => {
 
   it("follows task.updated events as setup finishes", async () => {
     const client = new FakeWsClient();
-    let push: (payload: unknown) => void = () => {};
+    // Multiple hooks subscribe to task.updated (useLiveTask and the
+    // lineage strip's refetch), so capture every listener, not just the
+    // latest subscriber.
+    const listeners: Array<(payload: unknown) => void> = [];
     const events: DaemonEvents = {
       subscribe(topic, listener) {
-        if (topic === "task.updated") push = listener;
+        if (topic === "task.updated") listeners.push(listener);
         return () => {};
       },
+    };
+    const push = (payload: unknown) => {
+      for (const fn of listeners) fn(payload);
     };
     render(<TaskDetailPane client={client} task={{ ...TASK, SetupStatus: "running" }} chat={CHAT} isDefaultChat events={events} />);
 

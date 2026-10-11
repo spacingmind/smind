@@ -2,7 +2,9 @@ package wsapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1166,5 +1168,46 @@ func TestWSAPIPermissionRequestCarriesDetail(t *testing.T) {
 	d, _ := raw.Events[0]["detail"].(map[string]any)
 	if d == nil || d["replacesExisting"] != true || d["largeShrink"] != true || d["path"] != "a.txt" {
 		t.Fatalf("detail = %+v", raw.Events[0]["detail"])
+	}
+}
+
+// TestRunStart_TreeBusyErrorIsReturnedToWSClient pins PR-G's G-AC4: when
+// a task tree is at its concurrency limit, run.start returns the
+// model-readable TreeBusyError message to the WS client instead of
+// starting a 5th run.
+func TestRunStart_TreeBusyErrorIsReturnedToWSClient(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "hang")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	// Fill the tree's default limit of 4 (each on its own chat so the
+	// per-chat guard never fires first).
+	for i := 0; i < 4; i++ {
+		chat, err := wm.CreateChat(task.ID, "chat")
+		if err != nil {
+			t.Fatalf("CreateChat() error = %v", err)
+		}
+		sendRequest(t, ws, fmt.Sprintf("start-%d", i), "run.start", map[string]any{
+			"taskId": task.ID, "chatId": chat.ID, "provider": "glm", "prompt": "hi",
+		})
+		resp := readEnvelopeFor(t, ws, fmt.Sprintf("start-%d", i), 5*time.Second)
+		if resp.Error != nil {
+			t.Fatalf("run.start %d error = %v", i, resp.Error.Message)
+		}
+	}
+
+	sendRequest(t, ws, "fifth", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "fifth", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("5th run.start = nil error, want the tree concurrency limit error")
+	}
+	var wantErr *runs.TreeBusyError
+	if !strings.Contains(resp.Error.Message, "task tree concurrency limit reached") || !strings.Contains(resp.Error.Message, fmt.Sprintf("task tree #%d", task.ID)) {
+		t.Fatalf("run.start error = %q, want the TreeBusyError text mentioning task tree #%d (%v)", resp.Error.Message, task.ID, wantErr)
 	}
 }

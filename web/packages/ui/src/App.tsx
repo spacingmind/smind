@@ -68,7 +68,7 @@ import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
-import { isDesktop } from "@/lib/platform";
+import { desktop, isDesktop } from "@/lib/platform";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
@@ -319,12 +319,32 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     };
   }, [connect]);
 
+  // The task header's lineage jump (PR-U2): fetch the target task fresh
+  // (the sidebar's tree may not hold an archived-then-reshown task) and
+  // reuse the normal selection path so tabs/chat seeding behave exactly
+  // like clicking it in the sidebar.
   const selectTask = useCallback((task: Task) => {
     setSelectedTask(task);
     // Tab seeding happens once this task's chats load (the effect above) --
     // useTaskChats is keyed on selectedTask.ID, so setting it here is what
     // kicks that fetch off.
   }, []);
+
+  // The task header's lineage jump (PR-U2): fetch the target task fresh
+  // (the sidebar's tree may not hold it) and reuse the normal selection
+  // path so tabs/chat seeding behave exactly like a sidebar click.
+  const jumpToTask = useCallback(
+    async (taskId: number) => {
+      if (!client) return;
+      try {
+        const target = await client.call<Task>("task.get", { id: taskId });
+        selectTask(target);
+      } catch (err) {
+        console.error("task.get failed for lineage jump", err);
+      }
+    },
+    [client, selectTask],
+  );
 
   function openFileTab(path: string) {
     if (!selectedTask) return;
@@ -679,6 +699,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
 
+  useActionHandler("app.quit", () => {
+    desktop.quit().catch(() => {});
+  });
+
   const { preference, setPreference } = useTheme();
   useActionHandler("theme.cycle", () => {
     const order: ThemePreference[] = ["light", "dark", "system"];
@@ -893,6 +917,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       paneCount={paneCount}
       task={selectedTask}
       client={client}
+      onJumpToTask={jumpToTask}
       connectionStatus={connectionStatus}
       events={events}
       onOpenFile={openFileTab}
@@ -1004,6 +1029,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
                 runningChatsByTask={runningChatsByTask}
                 onNewChat={openNewChat}
                 onOpenChat={openChatById}
+                onJumpToTask={jumpToTask}
                 onArchiveChat={archiveChatTab}
                 dragOverPaneId={dragOverPaneId}
                 dropPosition={dropPosition}
@@ -1396,6 +1422,8 @@ interface SplitPaneCallbacks {
   onNewChat: (placement: TabPlacement) => void;
   /** "+" -> an existing not-open chat: opens its tab. Also the concurrency banner's jump target and a chat tab's own rename/archive dispatch path. */
   onOpenChat: (chatId: number, placement?: TabPlacement) => void;
+  /** Selects another task (the lineage strip's parent/child jumps, PR-U2). */
+  onJumpToTask: (taskId: number) => void;
   /** Tab context menu's "Archive chat" (chat tabs only) -- opens the confirm dialog. */
   onArchiveChat: (entry: TabEntry) => void;
   /** The pane a drag is currently hovering over, if any (Item 8) -- drives which pane renders its drop-zone overlay. */
@@ -1450,6 +1478,7 @@ function SplitTreeView({
         paneCount={paneCount}
         task={shared.task}
         client={shared.client}
+        onJumpToTask={shared.onJumpToTask}
         connectionStatus={shared.connectionStatus}
         events={shared.events}
         onOpenFile={shared.onOpenFile}
@@ -1558,6 +1587,7 @@ function PaneTabStrip({
   runningChatsByTask,
   onNewChat,
   onOpenChat,
+  onJumpToTask,
   onArchiveChat,
   showMoveAffordance = true,
   dragOverPaneId = null,
@@ -1595,6 +1625,7 @@ function PaneTabStrip({
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
   onNewChat: (placement: TabPlacement) => void;
   onOpenChat: (chatId: number, placement?: TabPlacement) => void;
+  onJumpToTask: (taskId: number) => void;
   onArchiveChat: (entry: TabEntry) => void;
   /** Item 21: the split tree is a desktop-only concept -- compact has nowhere for "split" to open a second pane, so it's hidden rather than left to open a split that never renders. */
   showMoveAffordance?: boolean;
@@ -1714,6 +1745,7 @@ function PaneTabStrip({
               chats={chats}
               runningChatsByTask={runningChatsByTask}
               onOpenChat={onOpenChat}
+              onJumpToTask={onJumpToTask}
             />
           </TabsContent>
         ))}
@@ -2010,6 +2042,7 @@ function TabContent({
   chats,
   runningChatsByTask,
   onOpenChat,
+  onJumpToTask,
 }: {
   entry: TabEntry;
   client: WsClient | null;
@@ -2025,6 +2058,7 @@ function TabContent({
   chats: Chat[] | null;
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
   onOpenChat: (chatId: number, placement?: TabPlacement) => void;
+  onJumpToTask: (taskId: number) => void;
 }) {
   // ADR-0016 P3: this tab's own chat (undefined only for a stale tab whose
   // chat.list result hasn't loaded yet, or was deleted out from under it --
@@ -2052,6 +2086,7 @@ function TabContent({
         events={events}
         onOpenFile={onOpenFile}
         onOpenDiffTab={onRevealInDiff}
+        onJumpToTask={onJumpToTask}
       />
     ) : null,
     files: (

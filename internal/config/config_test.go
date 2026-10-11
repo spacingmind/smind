@@ -118,3 +118,51 @@ func TestLoad_GLMMaxTurns(t *testing.T) {
 		t.Fatalf("maxTurns 10000: %v", err)
 	}
 }
+
+// TestDefault_OrchestrationMaxConcurrentRunsPerTree pins the per-tree
+// concurrency guard's default (PR-G).
+func TestDefault_OrchestrationMaxConcurrentRunsPerTree(t *testing.T) {
+	t.Parallel()
+	if got := Default().Orchestration.MaxConcurrentRunsPerTree; got != 4 {
+		t.Fatalf("Default().Orchestration.MaxConcurrentRunsPerTree = %d, want 4", got)
+	}
+}
+
+// TestLoad_OrchestrationMaxConcurrentRunsPerTreeOverride proves the knob
+// is configured from config.yaml; a missing file keeps the default.
+func TestLoad_OrchestrationMaxConcurrentRunsPerTreeOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Orchestration.MaxConcurrentRunsPerTree; got != 4 {
+		t.Fatalf("missing file: MaxConcurrentRunsPerTree = %d, want default 4", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("orchestration:\n  maxConcurrentRunsPerTree: 2\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Orchestration.MaxConcurrentRunsPerTree; got != 2 {
+		t.Fatalf("override: MaxConcurrentRunsPerTree = %d, want 2", got)
+	}
+}
+
+// TestLoad_OrchestrationMaxConcurrentRunsPerTreeRejectsZero proves Load
+// rejects a limit below 1.
+func TestLoad_OrchestrationMaxConcurrentRunsPerTreeRejectsZero(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte("orchestration:\n  maxConcurrentRunsPerTree: 0\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	if _, err := Load(); err == nil {
+		t.Fatal("Load() = nil error, want rejection of maxConcurrentRunsPerTree 0")
+	}
+}
