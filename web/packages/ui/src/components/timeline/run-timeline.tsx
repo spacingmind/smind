@@ -7,6 +7,7 @@ import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
+import { describeStopReason } from "@/components/timeline/stop-reason";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
 import type { RunStatusValue } from "@/lib/types";
 
@@ -46,6 +47,7 @@ export const RunTimeline = memo(function RunTimeline({
   providerLabels?: Record<string, string>;
 } & TimelineRowContext) {
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
+  const stop = run.stopReason ? describeStopReason(run.stopReason) : null;
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
@@ -99,7 +101,17 @@ export const RunTimeline = memo(function RunTimeline({
 
       <div className="flex items-center gap-2 border-t px-3 py-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
         {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
-        {run.stopReason && <span data-testid="run-stop-reason">{run.stopReason}</span>}
+        {stop && (
+          <span
+            data-testid="run-stop-reason"
+            data-tone={stop.tone}
+            title={stop.hint}
+            className={stop.tone === "warning" ? "text-warning" : undefined}
+          >
+            {stop.label}
+            {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
+          </span>
+        )}
         <CopyTurnButton run={run} />
       </div>
     </li>
