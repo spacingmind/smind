@@ -98,7 +98,8 @@ Usage:
   smind task stop <runId>                                  stop a running run
 
   smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept]
-      [--thinking-level=<level>] [--notes=<text>]         create an agent profile
+      [--thinking-level=<level>] [--model=<model>]
+      [--notes=<text>]                                    create an agent profile
   smind profile ls                                         list agent profiles
   smind profile rm <id>                                    remove an agent profile
 

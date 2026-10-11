@@ -79,7 +79,7 @@ func TestRunner_RunPrompt_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -118,7 +118,7 @@ func TestRunner_RunPrompt_Kimi(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderKimi, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderKimi, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -174,7 +174,7 @@ func TestRunner_RunPrompt_CodexNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -205,7 +205,7 @@ func TestRunner_RunPrompt_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -245,7 +245,7 @@ func TestRunner_RunPrompt_ClaudeNative_ToolCallEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -301,7 +301,7 @@ func TestRunner_RunPrompt_GLM_StructuredEvents(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -383,7 +383,7 @@ func TestRunner_RunPrompt_ClaudeNative_PermissionModeFlags(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{Mode: tc.mode}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{Mode: tc.mode}, "", "", events)
 			}()
 			got := drainEvents(events)
 			if err := <-errCh; err != nil {
@@ -444,7 +444,7 @@ func TestRunner_RunPrompt_ClaudeNative_ThinkingLevel(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, tc.level, events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, tc.level, "", events)
 			}()
 
 			got := drainEvents(events)
@@ -518,7 +518,7 @@ func TestRunner_RunPrompt_NoWorktree(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -538,7 +538,7 @@ func TestRunner_RunPrompt_UnknownProvider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, Provider("bogus"), "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, Provider("bogus"), "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -567,7 +567,7 @@ func TestRunner_RunPrompt_ContextCancellationStopsSubprocess(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	select {
@@ -620,7 +620,7 @@ func TestRunner_RunPrompt_DoneEventDoesNotBlockAfterCallerStopsReading(t *testin
 	defer cancel()
 
 	go func() {
-		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hello", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderGLM, "hello", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	select {
@@ -691,7 +691,7 @@ func TestRunner_RunPrompt_PermissionRequest_GLM(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -746,7 +746,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -793,7 +793,7 @@ func TestRunner_RunPrompt_PermissionRequest_ClaudeNative_Deny(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", decider, PermissionSettings{}, "", "", events)
 	}()
 
 	got := drainEvents(events)
@@ -835,7 +835,7 @@ func TestRunner_RunPrompt_ClaudeNative_DialogTimeoutEnv(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 			}()
 
 			got := drainEvents(events)
@@ -870,7 +870,7 @@ func TestRunner_RunPrompt_GLM_AutoAcceptWithoutDecider(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{AutoAccept: true}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{AutoAccept: true}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -912,7 +912,7 @@ func TestRunner_RunPrompt_CodexNative_ModePresets(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", decider, PermissionSettings{Mode: tc.mode}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", decider, PermissionSettings{Mode: tc.mode}, "", "", events)
 			}()
 			got := drainEvents(events)
 			if err := <-errCh; err != nil {
@@ -941,7 +941,7 @@ func TestRunner_RunPrompt_CodexNative_ModePresets(t *testing.T) {
 		events := make(chan Event)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{Mode: "auto-safe"}, "", events)
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{Mode: "auto-safe"}, "", "", events)
 		}()
 		drainEvents(events)
 		if err := <-errCh; err == nil || !strings.Contains(err.Error(), "auto-safe") {
@@ -990,7 +990,7 @@ func TestRunner_RunPrompt_ACP_AppliesPermissionMode(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: tc.mode}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: tc.mode}, "", "", events)
 			}()
 			got := drainEvents(events)
 			err := <-errCh
@@ -1042,7 +1042,7 @@ func TestRunner_SetPermissionMode(t *testing.T) {
 		events := make(chan Event)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", "", events)
 		}()
 		drainEvents(events)
 		if err := <-errCh; err != nil {
@@ -1088,13 +1088,20 @@ func TestRunner_SetPermissionMode(t *testing.T) {
 
 // fakeClaudeModeClient is a claudeBackend that only records
 // SetPermissionMode calls.
-type fakeClaudeModeClient struct{ mode string }
+type fakeClaudeModeClient struct {
+	mode       string
+	modelCalls []*string
+}
 
 func (f *fakeClaudeModeClient) Prompt(context.Context, string, chan<- claudecode.Message) (claudecode.ResultMessage, error) {
 	return claudecode.ResultMessage{}, nil
 }
 func (f *fakeClaudeModeClient) SetPermissionMode(_ context.Context, mode string) error {
 	f.mode = mode
+	return nil
+}
+func (f *fakeClaudeModeClient) SetModel(_ context.Context, model *string) error {
+	f.modelCalls = append(f.modelCalls, model)
 	return nil
 }
 func (f *fakeClaudeModeClient) Close() error { return nil }
@@ -1129,7 +1136,7 @@ func TestRunner_SetPermissionMode_ConfigOptionAgentRoundTrip(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -1159,7 +1166,7 @@ func TestRunner_SetPermissionMode_FollowsCurrentModeUpdate(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", d, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -1187,7 +1194,7 @@ func TestRunner_StartModeAppliedBeforeSessionIsSwitchable(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: "accept_edits"}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{Mode: "accept_edits"}, "", "", events)
 	}()
 	go drainEvents(events)
 

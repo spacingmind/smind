@@ -90,7 +90,7 @@ func TestRunner_RunPrompt_GLM_ResumeCapabilityMatrix(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 			}()
 			got := drainEvents(events)
 			if err := <-errCh; err != nil {
@@ -108,7 +108,7 @@ func TestRunner_RunPrompt_GLM_ResumeCapabilityMatrix(t *testing.T) {
 			events2 := make(chan Event)
 			errCh2 := make(chan error, 1)
 			go func() {
-				errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", events2)
+				errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", "", events2)
 			}()
 			got2 := drainEvents(events2)
 			if err := <-errCh2; err != nil {
@@ -138,7 +138,7 @@ func TestRunner_RunPrompt_GLM_StaleSessionFallsBackWithNote(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -167,7 +167,7 @@ func TestRunner_RunPrompt_ClaudeNative_ResumesSessionAcrossRuns(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -181,7 +181,7 @@ func TestRunner_RunPrompt_ClaudeNative_ResumesSessionAcrossRuns(t *testing.T) {
 	events2 := make(chan Event)
 	errCh2 := make(chan error, 1)
 	go func() {
-		errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "what did I say before?", nil, PermissionSettings{}, "", events2)
+		errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "what did I say before?", nil, PermissionSettings{}, "", "", events2)
 	}()
 	drainEvents(events2)
 	if err := <-errCh2; err != nil {
@@ -218,7 +218,7 @@ func TestRunner_RunPrompt_ClaudeNative_StaleSessionFallsBackWithNote(t *testing.
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -244,7 +244,7 @@ func TestRunner_RunPrompt_CodexNative_ResumesSessionAcrossRuns(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -257,7 +257,7 @@ func TestRunner_RunPrompt_CodexNative_ResumesSessionAcrossRuns(t *testing.T) {
 	events2 := make(chan Event)
 	errCh2 := make(chan error, 1)
 	go func() {
-		errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "what did I say before?", nil, PermissionSettings{}, "", events2)
+		errCh2 <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "what did I say before?", nil, PermissionSettings{}, "", "", events2)
 	}()
 	drainEvents(events2)
 	if err := <-errCh2; err != nil {
@@ -281,7 +281,7 @@ func TestRunner_RunPrompt_CodexNative_StaleSessionFallsBackWithNote(t *testing.T
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -318,7 +318,7 @@ func cancelRunAfterFirstChunk(t *testing.T, r *Runner, taskHandle store.Task, pr
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(ctx, taskHandle.ID, taskHandle.ID, provider, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(ctx, taskHandle.ID, taskHandle.ID, provider, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 
 	select {
@@ -366,7 +366,7 @@ func TestRunner_RunPrompt_GLM_StoppedRunStillResumes(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "what did I say before?", nil, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -396,7 +396,7 @@ func TestRunner_RunPrompt_CodexNative_StoppedRunStillResumes(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "what did I say before?", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "what did I say before?", nil, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -428,7 +428,7 @@ func TestRunner_RunPrompt_ClaudeNative_StoppedRunStillResumes(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "what did I say before?", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "what did I say before?", nil, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {

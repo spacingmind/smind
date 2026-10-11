@@ -98,6 +98,12 @@ type ProviderInfo struct {
 	Modes           []ModeInfo `json:"modes,omitempty"`
 	DefaultMode     string     `json:"defaultMode,omitempty"`
 	ModesDiscovered bool       `json:"modesDiscovered,omitempty"`
+	// Models is the provider's model catalog (ADR-0025). For claude-native it
+	// is static and ModelsDiscovered is false (any syntax-valid id is still
+	// accepted); for ACP providers and Codex it is what the lazy probe found,
+	// and ModelsDiscovered true means an id outside it is rejected up front.
+	Models           []ModelInfo `json:"models,omitempty"`
+	ModelsDiscovered bool        `json:"modelsDiscovered,omitempty"`
 	// SupportsAutoAccept marks an ACP provider, which additionally takes
 	// PermissionSettings.AutoAccept (approve every permission prompt).
 	SupportsAutoAccept bool `json:"supportsAutoAccept,omitempty"`
@@ -127,6 +133,7 @@ func SupportedProviders() []ProviderInfo {
 	}
 	for i := range providers {
 		providers[i].Modes, providers[i].DefaultMode = staticModes(providers[i].ID)
+		providers[i].Models = staticModels(providers[i].ID)
 	}
 	return providers
 }

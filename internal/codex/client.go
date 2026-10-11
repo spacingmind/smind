@@ -36,6 +36,7 @@ type threadStartParams struct {
 	Cwd            string `json:"cwd,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
+	Model          string `json:"model,omitempty"`
 }
 
 type thread struct {
@@ -60,6 +61,7 @@ type threadResumeParams struct {
 	Cwd            string `json:"cwd,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
+	Model          string `json:"model,omitempty"`
 }
 
 type threadUnarchiveParams struct {
@@ -144,6 +146,10 @@ type Client struct {
 	approvalPolicy string
 	sandbox        string
 
+	// model is sent as `model` on every thread/start and thread/resume
+	// (see WithModel); empty omits the field, leaving Codex's default.
+	model string
+
 	// mu guards updateSubs/turnWaiters, both keyed by threadID -- not
 	// turnID, deliberately: a turn's own id is only known once turn/start's
 	// response arrives, which would create a window (between issuing the
@@ -201,6 +207,74 @@ func WithThreadPolicy(approvalPolicy, sandbox string) Option {
 	return func(c *Client) { c.approvalPolicy, c.sandbox = approvalPolicy, sandbox }
 }
 
+// WithModel sets the `model` sent on every thread/start and thread/resume.
+// Empty (the default) omits the field entirely.
+func WithModel(model string) Option {
+	return func(c *Client) { c.model = model }
+}
+
+// ModelInfo is one entry of the app-server's model/list.
+type ModelInfo struct {
+	ID          string
+	DisplayName string
+	Description string
+	IsDefault   bool
+}
+
+type modelListParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+type modelListResponse struct {
+	Data []struct {
+		ID          string `json:"id"`
+		Model       string `json:"model"`
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+		Hidden      bool   `json:"hidden"`
+		IsDefault   bool   `json:"isDefault"`
+	} `json:"data"`
+	NextCursor string `json:"nextCursor"`
+}
+
+// maxModelListPages bounds ListModels' cursor loop against a misbehaving
+// server that never stops returning a cursor.
+const maxModelListPages = 20
+
+// ListModels returns the models the app-server offers (model/list),
+// following pagination and skipping hidden ones. The model id is the
+// entry's `model` field (what thread/start's `model` accepts), falling back
+// to `id`.
+func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	var out []ModelInfo
+	cursor := ""
+	for page := 0; page < maxModelListPages; page++ {
+		raw, err := c.conn.call(ctx, "model/list", modelListParams{Cursor: cursor})
+		if err != nil {
+			return nil, fmt.Errorf("codex: model/list: %w", err)
+		}
+		var res modelListResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return nil, fmt.Errorf("codex: model/list: decode response: %w", err)
+		}
+		for _, m := range res.Data {
+			if m.Hidden {
+				continue
+			}
+			id := m.Model
+			if id == "" {
+				id = m.ID
+			}
+			out = append(out, ModelInfo{ID: id, DisplayName: m.DisplayName, Description: m.Description, IsDefault: m.IsDefault})
+		}
+		if res.NextCursor == "" {
+			break
+		}
+		cursor = res.NextCursor
+	}
+	return out, nil
+}
+
 // New spawns command[0] with command[1:] as arguments and wires up a codex
 // app-server connection to it, registering this Client's approval-request
 // handlers. Call Initialize before anything else.
@@ -250,7 +324,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession starts a new codex thread rooted at cwd (the task's worktree
 // path), returning its thread id.
 func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
-	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox})
+	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model})
 	if err != nil {
 		return "", fmt.Errorf("codex: thread/start: %w", err)
 	}
@@ -314,7 +388,7 @@ func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error
 }
 
 func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
-	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox}); err != nil {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model}); err != nil {
 		return fmt.Errorf("codex: thread/resume: %w", err)
 	}
 	return nil

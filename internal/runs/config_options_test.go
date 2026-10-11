@@ -109,3 +109,21 @@ func TestRegistry_ConfigOptions_GLM_RealSelectRoundTrip(t *testing.T) {
 		t.Fatalf("SetConfigOption() = %+v, want currentValue reflecting the new value %q", set, "high")
 	}
 }
+
+// TestRegistry_SetConfigOption_CodexModelRejected: through the registry, a
+// codex run's model option is refused with the next-run explanation.
+func TestRegistry_SetConfigOption_CodexModelRejected(t *testing.T) {
+	t.Parallel()
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	reg := newTestRegistry(t, st)
+	runner := taskrunner.New(wm, taskrunner.WithCodexCommand([]string{"/nonexistent/smind-test-codex-agent"}))
+	runID, err := reg.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderCodexNative, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg, runID, StatusError, 5*time.Second)
+	if _, err := reg.SetConfigOption(context.Background(), runID, "model", "gpt-fake-a"); !errors.Is(err, taskrunner.ErrCodexModelNextRun) {
+		t.Fatalf("SetConfigOption(model) error = %v, want ErrCodexModelNextRun", err)
+	}
+}

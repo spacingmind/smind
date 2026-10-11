@@ -1164,6 +1164,10 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			// omitted or "reject" keeps today's behavior exactly, so old
 			// clients are unchanged.
 			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Model (ADR-0025) is the model the run is asked to use; omitted or
+			// empty means the provider's default. Validated against the
+			// provider's catalog by the runs registry before any spawn.
+			Model string `json:"model"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.prompt: invalid params: %w", err)
@@ -1175,7 +1179,7 @@ func handleTaskPrompt(wm *workspace.Manager, runner *taskrunner.Runner, reg *run
 			return nil, fmt.Errorf("task.prompt: invalid thinkingLevel %q", p.ThinkingLevel)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, store.ChatQueueSourceHuman, 0, 0, runs.WithModel(p.Model))
 		if err != nil {
 			return nil, fmt.Errorf("task.prompt: %w", err)
 		}
@@ -1233,6 +1237,10 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			// WhenBusy is ADR-0021 §2's busy-chat delivery mode. Optional;
 			// omitted or "reject" keeps today's behavior exactly.
 			WhenBusy runs.WhenBusy `json:"whenBusy"`
+			// Model (ADR-0025) is the model the run is asked to use; omitted or
+			// empty means the provider's default. Validated against the
+			// provider's catalog by the runs registry before any spawn.
+			Model string `json:"model"`
 			// Source/FromTaskID/FromChatID are ADR-0021 §4's provenance:
 			// the wsapi default is a human caller; the MCP layer passes
 			// orchestrator, or agent plus its own task/chat ids for the
@@ -1262,7 +1270,7 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 			return nil, fmt.Errorf("run.start: source %q requires fromTaskId and fromChatId", p.Source)
 		}
 
-		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID)
+		out, err := reg.StartWhenBusy(context.Background(), wm, runner, p.TaskID, p.ChatID, p.Provider, p.Prompt, taskrunner.PermissionSettings{Mode: p.PermissionMode, AutoAccept: p.AutoAccept}, p.ThinkingLevel, p.WhenBusy, p.Source, p.FromTaskID, p.FromChatID, runs.WithModel(p.Model))
 		if err != nil {
 			return nil, fmt.Errorf("run.start: %w", err)
 		}
@@ -1969,6 +1977,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			ThinkingLevel        string          `json:"thinkingLevel"`
+			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -1983,6 +1992,7 @@ func handleProfileCreate(profReg *profiles.Registry) handlerFunc {
 			PermissionMode: p.PermissionMode,
 			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
+			Model:          p.Model,
 			Notes:          p.Notes,
 		})
 	}
@@ -2021,6 +2031,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			AutoAccept           bool            `json:"autoAccept"`
 			LegacyApprovalPolicy json.RawMessage `json:"approvalPolicy"`
 			ThinkingLevel        string          `json:"thinkingLevel"`
+			Model                string          `json:"model"`
 			Notes                string          `json:"notes"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
@@ -2036,6 +2047,7 @@ func handleProfileUpdate(profReg *profiles.Registry) handlerFunc {
 			PermissionMode: p.PermissionMode,
 			AutoAccept:     p.AutoAccept,
 			ThinkingLevel:  p.ThinkingLevel,
+			Model:          p.Model,
 			Notes:          p.Notes,
 		})
 	}
