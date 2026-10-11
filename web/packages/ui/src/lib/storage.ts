@@ -29,6 +29,7 @@ export const STORAGE_KEYS = {
   pinnedTasks: "smind:pinned-tasks",
   unreadTasks: "smind:unread-tasks",
   sidebarGroupMode: "smind:sidebar-group-mode",
+  collapsedTasks: "smind.sidebar.collapsedTasks",
   notificationSound: "smind:notification-sound",
 } as const;
 
