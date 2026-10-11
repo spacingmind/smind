@@ -10,12 +10,33 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+// repoWorktreeLocks serializes git worktree mutations per repository.
+// `git worktree add/remove` run concurrently in one repo can fail on Windows
+// ("failed to read .git/worktrees/<name>/commondir: No error", exit 128): git
+// reads the shared .git/worktrees admin directory while another process is
+// still writing an entry in it. An orchestrator creating several tasks in one
+// workspace at once hits it (3 of 25 runs of the concurrent-create test
+// under load). The daemon is the only writer, so an in-process lock per repo
+// path is enough; different repositories still run in parallel.
+var repoWorktreeLocks sync.Map // cleaned repo path -> *sync.Mutex
+
+// runWorktreeGit runs a `git worktree ...` command while holding repoPath's
+// lock.
+func runWorktreeGit(repoPath string, args ...string) error {
+	mu, _ := repoWorktreeLocks.LoadOrStore(filepath.Clean(repoPath), &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	defer m.Unlock()
+	return runGit(repoPath, args...)
+}
 
 // gitWorktreeAdd runs `git worktree add <worktreePath> -b <branch>` inside
 // repoPath, creating a real git worktree checked out on a new branch.
 func gitWorktreeAdd(repoPath, worktreePath, branch string) error {
-	return runGit(repoPath, "worktree", "add", worktreePath, "-b", branch)
+	return runWorktreeGit(repoPath, "worktree", "add", worktreePath, "-b", branch)
 }
 
 // gitWorktreeAddFrom is gitWorktreeAdd with an explicit start point (e.g. a
@@ -24,7 +45,7 @@ func gitWorktreeAdd(repoPath, worktreePath, branch string) error {
 // smind/pr-<id> branch from the base branch rather than from whatever the
 // workspace checkout happens to have checked out.
 func gitWorktreeAddFrom(repoPath, worktreePath, branch, startPoint string) error {
-	return runGit(repoPath, "worktree", "add", worktreePath, "-b", branch, startPoint)
+	return runWorktreeGit(repoPath, "worktree", "add", worktreePath, "-b", branch, startPoint)
 }
 
 // gitFetchBranch fetches exactly branch from remote into its remote-tracking
@@ -155,7 +176,7 @@ func gitWorktreeCheckpoint(worktreePath string) error {
 // guards against refuse-to-remove edge cases (e.g. untracked-but-ignored
 // leftovers, submodules) rather than silently discarding reviewable changes.
 func gitWorktreeRemove(repoPath, worktreePath string) error {
-	return runGit(repoPath, "worktree", "remove", worktreePath, "--force")
+	return runWorktreeGit(repoPath, "worktree", "remove", worktreePath, "--force")
 }
 
 // runGit shells out to the real git binary rather than using a Go git
