@@ -247,6 +247,19 @@ export function SettingsScreen({
     );
   }
 
+  const backToApp = (
+    <Button
+      variant="ghost"
+      aria-label="Back to app"
+      className="h-8 w-full justify-start gap-2 rounded-md px-2 text-ui-base"
+      data-testid="settings-back-button"
+      onClick={onNavigateBack}
+    >
+      <ArrowLeft className="size-3.5" />
+      Back to app
+    </Button>
+  );
+
   return (
     <div className="flex h-full min-h-0 w-full" data-testid="settings-screen">
       <aside
@@ -254,17 +267,20 @@ export function SettingsScreen({
         data-settings-sidebar
         data-testid="settings-sidebar"
       >
-        <div className="h-12 shrink-0" data-testid="settings-sidebar-top" data-tauri-drag-region={dragRegion} />
-        <Button
-          variant="ghost"
-          aria-label="Back to app"
-          className="h-8 w-full justify-start gap-2 rounded-md px-2 text-ui-base"
-          data-testid="settings-back-button"
-          onClick={onNavigateBack}
-        >
-          <ArrowLeft className="size-3.5" />
-          Back to app
-        </Button>
+        {/* Desktop build: an empty h-12 strip owns the title-bar drag and the
+            macOS traffic lights, the back row sits under it. Browser: no title
+            bar to clear, so the back row takes that h-12 row itself and lines
+            up with the content header across the divider. */}
+        {isDesktop ? (
+          <>
+            <div className="h-12 shrink-0" data-testid="settings-sidebar-top" data-tauri-drag-region={dragRegion} />
+            <div className="shrink-0 px-2 pb-1">{backToApp}</div>
+          </>
+        ) : (
+          <div className="flex h-12 shrink-0 items-center px-2" data-testid="settings-sidebar-top">
+            {backToApp}
+          </div>
+        )}
         <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <SettingsNav
             sections={sections}
