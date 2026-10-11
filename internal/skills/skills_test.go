@@ -2,6 +2,7 @@ package skills
 
 import (
 	"os"
+	"runtime"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -54,9 +55,12 @@ func TestSkillInstall_WritesBundleToAllTargets(t *testing.T) {
 			if !strings.Contains(string(mb), `"SKILL.md": "`+hashBytes(s.Files["SKILL.md"])+`"`) {
 				t.Fatalf("manifest lacks SKILL.md hash: %s", mb)
 			}
-			fi, _ := os.Stat(filepath.Join(dir, "SKILL.md"))
-			if fi.Mode().Perm() != 0o644 {
-				t.Fatalf("SKILL.md mode = %v, want 0644", fi.Mode().Perm())
+			if runtime.GOOS != "windows" {
+				// Windows has no POSIX permission bits; files are readable by all.
+				fi, _ := os.Stat(filepath.Join(dir, "SKILL.md"))
+				if fi.Mode().Perm() != 0o644 {
+					t.Fatalf("SKILL.md mode = %v, want 0644", fi.Mode().Perm())
+				}
 			}
 		}
 	}

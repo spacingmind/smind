@@ -461,6 +461,7 @@ func newTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	runGitT(t, dir, "init")
+	runGitT(t, dir, "config", "core.autocrlf", "false")
 	runGitT(t, dir, "config", "user.email", "test@example.com")
 	runGitT(t, dir, "config", "user.name", "Test")
 

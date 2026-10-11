@@ -108,7 +108,11 @@ func TestList_EmptyPathDefaultsToHomeDir(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(home, "sub"), 0o755); err != nil {
 		t.Fatalf("mkdir sub: %v", err)
 	}
-	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	} else {
+		t.Setenv("HOME", home)
+	}
 
 	result, err := List("")
 	if err != nil {
