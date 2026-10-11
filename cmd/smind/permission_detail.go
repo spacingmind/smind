@@ -67,6 +67,10 @@ func renderPermissionDetail(d *permissionDetail) string {
 		}
 	}
 	switch {
+	case d.Redacted && d.ReplacesExisting && d.ExistingBytes == 0 && d.ExistingLines == 0:
+		// Existing stats are deliberately withheld (the zero values below
+		// are "absent", not "empty"): never print a made-up "0 -> N".
+		fmt.Fprintf(&b, "  replaces existing file with %d lines, %s\n", d.NewLines, formatKB(d.NewBytes))
 	case d.ExistingBytes > 0 || d.ExistingLines > 0 || d.ReplacesExisting:
 		fmt.Fprintf(&b, "  %d -> %d lines, %s -> %s\n", d.ExistingLines, d.NewLines, formatKB(d.ExistingBytes), formatKB(d.NewBytes))
 	case d.NewLines > 0 || d.NewBytes > 0:

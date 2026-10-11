@@ -107,3 +107,18 @@ func TestFetchPendingPermissions_CarriesDetail(t *testing.T) {
 		t.Fatalf("Detail = %+v", d)
 	}
 }
+
+// A redacted overwrite carries no existing stats on the wire; the CLI must
+// not print the absent zeros as "0 -> N lines".
+func TestRenderPermissionRequest_RedactedOverwriteHasNoFakeZeroStats(t *testing.T) {
+	out := renderPermissionRequest("r1", "q1", "Write file: .env", nil, &permissionDetail{
+		Kind: "write", Path: ".env", NewLines: 3, NewBytes: 40,
+		ReplacesExisting: true, Redacted: true,
+	})
+	if strings.Contains(out, "0 -> 3") || strings.Contains(out, "0.0 KB ->") {
+		t.Fatalf("output shows fabricated existing stats:\n%s", out)
+	}
+	if !strings.Contains(out, "replaces existing file with 3 lines") || !strings.Contains(out, "WARNING: replaces an existing file") {
+		t.Fatalf("output lacks the overwrite warning:\n%s", out)
+	}
+}
