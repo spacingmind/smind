@@ -45,6 +45,10 @@ function mockPlatform(opts: { desktop: boolean; os: DesktopOS | null }) {
       daemonStatus: reject,
       onDaemonProgress: () => () => {},
       onMenuAction: () => () => {},
+      appUpdateCheck: () => Promise.resolve({ kind: "unsupported" }),
+      appUpdateInstall: () => Promise.resolve(),
+      onAppUpdateCheckRequested: () => () => {},
+      onAppUpdateProgress: () => () => {},
     },
   }));
   return win;
