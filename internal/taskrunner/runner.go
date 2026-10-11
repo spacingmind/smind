@@ -346,7 +346,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	var opts []acp.Option
 	switch {
 	case decider != nil:
-		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider}))
+		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider, cwd: worktreePath}))
 	case perm.AutoAccept:
 		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case r.acpPermissionPolicy != nil:
@@ -737,7 +737,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		// Installed for every mode, bypassPermissions included: in bypass
 		// the CLI never asks, but a mid-run switch to an asking mode must
 		// still reach a human.
-		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider}))
+		opts = append(opts, claudecode.WithPermissionPolicy(claudeDeciderAdapter{decider: decider, cwd: worktreePath}))
 		// Hold the CLI's own permission-dialog deadline open well past
 		// smind's 5-minute manual-approval window, so the CLI's internal
 		// auto-deny fallback can't silently cancel a pending request
