@@ -12,8 +12,18 @@ rate-limited, so smind must never call them carelessly ("có rate limit, đừng
 có gọi vô tội vạ"). Section 3 now has a **Call budget (hard rules)**
 subsection; sections 4 and 5 and decisions D2, D3 and D6 are amended to match.
 Also approved the same day: the account filter shared by footer and modal, a
-footer row always present while polling is enabled, the "Claude"/"Codex"
-labels, an event after every completed fetch, and `Problem.ExpiresAt`.
+footer row always present while polling is enabled (superseded by round 2
+below: the footer is off by default), the "Claude"/"Codex" labels, an event after every completed fetch, and `Problem.ExpiresAt`.
+
+**Amended 2026-10-12 (Human, second round):** the sidebar footer Usage item is
+**off by default** (turned on in Settings → Usage); plan usage instead shows
+**on hover of the usage icon in each chat** and in **Settings → Usage**, so the
+per-chat card (PR-E) is now required and comes before the footer; accounts are
+named by their user-set label; Settings is being rebuilt as a full-screen,
+registry-driven screen (parallel PR `feat/settings-fullscreen`), so the Usage
+section plugs into the registry; and a zero-extra-call **passive rate-limit
+signal** is proposed as **D14 (Proposed, needs the Human)**. See section 5
+(Web), section 7 (D14) and the Decisions list.
 
 Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/active/account-usage-windows.md).
 
@@ -229,6 +239,14 @@ Paseo derives keys from provider identities because it reads several
 harness stores that can hold the same login; smind has one store, so the
 row id is the identity. Two smind accounts that hold the same provider login
 will show duplicate windows; de-duplicating them is a later add-on, not v1.
+
+**Display name.** `quota.DisplayName(a)` is the one rule every surface uses
+(web, CLI, MCP): the account's user-set label (`accounts.label`, trimmed); if
+it is empty or equals a provider default (`anthropic`, `openai`, `claude`,
+`codex`, `default`, case-insensitive), the provider default name ("Claude" for
+`anthropic`, "Codex" for `openai`). The label is used as written, even if it
+is an email (it is the user's own text, shown only to them, and never logged).
+The wire carries it as `displayName`; the account key never contains it.
 
 **Storage.** `quota_snapshots.usage_data` stays `TEXT`; it now holds the JSON
 of `Report` with `"v":2`. `quota_snapshots` itself has **no schema change and
@@ -545,90 +563,119 @@ removed or reshaped.
   `account_usage` tool returning the same `AccountUsage[]` (`touch` only: it
   has no refresh input, so an agent cannot force a call), added to the catalog and
   `mcp_instructions.go`, instead of widening `usage_summary`.
-- **Web (D5: a port of Paseo's Usage UX).** The interaction model is
-  Paseo's; the data source is smind's accounts table. Paseo's `UsageReportEntry`
-  becomes `AccountUsage`, its "source" becomes the account's provider
-  (`anthropic` → "Claude", `openai` → "Codex"), its "account" is the smind
-  account row, and its "host" (which machine's daemon to ask) has no
-  equivalent inside one daemon: the remembered pick is an **account filter**
-  instead.
-  - **Sidebar footer Usage item.** A row in the existing footer
-    (`SidebarFooter` in `app-sidebar.tsx`), next to Providers and Agents.
-    Each account's provider logo followed, per pinned window, by a meter and
-    "31% 5h" (the richest layout that fits one line: meters, else labels,
-    else percents alone). With no explicit pins it shows each account's
-    `summary` windows (the first window with a percent if none is marked);
-    pins replace the defaults, an explicit empty selection stays empty (the
-    row then reads plain "Usage"). Unavailable and error accounts are
-    left out of the summary. It remembers the picked account filter. The
-    row is hidden while `accountUsage.enabled` is false or the daemon lacks
-    the RPC; the icon-collapsed rail shows the icon only.
-  - **Usage modal.** Clicking the row opens Usage **over the current
-    screen** (a dialog on wide layouts, a bottom sheet on narrow ones), never
-    a route change, so closing it leaves the user where they were. It mounts
-    on first open and unmounts after it closes, so reports load only while it
-    is shown. Title row: an account filter ("All accounts" or one account;
-    hidden with a single account), **Refresh all**, and a **Settings**
-    button. The body is the per-account cards, scrollable on long lists.
-  - **Cards.** One per account: provider logo, provider name, plan badge,
-    a status dot with "Unavailable" / "Error" when not available, a refresh
-    button whose tooltip says when the report was fetched ("Updated 3m
-    ago", printed on the card itself where there is no hover). One bar per
-    window: label, percent (used, or "N% left"), reset countdown ("resets
-    2h", "resetting now"), a meter coloured by tone `ok` / `warning` /
-    `danger` (default muted). Balances as "$x / $y" or "x left" lines,
-    details as label/value rows, the account label in the footer. Problem
-    states are explained in words, never a bare badge: *expired* ("Login
-    expired 2h ago. Reconnect it in Providers."), *rejected* ("Login
-    rejected (HTTP 401). Reconnect it in Providers."), *no_quota* (the
-    report's detail: "API-key accounts have no plan windows"), *error* (the
-    fixed-vocabulary error plus "retry in 3 min" when backing off). A failed
-    refresh keeps the previous report on screen and adds "Unable to refresh
-    usage".
-  - **Pin windows, used/remaining.** While the sidebar summary is on, every
-    window row is a checkbox that pins it to the footer item (the whole row,
-    a pin glyph with a tooltip, half-strength hover highlight, the checked
-    state in its accessible name: "Pin Claude Session, 31% · resets 2h").
-    A pin is `{provider, windowId}` and matches that window on every
-    account of the provider. A "Percentages" control switches the footer,
-    the cards and Settings between **Used** and **Remaining**.
-  - **Settings → Usage.** The existing Usage section gets a **Plan usage**
-    block **above** the existing token table (retitled **Token usage**): the
-    same cards and controls as the modal, with Refresh all and a visible
-    **Settings** control (the "Summary in sidebar" switch and the
-    Used/Remaining control) in the block's header, above the reports, so it
-    is found without opening a menu. When polling is disabled the block says
-    so, names `accountUsage.enabled`, and offers nothing to refresh. When
-    the daemon predates `account.usage` it says "Update the daemon to see
-    plan usage" and makes no call.
-  - **Per-run plan usage (optional, last).** The run usage pill's popover
-    may show the matching account's plan cards (no pins, no refresh), the
-    way Paseo shows an agent's own account in its context-window details.
-    Smind's runs use the user's own provider login, which may not be a
-    smind account, so it shows only when **exactly one** OAuth account of
-    the run's provider exists, labelled with that account; otherwise
-    nothing. It is a separate, deferrable PR.
-  - **Call discipline in the client.** Reconnect re-lists with `mode:"cached"`.
-    The footer item and the open modal ask with `mode:"touch"` only at the TTL
-    cadence while the window is visible and focused (paused when hidden or
-    blurred). Refresh buttons use `mode:"refresh"`, are disabled for 30 s
-    after a press, and are also disabled with the reason when the daemon
-    reports `refreshBlocked` ("Rate limited, retry in 12 min", "Refreshed just
-    now", "Refresh limit reached, next in 24 min", "Reconnect this account to
-    refresh"). The daemon enforces the budget either way.
+- **Web (D5, amended 2026-10-12: a port of Paseo's Usage UX with a different
+  default placement).** The interaction model is Paseo's; the data source is
+  smind's accounts table. Paseo's `UsageReportEntry` becomes `AccountUsage`,
+  its "source" becomes the account's provider (`anthropic` → "Claude",
+  `openai` → "Codex"), its "account" is the smind account row, and its "host"
+  has no equivalent inside one daemon: the remembered pick is an **account
+  filter** ("All accounts" or one account) shared by the footer item, the
+  modal and Settings → Usage.
+  - **Names.** Every account is shown by its **display name**: the user-set
+    `accounts.label`, falling back to the provider default ("Claude" / "Codex")
+    only when the label is empty or is itself a provider default
+    (`quota.DisplayName`, above). Card titles, the account filter, pin labels
+    ("Pin Work Max Session"), the footer's accessible name, the chat hover card
+    and the CLI all use it; the provider shows as its logo and, when the
+    display name is not already the provider's, a muted provider name.
+  - **Where plan usage appears (Human, 2026-10-12).**
+    1. **Hover on the usage icon in each chat** (PR-E, required);
+    2. **Settings → Usage** (PR-D1);
+    3. the **Usage modal** over the current screen, opened from the hover
+       card's "Open Usage" link, the command palette ("Usage: open plan
+       usage"), and the footer item when it is on (PR-D1);
+    4. the **sidebar footer Usage item**, **off by default**, turned on by
+       the "Show summary in sidebar" switch in Settings → Usage (PR-D2).
+  - **Chat hover card (PR-E).** The chat header's usage pill
+    (`ChatUsageTotal`) and each run's usage pill (`RunUsagePill`) show a hover
+    card (pointer hover or keyboard focus; on touch devices a tap opens the
+    same content in the existing popover) with the existing token rows and,
+    below them, a **Plan usage** section. Smind's runs use the user's own
+    provider login (ADR-0020), which smind does not necessarily know, so the
+    card cannot say with certainty which smind account served a chat. Rule:
+    map the chat's provider to the account provider (`claude-native` →
+    `anthropic`, `codex-native` → `openai`; other providers have no plan
+    section) and show **every OAuth account of that provider, compactly**
+    (display name, plan badge, one meter line per `summary` window, freshness),
+    with the filter-selected account first. With one account that is the whole
+    section; with several, a one-line note says "This chat's login isn't
+    tracked; showing all Claude accounts". Why all rather than the filter's
+    pick: a silent pick of one account would show the wrong account's quota
+    whenever the user's real login is another one, the filter is a modal
+    preference and should not hide data elsewhere, and the cost of showing
+    two or three compact lines is small. **The hover card reads the cache only
+    (`mode:"cached"`) and never causes a fetch**; with an empty or old cache it
+    says "No plan data yet" or "Updated 40 min ago" and offers "Open Usage",
+    where an explicit surface fetches under the budget. The trigger is shown
+    when the chat has token usage or plan data. It never offers pins or a
+    refresh button.
+  - **Settings → Usage (PR-D1).** A registered Settings section
+    (`registerSettingsSection`) that renders into whatever content container
+    the Settings screen provides: it must work in the current in-shell layout
+    and in the full-screen Settings screen being built in parallel (its own
+    left settings sidebar and a framed content view; narrow layouts show a
+    section as a pushed detail page), so it assumes no app sidebar, no fixed
+    width, and puts its own controls in its own body. A **Plan usage** block
+    sits **above** the existing token table (retitled **Token usage**): Refresh
+    all, a visible **Settings** control with the **Show summary in sidebar**
+    switch (default off) and the Used/Remaining control, then the per-account
+    cards. When polling is disabled it says so and names
+    `accountUsage.enabled`; when the daemon predates `account.usage` it says
+    "Update the daemon to see plan usage" and makes no call.
+  - **Usage modal.** Opens **over the current screen** (a dialog on wide
+    layouts, a bottom sheet on narrow ones), never a route change, so closing
+    it leaves the user where they were; reachable from the hover card, the
+    command palette and the footer item. It mounts on first open and unmounts
+    after it closes. Title row: the account filter (hidden with one account),
+    **Refresh all**, **Settings**. Body: the per-account cards, scrollable.
+  - **Sidebar footer Usage item (PR-D2, off by default).** When the switch is
+    on, a row in the existing footer shows each account's provider logo and,
+    per pinned window, a meter and "31% 5h" in the richest layout that fits
+    one line (meters, else labels, else percents). Defaults are each
+    account's `summary` windows; pins replace them; an explicit empty
+    selection stays empty and the row then reads plain "Usage"; unavailable
+    and error accounts are left out; it follows the account filter; the
+    icon-collapsed rail shows the icon only. The row exists only while the
+    switch is on, polling is enabled and the daemon supports `account.usage`.
+  - **Cards.** One per account: provider logo, display name, plan badge, a
+    status dot with "Unavailable" / "Error" when not available, a refresh
+    button whose tooltip says when the report was fetched ("Updated 3m ago",
+    printed on the card where there is no hover). One bar per window: label,
+    percent (used, or "N% left"), reset countdown ("resets 2h", "resetting
+    now"), a meter coloured by tone `ok` / `warning` / `danger`. Balances,
+    detail rows. Problem states are explained in words: *expired* ("Login
+    expired 2h ago. Reconnect it in Providers."), *rejected* ("Login rejected
+    (HTTP 401). Reconnect it in Providers."), *no_quota* (the report's
+    detail), *error* (fixed-vocabulary text plus "retry in 3 min" when backing
+    off). A failed refresh keeps the previous report and adds "Unable to
+    refresh usage".
+  - **Pin windows, used/remaining.** While the footer switch is on, every
+    window row in Settings and the modal is a checkbox that pins it to the
+    footer (whole row, pin glyph with tooltip, half-strength hover, checked
+    state in its accessible name: "Pin Work Max Session, 31% · resets 2h").
+    A pin is `{provider, windowId}` and matches that window on every account
+    of the provider. A "Percentages" control switches the footer, cards and
+    hover card between **Used** and **Remaining**.
+  - **Call discipline in the client.** Reconnect re-lists with
+    `mode:"cached"`; the hover card is `cached`. Settings → Usage, the modal and
+    the footer item (when on) ask with `mode:"touch"` only at the TTL cadence
+    while the window is visible and focused (paused when hidden or blurred).
+    Refresh buttons use `mode:"refresh"`, are disabled for 30 s after a press,
+    and are disabled with the reason when the daemon reports `refreshBlocked`
+    ("Rate limited, retry in 12 min", "Refreshed just now", "Refresh limit
+    reached, next in 24 min", "Reconnect this account to refresh"). The daemon
+    enforces the budget either way.
   - **State and rules.** Preferences (`displayAs`, `pins`, picked account,
-    "Summary in sidebar") are client-side in `localStorage` (D11), with
+    "Show summary in sidebar") are client-side in `localStorage` (D11), with
     Paseo's rules: `null` pins mean defaults, an array (even empty) is the
     user's selection, an unknown account pick falls back to All. No new web
-    dependency (smind's web has no data-fetching library): the reports live
-    in a small module store fed by `account.usage` and the `account.usage`
-    event, keeping the newer `fetchedAt` when a refresh and a list race. A
-    missing or reshaped field renders as "not shown", never throws.
+    dependency: reports live in a small module store fed by `account.usage`
+    and its event, keeping the newer `fetchedAt` when a refresh and a list
+    race. A missing or reshaped field renders as "not shown", never throws.
   - **Verification.** Component and logic tests mirror Paseo's e2e specs
-    (listed in the plan's PR-D), and a light and dark screenshot pass
-    (desktop and narrow) is required before PR-D merges.
-  - The Settings → Providers rows are unchanged by this ADR (no per-row
-    bars): plan usage has one home, the Usage surfaces above.
+    (listed in the plan), and a light and dark screenshot pass (desktop and
+    narrow) is required before each UI PR merges.
+  - The Settings → Providers rows are unchanged (no per-row bars).
 
 ### 6. Security
 
@@ -648,6 +695,107 @@ removed or reshaped.
 - Disclosure: the feature calls two undocumented endpoints using the user's
   tokens. The Settings switch states this in one sentence (D2).
 
+### 7. Passive rate-limit signal from proxied responses (D14, Proposed)
+
+**Status: Proposed. Needs the Human's decision; nothing in sections 1 to 6
+depends on it.** It answers the routing freshness gap accepted in the call
+budget: because only user surfaces fetch, the router cannot know about an
+account nobody has looked at.
+
+**Idea.** The proxy already receives the upstream response for every proxied
+request, with the account that served it known. Provider rate-limit **response
+headers** (and an explicit upstream rejection) can be parsed into the same
+snapshot store as a **passive** report: **zero extra calls**, no fetch path,
+never triggers a fetch. It only sees proxied traffic (external clients and
+Claude Code pointed at `:4648`; smind's own runs bypass the proxy, ADR-0020),
+which is exactly the traffic the router serves.
+
+**Evidence (from refs only; no real endpoint was called).**
+
+| Provider | Headers seen in the refs | Source |
+|---|---|---|
+| Anthropic (OAuth) | `anthropic-ratelimit-unified-status` (`allowed` / `rejected`, SDK also `allowed_warning`), `-5h-status`, `-5h-reset` (epoch s), `-5h-utilization` (fraction, e.g. `0.0`), `-7d-status`, `-7d-reset`, `-7d-utilization` (e.g. `0.53`), `-7d_oi-status` / `-reset` (a model-specific window the refs call Fable-only), `-representative-claim` (`five_hour`, `seven_day`), `-reset`, `-overage-status`, `-overage-disabled-reason`, `-fallback-percentage`, plus `Retry-After` on 429 | `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals_test.go:68-110` (header set with utilization values), `.../quota_signals.go:26-54,150-200` (observation and header allowlist, bounds), `.../internal/runtime/executor/helps/claude_ratelimit.go:19-60` (status and reset semantics, "Fable-only" 7d_oi rule), `.../claude_executor_ratelimit_test.go:30-41,517-530` (429 with `rejected`, and an ordinary 429 with 5h/7d `allowed` that must **not** block sibling models), `.../conductor_cooldown.go:913-918` (observed on every result, success or failure) |
+| Anthropic (CLI event) | `rate_limit_event`: `status` (`allowed` / `allowed_warning` / `rejected`), `resets_at`, `rate_limit_type` (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `overage`), `utilization` (fraction 0 to 1), overage fields: confirms the header data is real and its units | `refs/claude-agent-sdk-python/src/claude_agent_sdk/types.py:1370-1395`, `.../_internal/message_parser.py:364` |
+| Codex (ChatGPT backend) | `x-codex-primary-used-percent`, `-primary-window-minutes`, `-primary-reset-at` (epoch s), the same for `x-codex-secondary-*`, extra limit families by prefix (`x-codex-bengalfox-*` with `-limit-name`), `x-codex-credits-has-credits` / `-unlimited` / `-balance`, `x-codex-plan-type`, `x-codex-active-limit` | `refs/codex/codex-rs/codex-api/src/rate_limits.rs:28-60,200-315` (parser), `refs/codex/codex-rs/core/tests/suite/client.rs:3206-3222` (header example), `refs/codex/codex-rs/codex-api/src/api_bridge.rs:199`, `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals_test.go:101-110` |
+| OpenAI `x-ratelimit-*` | Not carried by Codex responses (cliproxyapi's own comment says only Grok emits them); not plan windows. **Ignored.** | `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals.go:177-184` |
+
+**What it can tell (Anthropic, per proxied response for the serving account):**
+per-window status (`allowed` / `allowed_warning` / `rejected`), reset time, and
+utilization for the 5-hour and 7-day windows, the overall status, whether
+overage is allowed (this also gives evidence for D9), and which window is the
+representative claim. A window the response marks `rejected` is a **hard
+exhaustion verdict until its reset**, learned on the very request that hit it.
+(Codex: used percent, window length and reset for primary and secondary,
+credits and plan: **only if** the proxied upstream is the ChatGPT Codex
+backend.)
+
+**What it cannot tell:**
+- anything about an account with no proxied traffic, or about smind's own runs
+  (they bypass the proxy);
+- anything for API-key accounts (no plan windows);
+- what a **bare 429** means: without an explicit `rejected` window it can be a
+  per-model or burst limit (the cliproxyapi test above exists to prevent
+  treating it as account exhaustion), so a bare 429 is **never** an exhaustion
+  signal;
+- which model the `7d_oi` window belongs to (name unknown), so it is shown but
+  never counted for routing;
+- data between requests: it goes stale exactly when traffic stops;
+- that the headers exist on every response, or will keep their names: they are
+  undocumented. That Anthropic sends them on every 200 is **unverified** from
+  the refs (cliproxyapi observes them on every result and its fixture shows
+  `allowed` values, which suggests it does); header **names and units** come
+  from test fixtures in the refs, not from a capture we made;
+- for Codex: smind's proxy default upstream for OpenAI is `api.openai.com/v1`
+  (`internal/server/upstream.go:11`), not the ChatGPT backend that emits
+  `x-codex-*`, so the Codex parser is **expected to be inert** through the
+  proxy until that is verified.
+
+**Design if accepted.**
+- **Write-only observer.** The proxy gets a `quota.Observer` (`Observe(account,
+  headers, status, now)`), separate from `Reader` and from `Touch`/`Refresh`.
+  It has no network path and no way to start a fetch (call-budget rules 3 and
+  4 stand); passive observations are **not** attempts and never touch
+  `quota_poll_state`.
+- **Typed, bounded parsing.** Only a fixed allowlist of header names is read;
+  values must be at most 512 characters with no control characters, at most
+  64 headers; values become typed fields (numbers, enums, timestamps). Raw
+  headers and values are never stored or logged.
+- **Report shape.** `Window` gains `Source` (`"fetched"` | `"passive"`) and
+  `Status` (`"allowed"` | `"allowed_warning"` | `"rejected"`); utilization
+  fraction × 100 becomes `UsedPct`; epoch seconds become `ResetsAt`; `5h` →
+  `five_hour`, `7d` → `weekly`, `7d_oi` → a `feature`-scoped window (display
+  only); overage `allowed` / `rejected` → `OverageEnabled`; `x-codex-*` windows
+  named by `window-minutes`. Tone comes from `Status` when there is no
+  percent (`allowed_warning` → warning, `rejected` → danger).
+- **Storage.** The same snapshot store, a second row kind: `quota_snapshots`
+  gains `kind TEXT NOT NULL DEFAULT 'fetched'` (an `addColumnIfMissing`
+  migration entry), retention keeps the latest row per account and kind. A
+  passive write happens only when the parsed observation **changed** and at
+  most once per account per 60 s, unless the exhausted verdict flips, so the
+  proxy hot path does not write per response (the write goes through the
+  existing async writer pattern).
+- **Precedence (lower than a fresh fetch).** `Peek` returns an effective
+  report: the latest fetched report, with passive windows overlaid per window
+  id **only when** the passive observation is newer than the fetched report
+  **and** either the fetched report is older than the TTL or the passive window
+  is `rejected`. So a **fresh fetched report's numbers win over passive
+  numbers**, a rejection seen on real traffic after the fetch is not ignored,
+  and a passive `allowed` newer than a stale fetched "exhausted" verdict
+  clears it without any call. Passive windows are flagged `source:"passive"`
+  on the wire and the UI says "from recent traffic".
+- **Routing.** Passive account-wide windows count like fetched ones
+  (section 4): a passive `rejected` 5-hour or 7-day window makes the account
+  exhausted for the next request, until its reset.
+- **Config.** `accountUsage.passive` (default true; false makes the observer a
+  no-op). `accountUsage.enabled: false` also disables it.
+
+**Recommended default: accept**, Anthropic first (headers with utilization,
+fixtures built from the refs' header sets), Codex parser shipped but fixtures-
+only and expected inert until the upstream question is answered; precedence as
+above; default on. It is a separate PR (PR-F) after PR-B, so declining it
+changes nothing else. Alternative: skip it and accept that routing is blind to
+accounts nobody has looked at (Consequences).
+
 ## Decisions (accepted 2026-10-11)
 
 The user accepted D1–D4 and D6–D13 as the recommended defaults and changed
@@ -666,7 +814,8 @@ rule d).
 - **D4. Providers in v1.** Anthropic OAuth + OpenAI/ChatGPT OAuth. API-key
   accounts and other providers show "no plan windows" with no HTTP call.
   Kimi, xAI, Antigravity and balance-only API-key providers are later.
-- **D5. UI placement and UX — CHANGED from the proposed default.** The web
+- **D5. UI placement and UX — CHANGED from the proposed default; amended
+  again 2026-10-12.** (Round 2 below supersedes the footer wording here.) The web
   UI **ports Paseo's Usage UX** (user: "tham khảo UI/UX paseo phần đó"):
   sidebar footer Usage item (provider logo + default/pinned window
   percents, remembers the picked account), Usage opens as a modal over the
@@ -693,6 +842,29 @@ rule d).
 - **D12. Proxy error when every candidate is exhausted.** Keep 503 with the
   reset time in the message for v1.
 - **D13. Per-account opt-out.** Global switch only in v1.
+
+**Round 2, 2026-10-12 (Human).**
+
+- **Account filter** shared by footer, modal and Settings → Usage: accepted
+  as proposed.
+- **D5 (amended).** The footer Usage item is **off by default**; the user
+  enables it in Settings → Usage (as in Paseo). Plan usage must instead show
+  **on hover of the usage icon in each chat** and in **Settings → Usage**. The
+  per-chat plan card (PR-E) is **required**, and the order is D1 (Settings
+  Usage + modal) → E (chat hover card) → D2 (footer item, default off, pins).
+  This supersedes the earlier approval of "a footer row always present while
+  polling is enabled". The hover card's account choice (all OAuth accounts of
+  the chat's provider, compactly, filter-selected first) and its cache-only
+  rule are specified in section 5.
+- **Names.** Accounts are shown by `accounts.label`, falling back to the
+  provider default name ("Claude" / "Codex") only when the label is empty or a
+  provider default. Provider labels "Claude"/"Codex" otherwise unchanged.
+- **Settings is being rebuilt** (parallel PR `feat/settings-fullscreen`,
+  `docs/plans/active/settings-fullscreen.md`: a full-screen Settings screen
+  with its own sidebar and content view). Settings → Usage plugs into the
+  registry (`registerSettingsSection`) and assumes no in-shell layout.
+- **D14 (Proposed, needs the Human): a zero-extra-call passive rate-limit
+  signal from proxied upstream responses.** See section 7. Not accepted yet.
 
 **Amendments, 2026-10-12 (Human, firm rule: do not call the rate-limited
 endpoints carelessly).** These replace the parts of D2, D3, D6 and D10 they
@@ -778,7 +950,9 @@ specific manual probe (see the plan's Validation).
   `resetsAt`, but an account nobody has viewed is unknown and routed to
   (fail-open). With the desktop app's footer item visible and focused the
   cache stays within one TTL; a headless daemon with no UI open gets no
-  fresh data. This is the accepted price of the call budget.
+  fresh data. This is the accepted price of the call budget; D14 (section 7, Proposed)
+  would narrow it for accounts that carry proxied traffic without any extra
+  call.
 - Token-refresh races become possible between the proxy and the poller;
   the new per-account `EnsureFresh` lock is part of PR-A and protects the
   proxy too.
