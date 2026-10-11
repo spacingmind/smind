@@ -5,6 +5,7 @@ import { PermissionModeControl } from "@/components/permission-mode-control";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
+import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
@@ -133,6 +134,10 @@ export function TaskDetailPane({
   // between the scrolling log and the prompt form (see below) rather than
   // inline per-run, so it can't be scrolled out of view while log chunks
   // keep streaming in above/below it.
+  // The chat's most recent run only -- the header pill shows that run's
+  // MCP servers, never an older run's (no fallback when it reported none).
+  const latestRun = runs?.[runs.length - 1];
+
   const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
 
   // The task's live run, if any. A task has at most one at a time, so the
@@ -209,6 +214,7 @@ export function TaskDetailPane({
                 {runConfigPillLabel(runConfigState, profiles, providers)}
               </button>
             )}
+            <McpServersIndicator servers={latestRun?.mcpServers} />
           </>
         }
         actions={
