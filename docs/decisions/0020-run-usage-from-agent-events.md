@@ -95,6 +95,16 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
      whose globs match explicitly, then accounts with no list, then a
      provider-shaped 400 `model_not_found`. A request with no `model`
      only matches accounts with no list.
+     - **Undeterminable model, fail closed** (user, 2026-10-11). If the
+       model can't be read, because the body is over the parse cap or
+       isn't JSON, the proxy first tries to recover the top-level `model`
+       from the buffered prefix. If that still fails, the request is
+       treated like one with no `model`: only accounts with no list may
+       serve it, and otherwise the proxy returns a 400
+       `model_not_found`. The body is still forwarded byte-for-byte.
+       This keeps the guarantee that a `glm-*` key is never picked for
+       `claude-*`, at the cost of rejecting some oversized requests in a
+       setup where every account has a list.
 6. **Out of scope.** Rotating smind's own runs across pooled accounts is
    out of scope. If several z.ai keys ever need pooling for GLM runs, that
    is a new ADR limited to API-key providers. Those have no login
