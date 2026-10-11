@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { Check, RotateCcw } from "lucide-react";
+import { Bot, Brain, CheckCheck, ChevronDown, Cpu, RotateCcw, ShieldCheck, SquareTerminal } from "lucide-react";
 
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
@@ -41,12 +41,8 @@ import type { AgentProfile, ModeInfo, ModelInfo, Provider, ProviderInfo, Thinkin
 // input card's bottom toolbar, so their visible chrome is nothing -- the
 // card is the border, and cn()'s tailwind-merge strips SelectTrigger's own
 // border/background halves in favour of these.
-const SELECT_TRIGGER_CLASS =
-  "h-11 shrink-0 border-0 bg-transparent px-2 text-ui-base hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
-
-/** The Agent trigger button matches SELECT_TRIGGER_CLASS's sizing/touch-target rules, but Button's own variant system needs its background/border zeroed the same way SelectTrigger's are (see that class's own doc comment). */
-const AGENT_TRIGGER_CLASS =
-  "h-11 shrink-0 gap-1 rounded-lg border-0 bg-transparent px-2 text-ui-base font-normal hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
+const PILL_TRIGGER_CLASS =
+  "size-11 shrink-0 justify-center gap-1.5 rounded-xl border-0 bg-transparent px-0 text-ui-base font-normal text-foreground-muted hover:bg-hover hover:text-foreground data-[state=open]:bg-hover sm:h-11 sm:w-auto sm:justify-start sm:px-2 md:h-7 md:px-1.5 md:text-ui-sm [&>svg:first-child]:size-4 [&>svg:first-child]:md:size-3.5 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 max-sm:[&>svg:last-child]:hidden";
 
 /**
  * The per-run configuration the composer submits with (run-config IA
@@ -365,9 +361,11 @@ function RunConfigToolbarAgent() {
             aria-label="Agents"
             data-testid="composer-agent-select"
             disabled={meta.disabled}
-            className={cn(AGENT_TRIGGER_CLASS, noAgent && "text-foreground-muted")}
+            className={cn(PILL_TRIGGER_CLASS, noAgent && "text-foreground-muted")}
           >
-            {triggerLabel}
+            <Bot aria-hidden className="shrink-0" />
+            <span className="max-sm:hidden">{triggerLabel}</span>
+            <ChevronDown aria-hidden className="size-3 shrink-0 opacity-60 max-sm:hidden" />
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="max-w-sm">
@@ -442,9 +440,10 @@ function RunConfigToolbarProvider() {
         title={boundLabel ? `This chat is bound to ${boundLabel}; start a new chat to switch` : undefined}
         data-testid="composer-provider-bound"
         data-bound={boundLabel ? "true" : undefined}
-        className={SELECT_TRIGGER_CLASS}
+        className={PILL_TRIGGER_CLASS}
       >
-        <SelectValue placeholder="Select provider" />
+        <SquareTerminal aria-hidden className="shrink-0" />
+        <SelectValue placeholder="Select provider" className="max-sm:hidden" />
       </SelectTrigger>
       <SelectContent>
         {meta.providers.map((p) => (
@@ -469,8 +468,9 @@ function RunConfigToolbarMode() {
   return (
     <>
       <Select value={meta.effectiveMode} onValueChange={(v) => v && actions.setPermissionMode(v)} disabled={meta.disabled}>
-        <SelectTrigger aria-label="Permission mode" title={current?.description} className={SELECT_TRIGGER_CLASS}>
-          <SelectValue placeholder="Select mode" />
+        <SelectTrigger aria-label="Permission mode" title={current?.description} className={PILL_TRIGGER_CLASS}>
+          <ShieldCheck aria-hidden className="shrink-0" />
+          <SelectValue placeholder="Select mode" className="max-sm:hidden" />
         </SelectTrigger>
         <SelectContent>
           {meta.modes.map((m) => (
@@ -489,10 +489,11 @@ function RunConfigToolbarMode() {
           data-testid="composer-auto-accept"
           disabled={meta.disabled}
           onClick={() => actions.setAutoAccept(!state.autoAccept)}
-          className={cn(AGENT_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
+          aria-label="Auto-accept"
+          className={cn(PILL_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
         >
-          {state.autoAccept && <Check aria-hidden />}
-          {AUTO_ACCEPT_LABEL}
+          <CheckCheck aria-hidden className="shrink-0" />
+          <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
         </Button>
       )}
     </>
@@ -518,9 +519,10 @@ function RunConfigToolbarThinking() {
       <SelectTrigger
         aria-label="Thinking level"
         title={THINKING_LEVELS.find((t) => t.id === (state.thinkingLevel || "standard"))?.help}
-        className={SELECT_TRIGGER_CLASS}
+        className={PILL_TRIGGER_CLASS}
       >
-        <SelectValue placeholder="Select thinking level" />
+        <Brain aria-hidden className="shrink-0" />
+        <SelectValue placeholder="Select thinking level" className="max-sm:hidden" />
       </SelectTrigger>
       <SelectContent>
         {THINKING_LEVELS.map((t) => (
@@ -567,9 +569,12 @@ function RunConfigToolbarModel() {
         aria-label="Model"
         title={known?.description ?? (state.model ? undefined : "The provider's own default model")}
         data-testid="composer-model-select"
-        className={SELECT_TRIGGER_CLASS}
+        className={PILL_TRIGGER_CLASS}
       >
-        <SelectValue placeholder="Select model">{current}</SelectValue>
+        <Cpu aria-hidden className="shrink-0" />
+        <SelectValue placeholder="Select model" className="max-sm:hidden">
+          {current}
+        </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={DEFAULT_MODEL_VALUE} title="The provider's own default model">
