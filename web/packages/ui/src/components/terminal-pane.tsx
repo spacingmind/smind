@@ -496,7 +496,7 @@ export function TerminalPane({
     if (!termRef.current?.find) return;
     setFindOpen(true);
   }, []);
-  useActionHandler("pane.find", openFind, { enabled: findFocused });
+  useActionHandler("pane.find", openFind, { enabled: findFocused, menuFallback: true });
 
   useEffect(() => {
     if (findOpen) findBarRef.current?.focus();

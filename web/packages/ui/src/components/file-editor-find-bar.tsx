@@ -34,7 +34,7 @@ export function FileEditorFindBar({
     model.open(editor.current);
     barRef.current?.focus();
   }, [model, editor]);
-  useActionHandler("pane.find", openAndFocus, { enabled: focused });
+  useActionHandler("pane.find", openAndFocus, { enabled: focused, menuFallback: true });
 
   useEffect(() => {
     if (state.open) barRef.current?.focus();
