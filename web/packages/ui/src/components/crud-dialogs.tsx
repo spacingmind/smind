@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -501,6 +501,32 @@ export function DeleteSpaceDialog({
   );
 }
 
+/**
+ * The live children of the task being archived (PR-U2): fetched with
+ * task.list on open so the confirm can say honestly what happens to them
+ * -- they stay and become top-level (archiving is not a cascade, see the
+ * hierarchy plan's Decision 2). A failed fetch blocks nothing; the
+ * warning line replaces the list.
+ */
+function ArchiveChildren({ children }: { children: Task[] }) {
+  const MAX_VISIBLE = 8;
+  const visible = children.slice(0, MAX_VISIBLE);
+  const rest = children.length - visible.length;
+  return (
+    <div data-testid="archive-children" className="mt-2">
+      <p className="font-normal">These tasks stay and become top-level:</p>
+      <ul className="mt-1 list-disc pl-5">
+        {visible.map((child) => (
+          <li key={child.ID}>
+            {child.Title} · {child.Status}
+          </li>
+        ))}
+        {rest > 0 && <li>+{rest} more</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function ArchiveTaskDialog({
   client,
   task,
@@ -516,6 +542,33 @@ export function ArchiveTaskDialog({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = fetch pending/never ran, [] = no children (today's dialog).
+  const [childTasks, setChildTasks] = useState<Task[] | null>(null);
+  const [childError, setChildError] = useState(false);
+
+  useEffect(() => {
+    if (!open || !task || !client) return;
+    // Capture the world at open: a result landing after close or after the
+    // task prop changed belongs to a different question.
+    const reqTaskId = task.ID;
+    let cancelled = false;
+    setChildTasks(null);
+    setChildError(false);
+    client
+      .call<Task[]>("task.list", { workspaceId: task.WorkspaceID, parentTaskId: task.ID })
+      .then((list) => {
+        if (cancelled || task.ID !== reqTaskId) return;
+        setChildTasks(list ?? []);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("task.list (children) failed, archive stays possible", err);
+        setChildError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, task, client]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -529,6 +582,8 @@ export function ArchiveTaskDialog({
                 Uncommitted work is checkpointed to the task branch before the
                 worktree is removed.
               </p>
+              {childTasks !== null && childTasks.length > 0 && <ArchiveChildren>{childTasks}</ArchiveChildren>}
+              {childError && <p className="mt-2 font-normal text-foreground-muted">Could not check for child tasks.</p>}
             </div>
           </DialogDescription>
         </DialogHeader>
@@ -556,7 +611,7 @@ export function ArchiveTaskDialog({
               }
             }}
           >
-            {pending ? "Archiving…" : "Archive"}
+            {pending ? "Archiving…" : childTasks !== null && childTasks.length > 0 ? "Archive parent only" : "Archive"}
           </Button>
         </DialogFooter>
       </DialogContent>
