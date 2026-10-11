@@ -101,6 +101,24 @@ impl Tray {
         self.refresh(count);
     }
 
+    pub fn on_run_ended(&self, task_id: i64) {
+        let count = {
+            let mut state = self.state.lock().unwrap();
+            state.on_run_ended(task_id);
+            state.count()
+        };
+        self.refresh(count);
+    }
+
+    pub fn on_permission_resolved(&self, request_id: &str) {
+        let count = {
+            let mut state = self.state.lock().unwrap();
+            state.on_permission_resolved(request_id);
+            state.count()
+        };
+        self.refresh(count);
+    }
+
     pub fn on_reconnected(&self) {
         let count = {
             let mut state = self.state.lock().unwrap();
