@@ -12,7 +12,7 @@ const NOT_ACTIVE_REASONS: Partial<Record<NonNullable<McpServerState["reason"]>, 
 
 /**
  * The chat header's per-run "active MCP servers" pill
- * (docs/plans/active/agent-mcp-servers.md): a count of the run's active
+ * (docs/plans/completed/agent-mcp-servers.md): a count of the run's active
  * MCP servers, with a popover listing each one's name, transport, and
  * state. Renders nothing when the run reported no servers. Only ever
  * receives McpServerState -- name/transport/status/reason and nothing

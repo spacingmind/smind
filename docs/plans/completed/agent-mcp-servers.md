@@ -4,10 +4,8 @@ Spec for `docs/decisions/0018-agent-mcp-servers.md`: letting agents smind
 spawns (ACP/GLM/Kimi, Claude Code native, Codex native) receive configured
 MCP servers, primary use case Playwright MCP browser control
 (`@playwright/mcp`) plus a general-purpose registry (e.g. a `pplx` MCP
-server). ADR-0018 is Proposed, not yet Accepted — this plan's Decisions
-section tracks what still needs the user's sign-off before implementation
-starts on each step; do not start a step whose underlying ADR-0018 open
-question is unresolved.
+server). ADR-0018 is Accepted (see Decisions); the plan is complete for v1
+(see Status at the end).
 
 ## Acceptance Criteria
 
@@ -297,10 +295,10 @@ accepted):
    somewhere to report to.
    - [x] **Settings CRUD half** (feat/agent-mcp-settings-ui): Settings ->
      MCP servers (`mcp-servers-section.tsx`). Shipped separately from step 3.
-   - [ ] **Per-run "active MCP servers" indicator** (spec above, M1-M8).
-     Previously only a session note on the run timeline. Sub-steps:
-     7a backend event + persistence + wire (M1-M5); 7b UI pill + popover
-     (M6-M8).
+   - [x] **Per-run "active MCP servers" indicator** (spec above, M1-M8).
+     Previously only a session note on the run timeline. 7a backend event +
+     persistence + wire (M1-M5); 7b UI pill + popover (M6-M8). See the
+     validation section "Per-run indicator (M1-M8)".
 8. [x] **Secret-redaction audit.** A focused pass confirming acceptance
    criterion 9 end to end for ACP and Claude native (Codex deferred per
    ADR-0018 resolved decisions 1 and 5). Depends on steps 3, 4.
@@ -447,3 +445,48 @@ accepted):
   unchanged.
 - Implementation: `writeClaudeMcpConfigFile` (`internal/taskrunner/mcp.go`),
   cleanup deferred in `runClaudeNative`.
+
+### Per-run indicator validation (M1-M8)
+
+- M1: `internal/taskrunner/mcp_test.go` -- `TestAcpMcpServerStates_
+  ActiveDroppedAndUnresolved` (pure mapping, row order),
+  `TestRunner_RunPrompt_ACPEmitsMcpServersEvent` (exactly one event, active /
+  dropped+transport_unsupported / dropped+command_not_found),
+  `..._ACPNoMcpServersEventWhenNoneConfigured` (regression guard: no event).
+- M2: `..._ClaudeNativeEmitsMcpServersAndFailedUpdate` (initial all-active,
+  then failed/failed_to_start for the CLI-reported server),
+  `..._ClaudeNativeNoSecondMcpEventWithoutFailures`.
+- M3: `..._CodexEmitsMcpServersProviderUnsupported`.
+- M4: `internal/runs` `TestEventCodec_McpServersRoundTrip`,
+  `TestRegistry_McpServersEventSurvivesRehydrate`; `internal/wsapi/
+  mcp_run_event_test.go` `TestRunLogs_McpServersEntry`,
+  `TestRunAttach_McpServersStreamEvent` (late attach backfills the event).
+- M5: `TestMcpServersEvent_NoSecretReachesWire` -- env/header/arg/command/url
+  secrets seeded; asserted over the `run.logs` response, the live and
+  backfilled `run.attach` frames, and every persisted `run_events.event_data`
+  row; server names must be present. Mutation-checked by hand: putting an env
+  value into a state's `Name` makes it fail.
+- M6: `timeline-model.test.ts` / `run-timeline.test.tsx` -- `appendTimelineEvent
+  ignores mcp_servers`, `latestMcpServers returns the last event's list`,
+  `RunEntry.mcpServers folded from run.logs backfill`, `RunEntry.mcpServers
+  updated live from the run.attach stream, latest wins`.
+- M7/M8: `mcp-servers-indicator.test.tsx` (5 tests incl. `never renders a
+  secret-looking value`) and `task-detail.test.tsx` `MCP servers pill` (latest
+  run only, newest run's servers shown, scoped to the chat's own runs).
+  Manually verified against a sandbox daemon (`SMIND_HOME` temp, fake ACP
+  agent via `SMIND_ACP_COMMAND` advertising stdio only, three servers with
+  seeded secrets, real built UI, headless Chromium): light + dark screenshots
+  of the `MCP 1/3` pill and popover (a first pass showed dropped servers'
+  names squeezed out of the popover rows; fixed by stacking name/transport
+  over status, re-screenshotted). The page DOM + innerText never contained any
+  seeded env/arg/url/header secret.
+- Not covered: a live Claude-native run showing the `failed` state in the real
+  UI (covered at the runner level with the fake CLI only); a Codex run (no
+  MCP mechanism, deferred).
+
+## Status
+
+Complete for v1: every step is done except step 6 (Codex), which stays
+deferred out of v1 by ADR-0018 resolved decision 1 (AC7 is therefore
+intentionally unimplemented; Codex runs report their servers as
+`dropped/provider_unsupported`). Moved to `completed/` on that basis.

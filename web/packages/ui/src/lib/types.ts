@@ -351,10 +351,10 @@ export interface RunToolCallEventParams {
   result?: unknown;
 }
 
-// One server entry in an "mcp_servers" run event (docs/plans/active/
-// agent-mcp-servers.md): the per-run state of an MCP server the run tried
-// to start. Multiple mcp_servers events per run are possible; the latest
-// one wins.
+// One server entry in an "mcp_servers" run event (docs/plans/completed/
+// agent-mcp-servers.md): the per-run state of an MCP server the run tried to
+// start. Multiple mcp_servers events per run are possible; the latest one
+// wins.
 export interface McpServerState {
   name: string;
   transport: "stdio" | "http" | "sse";
