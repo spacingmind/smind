@@ -77,13 +77,17 @@ type OrchestrationConfig struct {
 	// grandchildren but rejects a great-grandchild. Enforced by
 	// internal/workspace.Manager.CreateTask.
 	MaxDepth int `yaml:"maxDepth"`
+	// MaxConcurrentRunsPerTree caps how many runs may be StatusRunning at
+	// once across one task tree (a root task and all its descendants).
+	// Default 4; Load rejects values < 1.
+	MaxConcurrentRunsPerTree int `yaml:"maxConcurrentRunsPerTree"`
 }
 
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
 		Server:        ServerConfig{Port: 4648},
-		Orchestration: OrchestrationConfig{MaxDepth: 2},
+		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4},
 		Worktrees: WorktreesConfig{
 			SetupTimeoutSeconds:    600,
 			TeardownTimeoutSeconds: 120,
@@ -124,6 +128,9 @@ func Load() (Config, error) {
 	}
 	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+	}
+	if n := cfg.Orchestration.MaxConcurrentRunsPerTree; n < 1 {
+		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", Path(), n)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)

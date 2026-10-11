@@ -118,6 +118,14 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		startPrompt = fmt.Sprintf("[message from task #%d, chat #%d]\n%s", fromTaskID, fromChatID, prompt)
 	}
 
+	// Resolved before reg.mu is taken, same as Start (store reads never
+	// happen under the registry lock; parent links are immutable while a
+	// run exists).
+	treeRoot, err := reg.treeRootOf(taskID)
+	if err != nil {
+		return StartOutcome{}, err
+	}
+
 	runCtx, cancel := context.WithCancel(ctx)
 	r := &run{
 		taskID:             taskID,
@@ -135,6 +143,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
 		pendingPermissions: make(map[string]chan string),
+		treeRoot:           treeRoot,
 	}
 
 	// The busy/idle decision and (when idle) this run's registration share
@@ -170,6 +179,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 
 	var busyRunID string
 	var archiving bool
+	var treeFull *TreeBusyError
 	func() {
 		if setupBusy {
 			return
@@ -192,11 +202,23 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 				return
 			}
 		}
+		// Idle chat but the tree is full: every mode refuses (an enqueue
+		// is not a concurrent run, but delivering it immediately would be;
+		// a busy chat's enqueue below is unaffected because we never reach
+		// here with busyRunID set).
+		if running := reg.runningInTreeLocked(treeRoot); running >= reg.maxConcurrentRunsPerTreeLocked() {
+			treeFull = &TreeBusyError{RootTaskID: treeRoot, Limit: reg.maxConcurrentRunsPerTreeLocked(), Running: running}
+			return
+		}
 		reg.runs[id] = r
 	}()
 	if archiving {
 		cancel()
 		return StartOutcome{}, fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if treeFull != nil {
+		cancel()
+		return StartOutcome{}, treeFull
 	}
 
 	if busyRunID == "" && !setupBusy {
@@ -328,6 +350,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if err != nil {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
+			var treeErr *TreeBusyError
 			if errors.As(err, &setupErr) {
 				// Setup was re-run since the check above; its finish delivers.
 				return
@@ -335,6 +358,12 @@ func (reg *Registry) deliverOne(chatID int64) {
 			if errors.As(err, &busyErr) {
 				// Someone else's run won the start race; their finish will
 				// deliver this item. Leave it queued.
+				return
+			}
+			if errors.As(err, &treeErr) {
+				// The task tree is at its concurrency limit; the slot frees
+				// when ANY run in the tree ends, which finish covers via
+				// its DeliverQueued retry. Leave it queued.
 				return
 			}
 			if errors.Is(err, ErrTaskArchiving) {
