@@ -31,6 +31,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "serve":
 		return cmdServe(args[1:])
+	case "stop":
+		return cmdStop(args[1:])
 	case "relay":
 		return cmdRelay(args[1:])
 	case "workspace":
@@ -66,6 +68,8 @@ func printUsage(w io.Writer) {
 
 Usage:
   smind serve                                             start the daemon
+
+  smind stop                                              ask the running daemon to shut down gracefully
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
   smind relay workspace new <id>                          enroll a relay workspace (secret printed once)
