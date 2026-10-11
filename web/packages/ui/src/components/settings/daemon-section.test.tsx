@@ -207,4 +207,20 @@ describe("daemon-section (desktop build)", () => {
 
     expect(screen.getByTestId("daemon-error")).toHaveTextContent("no published release for version");
   });
+
+  it("re-reads the live status after a failed restart instead of keeping the stale Running state", async () => {
+    const daemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce(baseStatus())
+      .mockResolvedValue(baseStatus({ reachable: false, managedState: "notRunning", pid: null }));
+    await renderSection({ daemonStatus, daemonRestart: vi.fn().mockRejectedValue(new Error("daemon failed to start after retry: boom")) });
+    expect(screen.getByTestId("daemon-reachable")).toHaveTextContent("Running");
+
+    fireEvent.click(screen.getByTestId("daemon-restart"));
+    await flush();
+    await flush();
+
+    expect(daemonStatus).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("daemon-reachable")).toHaveTextContent("Not running");
+  });
 });

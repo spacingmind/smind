@@ -331,7 +331,7 @@ impl WslPathRunner for WslExeRunner {
 
 /// wsl.exe writes UTF-16LE output (with or without a BOM) on some
 /// locales and plain UTF-8 on others; accept both.
-fn decode_wsl_output(raw: &[u8]) -> String {
+pub(crate) fn decode_wsl_output(raw: &[u8]) -> String {
     let (chunks, _) = raw.as_chunks::<2>();
     let looks_utf16 = (raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
         || chunks.iter().take(8).any(|c| c[1] == 0x00 && c[0] != 0);

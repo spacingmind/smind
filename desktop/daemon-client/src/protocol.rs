@@ -45,6 +45,24 @@ pub struct PermissionPending {
     pub options: Vec<serde_json::Value>,
 }
 
+/// PermissionResolved is the payload of permission.resolved events:
+/// {runId, taskId, requestId, ...} -- only the fields this client needs
+/// (see internal/wsapi/events.go's permissionResolvedPayload).
+#[derive(Debug, Deserialize)]
+pub struct PermissionResolved {
+    #[serde(rename = "runId")]
+    pub run_id: String,
+    #[serde(rename = "taskId")]
+    pub task_id: i64,
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+}
+
+/// permission_resolved decodes a permission.resolved event's payload.
+pub fn permission_resolved(payload: &serde_json::Value) -> Option<PermissionResolved> {
+    serde_json::from_value(payload.clone()).ok()
+}
+
 /// RunStatus is the payload of run.status events:
 /// {runId, taskId, status, stopReason, err} -- only the fields this
 /// client needs (see internal/wsapi/events.go's runStatusPayload).
@@ -148,6 +166,14 @@ mod tests {
     use super::*;
 
     const SAMPLE: &str = r#"{"event":{"topic":"permission.pending","seq":3,"payload":{"runId":"run_1","taskId":42,"requestId":"req_9","summary":"Run `cargo test` in task 42?","options":[{"id":"allow","name":"Allow","kind":"allow"}]}}}"#;
+
+    #[test]
+    fn permission_resolved_payload_decodes() {
+        let payload = serde_json::json!({"runId":"run_1","taskId":42,"chatId":7,"requestId":"req_9","optionId":"allow","reason":"human"});
+        let p = permission_resolved(&payload).unwrap();
+        assert_eq!((p.run_id.as_str(), p.task_id, p.request_id.as_str()), ("run_1", 42, "req_9"));
+        assert!(permission_resolved(&serde_json::json!({"runId":"r"})).is_none());
+    }
 
     #[test]
     fn parses_event_notification() {
