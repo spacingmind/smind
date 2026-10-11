@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/store"
@@ -34,6 +35,21 @@ type Manager struct {
 	// than an unbounded (zero-value) depth. cmd/smind/serve.go overrides
 	// it from the loaded config via SetMaxDepth.
 	maxTaskDepth int
+
+	// wt holds the worktrees: config (ADR-0024); portMu serialises port
+	// allocation.
+	wtMu   sync.Mutex
+	wt     WorktreesSettings
+	portMu sync.Mutex
+}
+
+// WorktreesSettings is the Manager's view of config.WorktreesConfig with the
+// port range already parsed.
+type WorktreesSettings struct {
+	HasPorts        bool
+	PortLo, PortHi  int
+	SetupTimeout    time.Duration
+	TeardownTimeout time.Duration
 }
 
 // Notifier receives workspace/space/task lifecycle notifications. Every
@@ -105,7 +121,15 @@ func (m *Manager) notifyTask(t store.Task) {
 
 // New returns a Manager backed by s.
 func New(s *store.Store) *Manager {
-	return &Manager{store: s, maxTaskDepth: config.Default().Orchestration.MaxDepth}
+	d := config.Default().Worktrees
+	return &Manager{
+		store:        s,
+		maxTaskDepth: config.Default().Orchestration.MaxDepth,
+		wt: WorktreesSettings{
+			SetupTimeout:    time.Duration(d.SetupTimeoutSeconds) * time.Second,
+			TeardownTimeout: time.Duration(d.TeardownTimeoutSeconds) * time.Second,
+		},
+	}
 }
 
 // SetMaxDepth overrides the task hierarchy depth limit CreateTask enforces
