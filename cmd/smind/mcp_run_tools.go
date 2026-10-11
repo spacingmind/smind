@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -43,13 +44,66 @@ func mcpRunLogs(ctx context.Context, client *wsclient.Client, tool string, runID
 // returns -- a snapshot, not the full history (that's task_logs).
 const mcpStatusTail = 20
 
+// mcpRunEvent is runLogEvent's MCP-facing mirror: same JSON names, but the
+// free-form fields (tool input/result, raw payload) are `any` rather than
+// json.RawMessage. The go-sdk infers "array or null" for a []byte-typed
+// field, so output validation rejected every real object there.
+type mcpRunEvent struct {
+	Type       string                   `json:"type"`
+	Text       string                   `json:"text,omitempty"`
+	StopReason string                   `json:"stopReason,omitempty"`
+	RequestID  string                   `json:"requestId,omitempty"`
+	Summary    string                   `json:"summary,omitempty"`
+	Options    []permissionOptionParams `json:"options,omitempty"`
+	OptionID   string                   `json:"optionId,omitempty"`
+	Reason     string                   `json:"reason,omitempty"`
+	ToolCallID string                   `json:"toolCallId"`
+	ToolName   string                   `json:"toolName,omitempty"`
+	Title      string                   `json:"title,omitempty"`
+	Status     string                   `json:"status,omitempty"`
+	Input      any                      `json:"input,omitempty"`
+	Result     any                      `json:"result,omitempty"`
+	Kind       string                   `json:"kind"`
+	Payload    any                      `json:"payload,omitempty"`
+}
+
+// rawToAny decodes one raw JSON value, falling back to its text if it is
+// not valid JSON; nil (absent) stays nil.
+func rawToAny(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	return v
+}
+
+// toMCPRunEvents converts run.logs events to their MCP shape; the result
+// is never nil so events serializes as [] rather than null.
+func toMCPRunEvents(events []runLogEvent) []mcpRunEvent {
+	out := make([]mcpRunEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, mcpRunEvent{
+			Type: e.Type, Text: e.Text, StopReason: e.StopReason,
+			RequestID: e.RequestID, Summary: e.Summary, Options: e.Options,
+			OptionID: e.OptionID, Reason: e.Reason,
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Title: e.Title, Status: e.Status,
+			Input: rawToAny(e.Input), Result: rawToAny(e.Result),
+			Kind: e.Kind, Payload: rawToAny(e.Payload),
+		})
+	}
+	return out
+}
+
 // taskStatusOutput is task_status's structured output.
 type taskStatusOutput struct {
 	RunID             string                `json:"runId"`
 	Status            string                `json:"status"`
 	StopReason        string                `json:"stopReason,omitempty"`
 	Err               string                `json:"err,omitempty"`
-	Events            []runLogEvent         `json:"events"`
+	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 }
 
@@ -69,13 +123,11 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 			StopReason: result.StopReason,
 			Err:        result.Err,
 		}
-		out.Events = result.Events
-		if len(result.Events) > mcpStatusTail {
-			out.Events = result.Events[len(result.Events)-mcpStatusTail:]
+		events := result.Events
+		if len(events) > mcpStatusTail {
+			events = events[len(events)-mcpStatusTail:]
 		}
-		if out.Events == nil {
-			out.Events = []runLogEvent{}
-		}
+		out.Events = toMCPRunEvents(events)
 		if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 			out.PendingPermission = &pending[0]
 		}
@@ -97,7 +149,7 @@ type taskLogsOutput struct {
 	Status     string        `json:"status"`
 	StopReason string        `json:"stopReason,omitempty"`
 	Err        string        `json:"err,omitempty"`
-	Events     []runLogEvent `json:"events"`
+	Events     []mcpRunEvent `json:"events"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
@@ -109,12 +161,9 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		if err != nil {
 			return nil, taskLogsOutput{}, err
 		}
-		if result.Events == nil {
-			result.Events = []runLogEvent{}
-		}
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
-			StopReason: result.StopReason, Err: result.Err, Events: result.Events,
+			StopReason: result.StopReason, Err: result.Err, Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
