@@ -553,7 +553,8 @@ function RunConfigToolbarModel() {
   const { state, actions, meta } = useRunConfig();
   if (meta.models.length === 0) return null;
   const known = meta.models.find((m) => m.id === state.model);
-  const current = state.model ? (known?.label ?? state.model) : "Default";
+  // "Default model", not a bare "Default": the toolbar already has other selects whose own default reads "Default"/"Standard".
+  const current = state.model ? (known?.label ?? state.model) : "Default model";
   return (
     <Select
       value={state.model || DEFAULT_MODEL_VALUE}

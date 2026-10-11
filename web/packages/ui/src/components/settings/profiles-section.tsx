@@ -378,7 +378,7 @@ function ProfileForm({
         value={form.name}
         onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
       />
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <div className="flex min-w-0 items-center gap-1.5">
           <Select
             value={form.provider}
@@ -398,6 +398,7 @@ function ProfileForm({
           </Select>
           <ProviderHealthDot client={client} provider={form.provider} providers={providers} testId={`${idPrefix}-provider-health`} />
         </div>
+        <ProfileModelSelect form={form} setForm={setForm} providers={providers} idPrefix={idPrefix} />
         <Select value={form.permissionMode} onValueChange={(value) => setForm((f) => ({ ...f, permissionMode: value }))}>
           <SelectTrigger aria-label="Permission mode" data-testid={`${idPrefix}-permission-mode`} className="w-full">
             <SelectValue placeholder="Permission mode" />
@@ -423,10 +424,7 @@ function ProfileForm({
               ))}
             </SelectContent>
           </Select>
-        ) : (
-          <div aria-hidden />
-        )}
-        <ProfileModelSelect form={form} setForm={setForm} providers={providers} idPrefix={idPrefix} />
+        ) : null}
       </div>
       {supportsAutoAccept(providers, form.provider) && (
         <label className="flex items-center gap-2 text-ui-sm text-foreground-muted" title={AUTO_ACCEPT_HELP}>

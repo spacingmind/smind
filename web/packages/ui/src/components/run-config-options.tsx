@@ -110,7 +110,14 @@ function ConfigOptionControl({
           data-testid={isModel ? "run-config-option-model" : undefined}
           className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-ui-sm hover:bg-hover"
         >
-          <SelectValue placeholder={option.name} />
+          {isModel ? (
+            // Prefixed so it reads apart from the composer's next-run Model picker sitting beside it.
+            <SelectValue placeholder={option.name}>
+              This run: {option.options.find((c) => c.value === current)?.name ?? current}
+            </SelectValue>
+          ) : (
+            <SelectValue placeholder={option.name} />
+          )}
         </SelectTrigger>
         <SelectContent>
           {option.options.map((choice) => (
