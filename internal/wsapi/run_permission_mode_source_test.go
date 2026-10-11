@@ -8,6 +8,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/spacingmind/smind/internal/runs"
+	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 )
 
@@ -117,4 +118,51 @@ func TestRunSetPermissionMode_HumanUnchanged(t *testing.T) {
 
 	sendRequest(t, ws, "stop", "run.stop", map[string]any{"runId": started.RunID})
 	readEnvelopeFor(t, ws, "stop", 5*time.Second)
+}
+
+// TestRunSetPermissionMode_OrchestratorFailsClosedWithoutCatalog proves
+// the ADR-0019 decision-6 guard fails closed: for a run whose provider
+// catalog cannot be resolved (here a rehydrated run with no live runner),
+// a non-human caller is rejected with the catalog lookup error -- not
+// waved through to the mode switch -- and the stored mode is unchanged.
+func TestRunSetPermissionMode_OrchestratorFailsClosedWithoutCatalog(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+
+	now := time.Now().UTC()
+	runID := "rehydrated-run"
+	if _, err := db.CreateRun(store.Run{
+		ID: runID, TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "done", StartedAt: now, FinishedAt: &now, StopReason: "end_turn",
+		PermissionMode: "default",
+	}); err != nil {
+		t.Fatalf("store.CreateRun() error = %v", err)
+	}
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	sendRequest(t, ws, "switch", "run.setPermissionMode", map[string]any{
+		"runId": runID, "modeId": "accept_edits", "source": "orchestrator",
+	})
+	resp := readEnvelopeFor(t, ws, "switch", 5*time.Second)
+	if resp.Error == nil || !strings.Contains(resp.Error.Message, "no live runner") {
+		t.Fatalf("error = %+v, want the catalog lookup error (no live runner)", resp.Error)
+	}
+	var found bool
+	for _, s := range readRunList(t, ws) {
+		if s.ID == runID {
+			found = true
+			if s.PermissionMode != "default" {
+				t.Errorf("permission mode = %q, want unchanged default", s.PermissionMode)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("run %s not in run.list", runID)
+	}
+	if row, err := db.GetRun(runID); err != nil || row.PermissionMode != "default" {
+		t.Fatalf("stored run = %+v, %v; want permission mode default", row, err)
+	}
 }

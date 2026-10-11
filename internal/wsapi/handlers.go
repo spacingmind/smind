@@ -1643,8 +1643,13 @@ func handleRunSetPermissionMode(reg *runs.Registry) handlerFunc {
 		// applies at enqueue time.
 		if p.Source != store.ChatQueueSourceHuman {
 			if p.ModeID != "" {
+				// Fail closed: if the catalog can't be resolved we can't
+				// tell whether the mode auto-approves, so reject.
 				catalog, err := reg.ProviderCatalogForRun(p.RunID)
-				if err == nil && taskrunner.ModeAutoApproves(catalog, taskrunner.PermissionSettings{Mode: p.ModeID}) {
+				if err != nil {
+					return nil, fmt.Errorf("run.setPermissionMode: %w", err)
+				}
+				if taskrunner.ModeAutoApproves(catalog, taskrunner.PermissionSettings{Mode: p.ModeID}) {
 					return nil, fmt.Errorf("run.setPermissionMode: a non-human caller may not pick an auto-approving permission mode (ADR-0019 decision 6); ask a human to switch modes")
 				}
 			}
