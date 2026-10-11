@@ -35,7 +35,9 @@ export function autoGrow(el: HTMLTextAreaElement): void {
  * a candidate with Enter must never send the message half-composed.
  */
 export function isSubmitKey(e: KeyboardEvent<HTMLTextAreaElement>): boolean {
-  if (e.key !== "Enter" || e.shiftKey) return false;
+  // Cmd/Ctrl+Enter is the composer's alternate send (interrupt, ADR-0021
+  // §9) -- routed to its own handler, never the plain submit.
+  if (e.key !== "Enter" || e.shiftKey || e.metaKey || e.ctrlKey) return false;
   const native = e.nativeEvent as unknown as { isComposing?: boolean; keyCode?: number };
   if (native.isComposing || native.keyCode === 229) return false;
   return true;

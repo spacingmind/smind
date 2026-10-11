@@ -32,6 +32,7 @@ func (r *Runner) untrackClaudeClient(chatID int64) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 	delete(r.claudeClients, chatID)
+	delete(r.claudeModels, chatID)
 }
 
 // SetPermissionMode switches chatID's live session to mode, using the
@@ -195,4 +196,29 @@ func mergeConfigOptions(existing, returned []acp.ConfigOption) []acp.ConfigOptio
 		out[i] = r
 	}
 	return out
+}
+
+// applyACPModel makes the agent's model option the requested model before
+// the first prompt (ADR-0025): nothing when model is empty, the agent
+// advertises no model option (the agent is the only judge then, so a model
+// it can't set is an error), or the option already holds that value.
+// Returns the options as the agent reports them after the change, like
+// applyACPMode. An agent-side rejection is returned as-is, failing the
+// run start with the agent's own error.
+func applyACPModel(ctx context.Context, client acpBackend, sessionID string, options []acp.ConfigOption, model string) ([]acp.ConfigOption, error) {
+	if model == "" {
+		return options, nil
+	}
+	c, ok := deriveACPModels(options)
+	if !ok {
+		return options, fmt.Errorf("agent advertises no model option")
+	}
+	if c.current == model {
+		return options, nil
+	}
+	returned, err := client.SetSessionConfigOption(ctx, sessionID, c.configID, model)
+	if err != nil {
+		return options, err
+	}
+	return mergeConfigOptions(options, returned), nil
 }

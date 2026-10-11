@@ -24,6 +24,7 @@ type persistedEvent struct {
 	PermissionSummary   string                        `json:"permissionSummary,omitempty"`
 	PermissionOptions   []taskrunner.PermissionOption `json:"permissionOptions,omitempty"`
 	PermissionOptionID  string                        `json:"permissionOptionId,omitempty"`
+	PermissionDetail    *taskrunner.PermissionDetail  `json:"permissionDetail,omitempty"`
 	ToolCallID          string                        `json:"toolCallId,omitempty"`
 	ToolName            string                        `json:"toolName,omitempty"`
 	ToolTitle           string                        `json:"toolTitle,omitempty"`
@@ -32,6 +33,8 @@ type persistedEvent struct {
 	ToolResult          json.RawMessage               `json:"toolResult,omitempty"`
 	RawKind             string                        `json:"rawKind,omitempty"`
 	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
+	Usage               *taskrunner.Usage             `json:"usage,omitempty"`
+	McpServers          []taskrunner.McpServerState   `json:"mcpServers,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
@@ -43,6 +46,7 @@ func encodeEvent(e Event) (string, error) {
 		PermissionSummary:   e.PermissionSummary,
 		PermissionOptions:   e.PermissionOptions,
 		PermissionOptionID:  e.PermissionOptionID,
+		PermissionDetail:    e.PermissionDetail,
 		ToolCallID:          e.ToolCallID,
 		ToolName:            e.ToolName,
 		ToolTitle:           e.ToolTitle,
@@ -51,6 +55,8 @@ func encodeEvent(e Event) (string, error) {
 		ToolResult:          e.ToolResult,
 		RawKind:             e.RawKind,
 		RawPayload:          e.RawPayload,
+		Usage:               e.Usage,
+		McpServers:          e.McpServers,
 	})
 	if err != nil {
 		return "", err
@@ -71,6 +77,7 @@ func decodeEvent(data string) (Event, error) {
 		PermissionSummary:   p.PermissionSummary,
 		PermissionOptions:   p.PermissionOptions,
 		PermissionOptionID:  p.PermissionOptionID,
+		PermissionDetail:    p.PermissionDetail,
 		ToolCallID:          p.ToolCallID,
 		ToolName:            p.ToolName,
 		ToolTitle:           p.ToolTitle,
@@ -79,5 +86,7 @@ func decodeEvent(data string) (Event, error) {
 		ToolResult:          p.ToolResult,
 		RawKind:             p.RawKind,
 		RawPayload:          p.RawPayload,
+		Usage:               p.Usage,
+		McpServers:          p.McpServers,
 	}, nil
 }

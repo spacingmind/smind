@@ -106,9 +106,10 @@ deterministically without a real Claude/Codex/ACP process:
 
 ## Progress
 
-Not started. Suggested breakdown for dispatching to an implementation
-agent (small, independently reviewable steps; each should end with
-`task test`/`task lint` green):
+Complete: steps 1-5, 7 and 8 shipped; step 6 was dropped (ADR-0017
+resolved decision 1). Breakdown as dispatched to implementation agents
+(small, independently reviewable steps; each ended with `task test`/
+`task lint` green):
 
 1. [x] **Scaffold the subcommand**: `smind mcp serve` in
    `cmd/smind/mcp.go` (the `mcp` group is shared with ADR-0018's
@@ -130,7 +131,7 @@ agent (small, independently reviewable steps; each should end with
    `TestMCPTools_TaskPermissionsShowsPendingPermission` -- each driven
    through the SDK's client type over an in-memory transport against the
    fake-agent in-process daemon.
-3. **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
+3. [x] **`task_send`**: wraps `task.prompt`/`run.start`, non-blocking. Test:
    returns a `runId` immediately; a separate `run.attach`/`run.logs` call
    confirms the run actually started. **Permission guard (ADR-0019
    decision 6, carried over from
@@ -160,7 +161,7 @@ agent (small, independently reviewable steps; each should end with
 7. [x] **MCP protocol round-trip test**: add the end-to-end stdio test
    scenario once enough tools exist to make it meaningful (after step 3
    or 4). `TestMCPServe_StdioRoundTrip`.
-8. **Docs**: update `AGENTS.md`'s workspace map / README if `smind mcp serve`
+8. [x] **Docs**: update `AGENTS.md`'s workspace map / README if `smind mcp serve`
    needs a one-line mention for discoverability (does not need its own
    doc page beyond the ADR + this plan).
 
@@ -230,3 +231,43 @@ Step 7's dedicated test runs the actual compiled `smind mcp serve` binary
 as a subprocess over real stdio (the SDK's `CommandTransport`) against the
 same fake-agent-backed daemon, exercising `initialize` -> `tools/list` ->
 one `tools/call` (`task_new`) end to end: `TestMCPServe_StdioRoundTrip`.
+
+Steps 3 and 8 (`task_send` + docs) validated as follows:
+
+- AC3's `task_send` row (wraps task.prompt's non-blocking half, i.e.
+  run.start, returns {runId} without blocking on run completion):
+  `TestMCPTools_TaskSendReturnsRunIdImmediately` -- runId returned at
+  once, then a direct `run.logs` call confirms the run registered and the
+  fake agent drove it to `done`.
+- ADR-0019 decision 6's permission guard (also
+  provider-native-permission-modes.md AC11/S17): `TestMCPTools_TaskSendRejectsAutoApprovingMode`
+  -- claude-native `bypassPermissions` rejected, glm ACP bypass-style id
+  rejected, `autoAccept: true` rejected, the same bypass mode via a
+  human-authored `profileId` accepted (with the `profile.get` wire keys
+  pinned against the real wsapi response first), `profileId` + explicit
+  auto-approving mode rejected, and `profileId` + contradicting
+  `provider` rejected.
+- Invalid tool args scenario for `task_send`: `TestMCPTools_TaskSendInvalidArgs`
+  -- blank prompt and missing/zero taskId are tool errors naming the
+  field, a type-invalid taskId is caught by the SDK's schema validation
+  before the handler runs, no panics.
+- Chat-scoped send scenario: `TestMCPTools_TaskSendChatScoped` -- a run
+  sent with an explicit `chatId` (from `chat_new`) reads back under that
+  chat via `run.list`'s chat filter; a foreign chatId is rejected.
+- AC7 update: `TestMCPTools_NoApprovalToolInCatalog` now also asserts
+  `task_send` is present.
+- Step 8 (docs): README gains an MCP-server feature bullet and a
+  "MCP server (`smind mcp serve`)" section covering the host config
+  shape, the tool list, the missing-approval-tools rule, and the
+  ADR-0019 permission guard.
+
+Superseded scenarios and closing audit: the Test Scenarios above that
+mention `task_approve`/`task_deny` ("disabled by default", "enabled",
+"`task_deny`") describe the config-gated approval tools that ADR-0017
+resolved decision 1 dropped; AC7 replaces them with the stronger
+"never in the catalog" guarantee, covered by
+`TestMCPTools_NoApprovalToolInCatalog`. With that, every AC1-AC7 above has
+named evidence (AC1/AC2 `cmd/smind/mcp_serve_test.go`, `mcp_exit_test.go`;
+AC3 `mcp_tools_test.go`, `mcp_run_tools_test.go`, `mcp_task_send_test.go`,
+`mcp_wait_test.go`, `mcp_stop_test.go`; AC4/AC5/AC7 `mcp_catalog_test.go`;
+the protocol round-trip `mcp_stdio_test.go`), and the plan is closed.

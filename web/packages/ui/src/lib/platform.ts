@@ -1,3 +1,6 @@
+import type { ActionId } from "@/keyboard/actions";
+import { CONNECTION_CHANGED_EVENT } from "@/lib/local-paths";
+
 /**
  * The desktop platform surface (ADR-0013 AC6): a single `isDesktop` /
  * `desktop` API pair components use instead of touching
@@ -13,7 +16,7 @@
 /** A saved daemon connection (AC4's Rust-side `Registry`/`Connection` shape, mirrored here). */
 export interface Connection {
   id: string;
-  kind: "local" | "url";
+  kind: "local" | "url" | "relay";
   label: string;
   baseUrl: string;
 }
@@ -47,6 +50,14 @@ export interface ConnectionVersionInfo {
   comparison: "older" | "same" | "newer" | "unknown";
 }
 
+/** One entry of the Rust-side editor allowlist (`editors_list`): the id `openInEditor` takes, and what to call it in the UI. */
+export interface EditorInfo {
+  id: string;
+  label: string;
+  /** "fileManager" is Finder / File Explorer / the XDG file manager (reveal); "editor" is a code editor (open). */
+  kind: "fileManager" | "editor";
+}
+
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
@@ -65,6 +76,21 @@ export interface DesktopApi {
   connectionVersion(id: string): Promise<ConnectionVersionInfo>;
   /** Subscribes to progress events during a long-running daemon operation; returns an unsubscribe function. */
   onDaemonProgress(cb: (progress: DaemonProgress) => void): () => void;
+  /**
+   * Subscribes to native menu actions (desktop-native-feel D3.3): the
+   * app menu emits one `menu-action` event whose payload is the action
+   * id, which the UI dispatches through the keyboard action registry.
+   */
+  onMenuAction(cb: (action: ActionId) => void): () => void;
+  /** Detected installed editors plus the platform file manager (desktop-native-feel D4.2), from a fixed Rust-side allowlist. */
+  editorsList(): Promise<EditorInfo[]>;
+  /**
+   * Opens `path` in the editor with id `editorId` from `editorsList`. The
+   * path must be absolute and exist on this machine; Rust rejects
+   * anything else. Rejects with an `Error` carrying Rust's human-readable
+   * message, so it can be shown in a toast as-is.
+   */
+  openInEditor(editorId: string, path: string): Promise<void>;
 }
 
 /** The host OS of a desktop build, read from the webview's user agent (WKWebView / WebView2 / WebKitGTK name their platform). */
@@ -126,6 +152,10 @@ function unavailable(): DesktopApi {
     takeOverDaemon: () => reject(),
     connectionVersion: () => reject(),
     onDaemonProgress: () => () => {},
+    // The browser stub never fires: there is no native menu there.
+    onMenuAction: () => () => {},
+    editorsList: () => reject(),
+    openInEditor: () => reject(),
   };
 }
 
@@ -148,6 +178,15 @@ async function loadInvoke() {
   return invoke;
 }
 
+/** Tauri rejects an `invoke` with the bare string a Rust command returned as its `Err`; wrap it so callers can rely on `Error.message`. */
+function asError(err: unknown): Error {
+  return err instanceof Error ? err : new Error(String(err));
+}
+
+function announceConnectionChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(CONNECTION_CHANGED_EVENT));
+}
+
 function realDesktopApi(): DesktopApi {
   return {
     async listConnections() {
@@ -156,15 +195,20 @@ function realDesktopApi(): DesktopApi {
     },
     async addConnection(label, url) {
       const invoke = await loadInvoke();
-      return invoke<Connection>("connections_add", { label, url });
+      const conn = await invoke<Connection>("connections_add", { label, url });
+      announceConnectionChange();
+      return conn;
     },
     async removeConnection(id) {
       const invoke = await loadInvoke();
       await invoke("connections_remove", { id });
+      announceConnectionChange();
     },
     async selectConnection(id) {
       const invoke = await loadInvoke();
-      return invoke<Connection>("connections_select", { id });
+      const conn = await invoke<Connection>("connections_select", { id });
+      announceConnectionChange();
+      return conn;
     },
     async getCurrentConnection() {
       const invoke = await loadInvoke();
@@ -198,11 +242,40 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       return invoke<ConnectionVersionInfo>("connection_version", { id });
     },
+    async editorsList() {
+      const invoke = await loadInvoke();
+      return invoke<EditorInfo[]>("editors_list");
+    },
+    async openInEditor(editorId, path) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("open_in_editor", { editorId, path });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
     onDaemonProgress(cb) {
       let unlisten: (() => void) | null = null;
       let cancelled = false;
       import("@tauri-apps/api/event").then(({ listen }) =>
         listen<DaemonProgress>("daemon-progress", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onMenuAction(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<string>("menu-action", (event) => cb(event.payload as ActionId)).then((fn) => {
           if (cancelled) {
             fn();
           } else {

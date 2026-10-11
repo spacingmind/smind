@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
 import { GitCompare } from "lucide-react";
 
+import { QueuedPrompts } from "@/components/composer/queued-prompts";
 import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
+import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
@@ -11,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { type DiffStat } from "@/lib/diff-stat";
 import type {
   AgentProfile,
+  ChatQueueItem,
   ConfigOptionParams,
   PermissionSettings,
   Provider,
@@ -80,13 +83,12 @@ function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
  * attachments exist.
  *
  * **Queue, not steer.** The daemon exposes no "send more input to a run
- * already in flight" RPC (internal/wsapi/handlers.go's method table has
- * run.start/attach/stop/logs/respondPermission and nothing else), so
- * submitting while a run is live holds the text client-side and starts it
- * as its own run when the live one reaches a terminal state. The queue is
- * deliberately in-memory: an unsent *draft* is worth persisting, but a
- * queued follow-up whose whole meaning is "right after the run I was
- * watching" is not, once that session is gone.
+ * already in flight" RPC, so submitting while a run is live hands the
+ * prompt to the daemon's per-chat queue via run.start whenBusy:"queue"
+ * (ADR-0021 §9) -- the queued rows rendered above the card come straight
+ * from that server state (useChatQueue, owned by task-detail.tsx), never
+ * local. Cmd/Ctrl+Enter or "Send now" while running sends with
+ * whenBusy:"interrupt" instead (Paseo's alternate-send shortcut).
  */
 export function Composer({
   client,
@@ -98,6 +100,9 @@ export function Composer({
   runningRunId,
   diffStat,
   onOpenDiff,
+  queuedItems,
+  onCancelQueued,
+  onQueued,
   onSubmit,
   onStop,
   textareaRef,
@@ -115,18 +120,26 @@ export function Composer({
   /** The chat's bound provider (chats.Provider), once set -- makes RunConfigToolbar's Provider select read-only. */
   boundProvider: Provider | null;
   connected: boolean;
-  /** The task's currently-running run, or null. Drives Stop and the queue drain. */
+  /** The task's currently-running run, or null. Drives Stop, "Send now", and the queue placeholder. */
   runningRunId: string | null;
   /** The task's diff stat (use-task-diff) for the pill above the card -- pill omitted when null/unchanged. */
   diffStat?: DiffStat | null;
   /** Brings the task's Diff tab forward when the pill is clicked; without it (no tab strip above) the pill is omitted entirely. */
   onOpenDiff?: () => void;
+  /** The chat's daemon-side queue rows (useChatQueue in task-detail.tsx) -- the only queue this composer shows. */
+  queuedItems: ChatQueueItem[];
+  /** Cancels a queued row server-side (chat.queueCancel); removal is the snapshot's job. */
+  onCancelQueued: (itemId: number) => void;
+  /** Called after a prompt was queued, so the queue view refetches even if the live snapshot missed it. */
+  onQueued?: () => void;
   onSubmit: (
     provider: Provider,
     prompt: string,
     permission: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
-  ) => Promise<void>;
+    whenBusy?: "queue" | "interrupt",
+    model?: string,
+  ) => Promise<SubmitResult>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
@@ -154,24 +167,16 @@ export function Composer({
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.
   const [runConfig, setRunConfig] = useState<RunConfigContextValue | null>(null);
-  const { provider, permissionMode, autoAccept, thinkingLevel } = runConfig?.state ?? {
+  const { provider, permissionMode, autoAccept, thinkingLevel, model } = runConfig?.state ?? {
     provider: "claude-native" as Provider,
     permissionMode: "",
     autoAccept: false,
     thinkingLevel: "" as ThinkingLevel,
+    model: "",
   };
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [queued, setQueued] = useState<string[]>([]);
-
-  // A queued follow-up belongs to the task it was typed for; switching
-  // tasks drops it rather than firing it at whatever is selected next.
-  const lastTaskId = useRef<number | null>(taskId);
-  if (lastTaskId.current !== taskId) {
-    lastTaskId.current = taskId;
-    if (queued.length > 0) setQueued([]);
-  }
 
   useEffect(() => {
     setProviders(FALLBACK_PROVIDERS);
@@ -211,16 +216,19 @@ export function Composer({
     (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
 
   const send = useCallback(
-    async (text: string) => {
+    async (text: string, whenBusy: "queue" | "interrupt") => {
       setSubmitting(true);
       setFormError(null);
       try {
-        await onSubmit(
+        const result = await onSubmit(
           provider,
           text,
           { permissionMode, autoAccept },
           provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined,
+          whenBusy,
+          model || undefined,
         );
+        if (result.kind === "queued") onQueued?.();
         return true;
       } catch (err) {
         setFormError(err instanceof Error ? err.message : String(err));
@@ -229,54 +237,32 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, onQueued],
   );
 
-  // draft is a fresh object every render (it closes over the current
-  // text), so the drain effect reads it through a ref instead of taking
-  // it as a dependency -- otherwise every keystroke would re-run a drain.
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
-
-  // Drains one queued prompt per terminal run. draining guards against a
-  // second drain being kicked off by the re-render that setQueued causes
-  // before onSubmit has had a chance to flip runningRunId back on.
-  const draining = useRef(false);
-  useEffect(() => {
-    if (running || draining.current || queued.length === 0 || !canSend) return;
-    const [next, ...rest] = queued;
-    draining.current = true;
-    setQueued(rest);
-    void send(next)
-      .then((ok) => {
-        // A failed send puts the text back in the composer rather than
-        // back in the queue: re-queuing would retry against the same
-        // failing condition forever, with no way for the user to see or
-        // edit what's looping.
-        if (!ok) {
-          const current = draftRef.current;
-          current.setValue(current.value ? `${current.value}\n${next}` : next);
-        }
-      })
-      .finally(() => {
-        draining.current = false;
-      });
-  }, [running, queued, canSend, send]);
-
+  // A plain submit always hands the prompt to the daemon's queue whenBusy
+  // (ADR-0021 §9) -- an idle chat starts at once under every mode, and a
+  // busy one queues instead of failing on a stale "running" flag.
   const submit = useCallback(() => {
     const trimmed = draft.value.trim();
     if (!trimmed || !canSend || submitting) return;
-    if (running) {
-      setQueued((prev) => [...prev, trimmed]);
-      draft.clear();
-      return;
-    }
     draft.clear();
-    void send(trimmed).then((ok) => {
-      // Restore the text if the run never started, so it isn't lost.
+    void send(trimmed, "queue").then((ok) => {
+      // Restore the text if the prompt never landed, so it isn't lost.
       if (!ok) draft.setValue(trimmed);
     });
-  }, [draft, canSend, submitting, running, send]);
+  }, [draft, canSend, submitting, send]);
+
+  // Paseo's alternate-send shortcut: while a run is live, Cmd/Ctrl+Enter
+  // interrupts it rather than queueing behind it.
+  const sendNow = useCallback(() => {
+    const trimmed = draft.value.trim();
+    if (!trimmed || !canSend || submitting) return;
+    draft.clear();
+    void send(trimmed, "interrupt").then((ok) => {
+      if (!ok) draft.setValue(trimmed);
+    });
+  }, [draft, canSend, submitting, send]);
 
   async function handleStop() {
     if (!runningRunId) return;
@@ -293,6 +279,14 @@ export function Composer({
   }
 
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+      // isSubmitKey ignores modifier-held Enters, so this is the one
+      // handler for them -- interrupt while running, plain submit idle.
+      e.preventDefault();
+      if (running) sendNow();
+      else submit();
+      return;
+    }
     if (e.key === "Escape" && running) {
       e.preventDefault();
       void handleStop();
@@ -321,29 +315,7 @@ export function Composer({
 
   return (
     <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto w-full max-w-3xl shrink-0 flex-col gap-2 border-t px-4 py-3 flex">
-      {queued.length > 0 && (
-        <ul data-testid="composer-queue" className="flex flex-col gap-1">
-          {queued.map((text, index) => (
-            <li
-              key={`${index}-${text}`}
-              data-testid="composer-queued-item"
-              className="flex items-center gap-2 rounded-md bg-surface px-2 py-1 text-ui-sm text-foreground-muted"
-            >
-              <span className="shrink-0 uppercase">Queued</span>
-              <span className="min-w-0 flex-1 truncate">{text}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                aria-label={`Remove queued prompt ${index + 1}`}
-                onClick={() => setQueued((prev) => prev.filter((_, i) => i !== index))}
-              >
-                ×
-              </Button>
-            </li>
-          ))}
-        </ul>
-      )}
+      <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
 
       {/* The pill row above the card (Item 5): only real data -- the diff
           stat, only when there are changes and there's a Diff tab to jump
@@ -411,6 +383,7 @@ export function Composer({
             <RunConfigToolbar.Provider />
             <RunConfigToolbar.Mode />
             <RunConfigToolbar.Thinking />
+            <RunConfigToolbar.Model />
             {configOptions && (
               <RunConfigOptions
                 options={configOptions.options}
@@ -421,6 +394,7 @@ export function Composer({
           <div className="ml-auto flex items-center gap-2">
             {formError && <span className="text-ui-sm text-destructive">{formError}</span>}
             {running && (
+              <>
               <Button
                 type="button"
                 variant="execute"
@@ -432,6 +406,19 @@ export function Composer({
               >
                 {stopping ? "Stopping…" : "Stop"}
               </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
+                disabled={inactive || !draft.value.trim()}
+                data-testid="chat-send-now-button"
+                title="Interrupt the running turn and send now (⌘/Ctrl+Enter)"
+                onClick={sendNow}
+              >
+                Send now
+              </Button>
+              </>
             )}
             <Button
               type="submit"

@@ -232,6 +232,7 @@ func TestClient_CallStream_DeliversEventsBeforeTerminal(t *testing.T) {
 	if err := c.Call(context.Background(), "run.stop", map[string]any{"runId": runID}, nil); err != nil {
 		t.Fatalf("Call(run.stop) error = %v", err)
 	}
+	waitRunTerminal(t, c, runID)
 }
 
 // TestClient_CallStream_CtxCancel_DetachesPromptlyWithoutStoppingRun proves
@@ -307,6 +308,29 @@ func TestClient_CallStream_CtxCancel_DetachesPromptlyWithoutStoppingRun(t *testi
 	if err := checker.Call(context.Background(), "run.stop", map[string]any{"runId": runID}, nil); err != nil {
 		t.Fatalf("Call(run.stop) error = %v", err)
 	}
+	waitRunTerminal(t, checker, runID)
+}
+
+// waitRunTerminal blocks until runID leaves "running". run.stop only signals
+// the run; its finish (status + event persistence) lands asynchronously, and
+// if the test returned first, t.TempDir's cleanup raced those SQLite writes
+// ("directory not empty" on CI).
+func waitRunTerminal(t *testing.T, c *Client, runID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var st struct {
+			Status string `json:"status"`
+		}
+		if err := c.Call(context.Background(), "run.logs", map[string]any{"runId": runID}, &st); err != nil {
+			t.Fatalf("Call(run.logs) error = %v", err)
+		}
+		if st.Status != "running" {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("run %s still running 10s after run.stop", runID)
 }
 
 // TestClient_CallStream_SlowScenario_ObservesRealGapsBetweenEvents is a

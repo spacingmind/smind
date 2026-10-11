@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,4 +160,36 @@ func firstFieldOfOutputLine(t *testing.T, out string) string {
 	}
 	t.Fatalf("output %q has no non-empty line to take an id from", out)
 	return ""
+}
+
+// TestTaskNew_PrintsIDBranchPath pins `task new`'s output: a parseable
+// first line (id first) followed by the branch and worktree path.
+func TestTaskNew_PrintsIDBranchPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home)
+	writeTestConfig(t, home, srvURL)
+	wsID := createCLIHierarchyWorkspace(t, srvURL)
+
+	code, out := runCaptured(t, []string{"task", "new", strconv.FormatInt(wsID, 10), "printed"})
+	if code != 0 {
+		t.Fatalf("task new = %d, out %q", code, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("output = %q, want 3 lines (task, branch, worktree)", out)
+	}
+	if _, err := strconv.ParseInt(strings.Fields(lines[0])[0], 10, 64); err != nil {
+		t.Fatalf("first line %q does not start with the task id", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "branch\t") || len(lines[1]) <= len("branch\t") {
+		t.Fatalf("line 2 = %q, want a branch", lines[1])
+	}
+	path := strings.TrimPrefix(lines[2], "worktree\t")
+	if path == lines[2] || !filepath.IsAbs(path) {
+		t.Fatalf("line 3 = %q, want an absolute worktree path", lines[2])
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("worktree path %q: %v", path, err)
+	}
 }

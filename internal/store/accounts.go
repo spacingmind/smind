@@ -11,9 +11,9 @@ func (s *Store) CreateAccount(a Account) (Account, error) {
 	a.CreatedAt, a.UpdatedAt = now, now
 
 	res, err := s.db.Exec(
-		`INSERT INTO accounts (provider, label, credential_type, credential_data, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		a.Provider, a.Label, a.CredentialType, a.CredentialData, a.CreatedAt, a.UpdatedAt,
+		`INSERT INTO accounts (provider, label, credential_type, credential_data, models, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?)`,
+		a.Provider, a.Label, a.CredentialType, a.CredentialData, a.Models, a.CreatedAt, a.UpdatedAt,
 	)
 	if err != nil {
 		return Account{}, fmt.Errorf("insert account: %w", err)
@@ -54,6 +54,22 @@ func (s *Store) RenameAccount(id int64, label string) (Account, error) {
 		label, time.Now().UTC(), id,
 	); err != nil {
 		return Account{}, fmt.Errorf("rename account %d: %w", id, err)
+	}
+	return s.GetAccount(id)
+}
+
+// SetAccountModels replaces the account's models JSON ("" clears it back to
+// NULL, i.e. no list), stamping a new updated_at. A nonexistent id is a
+// clear not-found error.
+func (s *Store) SetAccountModels(id int64, modelsJSON string) (Account, error) {
+	if _, err := s.GetAccount(id); err != nil {
+		return Account{}, fmt.Errorf("set account %d models: %w", id, err)
+	}
+	if _, err := s.db.Exec(
+		`UPDATE accounts SET models = NULLIF(?, ''), updated_at = ? WHERE id = ?`,
+		modelsJSON, time.Now().UTC(), id,
+	); err != nil {
+		return Account{}, fmt.Errorf("set account %d models: %w", id, err)
 	}
 	return s.GetAccount(id)
 }
@@ -106,9 +122,9 @@ func (s *Store) DeleteAccount(id int64) error {
 func (s *Store) GetAccount(id int64) (Account, error) {
 	var a Account
 	err := s.db.QueryRow(
-		`SELECT id, provider, label, credential_type, credential_data, created_at, updated_at
+		`SELECT id, provider, label, credential_type, credential_data, COALESCE(models, ''), created_at, updated_at
 		 FROM accounts WHERE id = ?`, id,
-	).Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.CreatedAt, &a.UpdatedAt)
+	).Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.Models, &a.CreatedAt, &a.UpdatedAt)
 	if err != nil {
 		return Account{}, fmt.Errorf("get account %d: %w", id, err)
 	}
@@ -118,7 +134,7 @@ func (s *Store) GetAccount(id int64) (Account, error) {
 // ListAccounts returns all accounts, ordered by id.
 func (s *Store) ListAccounts() ([]Account, error) {
 	rows, err := s.db.Query(
-		`SELECT id, provider, label, credential_type, credential_data, created_at, updated_at
+		`SELECT id, provider, label, credential_type, credential_data, COALESCE(models, ''), created_at, updated_at
 		 FROM accounts ORDER BY id`,
 	)
 	if err != nil {
@@ -129,7 +145,7 @@ func (s *Store) ListAccounts() ([]Account, error) {
 	var accounts []Account
 	for rows.Next() {
 		var a Account
-		if err := rows.Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.CreatedAt, &a.UpdatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Provider, &a.Label, &a.CredentialType, &a.CredentialData, &a.Models, &a.CreatedAt, &a.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan account: %w", err)
 		}
 		accounts = append(accounts, a)

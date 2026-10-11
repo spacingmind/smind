@@ -31,7 +31,8 @@ describe("useDaemonEvents", () => {
     const subs = socket.sent.filter((e) => e.method === "events.subscribe");
     expect(subs).toHaveLength(1);
     // ADR 0005's three, ADR 0009's eight lifecycle topics, ADR 0014's
-    // three profile.* topics, and ADR-0016's three chat.* topics. Notably
+    // three profile.* topics, ADR-0018's three mcpServer.* topics, and
+    // ADR-0016's three chat.* topics. Notably
     // absent: "event.dropped", which the daemon synthesises rather than
     // publishes and whose name knownTopics rejects.
     expect(subs[0]!.params).toEqual({
@@ -50,9 +51,13 @@ describe("useDaemonEvents", () => {
         "profile.created",
         "profile.updated",
         "profile.deleted",
+        "mcpServer.created",
+        "mcpServer.updated",
+        "mcpServer.deleted",
         "chat.created",
         "chat.updated",
         "chat.archived",
+        "chat.queueUpdated",
       ],
     });
 
@@ -144,6 +149,26 @@ describe("useDaemonEvents", () => {
     });
     notify(socket2, "run.status", { runId: "r2", taskId: 2, status: "done" });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes to chat.queueUpdated", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+    renderHook(() => useDaemonEvents(client));
+    await flush();
+
+    const sub = socket.sent.find((e) => e.method === "events.subscribe");
+    expect((sub!.params as { topics: string[] }).topics).toContain("chat.queueUpdated");
+
+    // And it dispatches to listeners on that topic like any other.
+    const { result } = renderHook(() => useDaemonEvents(client));
+    await flush();
+    const listener = vi.fn();
+    act(() => {
+      result.current!.subscribe("chat.queueUpdated", listener);
+    });
+    notify(socket, "chat.queueUpdated", { chatId: 1, items: [] });
+    expect(listener).toHaveBeenCalledWith({ chatId: 1, items: [] });
   });
 
   it("a failed events.subscribe (daemon without the RPC) never throws into the render", async () => {

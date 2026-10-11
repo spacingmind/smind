@@ -34,6 +34,9 @@ type DeleteSummary struct {
 // a failure and nothing runs: the directory being gone is exactly the end
 // state this is trying to reach.
 func (m *Manager) checkpointAndRemoveWorktree(t store.Task) error {
+	// ADR-0024 §4: a still-running setup script is killed first so it can't
+	// keep writing into a worktree that is about to be checkpointed.
+	m.cancelSetup(t.ID)
 	if t.WorktreePath == nil || !dirExists(*t.WorktreePath) {
 		return nil
 	}
@@ -45,6 +48,9 @@ func (m *Manager) checkpointAndRemoveWorktree(t store.Task) error {
 	if err != nil {
 		return fmt.Errorf("checkpoint task %d worktree: %w", t.ID, err)
 	}
+	// Teardown runs after the checkpoint (user work is already safe) and
+	// before removal (the worktree is still there to clean up), best effort.
+	m.runTeardown(t, ws)
 	if err := gitWorktreeRemove(ws.Path, *t.WorktreePath); err != nil {
 		return fmt.Errorf("checkpoint task %d worktree: %w", t.ID, err)
 	}

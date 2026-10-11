@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { useTaskAttention } from "@/hooks/use-task-attention";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { RunStatusValue, RunSummary } from "@/lib/types";
+import type { WsClientLike } from "@/lib/ws-client";
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -166,5 +167,27 @@ describe("useTaskAttention runStatus", () => {
     await flush();
 
     expect(result.current.runStatus.get(1)).toBe("error");
+  });
+});
+
+describe("useTaskAttention loaded", () => {
+  it("task-attention-loaded-after-first-run-list: false before the first run.list resolves, true after, false again after a client change", async () => {
+    const client = new FakeWsClient();
+    const { result, rerender } = renderHook(({ c }) => useTaskAttention(c, null, null), { initialProps: { c: client as unknown as WsClientLike } });
+    expect(result.current.loaded).toBe(false);
+
+    client.nth("run.list").resolve([run("r1", 1, "running", "2024-01-01T00:00:00Z")]);
+    await flush();
+    client.nth("run.logs").resolve({ events: [] });
+    await flush();
+    expect(result.current.loaded).toBe(true);
+
+    const next = new FakeWsClient();
+    rerender({ c: next as unknown as WsClientLike });
+    expect(result.current.loaded).toBe(false);
+
+    next.nth("run.list").resolve([]);
+    await flush();
+    expect(result.current.loaded).toBe(true);
   });
 });

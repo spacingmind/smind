@@ -119,11 +119,16 @@ Origin allowlist, no new endpoints — and the desktop app ships a
       from the GitHub Release, replace it, and restart `smind serve`.
     - **macOS native:** runs the darwin binary as an app-managed
       process, e.g. a launchd agent or a sidecar.
-    - **Windows native:** runs a windows binary directly. **Blocked
-      today:** `GOOS=windows go build ./cmd/smind` fails in
-      `internal/terminal` (`syscall.Kill`; `creack/pty` has no ConPTY
-      support). A native-Windows daemon needs a Windows terminal
-      backend first, which is its own plan.
+    - **Windows native:** runs a windows binary directly. The former
+      `internal/terminal` blocker (`syscall.Kill`; `creack/pty` has no
+      ConPTY support) is lifted -- the terminal backend is now
+      cross-platform via `charmbracelet/x/xpty`, verified by a real
+      `windows-latest` CI job (see
+      docs/plans/active/windows-native-terminal.md). Windows is **not**
+      yet a supported daemon host: the rest of the daemon's runtime
+      parity on Windows (agent CLI spawn via `.cmd` shims, path
+      handling, git worktrees) is follow-up work driven by that plan's
+      non-blocking full-suite CI results.
 
     This is where ADR-0012's deferred "sidecar mode" lands.
     Remote/tunneled/relay daemons are never updated by the app. They

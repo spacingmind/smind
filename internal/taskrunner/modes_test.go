@@ -118,3 +118,21 @@ func TestModeAutoApproves(t *testing.T) {
 		}
 	}
 }
+
+func TestModeAutoApproves_GLMAcceptEditsIsNotAutoApproving(t *testing.T) {
+	catalog := ProviderInfo{
+		ID:          ProviderGLM,
+		DefaultMode: "default",
+		Modes: []ModeInfo{
+			{ID: "default"},
+			{ID: "accept_edits"},
+			{ID: "bypass_permissions", AutoApproves: true},
+		},
+	}
+	if ModeAutoApproves(catalog, PermissionSettings{Mode: "accept_edits"}) {
+		t.Error("accept_edits auto-approves, want false")
+	}
+	if !ModeAutoApproves(catalog, PermissionSettings{Mode: "bypass_permissions"}) {
+		t.Error("bypass_permissions does not auto-approve, want true")
+	}
+}

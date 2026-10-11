@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appendTimelineEvent, buildTimeline, type TimelineItem, type TimelineToolCallItem } from "@/hooks/use-run-timeline";
+import { appendTimelineEvent, buildTimeline, latestMcpServers, type TimelineItem, type TimelineToolCallItem } from "@/hooks/use-run-timeline";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import type { RunLogEvent } from "@/lib/types";
 
@@ -89,6 +89,16 @@ describe("appendTimelineEvent", () => {
     expect(items).toEqual([{ kind: "permission", id: "permission-0", requestId: "", optionId: "", reason: undefined }]);
   });
 
+  it("adds no row for a per-turn 'usage' event (ADR-0020)", () => {
+    const items = buildTimeline([
+      { type: "chunk", text: "hi" },
+      { type: "usage", usage: { source: "claude_result", inputTokens: 10 } } as unknown as RunLogEvent,
+      { type: "done", stopReason: "end_turn" },
+    ]);
+
+    expect(items.map((i) => i.kind)).not.toContain("unknown");
+  });
+
   it("renders a 'raw' event (docs/decisions/0010-preserve-unknown-acp-event-kinds.md) as a fallback row, keeping its ACP kind", () => {
     // The daemon forwards an ACP session-update kind it doesn't recognize
     // (e.g. "plan") as a "raw" wire event instead of dropping it. The wire
@@ -128,6 +138,33 @@ describe("appendTimelineEvent", () => {
       expect(after).toHaveLength(2);
       expect(after[1]).toMatchObject({ kind: "permission", reason: "human" });
     });
+  });
+
+
+  it("appendTimelineEvent ignores mcp_servers", () => {
+    const before = buildTimeline([{ type: "chunk", text: "hello" }]);
+    const after = appendTimelineEvent(before, {
+      type: "mcp_servers",
+      mcpServers: [{ name: "github", transport: "stdio", status: "active" }],
+    });
+
+    // The event folds into RunEntry.mcpServers instead (see use-run-timeline);
+    // it must not become a transcript row, not even an "unknown" placeholder.
+    expect(after).toBe(before);
+  });
+
+  it("latestMcpServers returns the last event's list", () => {
+    const first = [{ name: "a", transport: "stdio" as const, status: "active" as const }];
+    const last = [{ name: "b", transport: "http" as const, status: "failed" as const, reason: "failed_to_start" as const }];
+    const events = [
+      { type: "chunk", text: "hi" },
+      { type: "mcp_servers", mcpServers: first },
+      { type: "mcp_servers", mcpServers: last },
+    ];
+
+    expect(latestMcpServers(events)).toBe(last);
+    expect(latestMcpServers([{ type: "mcp_servers" }])).toBeUndefined();
+    expect(latestMcpServers([{ type: "chunk", text: "none" }])).toBeUndefined();
   });
 
   it("folds 2000 chunk events into one item in linear time", () => {

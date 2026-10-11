@@ -426,3 +426,45 @@ func TestTaskSend_ModeFlags(t *testing.T) {
 		t.Fatalf("run(task send --approval-policy) = %d, stderr %q; want 2 mentioning --mode", code, stderr)
 	}
 }
+
+// TestTaskSend_ModelFlag: --model (both spellings) reaches run.start and is
+// recorded on the run; a malformed model is rejected by the daemon with a
+// nonzero exit and nothing started.
+func TestTaskSend_ModelFlag(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	srvURL := newConfigOptionTestEnv(t, home, "models")
+	writeTestConfig(t, home, srvURL)
+
+	client := dialTestClient(t, srvURL)
+	taskID := newTestRepoTask(t, client)
+	id := strconv.FormatInt(taskID, 10)
+
+	if code, out := runCaptured(t, []string{"task", "send", id, "glm", "hi", "--model", "fake-model-a"}); code != 0 {
+		t.Fatalf("run(task send --model) = %d; out %s", code, out)
+	}
+	if code, out := runCaptured(t, []string{"task", "send", id, "glm", "again", "--model=fake-model-b"}); code != 0 {
+		t.Fatalf("run(task send --model=) = %d; out %s", code, out)
+	}
+	var runs []struct {
+		Prompt string
+		Model  string
+	}
+	if err := client.Call(context.Background(), "run.list", map[string]any{}, &runs); err != nil {
+		t.Fatalf("run.list: %v", err)
+	}
+	got := map[string]string{}
+	for _, r := range runs {
+		got[r.Prompt] = r.Model
+	}
+	if len(runs) != 2 || got["hi"] != "fake-model-a" || got["again"] != "fake-model-b" {
+		t.Fatalf("run.list = %+v, want hi->fake-model-a, again->fake-model-b", runs)
+	}
+
+	if code, _ := runCaptured(t, []string{"task", "send", id, "glm", "bad", "--model", "--evil"}); code == 0 {
+		t.Fatal("task send --model --evil exited 0, want a rejection")
+	}
+	if code, _ := runCaptured(t, []string{"task", "send", id, "glm", "x", "--model"}); code != 2 {
+		t.Fatalf("task send with a dangling --model = %d, want 2", code)
+	}
+}

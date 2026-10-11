@@ -1,4 +1,4 @@
-import type { ModeInfo, Provider, ProviderInfo } from "@/lib/types";
+import type { ModeInfo, ModelInfo, Provider, ProviderInfo } from "@/lib/types";
 
 /**
  * Provider-native permission modes (ADR-0019): every surface -- composer,
@@ -79,4 +79,9 @@ export const AUTO_ACCEPT_HELP = "Automatically approves every permission prompt 
 export function describePermission(providers: ProviderInfo[], provider: string, mode: string, autoAccept: boolean): string {
   const label = permissionModeLabel(providers, provider, mode);
   return autoAccept ? `${label} · ${AUTO_ACCEPT_LABEL}` : label;
+}
+
+/** provider's model catalog (ADR-0025), [] when provider.list lists none (unprobed ACP agent, older daemon, or the pre-answer fallback). */
+export function providerModels(providers: ProviderInfo[], provider: string): ModelInfo[] {
+  return infoFor(providers, provider)?.models ?? [];
 }

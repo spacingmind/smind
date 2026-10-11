@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -143,6 +145,17 @@ func newTestTask(t *testing.T, wm *workspace.Manager, scenario string) store.Tas
 	return task
 }
 
+// withoutUsage drops the turn's usage event, which these tests aren't about.
+func withoutUsage(events []Event) []Event {
+	var out []Event
+	for _, e := range events {
+		if e.Type != taskrunner.EventTypeUsage {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
 	return taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 }
@@ -251,6 +264,7 @@ func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("History() error = %v", err)
 	}
+	hist = withoutUsage(hist)
 	if len(hist) != 3 {
 		t.Fatalf("got %d history events, want 3: %+v", len(hist), hist)
 	}
@@ -335,7 +349,7 @@ func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	got := drainToClose(t, events, 5*time.Second)
+	got := withoutUsage(drainToClose(t, events, 5*time.Second))
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3: %+v", len(got), got)
 	}
@@ -375,7 +389,7 @@ func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	got := drainToClose(t, events, time.Second)
+	got := withoutUsage(drainToClose(t, events, time.Second))
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3: %+v", len(got), got)
 	}
@@ -530,6 +544,7 @@ func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("History(B) error = %v", err)
 	}
+	histA, histB = withoutUsage(histA), withoutUsage(histB)
 	if len(histA) != 3 || len(histB) != 3 {
 		t.Fatalf("len(histA) = %d, len(histB) = %d, want 3 and 3", len(histA), len(histB))
 	}
@@ -1956,4 +1971,99 @@ func TestRegistry_ApplyReportedMode_NonInitialAfterSwitchIsApplied(t *testing.T)
 		t.Fatalf("RespondPermission() error = %v", err)
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}
+
+// TestRegistry_McpServersEventSurvivesRehydrate proves an
+// EventTypeMcpServers event (ADR-0018's per-run indicator, M4) survives a
+// daemon-restart rehydrate: a Registry rebuilt from the same store sees
+// the identical mcp_servers event the live run emitted. The runner is
+// wired to a real MCP source with one stdio and one capability-dropped
+// http server (the fakeagent advertises stdio only), so the ACP path
+// emits the event naturally. Not parallel: it sets FAKEAGENT_MCP_CAPS.
+func TestRegistry_McpServersEventSurvivesRehydrate(t *testing.T) {
+	t.Setenv("FAKEAGENT_MCP_CAPS", "stdio")
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "remote", Transport: "http", URL: "https://r/mcp", Enabled: true}); err != nil {
+		t.Fatalf("Create(remote): %v", err)
+	}
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}), taskrunner.WithMcpServers(reg))
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg1, runID, StatusDone, 5*time.Second)
+
+	wantHist, _, err := reg1.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg1 error = %v", err)
+	}
+	var wantEvents []taskrunner.Event
+	for _, e := range wantHist {
+		if e.Type == taskrunner.EventTypeMcpServers {
+			wantEvents = append(wantEvents, e)
+		}
+	}
+	if len(wantEvents) != 1 {
+		t.Fatalf("live history mcp_servers events = %d, want 1", len(wantEvents))
+	}
+
+	reg2 := newTestRegistry(t, st)
+	gotHist, _, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 (rehydrated) error = %v", err)
+	}
+	var gotEvents []taskrunner.Event
+	for _, e := range gotHist {
+		if e.Type == taskrunner.EventTypeMcpServers {
+			gotEvents = append(gotEvents, e)
+		}
+	}
+	if len(gotEvents) != 1 {
+		t.Fatalf("rehydrated history mcp_servers events = %d, want 1", len(gotEvents))
+	}
+	if !reflect.DeepEqual(gotEvents[0].McpServers, wantEvents[0].McpServers) {
+		t.Fatalf("rehydrated McpServers = %+v, want %+v", gotEvents[0].McpServers, wantEvents[0].McpServers)
+	}
+}
+
+func TestRunsPermissionRequestEventCarriesDetail(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{AutoAccept: true})
+	decider := runPermissionDecider{reg: reg, r: r}
+	detail := &taskrunner.PermissionDetail{Kind: "write", Path: "a.txt", NewLines: 7, ReplacesExisting: true, LargeShrink: true}
+
+	if _, err := decider.DecideDetailed(context.Background(), "Write file: a.txt", detail, allowDenyOptions); err != nil {
+		t.Fatalf("DecideDetailed() error = %v", err)
+	}
+	r.mu.Lock()
+	hist := append([]taskrunner.Event(nil), r.history...)
+	r.mu.Unlock()
+	var req *taskrunner.Event
+	for i := range hist {
+		if hist[i].Type == taskrunner.EventTypePermissionRequest {
+			req = &hist[i]
+		}
+	}
+	if req == nil || req.PermissionDetail == nil || !req.PermissionDetail.ReplacesExisting {
+		t.Fatalf("permission_request = %+v, want detail recorded", req)
+	}
+
+	data, err := encodeEvent(*req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := decodeEvent(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.PermissionDetail == nil || *back.PermissionDetail != *detail {
+		t.Fatalf("round trip detail = %+v, want %+v", back.PermissionDetail, detail)
+	}
 }

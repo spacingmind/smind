@@ -5,10 +5,12 @@ import "@/components/settings/appearance-section";
 import "@/components/settings/connections-section";
 import "@/components/settings/daemon-section";
 import "@/components/settings/general-section";
+import "@/components/settings/mcp-servers-section";
 import "@/components/settings/notifications-section";
 import "@/components/settings/profiles-section";
 import "@/components/settings/providers-section";
 import "@/components/settings/shortcuts-section";
+import "@/components/settings/usage-section";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";

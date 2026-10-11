@@ -104,13 +104,15 @@ type permissionOptionParams struct {
 // includes the runId so it is copy-pasteable as-is: cmdTaskApprove's real
 // usage is `smind task approve <runId> [requestId] [optionId]` -- a hint
 // printing only the requestId would paste into nothing.
-func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams) string {
+func renderPermissionRequest(runID, requestID, summary string, options []permissionOptionParams, detail *permissionDetail) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n[permission] %s (request %s)\n", summary, requestID)
+	b.WriteString(renderPermissionDetail(detail))
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
-	fmt.Fprintf(&b, "  -> smind task approve %s %s\n", runID, requestID)
+	fmt.Fprintf(&b, "  -> approve: smind task approve %s %s\n", runID, requestID)
+	fmt.Fprintf(&b, "  -> deny:    smind task deny %s %s\n", runID, requestID)
 	return b.String()
 }
 
@@ -131,6 +133,7 @@ type runLogEvent struct {
 	RequestID  string                   `json:"requestId,omitempty"`
 	Summary    string                   `json:"summary,omitempty"`
 	Options    []permissionOptionParams `json:"options,omitempty"`
+	Detail     *permissionDetail        `json:"detail,omitempty"`
 	OptionID   string                   `json:"optionId,omitempty"`
 	Reason     string                   `json:"reason,omitempty"`
 	toolCallEventParams
@@ -148,7 +151,7 @@ type runLogsResult struct {
 
 func cmdTask(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|options|set-option|chat> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind task <new|ls|send|runs|attach|logs|stop|permissions|approve|deny|options|set-option|chat|queue> ...")
 		return 2
 	}
 	switch args[0] {
@@ -170,12 +173,16 @@ func cmdTask(args []string) int {
 		return cmdTaskPermissions(args[1:])
 	case "approve":
 		return cmdTaskApprove(args[1:])
+	case "deny":
+		return cmdTaskDeny(args[1:])
 	case "options":
 		return cmdTaskOptions(args[1:])
 	case "set-option":
 		return cmdTaskSetOption(args[1:])
 	case "chat":
 		return cmdTaskChat(args[1:])
+	case "queue":
+		return cmdTaskQueue(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind task: unknown subcommand %q\n", args[0])
 		return 2
@@ -250,7 +257,15 @@ func cmdTaskNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "task new: %v\n", err)
 		return 1
 	}
+	// First line stays "id<TAB>title<TAB>status" for existing parsers; the
+	// branch and worktree path follow on their own labelled lines.
 	fmt.Printf("%d\t%s\t%s\n", task.ID, task.Title, task.Status)
+	if task.Branch != nil {
+		fmt.Printf("branch\t%s\n", *task.Branch)
+	}
+	if task.WorktreePath != nil {
+		fmt.Printf("worktree\t%s\n", *task.WorktreePath)
+	}
 	return 0
 }
 
@@ -336,7 +351,7 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt]"
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
@@ -362,12 +377,21 @@ func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, mode, chatArg string
+	var taskIDArg, provider, mode, chatArg, whenBusy, model string
 	var autoAccept bool
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
+		case a == "--when-busy":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			whenBusy = args[i]
+		case strings.HasPrefix(a, "--when-busy="):
+			whenBusy = strings.TrimPrefix(a, "--when-busy=")
 		case a == "--chat":
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
@@ -386,6 +410,15 @@ func cmdTaskSend(args []string) int {
 			mode = args[i]
 		case strings.HasPrefix(a, "--mode="):
 			mode = strings.TrimPrefix(a, "--mode=")
+		case a == "--model":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			model = args[i]
+		case strings.HasPrefix(a, "--model="):
+			model = strings.TrimPrefix(a, "--model=")
 		case a == "--auto-accept":
 			autoAccept = true
 		case a == "--approval-policy" || strings.HasPrefix(a, "--approval-policy="):
@@ -448,14 +481,38 @@ func cmdTaskSend(args []string) int {
 	if autoAccept {
 		params["autoAccept"] = true
 	}
+	// --model (ADR-0025): omitted leaves the provider's default. Validated
+	// by the daemon against the provider's catalog before anything spawns.
+	if model != "" {
+		params["model"] = model
+	}
 	if chatID != 0 {
 		params["chatId"] = chatID
 	}
-	var start runStartResult
+	// --when-busy is ADR-0021 §2's busy-chat delivery mode; the CLI
+	// default is reject (today's behavior) unless the flag says otherwise.
+	if whenBusy != "" {
+		switch whenBusy {
+		case "reject", "queue", "interrupt":
+			params["whenBusy"] = whenBusy
+		default:
+			fmt.Fprintf(os.Stderr, "task send: invalid --when-busy %q (want reject, queue, or interrupt)\n", whenBusy)
+			return 2
+		}
+	}
+	var start struct {
+		RunID       string `json:"runId"`
+		Queued      bool   `json:"queued"`
+		QueueItemID int64  `json:"queueItemId"`
+	}
 	err = client.Call(ctx, "run.start", params, &start)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "task send: %v\n", err)
 		return 1
+	}
+	if start.Queued {
+		fmt.Fprintf(os.Stderr, "queued as item %d -- it runs when the chat's current run finishes (smind task queue ls to watch, task queue cancel %d to undo)\n", start.QueueItemID, start.QueueItemID)
+		return 0
 	}
 	fmt.Fprintf(os.Stderr, "run %s started\n", start.RunID)
 
@@ -534,11 +591,12 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 				RequestID string                   `json:"requestId"`
 				Summary   string                   `json:"summary"`
 				Options   []permissionOptionParams `json:"options"`
+				Detail    *permissionDetail        `json:"detail"`
 			}
 			if err := json.Unmarshal(params, &p); err != nil {
 				return
 			}
-			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
+			fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
 		case "permission_resolved":
 			var p struct {
 				RequestID string `json:"requestId"`
@@ -561,7 +619,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 		fmt.Fprintf(os.Stderr, "run %s: %v\n", runID, err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "run %s finished: %s\n", runID, result.StopReason)
+	fmt.Fprint(os.Stderr, renderDone(runID, result.StopReason))
 	return 0
 }
 
@@ -708,7 +766,7 @@ func printRunLogs(result runLogsResult) {
 		case "raw":
 			fmt.Print(renderRaw(e.rawEventParams))
 		case "permission_request":
-			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options))
+			fmt.Print(renderPermissionRequest(result.RunID, e.RequestID, e.Summary, e.Options, e.Detail))
 		case "permission_resolved":
 			fmt.Print(renderPermissionResolved(e.RequestID, e.OptionID, e.Reason))
 		}
@@ -718,6 +776,9 @@ func printRunLogs(result runLogsResult) {
 	switch result.Status {
 	case "done":
 		fmt.Fprintf(os.Stderr, "run %s: done (%s)\n", result.RunID, result.StopReason)
+		if note := stopNote(result.StopReason); note != "" {
+			fmt.Fprintln(os.Stderr, note)
+		}
 	case "error":
 		fmt.Fprintf(os.Stderr, "run %s: error: %s\n", result.RunID, result.Err)
 	case "stopped":
@@ -760,6 +821,7 @@ type pendingPermission struct {
 	RequestID string
 	Summary   string
 	Options   []permissionOptionParams
+	Detail    *permissionDetail
 }
 
 // fetchPendingPermissions calls run.logs for runID and returns every
@@ -779,7 +841,7 @@ func fetchPendingPermissions(ctx context.Context, client *wsclient.Client, runID
 	var pending []pendingPermission
 	for _, e := range result.Events {
 		if e.Type == "permission_request" && !resolved[e.RequestID] {
-			pending = append(pending, pendingPermission{RequestID: e.RequestID, Summary: e.Summary, Options: e.Options})
+			pending = append(pending, pendingPermission{RequestID: e.RequestID, Summary: e.Summary, Options: e.Options, Detail: e.Detail})
 		}
 	}
 	return pending, nil
@@ -814,7 +876,7 @@ func cmdTaskPermissions(args []string) int {
 		return 0
 	}
 	for _, p := range pending {
-		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options))
+		fmt.Print(renderPermissionRequest(runID, p.RequestID, p.Summary, p.Options, p.Detail))
 	}
 	return 0
 }
@@ -834,8 +896,31 @@ const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [opti
 // internal/runs.firstOptionByKind's own selection so `task approve
 // <runId>` with no further arguments does the obvious thing.
 func cmdTaskApprove(args []string) int {
+	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, args)
+}
+
+// cmdTaskDenyUsage is printed on any argument error in cmdTaskDeny.
+const cmdTaskDenyUsage = "usage: smind task deny <runId> [requestId]"
+
+// cmdTaskDeny is the human-only counterpart of cmdTaskApprove: it rejects a
+// run's pending permission request with the request's own reject option.
+// CLI only -- there is deliberately no MCP deny tool (ADR-0017 #1).
+func cmdTaskDeny(args []string) int {
+	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, args)
+}
+
+// isHelpArg reports whether a CLI argument asks for usage.
+func isHelpArg(a string) bool { return a == "-h" || a == "--help" || a == "help" }
+
+// cmdTaskDecide answers a pending permission request, picking the first
+// allow option (allow=true) or the first reject option (allow=false).
+func cmdTaskDecide(verb, usage string, allow bool, args []string) int {
+	if len(args) > 0 && isHelpArg(args[0]) {
+		fmt.Println(usage)
+		return 0
+	}
 	if len(args) < 1 || len(args) > 2 {
-		fmt.Fprintln(os.Stderr, cmdTaskApproveUsage)
+		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
 	runID := args[0]
@@ -849,11 +934,11 @@ func cmdTaskApprove(args []string) int {
 
 	pending, err := fetchPendingPermissions(context.Background(), client, runID)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "task %s: %v\n", verb, err)
 		return 1
 	}
 	if len(pending) == 0 {
-		fmt.Fprintln(os.Stderr, "task approve: no pending permission request")
+		fmt.Fprintf(os.Stderr, "task %s: no pending permission request\n", verb)
 		return 1
 	}
 
@@ -867,7 +952,7 @@ func cmdTaskApprove(args []string) int {
 			}
 		}
 		if target == nil {
-			fmt.Fprintf(os.Stderr, "task approve: request %q is not pending\n", requestID)
+			fmt.Fprintf(os.Stderr, "task %s: request %q is not pending\n", verb, requestID)
 			return 1
 		}
 	} else {
@@ -876,13 +961,19 @@ func cmdTaskApprove(args []string) int {
 
 	optionID := ""
 	for _, o := range target.Options {
-		if o.Kind == "allow_once" || o.Kind == "allow_always" {
+		isAllow := o.Kind == "allow_once" || o.Kind == "allow_always"
+		isReject := o.Kind == "reject_once" || o.Kind == "reject_always"
+		if (allow && isAllow) || (!allow && isReject) {
 			optionID = o.ID
 			break
 		}
 	}
 	if optionID == "" {
-		fmt.Fprintf(os.Stderr, "task approve: request %q has no allow option: %+v\n", target.RequestID, target.Options)
+		kind := "allow"
+		if !allow {
+			kind = "reject"
+		}
+		fmt.Fprintf(os.Stderr, "task %s: request %q has no %s option: %+v\n", verb, target.RequestID, kind, target.Options)
 		return 1
 	}
 
@@ -890,7 +981,7 @@ func cmdTaskApprove(args []string) int {
 		"runId": runID, "requestId": target.RequestID, "optionId": optionID,
 	}, nil)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "task approve: %v\n", err)
+		fmt.Fprintf(os.Stderr, "task %s: %v\n", verb, err)
 		return 1
 	}
 	fmt.Printf("request %s -> %s\n", target.RequestID, optionID)
@@ -1305,5 +1396,132 @@ func cmdTaskRuns(args []string) int {
 		fmt.Fprintf(tw, "%s\t%d\t%s\t%s\n", r.ID, r.ChatID, r.Provider, r.Status)
 	}
 	tw.Flush()
+	return 0
+}
+
+// cmdTaskQueueUsage is printed on any argument error in the queue group.
+const cmdTaskQueueUsage = "usage: smind task queue <ls --chat <chatId>|cancel <itemId>>"
+
+// cmdTaskQueue dispatches the queue subcommands (ADR-0021 §8's CLI).
+func cmdTaskQueue(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+	switch args[0] {
+	case "ls":
+		return cmdTaskQueueLs(args[1:])
+	case "cancel":
+		return cmdTaskQueueCancel(args[1:])
+	default:
+		fmt.Fprintf(os.Stderr, "smind task queue: unknown subcommand %q\n", args[0])
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+}
+
+// queueItemRow is one entry of a chat.queueList result -- the CLI-side
+// mirror of the wire shape, same convention as chatRow.
+type queueItemRow struct {
+	ID           int64     `json:"ID"`
+	Prompt       string    `json:"Prompt"`
+	Source       string    `json:"Source"`
+	Priority     int       `json:"Priority"`
+	Status       string    `json:"Status"`
+	RunID        *string   `json:"RunID"`
+	CancelReason string    `json:"CancelReason"`
+	CreatedAt    time.Time `json:"CreatedAt"`
+}
+
+// cmdTaskQueueLs lists a chat's queue items, all statuses, oldest first.
+func cmdTaskQueueLs(args []string) int {
+	var chatArg string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--chat":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+				return 2
+			}
+			i++
+			chatArg = args[i]
+		case strings.HasPrefix(a, "--chat="):
+			chatArg = strings.TrimPrefix(a, "--chat=")
+		default:
+			fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+			return 2
+		}
+	}
+	if chatArg == "" {
+		fmt.Fprintln(os.Stderr, cmdTaskQueueUsage)
+		return 2
+	}
+	chatID, err := parseInt64(chatArg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task queue ls: invalid --chat value %q: %v\n", chatArg, err)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	var result struct {
+		Items []queueItemRow `json:"items"`
+	}
+	if err := client.Call(context.Background(), "chat.queueList", map[string]any{"chatId": chatID}, &result); err != nil {
+		fmt.Fprintf(os.Stderr, "task queue ls: %v\n", err)
+		return 1
+	}
+	if len(result.Items) == 0 {
+		fmt.Println("queue empty")
+		return 0
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
+	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tRUN\tPROMPT")
+	for _, item := range result.Items {
+		prompt := item.Prompt
+		if len(prompt) > 40 {
+			prompt = prompt[:40] + "..."
+		}
+		runID := "-"
+		if item.RunID != nil && *item.RunID != "" {
+			runID = *item.RunID
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, runID, prompt)
+	}
+	tw.Flush()
+	return 0
+}
+
+// cmdTaskQueueCancel cancels a still-queued item by id. Cancelling a
+// delivered or already-cancelled item is the daemon's error to surface.
+func cmdTaskQueueCancel(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "usage: smind task queue cancel <itemId>")
+		return 2
+	}
+	itemID, err := parseInt64(args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "task queue cancel: invalid itemId %q: %v\n", args[0], err)
+		return 2
+	}
+
+	client, err := dialDaemon(context.Background())
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer client.Close()
+
+	if err := client.Call(context.Background(), "chat.queueCancel", map[string]any{"itemId": itemID}, nil); err != nil {
+		fmt.Fprintf(os.Stderr, "task queue cancel: %v\n", err)
+		return 1
+	}
+	fmt.Printf("queue item %d cancelled\n", itemID)
 	return 0
 }

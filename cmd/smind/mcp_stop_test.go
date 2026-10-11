@@ -2,7 +2,7 @@ package main
 
 import "testing"
 
-// TestMCPTools_TaskStop proves task_stop (docs/plans/active/mcp-server.md
+// TestMCPTools_TaskStop proves task_stop (docs/plans/completed/mcp-server.md
 // step 5) wraps run.stop: stopping a still-running run is reflected in a
 // subsequent task_status as a terminal "stopped" status. Started via
 // run.start directly (task_send is out of scope -- ADR-0019).

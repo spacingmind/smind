@@ -82,7 +82,7 @@ const (
 	// resumed -- either because the provider doesn't support resume at all,
 	// or because resuming the stored id itself failed (a stale/unknown
 	// session). Never sent instead of EventTypeDone, only before it -- see
-	// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.5.
+	// ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's P2.5.
 	EventTypeSessionNote
 
 	// EventTypePermissionModeChanged reports the provider-native permission
@@ -93,7 +93,61 @@ const (
 	// is bookkeeping for the run's status, not transcript: internal/runs
 	// applies it to the run and never records it into history.
 	EventTypePermissionModeChanged
+
+	// EventTypeUsage carries the usage one turn consumed, normalized from
+	// the agent's own report, in Usage (ADR-0020, ADR-0008). Sent once per
+	// turn, just before EventTypeDone. Never carries prompt text.
+	EventTypeUsage
+
+	// EventTypeMcpServers reports which configured MCP servers applied to
+	// this run's workspace and how each fared -- active on the agent's
+	// wire, dropped (transport the agent doesn't advertise, an
+	// unresolvable stdio command, or a provider without MCP support), or
+	// failed to start (ADR-0018). Names, transports, and fixed status/
+	// reason enums only: never a command, args, url, env, or header value,
+	// which may carry secrets. ACP and Codex send it once per turn (before
+	// the session is created); Claude-native sends it at start with every
+	// row active, then again after the CLI's init message only when the
+	// CLI reported failed servers (latest event wins). Sent only when at
+	// least one server applies -- a run with no servers behaves exactly
+	// as before.
+	EventTypeMcpServers
 )
+
+// McpServerState status values for Event.McpServers (ADR-0018): a server
+// the agent was handed, one that was dropped before the wire, or one the
+// Claude CLI reported as failed to start.
+const (
+	McpStatusActive  = "active"
+	McpStatusDropped = "dropped"
+	McpStatusFailed  = "failed"
+)
+
+// McpServerState reason values, set whenever Status is not active.
+const (
+	// McpReasonTransportUnsupported: the agent doesn't advertise the
+	// server's transport.
+	McpReasonTransportUnsupported = "transport_unsupported"
+	// McpReasonCommandNotFound: a stdio server's command wasn't resolvable
+	// in PATH.
+	McpReasonCommandNotFound = "command_not_found"
+	// McpReasonProviderUnsupported: the provider has no MCP mechanism yet
+	// (Codex, deferred per ADR-0018 resolved decision 1).
+	McpReasonProviderUnsupported = "provider_unsupported"
+	// McpReasonFailedToStart: the Claude CLI's init message reported the
+	// server with status "failed".
+	McpReasonFailedToStart = "failed_to_start"
+)
+
+// McpServerState is one configured MCP server's disposition for a run, as
+// carried by EventTypeMcpServers. Deliberately names and fixed enums only
+// -- no command, args, url, env, or header value ever appears here.
+type McpServerState struct {
+	Name      string `json:"name"`
+	Transport string `json:"transport"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+}
 
 // Unified ToolStatus values for Event.ToolStatus, spanning both providers'
 // own status vocabularies: Claude Code has no explicit tool-call status at
@@ -159,6 +213,11 @@ type Event struct {
 	// EventTypePermissionRequest.
 	PermissionOptions []PermissionOption
 
+	// PermissionDetail describes what the requested edit/execute will do,
+	// populated for EventTypePermissionRequest when the provider supplies
+	// one (ACP only today); nil otherwise.
+	PermissionDetail *PermissionDetail
+
 	// PermissionOptionID is the option that was chosen, populated for
 	// EventTypePermissionResolved.
 	PermissionOptionID string
@@ -223,6 +282,14 @@ type Event struct {
 	// Initial is set only on the EventTypePermissionModeChanged that
 	// reports the mode a run started in.
 	Initial bool
+
+	// Usage is populated for EventTypeUsage.
+	Usage *Usage
+
+	// McpServers is populated for EventTypeMcpServers: every configured
+	// server that applied to this run's workspace, in row order, with its
+	// status (and reason, when not active). See McpServerState.
+	McpServers []McpServerState
 }
 
 // PermissionResolution categorizes how an EventTypePermissionResolved

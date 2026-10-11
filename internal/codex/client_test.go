@@ -161,7 +161,7 @@ func TestClient_CommandExecutionApproval_OrderingAndDecision(t *testing.T) {
 // currently loaded, skipping thread/resume entirely for one that already
 // is, and the archived -> thread/unarchive -> retry path -- plus the
 // unknown-thread-id failure a caller falls back to a fresh thread on. See
-// ADR-0016 section 2 / docs/plans/active/multi-chat-per-task.md's P2.4.
+// ADR-0016 section 2 / docs/plans/completed/multi-chat-per-task.md's P2.4.
 func TestClient_ResumeSession(t *testing.T) {
 	t.Parallel()
 

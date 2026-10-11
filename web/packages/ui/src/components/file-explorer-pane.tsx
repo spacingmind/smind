@@ -1,17 +1,19 @@
 import type { ComponentProps, CSSProperties, ReactNode } from "react";
-import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2, PanelRight } from "lucide-react";
+import { AlertCircle, ChevronRight, Copy, Folder, FolderOpen, GitCompare, Loader2, PanelRight, SquareArrowOutUpRight } from "lucide-react";
 
 import { FileStatusMarker } from "@/components/file-status-marker";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { FileIcon } from "@/lib/file-icons";
 import { requestDiffReveal } from "@/lib/diff-reveal";
 import { useFileExplorer, type DirNode } from "@/hooks/use-file-explorer";
+import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useTaskFileStatus } from "@/hooks/use-task-file-status";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import type { WsClientLike } from "@/lib/ws-client";
@@ -65,6 +67,11 @@ export function FileExplorerPane({
   const explorer = useFileExplorer(client, task);
   const { statusByPath } = useTaskFileStatus(client, task, events);
   const dirStatus = rollUpDirStatus(statusByPath);
+  const localPathActions = useLocalPathActions();
+  // The tree's paths are relative to the worktree root; the actions need
+  // the absolute path on the daemon's machine, so no worktree, no items.
+  const worktreeRoot = task.WorktreePath?.replace(/\/+$/, "") ?? null;
+  const pathActions = localPathActions && worktreeRoot ? { actions: localPathActions, root: worktreeRoot } : null;
 
   function revealInDiff(path: string): void {
     requestDiffReveal(task.ID, path);
@@ -87,6 +94,7 @@ export function FileExplorerPane({
         }}
         onRevealInDiff={revealInDiff}
         onOpenToSide={onOpenFileToSide}
+        pathActions={pathActions}
       />
     </div>
   );
@@ -112,6 +120,12 @@ function rollUpDirStatus(statusByPath: Map<string, TaskFile["status"]>): Map<str
   return out;
 }
 
+/** Reveal / Open-in-editor for tree rows: the local actions plus the worktree's absolute root to join a row's relative path onto. Null hides the items. */
+interface RowPathActions {
+  actions: LocalPathActions;
+  root: string;
+}
+
 /** Renders `dirs.get(path)`'s children -- files and, for each subdirectory, a toggleable row plus (if expanded) a recursive DirChildren for it. */
 function DirChildren({
   path,
@@ -124,6 +138,7 @@ function DirChildren({
   onSelectFile,
   onRevealInDiff,
   onOpenToSide,
+  pathActions,
 }: {
   path: string;
   depth: number;
@@ -135,6 +150,7 @@ function DirChildren({
   onSelectFile: (path: string) => void;
   onRevealInDiff: (path: string) => void;
   onOpenToSide?: (path: string) => void;
+  pathActions: RowPathActions | null;
 }) {
   const node = dirs.get(path);
   if (!node) return null;
@@ -167,6 +183,7 @@ function DirChildren({
               path={childPath}
               onRevealInDiff={onRevealInDiff}
               onOpenToSide={onOpenToSide}
+              pathActions={pathActions}
               changed={statusByPath.has(childPath)}
             >
               <TreeRow
@@ -213,6 +230,7 @@ function DirChildren({
                 onSelectFile={onSelectFile}
                 onRevealInDiff={onRevealInDiff}
                 onOpenToSide={onOpenToSide}
+                pathActions={pathActions}
               />
             )}
           </div>
@@ -231,6 +249,10 @@ function DirChildren({
  * (`onSelectFile`'s "prefer" placement, which only uses an existing side
  * pane and never creates one).
  *
+ * Reveal and "Open in <editor>" follow "Copy path" only in the desktop
+ * app on its local daemon (hooks/use-local-path-actions.ts); they are
+ * absent otherwise, not disabled.
+ *
  * Clipboard writes go through navigator.clipboard when it exists and are
  * a silent no-op when it doesn't (jsdom, and any non-secure-context
  * browser) -- copying a path is not worth an error surface.
@@ -240,14 +262,17 @@ function RowContextMenu({
   changed,
   onRevealInDiff,
   onOpenToSide,
+  pathActions,
   children,
 }: {
   path: string;
   changed: boolean;
   onRevealInDiff: (path: string) => void;
   onOpenToSide?: (path: string) => void;
+  pathActions: RowPathActions | null;
   children: ReactNode;
 }) {
+  const absolutePath = pathActions ? `${pathActions.root}/${path}` : null;
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
@@ -277,6 +302,26 @@ function RowContextMenu({
           <Copy />
           Copy path
         </ContextMenuItem>
+        {pathActions && absolutePath && (
+          <>
+            <ContextMenuSeparator />
+            <ContextMenuItem onSelect={() => pathActions.actions.reveal(absolutePath)} data-testid="file-menu-reveal">
+              <FolderOpen />
+              {pathActions.actions.revealLabel}
+            </ContextMenuItem>
+            {pathActions.actions.editors.map((editor) => (
+              <ContextMenuItem
+                key={editor.id}
+                onSelect={() => pathActions.actions.open(editor.id, absolutePath)}
+                data-testid="file-menu-open-in-editor"
+                data-editor-id={editor.id}
+              >
+                <SquareArrowOutUpRight />
+                Open in {editor.label}
+              </ContextMenuItem>
+            ))}
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

@@ -93,11 +93,12 @@ References:
    "Install daemon" click is needed. The daemon banner and Settings →
    Daemon still show status, and Restart still works.
 4. **An older managed daemon is running** (`comparison == "older"`,
-   managed): the app replaces it with the bundled binary and restarts
-   it automatically on launch, and shows progress through the existing
-   `DaemonProgress` events. An **unmanaged** daemon (one the user
-   started from a terminal) is never killed automatically. The existing
-   take-over flow stays the only way to adopt it.
+   managed): ~~replaced and restarted automatically on launch~~ —
+   **superseded by M5** (user, 2026-10-10): it is updated automatically
+   only when no agent run is in flight; otherwise the user is asked. An
+   **unmanaged** daemon (one the user started from a terminal) is never
+   killed automatically. The existing take-over flow stays the only way
+   to adopt it.
 5. Quitting the app leaves the daemon running (current detached-spawn
    behaviour), so agents keep working. Reopening the app reconnects
    without restarting the daemon.
@@ -137,6 +138,63 @@ References:
 3. No signing secrets are referenced (M1.4). The workflow comment says
    signing and notarization are out of scope, like the Windows one.
 
+### M5 — Update the daemon only when idle (user, 2026-10-10)
+
+Paseo restarts a desktop-owned daemon on any version mismatch at launch,
+with no prompt (`refs/paseo/packages/desktop/src/daemon/daemon-manager.ts`
+`shouldRestartForVersion`), and only warns "Running agent work will be
+interrupted." on a manual Stop (`desktop-daemon.ts`
+`confirmAndStopDesktopDaemon`). A smind daemon restart marks in-flight
+runs `interrupted` (`internal/runs/registry.go`), so smind defers the
+update while runs are active instead.
+
+1. **Rust no longer restarts an older managed daemon by itself.**
+   `launch_decision(true, Managed, Older)` returns a new non-acting
+   variant (e.g. `OfferUpdate`), and `auto_start` only installs and
+   starts when no daemon is reachable (`InstallAndStart`, unchanged). The
+   update decision moves to the UI, which knows the run state.
+2. **The UI decides, and only once it knows the run state.** The
+   decision needs the run snapshot for the current connection:
+   `useTaskAttention`'s `run.list` resync must have completed at least
+   once. Expose that as a `loaded` flag (or equivalent) on `TaskSignal`,
+   reset when the client changes. While it is not loaded, nothing is
+   auto-updated. An empty map before the first `run.list` must never be
+   read as "0 running".
+3. **Idle → update automatically.** For the local, app-managed daemon
+   with `comparison == "older"`, once the snapshot is loaded and the
+   running-run count is 0, the banner calls `desktop.daemonUpdate()`
+   without a click. It shows "Updating daemon…" plus the existing
+   `DaemonProgress` stage text. It does this at most once per
+   (connection id, daemon version) per app session, so a failing update
+   never loops.
+4. **Busy → defer, armed by default.** If the running-run count is > 0,
+   the banner reads, in substance: "Daemon vX is older than this app
+   (vY) · N agents running — will update when they finish". It offers:
+   - **Update now**, which opens a confirm dialog (destructive style,
+     Paseo's wording) that says "Running agent work will be interrupted"
+     and names N. Confirming calls `daemonUpdate()`; cancelling changes
+     nothing.
+   - **Not now**, which disarms the deferred update for the rest of the
+     app session. The banner stays, with the manual "Update & restart"
+     button. That button goes through the same confirm dialog if runs
+     are active, and updates straight away if none are.
+
+   While armed, the moment the running-run count drops to 0, the update
+   runs automatically, as in M5.3.
+5. **Running-run count** = the total number of running runs across all
+   tasks and chats, taken from `useTaskAttention`'s
+   `runningChatsByTask` (or the run bookkeeping behind it), passed into
+   the banner from `App.tsx`. It is not the count of tasks.
+6. **Errors** from an automatic or manual update show in the banner's
+   existing error slot with a manual retry button. There is no automatic
+   retry.
+7. **Unchanged:**
+   - an unmanaged local daemon and URL/relay connections still get only
+     the plain notice;
+   - `InstallAndStart` on a fresh machine is untouched;
+   - Settings → Daemon's Update/Restart buttons keep working;
+   - the browser build renders nothing.
+
 ## Test Scenarios
 
 ### Rust (`cargo test`, no webview)
@@ -159,6 +217,38 @@ References:
 - `tray_not_built_on_macos` — the tray-setup gate returns false for
   macOS and true for Windows/Linux. Test it as a pure function of the
   target OS.
+
+### M5 — update when idle
+
+Rust (`cargo test`):
+- `launch_decision_offers_update_instead_of_restarting` —
+  `(reachable, Managed, Older)` gives the offer variant, never a restart.
+  `(false, NotRunning, _)` still gives `InstallAndStart`. Update
+  `macos_autostart_when_unreachable` to match.
+
+Web (vitest, `desktop-daemon-banner.test.tsx` + `use-task-attention.test.ts`):
+- `task-attention-loaded-after-first-run-list` — `loaded` is false
+  before the first `run.list` resolves, true after it, and false again
+  after a client change until the next resync.
+- `daemon-update-not-before-runs-loaded` — managed + older + runs not
+  loaded: `daemonUpdate` is not called.
+- `daemon-update-auto-when-idle` — managed + older + loaded + 0
+  running: `daemonUpdate` is called exactly once, with no click, and a
+  re-render doesn't call it again.
+- `daemon-update-deferred-while-running` — 2 running: no call. The
+  banner text names "2 agents running" and "when they finish".
+- `daemon-update-fires-when-last-run-finishes` — armed, the running
+  count goes 2 → 1 → 0, and `daemonUpdate` is called once, at 0.
+- `daemon-update-now-requires-confirm` — "Update now" with runs active
+  opens the confirm dialog, which says the work will be interrupted.
+  Cancel means no call; confirm means one call.
+- `daemon-update-not-now-disarms` — "Not now", then the count drops to
+  0: no automatic call. The manual button is still present.
+- `daemon-update-failure-no-loop` — `daemonUpdate` rejects: the error
+  shows, there is no second automatic call, and the retry button calls
+  it again.
+- `daemon-update-unmanaged-untouched` — unmanaged local daemon, and a
+  URL connection: only the plain notice, no automatic call, no buttons.
 
 ### Build / CI checks
 
@@ -249,12 +339,20 @@ References:
   `click_waiters_are_capped`); beyond the cap a notification is shown without
   click-to-navigate and the fact is logged.
 
+- **Update the daemon only when idle (user, 2026-10-10), M5.**
+  This supersedes M2.4's unconditional auto-restart. It differs from
+  Paseo on purpose: Paseo always restarts at launch, while smind defers
+  when runs are in flight, because a restart marks them `interrupted`.
+  The decision lives in the UI, which has the run state, so the Rust
+  side only stops auto-restarting. No backend changes.
+
 ## Progress
 
 - [x] M1 — macOS app build (`tauri.macos.conf.json`, `task desktop:mac`, install, README)
 - [x] M2 — bundled daemon sidecar + auto-start/auto-update (Rust, built and run for real; release-path artifact reuse not yet exercised, see Validation)
 - [~] M3 — Dock lifecycle, no tray, Dock badge (implemented and partly verified; four interactions need a human, see "Not verified")
 - [x] M4 — CI workflow + release assets (PR run green for both arches; the release-please call path is wired and actionlint-clean but not run)
+- [x] M5 — update the daemon only when idle (branch `feat/desktop-daemon-update-when-idle`)
 
 Commits on `feat/desktop-macos-app` (PR #238): `feat(desktop): macOS app
 build` (M1), `feat(desktop): bundled daemon sidecar` (M2), `fix(desktop):
@@ -480,3 +578,27 @@ verified, Dock rendering blocked by the notification-permission prompt;
 - `tauri_plugin_log` runs at its default (TRACE) level, so the log file
   rotates away INFO lines within seconds of a connection being open;
   this made the app's own diagnostics hard to read. Pre-existing.
+
+### M5
+
+Maps desktop-macos-app M5.1–M5.7 to its tests (branch
+`feat/desktop-daemon-update-when-idle`; `task test` and `task lint` green,
+`cargo test` 13 passed and `cargo clippy --all-targets -- -D warnings`
+clean in `desktop/src-tauri`):
+
+- **M5.1** Rust no longer restarts: `launch_decision_offers_update_instead_of_restarting`
+  and updated `macos_autostart_when_unreachable` (cargo test).
+- **M5.2** `loaded` flag: `task-attention-loaded-after-first-run-list`
+  (use-task-attention.test.ts).
+- **M5.3** auto-update when idle, once per (connection id, daemon version):
+  `daemon-update-auto-when-idle`; not before loaded:
+  `daemon-update-not-before-runs-loaded`.
+- **M5.4** defer + confirm dialog ("Running agent work will be
+  interrupted", names N) + Not now disarm + armed auto-fire:
+  `daemon-update-deferred-while-running`, `daemon-update-now-requires-confirm`,
+  `daemon-update-not-now-disarms`, `daemon-update-fires-when-last-run-finishes`.
+- **M5.5** running-run count = sum of `runningChatsByTask` set sizes,
+  passed from `App.tsx` (exercised via the `runningRuns` prop in every
+  M5 banner test).
+- **M5.6** errors + manual retry, no loop: `daemon-update-failure-no-loop`.
+- **M5.7** unchanged unmanaged/URL notice: `daemon-update-unmanaged-untouched`.

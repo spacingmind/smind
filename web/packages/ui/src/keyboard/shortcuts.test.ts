@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   bindingAllowedInScope,
+  platformBindings,
   conflictingBindings,
   helpSections,
   INITIAL_CHORD_STATE,
@@ -44,7 +45,11 @@ describe("SHORTCUT_BINDINGS", () => {
   });
 
   it("binds the combos the plan names, matching Paseo's defaults", () => {
-    const byAction = new Map(SHORTCUT_BINDINGS.map((b) => [b.action, b.combo]));
+    // The web table: jsdom is not a desktop build, and the desktop-only
+    // Mod+T / Mod+Digit rows would shadow the web defaults in the map.
+    const byAction = new Map(
+      platformBindings(SHORTCUT_BINDINGS, false).map((b) => [b.action, b.combo]),
+    );
     expect(byAction.get("sidebar.toggle")).toBe("Mod+B");
     expect(byAction.get("palette.open")).toBe("Mod+K");
     expect(byAction.get("composer.focus")).toBe("Mod+L");
@@ -284,7 +289,8 @@ describe("pane-focus defaults vs. a rebind, in an editable field", () => {
 });
 
 describe("sidebar.task-jump (Alt+Digit) vs. tab.jump (Mod+Alt+Digit)", () => {
-  const bindings = resolveBindings();
+  // The web table: the desktop-only Mod+Digit row would match Ctrl+2.
+    const bindings = resolveBindings(platformBindings(SHORTCUT_BINDINGS, false));
   const NON_MAC_2 = { isMac: false, scope: "other" } as const;
 
   it("Alt+2 alone fires sidebar.task-jump, not tab.jump", () => {

@@ -177,3 +177,63 @@ func mustDecode(t *testing.T, raw json.RawMessage, v any) {
 		t.Fatalf("decode result: %v", err)
 	}
 }
+
+// TestProfile_ModelRoundTrip: a profile's model survives create, get, list
+// and update, an update can clear it, and a malformed model is rejected at
+// create and update (ADR-0025).
+func TestProfile_ModelRoundTrip(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	t.Cleanup(func() { _ = ws.Close() })
+
+	call := func(id, method string, params map[string]any) envelope {
+		sendRequest(t, ws, id, method, params)
+		return readEnvelopeFor(t, ws, id, 5*time.Second)
+	}
+
+	resp := call("create", "profile.create", map[string]any{"name": "Cheap", "provider": "claude-native", "model": "haiku"})
+	if resp.Error != nil {
+		t.Fatalf("profile.create error = %v", resp.Error.Message)
+	}
+	var created store.AgentProfile
+	if err := json.Unmarshal(resp.Result, &created); err != nil || created.Model != "haiku" {
+		t.Fatalf("profile.create = %+v, %v, want model haiku", created, err)
+	}
+
+	resp = call("get", "profile.get", map[string]any{"id": created.ID})
+	var got store.AgentProfile
+	if err := json.Unmarshal(resp.Result, &got); err != nil || got.Model != "haiku" {
+		t.Fatalf("profile.get = %+v, %v, want model haiku", got, err)
+	}
+
+	resp = call("list", "profile.list", nil)
+	var listed []store.AgentProfile
+	if err := json.Unmarshal(resp.Result, &listed); err != nil || len(listed) != 1 || listed[0].Model != "haiku" {
+		t.Fatalf("profile.list = %+v, %v, want one profile with model haiku", listed, err)
+	}
+
+	resp = call("update", "profile.update", map[string]any{"id": created.ID, "name": "Cheap", "provider": "claude-native", "model": "claude-opus-5-5"})
+	var updated store.AgentProfile
+	if err := json.Unmarshal(resp.Result, &updated); err != nil || updated.Model != "claude-opus-5-5" {
+		t.Fatalf("profile.update = %+v, %v, want model claude-opus-5-5", updated, err)
+	}
+	resp = call("clear", "profile.update", map[string]any{"id": created.ID, "name": "Cheap", "provider": "claude-native"})
+	if err := json.Unmarshal(resp.Result, &updated); err != nil || updated.Model != "" {
+		t.Fatalf("profile.update without model = %+v, %v, want the model cleared", updated, err)
+	}
+
+	for _, bad := range []string{"--model", "has space", "-x"} {
+		resp = call("badc", "profile.create", map[string]any{"name": "Bad", "provider": "claude-native", "model": bad})
+		if resp.Error == nil {
+			t.Errorf("profile.create(model=%q) error = nil, want rejected", bad)
+		}
+		resp = call("badu", "profile.update", map[string]any{"id": created.ID, "name": "Cheap", "provider": "claude-native", "model": bad})
+		if resp.Error == nil {
+			t.Errorf("profile.update(model=%q) error = nil, want rejected", bad)
+		}
+	}
+}

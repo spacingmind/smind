@@ -61,6 +61,13 @@ export interface BindingWhen {
    * guard is `editable`-only, and nothing here needs a terminal exemption.
    */
   editableWhenRebound?: true;
+  /**
+   * Platform gate (desktop-native-feel D3.1): `true` = desktop-only,
+   * `false` = web-only, absent = both. `platformBindings` filters the
+   * table on this field before the rows reach the matcher, the help
+   * dialog or the conflict check -- Paseo's `when: { desktop }` pattern.
+   */
+  desktop?: boolean;
 }
 
 export interface ShortcutBinding {
@@ -144,25 +151,44 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
   },
   {
+    // Web-only: the browser owns Ctrl/Cmd+digit (it switches the
+    // browser's own tabs), so the web build keeps the Alt-modified
+    // variant; the desktop build gets Mod+digit below (D3.2).
     id: "tab-jump",
     action: "tab.jump",
     combo: "Mod+Alt+Digit",
     section: "tabs",
     label: "Jump to tab by number",
-    when: { global: true },
+    when: { global: true, desktop: false },
   },
   {
+    id: "tab-jump-desktop",
+    action: "tab.jump",
+    combo: "Mod+Digit",
+    section: "tabs",
+    label: "Jump to tab by number",
+    when: { global: true, desktop: true },
+  },
+  {
+    // Web-only: a browser tab's own new-tab shortcut can't be
+    // intercepted (see `docs/plans/active/web-keyboard-tabs.md`'s
+    // Decisions) -- matches Paseo's own web-runtime substitutions for
+    // otherwise browser-reserved combos (e.g. its close-tab's Alt+Shift+W).
+    // The desktop build owns the keyboard and gets Mod+T below (D3.2).
     id: "tab-new",
     action: "tab.new",
     combo: "Alt+Shift+T",
     section: "tabs",
     label: "New tab",
-    when: { global: true },
-    // Not Mod+T: a browser tab's own new-tab shortcut can't be
-    // intercepted (see `docs/plans/active/web-keyboard-tabs.md`'s
-    // Decisions) -- matches Paseo's own web-runtime substitutions for
-    // otherwise browser-reserved combos (e.g. its close-tab's Alt+Shift+W).
-    note: "Not Mod+T -- the browser owns that one",
+    when: { global: true, desktop: false },
+  },
+  {
+    id: "tab-new-desktop",
+    action: "tab.new",
+    combo: "Mod+T",
+    section: "tabs",
+    label: "New tab",
+    when: { global: true, desktop: true },
   },
   {
     id: "tab-next",
@@ -370,6 +396,18 @@ export function resolveBindings(
       };
     }
   });
+}
+
+/**
+ * The rows of the table that apply on this platform: a binding gated
+ * `when.desktop` is dropped entirely, so it neither matches a key event
+ * nor appears in the help dialog / conflict checks on the other platform.
+ */
+export function platformBindings(
+  bindings: readonly ShortcutBinding[],
+  isDesktop: boolean,
+): readonly ShortcutBinding[] {
+  return bindings.filter((b) => b.when?.desktop === undefined || b.when.desktop === isDesktop);
 }
 
 /** Whether a binding is allowed to fire with focus where it currently is. `overridden` is `ResolvedBinding`'s field -- omitted (or false), a binding with `editableWhenRebound` is treated as still on its default combo. */

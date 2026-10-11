@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,14 @@ func captureStderr(t *testing.T, f func()) string {
 // internal/taskrunner/fakeagent binary, and returns its URL -- the CLI
 // tests dial it exactly the way dialDaemon does in production, via a
 // config.yaml port. Mirrors the account_test.go setup in this package.
-func newConfigOptionTestEnv(t *testing.T, home string) string {
+func newConfigOptionTestEnv(t *testing.T, home string, agentArgs ...string) string {
+	t.Helper()
+	return newConfigOptionTestEnvArgs(t, home, agentArgs...)
+}
+
+// newConfigOptionTestEnvArgs is newConfigOptionTestEnv with extra argv
+// for the fake agent (e.g. "modes:session", "live-opts").
+func newConfigOptionTestEnvArgs(t *testing.T, home string, agentArgs ...string) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "smind-cli-configopt-")
 	if err != nil {
@@ -112,7 +120,7 @@ func newConfigOptionTestEnv(t *testing.T, home string) string {
 	t.Cleanup(func() { _ = s.Close() })
 
 	wm := workspace.New(s)
-	handler, err := wsapi.Handler(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeAgent})), s, token)
+	handler, err := wsapi.Handler(wm, accounts.New(s), taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, append([]string{fakeAgent}, agentArgs...))), s, token)
 	if err != nil {
 		t.Fatalf("wsapi.Handler() error = %v", err)
 	}
@@ -258,6 +266,13 @@ func startTestRun(t *testing.T, srvURL, provider string, scenarios ...string) st
 		}
 		if err := os.WriteFile(filepath.Join(*got.WorktreePath, "scenario"), []byte(scenarios[0]), 0o644); err != nil {
 			t.Fatalf("write scenario: %v", err)
+		}
+		if scenarios[0] == "permission-write" {
+			// The file the fake agent's Write permission overwrites.
+			existing := strings.Repeat("existing line\n", 240)
+			if err := os.WriteFile(filepath.Join(*got.WorktreePath, "existing.txt"), []byte(existing), 0o644); err != nil {
+				t.Fatalf("write existing.txt: %v", err)
+			}
 		}
 	}
 

@@ -11,7 +11,7 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--notes=<text>]"
+const cmdProfileAddUsage = "usage: smind profile add <name> <provider> [--mode <permissionMode>] [--auto-accept] [--thinking-level=<level>] [--model=<model>] [--notes=<text>]"
 
 func cmdProfile(args []string) int {
 	if len(args) == 0 {
@@ -35,8 +35,8 @@ func cmdProfile(args []string) int {
 // Value-taking flags accept both `--flag value` (matching `task new`'s
 // `--space <id>` convention) and `--flag=value`; the boolean
 // --auto-accept accepts `--auto-accept`, `--auto-accept=true`, and
-// `--auto-accept=false` -- no model flag (ADR-0014's model deferral,
-// dropped from v1 entirely).
+// `--auto-accept=false`. --model (ADR-0025) names the profile's model; the
+// daemon validates it.
 func cmdProfileAdd(args []string) int {
 	if len(args) < 2 {
 		fmt.Fprintln(os.Stderr, cmdProfileAddUsage)
@@ -44,7 +44,7 @@ func cmdProfileAdd(args []string) int {
 	}
 	name, provider := args[0], args[1]
 
-	var mode, thinkingLevel, notes string
+	var mode, thinkingLevel, model, notes string
 	var autoAccept bool
 	rest := args[2:]
 	for i := 0; i < len(rest); i++ {
@@ -83,6 +83,8 @@ func cmdProfileAdd(args []string) int {
 			mode = value
 		case "--thinking-level":
 			thinkingLevel = value
+		case "--model":
+			model = value
 		case "--notes":
 			notes = value
 		default:
@@ -101,13 +103,13 @@ func cmdProfileAdd(args []string) int {
 	var p store.AgentProfile
 	err = client.Call(context.Background(), "profile.create", map[string]any{
 		"name": name, "provider": provider,
-		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "notes": notes,
+		"permissionMode": mode, "autoAccept": autoAccept, "thinkingLevel": thinkingLevel, "model": model, "notes": notes,
 	}, &p)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "profile add: %v\n", err)
 		return 1
 	}
-	fmt.Printf("%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
+	fmt.Printf("%d\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model)
 	return 0
 }
 
@@ -131,9 +133,9 @@ func cmdProfileList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING")
+	fmt.Fprintln(tw, "ID\tNAME\tPROVIDER\tMODE\tTHINKING\tMODEL")
 	for _, p := range profiles {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", p.ID, p.Name, p.Provider, profileModeColumn(p), p.ThinkingLevel, p.Model)
 	}
 	tw.Flush()
 	return 0

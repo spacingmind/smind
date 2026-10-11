@@ -97,6 +97,73 @@ var migrations = []migration{
 			return backfillPermissionModes(db)
 		},
 	},
+	{
+		// ADR-0020 §5: model-aware routing globs on accounts. NULL (no
+		// list) is the valid default for every pre-existing row.
+		name: "accounts.models",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "accounts", "models", "TEXT")
+		},
+	},
+	{
+		// Structured cancel kind on chat_queue items: 'user' (the
+		// chat.queueCancel RPC) or 'auto' (delivery failed). The reason
+		// string stays display text; the kind is what clients branch on.
+		// Pre-existing cancelled rows get theirs backfilled from the
+		// reason the daemon wrote at the time ('cancelled by user' is the
+		// only user-cancel reason it ever stored), every other cancelled
+		// row was a delivery failure. Idempotent: the backfill only
+		// touches rows whose kind is still '' and which are no longer
+		// queued, and a fresh database has no cancelled rows at all.
+		name: "chat_queue.cancel_kind",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "chat_queue", "cancel_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			if _, err := db.Exec(`UPDATE chat_queue
+				SET cancel_kind = CASE WHEN cancel_reason = 'cancelled by user' THEN 'user' ELSE 'auto' END
+				WHERE status = 'cancelled' AND cancel_kind = ''`); err != nil {
+				return fmt.Errorf("backfill chat_queue.cancel_kind: %w", err)
+			}
+			return nil
+		},
+	},
+	{
+		// ADR-0024: per-workspace setup/teardown scripts, per-task setup
+		// state and port. All NULL (none) for pre-existing rows. The partial
+		// unique index lives here, not in schema.sql, because it needs the
+		// port column to exist first.
+		name: "worktree_setup",
+		apply: func(db *sql.DB) error {
+			for _, c := range []struct{ table, col, ddl string }{
+				{"workspaces", "setup_script", "TEXT"},
+				{"workspaces", "teardown_script", "TEXT"},
+				{"tasks", "setup_status", "TEXT"},
+				{"tasks", "setup_error", "TEXT"},
+				{"tasks", "setup_log", "TEXT"},
+				{"tasks", "port", "INTEGER"},
+			} {
+				if err := addColumnIfMissing(db, c.table, c.col, c.ddl); err != nil {
+					return err
+				}
+			}
+			_, err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_port_live ON tasks(port) WHERE port IS NOT NULL AND archived_at IS NULL`)
+			return err
+		},
+	},
+	{
+		// ADR-0025: the requested model on runs and agent profiles. NULL
+		// (provider default) is the valid value for every pre-existing row.
+		name: "model_selection",
+		apply: func(db *sql.DB) error {
+			for _, table := range []string{"runs", "agent_profiles"} {
+				if err := addColumnIfMissing(db, table, "model", "TEXT"); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
