@@ -7,10 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/securefile"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -259,7 +261,17 @@ func runFakeClaudeCLI() {
 				_ = os.WriteFile(filepath.Join(wd, "mcp-config-content"), data, 0o644)
 				fi, _ := os.Stat(cfg)
 				di, _ := os.Stat(filepath.Dir(cfg))
-				modes := fmt.Sprintf("%o %o", fi.Mode().Perm(), di.Mode().Perm())
+				fileMode, dirMode := fmt.Sprintf("%o", fi.Mode().Perm()), fmt.Sprintf("%o", di.Mode().Perm())
+				if runtime.GOOS == "windows" {
+					// No POSIX mode bits: the file must be owner-only by
+					// ACL (internal/securefile); the temp dir sits under the
+					// user's %TEMP% and has no mode to assert.
+					fileMode, dirMode = "not-private", "n/a"
+					if private, err := securefile.IsPrivate(cfg); err == nil && private {
+						fileMode = "600"
+					}
+				}
+				modes := fileMode + " " + dirMode
 				_ = os.WriteFile(filepath.Join(wd, "mcp-config-modes"), []byte(modes), 0o644)
 			}
 		}

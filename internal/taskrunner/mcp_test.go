@@ -311,7 +311,7 @@ func TestRunner_RunPrompt_ACPSendsConfiguredMcpServers(t *testing.T) {
 		t.Fatalf("dump entry = %v, want stdio playwright", pw)
 	}
 	cmd, _ := pw["command"].(string)
-	if !filepath.IsAbs(cmd) || filepath.Base(cmd) != "go" {
+	if !filepath.IsAbs(cmd) || strings.TrimSuffix(filepath.Base(cmd), ".exe") != "go" {
 		t.Fatalf("command = %v, want an absolute go path", pw["command"])
 	}
 	if env, _ := pw["env"].([]any); len(env) != 1 {
@@ -555,8 +555,12 @@ func TestRunner_RunPrompt_ClaudeNativeMcpConfigFileMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read mcp-config-modes: %v", err)
 	}
-	if string(modes) != "600 700" {
-		t.Fatalf("file/dir modes = %q, want %q", modes, "600 700")
+	wantModes := "600 700"
+	if runtime.GOOS == "windows" {
+		wantModes = "600 n/a" // owner-only ACL on the file; no dir mode (see the fake claude)
+	}
+	if string(modes) != wantModes {
+		t.Fatalf("file/dir modes = %q, want %q", modes, wantModes)
 	}
 	content, err := os.ReadFile(filepath.Join(*task.WorktreePath, "mcp-config-content"))
 	if err != nil {
