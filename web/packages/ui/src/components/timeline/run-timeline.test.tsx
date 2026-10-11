@@ -1,12 +1,13 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { TimelineRow } from "@/components/timeline/timeline-row";
 import { FOLLOW_THRESHOLD_PX, useAutoFollow } from "@/components/timeline/use-auto-follow";
-import { buildTimeline, type RunEntry, type TimelineItem } from "@/hooks/use-run-timeline";
-import type { RunLogEvent } from "@/lib/types";
+import { buildTimeline, useRunTimeline, type RunEntry, type TimelineItem } from "@/hooks/use-run-timeline";
+import { FakeWsClient } from "@/test/fake-ws-client";
+import type { RunLogEvent, RunLogsResult, RunSummary } from "@/lib/types";
 
 function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry {
   return {
@@ -332,5 +333,73 @@ describe("useAutoFollow", () => {
     el.scrollTop = 600 - FOLLOW_THRESHOLD_PX - 1;
     fireEvent.scroll(el);
     expect(el).toHaveAttribute("data-following", "false");
+  });
+});
+
+describe("useRunTimeline mcpServers", () => {
+  function summary(overrides: Partial<RunSummary> = {}): RunSummary {
+    return {
+      ID: "run-1",
+      TaskID: 1,
+      ChatID: 10,
+      Provider: "claude-native",
+      Prompt: "do the thing",
+      Status: "done",
+      StartedAt: "2024-01-01T00:00:00Z",
+      FinishedAt: "2024-01-01T00:00:05Z",
+      StopReason: "end_turn",
+      Err: "",
+      PermissionMode: "",
+      AutoAccept: false,
+      ThinkingLevel: "",
+      ...overrides,
+    };
+  }
+
+  it("RunEntry.mcpServers folded from run.logs backfill", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary()]);
+    await act(async () => {});
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({
+        runId: "run-1",
+        status: "done",
+        stopReason: "end_turn",
+        events: [
+          { type: "mcp_servers", mcpServers: [{ name: "a", transport: "stdio", status: "dropped", reason: "command_not_found" }] },
+          { type: "mcp_servers", mcpServers: [{ name: "a", transport: "stdio", status: "active" }] },
+        ],
+      } satisfies RunLogsResult);
+    });
+
+    // Latest of the two events wins, never an accumulation.
+    await waitFor(() => expect(result.current.runs?.[0]?.mcpServers).toEqual([{ name: "a", transport: "stdio", status: "active" }]));
+  });
+
+  it("RunEntry.mcpServers updated live from the run.attach stream, latest wins", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary({ Status: "running", FinishedAt: null })]);
+    await act(async () => {});
+    await act(async () => {
+      client.emit("run.attach", 0, "mcp_servers", {
+        mcpServers: [
+          { name: "github", transport: "stdio", status: "failed", reason: "command_not_found" },
+          { name: "search", transport: "http", status: "active" },
+        ],
+      });
+    });
+    expect(result.current.runs?.[0]?.mcpServers).toEqual([
+      { name: "github", transport: "stdio", status: "failed", reason: "command_not_found" },
+      { name: "search", transport: "http", status: "active" },
+    ]);
+
+    await act(async () => {
+      client.emit("run.attach", 0, "mcp_servers", { mcpServers: [{ name: "search", transport: "http", status: "active" }] });
+    });
+    expect(result.current.runs?.[0]?.mcpServers).toEqual([{ name: "search", transport: "http", status: "active" }]);
   });
 });

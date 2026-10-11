@@ -351,6 +351,17 @@ export interface RunToolCallEventParams {
   result?: unknown;
 }
 
+// One server entry in an "mcp_servers" run event (docs/plans/active/
+// agent-mcp-servers.md): the per-run state of an MCP server the run tried
+// to start. Multiple mcp_servers events per run are possible; the latest
+// one wins.
+export interface McpServerState {
+  name: string;
+  transport: "stdio" | "http" | "sse";
+  status: "active" | "dropped" | "failed";
+  reason?: "transport_unsupported" | "command_not_found" | "provider_unsupported" | "failed_to_start";
+}
+
 // Every event name run.attach/run.logs can carry today
 // (internal/wsapi/handlers.go's toRunLogEvent). The three structured ones
 // were added by ADR 0008 and are additive: a run recorded before it still
@@ -363,6 +374,7 @@ export type RunEventType =
   | "done"
   | "permission_request"
   | "permission_resolved"
+  | "mcp_servers"
   | "raw";
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
@@ -389,6 +401,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   kind?: string;
   /** Populated for a "raw" entry (ADR 0010) -- the update's full original JSON, forwarded as-is. */
   payload?: unknown;
+  /** Populated for an "mcp_servers" entry -- the run's current per-server state, latest event wins. */
+  mcpServers?: McpServerState[];
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).

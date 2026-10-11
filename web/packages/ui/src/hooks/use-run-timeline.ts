@@ -7,6 +7,7 @@ import type {
   PermissionRequestEventParams,
   PermissionResolutionReason,
   PermissionResolvedEventParams,
+  McpServerState,
   Provider,
   RunAttachResult,
   RunLogEvent,
@@ -118,7 +119,7 @@ const TEXT_EVENT_KINDS: Record<string, TimelineTextItem["kind"]> = {
  * "permission_resolved" is deliberately *not* in this set: it becomes a
  * TimelinePermissionItem, handled by its own branch below.
  */
-const NON_ITEM_EVENTS = new Set(["done", "permission_request"]);
+const NON_ITEM_EVENTS = new Set(["done", "permission_request", "mcp_servers"]);
 
 /**
  * Appends one wire event to a run's item list, returning a new array.
@@ -256,6 +257,20 @@ export interface RunEntry {
    * another connection could answer first.
    */
   pendingPermission?: PendingPermission;
+  /**
+   * The run's current per-server MCP state, from the latest "mcp_servers"
+   * event (live or backfilled). Undefined when the run reported none.
+   */
+  mcpServers?: McpServerState[];
+}
+
+/** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
+export function latestMcpServers(events: RunLogEvent[]): McpServerState[] | undefined {
+  let latest: McpServerState[] | undefined;
+  for (const event of events) {
+    if (event.type === "mcp_servers") latest = event.mcpServers;
+  }
+  return latest;
 }
 
 interface TimelineState {
@@ -424,6 +439,9 @@ function streamRun(client: WsClientLike, session: Session, setRuns: Dispatch<Set
           setPendingPermission(setRuns, runId, params as PermissionRequestEventParams);
           return;
         }
+        if (event === "mcp_servers") {
+          patch(setRuns, runId, { mcpServers: (params as { mcpServers: McpServerState[] }).mcpServers });
+        }
         if (event === "permission_resolved") {
           clearPendingPermission(setRuns, runId, params as PermissionResolvedEventParams);
           // Also falls through to appendEvent below, so the resolution
@@ -530,6 +548,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
                 if (session.cancelled) return;
                 patch(setRuns, r.ID, {
                   items: buildTimeline(logs.events),
+                  mcpServers: latestMcpServers(logs.events),
                   status: logs.status,
                   stopReason: logs.stopReason,
                   err: logs.err,
