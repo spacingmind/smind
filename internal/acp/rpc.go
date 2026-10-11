@@ -94,6 +94,7 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
+	setProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -307,7 +308,8 @@ func (c *conn) failPending(err error) {
 }
 
 // close closes stdin (signalling the agent to exit) and waits for the
-// subprocess to exit, force-killing it if it hasn't within timeout.
+// subprocess to exit, force-killing its whole process group if it hasn't
+// within timeout.
 func (c *conn) close(timeout time.Duration) error {
 	c.closeOnce.Do(func() {
 		_ = c.stdin.Close()
@@ -325,7 +327,9 @@ func (c *conn) close(timeout time.Duration) error {
 	case err := <-waitDone:
 		return err
 	case <-time.After(timeout):
-		_ = c.cmd.Process.Kill()
+		// Kill the whole process group, not just the agent, so MCP server
+		// grandchildren (npx -> node -> chromium) don't outlive it.
+		killProcessGroup(c.cmd)
 		return <-waitDone
 	}
 }

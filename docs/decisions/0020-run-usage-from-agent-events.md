@@ -27,7 +27,7 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
 | Backend | Usage source | What it carries |
 |---|---|---|
 | claude-native | the stream-json `result` message at the end of each turn | `usage{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}`, `total_cost_usd`, `modelUsage` (per model) |
-| codex-native | `thread/tokenUsage/updated` (`refs/codex/codex-rs/app-server-protocol/.../ThreadTokenUsageUpdatedNotification.ts`) | `tokenUsage.last` / `.total`: `inputTokens`, `cachedInputTokens`, `cacheWriteInputTokens`, `outputTokens`, `reasoningOutputTokens`, `totalTokens`; `modelContextWindow` |
+| codex-native | `thread/tokenUsage/updated` (`refs/codex/codex-rs/app-server-protocol/.../ThreadTokenUsageUpdatedNotification.ts`) | `tokenUsage.total` (thread-cumulative; `.last` is one model response): `inputTokens`, `cachedInputTokens`, `cacheWriteInputTokens`, `outputTokens`, `reasoningOutputTokens`, `totalTokens`; `modelContextWindow` |
 | ACP (GLM, kimi) | `PromptResponse.usage`, behind the unstable `unstable_end_turn_token_usage` feature (`refs/agent-client-protocol/.../v1/agent.rs:3104`) | session-cumulative `input_tokens`, `output_tokens`, `thought_tokens?`, cache read/write, `total_tokens` |
 | ACP (GLM, kimi) | the `usage_update` session notification, stabilized | context `used` / `size`, and optional cumulative `cost{amount, currency}` |
 
@@ -53,9 +53,15 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
    that reports nothing leaves the field NULL.
    - **claude-native:** read from the turn's `result` message.
      `modelUsage` gives the model, and the cost is `total_cost_usd`.
-   - **codex-native:** use `tokenUsage.last` from the last
-     `thread/tokenUsage/updated` of the turn. That is per-turn, so no
-     differencing is needed.
+   - **codex-native:** use `tokenUsage.total` from the last
+     `thread/tokenUsage/updated` of the turn. It is the thread's
+     cumulative usage, so the run's value is the difference from the
+     snapshot stored for the same thread at the end of the previous run,
+     in the session handle like ACP. (`tokenUsage.last` is only the last
+     single model response, so a turn with a tool loop would be
+     under-counted. The first cut of this ADR said "last, no differencing";
+     that was wrong.) A total that went down, or a snapshot for another
+     thread id, starts from zero.
    - **ACP:** if `PromptResponse.usage` is present, it is
      session-cumulative, so the run's value is the difference from the
      snapshot stored for the same session at the end of the previous run.
@@ -63,6 +69,21 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
      persistence. Context `used`/`size` and cumulative `cost` come from
      the last `usage_update`; cost is differenced the same way. A
      backend that sends neither leaves the run's usage NULL.
+   - **Baseline resets (ACP and codex).** The snapshot is tagged with
+     the session id, and for ACP with the agent process instance (unique
+     per spawned process). It is no baseline, and the run is charged the
+     whole cumulative figure, if the session id differs, if the instance
+     differs (the new process's counters may have restarted, even to a
+     value at or above the snapshot), or if any counter went down. ACP
+     does not say whether counters outlive the agent process, and smind
+     spawns one process per run, so in practice each ACP run is charged
+     the cumulative figure its process reports; differencing applies
+     where one process serves several runs.
+   - **First-run limitation.** A session or thread that predates this
+     change has no stored snapshot, so its first run afterwards is charged
+     the whole cumulative figure (including earlier runs' usage). There is
+     no backfill: the earlier figures were never recorded and are not
+     estimated.
 3. **Storage.** A `run_usage` table holds one row per run, keyed by
    `run_id`. It carries `workspace_id`, `task_id`, `chat_id`, `provider`,
    `model`, the token fields, `cost_usd`, `context_used`,

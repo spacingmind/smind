@@ -180,7 +180,10 @@ never go through the proxy. Usage comes from each agent's own events.
    `total_cost_usd`, `modelUsage`) into AC1 and emit it as a `usage` run
    event.
 3. **codex-native.** Take `thread/tokenUsage/updated` and keep the last
-   `tokenUsage.last` of the turn. Emit it at turn end.
+   `tokenUsage.total` of the turn. It is the thread's cumulative usage, so
+   store the per-run difference from the previous run's snapshot for the
+   same thread (kept in the session handle, like ACP). Emit it at turn
+   end.
 4. **ACP.**
    - Take `PromptResponse.usage` when present. It is session-cumulative,
      so store the per-run difference from the previous run's snapshot for
@@ -190,8 +193,8 @@ never go through the proxy. Usage comes from each agent's own events.
    - If neither arrives, the usage is NULL.
 5. **Storage.** A `run_usage` table, one row per run, upserted at each
    turn end and on finish. It has workspace/task/chat ids, provider,
-   model, the token fields, cost, context, `session_snapshot` (JSON, ACP
-   only) and `source`. No prompt text and no secrets.
+   model, the token fields, cost, context, `session_snapshot` (JSON, ACP and
+   codex) and `source`. No prompt text and no secrets.
 6. **Wire.**
    - `RunSummary` (`run.list`) carries token and cost totals.
    - Structured run event `usage` (ADR-0008).
@@ -357,9 +360,15 @@ provenance (O1) gives the runner (or internal/runs) that context.
 - `TestUsage_ClaudeResultParsed`: a `result` message with all four token
   fields, the cost and `modelUsage` maps onto AC1; a missing field stays
   nil.
-- `TestUsage_CodexTokenUsageLastOfTurn`: two
-  `thread/tokenUsage/updated` notifications in one turn; the stored value
-  is the last `tokenUsage.last`.
+- `TestUsage_CodexTokenUsageDifferencedTotal`: a tool-looping turn sends
+  three `thread/tokenUsage/updated` notifications whose `total` is
+  cumulative; the run records the full growth of `total` (not the last
+  call's `last`), and a second turn on the thread records only its own
+  delta against the stored snapshot.
+- `TestUsage_ACPNewAgentProcessResetsBaseline`: a resumed session on a new
+  agent process reports counters that restarted but are at or above the
+  stored snapshot; the run is charged the whole figure, not the
+  difference.
 - `TestUsage_ACPPromptUsageDifferenced`: run 1 reports cumulative 100/20
   and stores 100/20; run 2 on the same session reports 160/50 and stores
   60/30; a new session starts from zero.
@@ -416,6 +425,19 @@ provenance (O1) gives the runner (or internal/runs) that context.
 ## Decisions
 
 Resolved:
+- **Codex usage is per-thread cumulative `total`, differenced** (review
+  correction, 2026-10-11). ADR-0020 §2 and AC3 first said to keep
+  `tokenUsage.last` of the turn. That is wrong: `last` is the usage of the
+  last single model response (`refs/codex/codex-rs/protocol/src/protocol.rs`
+  `TokenUsageInfo`), and a tool-looping turn makes several, so a turn was
+  under-counted. `tokenUsage.total` is the thread's cumulative usage;
+  codex-native now records `total` minus the thread's previous snapshot,
+  like ACP. Both the ADR and AC3 are amended.
+- **ACP snapshots are scoped to the agent process instance** (review
+  correction, 2026-10-11). Resetting the baseline only when a counter
+  decreases misses a restarted counter that is at or above the stored
+  snapshot. The snapshot is now tagged with the spawning process's instance
+  id and ignored when it differs.
 - **No cost/price computation** (user, 2026-09-28). Tokens only, in every
   step.
 
@@ -473,7 +495,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-0020 accepted (2026-10-11, rewritten: usage from agent events, runs off the proxy)
 - [x] ADR-O drafted as ADR-0021 (Proposed)
 - [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
-- [ ] ADR-M implemented
+- [ ] ADR-M implemented — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
 - [x] ADR-O implemented
 - [ ] Step 3 dogfood + gap log
 
@@ -569,4 +591,16 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 
 Known limitation: when `profileId` is set, `task_send` sends `source=human` so the server's non-human guard accepts the profile's human-authored auto-approving mode — which drops agent provenance (the header) for profile sends (comment in `cmd/smind/mcp_task_send.go`).
 
-Not started: O1 (run provenance columns), O2 Wave 2 items, ADR-0020 implementation (Proposed).
+Not started: O1 (run provenance columns), O2 Wave 2 items.
+
+**ADR-M AC 1–6 + 8 — per-run usage from agent events** (branch `feat/run-usage-adr-0020`, `task test` + `task lint` green, 2026-10-11):
+
+- **AC1 type** — `internal/taskrunner/usage.go`: `Usage` / `UsageSnapshot` / `UsageSource`, every numeric field a nullable pointer; `EventTypeUsage` appended (never inserted) to the persisted event enum.
+- **AC2 claude-native** — `TestUsage_ClaudeResultParsed`. Deviation worth knowing: SDK v0.3.2's `ResultMessage` has no top-level `usage` and a non-pointer `TotalCostUSD`, so tokens are summed from `modelUsage` across models, `Model` = the model with the most tokens, a zero cost reads as "not reported", and an empty `modelUsage` is `not_reported` with every field nil.
+- **AC3 codex-native** — `TestUsage_CodexTokenUsageDifferencedTotal` (`internal/taskrunner/usage_test.go`) and `TestDiffCodexUsage`: the fake agent runs a tool-looping turn (three model calls, cumulative `total`, `last` = one call), and the run records the growth of `tokenUsage.total` (90/60/5/17/3), not the final `last` (50/40/5/8/3); a second turn on the thread records only its delta (60/50/0/4/0) against the per-thread snapshot kept in `SessionHandle.Metadata`; a snapshot for another thread id, or a total that went down, restarts from zero. The test fails against the earlier keep-`last` implementation (verified by reverting the decode to `last`). This replaces the first cut, which kept `tokenUsage.last` and under-counted tool loops; see the Decisions section.
+- **AC4 ACP** — `TestUsage_ACPPromptUsageDifferenced` (100/20 → 100/20; same session 160/50 → 60/30; a new session starts from zero), `TestUsage_ACPUsageUpdateContextAndCost` (context from the last `usage_update`, cost differenced), `TestUsage_ACPNothingReportedIsNull`, `TestUsage_ACPSnapshotSurvivesNotReportedRun`, `TestDiffACPUsage` (counter reset ⇒ zero baseline; a different agent instance ⇒ zero baseline even when no counter went down; unreported field stays nil), `TestUsage_ACPNewAgentProcessResetsBaseline` (a new agent process, counters restarted but at or above the snapshot ⇒ charged the whole figure). The snapshot carries the agent process instance (`acp.Client.InstanceID`, unique per spawned process), and a snapshot from another instance is not a baseline. smind spawns one agent process per run, so in practice every ACP run charges its reported cumulative figure as-is; the differencing path applies when an instance persists across runs. The differencing tests use a wrapper reporting a fixed instance to model such an agent. The cumulative snapshot lives in `SessionHandle.Metadata` (so it is persisted with the chat's session handle) and is also written to `run_usage.session_snapshot`; a chat whose session predates this change has no snapshot, so its first run after upgrade is charged the session's whole cumulative figure.
+- **AC5 storage** — `run_usage` table (additive `CREATE TABLE IF NOT EXISTS`, no migration needed; old runs have no row and read back with no `usage`): `TestRunUsage_UpsertAndSummary` (`internal/store/run_usage_test.go`); the Registry upserts on each usage event (`internal/runs/usage_test.go`) and again, idempotently, on finish (`TestFinish_ReupsertsUsage` in `internal/runs/usage_test.go` sets the run's usage without going through `record`, so only `finish`'s re-upsert can write the row; it fails when that re-upsert is removed). A turn whose backend reports nothing still emits one usage event with source `not_reported`, so its row is all-NULL and the UI can say "usage not reported"; a run stopped before turn end gets no row.
+- **AC6 wire** — `TestRunList_CarriesUsageTotals` (`internal/runs`, `internal/wsapi`): `run.list` carries `usage`; `usage` events appear in `run.logs` and streamed events; `usage.summary` takes `scope` (default `all`; result stays an array, rows tagged `scope`, runs rows carry `costUsd`, nil when no run in the group reported a cost) — `internal/wsapi/usage_test.go`; `smind usage --scope` (`cmd/smind/usage_test.go`). With `scope=all`, `groupBy=account|day` returns proxy rows only (exactly today's rows plus the tag), `workspace|task|chat|run|provider` runs rows only, `model` both.
+- **No prompt/secret** — `TestUsageEvent_NoPromptOrSecret` (`internal/taskrunner`, `internal/runs`).
+- **AC8 no regressions** — nothing in run spawning changed (no env injection, no proxy hop); the proxy meter and its tests are untouched; the web timeline ignores `usage` events (`timeline-model.test.ts`) so they don't render as an "unknown" row. No other UI work; usage display in the web UI is a follow-up.
+- **Not verified** — against a real `claude` / `codex` / GLM process: all checks use the fake agents (the ACP fake scripts `usage_update` and `PromptResponse.usage`), so what `glm-acp-agent` really sends is unconfirmed.

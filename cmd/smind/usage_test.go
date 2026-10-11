@@ -77,3 +77,91 @@ func TestRunUsageRejectsBadGroupBy(t *testing.T) {
 		t.Fatalf("run(usage --by bogus) = 0, want 2; stderr: %s", stderr)
 	}
 }
+
+// seedRunUsageRows creates a task with two finished runs carrying usage
+// (one with no reported cost), as the Registry would have upserted.
+func seedRunUsageRows(t *testing.T, s *store.Store) {
+	t.Helper()
+	ws, err := s.CreateWorkspace(store.Workspace{Path: "/repo", Title: "repo", RoutingPolicy: "hard"})
+	if err != nil {
+		t.Fatalf("CreateWorkspace() error = %v", err)
+	}
+	task, err := s.CreateTask(store.Task{WorkspaceID: ws.ID, Title: "t", Status: "created"})
+	if err != nil {
+		t.Fatalf("CreateTask() error = %v", err)
+	}
+	in, out, cost := int64(300), int64(40), 1.5
+	for i, u := range []store.RunUsage{
+		{InputTokens: &in, OutputTokens: &out, CostUSD: &cost},
+		{InputTokens: &in},
+	} {
+		id := "run-" + strconv.Itoa(i)
+		if _, err := s.CreateRun(store.Run{ID: id, TaskID: task.ID, Provider: "glm", Prompt: "p", Status: "done", StartedAt: time.Now()}); err != nil {
+			t.Fatalf("CreateRun() error = %v", err)
+		}
+		u.RunID, u.TaskID, u.Provider, u.Source = id, task.ID, "glm", "claude_result"
+		if err := s.UpsertRunUsage(u); err != nil {
+			t.Fatalf("UpsertRunUsage() error = %v", err)
+		}
+	}
+}
+
+// TestRunUsageScopeRuns: --scope runs --by task prints a runs row with the
+// summed tokens and cost under a SCOPE column; the default --by for
+// --scope runs is task.
+func TestRunUsageScopeRuns(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	seedRunUsageRows(t, s)
+
+	for _, args := range [][]string{
+		{"usage", "--scope", "runs", "--by", "task"},
+		{"usage", "--scope", "runs"},
+	} {
+		var code int
+		stdout := captureStdout(t, func() { code = run(args) })
+		if code != 0 {
+			t.Fatalf("run(%v) = %d; stdout: %s", args, code, stdout)
+		}
+		if !strings.Contains(stdout, "SCOPE") || !strings.Contains(stdout, "COST USD") {
+			t.Errorf("%v: stdout = %q, want SCOPE and COST USD columns", args, stdout)
+		}
+		fields := strings.Fields(strings.Split(strings.TrimSpace(stdout), "\n")[1])
+		// scope key count input output cacheRead cacheWrite reasoning cost
+		if len(fields) != 9 || fields[0] != "runs" || fields[2] != "2" || fields[3] != "600" || fields[4] != "40" || fields[8] != "1.5" {
+			t.Errorf("%v: row = %v, want runs/2 runs/600 in/40 out/1.5 cost", args, fields)
+		}
+	}
+}
+
+// TestRunUsageProxyRowShowsNoCost: a proxy row prints "-" for cost.
+func TestRunUsageProxyRowShowsNoCost(t *testing.T) {
+	_, s := newTestProfileDaemon(t)
+	in := int64(5)
+	if _, err := s.CreateRequestLog(store.RequestLog{
+		StartedAt: time.Now(), Provider: "anthropic", SessionKey: "s", Model: strPtr("m"),
+		Status: 200, Outcome: store.RequestLogOutcomeOK, DurationMs: 1, InputTokens: &in,
+	}); err != nil {
+		t.Fatalf("CreateRequestLog() error = %v", err)
+	}
+	var code int
+	stdout := captureStdout(t, func() { code = run([]string{"usage", "--scope", "proxy", "--by", "model"}) })
+	if code != 0 || !strings.Contains(stdout, "proxy") || !strings.HasSuffix(strings.TrimSpace(stdout), "-") {
+		t.Fatalf("code=%d stdout=%q, want a proxy row ending in cost '-'", code, stdout)
+	}
+}
+
+// TestRunUsageRejectsBadScope guards --scope's allowed values and the
+// daemon's scope/groupBy validation.
+func TestRunUsageRejectsBadScope(t *testing.T) {
+	newTestProfileDaemon(t)
+	for _, args := range [][]string{
+		{"usage", "--scope", "bogus"},
+		{"usage", "--scope", "runs", "--by", "account"},
+	} {
+		var code int
+		captureStderr(t, func() { code = run(args) })
+		if code == 0 {
+			t.Errorf("run(%v) = 0, want non-zero", args)
+		}
+	}
+}

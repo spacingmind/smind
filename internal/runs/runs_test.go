@@ -143,6 +143,17 @@ func newTestTask(t *testing.T, wm *workspace.Manager, scenario string) store.Tas
 	return task
 }
 
+// withoutUsage drops the turn's usage event, which these tests aren't about.
+func withoutUsage(events []Event) []Event {
+	var out []Event
+	for _, e := range events {
+		if e.Type != taskrunner.EventTypeUsage {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 func newTestRunner(wm *workspace.Manager) *taskrunner.Runner {
 	return taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}))
 }
@@ -251,6 +262,7 @@ func TestRegistry_Start_RunsToCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("History() error = %v", err)
 	}
+	hist = withoutUsage(hist)
 	if len(hist) != 3 {
 		t.Fatalf("got %d history events, want 3: %+v", len(hist), hist)
 	}
@@ -335,7 +347,7 @@ func TestRegistry_Subscribe_MidRunAttach_BackfillThenLive(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	got := drainToClose(t, events, 5*time.Second)
+	got := withoutUsage(drainToClose(t, events, 5*time.Second))
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3: %+v", len(got), got)
 	}
@@ -375,7 +387,7 @@ func TestRegistry_Subscribe_AlreadyFinished(t *testing.T) {
 	}
 	defer unsubscribe()
 
-	got := drainToClose(t, events, time.Second)
+	got := withoutUsage(drainToClose(t, events, time.Second))
 	if len(got) != 3 {
 		t.Fatalf("got %d events, want 3: %+v", len(got), got)
 	}
@@ -530,6 +542,7 @@ func TestRegistry_TwoRuns_DoNotCrossContaminate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("History(B) error = %v", err)
 	}
+	histA, histB = withoutUsage(histA), withoutUsage(histB)
 	if len(histA) != 3 || len(histB) != 3 {
 		t.Fatalf("len(histA) = %d, len(histB) = %d, want 3 and 3", len(histA), len(histB))
 	}
