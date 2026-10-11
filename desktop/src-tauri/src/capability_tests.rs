@@ -39,6 +39,7 @@ fn capability_allowlist_exact() {
         "allow-app-update-check",
         "allow-app-update-install",
         "allow-app-quit",
+        "allow-app-menu-action",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",
@@ -107,6 +108,9 @@ fn app_quit_is_allowlisted_and_registered() {
         .filter_map(Value::as_str)
         .collect();
     assert!(perms.contains(&"allow-app-quit"));
+    assert!(perms.contains(&"allow-app-menu-action"));
+    assert!(BUILD_RS.contains("\"app_menu_action\""));
+    assert!(include_str!("lib.rs").contains("menu::app_menu_action"));
     assert!(BUILD_RS.contains("\"app_quit\""));
     assert!(include_str!("lib.rs").contains("commands::app_quit"));
 }

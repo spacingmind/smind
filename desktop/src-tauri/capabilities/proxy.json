@@ -28,6 +28,7 @@
     "allow-app-update-check",
     "allow-app-update-install",
     "allow-app-quit",
+    "allow-app-menu-action",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",

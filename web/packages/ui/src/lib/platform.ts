@@ -69,6 +69,23 @@ export interface EditorInfo {
   kind: "fileManager" | "editor";
 }
 
+/**
+ * The native-only app-menu actions `app_menu_action` accepts (a fixed Rust-side
+ * allowlist in `menu.rs`); renderer actions go through the keyboard registry instead.
+ */
+export type NativeMenuActionId =
+  | "reload"
+  | "zoom-in"
+  | "zoom-out"
+  | "zoom-reset"
+  | "fullscreen"
+  | "minimize"
+  | "hide"
+  | "about"
+  | "log-folder"
+  | "github"
+  | "quit";
+
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
   listConnections(): Promise<Connection[]>;
@@ -80,6 +97,8 @@ export interface DesktopApi {
   openExternal(url: string): Promise<void>;
   /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
   quit(): Promise<void>;
+  /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
+  menuAction(id: NativeMenuActionId): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
   daemonStatus(): Promise<DaemonStatus>;
   daemonInstall(): Promise<DaemonStatus>;
@@ -167,6 +186,7 @@ function unavailable(): DesktopApi {
     getCurrentConnection: () => reject(),
     openExternal: () => reject(),
     quit: () => reject(),
+    menuAction: () => reject(),
     daemonStatus: () => reject(),
     daemonInstall: () => reject(),
     daemonUpdate: () => reject(),
@@ -248,6 +268,14 @@ function realDesktopApi(): DesktopApi {
     async quit() {
       const invoke = await loadInvoke();
       await invoke("app_quit");
+    },
+    async menuAction(id) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("app_menu_action", { id });
+      } catch (err) {
+        throw asError(err);
+      }
     },
     async daemonStatus() {
       const invoke = await loadInvoke();

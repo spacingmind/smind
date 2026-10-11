@@ -17,6 +17,17 @@
 //! (Ctrl/Cmd+T, +W, +K, +F, +,, +B): choosing one emits a `menu-action`
 //! event and the renderer's dedupe keeps the keystroke from firing twice.
 //!
+//! Accelerator table (`accelerator`, pinned by
+//! `menu_accelerators_follow_the_platform_table`): macOS carries every
+//! item's accelerator. On Windows/Linux only the items that are honoured
+//! there keep one -- Reload, Zoom In/Out/Reset, Toggle Fullscreen, Quit
+//! (the renderer owns Ctrl+Q there, see `keyboard/shortcuts.ts`'s
+//! `app-quit`) and the debug-only DevTools F12. Minimize's Cmd+M is a
+//! macOS convention, so it has none elsewhere. The window is undecorated
+//! on Windows/Linux, so the menu bar itself is not drawn; the same
+//! actions live in the header's app menu (`app-menu.tsx`), which reaches
+//! the native-only ones through `app_menu_action`.
+//!
 //! The D3 items carry their accelerator on macOS only. On Windows and
 //! Linux, CmdOrCtrl resolves to Ctrl, and Ctrl+W/K/B/F/T are readline
 //! keys inside the terminal pane (delete-word, kill-line, back/forward-
@@ -79,14 +90,37 @@ pub fn update_menu_location(os: &str) -> UpdateMenuLocation {
     }
 }
 
-/// The accelerator for a D3 item: the combo it shares with the binding
-/// table on macOS, nothing on Windows/Linux (see the module comment).
-fn renderer_accel(combo: &str) -> Option<&str> {
-    if cfg!(target_os = "macos") {
-        Some(combo)
-    } else {
-        None
-    }
+/// Every item that can carry an accelerator, with its macOS combo and
+/// whether the combo is also honoured on Windows/Linux.
+const ACCELERATORS: &[(&str, &str, bool)] = &[
+    (ID_APP_SETTINGS, "CmdOrCtrl+,", false),
+    (ID_APP_QUIT, "CmdOrCtrl+Q", false),
+    (ID_NEW_TAB, "CmdOrCtrl+T", false),
+    (ID_CLOSE_TAB, "CmdOrCtrl+W", false),
+    (ID_SETTINGS, "CmdOrCtrl+,", false),
+    (ID_RELOAD, "CmdOrCtrl+R", true),
+    (ID_QUIT, "CmdOrCtrl+Q", true),
+    (ID_PALETTE, "CmdOrCtrl+K", false),
+    (ID_FIND, "CmdOrCtrl+F", false),
+    (ID_TOGGLE_SIDEBAR, "CmdOrCtrl+B", false),
+    (ID_ZOOM_IN, "CmdOrCtrl+Plus", true),
+    (ID_ZOOM_OUT, "CmdOrCtrl+-", true),
+    (ID_ZOOM_RESET, "CmdOrCtrl+0", true),
+    (ID_FULLSCREEN, "F11", true),
+    (ID_DEVTOOLS, "F12", true),
+    (ID_MINIMIZE, "CmdOrCtrl+M", false),
+];
+
+/// The accelerator `item` shows on `os` (`std::env::consts::OS` spelling).
+fn accelerator(item: &str, os: &str) -> Option<&'static str> {
+    ACCELERATORS
+        .iter()
+        .find(|(id, _, _)| *id == item)
+        .and_then(|(_, combo, everywhere)| (os == "macos" || *everywhere).then_some(*combo))
+}
+
+fn accel(item: &str) -> Option<&'static str> {
+    accelerator(item, std::env::consts::OS)
 }
 
 pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
@@ -120,7 +154,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 ID_APP_SETTINGS,
                 "Settings…",
                 true,
-                renderer_accel("CmdOrCtrl+,"),
+                accel(ID_APP_SETTINGS),
             )?)
             .separator()
             .item(&PredefinedMenuItem::hide(app, Some("Hide smind"))?)
@@ -131,7 +165,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 ID_APP_QUIT,
                 "Quit smind",
                 true,
-                Some("CmdOrCtrl+Q"),
+                accel(ID_APP_QUIT),
             )?)
             .build()?;
         app_menu = Some(app_submenu);
@@ -143,14 +177,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_NEW_TAB,
             "New Tab",
             true,
-            renderer_accel("CmdOrCtrl+T"),
+            accel(ID_NEW_TAB),
         )?)
         .item(&MenuItem::with_id(
             app,
             ID_CLOSE_TAB,
             "Close Tab",
             true,
-            renderer_accel("CmdOrCtrl+W"),
+            accel(ID_CLOSE_TAB),
         )?);
     if !cfg!(target_os = "macos") {
         // Settings… lives in the app menu on macOS; the File menu hosts it
@@ -160,7 +194,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_SETTINGS,
             "Settings…",
             true,
-            renderer_accel("CmdOrCtrl+,"),
+            accel(ID_SETTINGS),
         )?);
     }
     let file = file_builder
@@ -170,7 +204,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_RELOAD,
             "Reload",
             true,
-            Some("CmdOrCtrl+R"),
+            accel(ID_RELOAD),
         )?)
         .separator()
         .item(&MenuItem::with_id(
@@ -178,7 +212,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_QUIT,
             "Quit",
             true,
-            Some("CmdOrCtrl+Q"),
+            accel(ID_QUIT),
         )?)
         .build()?;
 
@@ -198,21 +232,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_PALETTE,
             "Command Palette",
             true,
-            renderer_accel("CmdOrCtrl+K"),
+            accel(ID_PALETTE),
         )?)
         .item(&MenuItem::with_id(
             app,
             ID_FIND,
             "Find",
             true,
-            renderer_accel("CmdOrCtrl+F"),
+            accel(ID_FIND),
         )?)
         .item(&MenuItem::with_id(
             app,
             ID_TOGGLE_SIDEBAR,
             "Toggle Sidebar",
             true,
-            renderer_accel("CmdOrCtrl+B"),
+            accel(ID_TOGGLE_SIDEBAR),
         )?)
         .separator()
         .item(&MenuItem::with_id(
@@ -220,21 +254,21 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_ZOOM_IN,
             "Zoom In",
             true,
-            Some("CmdOrCtrl+Plus"),
+            accel(ID_ZOOM_IN),
         )?)
         .item(&MenuItem::with_id(
             app,
             ID_ZOOM_OUT,
             "Zoom Out",
             true,
-            Some("CmdOrCtrl+-"),
+            accel(ID_ZOOM_OUT),
         )?)
         .item(&MenuItem::with_id(
             app,
             ID_ZOOM_RESET,
             "Reset Zoom",
             true,
-            Some("CmdOrCtrl+0"),
+            accel(ID_ZOOM_RESET),
         )?)
         .separator()
         .item(&MenuItem::with_id(
@@ -242,7 +276,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_FULLSCREEN,
             "Toggle Fullscreen",
             true,
-            Some("F11"),
+            accel(ID_FULLSCREEN),
         )?);
     if cfg!(debug_assertions) {
         view_builder = view_builder.separator().item(&MenuItem::with_id(
@@ -250,7 +284,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_DEVTOOLS,
             "Toggle DevTools",
             true,
-            Some("F12"),
+            accel(ID_DEVTOOLS),
         )?);
     }
     let view = view_builder.build()?;
@@ -261,7 +295,7 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ID_MINIMIZE,
             "Minimize",
             true,
-            Some("CmdOrCtrl+M"),
+            accel(ID_MINIMIZE),
         )?)
         // No tray on macOS (desktop-macos-app M3): the window just hides
         // and the Dock icon brings it back.
@@ -341,6 +375,11 @@ pub fn handle_event(app: &AppHandle, id: &str) {
         return;
     }
 
+    handle_native(app, id);
+}
+
+/// The native-only items (everything `menu_action_for` does not claim).
+fn handle_native(app: &AppHandle, id: &str) {
     let Some(win) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
@@ -379,6 +418,40 @@ pub fn handle_event(app: &AppHandle, id: &str) {
         }
         _ => {}
     }
+}
+
+/// The ids `app_menu_action` accepts, and the menu item each stands for.
+/// Renderer actions are not here: the header app menu dispatches those
+/// through the keyboard registry, never over IPC.
+const NATIVE_MENU_ACTIONS: &[(&str, &str)] = &[
+    ("reload", ID_RELOAD),
+    ("zoom-in", ID_ZOOM_IN),
+    ("zoom-out", ID_ZOOM_OUT),
+    ("zoom-reset", ID_ZOOM_RESET),
+    ("fullscreen", ID_FULLSCREEN),
+    ("minimize", ID_MINIMIZE),
+    ("hide", ID_HIDE),
+    ("about", ID_ABOUT),
+    ("log-folder", ID_LOG_FOLDER),
+    ("github", ID_GITHUB),
+    ("quit", ID_QUIT),
+];
+
+fn native_item_for(action: &str) -> Option<&'static str> {
+    NATIVE_MENU_ACTIONS
+        .iter()
+        .find(|(name, _)| *name == action)
+        .map(|(_, item)| *item)
+}
+
+/// The header app menu's (Windows/Linux) native items: runs the same logic
+/// as clicking the menu item. One command with an allowlist rather than one
+/// command per item; an unknown id is rejected.
+#[tauri::command]
+pub fn app_menu_action(app: AppHandle, id: String) -> Result<(), String> {
+    let item = native_item_for(&id).ok_or_else(|| format!("app_menu_action: unknown id {id:?}"))?;
+    handle_native(&app, item);
+    Ok(())
 }
 
 /// The action id a menu item id maps to, for items the renderer performs.
@@ -454,5 +527,66 @@ mod tests {
             super::update_menu_location("linux"),
             super::UpdateMenuLocation::None
         );
+    }
+
+    #[test]
+    fn menu_accelerators_follow_the_platform_table() {
+        // macOS: every item that can carry one does.
+        for (id, combo, _) in ACCELERATORS {
+            assert_eq!(accelerator(id, "macos"), Some(*combo), "{id} on macos");
+        }
+        // Windows/Linux: renderer-action items (D3 rule) and the macOS-only
+        // conventions carry none...
+        for os in ["windows", "linux"] {
+            for id in [
+                ID_NEW_TAB,
+                ID_CLOSE_TAB,
+                ID_PALETTE,
+                ID_FIND,
+                ID_SETTINGS,
+                ID_TOGGLE_SIDEBAR,
+                ID_MINIMIZE,
+                ID_APP_QUIT,
+                ID_APP_SETTINGS,
+            ] {
+                assert_eq!(accelerator(id, os), None, "{id} on {os}");
+            }
+            // ...and only the honoured-everywhere set keeps one.
+            let mut kept: Vec<&str> = ACCELERATORS
+                .iter()
+                .filter(|(id, _, _)| accelerator(id, os).is_some())
+                .map(|(id, _, _)| *id)
+                .collect();
+            kept.sort_unstable();
+            let mut want = vec![
+                ID_RELOAD,
+                ID_QUIT,
+                ID_ZOOM_IN,
+                ID_ZOOM_OUT,
+                ID_ZOOM_RESET,
+                ID_FULLSCREEN,
+                ID_DEVTOOLS,
+            ];
+            want.sort_unstable();
+            assert_eq!(kept, want, "{os}");
+        }
+        // No renderer action is ever honoured natively off macOS.
+        for (id, _, everywhere) in ACCELERATORS {
+            if menu_action_for(id).is_some() {
+                assert!(!everywhere, "{id}");
+            }
+        }
+    }
+
+    #[test]
+    fn app_menu_action_allowlist_is_native_only_and_rejects_unknown_ids() {
+        for (name, item) in NATIVE_MENU_ACTIONS {
+            assert_eq!(native_item_for(name), Some(*item));
+            assert_eq!(menu_action_for(item), None, "{name} must not be a renderer action");
+        }
+        assert_eq!(native_item_for("tab.new"), None);
+        assert_eq!(native_item_for("file-reload"), None);
+        assert_eq!(native_item_for(""), None);
+        assert_eq!(native_item_for("devtools"), None);
     }
 }
