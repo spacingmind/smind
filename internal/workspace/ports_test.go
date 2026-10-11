@@ -3,7 +3,6 @@ package workspace
 import (
 	"errors"
 	"net"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -187,16 +186,17 @@ func TestCreateTask_PortExhaustionLeavesNothing(t *testing.T) {
 	if len(tasks) != 1 || tasks[0].ID != first.ID {
 		t.Fatalf("tasks = %+v, want only the first", tasks)
 	}
-	entries, _ := os.ReadDir(filepath.Dir(*first.WorktreePath))
-	if len(entries) != 1 {
-		t.Fatalf("worktree dirs = %d, want 1", len(entries))
+	// The worktree dir root is shared by parallel tests, so look only for
+	// this test's own discarded task by its slug.
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(*first.WorktreePath), "second-*")); len(left) != 0 {
+		t.Fatalf("discarded worktree dirs left behind: %v", left)
 	}
 	out, err := runGitOutput(w.Path, "branch", "--list", "smind/task-*")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(strings.Fields(strings.ReplaceAll(out, "+", ""))); n != 1 {
-		t.Fatalf("generated branches = %q, want only the first task's", out)
+	if strings.Contains(out, "task-second-") {
+		t.Fatalf("discarded task's branch left behind: %q", out)
 	}
 }
 
