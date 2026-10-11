@@ -411,12 +411,27 @@ fn wsl_install(distro: &str, urls: &release::ReleaseUrls) -> Result<(), String> 
     Ok(())
 }
 
-fn wsl_start(distro: &str) -> Result<(), String> {
-    let out = wsl::run(&wsl::start_detached_argv(distro)).map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("failed to start daemon: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(())
+/// wsl_start runs the start script, which only exits 0 once the daemon is
+/// listening on `port`. Blocking (up to ~15s): call via `wsl_start_blocking`
+/// from async code.
+fn wsl_start(distro: &str, port: u16) -> Result<(), String> {
+    let out = wsl::run(&wsl::start_detached_argv(distro, port)).map_err(|e| e.to_string())?;
+    wsl::start_outcome(out.status.success(), &crate::editors::decode_wsl_output(&out.stderr))
+}
+
+/// wsl_start_blocking moves `wsl_start` off the async runtime's threads.
+/// `retry` adds the single automatic retry restart uses.
+async fn wsl_start_blocking(distro: String, port: u16, retry: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || if retry { start_with_one_retry(|| wsl_start(&distro, port)) } else { wsl_start(&distro, port) })
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// start_with_one_retry runs `start` once more if it fails, so a Restart
+/// that loses a race with the old process's shutdown doesn't leave the user
+/// without a daemon. The error of the last attempt is what's reported.
+fn start_with_one_retry<F: FnMut() -> Result<(), String>>(mut start: F) -> Result<(), String> {
+    start().or_else(|_| start()).map_err(|e| format!("daemon failed to start after retry: {e}"))
 }
 
 /// wsl_binary_installed answers `restart`'s precondition (and
@@ -613,12 +628,12 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 }
             }
 
-            wsl_start(&distro)?;
+            wsl_start_blocking(distro.clone(), port, false).await?;
 
             // Bug 1's post-start half: don't trust "whoever now owns the
             // port" -- verify identity (and reported version) before
             // saving a ManagedRecord, exactly as the macOS branch does.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            // The start script only returns once the port is listening.
             let (_, daemon_version) = probe_healthz(&base_url).await;
             let port_owner_after = find_port_owner(platform, Some(&distro), port);
             // Resolve (not just check) the new process's real path, so
@@ -720,9 +735,11 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
         }
         Platform::Wsl2 => {
             let distro = distro.as_deref().unwrap();
-            wsl_start(distro)?;
+            // On failure this returns Err before any record is saved;
+            // compute_status then reads the live port, so a dead daemon is
+            // never reported as running.
+            wsl_start_blocking(distro.to_string(), port, true).await?;
 
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             let port_owner_after = find_port_owner(platform, Some(distro), port);
             let resolved_exe_after = port_owner_after.and_then(|pid| wsl_resolve_exe_path(distro, pid));
             let exe_matches_after = resolved_exe_after.as_deref().map(wsl::exe_path_matches_managed_bin).unwrap_or(false);
@@ -841,6 +858,42 @@ mod tests {
 
     use smind_daemon_client::daemon_manager::managed::ManagedState;
     use smind_daemon_client::daemon_manager::version::Comparison;
+
+    #[test]
+    fn restart_start_failure_retries_once_then_reports_the_error() {
+        let mut calls = 0;
+        let r = start_with_one_retry(|| {
+            calls += 1;
+            Err(format!("boom {calls}"))
+        });
+        assert_eq!(calls, 2);
+        assert_eq!(r, Err("daemon failed to start after retry: boom 2".to_string()));
+
+        let mut calls = 0;
+        let r = start_with_one_retry(|| {
+            calls += 1;
+            if calls == 1 { Err("first".to_string()) } else { Ok(()) }
+        });
+        assert_eq!((calls, r), (2, Ok(())));
+
+        let mut calls = 0;
+        assert_eq!(start_with_one_retry(|| { calls += 1; Ok(()) }), Ok(()));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn failed_restart_never_reports_managed_running() {
+        // A failed start returns Err before the record-saving code runs
+        // (`?` in restart), and status is computed from the live port: with
+        // nothing listening, classify is NotRunning even if a stale record
+        // still names the old pid.
+        let saved = std::cell::Cell::new(false);
+        let r = start_with_one_retry(|| Err("x".to_string())).inspect(|_| saved.set(true));
+        assert!(r.is_err());
+        assert!(!saved.get());
+        let stale = ManagedRecord { pid: 4242, version: "0.1.0".into(), installed_at: "0".into(), exe_path: "/x".into() };
+        assert_eq!(managed::classify(Some(&stale), None), ManagedState::NotRunning);
+    }
 
     fn layout_in(dir: &Path) -> native::Layout {
         native::Layout::new(&dir.join("managed-daemon"))

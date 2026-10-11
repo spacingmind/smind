@@ -524,6 +524,7 @@ type countingNotifier struct {
 func (c *countingNotifier) NotifyRunStatus(s RunStatus) {}
 func (c *countingNotifier) NotifyPermissionPending(string, int64, int64, string, string, []taskrunner.PermissionOption) {
 }
+func (c *countingNotifier) NotifyPermissionResolved(string, int64, int64, string, string, string) {}
 func (c *countingNotifier) NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
