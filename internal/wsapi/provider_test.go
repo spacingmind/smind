@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -207,7 +208,14 @@ func TestServer_ProviderTest_CLIMissing(t *testing.T) {
 func TestServer_ProviderTest_CLIPresent(t *testing.T) {
 	dir := t.TempDir()
 	fake := filepath.Join(dir, "npx")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	content := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		// npm installs npx as npx.cmd; a shim-only install is exactly
+		// what provider.test must report as present (PATHEXT lookup).
+		fake = filepath.Join(dir, "npx.cmd")
+		content = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(fake, []byte(content), 0o755); err != nil {
 		t.Fatalf("write fake npx: %v", err)
 	}
 	t.Setenv("PATH", dir)
