@@ -9,6 +9,32 @@ permissions:
   contents: read
 
 jobs:
+  windows-terminal:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Mark repo safe for git
+        run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test terminal package
+        run: go test -v ./internal/terminal/...
+
+      - name: Test full suite (non-blocking, input for runtime-parity plan)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: go test -timeout 8m ./...
+
   ci:
     runs-on: ubuntu-latest
     steps:

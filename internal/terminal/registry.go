@@ -8,8 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/creack/pty"
-
 	"github.com/spacingmind/smind/internal/store"
 )
 
@@ -167,9 +165,21 @@ type session struct {
 	id        string
 	taskID    int64
 	startedAt time.Time
-	cmd       *exec.Cmd
-	ptmx      *os.File
 
+	// pty is the started shell + its PTY behind the platform seam (see
+	// ptySession's doc comment): the cmd, the pty itself, and per-OS kill
+	// bookkeeping (a Job Object handle on Windows) all live in there, and
+	// every platform difference in wait/kill ordering is confined to it.
+	pty *ptySession
+
+	// reaped closes once the session's process has exited and been fully
+	// reaped, by waitLoop (xpty.WaitProcess on both platforms -- see
+	// ptySession's doc comment for why the waiter is a dedicated loop
+	// rather than readLoop). readLoop waits on it right before finish, so
+	// finish -- and therefore Close, which blocks on closedCh, which
+	// finish closes last -- can rely on the process genuinely being gone
+	// by the time any of them run, on both platforms.
+	reaped chan struct{}
 	// closedCh closes once this session's background read loop has
 	// observed the shell exiting (naturally, or via Close) and finished
 	// running finish -- see Close, which waits on it so a caller can rely
@@ -274,14 +284,14 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 	cmd.Dir = worktreePath
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
-	ptmx, err := pty.Start(cmd)
+	pty, err := startPty(cmd)
 	if err != nil {
 		return "", fmt.Errorf("terminal: create: start shell: %w", err)
 	}
 
 	id, err := newSessionID()
 	if err != nil {
-		killAndReap(ptmx, cmd)
+		pty.killAndReap()
 		return "", fmt.Errorf("terminal: create: %w", err)
 	}
 
@@ -289,7 +299,7 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 	if _, err := reg.st.CreateTerminalSession(store.TerminalSession{
 		ID: id, TaskID: taskID, Status: string(StatusRunning), StartedAt: startedAt,
 	}); err != nil {
-		killAndReap(ptmx, cmd)
+		pty.killAndReap()
 		return "", fmt.Errorf("terminal: create: persist session: %w", err)
 	}
 
@@ -297,8 +307,8 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 		id:             id,
 		taskID:         taskID,
 		startedAt:      startedAt,
-		cmd:            cmd,
-		ptmx:           ptmx,
+		pty:            pty,
+		reaped:         make(chan struct{}),
 		closedCh:       make(chan struct{}),
 		checkpointStop: make(chan struct{}),
 		checkpointDone: make(chan struct{}),
@@ -311,24 +321,10 @@ func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
 	reg.mu.Unlock()
 
 	go reg.readLoop(s)
+	go reg.waitLoop(s)
 	go reg.checkpointLoop(s)
 
 	return id, nil
-}
-
-// killAndReap kills cmd's already-spawned process and waits for it to
-// actually exit, discarding both the kill error (the process may have
-// already exited on its own) and the wait error (its exit status is
-// irrelevant here -- the caller is abandoning this session entirely,
-// before it was ever registered). Used by Create's error paths, both of
-// which run after pty.Start has already spawned a real shell: killing it
-// without also reaping it (a plain Kill with no following Wait) leaves a
-// zombie process under the daemon, since nothing else ever calls Wait on
-// it -- mirrors readLoop's own reap comment for the normal-exit path.
-func killAndReap(ptmx *os.File, cmd *exec.Cmd) {
-	_ = ptmx.Close()
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
 }
 
 // readLoop is the one goroutine that ever reads s.ptmx: it pushes every
@@ -343,7 +339,7 @@ func killAndReap(ptmx *os.File, cmd *exec.Cmd) {
 func (reg *Registry) readLoop(s *session) {
 	buf := make([]byte, readBufSize)
 	for {
-		n, err := s.ptmx.Read(buf)
+		n, err := s.pty.Read(buf)
 		if n > 0 {
 			data := make([]byte, n)
 			copy(data, buf[:n])
@@ -354,13 +350,50 @@ func (reg *Registry) readLoop(s *session) {
 		}
 	}
 
-	// Reap the process so it doesn't linger as a zombie. Its exit status
-	// (clean exit, or killed by Close's SIGKILL) isn't surfaced anywhere
+	// readLoop is the sole reader, so it's also the natural owner of the
+	// pty's lifecycle end on the natural-exit path: closing it here (and
+	// not only via Close/waitLoop) is what keeps a naturally-exited Unix
+	// session from leaking its master fd forever. A double close with
+	// Close's/waitLoop's own close is harmless: os.File returns an
+	// already-closed error (ignored), and ConPTY guards with closeOnce.
+	_ = s.pty.Close()
+
+	// Wait until waitLoop has reaped the process (and released the job
+	// handle on Windows) before finishing: this is what guarantees -- on
+	// both platforms, whichever of readLoop/waitLoop observed the exit
+	// first -- that by the time finish (and therefore Close, which blocks
+	// on closedCh) runs, the process is genuinely gone rather than merely
+	// asked to die. The reap itself is waitLoop's job now; its exit
+	// status (clean exit, or killed by Close) isn't surfaced anywhere
 	// today -- a terminal session has no analog to a Run's
 	// success/error/stopped distinction, just running or closed.
-	_ = s.cmd.Wait()
+	<-s.reaped
 
 	reg.finish(s)
+}
+
+// waitLoop is the one goroutine that ever waits on the session's
+// process: it blocks in xpty.WaitProcess (a plain cmd.Wait on Unix; the
+// ConPTY-correct process wait on Windows, where cmd.Wait is invalid for
+// attribute-list-started processes), then releases the per-OS kill
+// bookkeeping (on Windows, closing the Job Object handle -- which is
+// both what a natural exit does instead of leaking the handle and a
+// no-op-if-killTree-beat-us-to-it, via the same once-guard), closes
+// reaped (unblocking readLoop if the pty read already errored), and
+// finally invokes the platform exit hook -- on Windows, closing the pty
+// so readLoop's Read unblocks, since ConPTY never EOFs its output pipe
+// on child exit (AC4); on Unix the hook is nil and readLoop's Read has
+// typically already errored on its own. Ordering note: onExit runs after
+// reaped closes so readLoop's wait-on-reaped then finish sequence is
+// never entered while the pty could still produce output the process
+// wrote before exiting.
+func (reg *Registry) waitLoop(s *session) {
+	_ = s.pty.wait()
+	s.pty.job.release()
+	close(s.reaped)
+	if s.pty.onExit != nil {
+		s.pty.onExit()
+	}
 }
 
 // checkpointLoop persists s's scrollback on checkpointCadence's bounded
@@ -600,7 +633,7 @@ func (reg *Registry) Write(id string, data []byte) error {
 		return fmt.Errorf("terminal: write %s: session no longer running", id)
 	}
 
-	if _, err := s.ptmx.Write(data); err != nil {
+	if _, err := s.pty.Write(data); err != nil {
 		return fmt.Errorf("terminal: write %s: %w", id, err)
 	}
 	return nil
@@ -625,7 +658,7 @@ func (reg *Registry) Resize(id string, cols, rows uint16) error {
 		return fmt.Errorf("terminal: resize %s: session no longer running", id)
 	}
 
-	if err := pty.Setsize(s.ptmx, &pty.Winsize{Rows: rows, Cols: cols}); err != nil {
+	if err := s.pty.Resize(int(cols), int(rows)); err != nil {
 		return fmt.Errorf("terminal: resize %s: %w", id, err)
 	}
 	return nil
@@ -661,8 +694,15 @@ func (reg *Registry) Close(id string) error {
 		return nil
 	}
 
-	killTree(s.cmd.Process.Pid)
-	_ = s.ptmx.Close()
+	s.pty.job.killTree(s.pty.pid())
+	// Close the pty explicitly too (not just via killTree/waitLoop's
+	// paths): on Unix a descendant that job control put in its own
+	// process group survives killTree's signals (see kill_other.go) and
+	// keeps the slave side open, so readLoop would never see EOF and
+	// this Close would block on closedCh forever. Close is the explicit-
+	// intent path -- dropping any output still buffered in the pty here
+	// is fine.
+	_ = s.pty.Close()
 
 	<-s.closedCh
 	return nil
