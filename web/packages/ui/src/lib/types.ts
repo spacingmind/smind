@@ -35,6 +35,8 @@ export interface Task {
   CreatedAt: string;
   UpdatedAt: string;
   ArchivedAt: string | null;
+  /** The parent task id; null/absent for a root task. */
+  ParentTaskID?: number | null;
   /** The setup/port fields are optional only so an older daemon (and bare test fixtures) still type-check; read them as ""/null when absent. */
   SetupStatus?: SetupStatus;
   /** Failure reason when SetupStatus is "failed". */
