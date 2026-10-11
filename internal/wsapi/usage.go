@@ -108,6 +108,7 @@ type usageSummaryEntry struct {
 	CacheWriteTokens int64    `json:"cacheWriteTokens"`
 	ReasoningTokens  int64    `json:"reasoningTokens"`
 	CostUSD          *float64 `json:"costUsd,omitempty"`
+	Unreported       []string `json:"unreported,omitempty"`
 }
 
 func usageSummaryEntryFrom(u store.UsageSummary) usageSummaryEntry {
@@ -115,7 +116,7 @@ func usageSummaryEntryFrom(u store.UsageSummary) usageSummaryEntry {
 		Scope: usageScopeProxy,
 		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
-		ReasoningTokens: u.ReasoningTokens,
+		ReasoningTokens: u.ReasoningTokens, Unreported: u.Unreported,
 	}
 }
 
@@ -124,7 +125,7 @@ func runUsageSummaryEntryFrom(u store.RunUsageSummary) usageSummaryEntry {
 		Scope: usageScopeRuns,
 		Key:   u.Key, Count: u.Count, InputTokens: u.InputTokens, OutputTokens: u.OutputTokens,
 		CacheReadTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheWriteTokens,
-		ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD,
+		ReasoningTokens: u.ReasoningTokens, CostUSD: u.CostUSD, Unreported: u.Unreported,
 	}
 }
 

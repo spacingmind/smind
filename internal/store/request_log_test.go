@@ -170,3 +170,62 @@ func TestStore_SummarizeRequestLogs_InvalidGroupBy(t *testing.T) {
 		t.Fatal("SummarizeRequestLogs(groupBy=bogus) succeeded, want error")
 	}
 }
+
+// TestSummarizeRequestLogs_UnreportedFields covers the U0 scenario for
+// proxy rows: a group whose rows never reported a token field (e.g. over
+// the response parse cap) names that field in Unreported.
+func TestSummarizeRequestLogs_UnreportedFields(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	acct := newTestAccount(t, s, "anthropic", "a1")
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// Reported row: input/output (and nothing else).
+	newTestRequestLog(t, s, base, &acct.ID, ptr("claude-3"), 100, 10)
+	// Over-parse-cap style row: no token fields at all.
+	mustNoErr := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("CreateRequestLog() error = %v", err)
+		}
+	}
+	mustNoErr(func() error {
+		_, err := s.CreateRequestLog(RequestLog{StartedAt: base.Add(time.Minute), Provider: "anthropic",
+			AccountID: &acct.ID, SessionKey: "sess", Status: 200, Outcome: RequestLogOutcomeOK, DurationMs: 10})
+		return err
+	}())
+
+	summary, err := s.SummarizeRequestLogs(nil, nil, "account")
+	if err != nil {
+		t.Fatalf("SummarizeRequestLogs() error = %v", err)
+	}
+	if len(summary) != 1 {
+		t.Fatalf("SummarizeRequestLogs() = %d groups, want 1", len(summary))
+	}
+	want := []string{"cacheReadTokens", "cacheWriteTokens", "reasoningTokens"}
+	got := summary[0].Unreported
+	if len(got) != len(want) {
+		t.Fatalf("Unreported = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Unreported = %v, want %v", got, want)
+		}
+	}
+
+	// A row reporting the remaining fields clears the list entirely.
+	mustNoErr(func() error {
+		_, err := s.CreateRequestLog(RequestLog{StartedAt: base.Add(2 * time.Minute), Provider: "anthropic",
+			AccountID: &acct.ID, SessionKey: "sess", Status: 200, Outcome: RequestLogOutcomeOK, DurationMs: 10,
+			CacheReadTokens: ptr(int64(1)), CacheWriteTokens: ptr(int64(2)), ReasoningTokens: ptr(int64(0))})
+		return err
+	}())
+	summary, err = s.SummarizeRequestLogs(nil, nil, "account")
+	if err != nil || len(summary) != 1 {
+		t.Fatalf("SummarizeRequestLogs() = %+v, %v; want 1 group", summary, err)
+	}
+	if len(summary[0].Unreported) != 0 {
+		t.Errorf("Unreported = %v, want nil (mix of NULL and reported rows)", summary[0].Unreported)
+	}
+}
