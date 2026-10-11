@@ -1756,9 +1756,45 @@ func handleRunSetConfigOption(reg *runs.Registry) handlerFunc {
 			RunID    string `json:"runId"`
 			ConfigID string `json:"configId"`
 			Value    string `json:"value"`
+			Source   string `json:"source"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.setConfigOption: invalid params: %w", err)
+		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.setConfigOption: invalid source %q", p.Source)
+		}
+		// ADR-0019 decision 6, fail-closed: a non-human caller may only
+		// change live settings that cannot widen permissions -- options in
+		// the thought_level or model categories. Anything else (category
+		// "mode", an empty/unknown category, or an unknown configId) is
+		// rejected before the session is touched.
+		if p.Source != store.ChatQueueSourceHuman {
+			opts, err := reg.ListConfigOptions(p.RunID)
+			if err != nil {
+				return nil, fmt.Errorf("run.setConfigOption: %w", err)
+			}
+			var category string
+			found := false
+			for _, o := range opts {
+				if o.ConfigID == p.ConfigID {
+					category, found = o.Category, true
+					break
+				}
+			}
+			if !found {
+				return nil, fmt.Errorf("run.setConfigOption: unknown configId %q for run %q (ADR-0019 decision 6: a non-human caller may only set thought_level or model options)", p.ConfigID, p.RunID)
+			}
+			switch category {
+			case "thought_level", "model":
+			default:
+				return nil, fmt.Errorf("run.setConfigOption: a non-human caller may only set options in the thought_level or model categories, not %q (ADR-0019 decision 6)", category)
+			}
 		}
 		opts, err := reg.SetConfigOption(ctx, p.RunID, p.ConfigID, p.Value)
 		if err != nil {
