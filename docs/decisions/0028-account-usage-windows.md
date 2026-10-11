@@ -2,10 +2,10 @@
 
 ## Status
 
-**Proposed, docs-only** (2026-10-11). Nothing here is built. The "Open
-decisions for Human" section lists what must be answered before PR-A
-starts; each has a recommended default. Until the user answers, this is a
-design to pick up, not a commitment.
+**Accepted** (2026-10-11). The user approved the design and answered every
+open decision: D1–D4 and D6–D13 as the recommended defaults, **D5 changed**
+(the web UI ports Paseo's Usage UX; see "Decisions (accepted 2026-10-11)").
+Nothing here is built yet; implementation follows the plan's PR split.
 
 Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/active/account-usage-windows.md).
 
@@ -68,9 +68,17 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   in-flight de-duplication, a 20 s deadline per fetch, forced refresh, and a
   `usage.list_reports` request that streams one update per account.
 - **App/CLI** (`packages/app/src/usage/*`, `packages/cli/src/commands/usage/*`):
-  a sidebar item showing pinned windows (default: windows flagged `summary`),
-  a modal with per-account cards, used/remaining display preference, a
-  refresh button, and `paseo usage ls|inspect --refresh`.
+  a sidebar footer item showing each account's source logo and its default or
+  pinned window percents, a Usage modal over the current screen with
+  per-account cards, a used/remaining preference, per-card and "Refresh all"
+  buttons, a Usage settings section, a remembered host pick, per-agent plan
+  usage in the context-window details, and `paseo usage ls|inspect
+  --refresh`. The UI's history (`#5685` footer item, `#5786` default
+  percents + logos + remembered host, `#5805` streamlined sidebar usage,
+  `#5876` unavailable quota explained, `#5903` derived window names and one
+  pin model, `#5921` Settings discoverable above reports, `#6216` modal over
+  the current screen, `#5975` per-agent usage) is what the web UI in section
+  5 ports.
 
 ### Constraints already decided in smind
 
@@ -89,7 +97,7 @@ Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/activ
   detection. `EnsureFresh` has **no per-account lock** today.
 - **Tokens:** never in argv, logs, or events (ADR-0015, ADR-0017).
 
-## Decision (proposed)
+## Decision
 
 ### 1. Data model: a windows report replaces `quota.Usage`
 
@@ -121,9 +129,10 @@ const (
 )
 
 type Problem struct {
-	Kind   ProblemKind `json:"kind"`
-	Status int         `json:"status,omitempty"` // HTTP status for rejected
-	Detail string      `json:"detail,omitempty"` // fixed vocabulary, never a response body
+	Kind      ProblemKind `json:"kind"`
+	Status    int         `json:"status,omitempty"`    // HTTP status for rejected
+	ExpiresAt *time.Time  `json:"expiresAt,omitempty"` // for expired: when the login expired
+	Detail    string      `json:"detail,omitempty"`    // fixed vocabulary, never a response body
 }
 
 type Tone string // "default" | "ok" | "warning" | "danger"
@@ -422,36 +431,100 @@ removed or reshaped.
 
   No credential fields, no email, no raw provider body. `refresh:true`
   waits up to 20 s for the fetch and returns whatever it has.
-- **wsapi event `account.usage`** (ADR-0005/0009 topic style, full snapshot
-  payload like `account.updated`): emitted after a fetch that changed the
-  stored report (any window pct/reset, status, problem), not on every poll.
-  Registered in `knownTopics`.
+- **wsapi event `account.usage`** (ADR-0005/0009 topic style, full
+  `AccountUsage` snapshot payload like `account.updated`): emitted after
+  **every completed network fetch** (success, `unavailable` or error), so a
+  refresh whose numbers did not change still advances `fetchedAt` ("Updated
+  3m ago"); not emitted for a cache hit. This is how the UI receives a
+  slow account's report without holding back the others (Paseo streams
+  `usage.list_reports.update` for the same reason). A `refresh:true` call
+  with no `accountIds` fetches every eligible account in parallel, each
+  emitting as it settles. Registered in `knownTopics`.
 - **CLI** `smind account usage [--refresh] [--json]`: one block per
   account, one line per window (`Session  41% used · resets in 2h 4m`),
   unavailable accounts show their problem in words, exit 0 whenever the call
   worked (an unavailable account is data, not an error). Distinct from
   `smind usage` (tokens).
-- **MCP** (read-only, ADR-0019 #6): see D8. Recommended: a new
+- **MCP** (read-only, ADR-0019 #6; D8): a new
   `account_usage` tool returning the same `AccountUsage[]` (no `refresh`
   input for run-scoped callers), added to the catalog and
   `mcp_instructions.go`, instead of widening `usage_summary`.
-- **Web**:
-  - **Settings → Accounts/Providers rows** (the existing account list in
-    `providers-section.tsx`): per account, one bar per window with used %,
-    tone color, and the reset time ("resets in 2h 4m", absolute time in a
-    tooltip); account-wide windows first, scoped ones after; balances as a
-    line; unavailable states in words ("Login expired – reconnect", "Provider
-    rejected the token", "No plan windows for API keys"); a "stale · retry
-    in 3 min" hint; refresh button; the polling switch.
-  - **Sidebar footer item**: pinned windows (default: windows with
-    `summary: true`, i.e. the account-wide ones) as compact meters with a
-    used/remaining toggle; click opens a popover with every account's
-    windows. Pins and the toggle are client preferences in `localStorage`
-    (D11); nothing is stored in the daemon. Hidden when there is nothing to
-    show.
-  - The existing Settings → Usage section keeps showing token usage and is
-    retitled "Token usage" if the two would otherwise be confused.
-  - Light and dark screenshot pass before the UI PR merges (standing rule).
+- **Web (D5: a port of Paseo's Usage UX).** The interaction model is
+  Paseo's; the data source is smind's accounts table. Paseo's `UsageReportEntry`
+  becomes `AccountUsage`, its "source" becomes the account's provider
+  (`anthropic` → "Claude", `openai` → "Codex"), its "account" is the smind
+  account row, and its "host" (which machine's daemon to ask) has no
+  equivalent inside one daemon: the remembered pick is an **account filter**
+  instead.
+  - **Sidebar footer Usage item.** A row in the existing footer
+    (`SidebarFooter` in `app-sidebar.tsx`), next to Providers and Agents.
+    Each account's provider logo followed, per pinned window, by a meter and
+    "31% 5h" (the richest layout that fits one line: meters, else labels,
+    else percents alone). With no explicit pins it shows each account's
+    `summary` windows (the first window with a percent if none is marked);
+    pins replace the defaults, an explicit empty selection stays empty (the
+    row then reads plain "Usage"). Unavailable and error accounts are
+    left out of the summary. It remembers the picked account filter. The
+    row is hidden while `accountUsage.enabled` is false or the daemon lacks
+    the RPC; the icon-collapsed rail shows the icon only.
+  - **Usage modal.** Clicking the row opens Usage **over the current
+    screen** (a dialog on wide layouts, a bottom sheet on narrow ones), never
+    a route change, so closing it leaves the user where they were. It mounts
+    on first open and unmounts after it closes, so reports load only while it
+    is shown. Title row: an account filter ("All accounts" or one account;
+    hidden with a single account), **Refresh all**, and a **Settings**
+    button. The body is the per-account cards, scrollable on long lists.
+  - **Cards.** One per account: provider logo, provider name, plan badge,
+    a status dot with "Unavailable" / "Error" when not available, a refresh
+    button whose tooltip says when the report was fetched ("Updated 3m
+    ago", printed on the card itself where there is no hover). One bar per
+    window: label, percent (used, or "N% left"), reset countdown ("resets
+    2h", "resetting now"), a meter coloured by tone `ok` / `warning` /
+    `danger` (default muted). Balances as "$x / $y" or "x left" lines,
+    details as label/value rows, the account label in the footer. Problem
+    states are explained in words, never a bare badge: *expired* ("Login
+    expired 2h ago. Reconnect it in Providers."), *rejected* ("Login
+    rejected (HTTP 401). Reconnect it in Providers."), *no_quota* (the
+    report's detail: "API-key accounts have no plan windows"), *error* (the
+    fixed-vocabulary error plus "retry in 3 min" when backing off). A failed
+    refresh keeps the previous report on screen and adds "Unable to refresh
+    usage".
+  - **Pin windows, used/remaining.** While the sidebar summary is on, every
+    window row is a checkbox that pins it to the footer item (the whole row,
+    a pin glyph with a tooltip, half-strength hover highlight, the checked
+    state in its accessible name: "Pin Claude Session, 31% · resets 2h").
+    A pin is `{provider, windowId}` and matches that window on every
+    account of the provider. A "Percentages" control switches the footer,
+    the cards and Settings between **Used** and **Remaining**.
+  - **Settings → Usage.** The existing Usage section gets a **Plan usage**
+    block **above** the existing token table (retitled **Token usage**): the
+    same cards and controls as the modal, with Refresh all and a visible
+    **Settings** control (the "Summary in sidebar" switch and the
+    Used/Remaining control) in the block's header, above the reports, so it
+    is found without opening a menu. When polling is disabled the block says
+    so, names `accountUsage.enabled`, and offers nothing to refresh. When
+    the daemon predates `account.usage` it says "Update the daemon to see
+    plan usage" and makes no call.
+  - **Per-run plan usage (optional, last).** The run usage pill's popover
+    may show the matching account's plan cards (no pins, no refresh), the
+    way Paseo shows an agent's own account in its context-window details.
+    Smind's runs use the user's own provider login, which may not be a
+    smind account, so it shows only when **exactly one** OAuth account of
+    the run's provider exists, labelled with that account; otherwise
+    nothing. It is a separate, deferrable PR.
+  - **State and rules.** Preferences (`displayAs`, `pins`, picked account,
+    "Summary in sidebar") are client-side in `localStorage` (D11), with
+    Paseo's rules: `null` pins mean defaults, an array (even empty) is the
+    user's selection, an unknown account pick falls back to All. No new web
+    dependency (smind's web has no data-fetching library): the reports live
+    in a small module store fed by `account.usage` and the `account.usage`
+    event, keeping the newer `fetchedAt` when a refresh and a list race. A
+    missing or reshaped field renders as "not shown", never throws.
+  - **Verification.** Component and logic tests mirror Paseo's e2e specs
+    (listed in the plan's PR-D), and a light and dark screenshot pass
+    (desktop and narrow) is required before PR-D merges.
+  - The Settings → Providers rows are unchanged by this ADR (no per-row
+    bars): plan usage has one home, the Usage surfaces above.
 
 ### 6. Security
 
@@ -471,67 +544,59 @@ removed or reshaped.
 - Disclosure: the feature calls two undocumented endpoints using the user's
   tokens. The Settings switch states this in one sentence (D2).
 
-## Open decisions for Human
+## Decisions (accepted 2026-10-11)
 
-Each has a recommended default; PR-A should not start until D1–D4, D9, D10
-are answered (they shape types and the fetcher). Others can be answered
-before their PR.
+The user accepted D1–D4 and D6–D13 as the recommended defaults and changed
+D5. These are decided; they are not to be reopened inside a PR (AGENTS.md
+rule d).
 
-- **D1. Exhaustion threshold.** At what used % is an account "exhausted"?
-  *Recommended:* **100%** on any counted window (config
-  `accountUsage.exhaustThresholdPct`, default 100). Lower values (e.g. 95)
-  fail over earlier but waste quota and amplify endpoint noise.
-- **D2. Default for outbound usage polling.** On or off out of the box?
-  *Recommended:* **on, demand-driven** (no idle timer; zero calls unless a
-  surface or the proxy asks), a single `accountUsage.enabled` kill switch,
-  and a one-line disclosure next to the switch. Alternative: off until the
-  user opts in (safer, but the feature is invisible until discovered).
-- **D3. TTL, backoff, forced-refresh floor.** *Recommended:* TTL 5 min,
-  backoff 1→30 min with jitter and `Retry-After`, forced refresh at most
-  once per 30 s per account.
-- **D4. Providers in v1.** *Recommended:* Anthropic OAuth + OpenAI/ChatGPT
-  OAuth (the two providers the proxy routes and the only two with a login
-  flow); API-key accounts and other providers show "no plan windows". Kimi,
-  xAI, Antigravity (refreshers exist, no known usage endpoint, no proxy
-  route) and balance-only API-key providers are later.
-- **D5. UI placement.** *Recommended:* windows inside each account row of
-  Settings → Accounts/Providers **plus** a sidebar footer item with pins
-  (the Paseo pattern); the Usage settings section stays tokens only.
-  Alternative: one dedicated "Plan usage" settings page.
-- **D6. Should routing use windows at all in the first release?**
-  *Recommended:* **yes, default `accountUsage.routing: true`**, because
-  only a 100% verdict ever changes routing and every failure is fail-open.
-  Alternative: ship display first (PR-A, C, D) and enable routing (PR-B)
-  one release later behind `routing: false`.
-- **D7. Hard policy with an exhausted account.** *Recommended:* keep the
-  existing contract (error, no failover), now naming the reset time.
-  Alternative: windows are advisory only for hard policy and the upstream
-  decides.
-- **D8. MCP shape.** The Supervisor brief suggested extending
-  `usage_summary`. *Recommended:* a **new read-only `account_usage` tool**
-  instead: `usage_summary`'s contract is aggregated rows keyed by `groupBy`
-  with a `scope` of proxy/runs/all; windows are per-account snapshots with a
-  different shape and no `since`/`until`, so folding them in would make most
-  of its inputs meaningless for one scope. Cost: one more catalog entry.
-- **D9. Overage.** When Anthropic `extra_usage` is enabled, should a 100%
-  window not count as exhausted? *Recommended:* **yes** (the account still
-  serves). Unverified that `is_enabled` always means requests continue past
-  the window; if the user disagrees, drop the rule.
-- **D10. May the poller refresh an expired token?** *Recommended:* **yes,**
-  only when the token is expired, via the existing `EnsureFresh` with a new
-  per-account lock, never on 401. Alternative: report `unavailable /
-  expired` and let the next proxied request refresh it (no new refresh
-  traffic from polling, but a never-proxied account shows "expired"
-  forever).
-- **D11. Where UI preferences live (pins, used/remaining).**
-  *Recommended:* client `localStorage` (no schema, matches Paseo).
-  Alternative: daemon-side so desktop/web/mobile agree.
-- **D12. Proxy error when every candidate is exhausted.** *Recommended:*
-  keep 503 with the reset time in the message for v1. Alternative: a
-  provider-shaped 429 with `Retry-After` (better for client retry
-  behavior, but a public proxy-contract change that wants its own decision).
-- **D13. Per-account opt-out.** *Recommended:* global switch only in v1.
-  Alternative: `account.update` field to exclude one account.
+- **D1. Exhaustion threshold.** **100%** used on any counted window; config
+  `accountUsage.exhaustThresholdPct`, default 100.
+- **D2. Default for outbound usage polling.** **On, demand-driven** (no idle
+  timer; zero calls unless a surface or the proxy asks), one
+  `accountUsage.enabled` kill switch, and a one-line disclosure next to the
+  switch.
+- **D3. TTL, backoff, forced-refresh floor.** TTL 5 min; backoff 1→30 min
+  with jitter and `Retry-After`; forced refresh at most once per 30 s per
+  account.
+- **D4. Providers in v1.** Anthropic OAuth + OpenAI/ChatGPT OAuth. API-key
+  accounts and other providers show "no plan windows" with no HTTP call.
+  Kimi, xAI, Antigravity and balance-only API-key providers are later.
+- **D5. UI placement and UX — CHANGED from the proposed default.** The web
+  UI **ports Paseo's Usage UX** (user: "tham khảo UI/UX paseo phần đó"):
+  sidebar footer Usage item (provider logo + default/pinned window
+  percents, remembers the picked account), Usage opens as a modal over the
+  current screen, Settings → Usage discoverable above the reports with
+  per-account cards (window bars, reset countdown, tone, balances, problem
+  states with explanations), refresh, pin windows, used/remaining toggle,
+  and per-run plan usage as an optional last PR. Section 5 and the plan's
+  PR-D carry the details and the Paseo → smind file map. This replaces the
+  proposed "bars inside each Settings → Providers row".
+- **D6. Routing uses windows in the first release.** Yes, default
+  `accountUsage.routing: true`.
+- **D7. Hard policy with an exhausted account.** Keep the existing contract
+  (error, no failover), now naming the reset time.
+- **D8. MCP shape.** A **new read-only `account_usage` tool**, not an
+  extension of `usage_summary` (different shape, no `groupBy` or
+  `since`/`until`).
+- **D9. Overage.** When Anthropic `extra_usage` is enabled, a full window
+  does not count as exhausted. Unverified that `is_enabled` always means
+  requests continue past the window; revisit after the live probe below.
+- **D10. May the poller refresh an expired token?** Yes, only when the token
+  is expired, via the existing `EnsureFresh` with a new per-account lock,
+  never on a 401.
+- **D11. Where UI preferences live.** Client `localStorage`.
+- **D12. Proxy error when every candidate is exhausted.** Keep 503 with the
+  reset time in the message for v1.
+- **D13. Per-account opt-out.** Global switch only in v1.
+
+**Live probes need Human go-ahead.** Four facts are unverified: that
+Anthropic's usage endpoint accepts smind's stored token (scope), that a
+stored OpenAI token carries `chatgpt_account_id`, that `chatgpt.com` accepts
+the uTLS fingerprint on that path, and what `extra_usage.is_enabled` means
+for serving. Probing them calls real endpoints with a real token, which is
+an outward-facing action: PR-A is fixtures-only until the Human approves a
+specific manual probe (see the plan's Validation).
 
 ## Alternatives considered
 
@@ -560,10 +625,14 @@ before their PR.
 - **Passive exhaustion from upstream 429s.** Not rejected on merit, only
   deferred: it needs no outbound polling and could cover the polling-off
   case, but it has to distinguish a quota 429 from a burst rate limit and
-  would need a cooling-down state. A follow-up ADR if D2 lands on "off".
+  would need a cooling-down state. A follow-up ADR if polling is turned off in practice.
 - **Least-pressure ordering in the pool.** Deferred: picking the candidate
   with the most remaining quota is a routing-policy change (and wants
   history for pace); v1 only excludes exhausted accounts.
+- **Per-account bars inside Settings → Providers rows (the first draft of
+  D5).** Superseded by the Paseo port: one home for plan usage (footer item,
+  modal, Settings → Usage) with pins and a summary, instead of bars buried in
+  the connection-management list.
 - **Move per-run tokens into windows (one usage concept).** Rejected: they
   answer different questions and have different sources and lifetimes (ADR-0020).
 
@@ -589,7 +658,10 @@ before their PR.
   `noopQuotaFetcher` are deleted, and the only callers are `serve.go` and
   `proxy.go`.
 - A thin new config section (`accountUsage`) and one new wsapi RPC, one
-  topic, one CLI subcommand, one MCP tool, and one web component family.
+  topic, one CLI subcommand, one MCP tool, and one web component family
+  ported from Paseo's usage UI (several files, no new data-fetching
+  dependency; a small segmented control and provider logo marks are the only
+  new UI primitives).
 
 ## Cross-references
 
@@ -604,7 +676,8 @@ before their PR.
   `refs/paseo/plugins/claude-usage-source/server/usage.ts`,
   `refs/paseo/plugins/codex-usage-source/server/usage.ts`,
   `refs/paseo/packages/server/src/server/plugins/usage-sources/index.ts`,
-  `refs/paseo/packages/app/src/usage/*`,
+  `refs/paseo/packages/app/src/usage/*` (ported by the web UI),
+  `refs/paseo/packages/app/e2e/browser/usage-{modal,settings,sidebar-item}.spec.ts`,
   `refs/paseo/packages/cli/src/commands/usage/*`.
 - `docs/ROADMAP.md` ("Quota prediction", quota `Fetcher` stub) and
   `docs/plans/active/orchestration-and-metering.md` (the "feed the router's
