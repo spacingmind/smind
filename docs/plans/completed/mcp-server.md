@@ -106,9 +106,10 @@ deterministically without a real Claude/Codex/ACP process:
 
 ## Progress
 
-Not started. Suggested breakdown for dispatching to an implementation
-agent (small, independently reviewable steps; each should end with
-`task test`/`task lint` green):
+Complete: steps 1-5, 7 and 8 shipped; step 6 was dropped (ADR-0017
+resolved decision 1). Breakdown as dispatched to implementation agents
+(small, independently reviewable steps; each ended with `task test`/
+`task lint` green):
 
 1. [x] **Scaffold the subcommand**: `smind mcp serve` in
    `cmd/smind/mcp.go` (the `mcp` group is shared with ADR-0018's
@@ -259,3 +260,14 @@ Steps 3 and 8 (`task_send` + docs) validated as follows:
   "MCP server (`smind mcp serve`)" section covering the host config
   shape, the tool list, the missing-approval-tools rule, and the
   ADR-0019 permission guard.
+
+Superseded scenarios and closing audit: the Test Scenarios above that
+mention `task_approve`/`task_deny` ("disabled by default", "enabled",
+"`task_deny`") describe the config-gated approval tools that ADR-0017
+resolved decision 1 dropped; AC7 replaces them with the stronger
+"never in the catalog" guarantee, covered by
+`TestMCPTools_NoApprovalToolInCatalog`. With that, every AC1-AC7 above has
+named evidence (AC1/AC2 `cmd/smind/mcp_serve_test.go`, `mcp_exit_test.go`;
+AC3 `mcp_tools_test.go`, `mcp_run_tools_test.go`, `mcp_task_send_test.go`,
+`mcp_wait_test.go`, `mcp_stop_test.go`; AC4/AC5/AC7 `mcp_catalog_test.go`;
+the protocol round-trip `mcp_stdio_test.go`), and the plan is closed.
