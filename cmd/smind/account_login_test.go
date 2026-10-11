@@ -119,6 +119,12 @@ func TestRunAccountLoginDispatchesOAuthStartAndPrintsAccount(t *testing.T) {
 	os.Stdout = write
 	defer func() { os.Stdout = previousStdout }()
 
+	// Stub the opener: the real one launches the developer's browser.
+	var opened string
+	previousOpenBrowser := openBrowser
+	openBrowser = func(u string) { opened = u }
+	defer func() { openBrowser = previousOpenBrowser }()
+
 	code := run([]string{"account", "login", "anthropic", "work"})
 
 	if err := write.Close(); err != nil {
@@ -144,6 +150,9 @@ func TestRunAccountLoginDispatchesOAuthStartAndPrintsAccount(t *testing.T) {
 	out := stdout.String()
 	if !bytes.Contains([]byte(out), []byte("https://example.invalid/authorize?state=abc")) {
 		t.Errorf("stdout = %q, want it to contain the authorize URL", out)
+	}
+	if opened != "https://example.invalid/authorize?state=abc" {
+		t.Errorf("openBrowser got %q, want the authorize URL", opened)
 	}
 	if !bytes.Contains([]byte(out), []byte("7\tanthropic\twork\toauth\n")) {
 		t.Errorf("stdout = %q, want the account line in account-add's format", out)
