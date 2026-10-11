@@ -31,6 +31,15 @@ export function writeUnreadTasks(unread: ReadonlySet<number>): void {
   writeStored(STORAGE_KEYS.unreadTasks, [...unread]);
 }
 
+/** Reads the persisted set of collapsed-parent task ids (task tree view, PR-U1), or an empty set if unset/corrupt. */
+export function readCollapsedTasks(): Set<number> {
+  return new Set(readStored<number[]>(STORAGE_KEYS.collapsedTasks, [], isNumberArray));
+}
+
+export function writeCollapsedTasks(collapsed: ReadonlySet<number>): void {
+  writeStored(STORAGE_KEYS.collapsedTasks, [...collapsed]);
+}
+
 /** The sidebar's two task-list views: the default grouped workspace/space tree, or a flat group-by-status view (AC6). */
 export type SidebarGroupMode = "tree" | "status";
 
