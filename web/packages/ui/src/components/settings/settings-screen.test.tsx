@@ -306,3 +306,83 @@ describe("SettingsScreen Notifications section (AC3)", () => {
     expect(await screen.findByTestId("settings-notifications-test-error")).toBeInTheDocument();
   });
 });
+
+describe("SettingsScreen layout", () => {
+  it("renders a settings sidebar with a back control above the grouped nav and a content view", () => {
+    renderScreen();
+
+    const sidebar = screen.getByTestId("settings-sidebar");
+    expect(sidebar).toBeInTheDocument();
+
+    const back = screen.getByTestId("settings-back-button");
+    expect(back).toHaveAccessibleName("Back to app");
+    expect(back).toHaveTextContent("Back to app");
+
+    const top = screen.getByTestId("settings-sidebar-top");
+    const nav = within(sidebar).getByRole("navigation", { name: "Settings sections" });
+    // top strip < back row < nav, in DOM order.
+    expect(top.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(back.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    expect(screen.getByTestId("settings-content-frame")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-content")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+  });
+
+  it("marks the active section with aria-current and switches content on nav click", () => {
+    renderScreen();
+
+    expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("settings-nav-appearance")).toHaveAttribute("aria-current", "false");
+
+    fireEvent.click(screen.getByTestId("settings-nav-appearance"));
+
+    expect(screen.getByTestId("settings-nav-appearance")).toHaveAttribute("aria-current", "true");
+    expect(screen.getByTestId("settings-nav-general")).toHaveAttribute("aria-current", "false");
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-section-general")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("Back button calls onNavigateBack", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape calls onNavigateBack when no dialog is open", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("Escape does not call onNavigateBack when a dialog is open", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    document.body.appendChild(dialog);
+    try {
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onNavigateBack).not.toHaveBeenCalled();
+    } finally {
+      dialog.remove();
+    }
+  });
+
+  it("Escape does not call onNavigateBack when the event was default-prevented", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const event = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    event.preventDefault();
+    document.dispatchEvent(event);
+    expect(onNavigateBack).not.toHaveBeenCalled();
+  });
+});

@@ -15,34 +15,29 @@ import "@/components/settings/usage-section";
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { PaneHeader } from "@/components/ui/pane-header";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { cn } from "@/lib/utils";
 import type { WsClient } from "@/lib/ws-client";
 
 /**
- * The settings screen (ui-redesign-parity Item 13, reshaped from a Dialog
- * to a full-pane view by web-ui-dogfood-polish Item 4): a section nav
- * rail on the left, the active section's content on the right
- * (audit-paseo.md §4's list+detail shape). The section list itself comes
+ * The settings screen, as a full-viewport two-column layout (Paseo's
+ * settings screen and ZCode's SettingsPage are the references): a left
+ * sidebar with a back-to-app row above a scrolling grouped section nav,
+ * and a framed content panel on the right with an h-12 header (group /
+ * section title) and a scrolling body. The section list itself comes
  * entirely from `settings-registry.ts` -- this component has no knowledge
- * of Appearance/General/Accounts/Quota beyond importing the two built-in
- * section files for their registration side effect, so later sections add
- * themselves the same way without editing this file.
+ * of individual sections beyond importing their files for the
+ * registration side effect.
  *
- * Rendered by the shell (App.tsx) as a sibling of the task pane, not by
- * the sidebar: the sidebar's settings button just flips the shell's view
- * state. `onNavigateBack` returns to the previous view (back button, or
- * Escape, which is wired here rather than via a keyboard-registry action
- * because it must not fire while a dialog sits on top of the screen).
- * Paseo's pattern is an expo-router push of `[section].tsx`; here the
- * same root -> section drill-down is one screen with internal state --
- * the plan's "no router library introduction" decision.
+ * Mounted by App.tsx as an absolutely positioned full-screen overlay over
+ * the (hidden, inert) shell. `onNavigateBack` returns to the previous
+ * view (back button, or Escape -- which only fires when nothing else
+ * consumed it: not default-prevented, no dialog/menu on top).
  *
  * "Preferences persist client-side (localStorage) unless and until a
- * daemon-side settings API exists" (Item 13's Decisions) is said here,
- * not just implemented silently, so a user does not assume these survive
- * clearing site data or moving to a different browser.
+ * daemon-side settings API exists" is said here, not just implemented
+ * silently, so a user does not assume these survive clearing site data
+ * or moving to a different browser.
  */
 export function SettingsScreen({
   client,
@@ -66,8 +61,7 @@ export function SettingsScreen({
   // Re-derive the active section whenever the registry changes shape, but
   // only snap to the first section when the current selection no longer
   // exists -- so re-opening on the same section you left doesn't reset
-  // your place. (Unlike the Dialog this used to be, there is no
-  // `open` prop: the screen only mounts while it is the active view.)
+  // your place.
   useEffect(() => {
     setActiveId((current) => (current && sections.some((s) => s.id === current) ? current : (sections[0]?.id ?? null)));
     // sections is a fresh array every render (listSettingsSections()), so
@@ -76,42 +70,41 @@ export function SettingsScreen({
     // activeId) on every render regardless of whether anything changed.
   }, [sections.map((s) => s.id).join(",")]);
 
-  // Escape closes the whole screen (not just deselects a section) --
-  // matching the Dialog Radix used to give this surface for free. Stops
-  // propagation so it can't also reach a dialog that happens to be open
-  // on top (e.g. a section's own popover).
+  // Escape closes the whole screen, but only when nothing else consumed
+  // it: default-prevented events and any open dialog/menu are left alone
+  // (bubble phase, so inner handlers get first crack).
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key !== "Escape") return;
-      e.stopPropagation();
+      if (e.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"],[role="alertdialog"],[role="menu"],[role="listbox"]')) return;
       onNavigateBack();
     }
-    document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [onNavigateBack]);
 
   const active = sections.find((s) => s.id === activeId) ?? null;
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background" data-testid="settings-screen">
-      <PaneHeader
-        title="Settings"
-        testId="settings-screen-header"
-        actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            aria-label="Back"
-            data-testid="settings-back-button"
-            onClick={onNavigateBack}
-          >
-            <ArrowLeft className="size-3.5" />
-            Back
-          </Button>
-        }
-      />
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Settings sections" className="w-44 shrink-0 overflow-y-auto border-r p-2">
+    <div className="flex h-full min-h-0 w-full bg-background" data-testid="settings-screen">
+      <aside
+        className="flex w-64 shrink-0 flex-col border-r bg-sidebar text-sidebar-foreground"
+        data-settings-sidebar
+        data-testid="settings-sidebar"
+      >
+        <div className="h-12 shrink-0" data-testid="settings-sidebar-top" />
+        <Button
+          variant="ghost"
+          aria-label="Back to app"
+          className="h-8 w-full justify-start gap-2 rounded-md px-2 text-ui-base"
+          data-testid="settings-back-button"
+          onClick={onNavigateBack}
+        >
+          <ArrowLeft className="size-3.5" />
+          Back to app
+        </Button>
+        <nav aria-label="Settings sections" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <ul className="flex flex-col gap-0.5">
             {sections.map((section, index) => {
               // A group heading renders once, above its first member --
@@ -121,7 +114,7 @@ export function SettingsScreen({
               return (
                 <Fragment key={section.id}>
                   {firstOfGroup && (
-                    <li aria-hidden="true" className="px-2 pt-3 pb-1 text-ui-sm text-foreground-subtle">
+                    <li aria-hidden="true" className="px-2 pt-3 pb-1 text-ui-sm font-medium text-foreground-subtle">
                       {section.groupLabel}
                     </li>
                   )}
@@ -132,8 +125,7 @@ export function SettingsScreen({
                       data-testid={`settings-nav-${section.id}`}
                       onClick={() => setActiveId(section.id)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-ui-base text-foreground hover:bg-hover",
-                        section.groupLabel && "pl-5",
+                        "flex h-8 w-full items-center gap-2 rounded-md px-2 pl-2 text-left text-ui-base text-foreground hover:bg-hover",
                         section.id === activeId && "bg-selected font-medium",
                       )}
                     >
@@ -146,10 +138,34 @@ export function SettingsScreen({
             })}
           </ul>
         </nav>
-        <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          {active ? active.render({ client, events }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
+      </aside>
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col p-1 pl-0">
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background"
+          data-testid="settings-content-frame"
+        >
+          <header className="flex h-12 shrink-0 items-center gap-2 border-b px-6" data-testid="settings-screen-header">
+            {active?.groupLabel && (
+              <>
+                <span className="text-ui-base text-foreground-subtle">{active.groupLabel}</span>
+                <span aria-hidden className="text-foreground-subtle">
+                  /
+                </span>
+              </>
+            )}
+            <h1 className="truncate text-ui-base font-medium">{active?.label}</h1>
+          </header>
+          <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
+            <div className="mx-auto w-full max-w-3xl p-6">
+              {active ? (
+                active.render({ client, events })
+              ) : (
+                <EmptyState testId="settings-empty" title="No settings sections registered" />
+              )}
+            </div>
+          </main>
         </div>
-      </div>
+      </section>
     </div>
   );
 }
