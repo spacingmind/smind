@@ -1,0 +1,10 @@
+{
+  "seven_day": { "utilization": 23, "resets_at": "2026-06-04T00:00:00Z" },
+  "limits": [
+    { "kind": "session", "percent": 6, "resets_at": "2026-06-01T21:00:00Z", "scope": null },
+    { "kind": "weekly_all", "percent": 23, "resets_at": "2026-06-04T00:00:00Z", "scope": null },
+    { "kind": "weekly_scoped", "group": "weekly", "percent": 2, "resets_at": "2026-06-04T00:00:00Z", "is_active": false, "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null } },
+    { "kind": "weekly_scoped", "percent": 9, "resets_at": "2026-06-05T00:00:00Z", "scope": { "model": null, "surface": { "id": "code", "display_name": "Code" } } },
+    { "kind": "weekly_scoped", "percent": 4, "resets_at": "2026-06-04T00:00:00Z", "scope": { "model": { "id": "fable-pro", "display_name": "Fable-Pro" }, "surface": null } }
+  ]
+}
