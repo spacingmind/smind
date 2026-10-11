@@ -26,6 +26,11 @@ The loop:
 5. Review: task_logs for the transcript, or read the git state in the
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.
+   task_tree {workspaceId | taskId} shows a whole task hierarchy in one
+   call: every child with its tier, run state, pending permission count,
+   subtree status counts, and usage/cost rollups. task_wait also takes
+   childrenOf (a taskId) to wait for the first of that task's direct
+   children's running runs, returning idle when none is running.
 6. task_stop: stop a run that should not continue.
 7. task_archive: when a task's work is done, archive it (uncommitted changes are
    committed to its branch as a checkpoint; refused while a run is active, so
