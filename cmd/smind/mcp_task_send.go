@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -31,7 +34,8 @@ import (
 // provider to a chat on first prompt.
 type taskSendInput struct {
 	TaskID         int64  `json:"taskId" jsonschema:"id of the task to send the prompt to"`
-	Prompt         string `json:"prompt" jsonschema:"the prompt to send"`
+	Prompt         string `json:"prompt,omitempty" jsonschema:"the prompt to send; use this or promptFile"`
+	PromptFile     string `json:"promptFile,omitempty" jsonschema:"alternative to prompt: path RELATIVE to the task's worktree of a regular file (max 64 KiB) whose contents are the prompt; no absolute paths, no .. components, no symlinks leaving the worktree"`
 	Provider       string `json:"provider,omitempty" jsonschema:"provider id (e.g. glm, claude-native, codex-native); optional when profileId names one or chatId names an already-bound chat"`
 	ChatID         *int64 `json:"chatId,omitempty" jsonschema:"optional id of the chat (conversation thread) to send to; defaults to the task's default chat"`
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
@@ -58,11 +62,30 @@ type taskSendOutput struct {
 // same RPC cmdTaskSend calls) behind the ADR-0019 permission guard.
 func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, taskSendOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskSendInput) (*mcp.CallToolResult, taskSendOutput, error) {
-		if strings.TrimSpace(in.Prompt) == "" {
-			return nil, taskSendOutput{}, fmt.Errorf("task_send: prompt is required")
-		}
 		if in.TaskID <= 0 {
 			return nil, taskSendOutput{}, fmt.Errorf("task_send: taskId is required")
+		}
+		if in.PromptFile != "" {
+			if in.Prompt != "" {
+				return nil, taskSendOutput{}, fmt.Errorf("task_send: pass prompt or promptFile, not both")
+			}
+			var task struct {
+				WorktreePath *string `json:"WorktreePath"`
+			}
+			if err := callWS(ctx, client, "task_send", "task.get", map[string]any{"id": in.TaskID}, &task); err != nil {
+				return nil, taskSendOutput{}, err
+			}
+			if task.WorktreePath == nil || *task.WorktreePath == "" {
+				return nil, taskSendOutput{}, fmt.Errorf("task_send: task %d has no worktree to read promptFile from", in.TaskID)
+			}
+			text, err := readPromptFile(*task.WorktreePath, in.PromptFile)
+			if err != nil {
+				return nil, taskSendOutput{}, fmt.Errorf("task_send: promptFile: %w", err)
+			}
+			in.Prompt = text
+		}
+		if strings.TrimSpace(in.Prompt) == "" {
+			return nil, taskSendOutput{}, fmt.Errorf("task_send: prompt is required (or promptFile)")
 		}
 
 		provider := in.Provider
@@ -204,4 +227,58 @@ func chatProviderFor(ctx context.Context, client *wsclient.Client, taskID, chatI
 		}
 	}
 	return "", fmt.Errorf("task_send: chat %d does not belong to task %d", chatID, taskID)
+}
+
+// mcpPromptFileMaxBytes caps a promptFile's size.
+const mcpPromptFileMaxBytes = 64 * 1024
+
+// readPromptFile reads rel, a path relative to worktree, as a prompt. It
+// runs in the MCP process (which shares the daemon's filesystem) and is
+// deliberately strict: no absolute paths, no ".." components, the
+// symlink-resolved target must stay inside the symlink-resolved worktree,
+// and the target must be a regular file of at most 64 KiB.
+func readPromptFile(worktree, rel string) (string, error) {
+	if filepath.IsAbs(rel) || strings.HasPrefix(rel, "/") || strings.HasPrefix(rel, `\\`) || filepath.VolumeName(rel) != "" {
+		return "", fmt.Errorf("path must be relative to the task's worktree, got %q", rel)
+	}
+	for _, part := range strings.FieldsFunc(rel, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if part == ".." {
+			return "", fmt.Errorf("path %q must not contain \"..\"", rel)
+		}
+	}
+	root, err := filepath.EvalSymlinks(worktree)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(filepath.Join(root, rel))
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", rel, err)
+	}
+	inside, err := filepath.Rel(root, resolved)
+	if err != nil || inside == ".." || strings.HasPrefix(inside, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%q resolves outside the task's worktree", rel)
+	}
+	f, err := os.Open(resolved)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("%q is not a regular file", rel)
+	}
+	if info.Size() > mcpPromptFileMaxBytes {
+		return "", fmt.Errorf("%q is %d bytes, over the %d byte limit", rel, info.Size(), mcpPromptFileMaxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, mcpPromptFileMaxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > mcpPromptFileMaxBytes {
+		return "", fmt.Errorf("%q is over the %d byte limit", rel, mcpPromptFileMaxBytes)
+	}
+	return string(data), nil
 }
