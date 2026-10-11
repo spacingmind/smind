@@ -2321,7 +2321,7 @@ describe("App drag-to-split (Item 8)", { timeout: 20_000 }, () => {
 });
 
 describe("App settings view (dogfood Item 4)", () => {
-  it("the sidebar's settings button swaps the main area to the settings screen, and Back returns to the previous view", async () => {
+  it("opening settings hides the shell (inert, aria-hidden) but keeps the task pane mounted", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2333,18 +2333,94 @@ describe("App settings view (dogfood Item 4)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    const paneBefore = screen.getByTestId("primary-pane");
+    const shell = screen.getByTestId("app-shell");
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(shell).not.toHaveAttribute("inert");
 
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     await flush();
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
-    expect(screen.queryByTestId("primary-pane")).not.toBeInTheDocument();
+    // Same DOM node: the task pane (and any live chat stream in it) was not
+    // unmounted, only hidden and made unreachable.
+    expect(paneBefore.isConnected).toBe(true);
+    expect(shell).toHaveAttribute("inert");
+    expect(shell).toHaveAttribute("aria-hidden", "true");
+    expect(shell).toHaveClass("invisible");
+    // The shell is a sibling of the screen, not its ancestor.
+    expect(shell.contains(screen.getByTestId("settings-screen"))).toBe(false);
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     await flush();
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
-    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
+    expect(shell).not.toHaveAttribute("inert");
+    expect(shell).not.toHaveAttribute("aria-hidden");
+    expect(shell).not.toHaveClass("invisible");
+  });
+
+  it("Back restores the previous task/tab and sidebar state", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    clickTaskRow(TASK_B);
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openBaseTab("Files");
+    const sidebar = document.querySelector("[data-slot='sidebar']")!;
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button-collapsed"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    // The sidebar toggle shortcut does not reach the hidden shell.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    expect(screen.getByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
+  });
+
+  it("a command-palette task pick while in settings leaves settings", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: TASK_B.Title } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
   });
 
   it("Escape from the settings screen returns to the task view", async () => {
