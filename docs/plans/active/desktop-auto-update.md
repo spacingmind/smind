@@ -289,15 +289,113 @@ workflow's `publish` job end to end.
 
 ## Progress
 
-- [ ] U1 config, keys, plugin
-- [ ] U2 Rust check/install
-- [ ] U3 menu
-- [ ] U4 UI
-- [ ] U5 `latest.json` script
-- [ ] U6 CI/release
-- [ ] U7 daemon interplay verified
-- [ ] Local end-to-end verification
+- [x] U1 config, keys, plugin (`ecaaccf`)
+- [x] U2 Rust check/install (`05bd511`, review fixes `4cf553e`)
+- [x] U3 menu (`b902554`)
+- [x] U4 UI (`451e7bc`, `e5fe7df`)
+- [x] U5 `latest.json` script (`af4528d`, version guard in `3a47b44`)
+- [x] U6 CI/release (`c261ac6`, `c28a6dc`, `dca0856`, fixes `3a47b44`, token hygiene in the final commit)
+- [~] U7 daemon interplay: no code change; not verified live (see Not verified)
+- [~] Local end-to-end verification: signing/verification and UI states verified; the in-window update on this Mac was blocked by a locked session (see Not verified)
+
+Work was split across three worktrees (Rust, CI, UI) and merged here. Review
+found and fixed before merge: `publish` ran `actions/checkout` after
+`download-artifact` (its `git clean` would have deleted `dist/`); duplicate
+`*.app.tar.gz` globs; no check that asset names match the manifest version;
+the updater plugin registered unconditionally (Linux would not compile);
+`semver` cfg'd away from Linux; a failed install consumed the pending
+update so the UI's Retry would have said "No update is pending"; a check
+could swap the pending update mid-install; a reducer path where a menu check
+could replace an in-flight download.
 
 ## Validation
 
-(filled in as work lands)
+Environment: this Mac (Apple Silicon, macOS 27). All runtime scenarios used
+an isolated `HOME`/`SMIND_HOME`, an `.e2e` identifier, daemon port 4751 and a
+local HTTP server on 8765 (`/tmp/smind-e2e`); the user's real app data and
+port 4648 were never touched. The machine was under heavy load from other
+agents (load average ~28) for most of the session.
+
+### Suites
+
+- `cargo test` in `desktop/src-tauri`: 46 passed (incl. every Rust scenario
+  above); `cargo clippy --all-targets -- -D warnings` clean.
+- `node --test 'desktop/scripts/*.test.mjs'`: 17 tests (13 latest.json, 4
+  signing-mode) pass; part of `task test`.
+- `task lint` clean, `task check:versions` passes, `cd web && bunx tsc -b
+  packages/ui` clean, `actionlint` clean on all four workflows.
+- `task test` (web): 1503 tests; the only failures were `App.test.tsx` /
+  `App.responsive.test.tsx` timeouts (5 s) under the load above, a different
+  set each run (4 failed, then 3); both files pass in isolation (70/70).
+  Unrelated to this change (they don't touch the updater), but a re-run on
+  a quiet machine/CI is the real confirmation.
+
+### Acceptance criteria -> evidence
+
+U1. Config: `updater_config_pins_key_and_endpoint`,
+`create_updater_artifacts_opt_in_only`. A keyless build with the opt-in config
+fails exactly as designed (observed: "A public key has been found, but no
+private key"), a build without it needs no key (`task desktop:mac` unchanged).
+Private key: generated with `tauri signer generate` to
+`~/.tauri/smind-updater.key` (outside the repo, mode 600, no password); the
+build log was grepped for the key's first bytes: 0 hits; the repo contains only
+the public key. README "Updating" added. **Done.**
+
+U2. All Rust scenarios pass (`version_newer_stable_only`, `notes_are_capped`,
+`check_result_serializes_to_contract`, `install_without_pending_is_error`,
+`failed_install_keeps_update_pending`, `install_rejects_concurrent_call`,
+`check_rejected_while_install_in_progress`, `updater_supported_by_platform`,
+capability tests). Signature enforcement (independent of the app): a scratch
+crate using the same `minisign-verify` crate as the plugin accepted
+`smind.app.tar.gz` + `.sig` built with the local key against the public key
+from `tauri.conf.json` (`signed-artifacts-local`), and rejected both a
+1-byte-tampered tarball ("signature verification failed") and a signature
+made with a different key ("created with a different key"). The in-app
+install path was **not** run (see below). **Done for logic; install not
+exercised live.**
+
+U3. `update_menu_location` (pure). The menu is built with it; the item was
+**not** clicked (see below). **Partly verified.**
+
+U4. 12 web scenarios + reducer tests pass. Visual check: the real
+`DesktopUpdateDialog` was rendered in headless Chrome against a mocked Tauri
+bridge in light, dark, downloading (62%) and error states (screenshots in
+`/tmp/smind-e2e/dialog-*.png`, not committed): themes correct, default
+focus on **Later**, notes scrollable. Not a screenshot of the real app
+window. **Done, with that caveat.**
+
+U5. 13 script tests. A real `gen-latest-json.mjs` run over the locally built,
+signed artifact (renamed per arch) produced a valid manifest: three platforms,
+per-arch URLs, 424-char signatures. **Done.**
+
+U6. Read-through against ADR-0023: secret only in the signing-decision and
+signed-build steps' env, never echoed; `publish` has no secret; PR/fork/manual
+path unchanged (unsigned build); real release with an empty secret fails
+(`signing-mode-fails-when-required-and-absent`); `latest.json` uploaded in its
+own last step; `*.sig` added to checksums/artifact/release globs.
+`actionlint` clean. **Not run on GitHub** (no release/dry run was started).
+
+### Not verified, needs a human or the next release
+
+- **The in-window end-to-end on a real app** (`local-update-end-to-end`,
+  `local-menu-check`, `local-bad-signature-rejected`, `local-later-dismiss`,
+  `local-endpoint-down-launch-silent`, `daemon-survives-app-update`, and the
+  real light/dark window screenshots). The session was locked
+  (`CGSSessionScreenIsLocked = true`) for the whole verification window, so
+  the webview never ran the launch check (the local server's access log stayed
+  empty) and `screencapture` returned the login screen. I did not try to get
+  past the lock. The built artifacts and a ready harness are in `/tmp/smind-e2e`
+  (`old/smind.app` 0.10.0 with a local endpoint, `new/smind.app.tar.gz` +
+  `.sig` for 0.10.1, `serve/latest.json`, `build-old.sh`, `build-new.sh`), but
+  `/tmp` is ephemeral; to redo: run the two build scripts, serve `serve/` on
+  8765 (`python3 -I -m http.server 8765 --bind 127.0.0.1 --directory
+  .../serve`), put `server:\n  port: 4751` in `$SMIND_HOME/config.yaml`, launch
+  `old/smind.app/Contents/MacOS/smind-desktop` with `HOME`, `SMIND_HOME`,
+  `SMIND_DAEMON_URL=http://127.0.0.1:4751`, and expect the prompt on launch.
+- **Windows** (the NSIS updater path, the signed Windows build): not built or
+  run; cfg-gated code was only read, not compiled, for Windows/Linux.
+- **The real release path**: GitHub's `releases/latest/download/latest.json`
+  redirect, the `publish` job end to end, and the first real update, which
+  needs the repo secret set and two releases.
+- After an app update the per-app macOS permission grants (notifications)
+  may need re-confirming, because the ad-hoc signature changes. Not measured.
