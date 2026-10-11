@@ -122,3 +122,21 @@ func testDaemonToken(t *testing.T) string {
 	}
 	return token
 }
+
+// TestMCPServer_InstructionsNameEveryTool pins PR-A AC6: the initialize
+// result's instructions are non-empty and name every registered tool, so
+// an orchestrator's guide can never drift behind the catalog -- adding a
+// tool without documenting it in mcpInstructions fails here.
+func TestMCPServer_InstructionsNameEveryTool(t *testing.T) {
+	env := newMCPSession(t)
+
+	init := env.cs.InitializeResult()
+	if init == nil || init.Instructions == "" {
+		t.Fatal("initialize result instructions = empty, want the orchestration guide")
+	}
+	for _, name := range mcpToolNames(t, env.cs) {
+		if !strings.Contains(init.Instructions, name) {
+			t.Fatalf("instructions do not mention tool %q", name)
+		}
+	}
+}

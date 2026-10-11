@@ -104,7 +104,7 @@ func newMCPServer(client *wsclient.Client) *mcp.Server {
 		Name:    "smind",
 		Title:   "smind",
 		Version: version.Version,
-	}, nil)
+	}, &mcp.ServerOptions{Instructions: mcpInstructions})
 	registerMCPTools(srv, client)
 	return srv
 }
