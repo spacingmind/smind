@@ -12,19 +12,19 @@ A **task** is a worktree plus a branch. A task has one or more **chats** (conver
 1. **Discover.** `workspace_list` for the `workspaceId`. `provider_list` for provider ids and their permission modes. `profile_list` for human-authored launch bundles and their `notes`.
 2. **Create a task.** `task_new { workspaceId, title, baseRef: "origin/develop" }` branches the worktree off a fresh ref instead of whatever the checkout has. Use `branch` to continue an existing branch, `prNumber` to review or fix a pull request. Pass `parentTaskId` with your own task id when you are a task yourself (hierarchy depth is limited to 2).
 3. **Send.** `task_send { taskId, prompt, provider | profileId }`. It returns `{ runId }` immediately, or `{ queued: true, queueItemId }` when the chat is already busy. It never blocks.
-4. **Wait.** `task_wait { runId }` blocks until the run is `done`, `error` or `stopped`, a permission request goes pending, or the timeout passes (default 120 s). A timeout is not a failure: call it again with the same `runId`. With several runs, `task_wait { runIds: [...] }` returns as soon as any one needs you. Do not poll `task_status` in a loop.
-5. **Review.** `task_logs { runId, tail }` for the transcript. Read the actual change with git in the task's `worktreePath` (`git log origin/develop..HEAD`, `git diff origin/develop...HEAD`). Run the repo's checks yourself. A run saying "done" is a claim, not evidence.
+4. **Wait.** `task_wait { runId }` blocks until the run is `done`, `error` or `stopped`, a permission request goes pending, or the timeout passes (default 120 s). A timeout is not a failure: call it again with the same `runId`. With several runs, `task_wait { runIds: [...] }` returns as soon as any one needs you. A pending permission returns immediately every time; once you have told the human about it, pass its id in `ignorePermissionIds` so the next wait blocks until something new happens instead of spinning. Do not poll `task_status` in a loop.
+5. **Review.** `task_logs { runId, tail }` for the transcript. Read the change with `task_diff { taskId }` (read-only, capped) or with git in the task's `worktreePath` (`git log origin/develop..HEAD`, `git diff origin/develop...HEAD`). Run the repo's checks yourself. A run saying "done" is a claim, not evidence.
 6. **Iterate or finish.** Send follow-ups with `task_send` to the same task. `task_stop { runId }` stops a run. When the work is pushed or merged, `task_archive { taskId }`.
 
 Lost a run id (for example after your context was compacted)? `run_list { taskId }` finds it. `task_list` and `task_get` show tasks, `chat_list` shows a task's chats, `chat_new` opens a fresh conversation in the same worktree.
 
 ## Queueing
 
-`task_send` defaults to `whenBusy: "queue"`: the prompt is appended and delivered at the next turn boundary. `"interrupt"` stops the running run and delivers first (use it to redirect, not for polite follow-ups). `"reject"` returns an error if the chat is busy. Pass `fromTaskId`/`fromChatId` (your own ids) so the delivered prompt carries a `[message from task #T, chat #C]` header and the receiving agent knows who is speaking.
+`task_send` defaults to `whenBusy: "queue"`: the prompt is appended and delivered at the next turn boundary. `"interrupt"` stops the running run and delivers first (use it to redirect, not for polite follow-ups). `"reject"` returns an error if the chat is busy. A long brief can live in a file inside the task's worktree: `promptFile` (a relative path, at most 64 KiB) replaces `prompt` so you don't pay for the text twice. `queue_list { chatId }` shows what is queued and `queue_cancel { chatId, itemId }` removes a prompt you queued yourself (never a human's). Pass `fromTaskId`/`fromChatId` (your own ids) so the delivered prompt carries a `[message from task #T, chat #C]` header and the receiving agent knows who is speaking.
 
 ## Permissions are human-only
 
-There is **no tool to approve or deny** a permission request, by design. If `task_wait` returns `pendingPermission`, or `task_permissions { runId }` lists something, stop and tell the human what is being asked (tool, summary) and which run. The human answers in the smind UI or with `smind task approve`. Never try to route around this.
+There is **no tool to approve or deny** a permission request, by design. If `task_wait` returns `pendingPermission`, or `task_permissions { runId }` lists something, stop and tell the human what is being asked (tool, summary) and which run. The human answers in the smind UI or with `smind task approve` / `smind task deny`. Never try to route around this.
 
 You also cannot choose an auto-approving mode yourself: `task_send` rejects `bypassPermissions`, `autoAccept` and similar. If the work needs one, use a profile the human wrote (`profile_list`, then `profileId`).
 
@@ -54,5 +54,6 @@ A task agent can orchestrate too if it has this MCP server. Add it once as an ag
 
 Discovery: `workspace_list`, `provider_list`, `profile_list`, `task_list`, `task_get`, `run_list`, `chat_list`.
 Lifecycle: `task_new`, `chat_new`, `task_send`, `task_wait`, `task_stop`, `task_archive`.
-Inspection: `task_status`, `task_logs`, `task_permissions`.
+Inspection: `task_status`, `task_logs`, `task_permissions`, `task_diff`, `usage_summary`.
+Queue: `queue_list`, `queue_cancel`.
 Live settings: `task_set_mode`, `task_options`, `task_set_option`.
