@@ -229,14 +229,65 @@ Settled for this plan:
     13 packages, before securefile/realpath landed.
 - 2026-10-12: branch `ci/windows-full-suite-nightly` also gets the
   `.gitattributes` rule for `internal/skills/bundle/**` (AC6).
-- Next:
-  - test-side groups: autocrlf in test repos, `SKILL.md` mode check,
-    `hostfs` `USERPROFILE`, the wsapi `stty` resize test;
-  - investigate G (config migration), H (store migration) and the runs
-    goroutine-count test;
-  - then AC1 (shims), AC2 (agent jobs), AC3 (shutdown endpoint), AC4
-    (setup `sh`), AC9 (release).
+- 2026-10-12: four slices implemented by GLM agents (glm-5.3) in separate
+  worktrees, each reviewed and re-run by the coordinator, then merged into
+  `fix/windows-test-agent-exe` together with `ci/windows-full-suite-nightly`:
+  A `fix/windows-test-side-groups`, B `feat/api-shutdown-smind-stop`,
+  C `feat/windows-setup-scripts`, D `feat/windows-agent-spawn`.
+  Coordinator follow-ups: per-repo lock around `git worktree` mutations
+  (concurrent-create flake, 3/25 under load); one `internal/winjob`
+  replacing four Job Object copies (and checking `NtResumeProcess`'s
+  status, which D ignored); one `internal/shimguard`; two taskrunner test
+  assumptions the merge unmasked.
+- 2026-10-12: **full `go test ./...` on native Windows: 34 packages ok, 0
+  failing tests, 214 s** (baseline: 15 packages / 192 tests failing,
+  >5 min).
+- Open: claude-native agent trees (AC2) and AC8's PR-blocking job, AC9
+  release binaries, ADR-0024 wording, README.
 
 ## Validation
 
-_(fill per AC as each one lands)_
+All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
+`fix/windows-test-agent-exe` at the merge of A-D + CI.
+
+- **AC1** — measured first (slice D): through a `.cmd` shim Go 1.27 does NOT
+  escape or reject cmd.exe metacharacters (`a&b` runs `b`; `%PATH%`
+  expands; `^` eaten; CR/LF split) while `.exe` targets round-trip every
+  argument. Fix = refusal: `internal/shimguard` (tests: refuses
+  `% & | < > ^ CR LF` on shims, allows quotes/`!`/spaces/empty/unicode, never
+  refuses an .exe or an unresolvable command) used by acp and codex
+  (`TestSpawnShim_*` in internal/acp and internal/codex),
+  `TestProviderTest_ReportsShim_Windows` and the `npx.cmd` fixtures.
+  **Not covered:** claude-native (see AC2).
+- **AC2** — `internal/winjob` (suspended start, assign, `NtResumeProcess`
+  with status check, once-guarded close): its own tests (resumed child runs,
+  Close kills child + grandchild, idempotent/nil-safe) plus
+  `TestAgentStop_KillsDescendants_Windows` and
+  `TestAgentJob_DaemonCrashKillsTree_Windows` for acp and codex (`-count=5`
+  stable). **Open:** `claude-agent-sdk-go@v0.3.2` spawns `claude` itself with
+  no hook, so claude-native trees can still orphan; needs a decision
+  (launcher wrapper vs upstream SDK change).
+- **AC3** — `POST /api/shutdown` (token-guarded like `/v1/*`, 202, one
+  `sync.Once` channel shared with the signal path) and `smind stop`:
+  `TestShutdown_*` (401 / GET / POST once / twice), `TestServe_GracefulShutdown`
+  (real daemon subprocess with a terminal; `smind stop` exits 0; session
+  persisted `closed`), `TestStop_NotRunning`, `TestStop_WrongToken`,
+  `TestServe_GracefulShutdown_CtrlBreak_Windows` (ran, not skipped).
+- **AC4** — `setup_windows.go` (sh from PATH or Git for Windows, suspended
+  start into a Job): `TestSetupScript_RunsWithEnv_Windows`,
+  `_TimeoutKillsTree_Windows`, `_CancelKillsTree_Windows`,
+  `_NoSh_FailsFast`, plus the previously Windows-skipped `TestSetup_*` and
+  teardown tests now running.
+- **AC5** — `taskStamp` (`TestTaskStamp_StrictlyIncreasingUnderConcurrency`)
+  and `TestCreateTask_ConcurrentSameTitle_UniqueNames`, which exposed a git
+  race fixed with a per-repo lock (40/40 under load, was 22/25).
+- **AC6** — `.gitattributes` (`*.sh` and `internal/skills/bundle/**` eol=lf);
+  `TestSkillBundle_FrontmatterValid` passes after re-checkout.
+- **AC7** — `internal/securefile`; `icacls` shows only the user and SYSTEM, no
+  inherited ACEs; auth/e2ee/taskrunner permission tests assert it (also
+  green on Linux via WSL).
+- **AC8** — suite green locally (above). **Not yet:** the PR-blocking CI
+  job and a green `windows-full-suite.yml` run on GitHub.
+- **AC9** — not started.
+- **AC10** — `internal/realpath` + `internal/testutil.Link`; four junction
+  escape tests failed before, pass now.
