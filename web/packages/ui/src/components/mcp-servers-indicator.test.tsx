@@ -68,7 +68,7 @@ describe("McpServersIndicator", () => {
     expect(popover).toHaveTextContent("Active");
     expect(popover).toHaveTextContent("search");
     expect(popover).toHaveTextContent("http");
-    expect(popover).toHaveTextContent("Not active — agent doesn't support this transport");
+    expect(popover).toHaveTextContent("Not active — transport not supported");
     expect(popover).toHaveTextContent("Not active — command not found in PATH");
     expect(popover).toHaveTextContent("Not active — not supported by this provider yet");
     // No/unknown reason degrades to the bare label, not a crash.

@@ -4,7 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { McpServerState } from "@/lib/types";
 
 const NOT_ACTIVE_REASONS: Partial<Record<NonNullable<McpServerState["reason"]>, string>> = {
-  transport_unsupported: "agent doesn't support this transport",
+  transport_unsupported: "transport not supported",
   command_not_found: "command not found in PATH",
   provider_unsupported: "not supported by this provider yet",
   failed_to_start: "failed to start",
@@ -42,17 +42,15 @@ export function McpServersIndicator({ servers }: { servers: McpServerState[] | u
         <p className="text-ui-sm font-medium text-foreground">MCP servers</p>
         <ul className="mt-2 space-y-2">
           {servers.map((server) => (
-            <li key={server.name} className="flex items-baseline justify-between gap-2">
-              <span className="truncate font-medium text-foreground">{server.name}</span>
-              <span className="flex shrink-0 items-baseline gap-1.5">
-                <span className="rounded border px-1 text-ui-sm text-foreground-muted">{server.transport}</span>
-                <span
-                  className={`text-ui-sm ${server.status === "active" ? "text-foreground-muted" : "text-warning"}`}
-                >
-                  {server.status === "active"
-                    ? "Active"
-                    : `Not active — ${NOT_ACTIVE_REASONS[server.reason!] ?? "not active"}`}
-                </span>
+            <li key={server.name} className="flex flex-col gap-0.5">
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-ui-sm font-medium text-foreground">{server.name}</span>
+                <span className="shrink-0 rounded border px-1 text-ui-sm text-foreground-muted">{server.transport}</span>
+              </span>
+              <span className={`text-ui-sm ${server.status === "active" ? "text-foreground-muted" : "text-warning"}`}>
+                {server.status === "active"
+                  ? "Active"
+                  : `Not active — ${NOT_ACTIVE_REASONS[server.reason!] ?? "not active"}`}
               </span>
             </li>
           ))}
