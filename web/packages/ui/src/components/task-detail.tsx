@@ -5,6 +5,7 @@ import { PermissionModeControl } from "@/components/permission-mode-control";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
+import { ChatUsageTotal } from "@/components/chat-usage-total";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
 import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
@@ -234,6 +235,7 @@ export function TaskDetailPane({
               </button>
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
+            <ChatUsageTotal runs={runs} />
           </>
         }
         actions={

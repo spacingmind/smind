@@ -16,14 +16,6 @@ function usage(overrides: Partial<RunUsage> = {}): RunUsage {
   };
 }
 
-function openPopover(): HTMLElement {
-  const pill = screen.getByTestId("run-usage-pill");
-  // Popovers are interactive but their content lives in the trigger's own
-  // subtree for our setup -- click and read whatever is rendered.
-  fireEvent.click(pill);
-  return pill;
-}
-
 describe("RunUsagePill", () => {
   it("shows input, output and cost compactly", () => {
     render(<RunUsagePill usage={usage()} />);
