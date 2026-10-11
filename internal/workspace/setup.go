@@ -9,9 +9,11 @@ import (
 // stdout+stderr kept as tasks.setup_log (ADR-0024).
 const setupLogCap = 64 << 10
 
-// ErrSetupUnsupported is returned where setup/teardown scripts would have to
-// run on a platform that cannot run them (Windows, v1).
-var ErrSetupUnsupported = errors.New("setup scripts are not supported on Windows")
+// ErrSetupUnsupported is returned when a workspace has a setup/teardown
+// script configured but no POSIX shell can be found to run it (Windows
+// without Git for Windows' sh.exe, ADR-0028 D1). Scripts are never
+// silently skipped.
+var ErrSetupUnsupported = errors.New("setup/teardown scripts need `sh`; install Git for Windows or add its bin directory to PATH")
 
 // tailBuffer keeps only the last cap bytes written to it.
 type tailBuffer struct {
