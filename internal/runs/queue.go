@@ -161,6 +161,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		}
 	}
 
+	if reg.testAfterSetupCheck != nil {
+		reg.testAfterSetupCheck()
+	}
+
 	var busyRunID string
 	var archiving bool
 	func() {
@@ -233,7 +237,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// Cover the finish-between-check-and-enqueue race: if the chat has gone
 	// idle since (e.g. its run finished while we were enquequeueing, before
 	// our item existed for finish's own delivery pass), deliver now.
-	// deliverOne is a no-op while the chat is busy.
+	// deliverOne is a no-op while the chat is busy. This also covers setup
+	// finishing between the setup-status read above and the enqueue (its
+	// finish hook ran over an empty queue): deliverOne re-reads setup status
+	// from the store. Pinned by TestSetup_QueuedPromptNotStranded...
 	reg.deliverOne(chatID)
 
 	return StartOutcome{Queued: true, QueueItemID: item.ID}, nil

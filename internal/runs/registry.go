@@ -101,6 +101,11 @@ type Registry struct {
 	// (ADR-0021 §3: cancel and move on). Guarded by mu.
 	deliveryAttempts map[int64]int
 
+	// testAfterSetupCheck, when non-nil, runs in StartWhenBusy between the
+	// task's setup-status read and the enqueue. Test seam only; nil in
+	// production.
+	testAfterSetupCheck func()
+
 	// deliverMu serializes queue delivery per Registry (see queue.go's
 	// deliverOne): the busy-check -> NextQueued -> Start -> MarkDelivered
 	// sequence must be atomic, so concurrent callers (finish and the

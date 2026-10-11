@@ -124,3 +124,32 @@ func TestSetup_StartRefusedWhileSetupRunning(t *testing.T) {
 		t.Fatalf("a run was registered: %+v", got)
 	}
 }
+
+// TestSetup_QueuedPromptNotStrandedWhenSetupFinishesDuringEnqueue: setup
+// finishes (and its hook runs DeliverQueued over an empty queue) after
+// StartWhenBusy read "setup running" but before the item is enqueued. The
+// item must still be delivered, not left until an unrelated finish.
+func TestSetup_QueuedPromptNotStrandedWhenSetupFinishesDuringEnqueue(t *testing.T) {
+	t.Parallel()
+	e := newSetupBusyEnv(t, "0")
+	e.reg.testAfterSetupCheck = func() {
+		e.finishSetup(t)
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			if task, _ := e.wm.GetTask(e.task.ID); task.SetupStatus == workspace.SetupOK {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Error("setup never finished")
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		time.Sleep(300 * time.Millisecond) // let the finish hook's DeliverQueued run (empty queue)
+	}
+	out := e.queueDuringSetup(t, WhenBusyQueue)
+	item := e.waitForQueuedStatus(t, out.QueueItemID, store.ChatQueueStatusDelivered)
+	if item.RunID == nil {
+		t.Fatal("delivered item has no run id")
+	}
+}
