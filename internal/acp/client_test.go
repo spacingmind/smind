@@ -233,7 +233,7 @@ func TestClient_PromptCancelledWhileUpdateInFlight(t *testing.T) {
 
 func TestGLMCommand(t *testing.T) {
 	got := GLMCommand()
-	want := []string{"npx", "-y", "glm-acp-agent@1.3.0"}
+	want := []string{"npx", "-y", "glm-acp-agent@1.14.0"}
 	if len(got) != len(want) {
 		t.Fatalf("GLMCommand() = %v, want %v", got, want)
 	}

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/mcpservers"
@@ -25,6 +26,16 @@ import (
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
 )
+
+// glmCommandOverride returns the GLM agent command carrying
+// agents.glm.maxTurns, and true, only when that is set (> 0) and the
+// SMIND_ACP_COMMAND test hook (envOverride) is not: the hook wins.
+func glmCommandOverride(cfg config.Config, envOverride string) ([]string, bool) {
+	if envOverride != "" || cfg.Agents.GLM.MaxTurns <= 0 {
+		return nil, false
+	}
+	return acp.GLMCommandWithMaxTurns(cfg.Agents.GLM.MaxTurns), true
+}
 
 // noopQuotaFetcher always reports zero usage. Real per-provider usage
 // polling (Anthropic/OpenAI/etc. quota APIs) isn't implemented yet, so this
@@ -75,6 +86,10 @@ func cmdServe(args []string) int {
 		// this changes nothing: taskrunner.New's own default
 		// (acp.GLMCommand()) applies exactly as before.
 		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, strings.Fields(cmd)))
+	}
+	if cmd, ok := glmCommandOverride(cfg, os.Getenv("SMIND_ACP_COMMAND")); ok {
+		log.Printf("glm: max turns per prompt = %d", cfg.Agents.GLM.MaxTurns)
+		runnerOpts = append(runnerOpts, taskrunner.WithACPCommand(taskrunner.ProviderGLM, cmd))
 	}
 	runner := taskrunner.New(wm, runnerOpts...)
 
