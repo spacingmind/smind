@@ -194,6 +194,28 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-unknown")).toBeInTheDocument();
   });
 
+  it("run footer shows the usage pill", () => {
+    render(
+      <ul>
+        <RunTimeline
+          run={run([], {
+            stopReason: "end_turn",
+            usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.042, source: "claude_result" },
+          })}
+        />
+      </ul>,
+    );
+
+    const footer = screen.getByTestId("run-footer");
+    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("12.3k in · 1.2k out · $0.042");
+    // The pill sits between the stop reason and the Copy button.
+    const stop = within(footer).getByTestId("run-stop-reason");
+    const pill = within(footer).getByTestId("run-usage-pill");
+    const copy = within(footer).getByTestId("run-copy-button");
+    expect(stop.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pill.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows the turn's elapsed time and copies the turn as plain text", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
