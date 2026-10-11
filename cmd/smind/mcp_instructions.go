@@ -20,6 +20,10 @@ The loop:
    task's worktree path. task_list/task_get/chat_list/chat_new manage and
    inspect tasks and their conversation threads.
 6. task_stop: stop a run that should not continue.
+7. task_archive: when a task's work is done, archive it (uncommitted changes are
+   committed to its branch as a checkpoint; refused while a run is active, so
+   task_stop first). task_new also takes baseRef (e.g. origin/develop), branch,
+   or prNumber to choose the worktree's starting point.
 
 If a task is busy with a running run, task_send queues the prompt on that
 chat by default -- you may keep sending and the daemon will deliver them
