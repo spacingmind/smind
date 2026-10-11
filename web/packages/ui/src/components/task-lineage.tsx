@@ -1,5 +1,5 @@
 import { StatusDot } from "@/components/ui/status-dot";
-import { pillStatus, statusSummary, usageChipText } from "@/lib/task-lineage";
+import { pillStatus, pillStatusWithSubtree, statusSummary, usageChipText } from "@/lib/task-lineage";
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
@@ -63,10 +63,11 @@ export function TaskLineageHeader({
               data-testid="task-child-pill"
               data-child-id={child.id}
               data-child-state={child.run.state}
+              data-child-urgency={pillStatusWithSubtree(child)}
               onClick={() => onJumpToTask?.(child.id)}
               className="flex max-w-[12rem] items-center gap-1.5 truncate rounded-full border px-2 py-0.5 transition-colors hover:bg-hover hover:text-foreground"
             >
-              <StatusDot status={pillStatus(child.run.state)} />
+              <StatusDot status={pillStatusWithSubtree(child)} />
               <span className="truncate">{child.title}</span>
               {child.tier && <span className="shrink-0">{child.tier}</span>}
             </button>

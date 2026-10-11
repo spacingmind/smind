@@ -98,6 +98,21 @@ export function pillStatus(state: TaskTreeRunState): StatusDotStatus {
 }
 
 /**
+ * The pill dot a child pill should actually show: a child with its own
+ * children must surface the most urgent state of itself plus its subtree
+ * (its own run being idle says nothing about a descendant waiting on a
+ * human), read off the node's descendant `counts`. Urgency order is
+ * failed > waiting_permission > running > anything else, so a red dot is
+ * never masked by a calmer one beneath it.
+ */
+export function pillStatusWithSubtree(node: TaskTreeNode): StatusDotStatus {
+  if (node.counts.failed > 0) return "danger";
+  if (node.counts.waitingPermission > 0 || node.run.state === "waiting_permission") return "warning";
+  if (node.counts.running > 0 || node.run.state === "running") return "running";
+  return pillStatus(node.run.state);
+}
+
+/**
  * The usage chip text: "<cost> · <tokens> tok", or null when nothing to
  * show (runs === 0 or no field reported). The token total sums the
  * non-null of input/output -- both null means "not reported" (an em dash

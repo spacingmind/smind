@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { childrenOf, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
+import { childrenOf, pillStatusWithSubtree, statusSummary, usageChipText, type TaskTreeNode, type TaskTreeCounts, type TreeUsageTotals } from "@/lib/task-lineage";
 
 function counts(partial: Partial<TaskTreeCounts> = {}): TaskTreeCounts {
   return { running: 0, waitingPermission: 0, failed: 0, done: 0, idle: 0, ...partial };
@@ -64,5 +64,31 @@ describe("childrenOf", () => {
     expect(childrenOf([root, a, grandchild, b], 1)).toEqual([a, b]);
     expect(childrenOf([root, a, grandchild, b], 2)).toEqual([grandchild]);
     expect(childrenOf([root], 1)).toEqual([]);
+  });
+});
+
+describe("pillStatusWithSubtree", () => {
+  it("pill shows warning when a descendant needs permission", () => {
+    expect(pillStatusWithSubtree(node({ id: 3, counts: counts({ waitingPermission: 1 }) }))).toBe("warning");
+  });
+
+  it("pill shows danger when a descendant failed", () => {
+    expect(
+      pillStatusWithSubtree(node({ id: 3, counts: counts({ failed: 1, waitingPermission: 1, running: 2 }) })),
+    ).toBe("danger");
+  });
+
+  it("pill uses own state for a leaf", () => {
+    expect(pillStatusWithSubtree(node({ id: 3, run: { state: "done", runningRunIds: [], pendingPermissions: 0 } }))).toBe("success");
+    expect(pillStatusWithSubtree(node({ id: 3, run: { state: "waiting_permission", runningRunIds: [], pendingPermissions: 1 } }))).toBe("warning");
+  });
+
+  it("danger outranks warning outranks running", () => {
+    const waiting = node({ id: 3, counts: counts({ waitingPermission: 1 }) });
+    expect(pillStatusWithSubtree(waiting)).toBe("warning");
+    expect(pillStatusWithSubtree(node({ id: 4, counts: counts({ failed: 1, waitingPermission: 1 }) }))).toBe("danger");
+    expect(pillStatusWithSubtree(node({ id: 5, counts: counts({ running: 1 }) }))).toBe("running");
+    // An own running run also promotes an otherwise-idle pill.
+    expect(pillStatusWithSubtree(node({ id: 6, run: { state: "running", runningRunIds: ["r1"], pendingPermissions: 0 } }))).toBe("running");
   });
 });
