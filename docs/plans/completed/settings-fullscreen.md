@@ -147,6 +147,6 @@ pop back to the list before closing; `settings.open` while open is a no-op;
 - AC4 App.test: same `primary-pane` node before/during/after (shell is `invisible`+`inert`, never unmounted).
 - AC5 settings-screen.test `Escape does not call onNavigateBack when a dialog is open` / `…default-prevented` / `…dialog that sits inside an inert subtree`.
 - AC6 settings-screen.test `SettingsScreen narrow` (list → detail, back, initialSectionId, Escape); screenshots `narrow-*-2-list`, `-3-detail-appearance`, `-4-list-again`.
-- AC7 PARTIAL: settings-screen.chrome.test (drag regions, window controls on Windows/Linux, macOS left inset), desktop-chrome.test (macOS opaque panes + vibrancy sidebar hook). **Not verified in a real Tauri window** (no headless desktop run available); plan stays in `active/` for that reason.
+- AC7 PASS: settings-screen.chrome.test (drag regions, window controls on Windows/Linux, macOS left inset), desktop-chrome.test (macOS opaque panes + vibrancy sidebar hook), plus a manual check by the Human on 2026-10-12 in a real macOS Tauri window (`task desktop:mac:install` from develop @ the #297 merge): settings covers the window, the top strip drags it, and the traffic lights do not overlap "Back to app".
 - AC8 registry untouched; all 11 settings test files pass (123 tests).
 - AC9 (round 2 shots) `tmp/screenshots/` (gitignored) — wide/narrow × light/dark, reviewed.
