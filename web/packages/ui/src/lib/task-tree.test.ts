@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AttentionReason, TaskRunStatus } from "@/hooks/use-task-attention";
+import type { RunStatusValue } from "@/lib/types";
 import { attentionRollup, descendantsOf, nestTasks, tierOf } from "@/lib/task-tree";
 import type { Task } from "@/lib/types";
 
@@ -80,11 +81,11 @@ describe("attentionRollup", () => {
       [3, new Set(["finished"] as AttentionReason[])],
       [4, new Set(["permission"] as AttentionReason[])],
     ]);
-    const runStatus = new Map([[2, "error"]]);
+    const runStatus = new Map([[2, "error" as RunStatusValue]]);
     expect(rollup(tasks, 1, attention, runStatus)).toEqual({ reason: "error", count: 3 });
 
     // Error gone: permission outranks finished, same as a row's own dot.
-    const runStatus2 = new Map();
+    const runStatus2 = new Map<number, RunStatusValue>();
     expect(rollup(tasks, 1, attention, runStatus2)).toEqual({ reason: "permission", count: 2 });
 
     const attention3 = new Map([[3, new Set(["finished"] as AttentionReason[])]]);

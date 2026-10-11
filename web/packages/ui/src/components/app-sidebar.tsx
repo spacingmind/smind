@@ -1,4 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 import { useCommands } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
@@ -54,12 +64,14 @@ import {
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
+import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -382,6 +394,39 @@ export function AppSidebar({
     [workspaces, allTasks],
   );
   const { pinned, togglePin } = usePinnedTasks(liveTaskIds);
+  // Collapsed-parent state for the tree view (PR-U1), pruned against the
+  // same live set as pins. Default empty: every parent starts expanded so
+  // a freshly loaded workspace shows its hierarchy rather than looking
+  // mysteriously empty.
+  const { collapsed, toggle: toggleCollapsed, expand: expandCollapsed } = useCollapsedTasks(liveTaskIds);
+  // The task hierarchy for the tree view (PR-U1): built from ALL of the
+  // workspace's tasks at once because the hierarchy trumps the space
+  // grouping (plan Decision 2) -- a child nests under its parent even when
+  // its own SpaceID differs, so per-space nesting would be wrong. Each
+  // space bucket filters these roots back down to its own afterwards.
+  const taskForest = useMemo(() => nestTasks(allTasks), [allTasks]);
+  // A selected task hidden under a collapsed parent must be revealed, or
+  // the keyboard/palette "select task" flows would silently select
+  // something the user cannot see. Only the collapsed ancestors on the
+  // selected node's chain are expanded -- the user's other collapse
+  // choices survive.
+  useEffect(() => {
+    if (selectedTaskId == null) return;
+    const chain: number[] = [];
+    const walk = (nodes: TaskNode[]): boolean => {
+      for (const node of nodes) {
+        if (node.task.ID === selectedTaskId) return true;
+        chain.push(node.task.ID);
+        const found = walk(node.children);
+        chain.pop();
+        if (found) return true;
+      }
+      return false;
+    };
+    if (!walk(taskForest)) return;
+    const hidden = chain.filter((id) => collapsed.has(id));
+    if (hidden.length > 0) expandCollapsed(hidden);
+  }, [selectedTaskId, taskForest, collapsed, expandCollapsed]);
   const rowSignal = useMemo<RowSignal>(
     () => ({
       attention,
@@ -815,6 +860,9 @@ export function AppSidebar({
                     <WorkspaceItem
                       key={ws.ID}
                       workspace={ws}
+                      forest={taskForest.filter((n) => n.task.WorkspaceID === ws.ID)}
+                      collapsed={collapsed}
+                      onToggleCollapse={toggleCollapsed}
                       expanded={expanded.has(ws.ID)}
                       onToggleExpanded={() =>
                         setExpanded((prev) => {
@@ -1191,6 +1239,9 @@ function RowMenu({
 
 function WorkspaceItem({
   workspace,
+  forest,
+  collapsed,
+  onToggleCollapse,
   expanded,
   onToggleExpanded,
   onAddSpace,
@@ -1205,6 +1256,11 @@ function WorkspaceItem({
   onSelectTask,
 }: {
   workspace: WorkspaceWithTree;
+  /** This workspace's root TaskNodes (the caller already filtered the global forest by WorkspaceID). */
+  forest: TaskNode[];
+  /** Persisted collapsed-parent ids (PR-U1), threaded so TaskRows can render rollups on collapsed parents. */
+  collapsed: ReadonlySet<number>;
+  onToggleCollapse: (taskId: number) => void;
   expanded: boolean;
   onToggleExpanded: () => void;
   onAddSpace: () => void;
@@ -1285,6 +1341,9 @@ function WorkspaceItem({
           {flat ? (
             <TaskRows
               tasks={workspace.ungroupedTasks}
+              nodes={forest.filter((n) => n.task.SpaceID === null)}
+              collapsed={collapsed}
+              onToggleCollapse={onToggleCollapse}
               selectedTaskId={selectedTaskId}
               onSelectTask={onSelectTask}
               emptyText="No tasks"
@@ -1299,6 +1358,9 @@ function WorkspaceItem({
                   key={space.ID}
                   space={space}
                   spaces={workspace.spaces}
+                  forest={forest}
+                  collapsed={collapsed}
+                  onToggleCollapse={onToggleCollapse}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   onAddTask={onAddTask}
@@ -1311,6 +1373,9 @@ function WorkspaceItem({
                 <SpaceLikeItem
                   title="Ungrouped"
                   tasks={workspace.ungroupedTasks}
+                  nodes={forest.filter((n) => n.task.SpaceID === null)}
+                  collapsed={collapsed}
+                  onToggleCollapse={onToggleCollapse}
                   selectedTaskId={selectedTaskId}
                   onSelectTask={onSelectTask}
                   onArchiveTask={onArchiveTask}
@@ -1329,6 +1394,9 @@ function WorkspaceItem({
 function SpaceItem({
   space,
   spaces,
+  forest,
+  collapsed,
+  onToggleCollapse,
   selectedTaskId,
   onSelectTask,
   onAddTask,
@@ -1339,6 +1407,10 @@ function SpaceItem({
   space: SpaceWithTasks;
   /** Every space in the workspace (including this one), so its task rows can offer the others as move targets. */
   spaces: SpaceWithTasks[];
+  /** This workspace's root TaskNodes; this space keeps the roots whose task.SpaceID matches it. */
+  forest: TaskNode[];
+  collapsed: ReadonlySet<number>;
+  onToggleCollapse: (taskId: number) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   onAddTask: (spaceId: number | null) => void;
@@ -1350,6 +1422,9 @@ function SpaceItem({
     <SpaceLikeItem
       title={space.Title}
       tasks={space.tasks}
+      nodes={forest.filter((n) => n.task.SpaceID === space.ID)}
+      collapsed={collapsed}
+      onToggleCollapse={onToggleCollapse}
       selectedTaskId={selectedTaskId}
       onSelectTask={onSelectTask}
       onArchiveTask={onArchiveTask}
@@ -1385,6 +1460,9 @@ function SpaceItem({
 function SpaceLikeItem({
   title,
   tasks,
+  nodes,
+  collapsed,
+  onToggleCollapse,
   selectedTaskId,
   onSelectTask,
   onArchiveTask,
@@ -1395,7 +1473,12 @@ function SpaceLikeItem({
   spaceId,
 }: {
   title: string;
+  /** The bucket's own tasks, still used for the aggregate dot above the list. */
   tasks: Task[];
+  /** The root TaskNodes this bucket renders (space-filtered by the caller); a nested child is never also a root here. */
+  nodes?: TaskNode[];
+  collapsed?: ReadonlySet<number>;
+  onToggleCollapse?: (taskId: number) => void;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
@@ -1436,6 +1519,9 @@ function SpaceLikeItem({
         <SidebarMenuSub className="mx-0 border-l-0 px-1">
           <TaskRows
             tasks={tasks}
+            nodes={nodes}
+            collapsed={collapsed}
+            onToggleCollapse={onToggleCollapse}
             selectedTaskId={selectedTaskId}
             onSelectTask={onSelectTask}
             emptyText="No tasks"
@@ -1547,53 +1633,54 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
   );
 }
 
-function TaskRows({
-  tasks,
+/**
+ * The task row itself. Memoized so that one task's attention/run status
+ * changing (a new RowSignal context value) re-renders only TaskRows -- the
+ * parent components don't depend on it -- and the per-row work below is
+ * skipped for rows whose props are all referentially stable: each task's
+ * entry in the maps comes from one parent memo, so an unrelated task's
+ * change produces the same `undefined`/value this row saw last time.
+ * `tierLabel` is computed once per row here (cheap: the forest already
+ * knows children) rather than re-derived in flat lists, which don't have
+ * a forest and therefore skip the chip.
+ */
+const TaskRow = memo(function TaskRow({
+  task,
+  tierLabel,
+  hasChildren,
+  isCollapsed,
+  onToggleCollapse,
+  rollup,
   selectedTaskId,
   onSelectTask,
-  emptyText,
   onArchiveTask,
   spaces,
   onMoveTask,
 }: {
-  tasks: Task[];
+  task: Task;
+  /** "<tier>" or "<tier> · <childCount>"; absent for an untiered root. */
+  tierLabel: string | null;
+  hasChildren: boolean;
+  isCollapsed: boolean;
+  onToggleCollapse?: (taskId: number) => void;
+  /** The collapsed-parent attention rollup (PR-U1), or null when there is nothing to show. */
+  rollup: { reason: AttentionReason; count: number } | null;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
-  emptyText: string;
   onArchiveTask: (task: Task) => void;
-  /**
-   * Every space in the task's workspace, and the handler to reassign one --
-   * both optional because SearchResults' flat list spans more than one
-   * workspace and doesn't (yet) offer the move action. When present, each
-   * row's action menu gains a "Move to space" submenu listing every space
-   * here other than the task's own, plus "Ungrouped" unless the task is
-   * already there.
-   */
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
   const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin } = useRowSignal();
-
-  if (tasks.length === 0) {
-    return (
-      <SidebarMenuSubItem>
-        <span className="px-2 text-ui-sm text-muted-foreground">{emptyText}</span>
-      </SidebarMenuSubItem>
-    );
-  }
-
+  const reason = primaryAttentionReason(attention?.get(task.ID));
+  const runState = runStatus.get(task.ID);
+  const runDot = runDotStatus(runState);
+  const stat = stats.get(task.ID);
+  const isUnread = unread.has(task.ID);
+  const isTaskPinned = pinned.has(task.ID);
+  const status = statusOverrides.get(task.ID) ?? task.Status;
   return (
-    <>
-      {tasks.map((task) => {
-        const reason = primaryAttentionReason(attention?.get(task.ID));
-        const runState = runStatus.get(task.ID);
-        const runDot = runDotStatus(runState);
-        const stat = stats.get(task.ID);
-        const isUnread = unread.has(task.ID);
-        const isTaskPinned = pinned.has(task.ID);
-        const status = statusOverrides.get(task.ID) ?? task.Status;
-        return (
-          <SidebarMenuSubItem key={task.ID}>
+          <SidebarMenuSubItem>
             <HoverCard openDelay={400} closeDelay={100}>
               <HoverCardTrigger asChild>
             <SidebarMenuSubButton
@@ -1611,6 +1698,31 @@ function TaskRows({
                * ancestor that used to break this chain).
                */}
               <span className="flex w-full min-w-0 items-center gap-2">
+              {/*
+               * Collapse chevron (PR-U1), only on rows that have children
+               * -- and only then, so leaf and untiered-root rows keep
+               * exactly the geometry they had before the tree wiring. The
+               * slot is always w-3 on parent rows (not only collapsed or
+               * expanded) so toggling never shifts the run-status dot next
+               * to it; childless rows render no slot at all, matching
+               * today's layout byte-for-byte.
+               */}
+              {hasChildren ? (
+                <button
+                  type="button"
+                  aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
+                  data-testid="task-collapse-toggle"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleCollapse?.(task.ID);
+                  }}
+                  className="flex w-3 shrink-0 items-center justify-center text-muted-foreground"
+                >
+                  <ChevronRight
+                    className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
+                  />
+                </button>
+              ) : null}
               {/*
                * Leading run-status dot -- the task's latest run, live off
                * run.status (Item 12). In its own reserved slot for the
@@ -1649,6 +1761,37 @@ function TaskRows({
                 )}
               </span>
               <span className="min-w-0 truncate">{task.Title}</span>
+              {/*
+               * Tier label (PR-U1): a muted, no-new-colour text tag naming
+               * the task's derived role, with the child count on a parent
+               * ("leader · 3") so a collapsed parent still says how big its
+               * subtree is. Absent for an untiered root -- most tasks --
+               * so the common row stays visually unchanged.
+               */}
+              {tierLabel && (
+                <span data-testid="task-tier" className="shrink-0 text-ui-xs text-muted-foreground">
+                  {tierLabel}
+                </span>
+              )}
+              {/*
+               * Collapsed-parent attention rollup (PR-U1): the loudest
+               * reason among the hidden descendants plus how many need
+               * attention, rendered right before the row's own attention
+               * slot so both dots read as "this row's signal" without
+               * moving any reserved slot. Expanded parents show nothing
+               * here -- their children carry their own dots.
+               */}
+              {rollup && (
+                <span
+                  data-testid="task-rollup"
+                  data-rollup-reason={rollup.reason}
+                  aria-label={`${rollup.count} descendants need attention: ${ATTENTION_LABEL[rollup.reason]}`}
+                  className="flex shrink-0 items-center gap-1"
+                >
+                  <StatusDot status={attentionDotStatus(rollup.reason)} />
+                  <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
+                </span>
+              )}
               {/*
                * The attention-dot slot is always in the DOM at a fixed
                * width, whether or not there's anything to show -- only
@@ -1715,10 +1858,122 @@ function TaskRows({
               </DropdownMenu>
             </span>
           </SidebarMenuSubItem>
-        );
-      })}
-    </>
   );
+});
+
+/**
+ * Renders a bucket's task rows. In the tree view (`nodes` given, PR-U1)
+ * rows come from the pre-nested forest: each parent row owns a chevron
+ * and its children render in a nested list below it (one
+ * ml-3/border-l/pl-1 step per level, via SidebarMenuSub -- plain ul/li
+ * wrappers, so recursion handles any depth the daemon allows). Without
+ * `nodes` -- SearchResults, PinnedSection, StatusGroupItem -- the list is
+ * exactly today's flat rendering; those lists have no forest, so the tier
+ * chip is skipped there rather than guessed.
+ */
+function TaskRows({
+  tasks,
+  nodes,
+  collapsed,
+  onToggleCollapse,
+  selectedTaskId,
+  onSelectTask,
+  emptyText,
+  onArchiveTask,
+  spaces,
+  onMoveTask,
+}: {
+  tasks: Task[];
+  /** Root TaskNodes for the tree view; absent for the flat lists (search/pinned/status). */
+  nodes?: TaskNode[];
+  collapsed?: ReadonlySet<number>;
+  onToggleCollapse?: (taskId: number) => void;
+  selectedTaskId: number | null;
+  onSelectTask?: (task: Task) => void;
+  emptyText: string;
+  onArchiveTask: (task: Task) => void;
+  /**
+   * Every space in the task's workspace, and the handler to reassign one --
+   * both optional because SearchResults' flat list spans more than one
+   * workspace and doesn't (yet) offer the move action. When present, each
+   * row's action menu gains a "Move to space" submenu listing every space
+   * here other than the task's own, plus "Ungrouped" unless the task is
+   * already there.
+   */
+  spaces?: SpaceWithTasks[];
+  onMoveTask?: (task: Task, spaceId: number | null) => void;
+}) {
+  const { attention, runStatus } = useRowSignal();
+
+  if (tasks.length === 0) {
+    return (
+      <SidebarMenuSubItem>
+        <span className="px-2 text-ui-sm text-muted-foreground">{emptyText}</span>
+      </SidebarMenuSubItem>
+    );
+  }
+
+  // Flat lists have no forest to derive a tier from; render today's rows.
+  if (!nodes) {
+    return (
+      <>
+        {tasks.map((task) => (
+          <TaskRow
+            key={task.ID}
+            task={task}
+            tierLabel={null}
+            hasChildren={false}
+            isCollapsed={false}
+            rollup={null}
+            selectedTaskId={selectedTaskId}
+            onSelectTask={onSelectTask}
+            onArchiveTask={onArchiveTask}
+            spaces={spaces}
+            onMoveTask={onMoveTask}
+          />
+        ))}
+      </>
+    );
+  }
+
+  const renderNode = (node: TaskNode): ReactNode => {
+    const { task, tier, children } = node;
+    const isCollapsed = collapsed?.has(task.ID) ?? false;
+    // Rollups only exist where children are hidden -- an expanded parent's
+    // descendants show their own dots, and computing the walk for every
+    // parent regardless would be wasted work on every attention change.
+    const rollup =
+      children.length > 0 && isCollapsed ? attentionRollup(node, attention, runStatus) : { reason: null, count: 0 };
+    return (
+      <SidebarMenuSubItem key={task.ID}>
+        <TaskRow
+          task={task}
+          tierLabel={tier ? (children.length > 0 ? `${tier} · ${children.length}` : tier) : null}
+          hasChildren={children.length > 0}
+          isCollapsed={isCollapsed}
+          onToggleCollapse={onToggleCollapse}
+          rollup={rollup.reason ? { reason: rollup.reason, count: rollup.count } : null}
+          selectedTaskId={selectedTaskId}
+          onSelectTask={onSelectTask}
+          onArchiveTask={onArchiveTask}
+          spaces={spaces}
+          onMoveTask={onMoveTask}
+        />
+        {children.length > 0 && !isCollapsed && (
+          // One indent+guide-line step per level. Deliberately NOT the
+          // default SidebarMenuSub mx-3.5/px-2.5 compound: this list sits
+          // at the same second nesting level SpaceLikeItem already fixed
+          // (see its own comment about not compounding indents), and the
+          // per-level step below is what visually encodes depth.
+          <SidebarMenuSub className="ml-3 border-l border-sidebar-border pl-1">
+            {children.map((child) => renderNode(child))}
+          </SidebarMenuSub>
+        )}
+      </SidebarMenuSubItem>
+    );
+  };
+
+  return <>{nodes.map((node) => renderNode(node))}</>;
 }
 
 /**
