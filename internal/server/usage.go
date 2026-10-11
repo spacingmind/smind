@@ -63,6 +63,77 @@ func parseRequestMeta(body []byte) (requestMeta, bool) {
 	return m, true
 }
 
+// extractModelPrefix best-effort extracts the top-level JSON "model" string
+// from prefix, an already-buffered prefix of a body readRequestBody couldn't
+// fully parse (over requestBodyParseCap, or under it but not valid JSON --
+// in which case prefix is the whole body and this returns false anyway).
+// It token-scans with a streaming json.Decoder so it never allocates a
+// full object graph, and only a top-level "model" counts: one nested inside
+// a sub-object's value is not the request's model. Any error, EOF, or
+// truncation before a model is found means "no model" -- never a guess.
+func extractModelPrefix(prefix []byte) (string, bool) {
+	dec := json.NewDecoder(bytes.NewReader(prefix))
+	tok, err := dec.Token()
+	if err != nil {
+		return "", false
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return "", false
+	}
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		key, ok := keyTok.(string)
+		if !ok {
+			return "", false
+		}
+		valTok, err := dec.Token()
+		if err != nil {
+			return "", false
+		}
+		if key == "model" {
+			if m, ok := valTok.(string); ok && m != "" {
+				return m, true
+			}
+			return "", false
+		}
+		if err := skipJSONValue(dec, valTok); err != nil {
+			return "", false
+		}
+	}
+	return "", false
+}
+
+// skipJSONValue skips the remainder of a JSON value whose first token dec
+// already consumed (valTok), tracking nesting depth so a truncated or
+// oversized-truncated object/array is detected rather than misparsed.
+func skipJSONValue(dec *json.Decoder, valTok json.Token) error {
+	depth := 0
+	switch valTok.(type) {
+	case json.Delim:
+		depth = 1
+	default:
+		return nil
+	}
+	for depth > 0 {
+		tok, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			if t == '{' || t == '[' {
+				depth++
+			} else {
+				depth--
+			}
+		}
+	}
+	return nil
+}
+
 // injectIncludeUsage sets stream_options.include_usage=true on an OpenAI
 // streaming request body that doesn't already have it true (cliproxyapi
 // precedent: internal/runtime/executor/openai_compat_executor.go:355),

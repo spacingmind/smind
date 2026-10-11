@@ -93,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.handleHealth)
 	mux.HandleFunc("GET /api/token", s.handleToken)
 	mux.Handle("POST /v1/messages", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropic)))
+	mux.Handle("POST /v1/messages/count_tokens", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropicCountTokens)))
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
 	mux.Handle("GET /ws", s.ws)
 	mux.Handle("/", webUI())

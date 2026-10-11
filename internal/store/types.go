@@ -9,8 +9,11 @@ type Account struct {
 	Label          string
 	CredentialType string
 	CredentialData string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Models is a JSON array of path.Match globs ("" = no list; stored as
+	// NULL).
+	Models    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // RoutingDecision records which account a session was routed to, for session
