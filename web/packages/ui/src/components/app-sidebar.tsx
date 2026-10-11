@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Circle,
   FolderGit2,
+  SquareTerminal,
   FolderOpen,
   FolderTree,
   GitBranch,
@@ -71,6 +72,8 @@ import {
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { SetupBadge } from "@/components/task-setup";
+import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -302,6 +305,7 @@ type CrudTarget =
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "scripts"; workspace: WorkspaceWithTree }
   | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
   | { kind: "deleteSpace"; space: SpaceWithTasks };
 
@@ -823,6 +827,7 @@ export function AppSidebar({
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                       onMoveTask={moveTask}
+                      onEditScripts={() => setCrud({ kind: "scripts", workspace: ws })}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
                       onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
                       localPathActions={localPathActions}
@@ -941,6 +946,15 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "scripts" && (
+            <WorkspaceScriptsDialog
+              client={client}
+              workspace={crud.workspace}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onSaved={refresh}
             />
           )}
           {crud?.kind === "deleteWorkspace" && (
@@ -1182,6 +1196,7 @@ function WorkspaceItem({
   onAddTask,
   onArchiveTask,
   onMoveTask,
+  onEditScripts,
   onDeleteWorkspace,
   onDeleteSpace,
   localPathActions,
@@ -1195,6 +1210,7 @@ function WorkspaceItem({
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
   onMoveTask: (task: Task, spaceId: number | null) => void;
+  onEditScripts: () => void;
   onDeleteWorkspace: () => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
   /** Reveal / Open-in-editor for the workspace folder; null (items absent) unless the desktop app is on its local daemon. */
@@ -1241,6 +1257,7 @@ function WorkspaceItem({
                   })),
                 ]
               : []),
+            { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
             { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
           ]}
           triggerProps={{
@@ -1636,7 +1653,8 @@ function TaskRows({
                * in the accessible name, so neither a test nor a screen
                * reader has to tell them apart by colour.
                */}
-              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
+              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
                 {reason && (
                   <StatusDot
                     status={attentionDotStatus(reason)}

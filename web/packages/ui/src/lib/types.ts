@@ -8,9 +8,21 @@ export interface Workspace {
   Path: string;
   Title: string;
   RoutingPolicy: string;
+  /** Whether a worktree setup/teardown script is configured (ADR-0024); the script text itself is only returned by workspace.get. */
+  HasSetupScript?: boolean;
+  HasTeardownScript?: boolean;
   CreatedAt: string;
   UpdatedAt: string;
 }
+
+/** workspace.get's result: the workspace plus its setup/teardown script text ("" = none) -- the only wire method that returns it (ADR-0024). */
+export interface WorkspaceWithScripts extends Workspace {
+  SetupScript: string;
+  TeardownScript: string;
+}
+
+/** A task's worktree setup state (ADR-0024): "" = no setup script ran. */
+export type SetupStatus = "" | "running" | "ok" | "failed";
 
 export interface Task {
   ID: number;
@@ -23,6 +35,14 @@ export interface Task {
   CreatedAt: string;
   UpdatedAt: string;
   ArchivedAt: string | null;
+  /** The setup/port fields are optional only so an older daemon (and bare test fixtures) still type-check; read them as ""/null when absent. */
+  SetupStatus?: SetupStatus;
+  /** Failure reason when SetupStatus is "failed". */
+  SetupError?: string;
+  /** Tail of the setup script's merged stdout/stderr (capped daemon-side). */
+  SetupLog?: string;
+  /** The allocated SMIND_PORT, or null when no port range is configured. */
+  Port?: number | null;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
