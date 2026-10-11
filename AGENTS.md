@@ -63,6 +63,12 @@ repo's history.
   terminal agent (`apps/zcode-cli`), pnpm monorepo (`packages/{desktop,
   web,ui,server,rpc,provider}`), plugin store — reference for
   desktop/web workbench UX and GLM-native agent/provider wiring.
+- `refs/autoharness` — a self-learning skill layer for Claude Code
+  (https://github.com/tigerless-labs/autoharness). A reflector distills
+  skills from sessions, a curator merges same-scenario skills, and skills
+  have a usage-validated lifecycle (probation, capacity, pruning, ledger).
+  Reference for smind's self-learning skills design
+  (`docs/plans/active/self-learning-skills.md`).
 
 Day-to-day style (Go idioms, React/TS conventions) is enforced by linters
 (`go vet`/`gofmt`, and ESLint/Prettier once added to `web/`), not by reading
