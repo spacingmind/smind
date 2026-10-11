@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -31,6 +33,17 @@ func stdioRow(name, command string) store.McpServer {
 	return store.McpServer{Name: name, Transport: "stdio", Command: command, Args: `["--flag"]`, Env: `{"B":"2","A":"1"}`, Enabled: true}
 }
 
+// absCmd turns a Unix-flavored fixture path into a genuinely absolute
+// path for the host OS: filepath.IsAbs("/abs/npx") is false on Windows,
+// which would wrongly route the already-absolute fixture command through
+// PATH resolution.
+func absCmd(p string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(`C:\\`, strings.TrimPrefix(p, "/"))
+	}
+	return p
+}
+
 // TestAcpMcpServers_MapsStdioAndHttpWireShape proves each transport maps
 // to its ACP wire shape: args as an array, env/headers as arrays of
 // {name,value} objects sorted by key for determinism.
@@ -40,7 +53,7 @@ func TestAcpMcpServers_MapsStdioAndHttpWireShape(t *testing.T) {
 	look := func(string) (string, error) { return "/resolved/bin", nil }
 
 	rows := []store.McpServer{
-		stdioRow("playwright", "/abs/npx"),
+		stdioRow("playwright", absCmd("/abs/npx")),
 		{Transport: "http", Name: "pplx", URL: "https://mcp.pplx.ai/mcp", Headers: `{"Authorization":"Bearer t"}`, Enabled: true},
 		{Transport: "sse", Name: "legacy", URL: "https://old/mcp", Headers: `{"X":"1"}`, Enabled: true},
 	}
@@ -54,7 +67,7 @@ func TestAcpMcpServers_MapsStdioAndHttpWireShape(t *testing.T) {
 	if len(wire) != 3 {
 		t.Fatalf("wire = %v, want 3 entries", wire)
 	}
-	wantStdio := `{"type":"stdio","name":"playwright","command":"/abs/npx","args":["--flag"],"env":[{"name":"A","value":"1"},{"name":"B","value":"2"}]}`
+	wantStdio := `{"type":"stdio","name":"playwright","command":` + strconv.Quote(absCmd("/abs/npx")) + `,"args":["--flag"],"env":[{"name":"A","value":"1"},{"name":"B","value":"2"}]}`
 	if got, _ := json.Marshal(wire[0]); string(got) != wantStdio {
 		t.Fatalf("stdio entry = %s, want %s", got, wantStdio)
 	}
@@ -76,7 +89,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 	t.Parallel()
 	look := func(string) (string, error) { return "/resolved/bin", nil }
 	rows := []store.McpServer{
-		stdioRow("playwright", "/abs/npx"),
+		stdioRow("playwright", absCmd("/abs/npx")),
 		{Transport: "http", Name: "pplx", URL: "https://mcp.pplx.ai/mcp", Enabled: true},
 	}
 
@@ -160,7 +173,16 @@ func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 		t.Setenv("PATH", "") // silence parallel+Setenv; reset below
 		dir := t.TempDir()
 		exe := filepath.Join(dir, "fakenpx")
-		if err := os.WriteFile(exe, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		content := "#!/bin/sh\nexit 0\n"
+		if runtime.GOOS == "windows" {
+			// Bare-command resolution goes through PATHEXT on Windows;
+			// an extensionless script can never be found, while an
+			// npm-style fakenpx.cmd is -- matching how a real "npx"
+			// MCP server command resolves.
+			exe = filepath.Join(dir, "fakenpx.cmd")
+			content = "@echo off\r\n"
+		}
+		if err := os.WriteFile(exe, []byte(content), 0o755); err != nil {
 			t.Fatalf("write fakenpx: %v", err)
 		}
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -190,7 +212,7 @@ func TestAcpMcpServers_UnresolvableCommandIsSkippedWithoutLeakingSecrets(t *test
 		Env:       `{"TOKEN":"SUPERSECRET"}`,
 		Enabled:   true,
 	}
-	good := stdioRow("good", "/abs/tool")
+	good := stdioRow("good", absCmd("/abs/tool"))
 	wire, inactive, unresolved, _, err := acpMcpServers([]store.McpServer{row, good}, staticMcpCaps{stdio: true}, exec.LookPath)
 	if err != nil {
 		t.Fatalf("acpMcpServers() error = %v, want the unresolvable command skipped, not failed", err)
