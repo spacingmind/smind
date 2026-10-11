@@ -42,3 +42,48 @@ func TestLoad_OrchestrationMaxDepthOverride(t *testing.T) {
 		t.Fatalf("override: MaxDepth = %d, want 1", got)
 	}
 }
+
+func TestDefault_WorktreesConfig(t *testing.T) {
+	t.Parallel()
+	w := Default().Worktrees
+	if w.SetupTimeoutSeconds != 600 || w.TeardownTimeoutSeconds != 120 {
+		t.Fatalf("timeouts = %d/%d, want 600/120", w.SetupTimeoutSeconds, w.TeardownTimeoutSeconds)
+	}
+	if _, _, ok, err := w.Ports.PortRange(); ok || err != nil {
+		t.Fatalf("default range ok=%v err=%v, want unset", ok, err)
+	}
+}
+
+func TestLoad_WorktreesConfigOverride(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	y := "worktrees:\n  ports:\n    range: \"31000-31999\"\n  setupTimeoutSeconds: 5\n  teardownTimeoutSeconds: 7\n"
+	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(y), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	lo, hi, ok, err := cfg.Worktrees.Ports.PortRange()
+	if err != nil || !ok || lo != 31000 || hi != 31999 {
+		t.Fatalf("range = %d-%d ok=%v err=%v", lo, hi, ok, err)
+	}
+	if cfg.Worktrees.SetupTimeoutSeconds != 5 || cfg.Worktrees.TeardownTimeoutSeconds != 7 {
+		t.Fatalf("timeouts = %+v", cfg.Worktrees)
+	}
+}
+
+func TestLoad_WorktreesBadRangeRejected(t *testing.T) {
+	for _, r := range []string{"500-600", "40000-31000", "abc", "1024-70000"} {
+		home := t.TempDir()
+		t.Setenv("SMIND_HOME", home)
+		y := "worktrees:\n  ports:\n    range: \"" + r + "\"\n"
+		if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(y), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(); err == nil {
+			t.Fatalf("range %q accepted, want error", r)
+		}
+	}
+}
