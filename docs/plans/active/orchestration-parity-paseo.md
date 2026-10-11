@@ -582,19 +582,25 @@ New decisions raised by the fold-in (not built, recommendation attached):
 
 ## Progress
 
-- [x] Phase A: inventory + gap table (this file)
-- [x] G31: dogfood gap log folded in (§5)
-- [ ] PR-G: dogfood fixes (D-G1 blocker, D-G4, D-G3, D-G5 config, D-G6, D-G7 rest, D-G9, D-G10)
-- [ ] PR-A: discovery tools + MCP instructions
-- [ ] PR-B: baseRef/branch/PR task creation + `task_archive`
-- [ ] PR-C: `task_set_mode`, `task_options`/`task_set_option`, `task_wait` wait-any
-- [ ] PR-D: bundled skills + `smind skill install|ls|uninstall`
-- [x] ADR-0024 (D1) and ADR-0025 (D2) written, Accepted
-- [ ] PR-E: worktree setup/teardown + ports (backend + CLI); PR-E2: web
-- [ ] PR-F: model selection (backend + CLI + MCP); PR-F2: web
-- [x] D1–D11 answered by the user (2026-10-11)
+- [x] Phase A: inventory + gap table (this file); G31 dogfood gap log folded in (§5)
+- [x] ADR-0024 (D1) and ADR-0025 (D2) written, Accepted; D1-D11 answered (2026-10-11)
+- [x] PR-A discovery tools + server instructions: #264 (merged)
+- [x] PR-B task from baseRef/branch/PR + `task_archive` + archive guard/latch: #266 (merged)
+- [x] PR-E worktree setup/teardown + ports (backend + CLI): #270 (merged)
+- [ ] PR-C live settings + wait-any: #269 (open, CI green)
+- [ ] PR-G dogfood fixes (D-G1 blocker, D-G3..D-G10): #273 (open, stacked on #269)
+- [ ] PR-F model selection (backend + CLI + MCP): #272 (open); PR-F2 web: #276 (open, stacked on #272)
+- [ ] PR-E2 web setup editor/badge: #275 (open)
+- [ ] PR-D bundled skills + `smind skill install|ls|uninstall`: code complete in branch `feat/orchestration-skills` (carries temporary integration merges of #269/#273); PR opens after they merge, rebased onto develop
+- [ ] D12 (live `autoAccept` CLI) and D13 (`needs-continue` run state) answered by the user
 
 ## Validation
 
-(filled in as each PR is verified: test names, `task test`, `task lint`,
-sandbox-daemon MCP smoke runs with an isolated `SMIND_HOME` and port.)
+Per PR, with what was and was not verified (details in each PR body):
+
+- **PR-A (#264):** TestRunList_*, TestMCPTools_{WorkspaceList,TaskGet,RunList*,ProviderListMarksAutoApprovingModes,ProfileListIncludesNotes}, TestMCPServer_InstructionsNameEveryTool (fails when a tool is undocumented), TestCapRuns. Criteria 1-7 met.
+- **PR-B (#266):** ref validation and git argv safety (`TestManager_CreateTask_BaseRefRejectsOptionLikeInput`), single-level refs/SHAs, `prNumber <= 0` rejected at every layer; archive guard fails closed, latch set *before* the active check (`TestTryBeginArchive_LatchSetBeforeActiveCheck` fails on the old order), `run.start` refuses archived tasks. Not verified: PR path against a real GitHub remote (test seam only).
+- **PR-E (#270):** setup/teardown/port tests listed in the PR; review fixes: `Start` honors setup-busy, `RetrySetup` atomic, `discardTask` never deletes a pre-existing branch (regression `TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch`, verified to fail on the old behavior). Not verified: real `npm ci`, Windows.
+- **PR-C (#269):** source-guarded `run.setPermissionMode`/`run.setConfigOption` (fail-closed on catalog lookup error and on non-`thought_level|model` categories), wait-any. Not verified: GLM's real option category.
+- **PR-G (#273), PR-F (#272), PR-F2 (#276), PR-E2 (#275):** see PR bodies; web PRs include light+dark screenshot reviews against sandbox daemons (isolated `SMIND_HOME`/port). Not verified anywhere: real GLM/Codex agents for model lists and `--max-turns`.
+- **Recurring, unrelated:** `TestServer_TerminalAttach_*` and a few `@smind/ui` `App.test.tsx` tests time out intermittently under load; they pass when rerun alone.
