@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -18,10 +19,10 @@ import (
 // registerMCPRunTools adds the run-reading tools, task_wait, and task_stop
 // to the catalog.
 func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request."}, mcpTaskStatus(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request. A pending permission means the run is NOT finished: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here."}, mcpTaskPermissions(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here. loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended."}, mcpTaskPermissions(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Check `state`: loop: task_wait; if state is waiting_permission, a HUMAN approves (you cannot); then task_wait again; only done/error/stopped mean the run ended. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
 
@@ -43,13 +44,66 @@ func mcpRunLogs(ctx context.Context, client *wsclient.Client, tool string, runID
 // returns -- a snapshot, not the full history (that's task_logs).
 const mcpStatusTail = 20
 
+// mcpRunEvent is runLogEvent's MCP-facing mirror: same JSON names, but the
+// free-form fields (tool input/result, raw payload) are `any` rather than
+// json.RawMessage. The go-sdk infers "array or null" for a []byte-typed
+// field, so output validation rejected every real object there.
+type mcpRunEvent struct {
+	Type       string                   `json:"type"`
+	Text       string                   `json:"text,omitempty"`
+	StopReason string                   `json:"stopReason,omitempty"`
+	RequestID  string                   `json:"requestId,omitempty"`
+	Summary    string                   `json:"summary,omitempty"`
+	Options    []permissionOptionParams `json:"options,omitempty"`
+	OptionID   string                   `json:"optionId,omitempty"`
+	Reason     string                   `json:"reason,omitempty"`
+	ToolCallID string                   `json:"toolCallId"`
+	ToolName   string                   `json:"toolName,omitempty"`
+	Title      string                   `json:"title,omitempty"`
+	Status     string                   `json:"status,omitempty"`
+	Input      any                      `json:"input,omitempty"`
+	Result     any                      `json:"result,omitempty"`
+	Kind       string                   `json:"kind"`
+	Payload    any                      `json:"payload,omitempty"`
+}
+
+// rawToAny decodes one raw JSON value, falling back to its text if it is
+// not valid JSON; nil (absent) stays nil.
+func rawToAny(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var v any
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return string(raw)
+	}
+	return v
+}
+
+// toMCPRunEvents converts run.logs events to their MCP shape; the result
+// is never nil so events serializes as [] rather than null.
+func toMCPRunEvents(events []runLogEvent) []mcpRunEvent {
+	out := make([]mcpRunEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, mcpRunEvent{
+			Type: e.Type, Text: e.Text, StopReason: e.StopReason,
+			RequestID: e.RequestID, Summary: e.Summary, Options: e.Options,
+			OptionID: e.OptionID, Reason: e.Reason,
+			ToolCallID: e.ToolCallID, ToolName: e.ToolName, Title: e.Title, Status: e.Status,
+			Input: rawToAny(e.Input), Result: rawToAny(e.Result),
+			Kind: e.Kind, Payload: rawToAny(e.Payload),
+		})
+	}
+	return out
+}
+
 // taskStatusOutput is task_status's structured output.
 type taskStatusOutput struct {
 	RunID             string                `json:"runId"`
 	Status            string                `json:"status"`
 	StopReason        string                `json:"stopReason,omitempty"`
 	Err               string                `json:"err,omitempty"`
-	Events            []runLogEvent         `json:"events"`
+	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 }
 
@@ -69,13 +123,11 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 			StopReason: result.StopReason,
 			Err:        result.Err,
 		}
-		out.Events = result.Events
-		if len(result.Events) > mcpStatusTail {
-			out.Events = result.Events[len(result.Events)-mcpStatusTail:]
+		events := result.Events
+		if len(events) > mcpStatusTail {
+			events = events[len(events)-mcpStatusTail:]
 		}
-		if out.Events == nil {
-			out.Events = []runLogEvent{}
-		}
+		out.Events = toMCPRunEvents(events)
 		if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 			out.PendingPermission = &pending[0]
 		}
@@ -97,7 +149,7 @@ type taskLogsOutput struct {
 	Status     string        `json:"status"`
 	StopReason string        `json:"stopReason,omitempty"`
 	Err        string        `json:"err,omitempty"`
-	Events     []runLogEvent `json:"events"`
+	Events     []mcpRunEvent `json:"events"`
 }
 
 // mcpTaskLogs wraps run.logs: full or tailed transcript plus the run's
@@ -109,12 +161,9 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		if err != nil {
 			return nil, taskLogsOutput{}, err
 		}
-		if result.Events == nil {
-			result.Events = []runLogEvent{}
-		}
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
-			StopReason: result.StopReason, Err: result.Err, Events: result.Events,
+			StopReason: result.StopReason, Err: result.Err, Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
@@ -133,6 +182,12 @@ type pendingPermissionOut struct {
 // logic fetchPendingPermissions (cmd/smind/task.go) implements for the
 // CLI. Read-only by construction: nothing here can resolve a request.
 func pendingPermissionsFrom(result runLogsResult) []pendingPermissionOut {
+	// A finished run has nothing left to approve: a request still
+	// unresolved in its transcript (e.g. the run was stopped mid-request)
+	// is stale and must not make a looping driver wait on a dead run.
+	if isTerminalRunStatus(result.Status) {
+		return nil
+	}
 	resolved := map[string]bool{}
 	for _, e := range result.Events {
 		if e.Type == "permission_resolved" {
@@ -221,6 +276,41 @@ type taskWaitOutput struct {
 	Err               string                `json:"err,omitempty"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
+	// State is the unambiguous summary of why task_wait returned:
+	// waiting_permission | running | done | error | stopped | timed_out.
+	// Only done/error/stopped mean the run ended.
+	State string `json:"state"`
+	// PendingPermissions lists every pending request, in order
+	// (PendingPermission is just the first).
+	PendingPermissions []pendingPermissionOut `json:"pendingPermissions,omitempty"`
+	Message            string                 `json:"message,omitempty"`
+}
+
+// buildTaskWaitOutput derives task_wait's output from one run.logs
+// snapshot. timedOut marks the deadline having passed with the run still
+// going.
+func buildTaskWaitOutput(result runLogsResult, timedOut bool) taskWaitOutput {
+	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
+	if pending := pendingPermissionsFrom(result); len(pending) > 0 {
+		out.PendingPermission = &pending[0]
+		out.PendingPermissions = pending
+		out.State = "waiting_permission"
+		out.Message = "Run " + result.RunID + " is waiting for a permission decision: a human must approve or deny this via `smind task approve <runId> [requestId] [optionId]` or the smind web UI. This is NOT completion; surface it to the human, then call task_wait again with the same runId."
+		return out
+	}
+	switch {
+	case isTerminalRunStatus(result.Status):
+		out.State = result.Status
+		if out.State != "done" && out.State != "stopped" {
+			out.State = "error"
+		}
+	case timedOut:
+		out.TimedOut = true
+		out.State = "timed_out"
+	default:
+		out.State = "running"
+	}
+	return out
 }
 
 // mcpTaskWait implements ADR-0017's one genuinely new capability: block
@@ -243,18 +333,8 @@ func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, task
 			if err != nil {
 				return nil, taskWaitOutput{}, err
 			}
-			out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
-			if pending := pendingPermissionsFrom(result); len(pending) > 0 {
-				out.PendingPermission = &pending[0]
-				return nil, out, nil
-			}
-			if isTerminalRunStatus(result.Status) {
-				return nil, out, nil
-			}
-
 			remaining := time.Until(deadline)
-			if remaining <= 0 {
-				out.TimedOut = true
+			if out := buildTaskWaitOutput(result, remaining <= 0); out.State != "running" {
 				return nil, out, nil
 			}
 			sleep := interval
