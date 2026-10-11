@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -43,7 +44,7 @@ func TestAcpMcpServers_MapsStdioAndHttpWireShape(t *testing.T) {
 		{Transport: "http", Name: "pplx", URL: "https://mcp.pplx.ai/mcp", Headers: `{"Authorization":"Bearer t"}`, Enabled: true},
 		{Transport: "sse", Name: "legacy", URL: "https://old/mcp", Headers: `{"X":"1"}`, Enabled: true},
 	}
-	wire, inactive, _, err := acpMcpServers(rows, all, look)
+	wire, inactive, _, _, err := acpMcpServers(rows, all, look)
 	if err != nil {
 		t.Fatalf("acpMcpServers() error = %v", err)
 	}
@@ -81,7 +82,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 
 	t.Run("v2 agent advertising only http", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, _, err := acpMcpServers(rows, staticMcpCaps{http: true}, look)
+		wire, inactive, _, _, err := acpMcpServers(rows, staticMcpCaps{http: true}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -101,7 +102,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 	// filter here just honors whatever the backend reports.
 	t.Run("v1 agent advertising nothing keeps stdio, drops http", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, _, err := acpMcpServers(rows, staticMcpCaps{stdio: true}, look)
+		wire, inactive, _, _, err := acpMcpServers(rows, staticMcpCaps{stdio: true}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -118,7 +119,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 
 	t.Run("agent advertising nothing yields non-nil empty wire", func(t *testing.T) {
 		t.Parallel()
-		wire, inactive, _, err := acpMcpServers([]store.McpServer{stdioRow("s", "/x"), {Transport: "http", Name: "h", URL: "u", Enabled: true}}, staticMcpCaps{}, look)
+		wire, inactive, _, _, err := acpMcpServers([]store.McpServer{stdioRow("s", "/x"), {Transport: "http", Name: "h", URL: "u", Enabled: true}}, staticMcpCaps{}, look)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -140,7 +141,7 @@ func TestAcpMcpServers_DropsTransportAgentDoesNotAdvertise(t *testing.T) {
 func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 
 	t.Run("injected lookPath", func(t *testing.T) {
-		wire, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "npx")}, staticMcpCaps{stdio: true}, func(cmd string) (string, error) {
+		wire, _, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "npx")}, staticMcpCaps{stdio: true}, func(cmd string) (string, error) {
 			if cmd != "npx" {
 				t.Errorf("lookPath called with %q, want npx", cmd)
 			}
@@ -164,7 +165,7 @@ func TestAcpMcpServers_ResolvesBareCommandToAbsolutePath(t *testing.T) {
 		}
 		t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-		wire, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "fakenpx")}, staticMcpCaps{stdio: true}, exec.LookPath)
+		wire, _, _, _, err := acpMcpServers([]store.McpServer{stdioRow("pw", "fakenpx")}, staticMcpCaps{stdio: true}, exec.LookPath)
 		if err != nil {
 			t.Fatalf("acpMcpServers() error = %v", err)
 		}
@@ -190,7 +191,7 @@ func TestAcpMcpServers_UnresolvableCommandIsSkippedWithoutLeakingSecrets(t *test
 		Enabled:   true,
 	}
 	good := stdioRow("good", "/abs/tool")
-	wire, inactive, unresolved, err := acpMcpServers([]store.McpServer{row, good}, staticMcpCaps{stdio: true}, exec.LookPath)
+	wire, inactive, unresolved, _, err := acpMcpServers([]store.McpServer{row, good}, staticMcpCaps{stdio: true}, exec.LookPath)
 	if err != nil {
 		t.Fatalf("acpMcpServers() error = %v, want the unresolvable command skipped, not failed", err)
 	}
@@ -903,4 +904,222 @@ func TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets(t *
 	if strings.Contains(logs.String(), "SUPERSECRET") {
 		t.Fatalf("log output leaked a secret: %s", logs.String())
 	}
+}
+
+// mcpServerEvents filters a run's events down to the EventTypeMcpServers
+// ones, in order.
+func mcpServerEvents(events []Event) []Event {
+	var out []Event
+	for _, e := range events {
+		if e.Type == EventTypeMcpServers {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// assertMcpStatesNoSecrets fails when the event's McpServers JSON contains
+// any of the given secret-bearing strings (env/header values, args,
+// command, url) -- the ADR-0018 redaction rule for the mcp_servers event.
+func assertMcpStatesNoSecrets(t *testing.T, e Event, leaks ...string) {
+	t.Helper()
+	raw, _ := json.Marshal(e.McpServers)
+	for _, leak := range leaks {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("mcp_servers event JSON %s leaked %q", raw, leak)
+		}
+	}
+}
+
+// TestAcpMcpServerStates_ActiveDroppedAndUnresolved: the pure mapping of
+// rows + capabilities to []McpServerState -- active for wire entries,
+// dropped/transport_unsupported for capability-dropped rows,
+// dropped/command_not_found for an unresolvable stdio command, in row
+// order -- with no secret/command/url value in the JSON.
+func TestAcpMcpServerStates_ActiveDroppedAndUnresolved(t *testing.T) {
+	t.Parallel()
+	look := func(cmd string) (string, error) {
+		if cmd == "no-such-command-xyz" {
+			return "", os.ErrNotExist
+		}
+		return "/resolved/" + cmd, nil
+	}
+	rows := []store.McpServer{
+		{Name: "pw", Transport: "stdio", Command: "go", Args: `["ARG-SECRET-99"]`, Env: `{"TOKEN":"ENV-SECRET-99"}`, Enabled: true},
+		{Name: "dropme", Transport: "http", URL: "https://URL-SECRET-99/mcp", Enabled: true},
+		{Name: "broken", Transport: "stdio", Command: "no-such-command-xyz", Enabled: true},
+	}
+	_, _, _, states, err := acpMcpServers(rows, staticMcpCaps{stdio: true}, look)
+	if err != nil {
+		t.Fatalf("acpMcpServers() error = %v", err)
+	}
+	want := []McpServerState{
+		{Name: "pw", Transport: "stdio", Status: McpStatusActive},
+		{Name: "dropme", Transport: "http", Status: McpStatusDropped, Reason: McpReasonTransportUnsupported},
+		{Name: "broken", Transport: "stdio", Status: McpStatusDropped, Reason: McpReasonCommandNotFound},
+	}
+	if !reflect.DeepEqual(states, want) {
+		t.Fatalf("states = %+v, want %+v", states, want)
+	}
+	assertMcpStatesNoSecrets(t, Event{McpServers: states}, "ENV-SECRET-99", "ARG-SECRET-99", "URL-SECRET-99", "no-such-command-xyz")
+}
+
+// TestRunner_RunPrompt_ACPEmitsMcpServersEvent: an ACP run with mixed
+// servers emits exactly one mcp_servers event, in row order, before the
+// session is created -- active for the wire entries, dropped with the
+// right reason for the capability-dropped and unresolvable ones.
+func TestRunner_RunPrompt_ACPEmitsMcpServersEvent(t *testing.T) {
+	r, st, task, _ := newMcpTestEnv(t, "stdio")
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Env: `{"TOKEN":"ENV-SECRET-99"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "dropme", Transport: "http", URL: "https://URL-SECRET-99/mcp", Enabled: true}); err != nil {
+		t.Fatalf("Create(dropme): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "broken", Transport: "stdio", Command: "no-such-command-xyz", Args: `["ARG-SECRET-99"]`, Enabled: true}); err != nil {
+		t.Fatalf("Create(broken): %v", err)
+	}
+
+	events := runMcpPrompt(t, r, task)
+
+	got := mcpServerEvents(events)
+	if len(got) != 1 {
+		t.Fatalf("mcp_servers events = %d, want exactly 1 (events %+v)", len(got), got)
+	}
+	want := []McpServerState{
+		{Name: "pw", Transport: "stdio", Status: McpStatusActive},
+		{Name: "dropme", Transport: "http", Status: McpStatusDropped, Reason: McpReasonTransportUnsupported},
+		{Name: "broken", Transport: "stdio", Status: McpStatusDropped, Reason: McpReasonCommandNotFound},
+	}
+	if !reflect.DeepEqual(got[0].McpServers, want) {
+		t.Fatalf("mcp_servers = %+v, want %+v", got[0].McpServers, want)
+	}
+	assertMcpStatesNoSecrets(t, got[0], "ENV-SECRET-99", "ARG-SECRET-99", "URL-SECRET-99", "no-such-command-xyz")
+}
+
+// TestRunner_RunPrompt_ACPNoMcpServersEventWhenNoneConfigured is the
+// regression guard: a run with no applicable servers emits no mcp_servers
+// event at all, exactly as before the feature.
+func TestRunner_RunPrompt_ACPNoMcpServersEventWhenNoneConfigured(t *testing.T) {
+	r, _, task, _ := newMcpTestEnv(t, "stdio,http")
+	events := runMcpPrompt(t, r, task)
+	if got := mcpServerEvents(events); len(got) != 0 {
+		t.Fatalf("mcp_servers events = %+v, want none", got)
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNativeEmitsMcpServersAndFailedUpdate: the
+// claude-native run emits the initial all-active event, then a second one
+// after the CLI init message that marks the CLI-reported failed server
+// failed/failed_to_start and the rest active.
+func TestRunner_RunPrompt_ClaudeNativeEmitsMcpServersAndFailedUpdate(t *testing.T) {
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("mcp-init"), 0o644); err != nil {
+		t.Fatalf("write scenario: %v", err)
+	}
+	r := claudeNativeRunner(t, wm)
+	WithMcpServers(mcpservers.New(st))(r)
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Env: `{"TOKEN":"ENV-SECRET-99"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "broken", Transport: "http", URL: "https://URL-SECRET-99/mcp", Enabled: true}); err != nil {
+		t.Fatalf("Create(broken): %v", err)
+	}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	mcp := mcpServerEvents(got)
+	if len(mcp) != 2 {
+		t.Fatalf("mcp_servers events = %d, want 2 (events %+v)", len(mcp), mcp)
+	}
+	wantInitial := []McpServerState{
+		{Name: "pw", Transport: "stdio", Status: McpStatusActive},
+		{Name: "broken", Transport: "http", Status: McpStatusActive},
+	}
+	if !reflect.DeepEqual(mcp[0].McpServers, wantInitial) {
+		t.Fatalf("initial mcp_servers = %+v, want %+v", mcp[0].McpServers, wantInitial)
+	}
+	wantUpdate := []McpServerState{
+		{Name: "pw", Transport: "stdio", Status: McpStatusActive},
+		{Name: "broken", Transport: "http", Status: McpStatusFailed, Reason: McpReasonFailedToStart},
+	}
+	if !reflect.DeepEqual(mcp[1].McpServers, wantUpdate) {
+		t.Fatalf("update mcp_servers = %+v, want %+v", mcp[1].McpServers, wantUpdate)
+	}
+	for _, e := range mcp {
+		assertMcpStatesNoSecrets(t, e, "ENV-SECRET-99", "URL-SECRET-99", "npx")
+	}
+}
+
+// TestRunner_RunPrompt_ClaudeNativeNoSecondMcpEventWithoutFailures: with
+// no CLI-reported failures there is exactly one mcp_servers event, the
+// initial all-active one.
+func TestRunner_RunPrompt_ClaudeNativeNoSecondMcpEventWithoutFailures(t *testing.T) {
+	r, st, task := newClaudeMcpEnv(t)
+	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	mcp := mcpServerEvents(got)
+	if len(mcp) != 1 {
+		t.Fatalf("mcp_servers events = %d, want exactly 1 (events %+v)", len(mcp), mcp)
+	}
+	want := []McpServerState{{Name: "pw", Transport: "stdio", Status: McpStatusActive}}
+	if !reflect.DeepEqual(mcp[0].McpServers, want) {
+		t.Fatalf("mcp_servers = %+v, want %+v", mcp[0].McpServers, want)
+	}
+}
+
+// TestRunner_RunPrompt_CodexEmitsMcpServersProviderUnsupported: a Codex
+// run with configured servers emits exactly one mcp_servers event, every
+// row dropped/provider_unsupported.
+func TestRunner_RunPrompt_CodexEmitsMcpServersProviderUnsupported(t *testing.T) {
+	st, wm, _ := newTestStoreAndManager(t)
+	task := newTestTaskUnder(t, wm)
+	if _, err := mcpservers.New(st).Create(store.McpServer{Name: "remote", Transport: "http", URL: "https://URL-SECRET-99/mcp", Headers: `{"Authorization":"Bearer HDR-SECRET-99"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(remote): %v", err)
+	}
+	r := codexRunner(wm)
+	WithMcpServers(mcpservers.New(st))(r)
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+	}()
+	got := drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+
+	mcp := mcpServerEvents(got)
+	if len(mcp) != 1 {
+		t.Fatalf("mcp_servers events = %d, want exactly 1 (events %+v)", len(mcp), mcp)
+	}
+	want := []McpServerState{{Name: "remote", Transport: "http", Status: McpStatusDropped, Reason: McpReasonProviderUnsupported}}
+	if !reflect.DeepEqual(mcp[0].McpServers, want) {
+		t.Fatalf("mcp_servers = %+v, want %+v", mcp[0].McpServers, want)
+	}
+	assertMcpStatesNoSecrets(t, mcp[0], "HDR-SECRET-99", "URL-SECRET-99")
 }
