@@ -24,7 +24,7 @@ func registerMCPRunTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_status", Description: "Non-blocking snapshot of a run: status, the last few transcript entries, and any still-pending permission request."}, mcpTaskStatus(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_logs", Description: "Read a run's full (or tailed) transcript and current status."}, mcpTaskLogs(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_permissions", Description: "List a run's still-pending permission requests (read-only). The human approves or denies them via `smind task approve` or the smind web UI; there is no tool for that here."}, mcpTaskPermissions(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_wait", Description: "Block until a run finishes (done/error/stopped), a permission request goes pending, or the timeout elapses (default 120s). A human approves or denies a pending permission out of band (smind web UI or `smind task approve`); to keep waiting after surfacing it, re-issue task_wait with ignorePermissionIds listing the request ids you have already surfaced -- the wait then ends only on a NEW pending request, a terminal status, or the timeout. Pass runIds (2-16 distinct runs, instead of runId) to wait for the first of several: it returns as soon as any one is done/error/stopped or has a pending permission, and runId in the result names which. A timeout is not a failure -- timedOut: true just means the run is still going; re-issue task_wait with the same runId to keep waiting, or use task_status for a non-blocking check."}, mcpTaskWait(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_stop", Description: "Stop a running run."}, mcpTaskStop(client))
 }
 
@@ -262,9 +262,10 @@ const mcpWaitMaxRunIDs = 16
 // taskWaitInput is task_wait's argument shape: either runId (wait on one
 // run) or runIds (wait for the first of 2-16 runs), never both.
 type taskWaitInput struct {
-	RunID          string   `json:"runId,omitempty" jsonschema:"id of the run to wait on (returned by run.start/task.prompt); use this or runIds"`
-	RunIDs         []string `json:"runIds,omitempty" jsonschema:"wait-any: 2-16 distinct run ids; returns as soon as any one of them is terminal or has a pending permission request, naming it in runId. Use this or runId, not both"`
-	TimeoutSeconds int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
+	RunID               string   `json:"runId,omitempty" jsonschema:"id of the run to wait on (returned by run.start/task.prompt); use this or runIds"`
+	RunIDs              []string `json:"runIds,omitempty" jsonschema:"wait-any: 2-16 distinct run ids; returns as soon as any one of them is terminal or has a pending permission request, naming it in runId. Use this or runId, not both"`
+	IgnorePermissionIDs []string `json:"ignorePermissionIds,omitempty" jsonschema:"permission request ids you have already surfaced to the human; a pending request with one of these ids does not end the wait, so it continues until a NEW pending request, a terminal status, or the timeout"`
+	TimeoutSeconds      int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
 }
 
 // taskWaitOutput is task_wait's structured output: the run's status once it
@@ -293,9 +294,13 @@ func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, task
 			timeout = time.Duration(in.TimeoutSeconds) * time.Second
 		}
 		deadline := time.Now().Add(timeout)
+		ignore := make(map[string]bool, len(in.IgnorePermissionIDs))
+		for _, id := range in.IgnorePermissionIDs {
+			ignore[id] = true
+		}
 
 		if len(in.RunIDs) == 0 {
-			out, err := mcpWaitOneRun(ctx, client, in.RunID, deadline)
+			out, err := mcpWaitOneRun(ctx, client, in.RunID, deadline, ignore)
 			return nil, out, err
 		}
 		if in.RunID != "" {
@@ -304,7 +309,7 @@ func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, task
 		if err := validateWaitRunIDs(in.RunIDs); err != nil {
 			return nil, taskWaitOutput{}, err
 		}
-		out, err := mcpWaitAnyRun(ctx, client, in.RunIDs, deadline)
+		out, err := mcpWaitAnyRun(ctx, client, in.RunIDs, deadline, ignore)
 		return nil, out, err
 	}
 }
@@ -332,7 +337,7 @@ func validateWaitRunIDs(ids []string) error {
 // has a pending permission, cancelling and joining the rest before
 // returning so no goroutine outlives the call. If every run times out the
 // result is {timedOut: true} with no runId.
-func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string, deadline time.Time) (taskWaitOutput, error) {
+func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string, deadline time.Time, ignore map[string]bool) (taskWaitOutput, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	defer func() {
@@ -349,7 +354,7 @@ func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			out, err := mcpWaitOneRun(ctx, client, id, deadline)
+			out, err := mcpWaitOneRun(ctx, client, id, deadline, ignore)
 			results <- result{out, err}
 		}()
 	}
@@ -368,7 +373,7 @@ func mcpWaitAnyRun(ctx context.Context, client *wsclient.Client, runIDs []string
 // mcpWaitOneRun is the per-run wait: poll run.logs with backoff until the
 // run is terminal, has a pending permission request, or deadline passes
 // (TimedOut).
-func mcpWaitOneRun(ctx context.Context, client *wsclient.Client, runID string, deadline time.Time) (taskWaitOutput, error) {
+func mcpWaitOneRun(ctx context.Context, client *wsclient.Client, runID string, deadline time.Time, ignore map[string]bool) (taskWaitOutput, error) {
 	interval := mcpWaitPollMin
 	for {
 		result, err := mcpRunLogs(ctx, client, "task_wait", runID, 0)
@@ -376,9 +381,11 @@ func mcpWaitOneRun(ctx context.Context, client *wsclient.Client, runID string, d
 			return taskWaitOutput{}, err
 		}
 		out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
-		if pending := pendingPermissionsFrom(result); len(pending) > 0 {
-			out.PendingPermission = &pending[0]
-			return out, nil
+		for _, p := range pendingPermissionsFrom(result) {
+			if !ignore[p.RequestID] {
+				out.PendingPermission = &p
+				return out, nil
+			}
 		}
 		if isTerminalRunStatus(result.Status) {
 			return out, nil
