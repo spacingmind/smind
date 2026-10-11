@@ -7,6 +7,14 @@ open decision: D1–D4 and D6–D13 as the recommended defaults, **D5 changed**
 (the web UI ports Paseo's Usage UX; see "Decisions (accepted 2026-10-11)").
 Nothing here is built yet; implementation follows the plan's PR split.
 
+**Amended 2026-10-12 (Human, firm rule):** the provider usage endpoints are
+rate-limited, so smind must never call them carelessly ("có rate limit, đừng
+có gọi vô tội vạ"). Section 3 now has a **Call budget (hard rules)**
+subsection; sections 4 and 5 and decisions D2, D3 and D6 are amended to match.
+Also approved the same day: the account filter shared by footer and modal, a
+footer row always present while polling is enabled, the "Claude"/"Codex"
+labels, an event after every completed fetch, and `Problem.ExpiresAt`.
+
 Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/active/account-usage-windows.md).
 
 ## Context
@@ -223,8 +231,9 @@ row id is the identity. Two smind accounts that hold the same provider login
 will show duplicate windows; de-duplicating them is a later add-on, not v1.
 
 **Storage.** `quota_snapshots.usage_data` stays `TEXT`; it now holds the JSON
-of `Report` with `"v":2`. There is **no schema change and no SQL
-migration**:
+of `Report` with `"v":2`. `quota_snapshots` itself has **no schema change and
+no SQL migration** (the call-budget state is one separate new table, section
+3):
 
 - A payload without `"v"` is the legacy `Usage` shape (only ever zeros,
   from `noopQuotaFetcher`). The decoder returns "no report" for it and the
@@ -290,61 +299,135 @@ Rules that apply to every fetcher:
   the only write is the existing refreshed-token persist, and only when the
   token was expired.
 
-### 3. Polling: demand-driven, cached, backed off
+### 3. Polling and the call budget
 
-- **TTL 5 minutes** (matches `defaultQuotaTTL` and Paseo). A cached report
-  inside the TTL is returned without a call.
-- **No idle timer.** The daemon does not poll in the background on its own.
-  A refresh happens only when (a) a surface asks (`account.usage`, the UI,
-  CLI, MCP) and the snapshot is older than the TTL, or (b) the proxy is
-  about to route among at least one candidate and the snapshot is older
-  than the TTL (an **asynchronous** refresh; the request is not held up, see
-  section 4). An idle daemon makes zero outbound usage calls.
-- **In-flight de-duplication** per account (singleflight): concurrent
-  callers share one fetch.
-- **Backoff** per account, in memory: on 429 honor `Retry-After` (seconds
-  or HTTP-date); on 5xx, timeout or network error use exponential backoff
-  1 min → 2 → 4 → … capped at 30 min, with jitter; reset on success. During
-  backoff the poller serves the last report, marked `stale`, with
-  `nextRetryAt`. A 401/403 (`rejected`) and a no_quota result are cached
-  for the normal TTL, not hammered. Backoff state is not persisted: a
-  restart clears it, and the worst case is one more 429.
-- **On-demand refresh** (`account.usage {refresh:true}`, `smind account
-  usage --refresh`, the UI refresh button) bypasses the TTL but **not** an
-  active backoff window, and not more than once per 30 s per account.
-  Refresh from a run-scoped caller (an agent over MCP) is ignored: it gets
-  the cached report. An agent must not be able to make smind hit a provider
-  in a loop.
+The usage endpoints are rate-limited and unofficial. smind treats every call
+as expensive: it fetches only when a person is looking, and the **daemon**
+enforces a hard budget that no client (a second browser tab, a script, an
+agent, a bug) can exceed.
+
+- **TTL 5 minutes**, not configurable below 5 minutes (`accountUsage.ttlSeconds`
+  may only raise it). A cached report inside the TTL is returned without a call.
 - **Last good report is kept.** A failed fetch never overwrites a stored
-  `available` report; the poller returns it marked `stale` with the error
-  alongside (`lastError`). This is what lets an exhausted verdict survive
-  a flaky endpoint (section 4).
-- **Opt-out switch.** The whole feature is controlled by one config key,
-  `accountUsage.enabled` (YAML, `~/.smind/config.yaml`). When false, no
-  outbound usage call is ever made, `account.usage` returns
-  `{enabled:false, reports:[]}`, and routing never consults windows (it
-  behaves exactly as today). Settings shows the switch's state and the one
-  sentence that explains what is called and with whose token. Other
-  config: `accountUsage.ttlSeconds` (300), `accountUsage.routing` (bool,
-  section 4), `accountUsage.exhaustThresholdPct` (100).
-- **No secrets in logs or events.** Fetchers log only `account id,
-  provider, HTTP status, duration, outcome kind`. Never the URL's query,
-  headers, the body, or a parse error that echoes a value (parse errors log
-  the field path only). The stored `Error` string is from a fixed
-  vocabulary, never a body excerpt (an HTML error page is not stored).
+  `available` report; it is returned marked `stale` with `lastError`. This
+  is what lets an exhausted verdict survive a flaky endpoint (section 4).
+- **Opt-out switch.** One config key, `accountUsage.enabled` (YAML,
+  `~/.smind/config.yaml`). When false, no outbound usage call is ever made,
+  `account.usage` returns `{enabled:false, reports:[]}`, and routing never
+  consults windows (it behaves exactly as today). Settings shows the state
+  and one sentence saying what is called and with whose token. Other config:
+  `accountUsage.ttlSeconds` (300, minimum 300), `accountUsage.routing`
+  (bool, section 4), `accountUsage.exhaustThresholdPct` (100). The call-budget
+  constants below are **not** configurable.
+- **No secrets in logs or events.** Fetchers log only account id, provider,
+  HTTP status, duration, outcome kind. Never the URL's query, headers, the
+  body, or a parse error that echoes a value. The stored `Error` string is
+  from a fixed vocabulary, never a body excerpt.
+
+#### Call budget (hard rules)
+
+Human rule (2026-10-12): usage endpoints are rate-limited; never call them
+carelessly. These rules live in `quota.Poller` (the daemon), so they hold
+whatever the client does, and each is pinned by a test that counts real HTTP
+requests on an `httptest` server.
+
+**Who may cause a fetch.** There are three entry points on the poller, and
+only the third can reach the network:
+
+| Entry point | Used by | Network? |
+|---|---|---|
+| `Peek(accountID)` | routing, the proxy, events, startup, reconnect re-list, `account.usage {mode:"cached"}` | **Never** |
+| `Touch(accountID)` | an explicit user surface asking for data: opening the Usage modal or Settings → Usage, the sidebar footer item while visible, `smind account usage`, MCP `account_usage` | At most **one fetch per account per TTL** |
+| `Refresh(accountID)` | an explicit refresh press: a card's or Refresh-all button, `smind account usage --refresh` (never MCP, never a run-scoped caller) | Bypasses the TTL, but under the floor and budget below |
+
+1. **Daemon-side floor, per account.**
+   - **Touch:** at most 1 network fetch per account per TTL (5 min), counted
+     from the last *attempt* (success or failure), not the last success.
+   - **Refresh:** at most 1 per account per **30 s**, **and** at most **6 per
+     account per rolling hour** (a per-account budget).
+   - A request over the floor or the budget is **served from the cache**, marked
+     `stale`, with `nextRefreshAt` and `refreshBlocked` (`"floor"`,
+     `"budget"`, `"backoff"` or `"rejected"`); it is **never queued** into a
+     later extra call, and it is not an error.
+   - Derived hard ceiling: since every attempt restarts the TTL clock, one
+     account receives **at most 18 usage-endpoint requests per hour** (12
+     TTL-paced plus 6 forced), whatever any client does. *Refresh all* starts
+     the per-account fetches with at most **2 in flight** at once.
+2. **Single-flight per account.** Concurrent callers of any kind (several
+   browser tabs, the CLI, MCP, an in-flight touch) share one in-flight fetch
+   and all receive its result. A forced refresh that arrives while a fetch
+   is in flight joins it and spends no budget.
+3. **Routing and the proxy never trigger a fetch.** They hold a
+   `quota.Reader` (an interface with `Peek` only), so a fetch path does not
+   exist from them at compile time. They read whatever the cache holds.
+4. **No fetch on daemon startup, on `account.updated` / `account.updateCredential`,
+   on account creation, or on client reconnect**, and **no background timer**
+   (D2). A reconnecting client re-lists with `mode:"cached"`. Startup does
+   not even read the state table until an account is first asked about.
+   The footer item asks for data (`mode:"touch"`) at most at the **TTL
+   cadence, only while the window is both visible and focused**; the timer
+   is paused when the tab is hidden or blurred, and on becoming visible it
+   asks only if its last report is older than the TTL. The daemon would
+   serve the cache anyway; the client does this so it does not even send the
+   request. Opening the modal or Settings → Usage asks once, then follows the
+   same cadence while open and focused.
+5. **Failure handling, with persisted state.**
+   - **429:** honor `Retry-After` (delta-seconds or HTTP-date), **at least
+     5 minutes when the header is absent**, capped at 6 h so a bad header
+     cannot park an account forever. Consecutive failures also raise an
+     exponential backoff: 1 min, 2, 4, … capped at 30 min, plus **additive**
+     jitter of 0–20% (jitter never shortens a `Retry-After`). The next
+     attempt is allowed at `now + max(retryAfterOrDefault, backoff + jitter)`.
+   - **5xx, timeout, network error, malformed/HTML/empty body:** the same
+     exponential 1 → 30 min backoff with jitter (a changed endpoint must not
+     be hammered).
+   - **401/403 (rejected) and a terminal refresh failure (`invalid_grant`):**
+     `unavailable`, **no retry of any kind (touch or refresh) until the
+     account's credential changes** (compared by a stored fingerprint, the
+     first 8 bytes of a SHA-256 of the access token or key, never logged or
+     put on the wire). A re-login, `account.updateCredential`, or a token
+     refreshed through the proxy changes it; re-saving the same credential
+     does not.
+   - A token-refresh call made for an expired credential is itself
+     rate-limited traffic: it obeys the same backoff and counts as an attempt.
+   - **Success** resets the failure count and the backoff.
+   - **The state is persisted**, so a daemon restart does not reset any of
+     it. New table `quota_poll_state` (created from `schema.sql` with
+     `CREATE TABLE IF NOT EXISTS`, which already applies to existing
+     databases; deleted with the account like `quota_snapshots`):
+
+     ```sql
+     CREATE TABLE IF NOT EXISTS quota_poll_state (
+         account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+         last_attempt_at TIMESTAMP,          -- any attempt, success or not
+         next_allowed_at TIMESTAMP,          -- end of backoff / Retry-After
+         consecutive_failures INTEGER NOT NULL DEFAULT 0,
+         forced_at TEXT NOT NULL DEFAULT '[]', -- JSON, <= 6 unix-ms of forced attempts in the last hour
+         rejected_fp TEXT                    -- credential fingerprint after 401/403/invalid_grant
+     );
+     ```
+
+     The attempt is written **before** the request goes out (write-ahead),
+     so a crash or restart mid-fetch cannot cause a second call inside the
+     TTL. A persisted `next_allowed_at` further than the 6 h cap in the
+     future (clock jumped) is clamped to the cap.
+6. **Tests assert exact call counts** on an `httptest` server (burst of 50
+   concurrent calls → 1 request; repeated forced refresh → capped; restart
+   during backoff → 0 requests; …). The plan names them (AC44–AC54).
 
 ### 4. Routing integration
 
 `routing.Router` consults windows instead of `TokensLimit`:
 
-- **The router never blocks on the network.** It reads the cache
-  (`Poller.Peek(accountID)`, which does no I/O). If the snapshot is older
-  than the TTL it triggers an asynchronous refresh (de-duplicated) and
-  decides on what it has. A cold cache (no snapshot yet) is "unknown", so a
-  fresh daemon's first request is routed as today, and the next one sees
-  the fetched windows. This replaces `isExhausted`'s synchronous
-  `Poller.Get`, which would have held a proxy request for up to 15 s on a
-  cold or expired cache.
+- **The router never touches the network, and never causes a fetch.** It
+  holds a `quota.Reader` and calls `Peek(accountID)`, which does no I/O and
+  starts nothing (call-budget rule 3). Whatever the cache holds is what routing
+  knows: a cold cache or a stale one is "unknown" and routes as today. This
+  replaces `isExhausted`'s synchronous `Poller.Get`, which would have held a
+  proxy request for up to 15 s on a cold cache and, worse, turned every
+  routed request into a potential usage call. The cache is warmed only by
+  user surfaces (rule 4), so an account nobody has looked at recently is
+  unknown to the router (see Consequences).
 - **`Route` becomes model-aware.** `Route(ctx, sessionKey, policy,
   candidates, opts ...RouteOption)` with `routing.WithModel(model)`; the
   proxy already has the model (it narrows candidates by it, ADR-0020 §5(b))
@@ -367,7 +450,8 @@ Rules that apply to every fetcher:
 - **Exhausted** = a counted window with `UsedPct >= exhaustThresholdPct`
   (default 100) or `RemainingPct <= 0`, **and** `now < ResetsAt`. A window
   whose `ResetsAt` has passed is treated as reset (0 used) without waiting
-  for a refetch; the async refresh then confirms. A counted exhausted
+  for a refetch (routing never fetches; the next user-surface touch
+  refreshes the cache). A counted exhausted
   window with **no** `ResetsAt` counts only while its snapshot is at most
   `2 × ttl` old.
 - **Suppressed when overage is on.** If `Report.OverageEnabled == true`
@@ -415,13 +499,18 @@ counts (ADR-0020; `usage.summary`, `run_usage`). Both stay; neither is
 removed or reshaped.
 
 - **wsapi RPC `account.usage`** (read-only). Params `{accountIds?:
-  number[], refresh?: boolean}`; result `{enabled: boolean, reports:
-  AccountUsage[]}`:
+  number[], mode?: "cached" | "touch" | "refresh"}`, default `"cached"`
+  (a client must opt in to anything that can reach the network); result
+  `{enabled: boolean, ttlSeconds: number, reports: AccountUsage[]}`. The
+  modes map to the poller entry points in section 3 (`Peek` / `Touch` /
+  `Refresh`); `refresh` is denied to run-scoped callers (treated as
+  `touch`):
 
   ```json
   { "accountId": 3, "key": "anthropic-3", "provider": "anthropic",
     "label": "Work Max", "credentialType": "oauth",
-    "stale": false, "nextRetryAt": null, "lastError": null,
+    "stale": false, "nextRefreshAt": null, "refreshBlocked": null,
+    "lastError": null,
     "report": { "v": 2, "status": "available", "planLabel": "",
       "windows": [ { "id": "five_hour", "label": "Session", "shortLabel": "5h",
         "summary": true, "usedPct": 41.0, "remainingPct": 59.0,
@@ -429,25 +518,32 @@ removed or reshaped.
       "fetchedAt": "2026-10-11T12:01:12Z" } }
   ```
 
-  No credential fields, no email, no raw provider body. `refresh:true`
-  waits up to 20 s for the fetch and returns whatever it has.
+  No credential fields, no email, no raw provider body. `nextRefreshAt` is
+  the earliest time a forced refresh would reach the network (null when it
+  never will, i.e. `refreshBlocked:"rejected"`), and `refreshBlocked` says
+  why one would not (`"floor"`, `"budget"`, `"backoff"`, `"rejected"`).
+  `touch` and `refresh` wait up to 20 s for a fetch they started or joined
+  and return whatever they have; a refused refresh returns the cached
+  report with `refreshBlocked` set, not an error.
 - **wsapi event `account.usage`** (ADR-0005/0009 topic style, full
   `AccountUsage` snapshot payload like `account.updated`): emitted after
   **every completed network fetch** (success, `unavailable` or error), so a
   refresh whose numbers did not change still advances `fetchedAt` ("Updated
   3m ago"); not emitted for a cache hit. This is how the UI receives a
   slow account's report without holding back the others (Paseo streams
-  `usage.list_reports.update` for the same reason). A `refresh:true` call
-  with no `accountIds` fetches every eligible account in parallel, each
-  emitting as it settles. Registered in `knownTopics`.
-- **CLI** `smind account usage [--refresh] [--json]`: one block per
+  `usage.list_reports.update` for the same reason). A `mode:"refresh"` call
+  with no `accountIds` fetches the eligible accounts (at most 2 in flight),
+  each emitting as it settles. Registered in `knownTopics`.
+- **CLI** `smind account usage [--refresh] [--json]` (`touch` by default,
+  `refresh` with `--refresh`; a blocked refresh prints why and when it will
+  be allowed): one block per
   account, one line per window (`Session  41% used · resets in 2h 4m`),
   unavailable accounts show their problem in words, exit 0 whenever the call
   worked (an unavailable account is data, not an error). Distinct from
   `smind usage` (tokens).
 - **MCP** (read-only, ADR-0019 #6; D8): a new
-  `account_usage` tool returning the same `AccountUsage[]` (no `refresh`
-  input for run-scoped callers), added to the catalog and
+  `account_usage` tool returning the same `AccountUsage[]` (`touch` only: it
+  has no refresh input, so an agent cannot force a call), added to the catalog and
   `mcp_instructions.go`, instead of widening `usage_summary`.
 - **Web (D5: a port of Paseo's Usage UX).** The interaction model is
   Paseo's; the data source is smind's accounts table. Paseo's `UsageReportEntry`
@@ -512,6 +608,14 @@ removed or reshaped.
     smind account, so it shows only when **exactly one** OAuth account of
     the run's provider exists, labelled with that account; otherwise
     nothing. It is a separate, deferrable PR.
+  - **Call discipline in the client.** Reconnect re-lists with `mode:"cached"`.
+    The footer item and the open modal ask with `mode:"touch"` only at the TTL
+    cadence while the window is visible and focused (paused when hidden or
+    blurred). Refresh buttons use `mode:"refresh"`, are disabled for 30 s
+    after a press, and are also disabled with the reason when the daemon
+    reports `refreshBlocked` ("Rate limited, retry in 12 min", "Refreshed just
+    now", "Refresh limit reached, next in 24 min", "Reconnect this account to
+    refresh"). The daemon enforces the budget either way.
   - **State and rules.** Preferences (`displayAs`, `pins`, picked account,
     "Summary in sidebar") are client-side in `localStorage` (D11), with
     Paseo's rules: `null` pins mean defaults, an array (even empty) is the
@@ -590,6 +694,26 @@ rule d).
   reset time in the message for v1.
 - **D13. Per-account opt-out.** Global switch only in v1.
 
+**Amendments, 2026-10-12 (Human, firm rule: do not call the rate-limited
+endpoints carelessly).** These replace the parts of D2, D3, D6 and D10 they
+touch; the rest of each decision stands.
+
+- **D2 (amended).** Demand-driven means **user surfaces only**: the proxy and
+  routing never cause a fetch (the earlier "or the proxy asks" is removed);
+  nothing fetches on startup, on `account.updated`, or on reconnect.
+- **D3 (amended).** TTL 5 min is a daemon-enforced floor (1 fetch per account
+  per TTL, not configurable below 5 min). Forced refresh: at most 1 per 30 s
+  **and 6 per hour** per account; excess is served from cache, never queued.
+  429 honors `Retry-After` (at least 5 min if absent); backoff 1→30 min with
+  jitter; 401/403 stops retrying until the credential changes; all of this is
+  persisted across restarts. See "Call budget (hard rules)".
+- **D6 (amended).** Routing uses windows, but only what the cache already
+  holds (`Peek`). Routing knowledge is therefore as fresh as the last user
+  surface that looked; accepted.
+- **D10 (amended).** An expired-token refresh made for a usage fetch is itself
+  budgeted traffic (it obeys the same backoff) and a terminal refresh failure
+  stops retries until the credential changes.
+
 **Live probes need Human go-ahead.** Four facts are unverified: that
 Anthropic's usage endpoint accepts smind's stored token (scope), that a
 stored OpenAI token carries `chatgpt_account_id`, that `chatgpt.com` accepts
@@ -612,14 +736,15 @@ specific manual probe (see the plan's Validation).
   Rejected: smind stores its own accounts; reading another app's secrets is
   a larger trust and OS-prompt cost (macOS keychain ACLs) and would report a
   different login than the one smind routes with.
-- **Poll in the background on a timer.** Rejected for v1: it wakes idle
-  accounts, adds constant outbound traffic with user tokens, and the
-  demand-driven path already gives fresh data whenever anyone looks or the
-  proxy routes.
-- **Block the proxy request on a fresh fetch.** Rejected: up to a 15 s stall
-  on a cold cache, on an unofficial endpoint. Cache-only routing with an
-  async refresh keeps the proxy's latency independent of the provider's
-  usage API.
+- **Poll in the background on a timer, or keep the cache warm for routing.**
+  Rejected: it wakes idle accounts and adds constant outbound traffic with
+  user tokens to a rate-limited endpoint. The cost is that routing is blind
+  to accounts nobody has looked at (Consequences); a keep-warm mechanism would
+  need its own ADR and the Human's approval.
+- **Block the proxy request on a fresh fetch, or refresh asynchronously from
+  routing (the first draft).** Rejected: a synchronous fetch stalls up to
+  15 s on a cold cache, and either form lets ordinary proxy traffic cause
+  calls to a rate-limited endpoint. Routing reads the cache only.
 - **Fail closed when usage is unknown.** Rejected: an unofficial endpoint
   would then be able to take routing down. Unknown must mean available.
 - **Passive exhaustion from upstream 429s.** Not rejected on merit, only
@@ -647,6 +772,13 @@ specific manual probe (see the plan's Validation).
   pin today's shapes with fixtures and never call the real endpoints, so
   they cannot detect drift by themselves; refreshing the fixtures from a
   real response is a manual step.
+- **Routing freshness depends on a person looking.** Because only user
+  surfaces fetch, the router knows an account is exhausted only if a surface
+  touched it before the window filled; an exhausted verdict then holds until
+  `resetsAt`, but an account nobody has viewed is unknown and routed to
+  (fail-open). With the desktop app's footer item visible and focused the
+  cache stays within one TTL; a headless daemon with no UI open gets no
+  fresh data. This is the accepted price of the call budget.
 - Token-refresh races become possible between the proxy and the poller;
   the new per-account `EnsureFresh` lock is part of PR-A and protects the
   proxy too.
@@ -657,7 +789,8 @@ specific manual probe (see the plan's Validation).
 - `Router.Route` and `quota.Fetcher` change signatures; `quota.Usage` and
   `noopQuotaFetcher` are deleted, and the only callers are `serve.go` and
   `proxy.go`.
-- A thin new config section (`accountUsage`) and one new wsapi RPC, one
+- A thin new config section (`accountUsage`), one new table
+  (`quota_poll_state`), and one new wsapi RPC, one
   topic, one CLI subcommand, one MCP tool, and one web component family
   ported from Paseo's usage UI (several files, no new data-fetching
   dependency; a small segmented control and provider logo marks are the only

@@ -9,6 +9,11 @@ the web UI ports Paseo's Usage UX (PR-D1/D2 below). PR-A may start, but its
 live-endpoint probes need Human go-ahead first (see Validation); until then
 it is fixtures-only.
 
+**Amended 2026-10-12 (Human, firm):** usage endpoints are rate-limited; never
+call them carelessly. ADR-0028 §3 "Call budget (hard rules)" is binding;
+AC44–AC54 and the `budget_*` tests below pin it. Nothing in this plan may add
+a fetch path that does not go through `quota.Poller`'s `Touch`/`Refresh`.
+
 Goal: smind learns each OAuth account's real plan windows (5-hour, weekly,
 per-model weekly; reset times) from the provider, uses them so the proxy's
 pool failover stops sending traffic to an exhausted account, and shows them
@@ -30,7 +35,8 @@ Data model and storage (PR-A)
   `quota.Usage` and `noopQuotaFetcher` are gone; `quota.Fetcher.Fetch` takes
   an `accounts.Account` and returns a `Report`.
 - **AC2** `quota_snapshots.usage_data` stores `Report` JSON with `"v":2`; no
-  schema change and no SQL migration. A legacy payload (no `"v"`) or a
+  change to `quota_snapshots` and no SQL migration entry (the one new table is
+  AC52). A legacy payload (no `"v"`) or a
   too-new `v` decodes to "no report" without error and is overwritten by the
   next successful fetch.
 - **AC3** The store has `GetLatestQuotaSnapshot(accountID)`; after an insert
@@ -72,23 +78,78 @@ Fetchers (PR-A)
 
 Poller (PR-A)
 
-- **AC12** `Poller.Peek` does no I/O. `Poller.Get`/refresh serves the cache
-  inside the TTL (default 5 min), de-duplicates concurrent fetches per
-  account, and never returns an error for a fetch failure (it returns the
-  last report marked `stale`, or "no report").
-- **AC13** Backoff per account: 429 honors `Retry-After` (seconds and
-  HTTP-date); 5xx/timeout/network use 1 → 30 min exponential with jitter;
-  success resets it. A forced refresh bypasses the TTL but not an active
-  backoff and not a 30 s per-account floor.
+- **AC12** `Poller` has exactly three entry points (AC44): `Peek` does no
+  I/O; `Touch` and `Refresh` are the only paths to the network. The cache is
+  served inside the TTL (default and minimum 5 min), concurrent callers share
+  one fetch (AC47), and no entry point returns an error for a fetch failure (it
+  returns the last report marked `stale`, or "no report").
+- **AC13** Backoff, `Retry-After`, rejected handling and persistence are
+  specified by AC49–AC52 (they replace the earlier in-memory backoff wording).
 - **AC14** A failed fetch never overwrites a stored `available` report.
 - **AC15** With `accountUsage.enabled: false` no outbound usage call is ever
-  made, `Peek`/`Get` return "no report", and the daemon starts normally.
-  `accountUsage.{enabled,ttlSeconds,routing,exhaustThresholdPct}` load with
-  the ADR defaults and reject invalid values (`ttlSeconds < 30`,
-  threshold outside 1–100).
+  made, `Peek`/`Touch`/`Refresh` return "no report", and the daemon starts
+  normally. `accountUsage.{enabled,ttlSeconds,routing,exhaustThresholdPct}`
+  load with the ADR defaults and reject invalid values (`ttlSeconds < 300`,
+  threshold outside 1–100); the call-budget constants (30 s floor, 6/hour, 2
+  in flight, 5 min `Retry-After` default, 6 h cap, 1→30 min backoff) are not
+  configurable.
 - **AC16** No token, refresh token, JWT, header or response body appears in
   any log line, stored report, wsapi payload or event; the stored `Error`
   and `Problem.Detail` come from a fixed vocabulary.
+
+Call budget (hard rules, PR-A; ADR-0028 §3). Every count below is asserted
+on an `httptest` server that counts requests; the clock is injected.
+
+- **AC44** *Entry points.* `quota.Poller` exposes `Peek`, `Touch`, `Refresh`.
+  `quota.Reader` (interface: `Peek` only) is what routing, the proxy and the
+  event path hold, so no fetch path exists from them at compile time.
+  `Peek` never makes a request, whatever the cache state.
+- **AC45** *Touch floor.* At most **1 network fetch per account per TTL (5 min)**,
+  counted from the last attempt (success or failure). `Touch` within the TTL,
+  or during backoff, or for a rejected account, makes 0 requests and returns
+  the cache.
+- **AC46** *Refresh floor and budget.* `Refresh` makes at most **1 request per
+  account per 30 s** and **6 per account per rolling hour**. Beyond either, it
+  returns the cached report with `stale`, `nextRefreshAt` and
+  `refreshBlocked` (`floor` | `budget` | `backoff` | `rejected`); it is not
+  an error and is **never queued** (no extra call happens later because of
+  it). Derived ceiling: at most **18 requests per account per hour** under any
+  call pattern. Refresh-all runs at most **2 fetches in flight**.
+- **AC47** *Single-flight.* Concurrent `Touch`/`Refresh` callers for one account
+  (tabs, CLI, MCP, an in-flight fetch) share one in-flight request and all
+  get its result; a `Refresh` that joins an in-flight fetch spends no budget.
+- **AC48** *No stray triggers.* Daemon startup, account creation, `account.updated`,
+  `account.updateCredential`, a client reconnect and the passage of time
+  make **0 requests**; there is no background timer; the state table is read
+  lazily, on the first request about an account.
+- **AC49** *429.* `Retry-After` (delta-seconds or HTTP-date) is honored; absent,
+  the wait is at least **5 min**; capped at 6 h; consecutive failures add an
+  exponential backoff 1, 2, 4 … 30 min with **additive** 0–20% jitter; next
+  attempt at `now + max(retryAfterOrDefault, backoff + jitter)`; jitter never
+  shortens a `Retry-After`.
+- **AC50** *Other failures.* 5xx, timeout, network error and malformed/HTML/empty
+  bodies use the same 1 → 30 min backoff; success resets the count and the
+  backoff; a token-refresh call made for an expired credential obeys the same
+  backoff and counts as an attempt.
+- **AC51** *Rejected.* 401/403 and a terminal refresh failure (`invalid_grant`)
+  produce `unavailable` and **no retry (touch or refresh) until the credential
+  fingerprint changes** (a re-login, `account.updateCredential` or a
+  proxy-refreshed token changes it; re-saving the same credential does not).
+  The fingerprint (8 bytes of SHA-256) is never logged or sent on the wire.
+- **AC52** *Persistence.* New table `quota_poll_state` (`account_id` PK,
+  `last_attempt_at`, `next_allowed_at`, `consecutive_failures`, `forced_at`
+  JSON of at most 6 unix-ms, `rejected_fp`) is created from `schema.sql`
+  (`CREATE TABLE IF NOT EXISTS`, which applies to existing databases) and
+  deleted with the account. The attempt is written **before** the request
+  (write-ahead). A daemon restart resets nothing: not the TTL, the backoff,
+  the forced-refresh budget, nor the rejected state. A persisted
+  `next_allowed_at` more than 6 h ahead (clock change) is clamped to 6 h.
+- **AC53** *Callers (PR-B, PR-C).* The proxy and routing cause **0** requests
+  (AC23). `account.usage` defaults to `cached`; a reconnect re-list is `cached`;
+  the CLI is `touch` unless `--refresh`; MCP `account_usage` is `touch` only;
+  a burst of 10 websocket clients touching at once yields 1 request; a
+  refused refresh returns the cache with the reason, never an error and never
+  a queued call.
 
 Routing (PR-B)
 
@@ -113,26 +174,32 @@ Routing (PR-B)
   time, unknown → routes. Affinity: a pinned exhausted account is replaced;
   a pinned account under the threshold is kept regardless of other
   candidates' usage.
-- **AC23** A stale snapshot triggers at most one asynchronous refresh per
-  account at a time; the proxy request is not held up.
+- **AC23** Routing and the proxy never cause a fetch (AC44): over 1000 routed
+  requests with a cold cache, a stale cache, and an account in backoff, the
+  usage `httptest` server sees **0 requests**, and `Route` returns without
+  waiting on anything.
 
 Surfaces: wsapi, CLI, MCP (PR-C)
 
-- **AC24** `account.usage` returns `{enabled, reports[]}` with the ADR's
-  shape for all accounts or the given `accountIds`; an unknown id is an
-  error; `refresh:true` triggers a fetch (subject to AC13) and waits up to
-  20 s; for a run-scoped caller `refresh` is ignored.
+- **AC24** `account.usage` takes `{accountIds?, mode?: "cached"|"touch"|"refresh"}`,
+  default `"cached"`, and returns `{enabled, ttlSeconds, reports[]}` with the ADR's
+  shape (including `stale`, `nextRefreshAt`, `refreshBlocked`); an unknown id
+  is an error; `cached` makes 0 requests; `touch` and `refresh` map to AC45/AC46
+  and wait up to 20 s for a fetch they started or joined; a refused refresh
+  returns the cached report with `refreshBlocked` (not an error); `refresh` from
+  a run-scoped caller is treated as `touch`.
 - **AC25** `account.usage` events are emitted after every completed network
   fetch (success, `unavailable` or error), so `fetchedAt` advances even when
   the numbers did not change, and not for a cache hit; a refresh without
   `accountIds` fetches all eligible accounts in parallel, one event each as
   it settles; the topic is accepted by `events.subscribe`.
-- **AC26** `smind account usage [--refresh] [--json]` prints per account one
+- **AC26** `smind account usage [--refresh] [--json]` uses `touch` (and
+  `refresh` only with `--refresh`), prints per account one
   line per window with used % and time to reset, prints unavailable accounts'
   problems in words, and exits 0 when the daemon answered.
 - **AC27** The MCP tool (D8: `account_usage`) is read-only, present in the
-  catalog and in `mcp_instructions.go`, and takes no refresh for run-scoped
-  callers. `usage_summary` and `usage.summary` are unchanged.
+  catalog and in `mcp_instructions.go`, uses `touch` only, and has no refresh
+  input. `usage_summary` and `usage.summary` are unchanged.
 Web: Paseo's Usage UX ported (PR-D1 core, PR-D2 sidebar and pins, PR-E optional)
 
 - **AC28** (D2) Sidebar footer Usage item: in the existing footer, each
@@ -183,7 +250,10 @@ Web: Paseo's Usage UX ported (PR-D1 core, PR-D2 sidebar and pins, PR-E optional)
   refresh keeps the previous report on screen and adds "Unable to refresh
   usage"; an account that recovers replaces its message with windows.
 - **AC36** (D1) Refresh: a card's button sends `account.usage {accountIds:[id],
-  refresh:true}` for that account only; Refresh all sends one refresh for
+  mode:"refresh"}` for that account only; it is disabled for 30 s after a press
+  and, when the daemon reports `refreshBlocked`, disabled with the reason and
+  time ("Rate limited, retry in 12 min", "Refreshed just now", "Refresh limit
+  reached, next in 24 min", "Reconnect this account to refresh"); Refresh all sends one refresh for
   every account; both show a spinner and are disabled while pending; other
   cards are untouched; a report with a later `fetchedAt` is never replaced
   by an earlier one when a refresh races a list or an event; plain list
@@ -211,6 +281,14 @@ Web: Paseo's Usage UX ported (PR-D1 core, PR-D2 sidebar and pins, PR-E optional)
   data), modal (one and several accounts, long list, each problem state,
   refresh in flight, options open) and Settings → Usage; looked at and fixed
   by the implementer before the PR is opened; attached to the PR.
+- **AC54** (D1+D2) Client call discipline (ADR-0028 §3 rules 4): a reconnect
+  re-lists with `mode:"cached"`; the footer item and an open modal/Settings
+  → Usage send `mode:"touch"` at most at the TTL cadence and **only while the
+  window is visible and focused** (timer paused when hidden or blurred; on
+  becoming visible a touch is sent only if the last report is older than the
+  TTL); with the footer hidden and no modal open the web UI sends no
+  `touch`; opening the modal sends one `touch`; the client never sends
+  `refresh` except from a button press.
 - **AC42** (E, optional) The run usage pill's popover shows the plan card
   (no pins, no refresh) of the run provider's account only when exactly one
   OAuth account of that provider exists, labelled with that account; nothing
@@ -284,19 +362,66 @@ test calls a real endpoint.**
 
 ### Go tests: poller (`internal/quota/poller_test.go`)
 
-- `poller_ttl_hit_no_fetch`; `poller_ttl_expired_refetches`.
-- `poller_singleflight`: 10 concurrent `Get` → 1 fetch.
+- `poller_ttl_hit_no_fetch`; `poller_ttl_expired_touch_refetches`.
 - `poller_peek_no_io`: `Peek` with a blocking fetcher returns immediately and starts nothing.
 - `poller_error_keeps_last_good`: good then failing fetch → stored report unchanged, returned `stale`.
-- `poller_backoff_429_retry_after`: 429 with `Retry-After: 120` → no fetch for 120 s (fake clock), then one.
-- `poller_backoff_exponential_capped_jittered`: repeated 503 → 1, 2, 4 … capped at 30 min, within jitter bounds; success resets.
-- `poller_force_refresh_respects_backoff_and_floor`: forced refresh during backoff → no fetch, cached returned with `nextRetryAt`; two forced refreshes within 30 s → one fetch.
 - `poller_prunes_old_snapshots`: after N inserts one row per account remains.
-- `poller_disabled_no_calls`: `enabled:false` → 0 requests across `Get`, `Peek`, forced refresh.
-- `poller_rejected_cached_for_ttl`: 401 result not refetched inside the TTL.
-- `poller_account_deleted`: snapshots gone, in-memory backoff dropped, no panic on a late fetch result.
+- `poller_disabled_no_calls`: `enabled:false` → 0 requests across `Peek`, `Touch`, `Refresh`.
+- `poller_account_deleted`: snapshots and `quota_poll_state` gone, no panic on a late fetch result.
 - `poller_notifies_after_every_completed_fetch`: callback fires after each network fetch (including an unchanged result and an error), never on a cache hit.
-- `config_accountusage_defaults_and_validation` (`internal/config`).
+- `config_accountusage_defaults_and_validation` (`internal/config`): defaults; `ttlSeconds < 300` rejected; threshold outside 1–100 rejected; budget constants are not config keys.
+
+### Go tests: call budget (PR-A, `internal/quota/budget_test.go`)
+
+Harness: an `httptest` server with `Calls()` (total and per path) and
+`MaxConcurrent()`, an injectable fake clock, and a helper that closes and
+reopens the SQLite store at the same path to simulate a daemon restart. Every
+test asserts an **exact** request count.
+
+Entry points and floors (AC44–AC47):
+- `budget_reader_has_no_fetch_surface`: compile-time assertion that `quota.Reader` has only `Peek`, and that `*Poller` satisfies it.
+- `budget_peek_never_calls`: cold cache, stale cache, backoff, rejected: 1000 `Peek` → 0 requests.
+- `budget_touch_within_ttl_zero_calls`: first `Touch` → 1; 100 more within the TTL → still 1.
+- `budget_touch_ttl_boundary`: at TTL−1 s → 0 more; at TTL → exactly 1 more.
+- `budget_touch_ttl_counts_from_last_attempt_not_last_success`: a failed attempt restarts the TTL (and backoff) clock.
+- `budget_burst_50_concurrent_touch_one_call`: 50 concurrent `Touch` on one account → **1** request, all 50 get the same result.
+- `budget_burst_50_concurrent_mixed_touch_refresh_one_call`: 25 `Touch` + 25 `Refresh` → **1** request; the joining refreshes spend no forced budget.
+- `budget_single_flight_is_per_account`: 50 concurrent calls across 5 accounts → exactly 5 requests.
+- `budget_forced_floor_30s`: 10 `Refresh` within 30 s → 1 request, the other 9 returned from cache with `refreshBlocked:"floor"` and `nextRefreshAt`; at 30 s one more is allowed.
+- `budget_forced_hourly_cap`: `Refresh` every 31 s for an hour → exactly **6** requests; the 7th is refused with `refreshBlocked:"budget"` and `nextRefreshAt` = oldest forced + 1 h.
+- `budget_excess_refresh_not_queued`: after refused refreshes, advance the clock 2 h with no further calls → **0** extra requests (nothing was queued).
+- `budget_hourly_ceiling_adversarial_client`: a client alternating `Touch` and `Refresh` every second for one fake hour → **≤ 18** requests.
+- `budget_refresh_all_max_two_in_flight`: 6 accounts → 6 requests total (one each), `MaxConcurrent() ≤ 2`.
+- `budget_refresh_all_skips_blocked_accounts`: accounts in backoff/rejected → 0 requests for them.
+
+No stray triggers (AC48):
+- `budget_startup_zero_calls`: build `Poller` + registry over accounts that already have snapshots and state; run the fake clock 24 h → **0** requests; `quota_poll_state` not read before the first request about an account (query counter).
+- `budget_account_events_zero_calls`: `NotifyAccountUpdated`, `account.updateCredential` (valid or rejected-fp change), account creation → **0** requests until a `Touch`.
+- `budget_no_background_timer`: with accounts configured and the clock advanced 24 h, a goroutine/timer leak check and **0** requests.
+
+Failures (AC49–AC51):
+- `budget_429_retry_after_seconds`: `Retry-After: 600` → 0 requests for 600 s (touch and refresh), then exactly 1.
+- `budget_429_retry_after_http_date`: parsed correctly against the fake clock.
+- `budget_429_absent_header_min_5m`: no header → 0 requests for 5 min, then 1.
+- `budget_429_retry_after_capped_6h`: `Retry-After: 999999` → next attempt at 6 h.
+- `budget_429_jitter_never_shortens_retry_after`: 200 seeded runs, wait ≥ `Retry-After` always and ≤ `Retry-After` + 20% of the backoff term.
+- `budget_consecutive_failures_exponential_capped`: 503 ×8 → waits 1, 2, 4, 8, 16, 30, 30, 30 min (within jitter bounds), request count exact at each step; success → count and backoff reset.
+- `budget_timeout_network_malformed_html_empty_backoff`: each failure kind backs off like a 503 (a changed endpoint is not hammered).
+- `budget_refresh_call_for_expired_token_obeys_backoff`: failing token endpoint → backoff applies to both the refresh call and the usage call; counts per host asserted.
+- `budget_401_no_retry_until_credential_changes`: 401 → `unavailable / rejected`; 100 `Touch`/`Refresh` over 7 fake days → **1** request total; `account.updateCredential` with a new token → next `Touch` makes exactly 1; re-saving the same token → still 0.
+- `budget_403_same_as_401`; `budget_invalid_grant_terminal_until_credential_changes` (token endpoint call count too).
+- `budget_proxy_refreshed_token_changes_fingerprint_allows_one_retry`.
+- `budget_fingerprint_not_in_logs_or_wire`.
+
+Persistence (AC52):
+- `budget_backoff_persists_across_restart`: 429 with `Retry-After: 600`, close and reopen the store, new `Poller`: `Touch` and `Refresh` → **0** requests until 600 s, then exactly 1.
+- `budget_ttl_persists_across_restart`: successful fetch, restart immediately → `Touch` → 0 requests.
+- `budget_forced_budget_persists_across_restart`: 6 forced in the hour, restart → 7th refused (`budget`).
+- `budget_rejected_state_persists_across_restart`: 401, restart → 0 requests until the credential changes.
+- `budget_write_ahead_crash_mid_fetch`: kill the poller after the attempt row is written and before the response; reopen within the TTL → 0 requests.
+- `budget_clock_skew_clamped`: persisted `next_allowed_at` 3 days ahead is clamped to 6 h; a clock that moves backwards never shortens a backoff.
+- `budget_state_table_created_on_existing_db`: open a database from the previous schema → table exists, no migration entry needed.
+- `budget_state_row_deleted_with_account`.
 
 ### Go tests: routing (`internal/routing/router_test.go`), fake poller reports
 
@@ -308,15 +433,16 @@ test calls a real endpoint.**
 - `route_threshold_configurable`: 95% at threshold 90 → exhausted; at 100 → not.
 - `route_unknown_report_not_exhausted`: no snapshot / `error` / `unavailable` each → account used.
 - `route_poller_error_never_fails_routing` (the old `check quota for account N` path is gone).
-- `route_exhausted_stands_through_failed_refetch` until `ResetsAt`, then eligible again without a successful fetch (fake clock).
+- `route_exhausted_stands_while_cache_is_stale` until `ResetsAt`, then eligible again without a successful fetch (fake clock).
 - `route_exhausted_without_resetsat_expires_after_2ttl`.
 - `route_overage_enabled_not_exhausted`; `route_overage_nil_still_exhausted`.
 - `route_all_exhausted_error_names_earliest_reset`.
 - `route_hard_exhausted_errors_with_reset`; `route_hard_unknown_routes`.
 - `route_affinity_exhausted_pinned_replaced`; `route_affinity_pinned_85pct_kept_over_idle_candidate`; `route_affinity_pinned_outside_candidates_ignored` (existing behavior kept).
-- `route_does_not_block_on_slow_fetcher`: fetcher blocks 5 s, `Route` returns in < 100 ms and one async refresh is started.
+- `route_never_fetches_call_count_zero` (PR-B): real `Poller` over the usage `httptest` server; 1000 `Route` calls with a cold cache, a stale cache and an account in backoff → **0** usage requests, `Route` never waits on I/O.
+- `route_holds_reader_only` (compile-time: `Router` is built from a `quota.Reader`).
 - `route_routing_disabled_never_consults_windows` (`routing:false`) and `route_polling_disabled_same_as_today`.
-- Proxy (`internal/server`): `proxy_passes_model_to_router`; `proxy_exhausted_pool_returns_503_with_reset_message`; existing model-aware and fail-closed tests stay green.
+- Proxy (`internal/server`): `proxy_1000_requests_zero_usage_calls` (cold, stale, backoff, exhausted); `proxy_passes_model_to_router`; `proxy_exhausted_pool_returns_503_with_reset_message`; existing model-aware and fail-closed tests stay green.
 
 ### Go tests: secrets (`internal/quota`, `internal/wsapi`)
 
@@ -326,9 +452,9 @@ test calls a real endpoint.**
 
 ### Go tests: wsapi, CLI, MCP
 
-- wsapi (`internal/wsapi/account_usage_test.go`): `account_usage_all`, `account_usage_ids`, `account_usage_unknown_id_errors`, `account_usage_disabled_returns_enabled_false`, `account_usage_refresh_waits_and_returns`, `account_usage_refresh_timeout_returns_cached`, `account_usage_refresh_ignored_for_run_scoped_caller`, `account_usage_event_after_every_fetch_not_on_cache_hit`, `account_usage_refresh_all_emits_one_event_per_account_as_each_settles`, `account_usage_topic_subscribable`, `account_usage_account_removed_event_flow` (usage state removed with the account).
-- CLI (`cmd/smind`): `account_usage_text_output` (golden: window line, reset formatting "resets in 2h 4m", unavailable wording for expired/rejected/no_quota, stale hint), `account_usage_json`, `account_usage_refresh_flag`, `account_usage_daemon_down_exit_code`, `account_usage_no_accounts`.
-- MCP: `account_usage_tool_in_catalog_and_instructions`, `account_usage_tool_readonly`, `account_usage_tool_no_refresh_input_for_run_scope`, `usage_summary_unchanged`.
+- wsapi (`internal/wsapi/account_usage_test.go`): `account_usage_all`, `account_usage_ids`, `account_usage_unknown_id_errors`, `account_usage_disabled_returns_enabled_false`, `account_usage_default_mode_is_cached_zero_calls`, `account_usage_touch_respects_ttl`, `account_usage_refresh_waits_and_returns`, `account_usage_refresh_timeout_returns_cached`, `account_usage_refresh_blocked_returns_cached_with_reason_not_error` (floor, budget, backoff, rejected), `account_usage_refresh_from_run_scoped_caller_is_touch`, `account_usage_reconnect_relist_cached_zero_calls`, `account_usage_ten_clients_burst_one_call` (10 ws clients touch at once → 1 request), `account_usage_event_after_every_fetch_not_on_cache_hit`, `account_usage_refresh_all_emits_one_event_per_account_as_each_settles`, `account_usage_topic_subscribable`, `account_usage_account_removed_event_flow` (usage state removed with the account).
+- CLI (`cmd/smind`): `account_usage_default_is_touch_not_refresh`, `account_usage_refresh_flag_blocked_prints_reason_and_next_time`, `account_usage_text_output` (golden: window line, reset formatting "resets in 2h 4m", unavailable wording for expired/rejected/no_quota, stale hint), `account_usage_json`, `account_usage_refresh_flag`, `account_usage_daemon_down_exit_code`, `account_usage_no_accounts`.
+- MCP: `account_usage_tool_is_touch_only` (no refresh input; 10 calls in a loop → at most 1 request per TTL), `account_usage_tool_in_catalog_and_instructions`, `account_usage_tool_readonly`, `account_usage_tool_no_refresh_input_for_run_scope`, `usage_summary_unchanged`.
 
 ### Web UI tests (vitest + Testing Library, `web/packages/ui`)
 
@@ -396,7 +522,7 @@ From `usage-sidebar-item.spec.ts`:
 From `usage-modal.spec.ts`:
 - `opens_from_the_footer_on_the_accounts_reports_with_no_filter_for_one_account`.
 - `refreshes_one_report_from_its_card`: request is `accountIds:[id],
-  refresh:true`; freshness text updates; other cards untouched.
+  mode:"refresh"`; freshness text updates; other cards untouched.
 - `shows_accounts_once_the_connection_is_ready_after_a_cold_load_on_a_phone`.
 - `tells_the_user_to_update_a_daemon_without_account_usage` (no call made).
 - `account_picked_in_the_modal_is_the_footers_account_after_a_reload`, plus
@@ -417,6 +543,16 @@ From `usage-settings.spec.ts`:
 - `asks_to_update_a_daemon_without_account_usage_and_never_calls_it`.
 - `plan_usage_block_sits_above_token_usage_and_token_table_is_unchanged`.
 - `settings_control_is_visible_above_the_reports`.
+
+Call discipline (AC54), with a fake timer and a fake `document.visibilityState` / focus:
+- `footer_touches_at_ttl_cadence_only_while_visible_and_focused` (exactly one `touch` per TTL; none before it).
+- `hidden_or_blurred_window_pauses_the_timer_and_sends_nothing`.
+- `becoming_visible_touches_only_if_last_report_older_than_ttl`.
+- `reconnect_relists_with_cached_mode`.
+- `footer_hidden_and_no_modal_means_no_touch`; `opening_modal_sends_one_touch`.
+- `refresh_is_sent_only_from_a_button_press`; `refresh_button_disabled_30s_after_press`.
+- `refresh_button_disabled_with_reason_when_daemon_reports_refresh_blocked` (backoff, floor, budget, rejected texts).
+- `two_tabs_each_touch_daemon_decides` (client does not try to coordinate; daemon floor is the guarantee).
 
 smind-specific:
 - `account_usage_event_upserts_without_refetch_and_removal_drops_the_card`.
@@ -446,7 +582,7 @@ supervisor looks at a couple before the PR is opened.
 
 ## Implementation split (non-stacked, each branches from `origin/develop`)
 
-Order: **PR-A → (PR-B ∥ PR-C) → PR-D1 → PR-D2 → (PR-E optional) → close-out.**
+Order: **PR-A1 → PR-A2 → (PR-B ∥ PR-C) → PR-D1 → PR-D2 → (PR-E optional) → close-out.**
 B and C may be worked in parallel because their write scopes do not overlap,
 except one wiring line each in `cmd/smind/serve.go`; whichever merges second
 rebases onto develop. D1 needs C's RPC and event merged; D2 is sequenced after
@@ -454,13 +590,18 @@ D1 is merged (not stacked on it). Points use the WORKSPACE_PROTOCOL axes.
 
 | PR | Outcome | Write scope (one owner each) | Depends on | Size |
 |---|---|---|---|---|
-| **PR-A** types, store, fetchers, poller, config | AC1–AC16: `Report` model, Anthropic and OpenAI fetchers with fixtures, API-key/unsupported → no_quota, poller with TTL/singleflight/backoff/prune/`Peek`, per-account `EnsureFresh` lock, `accountUsage` config, serve.go wiring replacing the noop fetcher (display data now flows; routing still ignores it). **Fixtures only; live probes after Human go-ahead.** | `internal/quota/**` (+ `testdata/`), `internal/store/quota_snapshots.go` (+ test), `internal/accounts/refresh.go` (lock only), `internal/config/config.go`, `cmd/smind/serve.go`, this plan's Progress/Validation | ADR accepted (done) | M (5): scope 1, PRs 1, risk 2, decisions 0, verify 1 |
-| **PR-B** routing integration | AC17–AC23: `WithModel`, windows → exhausted rules, async refresh trigger, error text with reset, `isExhausted` rewrite, proxy passes model | `internal/routing/**`, `internal/server/proxy.go` (the `Route` call and its error text only), one line in `serve.go` | PR-A merged | M (4): scope 1, PRs 1, risk 2, decisions 0, verify 0 |
-| **PR-C** wsapi, CLI, MCP | AC24–AC27: `account.usage` RPC + per-fetch event + topic, run-scoped refresh denial, `smind account usage`, MCP `account_usage`, instructions, catalog tests, the `enabled` state the UI reads | `internal/wsapi/{account_usage.go,events.go,handlers.go}` (+ tests), `cmd/smind/{account.go,mcp_*.go}` (+ tests), one line in `serve.go` | PR-A merged | M (3): scope 1, PRs 1, risk 1, decisions 0, verify 0 |
-| **PR-D1** web core: store, cards, modal, Settings → Usage | AC32–AC40 (all of them except footer item, pins and the layout chooser): types/model/format/copy/tone, preferences (`displayAs`, account pick, "Summary in sidebar"), report store + event wiring, cards, window bars (plain), balance bars, meter, refresh buttons, problem copy, modal (dialog/sheet), account filter, options popover, segmented control, Plan usage block in Settings → Usage, provider logo marks; screenshots for the modal and Settings | `web/packages/ui/src/{lib/account-usage/**, hooks/use-account-usage.ts, hooks/use-usage-preferences.ts, components/account-usage/** (cards, modal, controls, options), components/ui/segmented-control.tsx, components/settings/usage-section.tsx}` (+ tests), `lib/storage.ts` (one key) | PR-C merged | M (4): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
-| **PR-D2** web sidebar footer item and pins | AC28–AC31, AC41 (footer part): footer Usage row with logos/defaults/pinned percents, layout chooser (`ResizeObserver` measuring), pinnable window rows, pin glyph, "Summary in sidebar" switch wiring, hidden/plain states, collapsed rail, footer screenshots | `web/packages/ui/src/components/{app-sidebar.tsx (footer slot + provider only), account-usage/{usage-sidebar-item,usage-sidebar-root,usage-window-bar}.tsx}`, `lib/account-usage/pinned.ts` (+ tests) | PR-D1 merged | M (3): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
+| **PR-A1** types, fetchers, snapshot store | AC1–AC11, AC14, AC16: `Report` model, `AccountKey`, Anthropic and OpenAI fetchers with fixtures, API-key/unsupported → no_quota, per-account `EnsureFresh` lock, `GetLatestQuotaSnapshot` + prune. **Fixtures only; live probes after Human go-ahead.** No poller yet: nothing calls the fetchers outside tests | `internal/quota/{types,report,anthropic,openai,fetcher}*.go` (+ `testdata/`), `internal/store/quota_snapshots.go` (+ test), `internal/accounts/refresh.go` (lock only) | ADR accepted (done) | M (4): scope 1, PRs 1, risk 2, decisions 0, verify 0 |
+| **PR-A2** poller, call budget, config, wiring | AC12–AC13, AC15, AC44–AC52: `Poller` with `Peek`/`Touch`/`Refresh`, `quota.Reader`, TTL/floor/budget/single-flight, persisted backoff and rejected state (`quota_poll_state`), `accountUsage` config, serve.go wiring replacing `noopQuotaFetcher` (display data can now flow; routing still ignores it) | `internal/quota/{poller,budget,reader}*.go` (+ tests), `internal/store/{quota_poll_state.go,schema.sql,accounts.go (delete cascade)}` (+ tests), `internal/config/config.go`, `cmd/smind/serve.go` | PR-A1 merged | M (5): scope 1, PRs 1, risk 2, decisions 0, verify 1 |
+| **PR-B** routing integration | AC17–AC23: `WithModel`, windows → exhausted rules (reads `quota.Reader` only, never fetches), error text with reset, `isExhausted` rewrite, proxy passes model | `internal/routing/**`, `internal/server/proxy.go` (the `Route` call and its error text only), one line in `serve.go` | PR-A2 merged | M (4): scope 1, PRs 1, risk 2, decisions 0, verify 0 |
+| **PR-C** wsapi, CLI, MCP | AC24–AC27, AC53: `account.usage` RPC (`cached`/`touch`/`refresh` modes) + per-fetch event + topic, run-scoped refresh → touch, `smind account usage`, MCP `account_usage`, instructions, catalog tests, the `enabled` state the UI reads | `internal/wsapi/{account_usage.go,events.go,handlers.go}` (+ tests), `cmd/smind/{account.go,mcp_*.go}` (+ tests), one line in `serve.go` | PR-A2 merged | M (3): scope 1, PRs 1, risk 1, decisions 0, verify 0 |
+| **PR-D1** web core: store, cards, modal, Settings → Usage | AC32–AC40 and AC54 (all of them except footer item, pins and the layout chooser): types/model/format/copy/tone, preferences (`displayAs`, account pick, "Summary in sidebar"), report store + event wiring, cards, window bars (plain), balance bars, meter, refresh buttons, problem copy, modal (dialog/sheet), account filter, options popover, segmented control, Plan usage block in Settings → Usage, provider logo marks; screenshots for the modal and Settings | `web/packages/ui/src/{lib/account-usage/**, hooks/use-account-usage.ts, hooks/use-usage-preferences.ts, components/account-usage/** (cards, modal, controls, options), components/ui/segmented-control.tsx, components/settings/usage-section.tsx}` (+ tests), `lib/storage.ts` (one key) | PR-C merged | M (4): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
+| **PR-D2** web sidebar footer item and pins | AC28–AC31, AC41 (footer part), AC54 (footer cadence): footer Usage row with logos/defaults/pinned percents, layout chooser (`ResizeObserver` measuring), pinnable window rows, pin glyph, "Summary in sidebar" switch wiring, hidden/plain states, collapsed rail, footer screenshots | `web/packages/ui/src/components/{app-sidebar.tsx (footer slot + provider only), account-usage/{usage-sidebar-item,usage-sidebar-root,usage-window-bar}.tsx}`, `lib/account-usage/pinned.ts` (+ tests) | PR-D1 merged | M (3): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
 | **PR-E** (optional) per-run plan usage | AC42: plan card in the run usage pill's popover for a single matching OAuth account | `web/packages/ui/src/components/{run-usage-pill.tsx, account-usage/run-plan-usage.tsx}` (+ tests) | PR-D1 merged | S (2) |
 | **Close-out** docs | AC43: ROADMAP/README/stale backlog text, plan → `completed/` with Validation | `docs/**`, `README.md` | all | S |
+
+Note: "PR-A" elsewhere in this plan and the ADR means PR-A1 and PR-A2
+together (split because the call budget and its persisted state made one PR
+too large to review); the budget tests (`budget_*`) and AC44–AC52 land in PR-A2.
 
 ### PR-D: Paseo → smind file map
 
@@ -549,8 +690,16 @@ scratch).
   Paseo → smind file map, test scenarios mirror Paseo's e2e specs. Paseo
   read: `packages/app/src/usage/*`, `e2e/browser/usage-*.spec.ts`, history
   of #5685/#5786/#5805/#5876/#5903/#5921/#6216/#5975.
+- 2026-10-12: Human approved the three open items (account filter shared by
+  footer and modal; footer row always present while polling is enabled;
+  Claude/Codex labels) and both extras (event after every completed fetch;
+  `Problem.ExpiresAt`), and added a firm rule: usage endpoints are
+  rate-limited, never call them carelessly. ADR-0028 §3 got "Call budget (hard
+  rules)"; AC44–AC54 and the `budget_*` tests added; routing/proxy now read
+  the cache only; backoff persisted in `quota_poll_state`.
 - [x] D1–D13 answered by the user
-- [ ] PR-A types, store, fetchers, poller, config (fixtures only)
+- [ ] PR-A1 types, fetchers, snapshot store (fixtures only)
+- [ ] PR-A2 poller with the call budget, persisted state, config, wiring
 - [ ] Human go-ahead for the manual live probe (see Validation)
 - [ ] PR-B routing integration
 - [ ] PR-C wsapi, CLI, MCP
@@ -594,6 +743,9 @@ Mapping for the implementation PRs (fill in as each lands):
 | AC1–AC4 | `internal/quota` report/versioning/accountkey/prune tests (`report_roundtrip_and_versioning`, `accountkey_stable`, `poller_prunes_old_snapshots`) |
 | AC5–AC11 | Anthropic/OpenAI/dispatch/refresh table tests with fixtures, `ensurefresh_*` under `-race` |
 | AC12–AC16 | `poller_*` tests with a fake clock, config tests, `no_secret_in_logs_report_event` |
+| AC44–AC52 | `budget_*` tests (`internal/quota/budget_test.go`) with exact `httptest` request counts, restart-persistence tests, `-race` |
+| AC53 | wsapi/CLI/MCP mode tests, `proxy_1000_requests_zero_usage_calls` |
+| AC54 | web call-discipline tests with fake timers and visibility/focus |
 | AC17–AC23 | `route_*` tests, proxy tests |
 | AC24–AC27 | wsapi, CLI golden, MCP catalog tests |
 | AC28–AC31 | PR-D2 vitest tests (`pinned_windows_show_in_footer…`, `summary_in_sidebar_switch…`, logic tests) + footer screenshots |
