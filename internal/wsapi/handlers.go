@@ -43,7 +43,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.create":              handleTaskCreate(wm),
 		"task.list":                handleTaskList(wm),
 		"task.get":                 handleTaskGet(wm),
-		"task.archive":             handleTaskArchive(wm),
+		"task.archive":             handleTaskArchive(wm, reg),
 		"task.move":                handleTaskMove(wm),
 		"task.diff":                handleTaskDiff(wm),
 		"task.files":               handleTaskFiles(wm),
@@ -446,13 +446,44 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 			SpaceID      *int64 `json:"spaceId"`
 			ParentTaskID *int64 `json:"parentTaskId"`
 			Title        string `json:"title"`
+			// BaseRef/Branch/PRNumber pick the task's starting point
+			// (exactly one of the three; all omitted = off HEAD) --
+			// validated again inside workspace.CreateTask.
+			BaseRef string `json:"baseRef"`
+			Branch  string `json:"branch"`
+			PRNum   *int64 `json:"prNumber"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
 		}
+		refModes := 0
+		if p.BaseRef != "" {
+			refModes++
+		}
+		if p.Branch != "" {
+			refModes++
+		}
+		if p.PRNum != nil {
+			if *p.PRNum <= 0 {
+				return nil, fmt.Errorf("task.create: prNumber must be > 0")
+			}
+			refModes++
+		}
+		if refModes > 1 {
+			return nil, fmt.Errorf("task.create: pass at most one of baseRef, branch, prNumber")
+		}
 		var opts []workspace.CreateTaskOption
 		if p.ParentTaskID != nil {
 			opts = append(opts, workspace.WithParentTask(*p.ParentTaskID))
+		}
+		if p.BaseRef != "" {
+			opts = append(opts, workspace.WithBaseRef(p.BaseRef))
+		}
+		if p.Branch != "" {
+			opts = append(opts, workspace.WithExistingBranch(p.Branch))
+		}
+		if p.PRNum != nil {
+			opts = append(opts, workspace.WithPullRequest(int(*p.PRNum)))
 		}
 		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
 	}
@@ -504,7 +535,15 @@ func handleTaskMove(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-func handleTaskArchive(wm *workspace.Manager) handlerFunc {
+// handleTaskArchive archives a task, refusing while any of its chats has
+// a running run or a queued prompt (see Registry.ActiveRunForTask): the
+// run's subprocess sits inside the task's worktree, so archiving under it
+// would destroy the directory a live agent is working in. The caller must
+// run.stop (and cancel queued items) first. The guard lives here, in the
+// daemon layer that holds both the workspace manager and the runs
+// registry, so the web UI gets it too. Past the guard, ArchiveTask's
+// checkpoint-first ordering is unchanged.
+func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
@@ -512,7 +551,19 @@ func handleTaskArchive(wm *workspace.Manager) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
 		}
-		return wm.ArchiveTask(p.ID)
+		release, err := reg.TryBeginArchive(p.ID)
+		if err != nil {
+			// Fail closed, naming what is in the way: an unreadable store
+			// refuses the archive, never answers "no active runs" on a
+			// broken read, and a running/queued run is named outright.
+			return nil, fmt.Errorf("task.archive: task %d: %w", p.ID, err)
+		}
+		defer release()
+		t, err := wm.ArchiveTask(p.ID)
+		if err != nil {
+			return nil, fmt.Errorf("task.archive: %w", err)
+		}
+		return t, nil
 	}
 }
 
