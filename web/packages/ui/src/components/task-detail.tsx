@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { PermissionModeControl } from "@/components/permission-mode-control";
+import { TaskLineageHeader } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
@@ -20,6 +21,7 @@ import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useLiveTask } from "@/hooks/use-live-task";
+import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
@@ -60,6 +62,7 @@ export function TaskDetailPane({
   events,
   onOpenFile,
   onOpenDiffTab,
+  onJumpToTask,
 }: {
   client: WsClientLike | null;
   task: Task;
@@ -79,10 +82,16 @@ export function TaskDetailPane({
   onOpenFile?: (path: string) => void;
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
+  /** Selects another task (the lineage strip's parent/child jump targets). Optional: without it the strip renders but isn't click-through. */
+  onJumpToTask?: (taskId: number) => void;
 }) {
   // Worktree setup state changes after the task was selected (ADR-0024), so
   // follow the task's own update events instead of the selection snapshot.
   const { task, apply: applyTask } = useLiveTask(taskProp, events);
+  // Hierarchy strip (task-hierarchy-tiers PR-U2): parent breadcrumb, child
+  // pills, subtree rollups. Never blocks the pane on load -- it renders
+  // nothing until the lineage arrives.
+  const lineage = useTaskLineage(client, task, events);
   const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort } = useRunTimeline(
     client,
     task.ID,
@@ -251,6 +260,8 @@ export function TaskDetailPane({
           </Button>
         }
       />
+
+      <TaskLineageHeader lineage={lineage} onJumpToTask={onJumpToTask} />
 
       <SetupDetails client={client} task={task} onTask={applyTask} />
 

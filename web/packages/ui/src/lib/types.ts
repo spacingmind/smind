@@ -43,6 +43,8 @@ export interface Task {
   SetupLog?: string;
   /** The allocated SMIND_PORT, or null when no port range is configured. */
   Port?: number | null;
+  /** The parent task id; null/absent for a root task. */
+  ParentTaskID?: number | null;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,

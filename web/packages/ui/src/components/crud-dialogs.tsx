@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import type { TaskTreeNode } from "@/lib/task-lineage";
 import type { Chat, Space, Task, Workspace } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
 
@@ -501,6 +502,52 @@ export function DeleteSpaceDialog({
   );
 }
 
+/** task.tree run states as plain words -- Task.Status is the lifecycle field ("has ever run"), not what's happening now. */
+function runStateWord(state: TaskTreeNode["run"]["state"]): string {
+  switch (state) {
+    case "running":
+      return "running";
+    case "waiting_permission":
+      return "needs you";
+    case "error":
+      return "failed";
+    case "done":
+      return "done";
+    case "stopped":
+      return "stopped";
+    case "idle":
+      return "idle";
+  }
+}
+
+/**
+ * The live children of the task being archived (PR-U2), so the confirm
+ * can say honestly what happens to them -- they stay and become
+ * top-level (archiving is not a cascade, see the hierarchy plan's
+ * Decision 2). Entries are `{ title, id }` plus the child's current run
+ * state when it came from task.tree (preferred); a task.list fallback
+ * carries no state at all, and the list renders titles only.
+ */
+function ArchiveChildren({ children }: { children: Array<{ id: number; title: string; runState?: TaskTreeNode["run"]["state"] }> }) {
+  const MAX_VISIBLE = 8;
+  const visible = children.slice(0, MAX_VISIBLE);
+  const rest = children.length - visible.length;
+  return (
+    <div data-testid="archive-children" className="mt-2">
+      <p className="font-normal">These tasks stay and become top-level:</p>
+      <ul className="mt-1 list-disc pl-5">
+        {visible.map((child) => (
+          <li key={child.id}>
+            {child.title}
+            {child.runState && <> · {runStateWord(child.runState)}</>}
+          </li>
+        ))}
+        {rest > 0 && <li>+{rest} more</li>}
+      </ul>
+    </div>
+  );
+}
+
 export function ArchiveTaskDialog({
   client,
   task,
@@ -516,6 +563,43 @@ export function ArchiveTaskDialog({
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // null = fetch pending/never ran, [] = no children (today's dialog).
+  const [childTasks, setChildTasks] = useState<Array<{ id: number; title: string; runState?: TaskTreeNode["run"]["state"] }> | null>(null);
+  const [childError, setChildError] = useState(false);
+
+  useEffect(() => {
+    if (!open || !task || !client) return;
+    // Capture the world at open: a result landing after close or after the
+    // task prop changed belongs to a different question.
+    const reqTaskId = task.ID;
+    let cancelled = false;
+    setChildTasks(null);
+    setChildError(false);
+    // task.tree first: it carries each child's live run state (Task.Status
+    // is the wrong field -- the lifecycle "has ever run"). On an older
+    // daemon without it, fall back to task.list and show titles only.
+    client
+      .call<{ nodes: TaskTreeNode[] }>("task.tree", { taskId: task.ID })
+      .then((result) => {
+        if (cancelled || task.ID !== reqTaskId) return;
+        setChildTasks((result.nodes ?? []).filter((n) => n.parentId === task.ID).map((n) => ({ id: n.id, title: n.title, runState: n.run.state })));
+      })
+      .catch(async (treeErr) => {
+        console.error("task.tree failed, falling back to task.list (titles only)", treeErr);
+        try {
+          const list = await client.call<Task[]>("task.list", { workspaceId: task.WorkspaceID, parentTaskId: task.ID });
+          if (cancelled || task.ID !== reqTaskId) return;
+          setChildTasks((list ?? []).map((t) => ({ id: t.ID, title: t.Title })));
+        } catch (listErr) {
+          if (cancelled) return;
+          console.error("task.list (children) failed, archive stays possible", listErr);
+          setChildError(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, task, client]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -529,6 +613,8 @@ export function ArchiveTaskDialog({
                 Uncommitted work is checkpointed to the task branch before the
                 worktree is removed.
               </p>
+              {childTasks !== null && childTasks.length > 0 && <ArchiveChildren>{childTasks}</ArchiveChildren>}
+              {childError && <p className="mt-2 font-normal text-foreground-muted">Could not check for child tasks.</p>}
             </div>
           </DialogDescription>
         </DialogHeader>
@@ -556,7 +642,7 @@ export function ArchiveTaskDialog({
               }
             }}
           >
-            {pending ? "Archiving…" : "Archive"}
+            {pending ? "Archiving…" : childTasks !== null && childTasks.length > 0 ? "Archive parent only" : "Archive"}
           </Button>
         </DialogFooter>
       </DialogContent>
