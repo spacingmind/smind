@@ -6,6 +6,7 @@
 //! process, hitting the network) plus Tauri glue (app data dir, event
 //! emission, app version). See `docs/plans/active/desktop-managed-daemon.md`.
 
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -84,16 +85,34 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
 /// as `resolve_distro` caches the distro name: it's spawning `wsl.exe`
 /// (once per call, uncached) that made every `daemon_status` poll flash a
 /// console window on Windows.
-fn detect_platform(state: &DesktopState) -> Platform {
+pub(crate) fn detect_platform(state: &DesktopState) -> Platform {
+    detect_platform_cached(&state.daemon_manager_platform)
+}
+
+/// platform_for is the pure decision: macOS is native-capable, and only a
+/// real Windows target can be Wsl2 (with `wsl.exe` reachable). Linux --
+/// including WSLg, where Windows interop exposes a `wsl.exe` -- is
+/// Unsupported: its daemon runs natively and there is no Windows host to
+/// translate paths for or spawn from.
+fn platform_for(target_os: &str, has_wsl: impl FnOnce() -> bool) -> Platform {
+    match target_os {
+        "macos" => Platform::Macos,
+        "windows" if has_wsl() => Platform::Wsl2,
+        _ => Platform::Unsupported,
+    }
+}
+
+pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platform {
     if cfg!(target_os = "macos") {
         return Platform::Macos;
     }
-    let mut cache = state.daemon_manager_platform.lock().unwrap();
+    let mut cache = cache.lock().unwrap();
     if let Some(p) = *cache {
         return p;
     }
-    let has_wsl = wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false);
-    let platform = if has_wsl { Platform::Wsl2 } else { Platform::Unsupported };
+    let platform = platform_for(std::env::consts::OS, || {
+        wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false)
+    });
     *cache = Some(platform);
     platform
 }
@@ -326,8 +345,12 @@ pub async fn auto_start(app: AppHandle) {
 /// resolve_distro detects the default WSL distro once per app run and
 /// caches it -- the default distro is not expected to change while the
 /// app is running.
-fn resolve_distro(state: &DesktopState) -> Result<String, String> {
-    let mut cache = state.daemon_manager_distro.lock().unwrap();
+pub(crate) fn resolve_distro(state: &DesktopState) -> Result<String, String> {
+    resolve_distro_cached(&state.daemon_manager_distro)
+}
+
+pub(crate) fn resolve_distro_cached(cache: &Mutex<Option<String>>) -> Result<String, String> {
+    let mut cache = cache.lock().unwrap();
     if let Some(d) = cache.as_ref() {
         return Ok(d.clone());
     }
@@ -946,6 +969,16 @@ mod tests {
         ));
         assert!(got.is_none());
         assert_eq!(calls, 5);
+    }
+
+    #[test]
+    fn wsl2_only_on_a_windows_target() {
+        assert_eq!(platform_for("windows", || true), Platform::Wsl2);
+        assert_eq!(platform_for("windows", || false), Platform::Unsupported);
+        // WSLg: a Linux app with wsl.exe interop is not a Windows host, and
+        // never even probes for it.
+        assert_eq!(platform_for("linux", || panic!("must not probe wsl.exe")), Platform::Unsupported);
+        assert_eq!(platform_for("macos", || panic!("must not probe wsl.exe")), Platform::Macos);
     }
 
     #[test]
