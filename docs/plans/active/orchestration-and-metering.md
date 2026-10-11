@@ -209,6 +209,118 @@ never go through the proxy. Usage comes from each agent's own events.
    and no proxy hop. The M1 proxy metering is unchanged for unattributed
    external traffic.
 
+#### ADR-M UI follow-up — usage in the web UI (branch `feat/usage-ui`, 2026-10-11)
+
+ADR-0020 shipped the data (`run_usage`, the `usage` run event, `usage` on
+`RunSummary`, `usage.summary scope/groupBy`) with no UI. This is the minimal,
+quiet UI for it. The data contract is already decided by ADR-0020 and the
+UI follows it: **nullable never means 0**. No new architecture; the single
+backend change (U0) is additive.
+
+**Acceptance criteria:**
+
+- **U0 — backend: say which sums are unreported (additive).**
+  `usage.summary` sums tokens with `COALESCE(SUM(col), 0)`, so a group in
+  which no run reported reasoning tokens reads `0` and the UI could not
+  tell "unreported" from a real 0. Add an optional `unreported` string
+  array to every `usage.summary` row (runs and proxy rows), naming the token
+  fields (`inputTokens`, `outputTokens`, `cacheReadTokens`,
+  `cacheWriteTokens`, `reasoningTokens`) for which **no row in the group**
+  had a non-NULL value. `omitempty`: absent when everything was reported,
+  so the existing row shape and the CLI are unchanged. A reported `0` is
+  not "unreported". `costUsd` already is `null`-able.
+- **U1 — wire types and formatting (`web/packages/ui/src/lib`).**
+  - `RunUsage` type (mirrors `internal/runs.RunUsage`: `inputTokens`,
+    `cachedInputTokens`, `cacheWriteTokens`, `outputTokens`,
+    `reasoningTokens`, `costUsd`, `model`, `contextUsed`, `contextSize`,
+    `source`, all but `source` optional/null) on `RunSummary.usage?` and on
+    `RunLogEvent.usage?`; `"usage"` added to `RunEventType`;
+    `UsageSummaryRow` for `usage.summary`.
+  - Pure helpers in `lib/usage-format.ts`:
+    - `formatTokens(n, mode)`: `null`/`undefined` is **"—"**, never "0";
+      `full` groups thousands (`12,345`), `compact` abbreviates
+      (`842`, `1.2k`, `12.3k`, `1.3M`, no `1000k`).
+    - `formatCost(usd)`: `null` is "—"; `< $0.01` uses 4 decimals,
+      `< $1` 3, otherwise 2; a *reported* 0 is `$0.00`.
+    - `usageSourceLabel(source)`: `claude_result`, `codex_token_usage`,
+      `acp_prompt_usage`, `acp_usage_update`, `not_reported`, and any
+      other `acp_*`/unknown value falls back to the raw string.
+    - `sumUsage(usages)`: per-field sum over the runs that reported that
+      field; a field no run reported stays `null`; a reported 0 counts and
+      is 0. Also returns `reportedRuns` / `totalRuns`.
+    - `usageSince(range, now)`: `today` is local midnight, `7d`/`30d` are
+      now minus N days; returns RFC3339.
+- **U2 — per-run usage state (`use-run-timeline.ts`).** `RunEntry.usage`
+  is **one value per run, replaced and never added**: seeded from
+  `run.list`'s `usage`, replaced by a live `usage` event on `run.attach`,
+  and by the latest `usage` event of a `run.logs` backfill. A run with no
+  usage row leaves it `undefined` (not an empty object). The timeline still
+  renders no row for a `usage` event.
+- **U3 — per-run pill (`RunUsagePill`, in the run's footer in
+  `run-timeline.tsx`).**
+  - Compact, muted, one line, e.g. `12.3k in · 1.2k out · $0.042`. Null
+    fields are omitted from the pill, not shown as 0. If neither input nor
+    output was reported, the pill reads **"Usage not reported"** (plus the
+    cost if it is known).
+  - Renders nothing when `run.usage` is `undefined` (an old run, or a run
+    that has not reported yet).
+  - Clicking it opens a popover (same pattern as `McpServersIndicator`)
+    with input, cached, cache write, output, reasoning, cost, model and
+    context used/size, each null as "—", full thousands grouping, and the
+    **source** line (`usageSourceLabel`).
+- **U4 — chat total (`ChatUsageTotal`, in the chat header subtitle next to
+  `McpServersIndicator`).**
+  - Shows `sumUsage` over the chat's runs (the `runs` of that chat only),
+    e.g. `24.1k in · 3.2k out · $0.31`, updating live as usage events
+    arrive. Nothing is rendered when no run has reported usage.
+  - A field no run reported is omitted or "—", never 0. If only some runs
+    reported, the popover says "N of M runs reported usage" and the total
+    is the sum over those that did.
+  - It is derived from the same `runs` state as the pills, so the chat
+    total always equals the sum of its runs' own pills (no second fetch,
+    no second source of truth, no double counting between the `run.list`
+    seed and a later `usage` event).
+  - Switching chats shows the new chat's total only: no stale total from
+    the previous chat, and a late `usage` event on the old chat's stream
+    does not change the new chat's total.
+  - No "total tokens" figure is invented: input and cached overlap
+    differently per provider (Claude's input excludes cache reads,
+    codex's includes them), so tokens are shown per field, never summed
+    across fields.
+- **U5 — Settings → Usage (`components/settings/usage-section.tsx`,
+  registered like Accounts/MCP servers, group "Agents & providers").**
+  - Controls: scope `Runs | Proxy | All` (default Runs), groupBy
+    `Task | Provider | Model | Workspace` (default Task), range
+    `Today | 7 days | 30 days` (default 7 days). Each control change sends
+    one `usage.summary` with `{scope, groupBy, since}` (no `until`).
+  - `proxy` accepts only `model` of those four, and `usage.summary` rejects
+    the other combinations, so choosing Proxy while groupBy is
+    task/provider/workspace switches groupBy to Model, and the other
+    groupBys are disabled while Proxy is selected. `All` may show proxy and
+    run rows (a Scope column tags each row).
+  - Table columns: group, count (runs/requests), input, cached, output,
+    reasoning, cost. A field named in the row's `unreported`, and a null
+    `costUsd`, shows "—", never 0. Numbers use `formatTokens(full)` and
+    `formatCost`.
+  - Group keys are shown as names: workspace and task keys (numeric ids as
+    strings) resolve to titles via `workspace.list` / `task.list`
+    (best-effort), falling back to `Task #12` / `Workspace #3`; a model key
+    of `""` is "Unknown model".
+  - Empty (no rows) shows an `EmptyState` ("No usage recorded in this
+    range"); a failed call shows an error `Alert`; loading shows the
+    spinner. A response for a superseded selection is ignored.
+- **U6 — visual.** Light and dark screenshots of the run footer pill, the
+  chat header total and Settings → Usage from a sandbox daemon with seeded
+  `run_usage` rows, reviewed by the leader. Subtle, no new colors, no
+  icons beyond one small glyph.
+- **U7 — no regressions.** `task test`, `task lint`, `cd web && bunx tsc -b
+  packages/ui` and the web vitest suite pass; the timeline still shows no
+  row for a `usage` event; `smind usage` output is unchanged.
+
+**Out of scope (follow-ups):** a composer usage pill; a task-level total
+(Settings → Usage grouped by task covers it); `account`/`day` groupings for
+proxy rows; budgets and alerts; charts; cost estimation (never).
+
 ### ADR-O — per-chat prompt queue ([ADR-0021](../../decisions/0021-per-chat-prompt-queue.md), Accepted 2026-10-10)
 - `task.prompt`/`run.start` to a chat with a running run takes
   `whenBusy`:
@@ -573,6 +685,56 @@ provenance (O1) gives the runner (or internal/runs) that context.
   account with no list, then 400 `model_not_found`; a `glm-*` key is
   never picked for `claude-*`.
 
+**ADR-M UI follow-up** (Go for U0, vitest for the rest; exact names):
+- U0: `TestSummarizeRunUsage_UnreportedFields`,
+  `TestSummarizeRequestLogs_UnreportedFields` (store): a group where no row
+  has reasoning lists `reasoningTokens`; a group with a reported `0` does
+  not; a fully reported group has none. `TestUsage_SummaryRowsNameUnreportedFields`
+  (wsapi): the `unreported` array reaches the wire for runs and proxy rows
+  and is absent when empty.
+- U1 `lib/usage-format.test.ts`:
+  - `formatTokens renders null as an em dash, never 0`
+  - `formatTokens groups thousands in full mode and abbreviates in compact mode`
+  - `formatCost uses 4/3/2 decimals by magnitude, null is an em dash, a reported 0 is $0.00`
+  - `sumUsage leaves a field no run reported as null`
+  - `sumUsage counts a reported 0 as 0, not as unreported`
+  - `sumUsage counts reporting runs and total runs`
+  - `usageSourceLabel maps every ADR-0020 source and falls back to the raw value`
+  - `usageSince: today is local midnight, 7d and 30d are rolling`
+- U2 `hooks/use-run-timeline.test.tsx`:
+  - `run.list usage seeds the run entry`
+  - `a live usage event replaces the run's usage instead of adding to it`
+  - `the latest usage event of a run.logs backfill wins`
+  - `a run without a usage row has undefined usage`
+- U3 `components/run-usage-pill.test.tsx` (and one case in
+  `timeline/run-timeline.test.tsx`: `run footer shows the usage pill`):
+  - `shows input, output and cost compactly`
+  - `shows "Usage not reported" for a not_reported run, never 0`
+  - `omits null fields from the pill and shows an em dash for them in the popover`
+  - `renders a reported 0 as 0`
+  - `popover shows full thousands, the model and the source label`
+  - `renders nothing without usage`
+- U4 `components/chat-usage-total.test.tsx` and `task-detail.test.tsx`:
+  - `chat total equals the sum of its runs' own usage`
+  - `a run with null cost does not count as 0 in the total`
+  - `says "2 of 3 runs reported usage" when only some reported`
+  - `renders nothing when no run reported usage`
+  - `task-detail: the header total updates live from a usage event`
+  - `task-detail: no double counting when a usage event follows the run.list usage`
+  - `task-detail: switching chats drops the previous chat's total`
+  - `task-detail: a late usage event from the previous chat's stream is ignored`
+- U5 `components/settings/usage-section.test.tsx`:
+  - `registers as the usage section in Agents & providers`
+  - `defaults to scope runs, groupBy task and a 7 day since`
+  - `scope, groupBy and range round-trip into usage.summary params`
+  - `choosing proxy switches groupBy to model and disables the runs-only groupBys`
+  - `renders rows with thousands separators and costs`
+  - `shows an em dash for unreported tokens and null cost, never 0`
+  - `resolves task and workspace keys to titles with an id fallback`
+  - `shows an empty state when there are no rows`
+  - `shows an error when usage.summary fails`
+  - `ignores a stale response after the selection changed`
+
 **ADR-O** (store tests plus fake-agent registry/wsapi tests; exact names):
 - `TestChatQueue_EnqueueBoundAndOrder`: 20 enqueues ok, the 21st gives
   `ErrQueueFull`; FIFO order; an `interrupt` item jumps ahead of earlier
@@ -608,6 +770,12 @@ provenance (O1) gives the runner (or internal/runs) that context.
 
 ## Decisions
 
+- **Usage UI: unreported is explicit, not inferred** (2026-10-11, UI
+  follow-up). `usage.summary` row sums are `COALESCE(SUM, 0)`, which hides
+  NULL. Rather than make the sums nullable (a wire break for the CLI), rows
+  gain an additive `unreported` list. The chat total is computed client-side
+  from the run entries (no backend total); tokens are never summed across
+  fields because input/cached overlap differs per provider.
 Resolved:
 - **Codex usage is per-thread cumulative `total`, differenced** (review
   correction, 2026-10-11). ADR-0020 §2 and AC3 first said to keep
@@ -659,7 +827,7 @@ orchestrator approve/deny tools (ADR-0017); mid-turn input injection
 
 Free-text task brief visible to child tasks; per-task token budget (on
 top of `request_log`, like Codex's `ThreadGoal.token_budget`);
-composer usage pill; feeding the router's `TokensUsed` from locally
+composer usage pill (the run/chat usage UI landed in the ADR-M UI follow-up; the composer pill did not); feeding the router's `TokensUsed` from locally
 counted tokens instead of the stubbed `quota.Fetcher`; per-workspace audit
 log; `/v1/responses`; `/v1/models`; a bundled
 orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
@@ -684,6 +852,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-O web composer follow-up (server queue replaces the client-side queue; branch `feat/composer-server-queue`, see Validation). Mobile not done.
 - [ ] Step 3 dogfood + gap log — first pass done 2026-10-11 (one GLM peer on the smind repo, via MCP; see "Step 3 dogfood gap log"). The full Step 3 shape (lead + ≥2 peers on a non-smind project) is not done.
 - [x] ADR-O follow-up: structured `cancel_kind` (implemented by GLM through smind; branch `feat/queue-cancel-kind`, see Validation)
+- [ ] ADR-M UI follow-up (branch `feat/usage-ui`): spec written 2026-10-11; U0 backend, U1–U2 types/format/state, U3 run pill, U4 chat total, U5 Settings → Usage, U6 screenshots — see Validation when done
 
 ## Validation
 
