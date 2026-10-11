@@ -261,6 +261,9 @@ export interface RunEntry {
   pendingPermission?: PendingPermission;
 }
 
+/** submitPrompt's result: a run that started, or a prompt the daemon queued (ADR-0021 §2). */
+export type SubmitResult = { kind: "started"; runId: string } | { kind: "queued"; queueItemId: number };
+
 interface TimelineState {
   /** null while the initial run.list fetch for the current task is in flight. */
   runs: RunEntry[] | null;
@@ -279,7 +282,7 @@ interface TimelineState {
     permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
     whenBusy?: WhenBusy,
-  ) => Promise<{ kind: "started"; runId: string } | { kind: "queued"; queueItemId: number }>;
+  ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
    * unmount, which only ever detach. The run's own active run.attach

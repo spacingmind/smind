@@ -1,9 +1,9 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "@/components/composer/composer";
-import { autoGrow, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
+import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Provider, ThinkingLevel } from "@/lib/types";
@@ -75,8 +75,11 @@ function renderComposer(
     boundProvider: null,
     connected: true,
     runningRunId: null,
+    queuedItems: [],
+    onCancelQueued: async () => {},
     onSubmit: async (provider, prompt, permission, thinkingLevel) => {
       submissions.push({ provider, prompt, ...permission, thinkingLevel });
+      return { kind: "started", runId: "run-test" };
     },
     onStop: async (runId) => {
       stops.push(runId);
@@ -114,6 +117,16 @@ describe("Composer", () => {
     fireEvent.keyDown(textarea(), { key: "Enter" });
     await flush();
     expect(submissions).toEqual([{ provider: "claude-native", prompt: "line one", permissionMode: "", autoAccept: false }]);
+  });
+
+  it("Cmd+Enter is not a plain submit key", () => {
+    // The alternate-send shortcut (ADR-0021 §9) owns modifier-held
+    // Enters -- the textarea must not fire the plain submit underneath
+    // the composer's own Cmd/Ctrl+Enter handler.
+    const key = (over: object) => ({ shiftKey: false, metaKey: false, ctrlKey: false, nativeEvent: {}, ...over }) as never;
+    expect(isSubmitKey(key({ key: "Enter", metaKey: true }))).toBe(false);
+    expect(isSubmitKey(key({ key: "Enter", ctrlKey: true }))).toBe(false);
+    expect(isSubmitKey(key({ key: "Enter" }))).toBe(true);
   });
 
   it("does not submit on the Enter that commits an IME composition", async () => {
@@ -200,39 +213,6 @@ describe("Composer", () => {
     rerender({ connected: true, taskId: 1, runningRunId: null });
     // Item 5: honest placeholder -- no @file/command claims.
     expect(textarea()).toHaveAttribute("placeholder", "Message the agent…");
-  });
-
-  it("queues a prompt typed while a run is live and sends it when the run ends", async () => {
-    const { submissions, rerender } = renderComposer({ runningRunId: "run-1" });
-
-    fireEvent.change(textarea(), { target: { value: "then do this" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-    await flush();
-
-    expect(submissions).toEqual([]);
-    expect(within(screen.getByTestId("composer-queue")).getByText("then do this")).toBeInTheDocument();
-    expect(textarea()).toHaveValue("");
-
-    rerender({ runningRunId: null });
-    await flush();
-
-    expect(submissions).toEqual([{ provider: "claude-native", prompt: "then do this", permissionMode: "", autoAccept: false }]);
-    expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
-  });
-
-  it("drops the queue when the task changes rather than firing it at the next task", async () => {
-    const { submissions, rerender } = renderComposer({ taskId: 1, runningRunId: "run-1" });
-
-    fireEvent.change(textarea(), { target: { value: "for task one" } });
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
-    await flush();
-    expect(screen.getByTestId("composer-queue")).toBeInTheDocument();
-
-    rerender({ taskId: 2, runningRunId: null });
-    await flush();
-
-    expect(submissions).toEqual([]);
-    expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
   });
 
   it("stops the live run from the composer, on click and on Escape", async () => {
