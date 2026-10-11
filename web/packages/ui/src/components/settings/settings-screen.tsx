@@ -55,6 +55,11 @@ function SettingsNav({
         const firstOfGroup = section.groupLabel && sections[index - 1]?.groupLabel !== section.groupLabel;
         return (
           <Fragment key={section.id}>
+            {!section.groupLabel && sections[index - 1]?.groupLabel && (
+              // An ungrouped entry registered after a group would otherwise
+              // read as one of its members; a divider ends the group.
+              <li role="separator" className={cn("my-1 h-px bg-border", list ? "mx-3" : "mx-2")} />
+            )}
             {firstOfGroup && (
               <li
                 aria-hidden="true"

@@ -62,9 +62,9 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-connections")).not.toBeInTheDocument();
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
-    // Order: General · Appearance · Agents & providers (Agents, MCP
-    // servers, Providers) · Notifications · Shortcuts (desktop inserts
-    // Connection between the group and Notifications).
+    // Order (Paseo-style): the ungrouped app sections first (General ·
+    // Appearance · Notifications · Shortcuts), then groups -- Connection
+    // (desktop only), then Agents & providers.
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -72,13 +72,42 @@ describe("SettingsScreen shell", () => {
     expect(ids).toEqual([
       "settings-nav-general",
       "settings-nav-appearance",
+      "settings-nav-notifications",
+      "settings-nav-shortcuts",
       "settings-nav-agents",
       "settings-nav-mcp-servers",
       "settings-nav-providers",
       "settings-nav-usage",
-      "settings-nav-notifications",
-      "settings-nav-shortcuts",
     ]);
+  });
+
+  it("keeps Notifications and Shortcuts out of the Agents & providers group (they precede its heading)", () => {
+    renderScreen();
+
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    const heading = within(nav).getByText("Agents & providers");
+    for (const id of ["notifications", "shortcuts"]) {
+      const item = within(nav).getByTestId(`settings-nav-${id}`);
+      expect(item.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+    for (const id of ["agents", "mcp-servers", "providers", "usage"]) {
+      const item = within(nav).getByTestId(`settings-nav-${id}`);
+      expect(heading.compareDocumentPosition(item) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+
+  it("an ungrouped section registered after a group is set off by a separator", () => {
+    const unregister = registerSettingsSection({ id: "late", label: "Late", order: 900, render: () => null });
+    try {
+      renderScreen();
+      const nav = screen.getByRole("navigation", { name: "Settings sections" });
+      const separator = within(nav).getByRole("separator");
+      const late = within(nav).getByTestId("settings-nav-late");
+      expect(separator.compareDocumentPosition(late) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(within(nav).getAllByRole("separator")).toHaveLength(1);
+    } finally {
+      unregister();
+    }
   });
 
   it("the Providers nav entry renders ADR-0015's real Providers section, not the old open-accounts stub", () => {

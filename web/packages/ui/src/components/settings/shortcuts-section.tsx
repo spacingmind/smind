@@ -36,7 +36,7 @@ export function ShortcutsSection() {
 registerSettingsSection({
   id: "shortcuts",
   label: "Shortcuts",
-  order: 300,
+  order: 120,
   icon: <Keyboard aria-hidden className="size-3.5" />,
   render: () => <ShortcutsSection />,
 });

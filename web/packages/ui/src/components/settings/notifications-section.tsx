@@ -138,7 +138,8 @@ export function NotificationsSection(_ctx: SettingsSectionContext) {
 registerSettingsSection({
   id: "notifications",
   label: "Notifications",
-  order: 250,
+  // Ungrouped, so it sorts with General/Appearance above every group heading.
+  order: 110,
   icon: <Bell aria-hidden className="size-3.5" />,
   render: (ctx) => <NotificationsSection {...ctx} />,
 });
