@@ -254,7 +254,15 @@ func cmdTaskNew(args []string) int {
 		fmt.Fprintf(os.Stderr, "task new: %v\n", err)
 		return 1
 	}
+	// First line stays "id<TAB>title<TAB>status" for existing parsers; the
+	// branch and worktree path follow on their own labelled lines.
 	fmt.Printf("%d\t%s\t%s\n", task.ID, task.Title, task.Status)
+	if task.Branch != nil {
+		fmt.Printf("branch\t%s\n", *task.Branch)
+	}
+	if task.WorktreePath != nil {
+		fmt.Printf("worktree\t%s\n", *task.WorktreePath)
+	}
 	return 0
 }
 
