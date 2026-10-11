@@ -1185,6 +1185,9 @@ func handleRunList(reg *runs.Registry) handlerFunc {
 				return nil, fmt.Errorf("run.list: invalid params: %w", err)
 			}
 		}
+		if p.Status != "" && !runs.ValidRunListStatus(runs.Status(p.Status)) {
+			return nil, fmt.Errorf("run.list: unknown status %q (valid: running, done, error, stopped, interrupted)", p.Status)
+		}
 		if p.TaskID == 0 && p.Status == "" {
 			return reg.List(p.ChatID), nil
 		}

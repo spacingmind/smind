@@ -363,3 +363,27 @@ func TestMCPTools_ProfileListIncludesNotes(t *testing.T) {
 		t.Fatalf("profile notes = %q, want the created notes", p.Notes)
 	}
 }
+
+// TestMCPTools_RunListUnknownStatusRejected proves run_list's MCP
+// surface inherits the daemon's status validation: an unrecognized
+// status is a clear tool error, not a silently empty list.
+func TestMCPTools_RunListUnknownStatusRejected(t *testing.T) {
+	env := newMCPSession(t)
+
+	res, err := env.cs.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "run_list",
+		Arguments: map[string]any{"status": "bogus"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool error = %v, want a result", err)
+	}
+	if !res.IsError {
+		t.Fatal("run_list status=bogus: IsError = false, want a tool error")
+	}
+	msg := mcpToolErrorText(res)
+	for _, want := range []string{"run_list:", "bogus", "running", "interrupted"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error text = %q, want it to mention %q", msg, want)
+		}
+	}
+}

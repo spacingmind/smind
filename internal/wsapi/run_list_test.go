@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,5 +233,37 @@ func TestRunList_LegacyChatIDUnchanged(t *testing.T) {
 	resp = readEnvelopeFor(t, ws, "raw", 5*time.Second)
 	if len(resp.Result) == 0 || resp.Result[0] != '[' {
 		t.Fatalf("run.list result = %s, want a bare JSON array", resp.Result)
+	}
+}
+
+// TestRunList_UnknownStatusRejected proves an unrecognized status value
+// is rejected with an error naming the valid statuses, rather than
+// silently matching nothing and returning an empty list.
+func TestRunList_UnknownStatusRejected(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	task := newTestTask(t, wm, "")
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	run := promptFinishedRun(t, ws, task.ID, 0)
+	_ = run
+
+	sendRequest(t, ws, "bogus", "run.list", map[string]any{"status": "bogus"})
+	resp := readEnvelopeFor(t, ws, "bogus", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatalf("run.list(status=bogus) succeeded with result %s, want an error", resp.Result)
+	}
+	for _, want := range []string{"bogus", "running", "done", "error", "stopped", "interrupted"} {
+		if !strings.Contains(resp.Error.Message, want) {
+			t.Fatalf("error %q does not mention %q", resp.Error.Message, want)
+		}
+	}
+
+	// Sanity: a valid status still works.
+	runs := listRuns(t, ws, "done", map[string]any{"status": "done"})
+	if len(runs) != 1 {
+		t.Fatalf("run.list(status=done) = %+v, want the 1 finished run", runs)
 	}
 }

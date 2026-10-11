@@ -49,3 +49,14 @@ func (reg *Registry) ListFiltered(taskID, chatID int64, status Status) []RunSumm
 	}
 	return out
 }
+
+// ValidRunListStatus reports whether s is one of the five Run lifecycle
+// statuses run.list's status filter accepts -- everything except the
+// zero value. Exported for wsapi's param validation.
+func ValidRunListStatus(s Status) bool {
+	switch s {
+	case StatusRunning, StatusDone, StatusError, StatusStopped, StatusInterrupted:
+		return true
+	}
+	return false
+}
