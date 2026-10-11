@@ -13,6 +13,7 @@ import (
 type Config struct {
 	Server        ServerConfig        `yaml:"server"`
 	Orchestration OrchestrationConfig `yaml:"orchestration"`
+	Agents        AgentsConfig        `yaml:"agents"`
 }
 
 // ServerConfig controls the HTTP server.
@@ -29,6 +30,19 @@ type OrchestrationConfig struct {
 	// grandchildren but rejects a great-grandchild. Enforced by
 	// internal/workspace.Manager.CreateTask.
 	MaxDepth int `yaml:"maxDepth"`
+}
+
+// AgentsConfig holds per-agent settings for the ACP agents smind spawns.
+type AgentsConfig struct {
+	GLM GLMConfig `yaml:"glm"`
+}
+
+// GLMConfig configures the GLM ACP agent (glm-acp-agent).
+type GLMConfig struct {
+	// MaxTurns caps the model calls (turns) the agent makes per prompt,
+	// passed as --max-turns. 0 or unset keeps the agent's own default
+	// (100 in glm-acp-agent 1.14.0). Negative values are rejected by Load.
+	MaxTurns int `yaml:"maxTurns"`
 }
 
 // Default returns the built-in defaults.
@@ -69,6 +83,9 @@ func Load() (Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return cfg, fmt.Errorf("parse config %s: %w", Path(), err)
+	}
+	if cfg.Agents.GLM.MaxTurns < 0 {
+		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be >= 0, got %d", Path(), cfg.Agents.GLM.MaxTurns)
 	}
 	return cfg, nil
 }
