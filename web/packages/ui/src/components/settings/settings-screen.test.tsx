@@ -1,6 +1,6 @@
 import { act } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { SettingsScreen } from "@/components/settings/settings-screen";
@@ -307,6 +307,97 @@ describe("SettingsScreen Notifications section (AC3)", () => {
   });
 });
 
+describe("SettingsScreen narrow", () => {
+  // Same shape as App.responsive.test.tsx: useIsMobile reads
+  // window.innerWidth inside an effect, so each render is followed by a
+  // flush to let it settle.
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 390 });
+    window.matchMedia = vi.fn().mockImplementation(
+      (query: string) =>
+        ({
+          matches: window.innerWidth < 768,
+          media: query,
+          onchange: null,
+          addEventListener: () => {},
+          removeEventListener: () => {},
+          addListener: () => {},
+          removeListener: () => {},
+          dispatchEvent: () => false,
+        }) as unknown as MediaQueryList,
+    );
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1024 });
+  });
+
+  async function renderNarrow(props: Partial<Parameters<typeof SettingsScreen>[0]> = {}) {
+    render(<SettingsScreen client={null} onNavigateBack={props.onNavigateBack ?? (() => {})} initialSectionId={props.initialSectionId} />);
+    await flush();
+  }
+
+  it("shows only the section list first, then a detail page after tapping a row", async () => {
+    await renderNarrow();
+
+    // List first: nav visible, no content pane, no sidebar.
+    expect(screen.getByTestId("settings-nav-appearance")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-content")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("settings-sidebar")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-nav-appearance"));
+    await flush();
+
+    expect(screen.queryByTestId("settings-nav-appearance")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-content")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-section-appearance")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen-header")).toHaveTextContent("Appearance");
+  });
+
+  it("back from the detail returns to the list, and back from the list calls onNavigateBack", async () => {
+    const onNavigateBack = vi.fn();
+    await renderNarrow({ onNavigateBack });
+
+    fireEvent.click(screen.getByTestId("settings-nav-shortcuts"));
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-back-button")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("settings-detail-back"));
+    await flush();
+    expect(screen.getByTestId("settings-nav-shortcuts")).toBeInTheDocument();
+    expect(onNavigateBack).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("initialSectionId lands directly on that section's detail", async () => {
+    await renderNarrow({ initialSectionId: "shortcuts" });
+
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+    expect(screen.queryByTestId("settings-nav-shortcuts")).not.toBeInTheDocument();
+  });
+
+  it("Escape on the detail returns to the list; Escape on the list calls onNavigateBack", async () => {
+    const onNavigateBack = vi.fn();
+    await renderNarrow({ onNavigateBack });
+
+    fireEvent.click(screen.getByTestId("settings-nav-general"));
+    await flush();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await flush();
+    expect(screen.getByTestId("settings-nav-general")).toBeInTheDocument();
+    expect(onNavigateBack).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onNavigateBack).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("SettingsScreen layout", () => {
   it("renders a settings sidebar with a back control above the grouped nav and a content view", () => {
     renderScreen();
@@ -384,5 +475,23 @@ describe("SettingsScreen layout", () => {
     event.preventDefault();
     document.dispatchEvent(event);
     expect(onNavigateBack).not.toHaveBeenCalled();
+  });
+
+  it("Escape ignores an open dialog that sits inside an inert subtree", () => {
+    const onNavigateBack = vi.fn();
+    render(<SettingsScreen client={null} onNavigateBack={onNavigateBack} />);
+
+    const inert = document.createElement("div");
+    inert.setAttribute("inert", "");
+    const dialog = document.createElement("div");
+    dialog.setAttribute("role", "dialog");
+    inert.appendChild(dialog);
+    document.body.appendChild(inert);
+    try {
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onNavigateBack).toHaveBeenCalledTimes(1);
+    } finally {
+      inert.remove();
+    }
   });
 });
