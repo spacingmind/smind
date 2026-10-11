@@ -1251,16 +1251,16 @@ function WorkspaceItem({
     <SidebarMenuItem>
       <ContextMenu>
         <ContextMenuTrigger asChild>
-        <SidebarMenuButton
-          onClick={onToggleExpanded}
-          data-testid="sidebar-workspace-row"
-          data-workspace-id={workspace.ID}
-        >
-          <FolderGit2 />
-          <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-          <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
-          <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
-        </SidebarMenuButton>
+          <SidebarMenuButton
+            onClick={onToggleExpanded}
+            data-testid="sidebar-workspace-row"
+            data-workspace-id={workspace.ID}
+          >
+            <FolderGit2 />
+            <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
+            <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+            <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
+          </SidebarMenuButton>
         </ContextMenuTrigger>
         <ContextMenuContent data-testid="sidebar-workspace-context-menu">
           {items.map((item) => (
