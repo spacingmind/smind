@@ -245,11 +245,9 @@ export function KeyboardProvider({
   // "skip keydown for menu-owned combos") holds on every platform,
   // including the Windows/Linux menu items that have no accelerator at
   // all, and stays correct even if the menu's accelerator set changes.
-  const lastRunRef = useRef<{
-    action: ActionId;
-    at: number;
-    source: "keydown" | "menu";
-  } | null>(null);
+  const lastRunRef = useRef<{ action: ActionId; at: number; source: "keydown" | "menu" } | null>(
+    null,
+  );
 
   const claimAction = useCallback((action: ActionId, source: "keydown" | "menu") => {
     const now = Date.now();
@@ -445,9 +443,7 @@ export function useActionHandler(
   const owner = options.menuFallback ? ownerRef.current : undefined;
 
   useEffect(() => {
-    return register(action, (payload) => handlerRef.current(payload), enabled, {
-      owner,
-    });
+    return register(action, (payload) => handlerRef.current(payload), enabled, { owner });
   }, [register, action, enabled, owner]);
 }
 

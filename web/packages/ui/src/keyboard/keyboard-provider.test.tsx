@@ -75,12 +75,7 @@ describe("KeyboardProvider dispatch", () => {
       </KeyboardProvider>,
     );
 
-    fireEvent.keyDown(document, {
-      key: "3",
-      code: "Digit3",
-      ctrlKey: true,
-      altKey: true,
-    });
+    fireEvent.keyDown(document, { key: "3", code: "Digit3", ctrlKey: true, altKey: true });
     expect(fire).toHaveBeenCalledWith({ digit: 3 });
   });
 
@@ -364,12 +359,7 @@ describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
 
     const textarea = screen.getByLabelText("composer");
     textarea.focus();
-    fireEvent.keyDown(textarea, {
-      key: "h",
-      code: "KeyH",
-      altKey: true,
-      shiftKey: true,
-    });
+    fireEvent.keyDown(textarea, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
 
     expect(fire).toHaveBeenCalledTimes(1);
   });
@@ -382,12 +372,7 @@ describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
       </KeyboardProvider>,
     );
 
-    fireEvent.keyDown(document, {
-      key: "ArrowLeft",
-      code: "ArrowLeft",
-      ctrlKey: true,
-      shiftKey: true,
-    });
+    fireEvent.keyDown(document, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
 
     expect(fire).toHaveBeenCalledTimes(1);
   });
@@ -573,10 +558,7 @@ describe("KeyboardProvider terminal scope", () => {
 
 describe("menu-dispatched actions", () => {
   function FindPane({ onFire, focused }: { onFire: (payload: unknown) => void; focused: boolean }) {
-    useActionHandler("pane.find", onFire, {
-      enabled: focused,
-      menuFallback: true,
-    });
+    useActionHandler("pane.find", onFire, { enabled: focused, menuFallback: true });
     return null;
   }
 

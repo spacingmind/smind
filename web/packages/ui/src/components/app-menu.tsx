@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useRef } from "react";
 import { Menu } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -76,9 +76,12 @@ export const APP_MENU_SECTIONS: { title: string; items: AppMenuItem[] }[] = [
  */
 export function AppMenu() {
   const { runAction } = useKeyboard();
+  // The chosen item runs once the menu has closed (see onCloseAutoFocus below).
+  const pending = useRef<AppMenuItem | null>(null);
   if (!isDesktop || !hasCaptionButtons(desktopOS)) return null;
 
   function run(item: AppMenuItem) {
+    pending.current = null;
     // `source: "menu"` so Find reaches the last focused pane (opening this
     // menu moved focus out of it).
     if ("action" in item) runAction(item.action, null, { source: "menu" });
@@ -97,7 +100,20 @@ export function AppMenu() {
           <Menu />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-48" data-testid="app-menu">
+      <DropdownMenuContent
+        align="end"
+        className="min-w-48"
+        data-testid="app-menu"
+        // Radix refocuses the trigger when the menu closes, which would steal focus
+        // from whatever the chosen item focuses (the find bar `pane.find` opens). So
+        // skip that, and run the item only now: while the menu is open its focus trap
+        // would also pull the freshly focused find bar back.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault();
+          const item = pending.current;
+          if (item) run(item);
+        }}
+      >
         {APP_MENU_SECTIONS.map((section, index) => (
           <Fragment key={section.title}>
             {index > 0 && <DropdownMenuSeparator />}
@@ -108,7 +124,9 @@ export function AppMenu() {
               <DropdownMenuItem
                 key={item.testId}
                 data-testid={`app-menu-item-${item.testId}`}
-                onClick={() => run(item)}
+                onSelect={() => {
+                  pending.current = item;
+                }}
               >
                 {item.label}
                 {item.shortcut && (

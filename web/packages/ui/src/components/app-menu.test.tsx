@@ -1,7 +1,7 @@
 // desktop-native-feel W3: the header app menu (Windows/Linux). `@/lib/platform`
 // is a module-load constant, so it is mocked per scenario and the component
 // imported fresh, like keyboard/desktop-shortcuts.test.tsx.
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
@@ -85,6 +85,9 @@ describe("AppMenu", () => {
     for (const item of items) {
       fireEvent.pointerDown(screen.getByTestId("app-menu-trigger"), { button: 0 });
       fireEvent.click(await screen.findByTestId(`app-menu-item-${item.testId}`));
+      // The item runs once the menu has closed (Radix's close-autofocus).
+      await waitFor(() => expect(screen.queryByTestId("app-menu")).toBeNull());
+      await new Promise((r) => setTimeout(r, 0));
     }
     // pane.find was enabled:false yet reached its (last focused) pane.
     expect(fired.sort()).toEqual([...rendererIds].sort());
@@ -94,5 +97,33 @@ describe("AppMenu", () => {
     );
     expect(menuAction).toHaveBeenCalledWith("quit");
     expect(menuAction).toHaveBeenCalledWith("hide");
+  });
+
+  it("app menu does not pull focus back to the trigger after an item runs", async () => {
+    mockPlatform({ desktop: true, os: "windows" });
+    const { AppMenu } = await import("@/components/app-menu");
+    const { KeyboardProvider, useActionHandler } = await import("@/keyboard/keyboard-provider");
+
+    // Stands in for the find bar: the action focuses an input.
+    function Claim() {
+      useActionHandler("pane.find", () => document.getElementById("find-input")?.focus());
+      return <input id="find-input" aria-label="find" />;
+    }
+    render(
+      <KeyboardProvider>
+        <Claim />
+        <AppMenu />
+      </KeyboardProvider>,
+    );
+
+    const trigger = screen.getByTestId("app-menu-trigger");
+    fireEvent.pointerDown(trigger, { button: 0 });
+    fireEvent.click(await screen.findByTestId("app-menu-item-pane.find"));
+
+    await waitFor(() => expect(screen.queryByTestId("app-menu")).toBeNull());
+    // Let Radix's close-autofocus run (a microtask/timeout after unmount).
+    await new Promise((r) => setTimeout(r, 50));
+    expect(document.activeElement).not.toBe(trigger);
+    expect(document.activeElement).toBe(document.getElementById("find-input"));
   });
 });
