@@ -4,6 +4,7 @@ import {
   DIGIT_WILDCARD,
   formatChord,
   isModifierKeyCode,
+  isShellControlKey,
   matchCombo,
   parseChord,
   type KeyCombo,
@@ -68,6 +69,13 @@ export interface BindingWhen {
    * dialog or the conflict check -- Paseo's `when: { desktop }` pattern.
    */
   desktop?: boolean;
+  /**
+   * Platform gate: `false` = non-Mac only, absent = both (Paseo's
+   * `when.mac`). Used by the terminal escape-hatch rows, which exist
+   * because off-Mac `Mod` is Ctrl and Ctrl+letter belongs to the shell
+   * while a terminal has focus.
+   */
+  mac?: false;
 }
 
 export interface ShortcutBinding {
@@ -334,6 +342,99 @@ export const SHORTCUT_BINDINGS: readonly ShortcutBinding[] = [
     when: { global: true },
     note: "Works while typing in the composer",
   },
+  // Terminal escape hatches (non-Mac only): off-Mac `Mod` is Ctrl, and
+  // Ctrl+letter bindings stand down in the terminal scope, so each gets a
+  // non-readline sibling that fires everywhere.
+  {
+    id: "palette-open-terminal",
+    action: "palette.open",
+    combo: "Mod+Shift+P",
+    section: "general",
+    label: "Open command palette",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+K goes to the shell there",
+  },
+  {
+    id: "tab-close-terminal",
+    action: "tab.close",
+    combo: "Alt+Shift+W",
+    section: "tabs",
+    label: "Close current tab",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+W goes to the shell there",
+  },
+  {
+    id: "sidebar-toggle-terminal",
+    action: "sidebar.toggle",
+    combo: "Mod+Shift+B",
+    section: "navigation",
+    label: "Toggle sidebar",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+B goes to the shell there",
+  },
+  {
+    id: "pane-find-terminal",
+    action: "pane.find",
+    combo: "Mod+Shift+F",
+    section: "navigation",
+    label: "Find in pane",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+F goes to the shell there",
+  },
+  {
+    id: "composer-focus-terminal",
+    action: "composer.focus",
+    combo: "Mod+Shift+L",
+    section: "agent",
+    label: "Focus the composer",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+L goes to the shell there",
+  },
+  {
+    id: "quick-open-open-terminal",
+    action: "quick-open.open",
+    combo: "Mod+Shift+O",
+    section: "navigation",
+    label: "Quick open a file",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+P goes to the shell there",
+  },
+  {
+    id: "tab-new-terminal",
+    action: "tab.new",
+    combo: "Mod+Shift+T",
+    section: "tabs",
+    label: "New tab",
+    when: { global: true, desktop: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+T goes to the shell there",
+  },
+  {
+    id: "task-prev-terminal",
+    action: "task.prev",
+    combo: "Mod+Shift+[",
+    section: "navigation",
+    label: "Previous task",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+[ goes to the shell there",
+  },
+  {
+    id: "task-next-terminal",
+    action: "task.next",
+    combo: "Mod+Shift+]",
+    section: "navigation",
+    label: "Next task",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+] goes to the shell there",
+  },
+  {
+    id: "pane-split-right-terminal",
+    action: "pane.split.right",
+    combo: "Alt+Shift+\\",
+    section: "tabs",
+    label: "Split pane right",
+    when: { global: true, mac: false },
+    note: "Use this while a terminal has focus: Ctrl+\\ goes to the shell there",
+  },
 ];
 
 
@@ -400,14 +501,19 @@ export function resolveBindings(
 
 /**
  * The rows of the table that apply on this platform: a binding gated
- * `when.desktop` is dropped entirely, so it neither matches a key event
+ * `when.desktop` / `when.mac` is dropped entirely, so it neither matches a key event
  * nor appears in the help dialog / conflict checks on the other platform.
  */
 export function platformBindings(
   bindings: readonly ShortcutBinding[],
   isDesktop: boolean,
+  isMac: boolean,
 ): readonly ShortcutBinding[] {
-  return bindings.filter((b) => b.when?.desktop === undefined || b.when.desktop === isDesktop);
+  return bindings.filter(
+    (b) =>
+      (b.when?.desktop === undefined || b.when.desktop === isDesktop) &&
+      (b.when?.mac === undefined || !isMac),
+  );
 }
 
 /** Whether a binding is allowed to fire with focus where it currently is. `overridden` is `ResolvedBinding`'s field -- omitted (or false), a binding with `editableWhenRebound` is treated as still on its default combo. */
@@ -465,6 +571,7 @@ function resolveInitialChordStep(
     const firstCombo = chord?.[0];
     if (!chord || !firstCombo) return;
     if (!bindingAllowedInScope(binding, context.scope)) return;
+    if (context.scope === "terminal" && isShellControlKey(firstCombo, context.isMac)) return;
     const stepMatch = matchCombo(firstCombo, event, context.isMac);
     if (stepMatch === null) return;
     if (chord.length > 1) {
@@ -501,6 +608,7 @@ function resolveAdvancingChordStep(
     const combo = chord?.[chordState.step];
     if (!binding || !chord || !combo) continue;
     if (!bindingAllowedInScope(binding, context.scope)) continue;
+    if (context.scope === "terminal" && isShellControlKey(combo, context.isMac)) continue;
     const stepMatch = matchCombo(combo, event, context.isMac);
     if (stepMatch === null) continue;
     if (chordState.step + 1 === chord.length) {
