@@ -107,6 +107,7 @@ pub fn run() {
             commands::connections_select,
             commands::connections_get_current,
             commands::open_external,
+            commands::app_quit,
             editors::editors_list,
             editors::open_in_editor,
             daemon_manager::daemon_status,

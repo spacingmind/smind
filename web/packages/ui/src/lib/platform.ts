@@ -78,6 +78,8 @@ export interface DesktopApi {
   getCurrentConnection(): Promise<Connection>;
   /** Opens an http(s) URL in the OS's default browser -- Rust validates the scheme (AC5); this is the only escape hatch a bundled-UI link needs, since in-window navigation is restricted to the proxy origin (AC3). */
   openExternal(url: string): Promise<void>;
+  /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
+  quit(): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
   daemonStatus(): Promise<DaemonStatus>;
   daemonInstall(): Promise<DaemonStatus>;
@@ -164,6 +166,7 @@ function unavailable(): DesktopApi {
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
     openExternal: () => reject(),
+    quit: () => reject(),
     daemonStatus: () => reject(),
     daemonInstall: () => reject(),
     daemonUpdate: () => reject(),
@@ -241,6 +244,10 @@ function realDesktopApi(): DesktopApi {
     async openExternal(url) {
       const invoke = await loadInvoke();
       await invoke("open_external", { url });
+    },
+    async quit() {
+      const invoke = await loadInvoke();
+      await invoke("app_quit");
     },
     async daemonStatus() {
       const invoke = await loadInvoke();

@@ -38,6 +38,7 @@ fn capability_allowlist_exact() {
         "allow-window-set-theme",
         "allow-app-update-check",
         "allow-app-update-install",
+        "allow-app-quit",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",
@@ -92,4 +93,20 @@ fn capability_app_grants_match_build_rs_commands() {
             "{p} has no `{cmd}` in build.rs"
         );
     }
+}
+
+/// `app_quit` is reachable from the bundled UI (renderer Ctrl+Q on
+/// Windows/Linux) and is registered with the invoke handler.
+#[test]
+fn app_quit_is_allowlisted_and_registered() {
+    let cap: Value = serde_json::from_str(PROXY_CAPABILITY).expect("proxy.json parses");
+    let perms: Vec<&str> = cap["permissions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(Value::as_str)
+        .collect();
+    assert!(perms.contains(&"allow-app-quit"));
+    assert!(BUILD_RS.contains("\"app_quit\""));
+    assert!(include_str!("lib.rs").contains("commands::app_quit"));
 }

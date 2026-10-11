@@ -107,6 +107,15 @@ pub fn connections_add_relay(
     Ok(conn)
 }
 
+/// Quits the app. The renderer's Ctrl+Q on Windows/Linux calls this: the
+/// window is undecorated there, so the native menu's Ctrl+Q accelerator never
+/// dispatches (no menu bar is attached to the window). Same effect as the
+/// menu's and the tray's Quit items.
+#[tauri::command]
+pub fn app_quit(app: AppHandle) {
+    app.exit(0);
+}
+
 #[tauri::command]
 pub fn open_external(app: AppHandle, url: String) -> Result<(), String> {
     let parsed = url::Url::parse(&url).map_err(|e| format!("invalid URL {url:?}: {e}"))?;

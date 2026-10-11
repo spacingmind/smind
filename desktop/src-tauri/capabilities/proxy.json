@@ -27,6 +27,7 @@
     "allow-window-set-theme",
     "allow-app-update-check",
     "allow-app-update-install",
+    "allow-app-quit",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
