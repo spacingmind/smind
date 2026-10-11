@@ -24,6 +24,9 @@ The loop:
    committed to its branch as a checkpoint; refused while a run is active, so
    task_stop first). task_new also takes baseRef (e.g. origin/develop), branch,
    or prNumber to choose the worktree's starting point.
+   task_set_mode / task_options / task_set_option change a live run's settings
+   (never to an auto-approving mode; only thinking-level or model options).
+   task_wait also takes runIds to wait for the first of several runs.
 
 If a task is busy with a running run, task_send queues the prompt on that
 chat by default -- you may keep sending and the daemon will deliver them
