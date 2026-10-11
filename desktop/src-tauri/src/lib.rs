@@ -30,6 +30,7 @@ mod notify;
 mod overlay_icon;
 mod state;
 mod tray;
+mod updater;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
@@ -93,6 +94,10 @@ pub fn run() {
         // tauri-plugin-single-instance's deep-link feature (registered
         // above), which is why single-instance is set up first.
         .plugin(tauri_plugin_deep_link::init())
+        // ADR-0023: updater plugin on macOS/Windows only; Linux (deb)
+        // has no updater. Its JS-facing permissions are never granted.
+        .plugin(updater_plugin())
+
         .invoke_handler(tauri::generate_handler![
             commands::connections_list,
             commands::connections_add,
@@ -300,6 +305,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building smind desktop")
         .run(lifecycle::handle_run_event);
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config> {
+    tauri_plugin_updater::Builder::new().build()
 }
 
 fn toggle_main(app: &tauri::AppHandle) {
