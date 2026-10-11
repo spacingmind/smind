@@ -34,6 +34,9 @@ type acpBackend interface {
 	SessionModes(sessionID string) (acp.SessionModeState, bool)
 	SetSessionMode(ctx context.Context, sessionID, modeID string) error
 	Prompt(ctx context.Context, sessionID, text string, updates chan<- acp.SessionUpdate) (string, error)
+	PromptUsage(sessionID string) (acp.PromptUsage, bool)
+	// InstanceID identifies the agent process behind this client.
+	InstanceID() string
 	Close() error
 }
 
@@ -55,6 +58,7 @@ type codexBackend interface {
 	NewSession(ctx context.Context, cwd string) (string, error)
 	ResumeSession(ctx context.Context, threadID, cwd string) (string, error)
 	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
+	ThreadTokenUsage(threadID string) (codex.TokenUsage, bool)
 	Close() error
 }
 
@@ -366,7 +370,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	// Stored as soon as the session exists, not only after a successful
 	// prompt: a cancelled turn (ctx cancellation aborting Prompt) must not
 	// lose the handle, or the next prompt would silently start fresh.
-	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: sessionID})
+	r.keepSessionHandle(chatID, provider, sessionID)
 	r.recordSessionModes(provider, client, sessionID, configOptions)
 	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
 	if err != nil {
@@ -387,9 +391,16 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 
 	updates := make(chan acp.SessionUpdate)
 	forwardDone := make(chan struct{})
+	var (
+		lastUsageUpdate acp.UsageUpdate
+		gotUsageUpdate  bool
+	)
 	go func() {
 		defer close(forwardDone)
 		for u := range updates {
+			if uu, ok := acp.ParseUsageUpdate(u); ok {
+				lastUsageUpdate, gotUsageUpdate = uu, true
+			}
 			if u.Type == acp.SessionUpdateCurrentModeUpdate {
 				// acp.Client has already applied it to SessionModes.
 				if mode, ok := currentACPMode(client, sessionID, nil); ok {
@@ -415,13 +426,62 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s prompt: %w", provider, scrubError(err, secrets))
 	}
-	r.sessionStore.Set(chatID, SessionHandle{Provider: provider, SessionID: sessionID})
+	r.keepSessionHandle(chatID, provider, sessionID)
+
+	promptUsage, hasPromptUsage := client.PromptUsage(sessionID)
+	handle, _ := r.sessionStore.Get(chatID)
+	usage, snap := diffACPUsage(usageSnapshotFromHandle(handle), sessionID, client.InstanceID(),
+		newCumulativeUsage(promptUsage, hasPromptUsage, lastUsageUpdate, gotUsageUpdate))
+	if snap != nil {
+		// Marshaling a struct of numbers and strings can't fail.
+		handle.Metadata, _ = json.Marshal(snap)
+		r.sessionStore.Set(chatID, handle)
+	}
+	r.sendUsage(ctx, events, usage)
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
 	case <-ctx.Done():
 	}
 	return nil
+}
+
+// codexTurnUsage is the turn's own usage: codex reports the thread's
+// cumulative tokenUsage.total, so it is differenced against the snapshot
+// the thread's previous turn left in the session handle's Metadata (ADR-0020
+// §2), and the new snapshot is stored back. Source not_reported with every
+// field nil if codex reported nothing.
+func (r *Runner) codexTurnUsage(chatID int64, client codexBackend, threadID string) Usage {
+	total, ok := client.ThreadTokenUsage(threadID)
+	handle, _ := r.sessionStore.Get(chatID)
+	usage, snap := diffCodexUsage(usageSnapshotFromHandle(handle), threadID, total, ok)
+	if snap != nil {
+		// Marshaling a struct of numbers and strings can't fail.
+		handle.Metadata, _ = json.Marshal(snap)
+		r.sessionStore.Set(chatID, handle)
+	}
+	return usage
+}
+
+// keepSessionHandle stores the handle for provider's sessionID like
+// sessionStore.Set, but keeps the handle's Metadata (the usage snapshot)
+// when the stored handle is for the same provider and session; a handle for
+// any other session starts without one.
+func (r *Runner) keepSessionHandle(chatID int64, provider Provider, sessionID string) {
+	h := SessionHandle{Provider: provider, SessionID: sessionID}
+	if old, ok := r.sessionStore.Get(chatID); ok && old.Provider == provider && old.SessionID == sessionID {
+		h.NativeHandle, h.Metadata = old.NativeHandle, old.Metadata
+	}
+	r.sessionStore.Set(chatID, h)
+}
+
+// sendUsage forwards a turn's normalized usage as one EventTypeUsage; every
+// runner calls it immediately before sending EventTypeDone.
+func (r *Runner) sendUsage(ctx context.Context, events chan<- Event, u Usage) {
+	select {
+	case events <- Event{Type: EventTypeUsage, Usage: &u}:
+	case <-ctx.Done():
+	}
 }
 
 // newOrResumeACPSession starts the ACP session this turn drives: if chatID
@@ -691,6 +751,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		return fmt.Errorf("taskrunner: claude code prompt: %w", err)
 	}
 	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderClaudeNative, SessionID: result.SessionID})
+	r.sendUsage(ctx, events, claudeUsage(result))
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: result.StopReason, Raw: result}:
@@ -861,7 +922,7 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 	}
 	// Stored as soon as the thread exists, not only after a successful
 	// prompt -- same stop-doesn't-lose-the-handle reasoning as runACP.
-	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
+	r.keepSessionHandle(chatID, ProviderCodexNative, threadID)
 
 	updates := make(chan codex.Update)
 	forwardDone := make(chan struct{})
@@ -880,7 +941,8 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 	if err != nil {
 		return fmt.Errorf("taskrunner: codex prompt: %w", err)
 	}
-	r.sessionStore.Set(chatID, SessionHandle{Provider: ProviderCodexNative, SessionID: threadID})
+	r.keepSessionHandle(chatID, ProviderCodexNative, threadID)
+	r.sendUsage(ctx, events, r.codexTurnUsage(chatID, client, threadID))
 
 	select {
 	case events <- Event{Type: EventTypeDone, StopReason: stopReason}:
