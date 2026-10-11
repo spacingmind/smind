@@ -706,7 +706,12 @@ export function useRunTimeline(
   // guarded against duplicates by knownRuns.
   useEffect(() => {
     if (!client || taskId === null || chatId === null || !events) return;
-    return events.subscribe("run.status", (payload) => {
+    // A permission.pending for an already-known run is ignored here: the
+    // attach stream owns pendingPermission, and applying the bus event too
+    // could resurrect a card the stream already resolved. For an unknown
+    // run it is an adoption trigger exactly like run.status -- the attach
+    // backfill replays the unresolved permission_request.
+    const adopt = (payload: unknown) => {
       const p = payload as Partial<RunStatusEventPayload>;
       const runId = p.runId;
       if (p.chatId !== chatId || !runId) return;
@@ -750,7 +755,13 @@ export function useRunTimeline(
         .finally(() => {
           adopting.current.delete(runId);
         });
-    });
+    };
+    const offStatus = events.subscribe("run.status", adopt);
+    const offPermission = events.subscribe("permission.pending", adopt);
+    return () => {
+      offStatus();
+      offPermission();
+    };
   }, [client, taskId, chatId, events]);
 
   const stopRun = useCallback(

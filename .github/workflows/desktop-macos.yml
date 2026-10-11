@@ -2,9 +2,12 @@ name: desktop-macos
 
 # Builds the Tauri desktop app for macOS -- one .dmg per architecture (arm64
 # and x86_64, no universal binary) -- and uploads them as workflow artifacts
-# named smind-desktop-<version>-macos-<arch>.dmg. Unsigned and not
-# notarized (ad-hoc signature only); signing and notarization are out of
-# scope here, like desktop-windows.yml, and no secrets are referenced. No
+# named smind-desktop-<version>-macos-<arch>.dmg. Apple code signing and
+# notarization are out of scope (ad-hoc signature only). The *updater*
+# artifacts (smind.app.tar.gz + .sig, minisign-signed with the
+# TAURI_SIGNING_PRIVATE_KEY secret) are built only when that secret is
+# present, via tauri build --config src-tauri/tauri.updater.conf.json
+# (ADR-0023.4); PR/fork/manual builds have no secret and skip them. No
 # release is published here: release-please.yml calls this as a reusable
 # workflow (workflow_call) and attaches the DMGs to the GitHub Release.
 #
@@ -30,6 +33,20 @@ on:
         type: string
         required: false
         default: ""
+      require-updater-signing:
+        description: >-
+          Fail the build when TAURI_SIGNING_PRIVATE_KEY is absent instead of
+          silently producing a release that can't self-update.
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        description: Minisign private key for updater artifact signing.
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        description: Password for the updater signing key (empty = none).
+        required: false
 
 permissions:
   contents: read
@@ -113,9 +130,29 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # The secret is exposed only here and only in the build step's env --
+      # never to other steps or third-party actions. The script prints
+      # sign=true/sign=false (or fails when require-updater-signing is set)
+      # without echoing the key.
+      - name: Decide updater signing
+        id: sign
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          REQUIRE_UPDATER_SIGNING: ${{ inputs.require-updater-signing }}
+        run: desktop/scripts/updater-signing-mode.sh >> "$GITHUB_OUTPUT"
+
       - name: Build app + dmg
+        if: steps.sign.outputs.sign != 'true'
         working-directory: desktop
         run: npx tauri build --target ${{ matrix.target }}
+
+      - name: Build app + dmg (with updater artifacts)
+        if: steps.sign.outputs.sign == 'true'
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --target ${{ matrix.target }} --config src-tauri/tauri.updater.conf.json
 
       # ci-macos-both-arches: each embedded binary really is this arch, and
       # the bundled daemon reports the app's version (never run an x86_64
@@ -156,8 +193,27 @@ jobs:
             "dist/smind-desktop-${version}-macos-${{ matrix.arch }}.dmg"
           ls -l dist
 
+      # Updater tarball: tauri names it smind.app.tar.gz on both arches, so
+      # rename per arch (ADR-0023.3); latest.json's URLs point at these names.
+      - name: Stage updater artifacts
+        if: steps.sign.outputs.sign == 'true'
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version desktop/src-tauri/tauri.conf.json)"
+          bundle_dir="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos"
+          base="dist/smind-desktop-${version}-macos-${{ matrix.arch }}.app.tar.gz"
+          for f in "$bundle_dir/smind.app.tar.gz" "$bundle_dir/smind.app.tar.gz.sig"; do
+            [ -f "$f" ] || { echo "::error::expected updater artifact $f is missing"; exit 1; }
+          done
+          cp "$bundle_dir/smind.app.tar.gz" "$base"
+          cp "$bundle_dir/smind.app.tar.gz.sig" "$base.sig"
+          ls -l dist
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: smind-desktop-macos-${{ matrix.arch }}
-          path: dist/*.dmg
+          path: |
+            dist/*.dmg
+            dist/*.app.tar.gz
+            dist/*.app.tar.gz.sig
           if-no-files-found: error

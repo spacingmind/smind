@@ -61,6 +61,19 @@ interface HandlerEntry {
   token: symbol;
   handler: ActionHandler;
   enabled: boolean;
+  /** Stable across re-registrations (`enabled` flips re-register under a new token); what "last focused" is remembered by. Set only for `menuFallback` handlers. */
+  owner?: symbol;
+}
+
+/** Options for {@link KeyboardContextValue.register}. */
+interface RegisterOptions {
+  /** See {@link useActionHandler}'s `menuFallback`. */
+  owner?: symbol;
+}
+
+/** Where a `runAction` came from: a menu click can't rely on focus still being in the pane it targets. */
+export interface RunActionOptions {
+  source?: "menu";
 }
 
 interface KeyboardContextValue {
@@ -74,9 +87,18 @@ interface KeyboardContextValue {
   /** Drops every override. */
   resetAllBindings: () => void;
   /** Registers `handler` for `action`; returns the unregister function. Prefer {@link useActionHandler}. */
-  register: (action: ActionId, handler: ActionHandler, enabled: boolean) => () => void;
-  /** Runs `action`'s current handler as if its shortcut fired. The command palette invokes actions this way. */
-  runAction: (action: ActionId, payload?: ActionPayload) => boolean;
+  register: (
+    action: ActionId,
+    handler: ActionHandler,
+    enabled: boolean,
+    options?: RegisterOptions,
+  ) => () => void;
+  /**
+   * Runs `action`'s current handler as if its shortcut fired. The command palette invokes actions this way.
+   * With `{ source: "menu" }` and no enabled handler, falls back to the `menuFallback` handler that was
+   * enabled most recently and is still mounted (see {@link useActionHandler}).
+   */
+  runAction: (action: ActionId, payload?: ActionPayload, options?: RunActionOptions) => boolean;
   /** True while at least one dialog owns the keyboard -- no binding fires. Dialogs claim it via {@link useModalKeyboardLock}. */
   modalOpen: boolean;
   /** Takes a modal lock; call the returned function to release it. Nested/overlapping dialogs are counted, not toggled. */
@@ -140,42 +162,63 @@ export function KeyboardProvider({
   // reads them at the moment a key is pressed.
   const handlers = useRef(new Map<ActionId, HandlerEntry[]>());
 
-  // D3.1: a row gated `when.desktop` exists only on its own platform, so
-  // it neither matches keys nor appears in the help list on the other one.
-  const bindings = useMemo(
-    () => resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop), overrides),
-    [overrides],
-  );
-
   // Read per dispatch rather than memoized at mount: tests reassign
   // `navigator.platform` between cases, and the cost is one regex.
   const isMac = isMacPlatform();
 
-  const register = useCallback((action: ActionId, handler: ActionHandler, enabled: boolean) => {
-    const token = Symbol("handler");
-    const stack = handlers.current.get(action) ?? [];
-    stack.push({ token, handler, enabled });
-    handlers.current.set(action, stack);
-    return () => {
-      const current = handlers.current.get(action);
-      if (!current) return;
-      const next = current.filter((entry) => entry.token !== token);
-      if (next.length === 0) handlers.current.delete(action);
-      else handlers.current.set(action, next);
-    };
-  }, []);
+  // D3.1: a row gated `when.desktop` exists only on its own platform, so
+  // it neither matches keys nor appears in the help list on the other one.
+  const bindings = useMemo(
+    () => resolveBindings(platformBindings(SHORTCUT_BINDINGS, isDesktop, isMac), overrides),
+    [overrides, isMac],
+  );
 
-  const runAction = useCallback((action: ActionId, payload: ActionPayload = null) => {
-    const stack = handlers.current.get(action);
-    if (!stack) return false;
-    for (let i = stack.length - 1; i >= 0; i--) {
-      const entry = stack[i]!;
-      if (!entry.enabled) continue;
-      entry.handler(payload);
-      return true;
-    }
-    return false;
-  }, []);
+  // The owner of the last enabled `menuFallback` handler, per action.
+  const lastEnabledOwner = useRef(new Map<ActionId, symbol>());
+
+  const register = useCallback(
+    (action: ActionId, handler: ActionHandler, enabled: boolean, options: RegisterOptions = {}) => {
+      const token = Symbol("handler");
+      const stack = handlers.current.get(action) ?? [];
+      stack.push({ token, handler, enabled, owner: options.owner });
+      handlers.current.set(action, stack);
+      if (enabled && options.owner) lastEnabledOwner.current.set(action, options.owner);
+      return () => {
+        const current = handlers.current.get(action);
+        if (!current) return;
+        const next = current.filter((entry) => entry.token !== token);
+        if (next.length === 0) handlers.current.delete(action);
+        else handlers.current.set(action, next);
+      };
+    },
+    [],
+  );
+
+  const runAction = useCallback(
+    (action: ActionId, payload: ActionPayload = null, options: RunActionOptions = {}) => {
+      const stack = handlers.current.get(action);
+      if (!stack) return false;
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const entry = stack[i]!;
+        if (!entry.enabled) continue;
+        entry.handler(payload);
+        return true;
+      }
+      // A native-menu click (or the header app menu) moves focus out of the
+      // webview/pane, so every focus-gated handler is disabled by the time
+      // the action arrives. Route it to the pane that was focused last.
+      if (options.source === "menu") {
+        const owner = lastEnabledOwner.current.get(action);
+        const entry = owner ? stack.find((e) => e.owner === owner) : undefined;
+        if (entry) {
+          entry.handler(payload);
+          return true;
+        }
+      }
+      return false;
+    },
+    [],
+  );
 
   // `modalOpen` is read inside a listener registered once, so it goes
   // through a ref -- re-subscribing the listener on every open/close would
@@ -301,7 +344,7 @@ export function KeyboardProvider({
     if (!isDesktop) return;
     return desktop.onMenuAction((id) => {
       if (modalOpenRef.current) return;
-      if (claimAction(id, "menu")) runAction(id);
+      if (claimAction(id, "menu")) runAction(id, null, { source: "menu" });
     });
   }, [runAction, claimAction]);
 
@@ -379,20 +422,29 @@ export function useKeyboard(): KeyboardContextValue {
  * dispatcher skip it, so an action falls through to an outer handler
  * instead of being swallowed by a component that can't currently perform
  * it.
+ *
+ * `menuFallback` marks a focus-gated handler (`enabled: <pane focused>`) as the
+ * target of a menu-dispatched action after focus has left it: when nothing is
+ * enabled, `runAction(action, _, { source: "menu" })` runs the `menuFallback`
+ * handler that was enabled most recently and is still mounted. Keystrokes
+ * never use the fallback -- Ctrl+F behaves exactly as without it.
  */
 export function useActionHandler(
   action: ActionId,
   handler: ActionHandler,
-  options: { enabled?: boolean } = {},
+  options: { enabled?: boolean; menuFallback?: boolean } = {},
 ): void {
   const enabled = options.enabled ?? true;
   const { register } = useKeyboard();
   const handlerRef = useRef(handler);
   handlerRef.current = handler;
+  const ownerRef = useRef<symbol | null>(null);
+  ownerRef.current ??= Symbol("owner");
+  const owner = options.menuFallback ? ownerRef.current : undefined;
 
   useEffect(() => {
-    return register(action, (payload) => handlerRef.current(payload), enabled);
-  }, [register, action, enabled]);
+    return register(action, (payload) => handlerRef.current(payload), enabled, { owner });
+  }, [register, action, enabled, owner]);
 }
 
 /**

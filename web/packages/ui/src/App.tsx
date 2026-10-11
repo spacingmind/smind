@@ -17,6 +17,7 @@ import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
+import { DesktopUpdateDialog } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
@@ -67,7 +68,7 @@ import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
-import { isDesktop } from "@/lib/platform";
+import { desktop, isDesktop } from "@/lib/platform";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
@@ -678,6 +679,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
 
+  useActionHandler("app.quit", () => {
+    desktop.quit().catch(() => {});
+  });
+
   const { preference, setPreference } = useTheme();
   useActionHandler("theme.cycle", () => {
     const order: ThemePreference[] = ["light", "dark", "system"];
@@ -861,6 +866,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
+      {isDesktop && <DesktopUpdateDialog />}
     </>
   );
 

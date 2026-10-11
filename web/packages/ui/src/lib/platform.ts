@@ -50,6 +50,17 @@ export interface ConnectionVersionInfo {
   comparison: "older" | "same" | "newer" | "unknown";
 }
 
+/** A check result from `app_update_check` (ADR-0023 interface contract): no updater on this platform, nothing newer, or an update Rust has verified and now holds for `appUpdateInstall`. */
+export type AppUpdateCheck =
+  | { kind: "unsupported" }
+  | { kind: "upToDate"; currentVersion: string }
+  | { kind: "available"; version: string; currentVersion: string; notes: string | null; date: string | null };
+
+/** A progress event emitted while `app_update_install` runs. */
+export type AppUpdateProgress =
+  | { stage: "downloading"; downloaded: number; total: number | null }
+  | { stage: "installing" };
+
 /** One entry of the Rust-side editor allowlist (`editors_list`): the id `openInEditor` takes, and what to call it in the UI. */
 export interface EditorInfo {
   id: string;
@@ -57,6 +68,24 @@ export interface EditorInfo {
   /** "fileManager" is Finder / File Explorer / the XDG file manager (reveal); "editor" is a code editor (open). */
   kind: "fileManager" | "editor";
 }
+
+/**
+ * The native-only app-menu actions `app_menu_action` accepts (a fixed Rust-side
+ * allowlist in `menu.rs`); renderer actions go through the keyboard registry instead.
+ */
+export type NativeMenuActionId =
+  | "reload"
+  | "zoom-in"
+  | "zoom-out"
+  | "zoom-reset"
+  | "fullscreen"
+  | "minimize"
+  | "hide"
+  | "about"
+  | "log-folder"
+  | "github"
+  | "check-updates"
+  | "quit";
 
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */
 export interface DesktopApi {
@@ -67,6 +96,10 @@ export interface DesktopApi {
   getCurrentConnection(): Promise<Connection>;
   /** Opens an http(s) URL in the OS's default browser -- Rust validates the scheme (AC5); this is the only escape hatch a bundled-UI link needs, since in-window navigation is restricted to the proxy origin (AC3). */
   openExternal(url: string): Promise<void>;
+  /** Quits the app (`app_quit`). The renderer's Ctrl+Q on Windows/Linux, where the undecorated window has no menu to carry the accelerator. */
+  quit(): Promise<void>;
+  /** Runs a native-only app-menu item (`app_menu_action`) -- what the header app menu uses on Windows/Linux, where the native menu bar isn't drawn. */
+  menuAction(id: NativeMenuActionId): Promise<void>;
   /** ADR-0013 part D2: install/update/restart/take-over the app-managed local daemon. */
   daemonStatus(): Promise<DaemonStatus>;
   daemonInstall(): Promise<DaemonStatus>;
@@ -82,6 +115,15 @@ export interface DesktopApi {
    * id, which the UI dispatches through the keyboard action registry.
    */
   onMenuAction(cb: (action: ActionId) => void): () => void;
+  /**
+   * The native window's theme -- on desktop the source of truth for the
+   * "system" preference. On Windows the webview's `prefers-color-scheme`
+   * follows a WebView2 profile setting the shell only updates on theme-change
+   * events, so it can disagree with the OS; the window's own theme doesn't.
+   */
+  getSystemTheme(): Promise<"light" | "dark">;
+  /** Calls `cb` when the native window theme changes (OS theme flip while following the system); returns an unsubscribe function. */
+  onSystemThemeChanged(cb: (theme: "light" | "dark") => void): () => void;
   /** Detected installed editors plus the platform file manager (desktop-native-feel D4.2), from a fixed Rust-side allowlist. */
   editorsList(): Promise<EditorInfo[]>;
   /**
@@ -91,6 +133,14 @@ export interface DesktopApi {
    * message, so it can be shown in a toast as-is.
    */
   openInEditor(editorId: string, path: string): Promise<void>;
+  /** ADR-0023: asks Rust to check for an update (it holds any result for `appUpdateInstall`). */
+  appUpdateCheck(): Promise<AppUpdateCheck>;
+  /** Installs the update held by the last successful check; rejects with an Error carrying Rust's string. */
+  appUpdateInstall(): Promise<void>;
+  /** Subscribes to download/install progress during `appUpdateInstall`; returns an unsubscribe function. */
+  onAppUpdateProgress(cb: (progress: AppUpdateProgress) => void): () => void;
+  /** Subscribes to the Check for Updates… menu item; returns an unsubscribe function. */
+  onAppUpdateCheckRequested(cb: () => void): () => void;
 }
 
 /** The host OS of a desktop build, read from the webview's user agent (WKWebView / WebView2 / WebKitGTK name their platform). */
@@ -145,6 +195,10 @@ function unavailable(): DesktopApi {
     selectConnection: () => reject(),
     getCurrentConnection: () => reject(),
     openExternal: () => reject(),
+    quit: () => reject(),
+    getSystemTheme: () => reject(),
+    onSystemThemeChanged: () => () => {},
+    menuAction: () => reject(),
     daemonStatus: () => reject(),
     daemonInstall: () => reject(),
     daemonUpdate: () => reject(),
@@ -156,6 +210,11 @@ function unavailable(): DesktopApi {
     onMenuAction: () => () => {},
     editorsList: () => reject(),
     openInEditor: () => reject(),
+    appUpdateCheck: () => reject(),
+    appUpdateInstall: () => reject(),
+    onAppUpdateProgress: () => () => {},
+    // The browser stub never fires: there is no native menu there.
+    onAppUpdateCheckRequested: () => () => {},
   };
 }
 
@@ -218,6 +277,41 @@ function realDesktopApi(): DesktopApi {
       const invoke = await loadInvoke();
       await invoke("open_external", { url });
     },
+    async quit() {
+      const invoke = await loadInvoke();
+      await invoke("app_quit");
+    },
+    async getSystemTheme() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return (await getCurrentWindow().theme()) === "dark" ? "dark" : "light";
+    },
+    onSystemThemeChanged(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) =>
+          getCurrentWindow().onThemeChanged((event) =>
+            cb(event.payload === "dark" ? "dark" : "light"),
+          ),
+        )
+        .then((fn) => {
+          if (cancelled) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    async menuAction(id) {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("app_menu_action", { id });
+      } catch (err) {
+        throw asError(err);
+      }
+    },
     async daemonStatus() {
       const invoke = await loadInvoke();
       return invoke<DaemonStatus>("daemon_status");
@@ -254,6 +348,18 @@ function realDesktopApi(): DesktopApi {
         throw asError(err);
       }
     },
+    async appUpdateCheck() {
+      const invoke = await loadInvoke();
+      return invoke<AppUpdateCheck>("app_update_check");
+    },
+    async appUpdateInstall() {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("app_update_install");
+      } catch (err) {
+        throw asError(err);
+      }
+    },
     onDaemonProgress(cb) {
       let unlisten: (() => void) | null = null;
       let cancelled = false;
@@ -276,6 +382,40 @@ function realDesktopApi(): DesktopApi {
       let cancelled = false;
       import("@tauri-apps/api/event").then(({ listen }) =>
         listen<string>("menu-action", (event) => cb(event.payload as ActionId)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onAppUpdateProgress(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<AppUpdateProgress>("app-update-progress", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onAppUpdateCheckRequested(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen("app-update-check-requested", () => cb()).then((fn) => {
           if (cancelled) {
             fn();
           } else {

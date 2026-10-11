@@ -331,7 +331,7 @@ impl WslPathRunner for WslExeRunner {
 
 /// wsl.exe writes UTF-16LE output (with or without a BOM) on some
 /// locales and plain UTF-8 on others; accept both.
-fn decode_wsl_output(raw: &[u8]) -> String {
+pub(crate) fn decode_wsl_output(raw: &[u8]) -> String {
     let (chunks, _) = raw.as_chunks::<2>();
     let looks_utf16 = (raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
         || chunks.iter().take(8).any(|c| c[1] == 0x00 && c[0] != 0);
@@ -400,6 +400,31 @@ pub fn open_in_editor_argv(
         }
         probe.canonicalize(raw_path)?
     };
+    if platform == Platform::Wsl2 && editor_id == "vscode" {
+        // VS Code rejects the `\\wsl.localhost\...` UNC host, so it gets the
+        // Remote-WSL form with the raw Linux path instead. `path` above (the
+        // translated one) was only needed for the existence check.
+        // Cursor also supports `--remote`, but that isn't verified here, so
+        // Cursor and Zed keep the translated path.
+        // Unverified on a real Windows host: the resolved program is usually
+        // `Code.exe` rather than the `code.cmd` CLI shim; `--remote` is the
+        // same flag for both, but this is on the re-test list.
+        let distro = distro.ok_or_else(|| "no default WSL distro found".to_string())?;
+        if distro.is_empty()
+            || !distro.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        {
+            return Err(format!(
+                "WSL distro {distro:?} can't be used for VS Code remote: WSL distro names with spaces aren't supported for VS Code remote (allowed characters: A-Z a-z 0-9 . _ -)"
+            ));
+        }
+        let launch = resolve_editor(os, editor_id, probe)
+            .ok_or_else(|| format!("editor {editor_id:?} is not installed on this machine"))?;
+        let mut argv = vec![launch.program];
+        argv.extend(launch.prefix_args);
+        // `wsl+<distro>` is one argv element; no shell is involved.
+        argv.extend(["--remote".to_string(), format!("wsl+{distro}"), raw_path.to_string()]);
+        return Ok(argv);
+    }
     build_argv(os, editor_id, &path, probe)
 }
 
@@ -924,6 +949,116 @@ mod tests {
         )
         .unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
+    }
+
+    fn wsl_vscode_probe() -> FakeProbe {
+        win_probe()
+            .with(r"\\wsl.localhost\Ubuntu\home\test\repo")
+            .with(r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe")
+            .with(r"C:\Users\test\AppData\Local\Programs\Zed\Zed.exe")
+    }
+
+    fn wsl_repo() -> FakeWsl {
+        FakeWsl {
+            map: vec![(
+                "/home/test/repo".to_string(),
+                Ok(r"\\wsl.localhost\Ubuntu\home\test\repo".to_string()),
+            )],
+        }
+    }
+
+    fn wsl_argv(editor: &str, distro: Option<&str>, probe: &FakeProbe) -> Result<Vec<String>, String> {
+        open_in_editor_argv(
+            ConnectionKind::Local,
+            Platform::Wsl2,
+            "windows",
+            editor,
+            "/home/test/repo",
+            probe,
+            &wsl_repo(),
+            distro,
+        )
+    }
+
+    #[test]
+    fn vscode_on_wsl_uses_remote_wsl_and_the_linux_path() {
+        let argv = wsl_argv("vscode", Some("Ubuntu-24.04"), &wsl_vscode_probe()).unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe".to_string(),
+                "--remote".to_string(),
+                "wsl+Ubuntu-24.04".to_string(),
+                "/home/test/repo".to_string(),
+            ]
+        );
+        // A path that doesn't exist (per wslpath + probe) is still rejected.
+        let err = open_in_editor_argv(
+            ConnectionKind::Local,
+            Platform::Wsl2,
+            "windows",
+            "vscode",
+            "/gone",
+            &wsl_vscode_probe(),
+            &FakeWsl { map: vec![("/gone".to_string(), Ok(r"C:\gone".to_string()))] },
+            Some("Ubuntu"),
+        )
+        .unwrap_err();
+        assert!(err.contains("does not exist"), "{err}");
+    }
+
+    #[test]
+    fn cursor_and_zed_on_wsl_still_use_the_translated_path() {
+        for (id, exe) in [
+            ("cursor", r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe"),
+            ("zed", r"C:\Users\test\AppData\Local\Programs\Zed\Zed.exe"),
+        ] {
+            let argv = wsl_argv(id, Some("Ubuntu"), &wsl_vscode_probe()).unwrap();
+            assert_eq!(
+                argv,
+                vec![exe.to_string(), r"\\wsl.localhost\Ubuntu\home\test\repo".to_string()],
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn wsl_distro_with_odd_characters_is_rejected_for_remote() {
+        for bad in ["My Distro", "Ubuntu;calc", "a+b", "x\"y", "", "d\u{e9}b"] {
+            let err = wsl_argv("vscode", Some(bad), &wsl_vscode_probe()).unwrap_err();
+            assert!(err.contains("distro"), "{bad:?}: {err}");
+        }
+        assert!(wsl_argv("vscode", Some("My Distro"), &wsl_vscode_probe())
+            .unwrap_err()
+            .contains("spaces aren't supported"));
+        // The same distro is fine for editors that take the translated path.
+        assert!(wsl_argv("cursor", Some("My Distro"), &wsl_vscode_probe()).is_ok());
+    }
+
+    #[test]
+    fn vscode_remote_argv_keeps_the_editor_allowlist() {
+        // Non-allowlisted ids are still rejected on WSL.
+        let err = wsl_argv("notepad", Some("Ubuntu"), &wsl_vscode_probe()).unwrap_err();
+        assert!(err.contains("unknown editor"), "{err}");
+        // A not-installed vscode still errors (no Code.exe, not on PATH).
+        let err = wsl_argv("vscode", Some("Ubuntu"), &FakeProbe::default().dir(r"\\wsl.localhost\Ubuntu\home\test\repo"))
+            .unwrap_err();
+        assert!(err.contains("not installed"), "{err}");
+        // Non-WSL platforms are unchanged: plain launch + path, no --remote.
+        let probe = macos_probe().dir("/work/repo");
+        let argv = open_in_editor_argv(
+            ConnectionKind::Local,
+            Platform::Macos,
+            "macos",
+            "vscode",
+            "/work/repo",
+            &probe,
+            &no_wsl(),
+            None,
+        )
+        .unwrap();
+        assert!(!argv.iter().any(|a| a == "--remote"), "{argv:?}");
+        assert_eq!(argv.last().unwrap(), "/work/repo");
     }
 
     #[test]

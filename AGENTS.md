@@ -41,6 +41,12 @@ model, routing behavior, public API shape, etc.) and isn't already decided in
 `docs/decisions/`, STOP and present the choice to the user. Do not decide
 architecture unilaterally.
 
+**(e) Multi-agent work.** When work is delegated (Supervisor → Lead →
+Peer), follow [docs/WORKSPACE_PROTOCOL.md](docs/WORKSPACE_PROTOCOL.md):
+complexity-point sizing, one owner per write scope, the brief/handoff formats,
+`REOPEN_REQUEST`/`DEPENDENCY_REQUEST`/`BLOCKED`, explicit accept/reject, and
+process safety (isolated sandboxes; kill only the PIDs you started).
+
 ## refs/ map
 
 `refs/` holds read-only clones of other projects, used as pattern references

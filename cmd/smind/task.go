@@ -896,7 +896,7 @@ const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [opti
 // internal/runs.firstOptionByKind's own selection so `task approve
 // <runId>` with no further arguments does the obvious thing.
 func cmdTaskApprove(args []string) int {
-	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, args)
+	return cmdTaskDecide("approve", cmdTaskApproveUsage, true, 3, args)
 }
 
 // cmdTaskDenyUsage is printed on any argument error in cmdTaskDeny.
@@ -906,7 +906,7 @@ const cmdTaskDenyUsage = "usage: smind task deny <runId> [requestId]"
 // run's pending permission request with the request's own reject option.
 // CLI only -- there is deliberately no MCP deny tool (ADR-0017 #1).
 func cmdTaskDeny(args []string) int {
-	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, args)
+	return cmdTaskDecide("deny", cmdTaskDenyUsage, false, 2, args)
 }
 
 // isHelpArg reports whether a CLI argument asks for usage.
@@ -914,12 +914,12 @@ func isHelpArg(a string) bool { return a == "-h" || a == "--help" || a == "help"
 
 // cmdTaskDecide answers a pending permission request, picking the first
 // allow option (allow=true) or the first reject option (allow=false).
-func cmdTaskDecide(verb, usage string, allow bool, args []string) int {
+func cmdTaskDecide(verb, usage string, allow bool, maxArgs int, args []string) int {
 	if len(args) > 0 && isHelpArg(args[0]) {
 		fmt.Println(usage)
 		return 0
 	}
-	if len(args) < 1 || len(args) > 2 {
+	if len(args) < 1 || len(args) > maxArgs {
 		fmt.Fprintln(os.Stderr, usage)
 		return 2
 	}
@@ -943,7 +943,7 @@ func cmdTaskDecide(verb, usage string, allow bool, args []string) int {
 	}
 
 	var target *pendingPermission
-	if len(args) == 2 {
+	if len(args) >= 2 {
 		requestID := args[1]
 		for i := range pending {
 			if pending[i].RequestID == requestID {
@@ -960,7 +960,24 @@ func cmdTaskDecide(verb, usage string, allow bool, args []string) int {
 	}
 
 	optionID := ""
+	if len(args) == 3 {
+		// The human named the option: any of the request's options is valid.
+		ids := make([]string, 0, len(target.Options))
+		for _, o := range target.Options {
+			ids = append(ids, o.ID)
+			if o.ID == args[2] {
+				optionID = o.ID
+			}
+		}
+		if optionID == "" {
+			fmt.Fprintf(os.Stderr, "task %s: request %q has no option %q; valid: %s\n", verb, target.RequestID, args[2], strings.Join(ids, ", "))
+			return 1
+		}
+	}
 	for _, o := range target.Options {
+		if optionID != "" {
+			break
+		}
 		isAllow := o.Kind == "allow_once" || o.Kind == "allow_always"
 		isReject := o.Kind == "reject_once" || o.Kind == "reject_always"
 		if (allow && isAllow) || (!allow && isReject) {
