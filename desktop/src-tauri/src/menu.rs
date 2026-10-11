@@ -395,6 +395,10 @@ fn handle_native(app: &AppHandle, id: &str) {
             let is_fullscreen = win.is_fullscreen().unwrap_or(false);
             let _ = win.set_fullscreen(!is_fullscreen);
         }
+        // The webview devtools API only exists in debug builds: the tauri
+        // `devtools` feature is deliberately not enabled (W4), so a release
+        // webview has no Inspect entries either.
+        #[cfg(debug_assertions)]
         ID_DEVTOOLS => {
             if win.is_devtools_open() {
                 win.close_devtools();
@@ -496,6 +500,19 @@ fn open_log_folder(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tauri_dependency_does_not_enable_devtools() {
+        let manifest = include_str!("../Cargo.toml");
+        let line = manifest
+            .lines()
+            .find(|l| l.trim_start().starts_with("tauri = "))
+            .expect("Cargo.toml has a `tauri = ` dependency line");
+        assert!(
+            !line.contains("devtools"),
+            "the tauri `devtools` feature would put Inspect in the release webview: {line}"
+        );
+    }
 
     #[test]
     fn menu_actions_match_web_action_ids() {
