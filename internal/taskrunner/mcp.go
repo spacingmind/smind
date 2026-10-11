@@ -3,6 +3,7 @@ package taskrunner
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -164,6 +165,26 @@ func claudeMcpConfig(rows []store.McpServer) (string, error) {
 		return "", err
 	}
 	return string(data), nil
+}
+
+// writeClaudeMcpConfigFile writes the --mcp-config JSON to a file (mode
+// 0600) inside a fresh private temp directory (0700, as os.MkdirTemp
+// creates it) and returns the file path plus a cleanup func that removes
+// the whole directory. The CLI accepts a file path for --mcp-config, which
+// keeps secrets in the JSON out of the process argv. On error nothing is
+// left behind.
+func writeClaudeMcpConfigFile(config string) (path string, cleanup func(), err error) {
+	dir, err := os.MkdirTemp("", "smind-mcp-")
+	if err != nil {
+		return "", nil, fmt.Errorf("create mcp config dir: %w", err)
+	}
+	cleanup = func() { _ = os.RemoveAll(dir) }
+	path = filepath.Join(dir, "mcp-config.json")
+	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("write mcp config: %w", err)
+	}
+	return path, cleanup, nil
 }
 
 // mcpServersForWorkspace lists the enabled MCP servers for workspaceID,

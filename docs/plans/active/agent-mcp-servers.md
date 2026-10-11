@@ -105,6 +105,41 @@ question is unresolved.
   starts normally and reports them as unsupported for the provider; no
   servers reach Codex.
 
+### Follow-up: keep Claude-native MCP secrets off argv
+
+Step 4 hands servers to the `claude` CLI as inline `--mcp-config <json>`, so
+env values / auth headers are visible in `ps`/argv. ACP agents are not
+affected (their `mcpServers` travel over the JSON-RPC stdio session, never
+argv; the agent launch command in `internal/acp/rpc.go` carries no server
+config), so this follow-up is Claude-native only.
+
+Acceptance criteria:
+
+- F1. With one or more applicable servers, `runClaudeNative` writes the
+  config JSON to a file inside a fresh `0700` temp directory (file mode
+  `0600`) and passes that file path to `--mcp-config`; the JSON itself never
+  appears in argv.
+- F2. The file contents are exactly the JSON `claudeMcpConfig` builds
+  (unchanged format).
+- F3. The temp dir and file are removed when the run ends: success, spawn
+  failure, prompt failure, and ctx cancellation.
+- F4. With no applicable servers no temp file/dir is created and
+  `--mcp-config` is absent (behavior unchanged).
+
+Test scenarios (`internal/taskrunner/mcp_test.go`):
+
+- `TestRunner_RunPrompt_ClaudeNativeMcpConfigFileMode` -- file mode 0600,
+  parent dir 0700, contents equal the expected JSON (observed by the fake CLI
+  at spawn time).
+- `TestRunner_RunPrompt_ClaudeNativeMcpConfigSecretNotInArgv` -- seeded env
+  and header secrets are absent from every argv element; `--mcp-config` value
+  is a path.
+- `TestRunner_RunPrompt_ClaudeNativeMcpConfigRemovedAfterRun` -- temp dir
+  empty after a successful run, a spawn failure, and a cancelled run.
+- `TestRunner_RunPrompt_ClaudeNativePassesMcpConfig` (existing, adapted) and
+  `..._WorkspaceRestriction` -- no servers => no `--mcp-config`, no temp
+  files created.
+
 ## Decisions
 
 - Follows `docs/decisions/0018-agent-mcp-servers.md` for the data model,
@@ -168,6 +203,8 @@ accepted):
 8. [x] **Secret-redaction audit.** A focused pass confirming acceptance
    criterion 9 end to end for ACP and Claude native (Codex deferred per
    ADR-0018 resolved decisions 1 and 5). Depends on steps 3, 4.
+
+9. [x] **Follow-up: Claude-native `--mcp-config` via 0600 temp file** (fix/mcp-config-secrets-off-argv), see the Follow-up subsection under Test Scenarios.
 
 ## Validation
 
@@ -266,11 +303,9 @@ accepted):
   capability => every server dropped" scenario became "stdio kept, http/sse dropped".
   The capability-dropped signal is an `EventTypeSessionNote` (server names only).
 - AC6 (Claude native, step 4): `TestClaudeMcpConfig_BuildsMergedMcpServersJSON`,
-  `TestRunner_RunPrompt_ClaudeNativePassesMcpConfig` (argv has `--mcp-config` + exact JSON with a
-  row, absent without), `..._ClaudeNativeWorkspaceRestriction`. `--mcp-config` carries the JSON
-  inline (SDK `WithMCPConfig`), so secrets are visible in the spawned `claude` process argv
-  (`ps`) on the local machine -- inherent in the SDK option; a temp-file variant would be a
-  follow-up if that matters.
+  `TestRunner_RunPrompt_ClaudeNativePassesMcpConfig` (argv has `--mcp-config` + a file path whose
+  content is the exact JSON with a row, absent without), `..._ClaudeNativeWorkspaceRestriction`.
+  Originally the JSON was inline in argv; superseded by the file-based follow-up (F1-F4 below).
 - AC7 (Codex, deferred): `TestRunner_RunPrompt_CodexNoteMcpServersUnsupported` -- starts
   normally, session note names the servers, no secrets in events.
 - AC9 (step 8 audit): wsapi responses + lifecycle events covered in step 2; runner side:
@@ -278,8 +313,8 @@ accepted):
   `TestRunner_RunPrompt_ACPInactiveMcpServerEmitsSessionNote` and
   `TestRunner_RunPrompt_ACPActiveMcpServerSecretNeverLeaksOutsideWire` (secrets delivered on
   the wire yet absent from every emitted Event -- what `internal/runs` persists as
-  run_events -- and from daemon log output). Not covered: Claude-native argv exposure above,
-  and secrets echoed back by a misbehaving agent in its own error text.
+  run_events -- and from daemon log output). Claude-native argv exposure is closed by
+  the F1-F4 follow-up. Not covered: secrets echoed back by a misbehaving agent in its own error text.
 - Step 6 (Codex) remains deferred out of v1 per ADR-0018 resolved decision 1.
 
 ### Review fixes (PR #251)
@@ -295,3 +330,19 @@ accepted):
   notes and run errors (`TestRunner_RunPrompt_ACPSessionErrorsScrubMcpSecrets`).
 - `internal/acp` puts the agent in its own process group (unix) and kills the
   group on close timeout (`TestConnClose_KillsGrandchildrenOnTimeout`).
+
+### Follow-up validation: Claude-native secrets off argv (F1-F4)
+
+- F1/F2: `TestRunner_RunPrompt_ClaudeNativeMcpConfigFileMode` (file 0600, dir
+  0700, content == `claudeMcpConfig` output, observed by the fake CLI at
+  spawn) and `TestRunner_RunPrompt_ClaudeNativeMcpConfigSecretNotInArgv`
+  (no `SUPERSECRET` in any argv element; `--mcp-config` is an absolute path).
+- F3: `TestRunner_RunPrompt_ClaudeNativeMcpConfigRemovedAfterRun` (success,
+  spawn failure, cancelled run; `TMPDIR` pointed at an empty test dir that must
+  be empty afterwards).
+- F4: `TestRunner_RunPrompt_ClaudeNativeNoMcpServersCreatesNoTempFile` plus
+  the existing no-rows / workspace-restriction assertions.
+- ACP agents checked: no argv exposure (servers go over the JSON-RPC session);
+  unchanged.
+- Implementation: `writeClaudeMcpConfigFile` (`internal/taskrunner/mcp.go`),
+  cleanup deferred in `runClaudeNative`.

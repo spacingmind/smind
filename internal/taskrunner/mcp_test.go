@@ -472,9 +472,163 @@ func TestRunner_RunPrompt_ClaudeNativePassesMcpConfig(t *testing.T) {
 	}
 	args = runClaudeMcp(t, r, task)
 	want := `{"mcpServers":{"pw":{"args":["-y"],"command":"npx","type":"stdio"}}}`
-	if v, ok := flagValue(args, "--mcp-config"); !ok || v != want {
-		t.Fatalf("--mcp-config = %q (present %v), want %q; args %q", v, ok, want, args)
+	v, ok := flagValue(args, "--mcp-config")
+	if !ok || v == "" || v == want {
+		t.Fatalf("--mcp-config = %q (present %v), want a file path (not inline JSON); args %q", v, ok, args)
 	}
+	// The CLI saw the expected JSON in the file it was pointed at.
+	got, err := os.ReadFile(filepath.Join(*task.WorktreePath, "mcp-config-content"))
+	if err != nil {
+		t.Fatalf("read mcp-config-content: %v", err)
+	}
+	if string(got) != want {
+		t.Fatalf("mcp config file content =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// claudeMcpTempDir points os.TempDir at a fresh dir (so a test can assert
+// nothing is left behind) and returns it. Not usable with t.Parallel.
+func claudeMcpTempDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir)
+	return dir
+}
+
+func assertDirEmpty(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", dir, err)
+	}
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("temp dir not empty: %v", names)
+	}
+}
+
+func seedClaudeMcpSecretServers(t *testing.T, st *store.Store) {
+	t.Helper()
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "npx", Env: `{"TOKEN":"SUPERSECRET-ENV"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "remote", Transport: "http", URL: "https://r/mcp", Headers: `{"Authorization":"Bearer SUPERSECRET-HDR"}`, Enabled: true}); err != nil {
+		t.Fatalf("Create(remote): %v", err)
+	}
+}
+
+func TestRunner_RunPrompt_ClaudeNativeMcpConfigFileMode(t *testing.T) {
+	r, st, task := newClaudeMcpEnv(t)
+	seedClaudeMcpSecretServers(t, st)
+	claudeMcpTempDir(t)
+
+	runClaudeMcp(t, r, task)
+
+	modes, err := os.ReadFile(filepath.Join(*task.WorktreePath, "mcp-config-modes"))
+	if err != nil {
+		t.Fatalf("read mcp-config-modes: %v", err)
+	}
+	if string(modes) != "600 700" {
+		t.Fatalf("file/dir modes = %q, want %q", modes, "600 700")
+	}
+	content, err := os.ReadFile(filepath.Join(*task.WorktreePath, "mcp-config-content"))
+	if err != nil {
+		t.Fatalf("read mcp-config-content: %v", err)
+	}
+	want, err := claudeMcpConfig(mustListMcp(t, st))
+	if err != nil || string(content) != want {
+		t.Fatalf("file content = %s, want %s (err %v)", content, want, err)
+	}
+}
+
+func mustListMcp(t *testing.T, st *store.Store) []store.McpServer {
+	t.Helper()
+	rows, err := mcpservers.New(st).ListForWorkspace(0)
+	if err != nil {
+		t.Fatalf("ListForWorkspace: %v", err)
+	}
+	return rows
+}
+
+func TestRunner_RunPrompt_ClaudeNativeMcpConfigSecretNotInArgv(t *testing.T) {
+	r, st, task := newClaudeMcpEnv(t)
+	seedClaudeMcpSecretServers(t, st)
+	claudeMcpTempDir(t)
+
+	args := runClaudeMcp(t, r, task)
+
+	for _, a := range args {
+		if strings.Contains(a, "SUPERSECRET") {
+			t.Fatalf("argv element leaks a secret: %q", a)
+		}
+	}
+	v, ok := flagValue(args, "--mcp-config")
+	if !ok || !filepath.IsAbs(v) {
+		t.Fatalf("--mcp-config = %q (present %v), want an absolute file path", v, ok)
+	}
+}
+
+func TestRunner_RunPrompt_ClaudeNativeMcpConfigRemovedAfterRun(t *testing.T) {
+	r, st, task := newClaudeMcpEnv(t)
+	seedClaudeMcpSecretServers(t, st)
+	tmp := claudeMcpTempDir(t)
+
+	t.Run("success", func(t *testing.T) {
+		runClaudeMcp(t, r, task)
+		assertDirEmpty(t, tmp)
+	})
+
+	t.Run("spawn failure", func(t *testing.T) {
+		// An unknown scenario makes the fake CLI exit before the
+		// initialize handshake, so the spawn itself fails.
+		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("no-such-scenario"), 0o644); err != nil {
+			t.Fatalf("write scenario: %v", err)
+		}
+		events := make(chan Event)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		}()
+		drainEvents(events)
+		if err := <-errCh; err == nil {
+			t.Fatal("RunPrompt() error = nil, want a spawn failure")
+		}
+		assertDirEmpty(t, tmp)
+	})
+
+	t.Run("cancelled run", func(t *testing.T) {
+		if err := os.WriteFile(filepath.Join(*task.WorktreePath, "scenario"), []byte("init-hang"), 0o644); err != nil {
+			t.Fatalf("write scenario: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		events := make(chan Event)
+		errCh := make(chan error, 1)
+		go func() {
+			errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		}()
+		// Wait for the first event (the run is live, CLI spawned), then cancel.
+		<-events
+		cancel()
+		go drainEvents(events)
+		<-errCh
+		assertDirEmpty(t, tmp)
+	})
+}
+
+func TestRunner_RunPrompt_ClaudeNativeNoMcpServersCreatesNoTempFile(t *testing.T) {
+	r, _, task := newClaudeMcpEnv(t)
+	tmp := claudeMcpTempDir(t)
+
+	args := runClaudeMcp(t, r, task)
+	if _, ok := flagValue(args, "--mcp-config"); ok {
+		t.Fatalf("--mcp-config present with no rows: %v", args)
+	}
+	assertDirEmpty(t, tmp)
 }
 
 func TestRunner_RunPrompt_ClaudeNativeWorkspaceRestriction(t *testing.T) {
@@ -702,7 +856,7 @@ func TestClaudeFailedMcpServers(t *testing.T) {
 // the CLI's init message reports a failed server; the run surfaces its
 // name as a session note, and neither events nor logs carry the secret
 // seeded into the servers' env/headers (it legitimately reaches only the
-// CLI's --mcp-config argv).
+// CLI, via the private --mcp-config file).
 func TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets(t *testing.T) {
 	st, wm, _ := newTestStoreAndManager(t)
 	task := newTestTaskUnder(t, wm)
