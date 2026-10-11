@@ -50,22 +50,49 @@ function flush(): Promise<void> {
 }
 
 describe("ArchiveTaskDialog children (PR-U2)", () => {
+  function treeNode(p: { id: number; title: string; state: "running" | "waiting_permission" | "done" | "error" | "stopped" | "idle"; root?: boolean }) {
+    return {
+      id: p.id,
+      parentId: p.root ? null : 7,
+      workspaceId: 1,
+      title: p.title,
+      depth: 1,
+      taskStatus: "created",
+      tier: null,
+      childCount: 0,
+      run: { state: p.state, runningRunIds: [], pendingPermissions: 0 },
+      counts: { running: 0, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+      usage: {
+        own: { runs: 0, inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, costUsd: null },
+        subtree: { runs: 0, inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null, reasoningTokens: null, costUsd: null },
+        archivedDescendants: 0,
+      },
+    };
+  }
+
   it("archive dialog lists live children", async () => {
     const client = wsFake();
     render(
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
     );
-    expect(client.calls.map((c) => c.method)).toContain("task.list");
+    expect(client.calls.map((c) => c.method)).toContain("task.tree");
 
     await act(async () => {
-      client.nth("task.list").resolve([child(8, "Coder one"), child(9, "Coder two")]);
+      client.nth("task.tree").resolve({
+        nodes: [
+          treeNode({ id: 7, title: "Parent task", state: "idle", root: true }),
+          treeNode({ id: 8, title: "Coder one", state: "running" }),
+          treeNode({ id: 9, title: "Coder two", state: "waiting_permission" }),
+        ],
+        truncated: false,
+      });
     });
     await flush();
 
     const block = screen.getByTestId("archive-children");
     expect(block.textContent).toContain("These tasks stay and become top-level:");
-    expect(block.textContent).toContain("Coder one · active");
-    expect(block.textContent).toContain("Coder two · active");
+    expect(block.textContent).toContain("Coder one · running");
+    expect(block.textContent).toContain("Coder two · needs you");
     expect(screen.getByTestId("dialog-archive-task-confirm").textContent).toBe("Archive parent only");
   });
 
@@ -75,7 +102,7 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
     );
     await act(async () => {
-      client.nth("task.list").resolve([]);
+      client.nth("task.tree").resolve({ nodes: [treeNode({ id: 7, title: "Parent task", state: "idle", root: true })], truncated: false });
     });
     await flush();
 
@@ -91,7 +118,10 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={onOpenChange} onArchived={onArchived} />,
     );
     await act(async () => {
-      client.nth("task.list").resolve([child(8, "Coder one")]);
+      client.nth("task.tree").resolve({
+        nodes: [treeNode({ id: 7, title: "Parent task", state: "idle", root: true }), treeNode({ id: 8, title: "Coder one", state: "idle" })],
+        truncated: false,
+      });
     });
     await flush();
 
@@ -111,6 +141,9 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
     );
     await act(async () => {
+      client.nth("task.tree").reject(new Error("boom"));
+    });
+    await act(async () => {
       client.nth("task.list").reject(new Error("boom"));
     });
     await flush();
@@ -122,6 +155,27 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
       fireEvent.click(screen.getByTestId("dialog-archive-task-confirm"));
     });
     expect(client.calls.filter((c) => c.method === "task.archive")).toHaveLength(1);
+    consoleError.mockRestore();
+  });
+
+  it("archive dialog falls back to titles when task.tree fails", async () => {
+    const client = wsFake();
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(
+      <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
+    );
+    await act(async () => {
+      client.nth("task.tree").reject(new Error("method not found: task.tree"));
+    });
+    await act(async () => {
+      client.nth("task.list").resolve([child(8, "Coder one"), child(9, "Coder two")]);
+    });
+    await flush();
+
+    const block = screen.getByTestId("archive-children");
+    expect(block.textContent).toContain("Coder one");
+    expect(block.textContent).not.toContain("Coder one ·");
+    expect(screen.getByTestId("dialog-archive-task-confirm").textContent).toBe("Archive parent only");
     consoleError.mockRestore();
   });
 });
