@@ -103,6 +103,7 @@ type taskStatusOutput struct {
 	RunID             string                `json:"runId"`
 	Status            string                `json:"status"`
 	StopReason        string                `json:"stopReason,omitempty"`
+	StopNote          string                `json:"stopNote,omitempty"`
 	Err               string                `json:"err,omitempty"`
 	Events            []mcpRunEvent         `json:"events"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
@@ -118,22 +119,31 @@ func mcpTaskStatus(client *wsclient.Client) mcp.ToolHandlerFor[runIDInput, taskS
 		if err != nil {
 			return nil, taskStatusOutput{}, err
 		}
-		out := taskStatusOutput{
-			RunID:      result.RunID,
-			Status:     result.Status,
-			StopReason: result.StopReason,
-			Err:        result.Err,
-		}
-		events := result.Events
-		if len(events) > mcpStatusTail {
-			events = events[len(events)-mcpStatusTail:]
-		}
-		out.Events = toMCPRunEvents(events)
-		if pending := pendingPermissionsFrom(result); len(pending) > 0 {
-			out.PendingPermission = &pending[0]
-		}
+		out := buildTaskStatusOutput(result)
 		return nil, out, nil
 	}
+}
+
+// buildTaskStatusOutput derives task_status's output from one run.logs
+// snapshot: status, the last mcpStatusTail events, and the first pending
+// permission.
+func buildTaskStatusOutput(result runLogsResult) taskStatusOutput {
+	out := taskStatusOutput{
+		RunID:      result.RunID,
+		Status:     result.Status,
+		StopReason: result.StopReason,
+		StopNote:   stopNote(result.StopReason),
+		Err:        result.Err,
+	}
+	events := result.Events
+	if len(events) > mcpStatusTail {
+		events = events[len(events)-mcpStatusTail:]
+	}
+	out.Events = toMCPRunEvents(events)
+	if pending := pendingPermissionsFrom(result); len(pending) > 0 {
+		out.PendingPermission = &pending[0]
+	}
+	return out
 }
 
 // taskLogsInput is task_logs's argument shape (wrapping run.logs).
@@ -149,6 +159,7 @@ type taskLogsOutput struct {
 	RunID      string        `json:"runId"`
 	Status     string        `json:"status"`
 	StopReason string        `json:"stopReason,omitempty"`
+	StopNote   string        `json:"stopNote,omitempty"`
 	Err        string        `json:"err,omitempty"`
 	Events     []mcpRunEvent `json:"events"`
 }
@@ -164,7 +175,8 @@ func mcpTaskLogs(client *wsclient.Client) mcp.ToolHandlerFor[taskLogsInput, task
 		}
 		return nil, taskLogsOutput{
 			RunID: result.RunID, Status: result.Status,
-			StopReason: result.StopReason, Err: result.Err, Events: toMCPRunEvents(result.Events),
+			StopReason: result.StopReason, StopNote: stopNote(result.StopReason),
+			Err: result.Err, Events: toMCPRunEvents(result.Events),
 		}, nil
 	}
 }
@@ -275,6 +287,7 @@ type taskWaitOutput struct {
 	RunID             string                `json:"runId"`
 	Status            string                `json:"status"`
 	StopReason        string                `json:"stopReason,omitempty"`
+	StopNote          string                `json:"stopNote,omitempty"`
 	Err               string                `json:"err,omitempty"`
 	PendingPermission *pendingPermissionOut `json:"pendingPermission,omitempty"`
 	TimedOut          bool                  `json:"timedOut"`
@@ -292,7 +305,7 @@ type taskWaitOutput struct {
 // snapshot. timedOut marks the deadline having passed with the run still
 // going.
 func buildTaskWaitOutput(result runLogsResult, timedOut bool) taskWaitOutput {
-	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, Err: result.Err}
+	out := taskWaitOutput{RunID: result.RunID, Status: result.Status, StopReason: result.StopReason, StopNote: stopNote(result.StopReason), Err: result.Err}
 	if pending := pendingPermissionsFrom(result); len(pending) > 0 {
 		out.PendingPermission = &pending[0]
 		out.PendingPermissions = pending

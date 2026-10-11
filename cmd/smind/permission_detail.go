@@ -107,3 +107,28 @@ func renderPermissionDetail(d *permissionDetail) string {
 	}
 	return b.String()
 }
+
+// stopNote explains a stop reason a human or driver could mistake for a
+// clean finish: the run state stays done, but the work may be incomplete.
+func stopNote(stopReason string) string {
+	switch stopReason {
+	case "max_turn_requests":
+		return `The agent hit its turn limit before finishing, so the work may be incomplete. Send a follow-up prompt such as "continue" to resume.`
+	case "max_tokens":
+		return "The agent hit its output token limit; the last answer may be cut off."
+	case "refusal":
+		return "The agent refused the request."
+	default:
+		return ""
+	}
+}
+
+// renderDone is the "run finished" line, followed by the stop note when the
+// stop reason has one.
+func renderDone(runID, stopReason string) string {
+	out := fmt.Sprintf("run %s finished: %s\n", runID, stopReason)
+	if note := stopNote(stopReason); note != "" {
+		out += note + "\n"
+	}
+	return out
+}

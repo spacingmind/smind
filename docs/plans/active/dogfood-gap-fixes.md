@@ -220,7 +220,7 @@ approval tools, no auto-approving profiles); G7 review tools; G9–G11.
 - [ ] WP2 daemon permission detail (AC3 Go side)
 - [ ] WP3 GLM pin/config/usage/stop note (AC5, AC6, AC7 error text) — pin+flag, config, serve wiring, usage tests + ADR-0020 note done; AC7 error text not in this branch
 - [ ] WP4 web card + stop label + screenshots (AC3 web, AC5 web)
-- [ ] CLI/MCP rendering of detail (AC3)
+- [x] CLI/MCP rendering of detail (AC3) + stop note in CLI/MCP (AC5): cmd/smind permission_detail.go, mcp_run_tools.go
 - [ ] stacked PR on #264 for instructions (AC2, AC7)
 
 ## Validation

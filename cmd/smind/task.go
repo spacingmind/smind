@@ -602,7 +602,7 @@ func streamRun(ctx context.Context, client *wsclient.Client, runID string) int {
 		fmt.Fprintf(os.Stderr, "run %s: %v\n", runID, err)
 		return 1
 	}
-	fmt.Fprintf(os.Stderr, "run %s finished: %s\n", runID, result.StopReason)
+	fmt.Fprint(os.Stderr, renderDone(runID, result.StopReason))
 	return 0
 }
 
@@ -759,6 +759,9 @@ func printRunLogs(result runLogsResult) {
 	switch result.Status {
 	case "done":
 		fmt.Fprintf(os.Stderr, "run %s: done (%s)\n", result.RunID, result.StopReason)
+		if note := stopNote(result.StopReason); note != "" {
+			fmt.Fprintln(os.Stderr, note)
+		}
 	case "error":
 		fmt.Fprintf(os.Stderr, "run %s: error: %s\n", result.RunID, result.Err)
 	case "stopped":
