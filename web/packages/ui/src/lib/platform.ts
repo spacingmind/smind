@@ -50,6 +50,17 @@ export interface ConnectionVersionInfo {
   comparison: "older" | "same" | "newer" | "unknown";
 }
 
+/** A check result from `app_update_check` (ADR-0023 interface contract): no updater on this platform, nothing newer, or an update Rust has verified and now holds for `appUpdateInstall`. */
+export type AppUpdateCheck =
+  | { kind: "unsupported" }
+  | { kind: "upToDate"; currentVersion: string }
+  | { kind: "available"; version: string; currentVersion: string; notes: string | null; date: string | null };
+
+/** A progress event emitted while `app_update_install` runs. */
+export type AppUpdateProgress =
+  | { stage: "downloading"; downloaded: number; total: number | null }
+  | { stage: "installing" };
+
 /** One entry of the Rust-side editor allowlist (`editors_list`): the id `openInEditor` takes, and what to call it in the UI. */
 export interface EditorInfo {
   id: string;
@@ -91,6 +102,14 @@ export interface DesktopApi {
    * message, so it can be shown in a toast as-is.
    */
   openInEditor(editorId: string, path: string): Promise<void>;
+  /** ADR-0023: asks Rust to check for an update (it holds any result for `appUpdateInstall`). */
+  appUpdateCheck(): Promise<AppUpdateCheck>;
+  /** Installs the update held by the last successful check; rejects with an Error carrying Rust's string. */
+  appUpdateInstall(): Promise<void>;
+  /** Subscribes to download/install progress during `appUpdateInstall`; returns an unsubscribe function. */
+  onAppUpdateProgress(cb: (progress: AppUpdateProgress) => void): () => void;
+  /** Subscribes to the Check for Updates… menu item; returns an unsubscribe function. */
+  onAppUpdateCheckRequested(cb: () => void): () => void;
 }
 
 /** The host OS of a desktop build, read from the webview's user agent (WKWebView / WebView2 / WebKitGTK name their platform). */
@@ -156,6 +175,11 @@ function unavailable(): DesktopApi {
     onMenuAction: () => () => {},
     editorsList: () => reject(),
     openInEditor: () => reject(),
+    appUpdateCheck: () => reject(),
+    appUpdateInstall: () => reject(),
+    onAppUpdateProgress: () => () => {},
+    // The browser stub never fires: there is no native menu there.
+    onAppUpdateCheckRequested: () => () => {},
   };
 }
 
@@ -254,6 +278,18 @@ function realDesktopApi(): DesktopApi {
         throw asError(err);
       }
     },
+    async appUpdateCheck() {
+      const invoke = await loadInvoke();
+      return invoke<AppUpdateCheck>("app_update_check");
+    },
+    async appUpdateInstall() {
+      const invoke = await loadInvoke();
+      try {
+        await invoke("app_update_install");
+      } catch (err) {
+        throw asError(err);
+      }
+    },
     onDaemonProgress(cb) {
       let unlisten: (() => void) | null = null;
       let cancelled = false;
@@ -276,6 +312,40 @@ function realDesktopApi(): DesktopApi {
       let cancelled = false;
       import("@tauri-apps/api/event").then(({ listen }) =>
         listen<string>("menu-action", (event) => cb(event.payload as ActionId)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onAppUpdateProgress(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen<AppUpdateProgress>("app-update-progress", (event) => cb(event.payload)).then((fn) => {
+          if (cancelled) {
+            fn();
+          } else {
+            unlisten = fn;
+          }
+        }),
+      );
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
+    },
+    onAppUpdateCheckRequested(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/event").then(({ listen }) =>
+        listen("app-update-check-requested", () => cb()).then((fn) => {
           if (cancelled) {
             fn();
           } else {

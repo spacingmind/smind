@@ -41,6 +41,9 @@ function DaemonSection() {
       setStatus(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      // A failed action may have stopped the daemon: re-read the live
+      // status instead of leaving the pre-action "Running" on screen.
+      refresh();
     } finally {
       setBusy(false);
       setStageMessage(null);

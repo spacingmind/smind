@@ -17,6 +17,7 @@ import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
+import { DesktopUpdateDialog } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
@@ -861,6 +862,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
+      {isDesktop && <DesktopUpdateDialog />}
     </>
   );
 

@@ -76,6 +76,8 @@ fn on_event(
             notify::show(ctx, n.title, n.body, n.task_id);
         }
         ClientEvent::RunRunning { task_id } => tray.on_run_running(task_id),
+        ClientEvent::RunEnded { task_id } => tray.on_run_ended(task_id),
+        ClientEvent::PermissionResolved { request_id } => tray.on_permission_resolved(&request_id),
         ClientEvent::Reconnected => tray.on_reconnected(),
     }
 }

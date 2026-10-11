@@ -83,6 +83,23 @@ task desktop:mac:install   # builds smind.app + .dmg, copies the app to /Applica
 task desktop:mac           # build only; output under desktop/src-tauri/target/<triple>/release/bundle/
 ```
 
+### Updating
+
+The macOS and Windows desktop apps check for updates on GitHub Releases
+(shortly after launch, and from **Check for Updates…** in the app menu on
+macOS / the Help menu on Windows). An update is only offered if its version
+is strictly newer and a stable release; you're prompted before anything is
+downloaded, and the package's signature is verified against a public key
+built into the app — the corresponding private key is a repository secret
+(`TAURI_SIGNING_PRIVATE_KEY`) used only by the release build.
+
+- The **first release carrying this feature must be installed by hand**;
+  only later releases can update in place.
+- If the signing key is ever lost or rotated, installed apps can no longer
+  verify new releases — one manual reinstall is needed, after which the new
+  key's releases update normally again.
+- The Linux `deb` package has no updater: install new versions by hand.
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships

@@ -1,9 +1,9 @@
 //! The tray's "pending approvals" state machine (quick-wins AC4): which
 //! tasks currently have an unresolved `permission.pending`.
 //!
-//! No `permission.resolved` event exists (see
-//! `docs/plans/completed/desktop-quick-wins.md`'s Context). A task's entry
-//! clears when its run transitions back to "running" -- the same signal
+//! An entry clears on the daemon's `permission.resolved` event (by
+//! request id; a daemon that predates it never sends one), when its run
+//! transitions back to "running" or ends -- the same signals
 //! `web/packages/ui/src/hooks/use-task-attention.ts` uses to clear its
 //! own permission badge -- or on a fresh reconnect, which resets the
 //! whole state rather than trying to resync it against `run.list`/
@@ -36,6 +36,14 @@ impl Attention {
         self.task_of.insert(request_id.to_string(), task_id);
     }
 
+    /// on_permission_resolved clears exactly the request that was
+    /// resolved; an unknown id (already cleared, or never seen) is a no-op.
+    pub fn on_permission_resolved(&mut self, request_id: &str) {
+        if self.task_of.remove(request_id).is_some() {
+            self.order.retain(|rid| rid != request_id);
+        }
+    }
+
     /// on_run_running clears every pending entry for a task whose run
     /// just (re)started -- the signal that a permission on it got
     /// resolved.
@@ -43,6 +51,12 @@ impl Attention {
         let task_of = &self.task_of;
         self.order.retain(|rid| task_of.get(rid) != Some(&task_id));
         self.task_of.retain(|_, tid| *tid != task_id);
+    }
+
+    /// on_run_ended clears a task's entries when its run stopped, failed
+    /// or finished: nothing can still be waiting on a permission there.
+    pub fn on_run_ended(&mut self, task_id: i64) {
+        self.on_run_running(task_id);
     }
 
     /// reset clears all state -- called on every fresh connection: a
@@ -103,6 +117,45 @@ mod tests {
         a.on_run_running(1);
         assert_eq!(a.count(), 1);
         assert_eq!(a.most_recent_task(), Some(2));
+    }
+
+    #[test]
+    fn resolved_clears_only_that_request() {
+        let mut a = Attention::new();
+        a.on_pending(1, "req-1");
+        a.on_pending(1, "req-2");
+        a.on_permission_resolved("req-1");
+        assert_eq!(a.count(), 1);
+        assert_eq!(a.most_recent_task(), Some(1));
+        a.on_permission_resolved("req-2");
+        assert_eq!(a.count(), 0);
+    }
+
+    #[test]
+    fn resolved_for_unknown_request_is_a_noop() {
+        let mut a = Attention::new();
+        a.on_pending(1, "req-1");
+        a.on_permission_resolved("nope");
+        assert_eq!(a.count(), 1);
+    }
+
+    #[test]
+    fn run_ended_clears_its_task_only() {
+        let mut a = Attention::new();
+        a.on_pending(1, "req-1");
+        a.on_pending(2, "req-2");
+        a.on_run_ended(2);
+        assert_eq!(a.count(), 1);
+        assert_eq!(a.most_recent_task(), Some(1));
+    }
+
+    #[test]
+    fn most_recent_task_falls_back_after_resolve() {
+        let mut a = Attention::new();
+        a.on_pending(1, "req-1");
+        a.on_pending(2, "req-2");
+        a.on_permission_resolved("req-2");
+        assert_eq!(a.most_recent_task(), Some(1));
     }
 
     #[test]

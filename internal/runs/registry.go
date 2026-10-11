@@ -166,6 +166,11 @@ func (reg *Registry) getPermissionTimeout() time.Duration {
 type Notifier interface {
 	NotifyRunStatus(s RunStatus)
 	NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption)
+	// NotifyPermissionResolved fires when a request that was announced via
+	// NotifyPermissionPending leaves the pending state. reason is one of
+	// "human", "timeout", "providerCancelled", "runEnded"; optionID is empty
+	// when no option was chosen. Never called for AutoAccept (never pending).
+	NotifyPermissionResolved(runID string, taskID, chatID int64, requestID, optionID, reason string)
 	NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem)
 }
 
@@ -802,6 +807,14 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 	return d.DecideDetailed(ctx, summary, nil, options)
 }
 
+// notifyResolved publishes permission.resolved for a request that was
+// pending (nil-safe when no notifier is set).
+func (d runPermissionDecider) notifyResolved(requestID, optionID, reason string) {
+	if n := d.reg.getNotifier(); n != nil {
+		n.NotifyPermissionResolved(d.r.id, d.r.taskID, d.r.chatID, requestID, optionID, reason)
+	}
+}
+
 // DecideDetailed implements taskrunner.DetailedPermissionDecider: detail
 // (possibly nil) is recorded on the permission_request event.
 func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, error) {
@@ -868,6 +881,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionOptionID:   optionID,
 			PermissionResolution: taskrunner.PermissionResolvedByHuman,
 		})
+		d.notifyResolved(requestID, optionID, "human")
 		return optionID, nil
 
 	case <-timer.C:
@@ -890,6 +904,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionOptionID:   optionID,
 			PermissionResolution: taskrunner.PermissionResolvedByTimeout,
 		})
+		d.notifyResolved(requestID, optionID, "timeout")
 		return optionID, nil
 
 	case <-ctx.Done():
@@ -909,6 +924,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 			PermissionRequestID:  requestID,
 			PermissionResolution: taskrunner.PermissionResolvedByProviderCancellation,
 		})
+		d.notifyResolved(requestID, "", "providerCancelled")
 		return "", ctx.Err()
 
 	case <-d.r.ctx.Done():
@@ -919,6 +935,7 @@ func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string
 		// guarantees this Decide call unblocks instead of hanging forever
 		// once a pending permission request's run is stopped.
 		d.abandon(requestID)
+		d.notifyResolved(requestID, "", "runEnded")
 		return "", d.r.ctx.Err()
 	}
 }

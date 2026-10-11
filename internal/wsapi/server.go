@@ -266,6 +266,12 @@ func (b busRunNotifier) NotifyPermissionPending(runID string, taskID, chatID int
 	}})
 }
 
+func (b busRunNotifier) NotifyPermissionResolved(runID string, taskID, chatID int64, requestID, optionID, reason string) {
+	b.bus.Publish(Event{Topic: TopicPermissionResolved, Payload: permissionResolvedPayload{
+		RunID: runID, TaskID: taskID, ChatID: chatID, RequestID: requestID, OptionID: optionID, Reason: reason,
+	}})
+}
+
 func (b busRunNotifier) NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem) {
 	b.bus.Publish(Event{Topic: TopicChatQueueUpdated, Payload: chatQueueUpdatedPayload{
 		ChatID: chatID, Items: toChatQueueItemParams(items),

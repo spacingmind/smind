@@ -58,6 +58,26 @@ const ID_TOGGLE_SIDEBAR: &str = "view-toggle-sidebar";
 const ID_APP_ABOUT: &str = "app-about";
 const ID_APP_SETTINGS: &str = "app-settings";
 const ID_APP_QUIT: &str = "app-quit";
+// desktop-auto-update U3: Check for Updates… (app menu on macOS, Help on
+// Windows, absent on Linux).
+const ID_APP_CHECK_UPDATES: &str = "app-check-updates";
+const ID_HELP_CHECK_UPDATES: &str = "help-check-updates";
+
+/// desktop-auto-update U3: where the Check for Updates… item lives.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum UpdateMenuLocation {
+    AppMenu,
+    HelpMenu,
+    None,
+}
+
+pub fn update_menu_location(os: &str) -> UpdateMenuLocation {
+    match os {
+        "macos" => UpdateMenuLocation::AppMenu,
+        "windows" => UpdateMenuLocation::HelpMenu,
+        _ => UpdateMenuLocation::None,
+    }
+}
 
 /// The accelerator for a D3 item: the combo it shares with the binding
 /// table on macOS, nothing on Windows/Linux (see the module comment).
@@ -83,6 +103,14 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
                 app,
                 ID_APP_ABOUT,
                 "About smind",
+                true,
+                None::<&str>,
+            )?)
+            .separator()
+            .item(&MenuItem::with_id(
+                app,
+                ID_APP_CHECK_UPDATES,
+                "Check for Updates…",
                 true,
                 None::<&str>,
             )?)
@@ -250,14 +278,24 @@ pub fn build(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         )?)
         .build()?;
 
-    let help = SubmenuBuilder::new(app, "Help")
+    let mut help_builder = SubmenuBuilder::new(app, "Help")
         .item(&MenuItem::with_id(
             app,
             ID_ABOUT,
             "About smind",
             true,
             None::<&str>,
-        )?)
+        )?);
+    if update_menu_location(std::env::consts::OS) == UpdateMenuLocation::HelpMenu {
+        help_builder = help_builder.item(&MenuItem::with_id(
+            app,
+            ID_HELP_CHECK_UPDATES,
+            "Check for Updates…",
+            true,
+            None::<&str>,
+        )?);
+    }
+    let help = help_builder
         .item(&MenuItem::with_id(
             app,
             ID_LOG_FOLDER,
@@ -291,6 +329,15 @@ pub fn handle_event(app: &AppHandle, id: &str) {
     // dispatched by the UI through the same registry a keystroke uses.
     if let Some(action) = menu_action_for(id) {
         let _ = app.emit("menu-action", action);
+        return;
+    }
+
+    // desktop-auto-update U3: the check request also works while the
+    // main window is hidden (macOS hidden-window state), so it must run
+    // before the get_webview_window early return.
+    if matches!(id, ID_APP_CHECK_UPDATES | ID_HELP_CHECK_UPDATES) {
+        crate::show_main(app);
+        let _ = app.emit("app-update-check-requested", ());
         return;
     }
 
@@ -391,5 +438,21 @@ mod tests {
         assert_eq!(menu_action_for(ID_APP_QUIT), None);
         assert_eq!(menu_action_for(ID_QUIT), None);
         assert_eq!(menu_action_for(ID_RELOAD), None);
+    }
+
+    #[test]
+    fn update_menu_location() {
+        assert_eq!(
+            super::update_menu_location("macos"),
+            super::UpdateMenuLocation::AppMenu
+        );
+        assert_eq!(
+            super::update_menu_location("windows"),
+            super::UpdateMenuLocation::HelpMenu
+        );
+        assert_eq!(
+            super::update_menu_location("linux"),
+            super::UpdateMenuLocation::None
+        );
     }
 }
