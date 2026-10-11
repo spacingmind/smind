@@ -26,7 +26,14 @@ The loop:
    or prNumber to choose the worktree's starting point.
    task_set_mode / task_options / task_set_option change a live run's settings
    (never to an auto-approving mode; only thinking-level or model options).
-   task_wait also takes runIds to wait for the first of several runs.
+   task_wait also takes runIds to wait for the first of several runs, and
+   ignorePermissionIds (request ids you already surfaced) to keep waiting
+   past a pending permission until a NEW one, a terminal status, or timeout.
+   task_diff reads a task's worktree diff (capped at 256 KiB); queue_list
+   and queue_cancel inspect and cancel your own queued prompts;
+   usage_summary reports token/cost usage. task_send also accepts
+   promptFile (a path relative to the task's worktree, max 64 KiB) instead
+   of prompt.
 
 If a task is busy with a running run, task_send queues the prompt on that
 chat by default -- you may keep sending and the daemon will deliver them

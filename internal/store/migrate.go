@@ -151,6 +151,19 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		// ADR-0025: the requested model on runs and agent profiles. NULL
+		// (provider default) is the valid value for every pre-existing row.
+		name: "model_selection",
+		apply: func(db *sql.DB) error {
+			for _, table := range []string{"runs", "agent_profiles"} {
+				if err := addColumnIfMissing(db, table, "model", "TEXT"); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

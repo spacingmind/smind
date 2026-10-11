@@ -236,10 +236,10 @@ func TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch(t *testing.T) {
 	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
 	w := setupWorkspace(t, m, "")
 	runGitT(t, w.Path, "branch", "user/feature")
-	if _, err := m.CreateTask(w.ID, nil, "first"); err != nil {
+	if _, err := m.CreateTask(w.ID, nil, "keepbranch-first"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.CreateTask(w.ID, nil, "second", WithExistingBranch("user/feature")); !errors.Is(err, ErrPortsExhausted) {
+	if _, err := m.CreateTask(w.ID, nil, "keepbranch-second", WithExistingBranch("user/feature")); !errors.Is(err, ErrPortsExhausted) {
 		t.Fatalf("err = %v, want exhausted", err)
 	}
 	if out, _ := runGitOutput(w.Path, "branch", "--list", "user/feature"); !strings.Contains(out, "user/feature") {

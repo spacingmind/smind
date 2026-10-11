@@ -20,10 +20,10 @@ func (s *Store) CreateRun(r Run) (Run, error) {
 		chatID = sql.NullInt64{Int64: r.ChatID, Valid: true}
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, approval_policy, model)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?)`,
 		r.ID, r.TaskID, chatID, r.Provider, r.Prompt, r.Status, r.StartedAt,
-		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept,
+		timePtrToNull(r.FinishedAt), r.StopReason, r.ErrMsg, r.PermissionMode, r.AutoAccept, nullString(r.Model),
 	)
 	if err != nil {
 		return Run{}, fmt.Errorf("insert run: %w", err)
@@ -81,7 +81,7 @@ func (s *Store) MarkRunningRunsInterrupted(interruptedStatus string) (int64, err
 // GetRun returns the run with the given id.
 func (s *Store) GetRun(id string) (Run, error) {
 	row := s.db.QueryRow(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model
 		 FROM runs WHERE id = ?`, id,
 	)
 	r, err := scanRun(row)
@@ -95,7 +95,7 @@ func (s *Store) GetRun(id string) (Run, error) {
 // used to rehydrate internal/runs.Registry's in-memory map at startup.
 func (s *Store) ListRecentRuns(limit int) ([]Run, error) {
 	rows, err := s.db.Query(
-		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept
+		`SELECT id, task_id, chat_id, provider, prompt, status, started_at, finished_at, stop_reason, err_msg, permission_mode, auto_accept, model
 		 FROM runs ORDER BY started_at DESC LIMIT ?`, limit,
 	)
 	if err != nil {
@@ -157,8 +157,9 @@ func scanRun(row rowScanner) (Run, error) {
 	var r Run
 	var chatID sql.NullInt64
 	var finishedAt sql.NullTime
+	var model sql.NullString
 	if err := row.Scan(&r.ID, &r.TaskID, &chatID, &r.Provider, &r.Prompt, &r.Status,
-		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept); err != nil {
+		&r.StartedAt, &finishedAt, &r.StopReason, &r.ErrMsg, &r.PermissionMode, &r.AutoAccept, &model); err != nil {
 		return Run{}, err
 	}
 	// NULL decodes as ChatID 0 ("unknown"/pre-chats) -- see CreateRun's
@@ -168,5 +169,6 @@ func scanRun(row rowScanner) (Run, error) {
 	// access, e.g. a test simulating a legacy row) can produce this.
 	r.ChatID = chatID.Int64
 	r.FinishedAt = nullToTimePtr(finishedAt)
+	r.Model = model.String
 	return r, nil
 }

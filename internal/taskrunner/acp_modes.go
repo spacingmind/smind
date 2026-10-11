@@ -38,6 +38,7 @@ type acpModeCatalog struct {
 // acpModeCacheEntry is Runner's per-provider discovery bookkeeping.
 type acpModeCacheEntry struct {
 	catalog     *acpModeCatalog
+	models      *modelCatalog // ACP: the model option; Codex: model/list
 	probing     bool
 	lastAttempt time.Time
 }
@@ -102,15 +103,32 @@ func configCurrentValue(raw json.RawMessage) string {
 // provider. A session that advertised nothing leaves any earlier catalog
 // in place.
 func (r *Runner) recordACPModes(provider Provider, modes *acp.SessionModeState, options []acp.ConfigOption) {
-	c, ok := deriveACPModes(modes, options)
-	if !ok {
+	c, modesOK := deriveACPModes(modes, options)
+	m, modelsOK := deriveACPModels(options)
+	if !modesOK && !modelsOK {
 		return
 	}
 	r.modeMu.Lock()
 	defer r.modeMu.Unlock()
 	e := r.acpModes[provider]
-	e.catalog = &c
+	if modesOK {
+		e.catalog = &c
+	}
+	if modelsOK {
+		e.models = &m
+	}
 	r.acpModes[provider] = e
+}
+
+// acpModelCatalog returns provider's discovered model catalog, if any.
+func (r *Runner) acpModelCatalog(provider Provider) (modelCatalog, bool) {
+	r.modeMu.Lock()
+	defer r.modeMu.Unlock()
+	e := r.acpModes[provider]
+	if e.models == nil {
+		return modelCatalog{}, false
+	}
+	return *e.models, true
 }
 
 // acpCatalog returns provider's discovered catalog, if any.
@@ -128,12 +146,19 @@ func (r *Runner) acpCatalog(provider Provider) (acpModeCatalog, bool) {
 // unless probing is disabled, its modes are already known, a probe is in
 // flight, or the last one failed less than acpModeProbeRetry ago.
 func (r *Runner) maybeProbeACPModes(provider Provider) {
+	r.maybeProbe(provider, r.probeACPModes)
+}
+
+// maybeProbe is the shared lazy-probe gate for ACP mode/model discovery
+// and Codex model discovery: at most one probe in flight per provider, and
+// a failed one is retried only after acpModeProbeRetry.
+func (r *Runner) maybeProbe(provider Provider, probe func(context.Context, Provider) error) {
 	if !r.acpModeProbe {
 		return
 	}
 	r.modeMu.Lock()
 	e := r.acpModes[provider]
-	if e.catalog != nil || e.probing || (!e.lastAttempt.IsZero() && time.Since(e.lastAttempt) < acpModeProbeRetry) {
+	if e.catalog != nil || e.models != nil || e.probing || (!e.lastAttempt.IsZero() && time.Since(e.lastAttempt) < acpModeProbeRetry) {
 		r.modeMu.Unlock()
 		return
 	}
@@ -145,8 +170,8 @@ func (r *Runner) maybeProbeACPModes(provider Provider) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), acpModeProbeTimeout)
 		defer cancel()
-		if err := r.probeACPModes(ctx, provider); err != nil {
-			log.Printf("taskrunner: probe %s permission modes: %v", provider, err)
+		if err := probe(ctx, provider); err != nil {
+			log.Printf("taskrunner: probe %s modes/models: %v", provider, err)
 		}
 		r.modeMu.Lock()
 		e := r.acpModes[provider]
@@ -195,4 +220,43 @@ func (r *Runner) recordSessionModes(provider Provider, client acpBackend, sessio
 		modes = &m
 	}
 	r.recordACPModes(provider, modes, options)
+}
+
+// probeCodexModels spawns a short-lived Codex app-server and records its
+// model/list. A server without model/list (an older codex) errors here, so
+// the provider keeps reporting no models and accepts any syntax-valid
+// string (ADR-0025).
+func (r *Runner) probeCodexModels(ctx context.Context, provider Provider) error {
+	client, err := r.newCodexClient(r.codexCommand)
+	if err != nil {
+		return fmt.Errorf("spawn: %w", err)
+	}
+	defer client.Close()
+	if err := client.Initialize(ctx); err != nil {
+		return fmt.Errorf("initialize: %w", err)
+	}
+	listed, err := client.ListModels(ctx)
+	if err != nil {
+		return err
+	}
+	if len(listed) == 0 {
+		return nil
+	}
+	c := modelCatalog{}
+	for _, m := range listed {
+		label := m.DisplayName
+		if label == "" {
+			label = m.ID
+		}
+		c.models = append(c.models, ModelInfo{ID: m.ID, Label: label, Description: m.Description, Default: m.IsDefault})
+		if m.IsDefault {
+			c.current = m.ID
+		}
+	}
+	r.modeMu.Lock()
+	defer r.modeMu.Unlock()
+	e := r.acpModes[provider]
+	e.models = &c
+	r.acpModes[provider] = e
+	return nil
 }

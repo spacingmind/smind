@@ -50,6 +50,7 @@ type chatQueueRunConfig struct {
 	PermissionMode string `json:"permissionMode"`
 	AutoAccept     bool   `json:"autoAccept"`
 	ThinkingLevel  string `json:"thinkingLevel"`
+	Model          string `json:"model,omitempty"`
 }
 
 // SetStarter wires the dependencies delivery needs to start runs itself
@@ -84,7 +85,8 @@ func (reg *Registry) starterDeps() (*workspace.Manager, *taskrunner.Runner, bool
 // gets the [message from task #T, chat #C] delivery header. An
 // orchestrator source may not enqueue an auto-approving permission
 // configuration (ADR-0019 decision 6, at enqueue time per ADR-0021 §6).
-func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, whenBusy WhenBusy, source string, fromTaskID, fromChatID int64) (StartOutcome, error) {
+func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, whenBusy WhenBusy, source string, fromTaskID, fromChatID int64, opts ...StartOption) (StartOutcome, error) {
+	model := startModel(opts)
 	if whenBusy == "" {
 		whenBusy = WhenBusyReject // the wire default: old clients unchanged
 	}
@@ -92,7 +94,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		return StartOutcome{}, fmt.Errorf("runs: start: invalid whenBusy %q", whenBusy)
 	}
 
-	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
 		return StartOutcome{}, err
 	}
@@ -125,6 +127,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		runner:             runner,
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
+		model:              model,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -213,7 +216,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	}
 
 	cfg, err := json.Marshal(chatQueueRunConfig{
-		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel),
+		Provider: string(provider), PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept, ThinkingLevel: string(thinkingLevel), Model: model,
 	})
 	if err != nil {
 		return StartOutcome{}, fmt.Errorf("runs: start: encode run config: %w", err)
@@ -321,7 +324,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 			continue
 		}
 
-		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel))
+		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel), WithModel(cfg.Model))
 		if err != nil {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
@@ -432,4 +435,28 @@ func (reg *Registry) CancelQueuedItem(id int64) error {
 	}
 	reg.cancelQueuedItem(id, store.ChatQueueCancelUser, "cancelled by user")
 	return nil
+}
+
+// StartOption is an optional per-run start parameter of Start and
+// StartWhenBusy, so adding one never changes the positional signature.
+type StartOption func(*startOptions)
+
+type startOptions struct {
+	model string
+}
+
+// WithModel names the model the run is asked to use (ADR-0025). "" is the
+// provider's default. It is validated like every other start parameter
+// (syntax always, membership once the provider's models are discovered),
+// persisted on the run row, and kept in a queued item's run config.
+func WithModel(model string) StartOption {
+	return func(o *startOptions) { o.model = model }
+}
+
+func startModel(opts []StartOption) string {
+	var o startOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+	return o.model
 }

@@ -128,6 +128,10 @@ type Run struct {
 	ErrMsg         string
 	PermissionMode string
 	AutoAccept     bool
+	// Model is the model the run was *asked* to use (ADR-0025); "" (stored
+	// as NULL) means the provider's default. Distinct from run_usage.model,
+	// which records what the agent reported using.
+	Model string
 }
 
 // RunEvent is one persisted internal/runs.Event, in the order it was
@@ -182,9 +186,12 @@ type AgentProfile struct {
 	PermissionMode string
 	AutoAccept     bool
 	ThinkingLevel  string
-	Notes          string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Model is the profile's requested model (ADR-0025); "" (NULL) is the
+	// provider's default.
+	Model     string
+	Notes     string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // McpServer is a named, daemon-global MCP server definition (docs/
