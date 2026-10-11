@@ -332,6 +332,11 @@ func (e *env) installOne(target, dir string, s Skill) (Result, error) {
 		want := s.Files[rel]
 		wantHash := hashBytes(want)
 		p := filepath.Join(dir, filepath.FromSlash(rel))
+		// A subdirectory inside the skill dir could itself be a symlink out
+		// of the home directory; check every file path, not just the root.
+		if err := e.checkContained(filepath.Dir(p)); err != nil {
+			return res, err
+		}
 		disk, err := os.ReadFile(p)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
@@ -417,6 +422,9 @@ func (e *env) uninstallOne(target, dir string, s Skill) (Result, error) {
 	keep := manifest{Files: map[string]string{}}
 	for _, rel := range sortedKeys(m.Files) {
 		p := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := e.checkContained(filepath.Dir(p)); err != nil {
+			return res, err
+		}
 		disk, err := os.ReadFile(p)
 		if errors.Is(err, fs.ErrNotExist) {
 			continue

@@ -300,3 +300,36 @@ func TestSkillBundle_FrontmatterValid(t *testing.T) {
 		}
 	}
 }
+
+// TestSkillUninstall_RefusesSymlinkedSubdirEscape: a manifest entry under a
+// subdirectory that is a symlink leaving the home directory must not let
+// uninstall delete a file outside it, even when the hash matches.
+func TestSkillUninstall_RefusesSymlinkedSubdirEscape(t *testing.T) {
+	home := t.TempDir()
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "victim.txt")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(home, ".claude", "skills", "smind")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "sub")); err != nil {
+		t.Fatal(err)
+	}
+	m := manifest{Files: map[string]string{"sub/victim.txt": hashBytes([]byte("keep me"))}}
+	b, err := marshalManifest(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ManifestName), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Uninstall(Options{Home: home, Targets: []string{"claude"}, Names: []string{"smind"}}); err == nil {
+		t.Fatal("Uninstall() error = nil, want a refusal")
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("file outside the home was removed: %v", err)
+	}
+}
