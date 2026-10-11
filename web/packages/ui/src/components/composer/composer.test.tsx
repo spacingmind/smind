@@ -146,6 +146,7 @@ function queueItem(partial: Partial<ChatQueueItem> & { ID: number }): ChatQueueI
     Status: "queued",
     RunID: null,
     CancelReason: "",
+    CancelKind: "",
     CreatedAt: "2026-10-11T00:00:00Z",
     UpdatedAt: "2026-10-11T00:00:00Z",
     ...partial,
@@ -793,7 +794,7 @@ describe("Composer server queue (ADR-0021 §9)", () => {
 
   it("renders an auto-cancelled item's reason", () => {
     renderComposer({
-      queuedItems: [queueItem({ ID: 5, Status: "cancelled", CancelReason: "delivery failed: queue is full" })],
+      queuedItems: [queueItem({ ID: 5, Status: "cancelled", CancelKind: "auto", CancelReason: "delivery failed: queue is full" })],
     });
 
     expect(screen.getByText("Not sent")).toBeInTheDocument();

@@ -281,7 +281,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 		}
 		chat, err := wm.GetChat(chatID)
 		if err != nil {
-			reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
+			reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, fmt.Sprintf("delivery failed: %v", err))
 			continue
 		}
 
@@ -293,7 +293,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 				// deliver this item. Leave it queued.
 				return
 			}
-			reg.cancelQueuedItem(item.ID, fmt.Sprintf("delivery failed: %v", err))
+			reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, fmt.Sprintf("delivery failed: %v", err))
 			continue
 		}
 		if err := reg.st.MarkDelivered(item.ID, runID); err != nil {
@@ -316,14 +316,15 @@ func deliverPrompt(item store.ChatQueueItem) string {
 	return fmt.Sprintf("[message from task #%d, chat #%d]\n%s", *item.FromTaskID, *item.FromChatID, item.Prompt)
 }
 
-// cancelQueuedItem marks a queued item cancelled with a reason and emits
-// the queue snapshot event (ADR-0021 §8).
-func (reg *Registry) cancelQueuedItem(id int64, reason string) {
+// cancelQueuedItem marks a queued item cancelled with a kind
+// (store.ChatQueueCancelUser/ChatQueueCancelAuto) and a display reason,
+// and emits the queue snapshot event (ADR-0021 §8).
+func (reg *Registry) cancelQueuedItem(id int64, kind, reason string) {
 	item, err := reg.st.GetChatQueueItem(id)
 	if err != nil {
 		return
 	}
-	if err := reg.st.MarkCancelled(id, reason); err != nil {
+	if err := reg.st.MarkCancelled(id, kind, reason); err != nil {
 		return
 	}
 	reg.notifyQueueUpdated(item.ChatID)
@@ -362,6 +363,6 @@ func (reg *Registry) CancelQueuedItem(id int64) error {
 	if item.Status != store.ChatQueueStatusQueued {
 		return fmt.Errorf("queue item %d is %s, not queued", id, item.Status)
 	}
-	reg.cancelQueuedItem(id, "cancelled by user")
+	reg.cancelQueuedItem(id, store.ChatQueueCancelUser, "cancelled by user")
 	return nil
 }

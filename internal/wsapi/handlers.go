@@ -881,6 +881,7 @@ type chatQueueItemParams struct {
 	Status       string    `json:"Status"`
 	RunID        *string   `json:"RunID"`
 	CancelReason string    `json:"CancelReason"`
+	CancelKind   string    `json:"CancelKind"`
 	CreatedAt    time.Time `json:"CreatedAt"`
 	UpdatedAt    time.Time `json:"UpdatedAt"`
 }

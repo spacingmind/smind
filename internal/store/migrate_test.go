@@ -674,3 +674,66 @@ func TestMigrate_AccountsModelsColumn(t *testing.T) {
 		s.Close()
 	}
 }
+
+// TestMigrate_ChatQueueCancelKind: a database whose chat_queue table
+// predates cancel_kind gets the column on Open, and its cancelled rows are
+// backfilled -- 'cancelled by user' to 'user', every other cancelled row to
+// 'auto' -- while queued and delivered rows stay empty.
+func TestMigrate_ChatQueueCancelKind(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-chat-queue.db")
+
+	// A database from just before cancel_kind: today's schema minus the
+	// column. Built by opening fresh, then dropping it.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE chat_queue DROP COLUMN cancel_kind`); err != nil {
+		t.Fatalf("drop cancel_kind: %v", err)
+	}
+	// Raw rows (MarkCancelled now writes the column this database doesn't
+	// have yet): one per status, both cancelled flavours.
+	now := time.Now().UTC()
+	for prompt, stmt := range map[string]string{
+		"queued":         `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'queued', 'human', 'queued', '', ?, ?)`,
+		"delivered":      `INSERT INTO chat_queue (chat_id, prompt, source, status, run_id, cancel_reason, created_at, updated_at) VALUES (?, 'delivered', 'human', 'delivered', 'run-1', '', ?, ?)`,
+		"user cancelled": `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'user cancelled', 'human', 'cancelled', 'cancelled by user', ?, ?)`,
+		"auto cancelled": `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'auto cancelled', 'human', 'cancelled', 'delivery failed: x', ?, ?)`,
+	} {
+		if _, err := s.db.Exec(stmt, chat.ID, now, now); err != nil {
+			t.Fatalf("seed %q: %v", prompt, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		var col string
+		if err := s.db.QueryRow(`SELECT name FROM pragma_table_info('chat_queue') WHERE name = 'cancel_kind'`).Scan(&col); err != nil {
+			t.Fatalf("chat_queue.cancel_kind column not found: %v", err)
+		}
+		items, err := s.ListChatQueue(chat.ID)
+		if err != nil {
+			t.Fatalf("ListChatQueue() error = %v", err)
+		}
+		want := map[string]string{"queued": "", "delivered": "", "user cancelled": ChatQueueCancelUser, "auto cancelled": ChatQueueCancelAuto}
+		for _, item := range items {
+			if item.CancelKind != want[item.Prompt] {
+				t.Errorf("Open() #%d item %q cancel_kind = %q, want %q", i, item.Prompt, item.CancelKind, want[item.Prompt])
+			}
+		}
+		s.Close()
+	}
+}

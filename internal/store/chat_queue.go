@@ -16,6 +16,13 @@ const (
 	ChatQueueSourceHuman        = "human"
 	ChatQueueSourceOrchestrator = "orchestrator"
 	ChatQueueSourceAgent        = "agent"
+
+	// ChatQueueCancelUser/ChatQueueCancelAuto are the cancel_kind values
+	// stamped when a queued item is cancelled: 'user' by the
+	// chat.queueCancel RPC, 'auto' by a failed delivery. '' means not
+	// cancelled; CancelReason carries the display text either way.
+	ChatQueueCancelUser = "user"
+	ChatQueueCancelAuto = "auto"
 )
 
 // chatQueueBound is the per-chat bound on queued items (ADR-0021 §7):
@@ -30,7 +37,9 @@ var ErrQueueFull = errors.New("queue full: this chat already has 20 queued promp
 // ChatQueueItem is one persisted prompt waiting for its chat to be free
 // (ADR-0021 §1). RunConfig is the JSON-encoded start parameters the item
 // will be delivered with (provider, permissionMode, thinkingLevel). RunID
-// and CancelReason are set when the item leaves 'queued'.
+// and CancelReason are set when the item leaves 'queued'; CancelKind
+// (ChatQueueCancelUser/ChatQueueCancelAuto) is set on cancel -- the
+// structured signal clients branch on, with CancelReason as display text.
 type ChatQueueItem struct {
 	ID           int64
 	ChatID       int64
@@ -43,6 +52,7 @@ type ChatQueueItem struct {
 	Status       string
 	RunID        *string
 	CancelReason string
+	CancelKind   string
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -89,7 +99,7 @@ func nullID(id int64) any {
 
 // GetChatQueueItem returns the queue item with the given id.
 func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
-	row := s.db.QueryRow(`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, created_at, updated_at FROM chat_queue WHERE id = ?`, id)
+	row := s.db.QueryRow(`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at FROM chat_queue WHERE id = ?`, id)
 	item, err := scanChatQueueItem(row)
 	if err != nil {
 		return ChatQueueItem{}, fmt.Errorf("get chat queue item %d: %w", id, err)
@@ -102,7 +112,7 @@ func (s *Store) GetChatQueueItem(id int64) (ChatQueueItem, error) {
 // priority). ok is false when the chat has nothing queued.
 func (s *Store) NextQueued(chatID int64) (ChatQueueItem, bool, error) {
 	row := s.db.QueryRow(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, created_at, updated_at
+		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at
 		 FROM chat_queue WHERE chat_id = ? AND status = 'queued'
 		 ORDER BY priority DESC, id LIMIT 1`, chatID,
 	)
@@ -133,12 +143,13 @@ func (s *Store) MarkDelivered(id int64, runID string) error {
 	return nil
 }
 
-// MarkCancelled stamps item id as cancelled with a reason. Only a queued
-// item can be cancelled; anything else is an error.
-func (s *Store) MarkCancelled(id int64, reason string) error {
+// MarkCancelled stamps item id as cancelled with a kind
+// (ChatQueueCancelUser/ChatQueueCancelAuto) and a display reason. Only a
+// queued item can be cancelled; anything else is an error.
+func (s *Store) MarkCancelled(id int64, kind, reason string) error {
 	res, err := s.db.Exec(
-		`UPDATE chat_queue SET status = 'cancelled', cancel_reason = ?, updated_at = ? WHERE id = ? AND status = 'queued'`,
-		reason, time.Now().UTC(), id,
+		`UPDATE chat_queue SET status = 'cancelled', cancel_reason = ?, cancel_kind = ?, updated_at = ? WHERE id = ? AND status = 'queued'`,
+		reason, kind, time.Now().UTC(), id,
 	)
 	if err != nil {
 		return fmt.Errorf("cancel chat queue item %d: %w", id, err)
@@ -153,7 +164,7 @@ func (s *Store) MarkCancelled(id int64, reason string) error {
 // (newest last) first.
 func (s *Store) ListChatQueue(chatID int64) ([]ChatQueueItem, error) {
 	rows, err := s.db.Query(
-		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, created_at, updated_at
+		`SELECT id, chat_id, prompt, run_config, source, from_task_id, from_chat_id, priority, status, run_id, cancel_reason, cancel_kind, created_at, updated_at
 		 FROM chat_queue WHERE chat_id = ? ORDER BY id`, chatID,
 	)
 	if err != nil {
@@ -200,7 +211,7 @@ func scanChatQueueItem(row rowScanner) (ChatQueueItem, error) {
 	if err := row.Scan(
 		&item.ID, &item.ChatID, &item.Prompt, &item.RunConfig, &item.Source,
 		&fromTaskID, &fromChatID, &item.Priority, &item.Status,
-		&runID, &item.CancelReason, &item.CreatedAt, &item.UpdatedAt,
+		&runID, &item.CancelReason, &item.CancelKind, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return ChatQueueItem{}, err
 	}
