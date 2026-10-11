@@ -350,6 +350,7 @@ func (reg *Registry) deliverOne(chatID int64) {
 		if err != nil {
 			var busyErr *ChatBusyError
 			var setupErr *SetupBusyError
+			var treeErr *TreeBusyError
 			if errors.As(err, &setupErr) {
 				// Setup was re-run since the check above; its finish delivers.
 				return
@@ -357,6 +358,12 @@ func (reg *Registry) deliverOne(chatID int64) {
 			if errors.As(err, &busyErr) {
 				// Someone else's run won the start race; their finish will
 				// deliver this item. Leave it queued.
+				return
+			}
+			if errors.As(err, &treeErr) {
+				// The task tree is at its concurrency limit; the slot frees
+				// when ANY run in the tree ends, which finish covers via
+				// its DeliverQueued retry. Leave it queued.
 				return
 			}
 			if errors.Is(err, ErrTaskArchiving) {

@@ -1146,6 +1146,12 @@ func (reg *Registry) finish(r *run, err error) {
 	// caller that waits on closedCh still sees "this run is fully done"
 	// including its queue hand-off.
 	reg.deliverOne(r.chatID)
+	// The freed slot may belong to a different chat than this one (the
+	// per-tree guard spans the whole tree), so also retry delivery for
+	// every chat with something queued -- a cheap query that no-ops when
+	// nothing is. finish holds no locks here and DeliverQueued takes only
+	// deliverMu -> reg.mu, so no deadlock.
+	reg.DeliverQueued()
 
 	// Signal last, same reasoning as internal/terminal.Registry's own
 	// finish: CloseAll blocks on this to know the run's subprocess is
