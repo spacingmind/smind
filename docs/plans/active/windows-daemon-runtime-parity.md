@@ -149,8 +149,10 @@ Named scenarios:
 
 ## Decisions
 
-Open, needing the user (AGENTS.md rule d). Do not implement AC3, AC4 or AC7
-until each is answered.
+**D1–D3 decided 2026-10-11 by the user, all as recommended, and recorded in
+ADR-0028** (`docs/decisions/0028-native-windows-daemon-runtime.md`): D1 (a)
+Git for Windows `sh`; D2 (a) `POST /api/shutdown` + `smind stop`; D3 (a)
+owner-only DACL. The option lists below are kept for the record.
 
 - **D1: shell for setup/teardown scripts on Windows.**
   - (a) `sh -c` via Git for Windows' `sh.exe` when present, otherwise fail

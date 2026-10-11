@@ -53,7 +53,8 @@ Daemon-wide knobs live in `config.yaml` (`worktrees:` block):
 - Shell: `sh -c <script>` (POSIX). On Windows setup/teardown are not run in
   v1: a configured script makes task creation fail fast with a clear
   message rather than silently skipping (ADR-0022 covers terminals, not
-  this).
+  this). **Amended by ADR-0028:** a native Windows daemon runs them with Git
+  for Windows' `sh`, and fails fast only when no `sh` is found.
 - cwd = the task worktree. The script runs in its own process group so a
   timeout, archive, or daemon shutdown kills the whole tree.
 - Environment: the daemon's environment plus `SMIND_SOURCE_CHECKOUT_PATH`
