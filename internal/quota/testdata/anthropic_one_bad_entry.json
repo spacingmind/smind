@@ -1,0 +1,8 @@
+{
+  "five_hour": { "utilization": 6, "resets_at": "2026-06-01T21:00:00Z" },
+  "seven_day": { "utilization": 23, "resets_at": "2026-06-04T00:00:00Z" },
+  "limits": [
+    { "kind": 42, "percent": "not-a-number" },
+    { "kind": "weekly_scoped", "percent": 2, "resets_at": "2026-06-04T00:00:00Z", "scope": { "model": { "id": null, "display_name": "Fable" }, "surface": null } }
+  ]
+}

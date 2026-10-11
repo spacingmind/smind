@@ -1,0 +1,7 @@
+{
+  "seven_day": { "utilization": 23, "resets_at": "2026-06-04T00:00:00Z" },
+  "seven_day_opus": { "utilization": 8, "resets_at": "2026-06-04T00:00:00Z" },
+  "limits": [
+    { "kind": "weekly_scoped", "percent": null, "resets_at": "2026-06-09T00:00:00Z", "scope": { "model": { "id": null, "display_name": "Opus" }, "surface": null } }
+  ]
+}

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/store"
 )
 
 type fakeRefresher struct {
@@ -313,5 +315,222 @@ func TestOAuth2Refresher_WithHTTPClientOverride(t *testing.T) {
 	}
 	if !called {
 		t.Error("Refresh() did not use the overridden HTTP client, want it to hit the local server")
+	}
+}
+
+// funcRefresher adapts a function to OAuthRefresher.
+type funcRefresher func(context.Context, OAuthCredential) (OAuthCredential, error)
+
+func (f funcRefresher) Refresh(ctx context.Context, c OAuthCredential) (OAuthCredential, error) {
+	return f(ctx, c)
+}
+
+// countingRefresher counts concurrent refreshes and simulates a slow token
+// endpoint so overlapping EnsureFresh calls are forced to interleave.
+type countingRefresher struct {
+	mu     sync.Mutex
+	calls  int64
+	delay  time.Duration
+	enter  chan struct{} // if non-nil, signal on each entry before delaying
+	result OAuthCredential
+	err    error
+}
+
+func (f *countingRefresher) Refresh(ctx context.Context, cred OAuthCredential) (OAuthCredential, error) {
+	f.mu.Lock()
+	f.calls++
+	f.mu.Unlock()
+	if f.enter != nil {
+		f.enter <- struct{}{}
+	}
+	if f.delay > 0 {
+		time.Sleep(f.delay)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return OAuthCredential{}, f.err
+	}
+	return f.result, nil
+}
+
+func (f *countingRefresher) count() int64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+func TestRegistry_EnsureFresh_ConcurrentSingleRefresh(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddOAuth("anthropic", "personal", OAuthCredential{
+		AccessToken:  "access-old",
+		RefreshToken: "refresh-old",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("AddOAuth() error = %v", err)
+	}
+
+	refresher := &countingRefresher{
+		delay: 50 * time.Millisecond,
+		result: OAuthCredential{
+			AccessToken:  "access-new",
+			RefreshToken: "refresh-new",
+			ExpiresAt:    time.Now().Add(time.Hour),
+		},
+	}
+
+	const workers = 8
+	var wg sync.WaitGroup
+	tokens := make([]string, workers)
+	for i := range workers {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got, err := r.EnsureFresh(context.Background(), created.ID, refresher)
+			if err != nil {
+				t.Errorf("EnsureFresh() error = %v", err)
+				return
+			}
+			tokens[i] = got.OAuth.AccessToken
+		}(i)
+	}
+	wg.Wait()
+
+	if got := refresher.count(); got != 1 {
+		t.Errorf("refresher called %d times, want exactly 1", got)
+	}
+	for i, tok := range tokens {
+		if tok != "access-new" {
+			t.Errorf("worker %d AccessToken = %q, want access-new", i, tok)
+		}
+	}
+}
+
+func TestRegistry_EnsureFresh_OtherAccountsIndependent(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	mk := func(label string) store.Account {
+		t.Helper()
+		a, err := r.AddOAuth("anthropic", label, OAuthCredential{
+			AccessToken:  "access-old",
+			RefreshToken: "refresh-old",
+			ExpiresAt:    time.Now().Add(-time.Minute),
+		})
+		if err != nil {
+			t.Fatalf("AddOAuth(%s) error = %v", label, err)
+		}
+		return a
+	}
+	a1, a2 := mk("one"), mk("two")
+
+	// A's refresher blocks until B's has been entered. With a global lock B
+	// could never start, so A would sit until its own timeout.
+	bEntered := make(chan struct{})
+	refA := funcRefresher(func(ctx context.Context, _ OAuthCredential) (OAuthCredential, error) {
+		select {
+		case <-bEntered:
+		case <-time.After(3 * time.Second):
+			return OAuthCredential{}, errors.New("account B refresh never started while A was refreshing")
+		}
+		return OAuthCredential{AccessToken: "access-a", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	})
+	refB := funcRefresher(func(ctx context.Context, _ OAuthCredential) (OAuthCredential, error) {
+		close(bEntered)
+		return OAuthCredential{AccessToken: "access-b", ExpiresAt: time.Now().Add(time.Hour)}, nil
+	})
+
+	done := make(chan error, 2)
+	go func() {
+		_, err := r.EnsureFresh(context.Background(), a1.ID, refA)
+		done <- err
+	}()
+	go func() {
+		_, err := r.EnsureFresh(context.Background(), a2.ID, refB)
+		done <- err
+	}()
+
+	timeout := time.After(5 * time.Second)
+	for range 2 {
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("EnsureFresh() error = %v", err)
+			}
+		case <-timeout:
+			t.Fatal("refreshes for different accounts did not complete in parallel; cross-account blocking suspected")
+		}
+	}
+}
+
+func TestRegistry_EnsureFresh_ValidTokenNoRefreshRepeated(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddOAuth("anthropic", "personal", OAuthCredential{
+		AccessToken:  "access-fresh",
+		RefreshToken: "refresh-old",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("AddOAuth() error = %v", err)
+	}
+
+	refresher := &countingRefresher{}
+	for range 3 {
+		got, err := r.EnsureFresh(context.Background(), created.ID, refresher)
+		if err != nil {
+			t.Fatalf("EnsureFresh() error = %v", err)
+		}
+		if got.OAuth.AccessToken != "access-fresh" {
+			t.Errorf("AccessToken = %q, want access-fresh", got.OAuth.AccessToken)
+		}
+	}
+	if got := refresher.count(); got != 0 {
+		t.Errorf("refresher called %d times, want 0 for unexpired credential", got)
+	}
+}
+
+func TestRegistry_EnsureFresh_RefresherErrorReleasesLock(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddOAuth("anthropic", "personal", OAuthCredential{
+		AccessToken:  "access-old",
+		RefreshToken: "refresh-old",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("AddOAuth() error = %v", err)
+	}
+
+	failing := &countingRefresher{err: errors.New("token endpoint down")}
+	if _, err := r.EnsureFresh(context.Background(), created.ID, failing); err == nil {
+		t.Fatal("EnsureFresh() error = nil, want failure")
+	}
+
+	succeeding := &countingRefresher{result: OAuthCredential{
+		AccessToken:  "access-new",
+		RefreshToken: "refresh-new",
+		ExpiresAt:    time.Now().Add(time.Hour),
+	}}
+	done := make(chan Account, 1)
+	go func() {
+		acc, err := r.EnsureFresh(context.Background(), created.ID, succeeding)
+		if err != nil {
+			t.Errorf("EnsureFresh() after failure error = %v", err)
+		}
+		done <- acc
+	}()
+	select {
+	case acc := <-done:
+		if acc.OAuth == nil || acc.OAuth.AccessToken != "access-new" {
+			t.Fatalf("AccessToken after retry = %+v, want access-new", acc.OAuth)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("lock not released after refresher error; retry deadlocked")
 	}
 }
