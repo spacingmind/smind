@@ -114,10 +114,10 @@ rule d), so it is **not built in this plan**.
 | G14 | Orchestration guidance in-band | skill only | none; `mcp.NewServer` passes no `Instructions` | Every MCP client could receive a condensed guide at `initialize` | P0 | XS | No |
 | G15 | Leader/coder pattern | profiles + skill | profiles have `notes`, hierarchy has `parentTaskId` + depth 2 | Needs skill text + the discovery tools above; no new code beyond G13 | P1 | S | No |
 | G16 | Queue list/cancel from MCP | n/a (steer) | `chat.queueList/Cancel` wsapi + CLI | Missing, **blocked on `feat/queue-cancel-kind`** (another leader owns `cancel_kind`) | P1 | S | Wait for that branch |
-| G17 | Worktree **setup/teardown** (deps, env copy, migrations) | `paseo.json` `worktree.setup/teardown` | none | Fresh task worktree has no deps/`.env`; every task starts broken for JS/Go-with-env repos | P0 | M–L | **Yes: D1** (trust model + file format + exec of repo/daemon-defined commands) |
-| G18 | Per-task port allocation | `servicePorts`, `$PASEO_PORT` | none | Parallel dev servers collide | P1 | M | Yes: part of D1 |
+| G17 | Worktree **setup/teardown** (deps, env copy, migrations) | `paseo.json` `worktree.setup/teardown` | none | Fresh task worktree has no deps/`.env`; every task starts broken for JS/Go-with-env repos | P0 | L | D1 **approved 2026-10-11** → ADR-0024, PR-E |
+| G18 | Per-task port allocation | `servicePorts`, `$PASEO_PORT` | none | Parallel dev servers collide | P1 | M | In ADR-0024, PR-E |
 | G19 | Workspace scripts / services | `scripts`, `start/stop_workspace_script` | none (terminals only) | no named, supervised commands | P2 | L | Yes: D1 follow-on |
-| G20 | Model discovery + update | `list_models`, `update_agent settings.model` | **no model concept** in runs/profiles/`provider.list` | Can't choose or list models | P1 | L | **Yes: D2** (data model: `model` on run config + profile) |
+| G20 | Model discovery + update | `list_models`, `update_agent settings.model` | **no model concept** in runs/profiles/`provider.list` | Can't choose or list models | P1 | L | D2 **approved 2026-10-11** → ADR-0025, PR-F |
 | G21 | Approve/deny permissions | `respond_to_permission` | none by decision | n/a | n/a | n/a | **D3 recommend keep ADR-0017** |
 | G22 | Push notification on finish/permission | `notifyOnFinish` | none (ADR-0017 §3 defers) | Orchestrator must block in `task_wait` | P1 | M | **Yes: D4** |
 | G23 | Schedules / heartbeats | full set | none | ROADMAP Phase 5, demand-driven | P2 | L | **D5 defer** |
@@ -346,12 +346,156 @@ Named tests: `TestSkillInstall_WritesBundleToAllTargets`,
 PR-D's text references PR-A/B/C tool names, so it is based on the stacked
 result of A–C (or lands after them); the catalog test enforces that.
 
-## 4. Decisions needed (not built here)
+### PR-E: worktree setup/teardown + per-task port (G17, G18; ADR-0024)
+
+Backend + CLI first (PR-E), web second (PR-E2). Accepted design: daemon-side,
+human-authored per-workspace scripts; background execution; setup counts as
+"busy" for run start; failed setup keeps the worktree; best-effort teardown
+after the checkpoint; port range from config. See
+[ADR-0024](../../decisions/0024-worktree-setup-teardown-and-ports.md).
+
+Acceptance criteria:
+
+1. A workspace with `setup_script` set: `task.create` returns immediately
+   with `setupStatus: "running"`; the script runs with cwd = the worktree
+   and env `SMIND_SOURCE_CHECKOUT_PATH`, `SMIND_WORKTREE_PATH`,
+   `SMIND_BRANCH`, `SMIND_TASK_ID`, `SMIND_WORKSPACE_ID` (and `SMIND_PORT`
+   when a range is configured); on exit 0 the task becomes `ok`, with the
+   output tail (≤ 64 KiB, merged stdout+stderr) in `setup_log`.
+2. Non-zero exit, timeout (process group killed, no leftover child), or a
+   daemon restart mid-setup ⇒ `failed` with a clear `setup_error`; the
+   worktree and task are intact; a `running` task found at daemon start
+   becomes `failed` ("interrupted by daemon restart") and is not re-run.
+3. While `running`, `run.start`/`task.prompt` with `whenBusy` `queue` or
+   `interrupt` enqueue and are delivered when setup finishes (including
+   when it finishes `failed`); `reject`/unset errors naming the setup.
+   A queued prompt is not lost across the transition.
+4. `task.retrySetup` re-runs the script on a non-running task; on a
+   `running` task it errors.
+5. Archive/delete: checkpoint commit first, then teardown (best-effort,
+   its failure/timeout appended to `setup_log` and never blocking the
+   archive), then `git worktree remove`. A checkpoint failure aborts before
+   teardown. Archiving a task whose setup is `running` kills the script
+   first. A workspace with no scripts behaves exactly as today
+   (`setup_status` NULL).
+6. Ports: with `worktrees.ports.range` set, each new task gets a distinct
+   free port (partial unique index on non-archived tasks + a loopback bind
+   probe); archiving frees it; exhaustion fails task creation with a clear
+   error; with no range configured nothing changes. `SMIND_PORT` is in the
+   setup env, the task's terminals, and Claude-native runs.
+7. Only humans can author scripts: `workspace.setScripts` exists in wsapi
+   and the CLI (`smind workspace setup show|set|clear`); **no MCP tool**
+   reads or writes script text, `task_new` has no script argument, a
+   committed `smind.json`/`paseo.json` in the repo is ignored. `task_get`
+   and `workspace_list` expose `setupStatus`/`setupError`/`port`/
+   `hasSetupScript` but never the script text.
+8. Windows: a configured script makes task creation fail fast with a clear
+   "not supported on Windows" message.
+9. Script env values are never shell-interpolated: a branch named
+   `x$(touch /tmp/pwned)` (git allows `$`, `(`, `)`) does not execute
+   anything from the env.
+
+Named tests: `TestSetup_RunsInWorktreeWithEnv`, `TestSetup_AsyncCreateReturnsRunning`,
+`TestSetup_FailureKeepsWorktree`, `TestSetup_TimeoutKillsProcessGroup`,
+`TestSetup_LogTailCapped`, `TestSetup_DaemonRestartMarksFailed`,
+`TestSetup_QueuedPromptDeliveredAfterSetup`,
+`TestSetup_QueuedPromptDeliveredAfterFailedSetup`,
+`TestSetup_RejectWhenBusyNamesSetup`, `TestSetup_RetryRunsAgain`,
+`TestSetup_RetryWhileRunningRejected`, `TestTeardown_RunsAfterCheckpointBeforeRemove`,
+`TestTeardown_FailureDoesNotBlockArchive`,
+`TestTeardown_NotRunWhenCheckpointFails`, `TestArchive_KillsRunningSetup`,
+`TestPorts_AllocatesDistinctFreePorts`, `TestPorts_ReleasedOnArchive`,
+`TestPorts_SkipsPortInUse`, `TestPorts_ExhaustionFails`,
+`TestPorts_ConcurrentCreatesUnique` (run with `-race`),
+`TestSetup_EnvNotInterpolated` (the `$(touch ...)` branch),
+`TestWorkspaceSetScripts_NoMCPTool` (catalog contains no tool that can set
+scripts; `task_get` output has no script text), `TestSetup_RepoFileIgnored`,
+`TestSetup_WindowsUnsupported` (build-tagged or via an OS seam),
+`TestMigrate_SetupColumns`. CLI: `TestWorkspaceSetup_SetShowClear`.
+PR-E2 (web): workspace settings editor for the two scripts, task setup
+badge (running/ok/failed) with the log tail; vitest names
+`workspace setup editor saves via workspace.setScripts`,
+`task shows setup failed badge with the error`; **light + dark screenshots**
+against a sandbox daemon (isolated `SMIND_HOME`/port) reviewed by the
+leader.
+
+### PR-F: model selection (G20; ADR-0025)
+
+Backend + CLI + MCP first (PR-F), web second (PR-F2). See
+[ADR-0025](../../decisions/0025-model-selection.md).
+
+Acceptance criteria:
+
+1. `model` accepted on `run.start`, `task.prompt`, profile create/update,
+   MCP `task_send`; absent/empty = provider default and the spawn is
+   byte-identical to today's (no `--model`, no set_config_option, no
+   `model` in `thread/start`).
+2. `runs.model` and `agent_profiles.model` columns (nullable, additive
+   migration, old DBs read back NULL); queued prompts keep `model`.
+3. Syntax validation (1–100 chars of `[A-Za-z0-9._:/@\[\]-]`, no leading `-`)
+   on every entry point before any spawn; `--model -x`/spaces/newlines/
+   101 chars rejected.
+4. `provider.list`/`provider_list` carry `models` + `modelsDiscovered`:
+   claude-native static catalog (any syntax-valid id still accepted);
+   ACP from the `model`-category config option of the lazy probe; codex
+   from `model/list`, with the "unavailable ⇒ no models, string accepted"
+   fallback. Never blocks.
+5. Applying: Claude `WithModel`; ACP `session/set_config_option` after
+   session/new (or load) and before the first prompt, only when the
+   requested value differs; Codex `model` in `thread/start`/`thread/resume`.
+   A rejection by the agent fails the run start with the agent's error.
+   With a discovered catalog an unknown ACP/Codex model is rejected up
+   front listing valid ids.
+6. Live switch via `run.listConfigOptions`/`run.setConfigOption` and MCP
+   `task_options`/`task_set_option`: ACP's own `model` option; for
+   claude-native a synthetic `model` option routed to `SetModel`
+   (default ⇒ `nil`); Codex rejects with "applies from the next run".
+   PR-C's fail-closed category allowlist stays, with `model` included.
+7. A profile's `model` is used when the profile is selected and is
+   overridden by an explicit `model` on the call.
+8. CLI: `smind task send --model`, `smind profile new/edit --model`,
+   `smind profile ls` shows it.
+9. Not a permission change: choosing any model is allowed for an
+   orchestrator (no `autoApproves` interplay); a test pins that
+   `task_send` with `model` and a restrictive `permissionMode` still
+   rejects an auto-approving mode.
+
+Named tests: `TestModel_ValidationRejectsBadStrings`,
+`TestRunStart_ModelEmptyIsDefault`, `TestRunStart_ModelPersistedOnRun`,
+`TestMigrate_ModelColumns`, `TestChatQueue_ModelPreserved`,
+`TestProfile_ModelRoundTrip`, `TestProfile_ModelOverriddenByCall`,
+`TestProviderList_ClaudeStaticModels`, `TestProviderList_ACPModelsFromProbe`,
+`TestProviderList_CodexModelsFromModelList`, `TestProviderList_UndiscoveredAcceptsString`,
+`TestRunClaudeNative_WithModelOption`, `TestRunACP_AppliesModelConfigOption`
+(fake agent), `TestRunACP_ModelRejectedFailsStart`,
+`TestRunCodex_ModelInThreadStart` (fake app server),
+`TestRunACP_UnknownModelRejectedWhenDiscovered`,
+`TestConfigOptions_ClaudeSyntheticModelOption`,
+`TestSetConfigOption_ClaudeModelCallsSetModel`,
+`TestSetConfigOption_CodexModelRejected`,
+`TestMCPTools_TaskSendModel`, `TestMCPTools_ProviderListHasModels`,
+`TestMCPTools_TaskSetOptionModelCategoryAllowed`,
+`TestMCPTools_TaskSendModelDoesNotUnlockAutoApproving`. CLI:
+`TestTaskSend_ModelFlag`, `TestProfile_ModelFlag`.
+PR-F2 (web): composer model picker (reads `provider.list`), profile editor
+field, run header chip; vitest `composer sends model on run.start`,
+`profile editor saves model`; **light + dark screenshots** against a
+sandbox daemon.
+
+## 4. Decisions
+
+D1 and D2 were approved by the user on 2026-10-11 and recorded as ADR-0024
+and ADR-0025 (built as PR-E and PR-F above). D3–D11 were accepted as
+recommended on the same date: keep ADR-0017's no-approval rule, wait-any
+before push, defer schedules/heartbeats, MCP terminals and browser tools,
+opt-in manual injection of `smind mcp serve`, PR creation stays human/CLI,
+`workspace_create` human-only, CLI `smind skill install` first.
+
 
 | # | Item | Why it's a decision | Recommendation |
 |---|---|---|---|
-| D1 | **Worktree setup/teardown + per-task port (+ later scripts/services)** (G17–G19) | New exec-of-commands surface (code execution on task create), and the file/format question: repo-committed file read from the base branch (Paseo's `paseo.json`) vs daemon-side config. A cloned untrusted repo would get code execution on the first `task_new` with the Paseo model. | **Daemon-side, human-authored, per-workspace config** (new `workspaces.setup_script`/`teardown_script`, set only via CLI/web, never via MCP or any non-human source), matching the ADR-0014/0018 precedent that standing config is the human's. Commands run as an argv list or `sh -c` of the stored script in the worktree with `SMIND_SOURCE_CHECKOUT_PATH`, `SMIND_WORKTREE_PATH`, `SMIND_BRANCH`, `SMIND_PORT` (allocated from a configurable range, recorded on the task); bounded time, output kept in a task event; setup failure marks the task `setup_failed` and keeps the worktree. Optional later: a repo `smind.json` honoured only after a trust-on-first-use hash approval by a human. Needs an ADR. |
-| D2 | **Model selection** (G20) | Runs/profiles have no `model` field; adding one is a data-model/wire change across run.start, profile, provider.list. | Add `model` to the run config and profile (ADR), populated from ACP model config options and a static Claude catalog; then `provider_list` can list models and `task_set_option` covers live switches. Until then GLM/Claude default models apply. |
+| D1 | **APPROVED 2026-10-11 → ADR-0024.** Worktree setup/teardown + per-task port (+ later scripts/services) (G17–G19) | New exec-of-commands surface (code execution on task create), and the file/format question: repo-committed file read from the base branch (Paseo's `paseo.json`) vs daemon-side config. A cloned untrusted repo would get code execution on the first `task_new` with the Paseo model. | **Daemon-side, human-authored, per-workspace config** (new `workspaces.setup_script`/`teardown_script`, set only via CLI/web, never via MCP or any non-human source), matching the ADR-0014/0018 precedent that standing config is the human's. Commands run as an argv list or `sh -c` of the stored script in the worktree with `SMIND_SOURCE_CHECKOUT_PATH`, `SMIND_WORKTREE_PATH`, `SMIND_BRANCH`, `SMIND_PORT` (allocated from a configurable range, recorded on the task); bounded time, output kept in a task event; setup failure marks the task `setup_failed` and keeps the worktree. Optional later: a repo `smind.json` honoured only after a trust-on-first-use hash approval by a human. Needs an ADR. |
+| D2 | **APPROVED 2026-10-11 → ADR-0025.** Model selection (G20) | Runs/profiles have no `model` field; adding one is a data-model/wire change across run.start, profile, provider.list. | Add `model` to the run config and profile (ADR), populated from ACP model config options and a static Claude catalog; then `provider_list` can list models and `task_set_option` covers live switches. Until then GLM/Claude default models apply. |
 | D3 | **Approval tools over MCP** (G21) | Would reverse ADR-0017 #1 / ADR-0019 #6, the user's standing rule. | **Keep as is.** The wait/notify pair already surfaces the pending request so the human is pulled in; improve that (D4) instead of delegating approval. |
 | D4 | **Push notification to the orchestrator** (G22) | ADR-0017 §3 deferred MCP resources/notifications; client support varies. | Ship wait-any (PR-C) now; revisit push only if wait-any proves insufficient in daily use. |
 | D5 | **Schedules & heartbeats** (G23) | ROADMAP Phase 5, demand-driven. | **Defer.** The host's own `/loop` / cron covers it today; no demand yet in smind use. |
@@ -380,7 +524,10 @@ table (G31) when it appears.
 - [ ] PR-B: baseRef/branch/PR task creation + `task_archive`
 - [ ] PR-C: `task_set_mode`, `task_options`/`task_set_option`, `task_wait` wait-any
 - [ ] PR-D: bundled skills + `smind skill install|ls|uninstall`
-- [ ] D1–D11 answered by the user
+- [x] ADR-0024 (D1) and ADR-0025 (D2) written, Accepted
+- [ ] PR-E: worktree setup/teardown + ports (backend + CLI); PR-E2: web
+- [ ] PR-F: model selection (backend + CLI + MCP); PR-F2: web
+- [x] D1–D11 answered by the user (2026-10-11)
 
 ## Validation
 
