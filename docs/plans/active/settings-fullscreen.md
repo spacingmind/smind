@@ -117,12 +117,27 @@ References (read-only, ported not invented):
 
 ## Progress
 
-- [ ] Spec (this file)
-- [ ] S1 Peer: `SettingsScreen` layout + narrow drill-down + chrome + tests
-- [ ] S2 Lead: `App.tsx` keep-mounted overlay + palette hook + App tests
-- [ ] Screenshots light/dark, both viewports
-- [ ] `task test`, `task lint`, web typecheck
+- [x] Spec (this file)
+- [x] S1a Peer (glm): two-column desktop layout — ACCEPT (7303fb1)
+- [x] S1b Peer (glm): narrow drill-down + desktop chrome — ACCEPT (4c5a5e9, a0343ae)
+- [x] S2 Lead: `App.tsx` keep-mounted overlay + palette hook + App tests (605cecb)
+- [x] S1c Peer (glm): section nav icons — REJECT as delivered (hit turn limit, uncommitted, stray `m` before `order:` in 6 files); Lead fixed + committed
+- [x] Screenshots light/dark at 1440×900 and 390×844 (found + fixed: ragged label alignment without icons; empty 48px strip above the back row in a browser)
+- [x] `task test` (web 1682/1682, Go + desktop scripts), `task lint`, `bun run typecheck`
+
+Deviations from the spec: Decision 6 also lets Escape on a *narrow detail*
+pop back to the list before closing; `settings.open` while open is a no-op;
+`SettingsScreen` is keyed by an open-request counter so a deep link
+(`shortcuts.help`) while Settings is open lands on its section.
 
 ## Validation
 
-(filled in as criteria are confirmed)
+- AC1 App.test `opening settings hides the shell (inert, aria-hidden) but keeps the task pane mounted`; screenshots `wide-*-2-settings-*` show no app sidebar/main view.
+- AC2 settings-screen.test `renders a settings sidebar with a back control above the grouped nav and a content view`, `marks the active section with aria-current…`; screenshots.
+- AC3 App.test `Back restores the previous task/tab and sidebar state` (collapsed sidebar, Files tab, sidebar.toggle disabled while open); `wide-*-5-restored` matches `wide-*-1-shell`.
+- AC4 App.test: same `primary-pane` node before/during/after (shell is `invisible`+`inert`, never unmounted).
+- AC5 settings-screen.test `Escape does not call onNavigateBack when a dialog is open` / `…default-prevented` / `…dialog that sits inside an inert subtree`.
+- AC6 settings-screen.test `SettingsScreen narrow` (list → detail, back, initialSectionId, Escape); screenshots `narrow-*-2-list`, `-3-detail-appearance`, `-4-list-again`.
+- AC7 PARTIAL: settings-screen.chrome.test (drag regions, window controls on Windows/Linux, macOS left inset), desktop-chrome.test (macOS opaque panes + vibrancy sidebar hook). **Not verified in a real Tauri window** (no headless desktop run available); plan stays in `active/` for that reason.
+- AC8 registry untouched; all 11 settings test files pass (123 tests).
+- AC9 `tmp/screenshots/` (gitignored) — wide/narrow × light/dark, reviewed.
