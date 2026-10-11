@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { MoreHorizontal, Plug, Plus } from "lucide-react";
 
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -220,10 +221,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-mcp-servers">
       <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-ui-base font-medium text-foreground">MCP servers</h3>
-          {newServerButton}
-        </div>
+        <SettingsSectionTitle title="MCP servers" actions={newServerButton} />
 
         {servers === null ? (
           loadError ? (
@@ -253,12 +251,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
               <EmptyState
                 testId="mcp-empty-state"
                 title="No MCP servers yet"
-                description="Give agents tools like a browser (Playwright) — add an MCP server"
-                action={
-                  <Button type="button" size="sm" data-testid="mcp-empty-new-button" onClick={openNew}>
-                    <Plus aria-hidden className="size-3.5" /> New server
-                  </Button>
-                }
+                description="Give agents tools like a browser (Playwright) — add one with New server"
               />
             )}
             {(servers.length > 0 || openCard === "new") && (

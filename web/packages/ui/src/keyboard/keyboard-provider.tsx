@@ -103,6 +103,13 @@ interface KeyboardContextValue {
   modalOpen: boolean;
   /** Takes a modal lock; call the returned function to release it. Nested/overlapping dialogs are counted, not toggled. */
   acquireModalLock: () => () => void;
+  /**
+   * Narrows dispatch to `allowed` until the returned function is called: every other action is treated as
+   * unclaimed (a key falls through to the browser, `runAction` returns false). For a surface that covers
+   * the whole shell -- the Settings screen -- so shell-scoped handlers that stay mounted underneath it
+   * can't act. Prefer {@link useActionRestriction}.
+   */
+  restrictActions: (allowed: readonly ActionId[]) => () => void;
 }
 
 /** How close together two runs of the same action must be for the second to count as a duplicate of the first. */
@@ -128,6 +135,7 @@ const KeyboardContext = createContext<KeyboardContextValue>({
   runAction: () => false,
   modalOpen: false,
   acquireModalLock: () => () => {},
+  restrictActions: () => () => {},
 });
 
 export function KeyboardProvider({
@@ -155,6 +163,21 @@ export function KeyboardProvider({
       released = true;
       setModalCount((n) => Math.max(0, n - 1));
     };
+  }, []);
+
+  // A ref, like the handlers: read only at dispatch time. Last restriction
+  // wins; a stale release (an earlier owner unmounting late) is ignored.
+  const restrictionRef = useRef<ReadonlySet<ActionId> | null>(null);
+  const restrictActions = useCallback((allowed: readonly ActionId[]) => {
+    const mine = new Set(allowed);
+    restrictionRef.current = mine;
+    return () => {
+      if (restrictionRef.current === mine) restrictionRef.current = null;
+    };
+  }, []);
+  const isActionAllowed = useCallback((action: ActionId) => {
+    const restriction = restrictionRef.current;
+    return restriction === null || restriction.has(action);
   }, []);
 
   // Handlers live in a ref, not state: registering one must not re-render
@@ -196,6 +219,7 @@ export function KeyboardProvider({
 
   const runAction = useCallback(
     (action: ActionId, payload: ActionPayload = null, options: RunActionOptions = {}) => {
+      if (!isActionAllowed(action)) return false;
       const stack = handlers.current.get(action);
       if (!stack) return false;
       for (let i = stack.length - 1; i >= 0; i--) {
@@ -217,7 +241,7 @@ export function KeyboardProvider({
       }
       return false;
     },
-    [],
+    [isActionAllowed],
   );
 
   // `modalOpen` is read inside a listener registered once, so it goes
@@ -313,6 +337,7 @@ export function KeyboardProvider({
       // binding with nobody listening (no task selected, so nothing claims
       // `tab.close`) must leave the browser's own Cmd+W alone rather than
       // swallowing it into a no-op.
+      if (!isActionAllowed(resolution.match.action)) return;
       const stack = handlers.current.get(resolution.match.action);
       if (!stack?.some((entry) => entry.enabled)) return;
 
@@ -333,7 +358,7 @@ export function KeyboardProvider({
       window.removeEventListener("keydown", onKeyDown, true);
       if (chordTimeoutRef.current !== null) clearTimeout(chordTimeoutRef.current);
     };
-  }, [runAction, claimAction]);
+  }, [runAction, claimAction, isActionAllowed]);
 
   // D3.3: a native menu item click (or its accelerator, which the OS
   // routes to the menu) arrives as one `menu-action` event and is
@@ -391,6 +416,7 @@ export function KeyboardProvider({
       runAction,
       modalOpen,
       acquireModalLock,
+      restrictActions,
     }),
     [
       bindings,
@@ -403,6 +429,7 @@ export function KeyboardProvider({
       runAction,
       modalOpen,
       acquireModalLock,
+      restrictActions,
     ],
   );
 
@@ -457,4 +484,18 @@ export function useModalKeyboardLock(open: boolean): void {
     if (!open) return;
     return acquireModalLock();
   }, [open, acquireModalLock]);
+}
+
+/**
+ * While `allowed` is non-null, only those actions dispatch (keys, native
+ * menu, command palette alike); `null` lifts the restriction. Pass a stable
+ * reference (a module constant) -- the restriction re-applies whenever the
+ * identity changes.
+ */
+export function useActionRestriction(allowed: readonly ActionId[] | null): void {
+  const { restrictActions } = useKeyboard();
+  useEffect(() => {
+    if (allowed === null) return;
+    return restrictActions(allowed);
+  }, [allowed, restrictActions]);
 }
