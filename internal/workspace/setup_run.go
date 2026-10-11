@@ -198,3 +198,44 @@ func (m *Manager) RetrySetup(id int64) (store.Task, error) {
 	m.startSetup(t, ws)
 	return t, nil
 }
+
+// runTeardown runs ws's teardown script for t in its worktree, best effort:
+// a failure or timeout is appended to the task's setup_log and never
+// blocks the archive/delete (ADR-0024 §4).
+func (m *Manager) runTeardown(t store.Task, ws store.Workspace) {
+	if ws.TeardownScript == "" || t.WorktreePath == nil {
+		return
+	}
+	if err := m.checkSetupSupported(ws.TeardownScript); err != nil {
+		m.appendSetupLog(t.ID, "teardown skipped: "+err.Error())
+		return
+	}
+	// Re-read so SMIND_PORT reflects the stored row.
+	if fresh, err := m.store.GetTask(t.ID); err == nil {
+		t = fresh
+	}
+	tail, err := runScript(context.Background(), *t.WorktreePath, ws.TeardownScript, setupEnv(ws, t), m.worktreesSettings().TeardownTimeout, setupLogCap)
+	if err != nil {
+		m.appendSetupLog(t.ID, fmt.Sprintf("teardown failed: %v\n%s", err, tail))
+	}
+}
+
+// appendSetupLog appends msg to the task's setup_log, keeping the tail
+// within setupLogCap. Errors are logged, never returned.
+func (m *Manager) appendSetupLog(id int64, msg string) {
+	t, err := m.store.GetTask(id)
+	if err != nil {
+		return
+	}
+	cur := t.SetupLog
+	if cur != "" {
+		cur += "\n"
+	}
+	cur += "--- " + msg
+	if over := len(cur) - setupLogCap; over > 0 {
+		cur = cur[over:]
+	}
+	if _, err := m.store.UpdateTaskSetup(id, t.SetupStatus, t.SetupError, cur); err != nil {
+		log.Printf("workspace: append task %d setup log: %v", id, err)
+	}
+}

@@ -45,6 +45,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.get":                 handleTaskGet(wm),
 		"task.archive":             handleTaskArchive(wm, reg),
 		"task.move":                handleTaskMove(wm),
+		"task.retrySetup":          handleTaskRetrySetup(wm),
 		"task.diff":                handleTaskDiff(wm),
 		"task.files":               handleTaskFiles(wm),
 		"task.fileDiff":            handleTaskFileDiff(wm),
@@ -564,6 +565,20 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 			return nil, fmt.Errorf("task.archive: %w", err)
 		}
 		return t, nil
+	}
+}
+
+// handleTaskRetrySetup re-runs the workspace's setup script on a
+// non-running task (ADR-0024 §3).
+func handleTaskRetrySetup(wm *workspace.Manager) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		var p struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("task.retrySetup: invalid params: %w", err)
+		}
+		return wm.RetrySetup(p.ID)
 	}
 }
 
