@@ -1452,13 +1452,17 @@ func cmdTaskQueueLs(args []string) int {
 		return 0
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tPROMPT")
+	fmt.Fprintln(tw, "ID\tSTATUS\tSOURCE\tRUN\tPROMPT")
 	for _, item := range result.Items {
 		prompt := item.Prompt
 		if len(prompt) > 40 {
 			prompt = prompt[:40] + "..."
 		}
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, prompt)
+		runID := "-"
+		if item.RunID != nil && *item.RunID != "" {
+			runID = *item.RunID
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", item.ID, item.Status, item.Source, runID, prompt)
 	}
 	tw.Flush()
 	return 0
