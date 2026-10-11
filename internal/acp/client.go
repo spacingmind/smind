@@ -189,6 +189,24 @@ type agentCapabilityFlags struct {
 	SessionCapabilities struct {
 		Resume json.RawMessage `json:"resume"`
 	} `json:"sessionCapabilities"`
+	// Mcp is the v2 capabilities shape's top-level "mcp" key, when present
+	// (each transport is an object there: {} = supported, absent/null/
+	// false = not -- see SupportsMcpStdio). McpCapabilities is the v1
+	// shape; stdio needs no v1 key at all because ACP v1 makes stdio
+	// support mandatory for every agent.
+	Mcp             json.RawMessage `json:"mcp"`
+	McpCapabilities struct {
+		HTTP json.RawMessage `json:"http"`
+		SSE  json.RawMessage `json:"sse"`
+	} `json:"mcpCapabilities"`
+}
+
+// truthy reports whether a capability's raw JSON value means "supported":
+// non-empty, not JSON null, and not boolean false. Covers both the v1
+// boolean form ("true") and the v2 object form ("{}").
+func truthy(raw json.RawMessage) bool {
+	s := string(raw)
+	return len(raw) > 0 && s != "null" && s != "false"
 }
 
 // capabilityFlags decodes c.AgentCapabilities, ignoring a decode error (an
@@ -214,6 +232,55 @@ func (c *Client) SupportsLoadSession() bool {
 // resumes a session without replaying its history.
 func (c *Client) SupportsResumeSession() bool {
 	return c.capabilityFlags().SessionCapabilities.Resume != nil
+}
+
+// SupportsMcpStdio reports whether the connected agent can take
+// stdio-transport MCP servers in a session's mcpServers (ADR-0018
+// "Capability checks"). A v2 agent (top-level "mcp" capabilities key)
+// must advertise mcp.stdio as an object; a v1 agent supports stdio
+// unconditionally -- ACP v1 makes stdio mandatory -- so it's true even
+// with no mcpCapabilities key at all. Malformed capabilities decode to
+// the v1 baseline.
+func (c *Client) SupportsMcpStdio() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			Stdio json.RawMessage `json:"stdio"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.Stdio)
+	}
+	return true
+}
+
+// SupportsMcpHttp reports whether the connected agent can take
+// http-transport MCP servers: v2's mcp.http object, or v1's
+// mcpCapabilities.http boolean. Missing or malformed => false.
+func (c *Client) SupportsMcpHttp() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			HTTP json.RawMessage `json:"http"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.HTTP)
+	}
+	return truthy(f.McpCapabilities.HTTP)
+}
+
+// SupportsMcpSSE reports whether the connected agent can take
+// sse-transport MCP servers: v2's mcp.sse object, or v1's
+// mcpCapabilities.sse boolean. Missing or malformed => false.
+func (c *Client) SupportsMcpSSE() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			SSE json.RawMessage `json:"sse"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.SSE)
+	}
+	return truthy(f.McpCapabilities.SSE)
 }
 
 // ConfigOption mirrors ACP v2's SessionConfigOption: one entry of the
@@ -362,8 +429,8 @@ func (c *Client) Initialize(ctx context.Context) error {
 // and fs/write_text_file requests for this session are validated against.
 // It also returns the session's initial config options, if the agent sent
 // any.
-func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/new", newSessionParams{Cwd: cwd, McpServers: []any{}})
+func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []any) (string, []ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/new", newSessionParams{Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return "", nil, fmt.Errorf("acp: session/new: %w", err)
 	}
@@ -386,8 +453,8 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOp
 // calling LoadSession; this package's own callers don't need the replay
 // and let it go unsubscribed, which handleSessionUpdate silently drops
 // (see its doc comment).
-func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/load", loadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/load", loadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return nil, fmt.Errorf("acp: session/load: %w", err)
 	}
@@ -405,8 +472,8 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]Conf
 // an agent that advertises the sessionCapabilities.resume capability (see
 // SupportsResumeSession) but not loadSession -- the session's own history
 // isn't replayed back to the client, unlike LoadSession.
-func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/resume", resumeSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/resume", resumeSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return nil, fmt.Errorf("acp: session/resume: %w", err)
 	}

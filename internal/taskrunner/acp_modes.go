@@ -179,7 +179,7 @@ func (r *Runner) probeACPModes(ctx context.Context, provider Provider) error {
 	if err := client.Initialize(ctx); err != nil {
 		return fmt.Errorf("initialize: %w", err)
 	}
-	sessionID, options, err := client.NewSession(ctx, dir)
+	sessionID, options, err := client.NewSession(ctx, dir, nil) // probe: never spawn user MCP servers
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}

@@ -241,6 +241,35 @@ func runFakeClaudeCLI() {
 			"result":     "ok",
 		})
 
+	case "mcp-init":
+		// Emits an init system message reporting MCP server statuses the
+		// way the real CLI does, so a test can assert failed servers are
+		// surfaced.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "system",
+			"subtype":    "init",
+			"session_id": "sess-1",
+			"mcp_servers": []map[string]any{
+				{"name": "pw", "status": "connected"},
+				{"name": "broken", "status": "failed"},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": "ok"}},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "result",
+			"subtype":    "success",
+			"session_id": "sess-1",
+			"result":     "ok",
+		})
+
 	case "permission":
 		// Mirrors claude-agent-sdk-go's own fakecli_test.go
 		// "streaming_and_permission" scenario: issues a real can_use_tool
