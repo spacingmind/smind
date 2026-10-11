@@ -265,3 +265,29 @@ func runGitPushRef(t *testing.T, dir, bare, sha, ref string) {
 	t.Helper()
 	runGitT(t, dir, "push", bare, sha+":"+ref)
 }
+
+// TestManager_CreateTask_BaseRefSingleLevelAndSHA proves --allow-onelevel:
+// a single-level baseRef (bare local branch name) and a full commit SHA
+// both create a worktree at the right commit.
+func TestManager_CreateTask_BaseRefSingleLevelAndSHA(t *testing.T) {
+	m, wsID, repo, _, baseSHA, _ := newTaskRefEnv(t)
+
+	// Single-level ref: a bare local branch name off the base commit.
+	runGitT(t, repo, "branch", "feature", baseSHA)
+	t1, err := m.CreateTask(wsID, nil, "Single level", WithBaseRef("feature"))
+	if err != nil {
+		t.Fatalf("CreateTask(baseRef=feature) error = %v, want single-level refs accepted", err)
+	}
+	if got := worktreeHead(t, *t1.WorktreePath); got != baseSHA {
+		t.Fatalf("single-level worktree HEAD = %s, want %s", got, baseSHA)
+	}
+
+	// A full 40-hex commit SHA as the start point.
+	t2, err := m.CreateTask(wsID, nil, "By SHA", WithBaseRef(baseSHA))
+	if err != nil {
+		t.Fatalf("CreateTask(baseRef=<sha>) error = %v, want a SHA accepted", err)
+	}
+	if got := worktreeHead(t, *t2.WorktreePath); got != baseSHA {
+		t.Fatalf("sha worktree HEAD = %s, want %s", got, baseSHA)
+	}
+}

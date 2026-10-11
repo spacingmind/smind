@@ -67,6 +67,11 @@ func validateRefName(dir, ref string, isBranch bool) error {
 	args := []string{"check-ref-format"}
 	if isBranch {
 		args = append(args, "--branch")
+	} else {
+		// A baseRef may legitimately be a single-level ref (a bare local
+		// branch/tag name, or even a full commit SHA used as a start
+		// point), which plain check-ref-format rejects.
+		args = append(args, "--allow-onelevel")
 	}
 	args = append(args, ref)
 	if err := runGit(dir, args...); err != nil {
