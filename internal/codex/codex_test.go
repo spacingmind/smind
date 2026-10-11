@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 
-	fakeAgentPath = filepath.Join(dir, "fakeagent")
+	fakeAgentPath = filepath.Join(dir, exeName("fakeagent"))
 	build := exec.Command("go", "build", "-o", fakeAgentPath, "./fakeagent")
 	build.Dir, err = os.Getwd()
 	if err != nil {

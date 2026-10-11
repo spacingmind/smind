@@ -46,7 +46,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 
-	fakeACPAgentPath = filepath.Join(dir, "fakeagent")
+	fakeACPAgentPath = filepath.Join(dir, exeName("fakeagent"))
 	build := exec.Command("go", "build", "-o", fakeACPAgentPath, "./fakeagent")
 	build.Dir, err = os.Getwd()
 	if err != nil {
@@ -56,7 +56,7 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
 	}
 
-	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	fakeCodexAgentPath = filepath.Join(dir, exeName("codex-fakeagent"))
 	buildCodex := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent")
 	buildCodex.Dir, err = os.Getwd()
 	if err != nil {
