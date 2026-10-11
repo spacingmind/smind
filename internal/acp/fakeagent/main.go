@@ -14,6 +14,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -43,6 +44,21 @@ var (
 
 	releaseOnce sync.Once
 	releaseCh   = make(chan struct{})
+
+	// mcpCaps is scripted via an "mcp=stdio,http,sse" os.Args entry (any
+	// subset; "mcp=none" or absent advertises no mcp capability key at
+	// all). "mcp=" emits the v1 shape (mcpCapabilities booleans; stdio is
+	// implicitly mandatory in v1 so a stdio entry is ignored), "mcp2="
+	// emits the v2 object shape ("mcp":{"stdio":{},...}; an empty list
+	// emits "mcp":{}).
+	mcpCaps      []string
+	mcpCaps2     bool
+	mcpCaps2List []string
+
+	// lastMcpServers holds the raw mcpServers JSON the most recent
+	// session/new|load|resume carried, served back on
+	// "_test/last_mcp_servers" so tests can assert the exact wire shape.
+	lastMcpServers = []byte("[]")
 )
 
 func writeMessage(msg message) {
@@ -84,6 +100,17 @@ func respond(id json.RawMessage, result any) {
 }
 
 func main() {
+	for _, a := range os.Args[1:] {
+		if v, ok := strings.CutPrefix(a, "mcp2="); ok {
+			mcpCaps2 = true
+			if v != "" && v != "none" {
+				mcpCaps2List = strings.Split(v, ",")
+			}
+		} else if v, ok := strings.CutPrefix(a, "mcp="); ok && v != "none" {
+			mcpCaps = strings.Split(v, ",")
+		}
+	}
+
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
 	var sessionCwd string
 
@@ -104,18 +131,39 @@ func main() {
 func handle(msg message, sessionCwd *string) {
 	switch {
 	case msg.Method == "initialize":
+		caps := map[string]any{
+			"loadSession":         true,
+			"sessionCapabilities": map[string]any{"resume": map[string]any{}},
+		}
+		if mcpCaps2 {
+			mcp := map[string]any{}
+			for _, c := range mcpCaps2List {
+				mcp[c] = map[string]any{}
+			}
+			caps["mcp"] = mcp
+		} else if len(mcpCaps) > 0 {
+			mcpCapsObj := map[string]any{}
+			for _, c := range mcpCaps {
+				switch c {
+				case "http", "sse":
+					mcpCapsObj[c] = true
+				}
+			}
+			if len(mcpCapsObj) > 0 {
+				caps["mcpCapabilities"] = mcpCapsObj
+			}
+		}
 		respond(msg.ID, map[string]any{
-			"protocolVersion": 1,
-			"agentCapabilities": map[string]any{
-				"loadSession":         true,
-				"sessionCapabilities": map[string]any{"resume": map[string]any{}},
-			},
+			"protocolVersion":   1,
+			"agentCapabilities": caps,
 		})
 	case msg.Method == "session/new":
 		var params struct {
-			Cwd string `json:"cwd"`
+			Cwd        string          `json:"cwd"`
+			McpServers json.RawMessage `json:"mcpServers"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
+		recordMcpServers(params.McpServers)
 		*sessionCwd = params.Cwd
 		// Scripts a select-kind option (with its own enumerated choices,
 		// like GLM's real thinking-level tiers) and a boolean-kind option
@@ -157,8 +205,9 @@ func handle(msg message, sessionCwd *string) {
 		})
 	case msg.Method == "session/load" || msg.Method == "session/resume":
 		var params struct {
-			SessionID string `json:"sessionId"`
-			Cwd       string `json:"cwd"`
+			SessionID  string          `json:"sessionId"`
+			Cwd        string          `json:"cwd"`
+			McpServers json.RawMessage `json:"mcpServers"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		if params.SessionID != sessionID {
@@ -167,6 +216,7 @@ func handle(msg message, sessionCwd *string) {
 			}})
 			return
 		}
+		recordMcpServers(params.McpServers)
 		*sessionCwd = params.Cwd
 		respond(msg.ID, map[string]any{
 			"configOptions": []map[string]any{{
@@ -192,6 +242,8 @@ func handle(msg message, sessionCwd *string) {
 		}
 	case msg.Method == "session/prompt":
 		go runPromptScript(msg, *sessionCwd)
+	case msg.Method == "_test/last_mcp_servers":
+		respond(msg.ID, map[string]any{"mcpServers": json.RawMessage(lastMcpServers)})
 	case msg.Method == "_test/release":
 		releaseOnce.Do(func() { close(releaseCh) })
 	case msg.Method == "" && len(msg.ID) > 0:
@@ -206,6 +258,13 @@ func handle(msg message, sessionCwd *string) {
 			}
 		}
 	}
+}
+
+func recordMcpServers(raw json.RawMessage) {
+	if len(raw) == 0 {
+		raw = json.RawMessage("[]")
+	}
+	lastMcpServers = append([]byte(nil), raw...)
 }
 
 func sessionUpdate(update map[string]any) {
