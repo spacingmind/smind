@@ -114,6 +114,15 @@ export interface DesktopApi {
    * id, which the UI dispatches through the keyboard action registry.
    */
   onMenuAction(cb: (action: ActionId) => void): () => void;
+  /**
+   * The native window's theme -- on desktop the source of truth for the
+   * "system" preference. On Windows the webview's `prefers-color-scheme`
+   * follows a WebView2 profile setting the shell only updates on theme-change
+   * events, so it can disagree with the OS; the window's own theme doesn't.
+   */
+  getSystemTheme(): Promise<"light" | "dark">;
+  /** Calls `cb` when the native window theme changes (OS theme flip while following the system); returns an unsubscribe function. */
+  onSystemThemeChanged(cb: (theme: "light" | "dark") => void): () => void;
   /** Detected installed editors plus the platform file manager (desktop-native-feel D4.2), from a fixed Rust-side allowlist. */
   editorsList(): Promise<EditorInfo[]>;
   /**
@@ -186,6 +195,8 @@ function unavailable(): DesktopApi {
     getCurrentConnection: () => reject(),
     openExternal: () => reject(),
     quit: () => reject(),
+    getSystemTheme: () => reject(),
+    onSystemThemeChanged: () => () => {},
     menuAction: () => reject(),
     daemonStatus: () => reject(),
     daemonInstall: () => reject(),
@@ -268,6 +279,29 @@ function realDesktopApi(): DesktopApi {
     async quit() {
       const invoke = await loadInvoke();
       await invoke("app_quit");
+    },
+    async getSystemTheme() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      return (await getCurrentWindow().theme()) === "dark" ? "dark" : "light";
+    },
+    onSystemThemeChanged(cb) {
+      let unlisten: (() => void) | null = null;
+      let cancelled = false;
+      import("@tauri-apps/api/window")
+        .then(({ getCurrentWindow }) =>
+          getCurrentWindow().onThemeChanged((event) =>
+            cb(event.payload === "dark" ? "dark" : "light"),
+          ),
+        )
+        .then((fn) => {
+          if (cancelled) fn();
+          else unlisten = fn;
+        })
+        .catch(() => {});
+      return () => {
+        cancelled = true;
+        unlisten?.();
+      };
     },
     async menuAction(id) {
       const invoke = await loadInvoke();

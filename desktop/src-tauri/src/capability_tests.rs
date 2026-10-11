@@ -47,6 +47,7 @@ fn capability_allowlist_exact() {
         "core:window:allow-start-dragging",
         "core:window:allow-is-maximized",
         "core:window:allow-is-fullscreen",
+        "core:window:allow-theme",
         "core:event:allow-listen",
         "core:event:allow-unlisten",
     ];

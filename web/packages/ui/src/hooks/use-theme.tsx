@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { desktopWindow, isDesktop } from "@/lib/platform";
+import { desktop, desktopWindow, isDesktop } from "@/lib/platform";
 import {
   applyResolvedTheme,
   readStoredThemePreference,
@@ -80,10 +80,33 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // Desktop build: mirror the theme into the native window (vibrancy and
   // chrome appearance follow it, and the next launch paints this surface
   // before the UI loads -- desktop-native-feel D2.1). Best-effort.
+  //
+  // For "system" the native window theme -- not matchMedia -- is the source
+  // of truth on desktop: WebView2's `prefers-color-scheme` follows a profile
+  // setting that can lag or disagree with the OS (see platform.ts). The
+  // native theme is read *after* `setTheme("system")` has released any forced
+  // light/dark, so it reports the OS. Idempotent: re-reading the same value
+  // changes no state, so this can't loop with the resolved-theme dependency.
   useEffect(() => {
     if (!isDesktop) return;
-    desktopWindow.setTheme(preference, resolved).catch(() => {});
+    let cancelled = false;
+    desktopWindow
+      .setTheme(preference, resolved)
+      .then(() => (preference === "system" ? desktop.getSystemTheme() : null))
+      .then((native) => {
+        if (!cancelled && native) setSystemPrefersDark(native === "dark");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [preference, resolved]);
+
+  // Desktop: follow the native window's theme changes while on "system".
+  useEffect(() => {
+    if (!isDesktop || preference !== "system") return;
+    return desktop.onSystemThemeChanged((theme) => setSystemPrefersDark(theme === "dark"));
+  }, [preference]);
 
   // Only listens while "system" is selected, so a light/dark-pinned user
   // never has the OS query silently steer them back -- matches the plan's
