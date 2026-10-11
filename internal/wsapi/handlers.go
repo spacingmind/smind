@@ -43,7 +43,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"task.create":              handleTaskCreate(wm),
 		"task.list":                handleTaskList(wm),
 		"task.get":                 handleTaskGet(wm),
-		"task.archive":             handleTaskArchive(wm),
+		"task.archive":             handleTaskArchive(wm, reg),
 		"task.move":                handleTaskMove(wm),
 		"task.diff":                handleTaskDiff(wm),
 		"task.files":               handleTaskFiles(wm),
@@ -532,13 +532,27 @@ func handleTaskMove(wm *workspace.Manager) handlerFunc {
 	}
 }
 
-func handleTaskArchive(wm *workspace.Manager) handlerFunc {
+// handleTaskArchive archives a task, refusing while any of its chats has
+// a running run or a queued prompt (see Registry.ActiveRunForTask): the
+// run's subprocess sits inside the task's worktree, so archiving under it
+// would destroy the directory a live agent is working in. The caller must
+// run.stop (and cancel queued items) first. The guard lives here, in the
+// daemon layer that holds both the workspace manager and the runs
+// registry, so the web UI gets it too. Past the guard, ArchiveTask's
+// checkpoint-first ordering is unchanged.
+func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
 			ID int64 `json:"id"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
+		}
+		if runID, queued, active := reg.ActiveRunForTask(p.ID); active {
+			if queued {
+				return nil, fmt.Errorf("task.archive: task %d has a queued prompt waiting to run; cancel it or let it finish first", p.ID)
+			}
+			return nil, fmt.Errorf("task.archive: task %d has a running run (%s); stop it (run.stop) first", p.ID, runID)
 		}
 		return wm.ArchiveTask(p.ID)
 	}

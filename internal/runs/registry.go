@@ -1245,3 +1245,45 @@ func newRunID() (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// ActiveRunForTask reports whether any of taskID's chats has an active
+// run: one that is StatusRunning, or (queued=true) a chat_queue item
+// still waiting to be delivered. It exists for the daemon's archive
+// guard (task.archive must refuse while work is in flight), scanning the
+// registry's in-memory runs plus the persisted queue, since queued items
+// belong to chats that have no run yet. The runID of the running run is
+// returned when one exists; for the queued case it is "" and queued is
+// true.
+func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, ok bool) {
+	reg.mu.Lock()
+	for _, r := range reg.runs {
+		if r.taskID != taskID {
+			continue
+		}
+		r.mu.Lock()
+		running := r.status == StatusRunning
+		r.mu.Unlock()
+		if running {
+			reg.mu.Unlock()
+			return r.id, false, true
+		}
+	}
+	reg.mu.Unlock()
+
+	chats, err := reg.st.ListChatsByTask(taskID, true)
+	if err != nil {
+		return "", false, false
+	}
+	for _, c := range chats {
+		items, err := reg.st.ListChatQueue(c.ID)
+		if err != nil {
+			return "", false, false
+		}
+		for _, item := range items {
+			if item.Status == store.ChatQueueStatusQueued {
+				return "", true, true
+			}
+		}
+	}
+	return "", false, false
+}
