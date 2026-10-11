@@ -72,6 +72,7 @@ import {
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
 import {
@@ -1652,7 +1653,8 @@ function TaskRows({
                * in the accessible name, so neither a test nor a screen
                * reader has to tell them apart by colour.
                */}
-              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
+              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
                 {reason && (
                   <StatusDot
                     status={attentionDotStatus(reason)}
