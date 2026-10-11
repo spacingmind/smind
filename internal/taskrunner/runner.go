@@ -277,6 +277,13 @@ func (r *Runner) lookPathFunc() func(string) (string, error) {
 // auto-accept), without one acp.AutoApprovePolicy is installed. Whatever
 // the provider's mode still escalates goes to decider.
 //
+// model is the requested model (ADR-0025): "" leaves the provider's
+// default in place and changes nothing about the spawn; otherwise it is
+// validated (syntax always, membership once the provider's catalog is
+// discovered) before anything is spawned, then applied natively -- Claude's
+// --model, an ACP session/set_config_option on the agent's model option,
+// Codex's thread/start `model`.
+//
 // thinkingLevel is Claude-only (see ThinkingLevel's doc comment): every
 // other provider ignores it entirely, regardless of what it's set to.
 // ThinkingLevelUnspecified (the zero value) preserves today's behavior
@@ -287,7 +294,7 @@ func (r *Runner) lookPathFunc() func(string) (string, error) {
 // propagates into the backend's turn call, aborting it, after which the
 // client is still closed as normal -- so a cancelled RunPrompt does not
 // leak the subprocess.
-func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider Provider, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, model string, events chan<- Event) error {
 	defer close(events)
 
 	task, err := r.wm.GetTask(taskID)
@@ -299,13 +306,21 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 	}
 	worktreePath := *task.WorktreePath
 
+	if model != "" {
+		if catalog, ok := r.ProviderCatalogFor(provider); ok {
+			if err := ValidateModel(catalog, model); err != nil {
+				return fmt.Errorf("taskrunner: %w", err)
+			}
+		}
+	}
+
 	switch provider {
 	case ProviderGLM, ProviderKimi:
-		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, events)
+		return r.runACP(ctx, chatID, task.WorkspaceID, provider, worktreePath, prompt, decider, perm, model, events)
 	case ProviderClaudeNative:
-		return r.runClaudeNative(ctx, chatID, task.WorkspaceID, worktreePath, workspace.TaskEnv(task), prompt, decider, perm, thinkingLevel, events)
+		return r.runClaudeNative(ctx, chatID, task.WorkspaceID, worktreePath, workspace.TaskEnv(task), prompt, decider, perm, thinkingLevel, model, events)
 	case ProviderCodexNative:
-		return r.runCodexNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, events)
+		return r.runCodexNative(ctx, chatID, task.WorkspaceID, worktreePath, prompt, decider, perm, model, events)
 	default:
 		return fmt.Errorf("taskrunner: unknown provider %q", provider)
 	}
@@ -316,7 +331,7 @@ func (r *Runner) RunPrompt(ctx context.Context, taskID, chatID int64, provider P
 // them to -- everything else about the ACP session/prompt/streaming flow is
 // identical, since it's the same wire protocol regardless of which agent is
 // on the other end of it.
-func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
+func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, provider Provider, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, model string, events chan<- Event) error {
 	command, ok := r.acpCommands[provider]
 	if !ok {
 		return fmt.Errorf("taskrunner: no ACP command configured for provider %q", provider)
@@ -382,6 +397,10 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	updated, err := applyACPMode(ctx, client, sessionID, configOptions, perm.Mode)
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s set permission mode %q: %w", provider, perm.Mode, err)
+	}
+	updated, err = applyACPModel(ctx, client, sessionID, updated, model)
+	if err != nil {
+		return fmt.Errorf("taskrunner: %s set model %q: %w", provider, model, err)
 	}
 	// Published only once the start mode is applied: until then a
 	// SetPermissionMode can't reach the session (it fails as "no live
@@ -646,7 +665,7 @@ const claudeDialogTimeoutEnv = "CLAUDE_CODE_USER_DIALOG_TIMEOUT_MS"
 // internal/runs, because runs imports taskrunner (import cycle).
 const claudeDialogTimeoutMS = "3600000"
 
-func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath string, taskEnv []string, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, events chan<- Event) error {
+func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath string, taskEnv []string, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, model string, events chan<- Event) error {
 	var opts []claudecode.Option
 	// ADR-0024: the task's SMIND_PORT (when a port range is configured).
 	if len(taskEnv) > 0 {
@@ -690,6 +709,9 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		// No thinking Option at all -- preserves today's SDK default
 		// exactly, for an older client or any request that never set the
 		// field.
+	}
+	if model != "" && model != ClaudeModelDefault {
+		opts = append(opts, claudecode.WithModel(model))
 	}
 	mode := perm.Mode
 	if mode == "" {
@@ -910,7 +932,7 @@ func claudeToolUseEvent(msg claudecode.Message, id, name string, input map[strin
 // Shaped like runACP (an explicit Initialize/NewSession handshake, unlike
 // runClaudeNative), since codex.Client needs the same two-step setup ACP
 // clients do.
-func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, events chan<- Event) error {
+func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, worktreePath, prompt string, decider PermissionDecider, perm PermissionSettings, model string, events chan<- Event) error {
 	mode := perm.Mode
 	if mode == "" {
 		mode = CodexModeAuto
@@ -922,6 +944,9 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 	// The mode's own approvalPolicy/sandbox pair (ADR-0019) -- Codex itself
 	// decides what to escalate; whatever it does reaches decider.
 	opts := []codex.Option{codex.WithThreadPolicy(preset.approvalPolicy, preset.sandbox)}
+	if model != "" {
+		opts = append(opts, codex.WithModel(model))
+	}
 	switch {
 	case decider != nil:
 		opts = append(opts, codex.WithPermissionPolicy(codexDeciderAdapter{decider}))

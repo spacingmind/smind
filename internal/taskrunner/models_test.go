@@ -1,9 +1,15 @@
 package taskrunner
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/workspace"
 )
 
 func TestModel_ValidationRejectsBadStrings(t *testing.T) {
@@ -143,4 +149,191 @@ func TestProviderList_CodexModelListUnavailableFallback(t *testing.T) {
 	if err := ValidateModel(p, "gpt-anything"); err != nil {
 		t.Fatalf("ValidateModel() = %v, want the string accepted", err)
 	}
+}
+
+// runModelPrompt runs one RunPrompt to completion and returns its error.
+func runModelPrompt(t *testing.T, r *Runner, taskID int64, provider Provider, model string) error {
+	t.Helper()
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), taskID, taskID, provider, "hi", nil, PermissionSettings{}, "", model, events)
+	}()
+	drainEvents(events)
+	return <-errCh
+}
+
+func glmRunnerArgs(wm *workspace.Manager, args ...string) *Runner {
+	r := New(wm)
+	r.newACPClient = func(_ []string, opts ...acp.Option) (acpBackend, error) {
+		return acp.New(append([]string{fakeACPAgentPath}, args...), opts...)
+	}
+	return r
+}
+
+func readLog(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return ""
+	}
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func TestRunClaudeNative_WithModelOption(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		model, want string
+	}{
+		{"claude-opus-5-5", "claude-opus-5-5"},
+		{"sonnet", "sonnet"},
+		{ClaudeModelDefault, ""}, // the synthetic default means no flag
+		{"", ""},
+	} {
+		t.Run("model="+tc.model, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "echo-args")
+			r := claudeNativeRunner(t, wm)
+			if err := runModelPrompt(t, r, task.ID, ProviderClaudeNative, tc.model); err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			args := strings.Split(readArgsFile(t, *task.WorktreePath), "\n")
+			got, has := flagValue(args, "--model")
+			if tc.want == "" {
+				if has {
+					t.Fatalf("--model present for model %q: %q", tc.model, args)
+				}
+				return
+			}
+			if !has || got != tc.want {
+				t.Fatalf("--model = %q (present %v), want %q; args %q", got, has, tc.want, args)
+			}
+		})
+	}
+}
+
+func TestRunACP_AppliesModelConfigOption(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, model, wantLog string
+	}{
+		{"switches", "fake-model-b", "set_config_option:model:fake-model-b"},
+		{"already current", "fake-model-a", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			wm, task := newTestTask(t, "reply")
+			r := glmRunnerArgs(wm, "models")
+			if err := runModelPrompt(t, r, task.ID, ProviderGLM, tc.model); err != nil {
+				t.Fatalf("RunPrompt() error = %v", err)
+			}
+			if got := readLog(t, filepath.Join(*task.WorktreePath, "session-model")); got != tc.wantLog {
+				t.Fatalf("session-model log = %q, want %q", got, tc.wantLog)
+			}
+		})
+	}
+}
+
+// The agent's own rejection of an (undiscovered) model fails the run
+// start, and the prompt never runs.
+func TestRunACP_ModelRejectedFailsStart(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "reply")
+	r := glmRunnerArgs(wm, "models")
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "bad-model", events)
+	}()
+	got := drainEvents(events)
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "unsupported model: bad-model") {
+		t.Fatalf("RunPrompt() error = %v, want the agent's own rejection", err)
+	}
+	if texts := eventTexts(got); len(texts) != 0 {
+		t.Fatalf("prompt ran despite model rejection: %v", texts)
+	}
+}
+
+// Once a provider's models are discovered, an unknown id is rejected up
+// front (no spawn), listing the valid ids.
+func TestRunACP_UnknownModelRejectedWhenDiscovered(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "reply")
+	r := glmRunnerArgs(wm, "models")
+	// A first run discovers the catalog from its session/new.
+	if err := runModelPrompt(t, r, task.ID, ProviderGLM, ""); err != nil {
+		t.Fatalf("discovery run error = %v", err)
+	}
+	spawned := false
+	inner := r.newACPClient
+	r.newACPClient = func(cmd []string, opts ...acp.Option) (acpBackend, error) {
+		spawned = true
+		return inner(cmd, opts...)
+	}
+	err := runModelPrompt(t, r, task.ID, ProviderGLM, "nope")
+	if err == nil || !strings.Contains(err.Error(), "fake-model-a, fake-model-b") {
+		t.Fatalf("RunPrompt() error = %v, want an invalid-model error listing valid ids", err)
+	}
+	if spawned {
+		t.Fatal("an agent was spawned for a model rejected up front")
+	}
+}
+
+func TestRunCodex_ModelInThreadStart(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "reply")
+	r := codexRunner(wm)
+	if err := runModelPrompt(t, r, task.ID, ProviderCodexNative, "gpt-fake-b"); err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	if got := readLog(t, filepath.Join(*task.WorktreePath, "thread-model")); got != "gpt-fake-b" {
+		t.Fatalf("thread/start model = %q, want gpt-fake-b", got)
+	}
+	// A resumed thread (second run on the same chat) carries it too.
+	if err := runModelPrompt(t, r, task.ID, ProviderCodexNative, "gpt-fake-a"); err != nil {
+		t.Fatalf("second RunPrompt() error = %v", err)
+	}
+	if got := readLog(t, filepath.Join(*task.WorktreePath, "thread-model")); got != "gpt-fake-a" {
+		t.Fatalf("thread/resume model = %q, want gpt-fake-a", got)
+	}
+}
+
+// An empty model changes nothing about any spawn: no --model flag, no
+// set_config_option for the model, no `model` in thread/start.
+func TestRunStart_ModelEmptyIsDefault(t *testing.T) {
+	t.Parallel()
+	t.Run("claude", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "echo-args")
+		if err := runModelPrompt(t, claudeNativeRunner(t, wm), task.ID, ProviderClaudeNative, ""); err != nil {
+			t.Fatalf("RunPrompt() error = %v", err)
+		}
+		if got := readArgsFile(t, *task.WorktreePath); strings.Contains(got, "--model") {
+			t.Fatalf("args contain --model: %q", got)
+		}
+	})
+	t.Run("acp", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "reply")
+		if err := runModelPrompt(t, glmRunnerArgs(wm, "models"), task.ID, ProviderGLM, ""); err != nil {
+			t.Fatalf("RunPrompt() error = %v", err)
+		}
+		if got := readLog(t, filepath.Join(*task.WorktreePath, "session-model")); got != "" {
+			t.Fatalf("session-model log = %q, want none", got)
+		}
+	})
+	t.Run("codex", func(t *testing.T) {
+		t.Parallel()
+		wm, task := newTestTask(t, "reply")
+		if err := runModelPrompt(t, codexRunner(wm), task.ID, ProviderCodexNative, ""); err != nil {
+			t.Fatalf("RunPrompt() error = %v", err)
+		}
+		if got := readLog(t, filepath.Join(*task.WorktreePath, "thread-model")); got != "" {
+			t.Fatalf("thread/start model = %q, want none", got)
+		}
+	})
 }

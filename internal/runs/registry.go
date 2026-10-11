@@ -333,6 +333,11 @@ type run struct {
 	// to feed.
 	thinkingLevel taskrunner.ThinkingLevel
 
+	// model is the model this run was asked to use (ADR-0025), "" for the
+	// provider's default; set at Start, immutable thereafter, and also
+	// persisted on the run row (store.Run.Model) so history shows the ask.
+	model string
+
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
 	// it. runPermissionDecider selects on it directly (not just on
@@ -758,7 +763,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
