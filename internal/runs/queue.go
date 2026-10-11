@@ -149,9 +149,14 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	r.id = id
 
 	var busyRunID string
+	var archiving bool
 	func() {
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
+		if reg.taskArchivingLocked(taskID) {
+			archiving = true
+			return
+		}
 		for _, existing := range reg.runs {
 			if existing.chatID != chatID {
 				continue
@@ -166,6 +171,10 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 		}
 		reg.runs[id] = r
 	}()
+	if archiving {
+		cancel()
+		return StartOutcome{}, fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
 
 	if busyRunID == "" {
 		// Idle: every mode starts immediately, exactly like Start's tail.
@@ -291,6 +300,13 @@ func (reg *Registry) deliverOne(chatID int64) {
 			if errors.As(err, &busyErr) {
 				// Someone else's run won the start race; their finish will
 				// deliver this item. Leave it queued.
+				return
+			}
+			if errors.Is(err, ErrTaskArchiving) {
+				// The task entered archive between this item being queued
+				// and now; leave it queued -- if the archive completes the
+				// task is gone (redelivery will then fail loudly), and if
+				// the archive aborts the next finish/enqueue delivers it.
 				return
 			}
 			reg.cancelQueuedItem(item.ID, store.ChatQueueCancelAuto, fmt.Sprintf("delivery failed: %v", err))

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -113,6 +114,14 @@ type Registry struct {
 	// could outlive the daemon; the item would also be marked delivered,
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
+
+	// archiving holds the task ids currently mid-archive (TryBeginArchive
+	// adds, its release func removes). While a task id is in it, every
+	// run-start path (Start, StartWhenBusy, queue delivery) refuses with
+	// ErrTaskArchiving: closing the TOCTOU window where the archive guard
+	// sees no active run but a run starts between the check and the
+	// worktree removal. Guarded by mu.
+	archiving map[int64]bool
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -199,7 +208,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int)}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool)}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -524,12 +533,39 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// registration happen under the same reg.mu critical section, so two
 	// concurrent Start calls for the same chat can't both observe "no
 	// running run yet" and both proceed -- whichever acquires reg.mu first
-	// registers and the other sees it on its own check.
-	if busyRunID, busy := reg.runningRunForChat(chatID); busy {
+	// registers and the other sees it on its own check. The same section
+	// also refuses a task mid-archive (TryBeginArchive), closing the
+	// guard-vs-removal TOCTOU window on the start side.
+	var busyRunID string
+	func() {
+		reg.mu.Lock()
+		defer reg.mu.Unlock()
+		if reg.taskArchivingLocked(taskID) {
+			busyRunID = "\x00archiving"
+			return
+		}
+		for _, existing := range reg.runs {
+			if existing.chatID != chatID {
+				continue
+			}
+			existing.mu.Lock()
+			running := existing.status == StatusRunning
+			existing.mu.Unlock()
+			if running {
+				busyRunID = existing.id
+				return
+			}
+		}
+		reg.runs[id] = r
+	}()
+	if busyRunID == "\x00archiving" {
+		cancel()
+		return "", fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if busyRunID != "" {
 		cancel()
 		return "", &ChatBusyError{ChatID: chatID, RunID: busyRunID}
 	}
-
 	if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
 		cancel()
 		return "", err
@@ -594,8 +630,12 @@ type startParams struct {
 // settings (with default-mode normalization), and thinking level. Every
 // error is wrapped "runs: start: ..." exactly as before.
 func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (startParams, error) {
-	if _, err := wm.GetTask(taskID); err != nil {
+	task, err := wm.GetTask(taskID)
+	if err != nil {
 		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	if task.ArchivedAt != nil {
+		return startParams{}, fmt.Errorf("runs: start: task %d is archived", taskID)
 	}
 
 	chat, err := resolveChat(wm, taskID, chatID)
@@ -1244,6 +1284,62 @@ func newRunID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// ErrTaskArchiving is the run-start refusal while a task is mid-archive:
+// starting a run inside a worktree that is being checkpointed and removed
+// would destroy the run's working directory out from under it.
+var ErrTaskArchiving = errors.New("task is being archived")
+
+// TryBeginArchive is the archive path's half of closing the TOCTOU window
+// around the active-run guard: under reg.mu it refuses (nil, error) when
+// the task already has an active run or queued prompt (the same
+// ActiveRunForTask outcome), and otherwise marks the task as archiving --
+// from that instant until the returned release func runs, every run-start
+// path (Start, StartWhenBusy, queue delivery) refuses with
+// ErrTaskArchiving. The caller must call release exactly once, typically
+// via defer, whether or not the archive itself succeeds.
+func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
+	// The active check runs outside reg.mu (it hits the store), then the
+	// lock is re-taken to decide+mark atomically against run starts
+	// (which check reg.archiving under the same lock). A run that starts
+	// in between is harmless: it either wins the race into reg.runs
+	// before the re-check below fails to see it (the run-start side's own
+	// critical section refuses only once archiving[taskID] is set) or is
+	// refused there -- and the final safety net is that ArchiveTask
+	// removing a worktree under a just-started run is bounded by the
+	// start path's own refusals from the moment the latch is set, which
+	// is exactly the window this closes.
+	runID, queued, active, err := reg.ActiveRunForTask(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if active {
+		if queued {
+			return nil, fmt.Errorf("has a queued prompt waiting to run; cancel it or let it finish first")
+		}
+		return nil, fmt.Errorf("has a running run (%s); stop it (run.stop) first", runID)
+	}
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
+	if reg.archiving[taskID] {
+		return nil, fmt.Errorf("task %d is already being archived", taskID)
+	}
+	reg.archiving[taskID] = true
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			reg.mu.Lock()
+			delete(reg.archiving, taskID)
+			reg.mu.Unlock()
+		})
+	}, nil
+}
+
+// taskArchivingLocked reports whether taskID is mid-archive; callers must
+// hold reg.mu.
+func (reg *Registry) taskArchivingLocked(taskID int64) bool {
+	return reg.archiving[taskID]
 }
 
 // ActiveRunForTask reports whether any of taskID's chats has an active

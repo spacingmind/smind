@@ -2,8 +2,13 @@ package wsapi
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"os"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/store"
+	"github.com/spacingmind/smind/internal/taskrunner"
+	"github.com/spacingmind/smind/internal/workspace"
 	"testing"
 	"time"
 
@@ -163,5 +168,97 @@ func TestTaskArchive_FailsClosedOnStoreError(t *testing.T) {
 	}
 	if _, err := os.Stat(*task.WorktreePath); err != nil {
 		t.Fatalf("worktree dir gone after a failed-closed archive, want it kept: %v", err)
+	}
+}
+
+// TestTaskArchive_BlocksRunStartWhileArchiving proves the archive latch:
+// while a task is mid-archive (TryBeginArchive held), run.start is
+// refused with the archiving error, and succeeds again after release.
+// Deterministic: the latch is taken directly on the server's registry, so
+// no timing race is involved.
+func wsapiNew(t *testing.T, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*API, error) {
+	t.Helper()
+	return New(wm, newTestAccountsRegistry(t), runner, db, token)
+}
+
+func TestTaskArchive_BlocksRunStartWhileArchiving(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	// Build via wsapi.New (not Handler) so the test holds the same
+	// *runs.Registry the handler closures close over -- the latch must be
+	// taken on exactly that registry for the refusal to be visible on the
+	// wire.
+	api, err := wsapiNew(t, wm, runner, db, "tok")
+	if err != nil {
+		t.Fatalf("wsapi.New() error = %v", err)
+	}
+	srv := httptest.NewServer(api.Handler)
+	t.Cleanup(srv.Close)
+	ws := dialWS(t, srv, "tok")
+	reg := api.Runs
+
+	release, err := reg.TryBeginArchive(task.ID)
+	if err != nil {
+		t.Fatalf("TryBeginArchive() error = %v", err)
+	}
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("run.start while archiving: error = nil, want the archiving refusal")
+	}
+	if !strings.Contains(resp.Error.Message, "being archived") {
+		t.Fatalf("error = %q, want the 'task is being archived' reason", resp.Error.Message)
+	}
+
+	// A second TryBeginArchive while held is also refused.
+	if _, err := reg.TryBeginArchive(task.ID); err == nil {
+		t.Fatal("second TryBeginArchive while held: error = nil, want refusal")
+	}
+
+	release()
+
+	sendRequest(t, ws, "2", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	resp = readEnvelopeFor(t, ws, "2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.start after release error = %v, want success", resp.Error.Message)
+	}
+	var started runStartResult
+	if err := json.Unmarshal(resp.Result, &started); err != nil {
+		t.Fatalf("decode run.start result: %v", err)
+	}
+	sendRequest(t, ws, "3", "run.stop", map[string]any{"runId": started.RunID})
+	readEnvelopeFor(t, ws, "3", 5*time.Second)
+}
+
+// TestRunStart_RefusesArchivedTask proves run.start (and therefore the
+// queue delivery path sharing prepareStart) refuses an archived task.
+func TestRunStart_RefusesArchivedTask(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	if _, err := wm.ArchiveTask(task.ID); err != nil {
+		t.Fatalf("ArchiveTask() error = %v", err)
+	}
+
+	sendRequest(t, ws, "1", "run.start", map[string]any{
+		"taskId": task.ID, "provider": "glm", "prompt": "hi",
+	})
+	resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("run.start on an archived task: error = nil, want refusal")
+	}
+	if !strings.Contains(resp.Error.Message, "archived") {
+		t.Fatalf("error = %q, want it to say the task is archived", resp.Error.Message)
 	}
 }
