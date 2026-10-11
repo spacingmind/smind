@@ -176,6 +176,21 @@ export function matchCombo(combo: KeyCombo, event: KeyEventLike, isMac: boolean)
   return keyMatches(combo, event);
 }
 
+/** Ctrl+[ is ESC, Ctrl+] the telnet escape, Ctrl+\ SIGQUIT -- control bytes like the letters. */
+const SHELL_PUNCT_CODES = new Set(["BracketLeft", "BracketRight", "Backslash"]);
+
+/**
+ * Whether a combo is a bare Ctrl+letter/[/]/\\ -- a readline/shell control byte
+ * (Ctrl+W, Ctrl+K, ...) that a focused terminal must receive. On Mac `Mod`
+ * is Cmd, so only an explicit `Ctrl` counts there.
+ */
+export function isShellControlKey(combo: KeyCombo, isMac: boolean): boolean {
+  const ctrl = combo.ctrl === true || (combo.mod === true && !isMac);
+  const meta = combo.meta === true || (combo.mod === true && isMac);
+  const shellKey = /^Key[A-Z]$/.test(combo.code) || SHELL_PUNCT_CODES.has(combo.code);
+  return ctrl && !meta && combo.alt !== true && combo.shift !== true && shellKey;
+}
+
 /**
  * A combo's platform-resolved spelling, for comparing two combos rather
  * than displaying one.

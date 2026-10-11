@@ -7,7 +7,13 @@ import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provid
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
+import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
+
+let mockLocalPathActions: LocalPathActions | null = null;
+vi.mock("@/hooks/use-local-path-actions", () => ({
+  useLocalPathActions: () => mockLocalPathActions,
+}));
 
 const WORKSPACE: Workspace = {
   ID: 1,
@@ -92,6 +98,82 @@ async function resolveWorkspaceTree(client: FakeWsClient, workspace: Workspace, 
 }
 
 describe("AppSidebar", () => {
+  describe("workspace row context menu", () => {
+    afterEach(() => {
+      mockLocalPathActions = null;
+    });
+
+    async function mountTree(client: FakeWsClient) {
+      render(
+        <SidebarProvider>
+          <AppSidebar client={client as never} selectedTaskId={null} />
+        </SidebarProvider>,
+      );
+      await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
+      return await screen.findByTestId("sidebar-workspace-row");
+    }
+
+    async function labels(container: HTMLElement): Promise<string[]> {
+      return within(container)
+        .getAllByRole("menuitem")
+        .map((el) => el.textContent ?? "");
+    }
+
+    it.each([
+      ["with localPathActions", true],
+      ["without localPathActions", false],
+    ])("workspace row context menu mirrors the actions menu (%s)", async (_name, local) => {
+      mockLocalPathActions = local
+        ? {
+            revealLabel: "Reveal in Finder",
+            editors: [{ id: "vscode", label: "VS Code", kind: "editor" }] as never,
+            reveal: vi.fn(),
+            open: vi.fn(),
+          }
+        : null;
+      const client = new FakeWsClient();
+      const row = await mountTree(client);
+
+      fireEvent.pointerDown(screen.getByTestId("sidebar-workspace-actions-trigger"), { button: 0, ctrlKey: false });
+      const dropdownLabels = await labels(await screen.findByRole("menu"));
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await flush();
+
+      fireEvent.contextMenu(row);
+      const contextLabels = await labels(await screen.findByTestId("sidebar-workspace-context-menu"));
+
+      expect(contextLabels).toEqual(dropdownLabels);
+      expect(contextLabels.includes("Reveal in Finder")).toBe(local);
+      expect(contextLabels.includes("Open in VS Code")).toBe(local);
+    });
+
+    it("right click on a workspace row does not toggle expansion", async () => {
+      const client = new FakeWsClient();
+      const row = await mountTree(client);
+      const before = screen.queryAllByTestId("sidebar-task-row").length;
+
+      fireEvent.contextMenu(row);
+      await screen.findByTestId("sidebar-workspace-context-menu");
+      expect(screen.queryAllByTestId("sidebar-task-row")).toHaveLength(before);
+
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      await flush();
+      fireEvent.click(row);
+      expect(screen.queryAllByTestId("sidebar-task-row")).not.toHaveLength(before);
+    });
+
+    it("workspace context menu Delete workspace opens the delete flow", async () => {
+      const client = new FakeWsClient();
+      const row = await mountTree(client);
+
+      fireEvent.contextMenu(row);
+      const menu = await screen.findByTestId("sidebar-workspace-context-menu");
+      fireEvent.click(within(menu).getByText("Delete workspace"));
+
+      expect(await screen.findByText("Delete workspace?")).toBeInTheDocument();
+    });
+  });
+
   it("sidebar logo sits on a theme-token tile in light theme and is untiled in dark", () => {
     const client = new FakeWsClient();
     render(
