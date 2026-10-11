@@ -25,9 +25,9 @@ acp.WithMaxTurns(n))`), and the write summary text (`overwrites existing file:
 - `task_wait` **`state`** / `pendingPermissions` / `message` (#273's
   `ignorePermissionIds` lets a driver wait past a surfaced request but the
   result still has no explicit "this is not completion" state), and a finished
-  run never reports a pending permission (#273 would still return a stale
-  unresolved request of a stopped run as pending: a looping driver never
-  ends);
+  run never reports a pending permission (without this, a request left
+  unresolved by a stopped run is still reported as pending alongside the
+  terminal status, which a driver can mistake for "waiting for a human");
 - the structured **`detail`** (daemon, CLI, MCP, web card) with capped diff,
   redaction rules and `outsideWorktree`/`largeShrink` flags;
 - the **stop note** (CLI, MCP) and the web "Turn limit reached" label;
