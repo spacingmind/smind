@@ -43,14 +43,17 @@ func handleTaskTree(db *store.Store, reg *runs.Registry) handlerFunc {
 		root := tasktree.Root{WorkspaceID: p.WorkspaceID}
 		if p.TaskID != 0 {
 			// The workspace comes from the task itself, so a cross-workspace
-			// id is not an issue; an unknown (or archived-root) id is a
-			// clear error rather than an empty result.
+			// id is not an issue; an unknown or archived id is a clear error
+			// rather than an empty result.
 			t, err := db.GetTask(p.TaskID)
 			if err != nil {
 				if errors.Is(err, sql.ErrNoRows) {
 					return nil, fmt.Errorf("task.tree: unknown task %d", p.TaskID)
 				}
 				return nil, fmt.Errorf("task.tree: get task %d: %w", p.TaskID, err)
+			}
+			if t.ArchivedAt != nil {
+				return nil, fmt.Errorf("task.tree: task %d is archived", p.TaskID)
 			}
 			root = tasktree.Root{TaskID: p.TaskID}
 			p.WorkspaceID = t.WorkspaceID

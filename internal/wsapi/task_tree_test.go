@@ -291,3 +291,20 @@ func TestTaskTree_WideTree200ChildrenIsOneStorePass(t *testing.T) {
 		t.Fatalf("childCount = %d, want 200", result.Nodes[0].ChildCount)
 	}
 }
+
+// TestTaskTree_ArchivedTaskIsError: {taskId} of an archived task is a
+// clear error, not an empty success.
+func TestTaskTree_ArchivedTaskIsError(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	task := newTestTask(t, wm, "")
+	if _, err := wm.ArchiveTask(task.ID); err != nil {
+		t.Fatalf("ArchiveTask() error = %v", err)
+	}
+	if _, errObj := callTaskTree(t, ws, "arch", map[string]any{"taskId": task.ID}); errObj == nil {
+		t.Fatal("archived taskId: error = nil, want an error")
+	}
+}

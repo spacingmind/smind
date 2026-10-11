@@ -16,7 +16,7 @@ import (
 // task-hierarchy plan (§4.2/§4.3): task_tree (one call for every task
 // with status/usage/permissions, nested) and task_wait's childrenOf mode.
 func registerMCPTreeTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) with its tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, and usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0). Pass exactly one of workspaceId or taskId."}, mcpTaskTree(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_tree", Description: "See a workspace's whole task hierarchy in one call: every task (or one task and its descendants) as nested nodes -- each carrying id, parentId, title, depth, tier (supervisor/leader/coder), run state, pending permission count, per-descendant status counts, usage rollups (tokens/cost summed over the subtree; null means nothing reported, never 0), and its children. Pass exactly one of workspaceId or taskId."}, mcpTaskTree(client))
 }
 
 // taskTreeInput is task_tree's argument shape: exactly one of
@@ -66,8 +66,9 @@ type taskTreeCounts struct {
 // client-side into roots (a node whose parentId is not among the returned
 // nodes is a root), plus truncation and a one-line summary. Roots is a
 // plain map tree rather than a recursive struct because the SDK's output
-// schema inference rejects recursive types; each root is
-// {"taskNode": {...the TreeNode fields...}, "children": [same shape]}.
+// schema inference rejects recursive types; each root is the TreeNode's
+// own fields (id, parentId, title, depth, taskStatus, tier, childCount,
+// run, counts, usage) with `children` beside them (spec §4.2).
 type taskTreeOutput struct {
 	Roots     []map[string]any `json:"roots"`
 	Truncated bool             `json:"truncated"`
@@ -107,7 +108,8 @@ func nestTaskTree(flat taskTreeFlat) taskTreeOutput {
 	// parent is in the returned set) already exists when the node does.
 	for i := range flat.Nodes {
 		n := flat.Nodes[i]
-		nested := map[string]any{"taskNode": decodeNodeMap(n), "children": []map[string]any{}}
+		nested := decodeNodeMap(n)
+		nested["children"] = []map[string]any{}
 		byID[n.ID] = nested
 		if n.ParentID != nil {
 			if p, ok := byID[*n.ParentID]; ok {
@@ -123,8 +125,8 @@ func nestTaskTree(flat taskTreeFlat) taskTreeOutput {
 	return taskTreeOutput{Roots: roots, Truncated: flat.Truncated, Summary: treeSummary(flat.Nodes)}
 }
 
-// decodeNodeMap renders one flat node back into the generic map that
-// rides through to MCP output, with children excluded.
+// decodeNodeMap renders one flat node's own fields into the generic map
+// that rides through to MCP output; children are attached by the caller.
 func decodeNodeMap(n taskTreeNode) map[string]any {
 	m := map[string]any{
 		"id": n.ID, "workspaceId": n.WorkspaceID, "title": n.Title,

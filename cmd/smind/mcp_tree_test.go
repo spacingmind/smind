@@ -55,26 +55,34 @@ func TestMCPTaskTree_Nested(t *testing.T) {
 		t.Fatalf("roots = %d, want 1 (the supervisor)", len(out.Roots))
 	}
 	root := out.Roots[0]
-	node := root["taskNode"].(map[string]any)
-	if id := node["id"].(float64); int64(id) != sup {
+	if id := root["id"].(float64); int64(id) != sup {
 		t.Fatalf("root id = %v, want %d", id, sup)
+	}
+	if root["parentId"] != nil {
+		t.Fatalf("root parentId = %v, want nil", root["parentId"])
 	}
 	kids := root["children"].([]any)
 	if len(kids) != 1 {
 		t.Fatalf("root children = %d, want 1 (leader)", len(kids))
 	}
 	leader := kids[0].(map[string]any)
-	if id := leader["taskNode"].(map[string]any)["id"].(float64); int64(id) != lead {
+	if id := leader["id"].(float64); int64(id) != lead {
 		t.Fatalf("leader id = %v, want %d", id, lead)
+	}
+	if p := leader["parentId"].(float64); int64(p) != sup {
+		t.Fatalf("leader parentId = %v, want %d", p, sup)
+	}
+	if leader["tier"] != "leader" {
+		t.Fatalf("leader tier = %v, want leader", leader["tier"])
 	}
 	grandkids := leader["children"].([]any)
 	if len(grandkids) != 2 {
 		t.Fatalf("leader children = %d, want 2", len(grandkids))
 	}
-	if id := grandkids[0].(map[string]any)["taskNode"].(map[string]any)["id"].(float64); int64(id) != c1 {
+	if id := grandkids[0].(map[string]any)["id"].(float64); int64(id) != c1 {
 		t.Fatalf("coder1 id = %v, want %d", id, c1)
 	}
-	if id := grandkids[1].(map[string]any)["taskNode"].(map[string]any)["id"].(float64); int64(id) != c2 {
+	if id := grandkids[1].(map[string]any)["id"].(float64); int64(id) != c2 {
 		t.Fatalf("coder2 id = %v, want %d", id, c2)
 	}
 	if !strings.Contains(out.Summary, "4 tasks") || !strings.Contains(out.Summary, "4 idle") {
