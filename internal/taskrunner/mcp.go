@@ -38,14 +38,17 @@ type mcpCapableBackend interface {
 // advertise. lookPath resolves a stdio server's bare command to an
 // absolute path; a command that can't be resolved is skipped (degrade,
 // don't fail the run) and reported in unresolved as `name (command "x")`
-// -- never env/headers/args values, which may carry secrets.
-func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath func(string) (string, error)) (wire []any, inactive, unresolved []string, err error) {
+// -- never env/headers/args values, which may carry secrets. states
+// mirrors every row (row order) with its disposition for
+// EventTypeMcpServers: active, or dropped with the reason.
+func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath func(string) (string, error)) (wire []any, inactive, unresolved []string, states []McpServerState, err error) {
 	wire = []any{}
 	for _, row := range rows {
 		switch row.Transport {
 		case "stdio":
 			if !client.SupportsMcpStdio() {
 				inactive = append(inactive, row.Name)
+				states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusDropped, Reason: McpReasonTransportUnsupported})
 				continue
 			}
 			command := row.Command
@@ -56,42 +59,48 @@ func acpMcpServers(rows []store.McpServer, client mcpCapableBackend, lookPath fu
 				}
 				if err != nil {
 					unresolved = append(unresolved, fmt.Sprintf("%s (command %q not found in PATH)", row.Name, row.Command))
+					states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusDropped, Reason: McpReasonCommandNotFound})
 					continue
 				}
 				command = resolved
 			}
 			var args []string
 			if err := json.Unmarshal([]byte(row.Args), &args); err != nil && strings.TrimSpace(row.Args) != "" {
-				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: args: %w", row.Name, err)
+				return nil, inactive, unresolved, states, fmt.Errorf("mcp server %q: args: %w", row.Name, err)
 			}
 			env, err := nameValues(row.Env)
 			if err != nil {
-				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: env: %w", row.Name, err)
+				return nil, inactive, unresolved, states, fmt.Errorf("mcp server %q: env: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerStdio{Type: "stdio", Name: row.Name, Command: command, Args: args, Env: env})
+			states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusActive})
 		case "http":
 			if !client.SupportsMcpHttp() {
 				inactive = append(inactive, row.Name)
+				states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusDropped, Reason: McpReasonTransportUnsupported})
 				continue
 			}
 			headers, err := nameValues(row.Headers)
 			if err != nil {
-				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
+				return nil, inactive, unresolved, states, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerHttp{Type: "http", Name: row.Name, URL: row.URL, Headers: headers})
+			states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusActive})
 		case "sse":
 			if !client.SupportsMcpSSE() {
 				inactive = append(inactive, row.Name)
+				states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusDropped, Reason: McpReasonTransportUnsupported})
 				continue
 			}
 			headers, err := nameValues(row.Headers)
 			if err != nil {
-				return nil, inactive, unresolved, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
+				return nil, inactive, unresolved, states, fmt.Errorf("mcp server %q: headers: %w", row.Name, err)
 			}
 			wire = append(wire, acp.McpServerHttp{Type: "sse", Name: row.Name, URL: row.URL, Headers: headers})
+			states = append(states, McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusActive})
 		}
 	}
-	return wire, inactive, unresolved, nil
+	return wire, inactive, unresolved, states, nil
 }
 
 // nameValues decodes a row's env/headers JSON object into []NameValue
@@ -113,6 +122,37 @@ func nameValues(objJSON string) ([]acp.NameValue, error) {
 		out = append(out, acp.NameValue{Name: k, Value: m[k]})
 	}
 	return out, nil
+}
+
+// claudeMcpStates maps rows to their Claude-native McpServerState list
+// (row order): every row active, except the names in failed (the CLI
+// init message's failed servers) which come out failed/failed_to_start.
+// failed is nil for the initial all-active event.
+func claudeMcpStates(rows []store.McpServer, failed []string) []McpServerState {
+	failedSet := map[string]bool{}
+	for _, name := range failed {
+		failedSet[name] = true
+	}
+	states := make([]McpServerState, len(rows))
+	for i, row := range rows {
+		state := McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusActive}
+		if failedSet[row.Name] {
+			state.Status, state.Reason = McpStatusFailed, McpReasonFailedToStart
+		}
+		states[i] = state
+	}
+	return states
+}
+
+// codexMcpStates maps rows to the Codex-native McpServerState list: every
+// row dropped/provider_unsupported -- Codex has no MCP mechanism in v1
+// (ADR-0018 resolved decision 1).
+func codexMcpStates(rows []store.McpServer) []McpServerState {
+	states := make([]McpServerState, len(rows))
+	for i, row := range rows {
+		states[i] = McpServerState{Name: row.Name, Transport: row.Transport, Status: McpStatusDropped, Reason: McpReasonProviderUnsupported}
+	}
+	return states
 }
 
 // claudeMcpConfig builds Claude CLI --mcp-config JSON from the enabled

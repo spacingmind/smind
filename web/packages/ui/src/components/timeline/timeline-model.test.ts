@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appendTimelineEvent, buildTimeline, type TimelineItem, type TimelineToolCallItem } from "@/hooks/use-run-timeline";
+import { appendTimelineEvent, buildTimeline, latestMcpServers, type TimelineItem, type TimelineToolCallItem } from "@/hooks/use-run-timeline";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import type { RunLogEvent } from "@/lib/types";
 
@@ -138,6 +138,33 @@ describe("appendTimelineEvent", () => {
       expect(after).toHaveLength(2);
       expect(after[1]).toMatchObject({ kind: "permission", reason: "human" });
     });
+  });
+
+
+  it("appendTimelineEvent ignores mcp_servers", () => {
+    const before = buildTimeline([{ type: "chunk", text: "hello" }]);
+    const after = appendTimelineEvent(before, {
+      type: "mcp_servers",
+      mcpServers: [{ name: "github", transport: "stdio", status: "active" }],
+    });
+
+    // The event folds into RunEntry.mcpServers instead (see use-run-timeline);
+    // it must not become a transcript row, not even an "unknown" placeholder.
+    expect(after).toBe(before);
+  });
+
+  it("latestMcpServers returns the last event's list", () => {
+    const first = [{ name: "a", transport: "stdio" as const, status: "active" as const }];
+    const last = [{ name: "b", transport: "http" as const, status: "failed" as const, reason: "failed_to_start" as const }];
+    const events = [
+      { type: "chunk", text: "hi" },
+      { type: "mcp_servers", mcpServers: first },
+      { type: "mcp_servers", mcpServers: last },
+    ];
+
+    expect(latestMcpServers(events)).toBe(last);
+    expect(latestMcpServers([{ type: "mcp_servers" }])).toBeUndefined();
+    expect(latestMcpServers([{ type: "chunk", text: "none" }])).toBeUndefined();
   });
 
   it("folds 2000 chunk events into one item in linear time", () => {

@@ -10,7 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Test harness for the MCP tool surface (docs/plans/active/mcp-server.md
+// Test harness for the MCP tool surface (docs/plans/completed/mcp-server.md
 // steps 1-2). It runs each tool against a real in-process daemon -- the
 // same fake-agent-backed wsapi.Handler setup newConfigOptionTestEnv
 // builds for the CLI tests -- driven through the SDK's own client type

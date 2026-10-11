@@ -92,6 +92,21 @@ async function resolveWorkspaceTree(client: FakeWsClient, workspace: Workspace, 
 }
 
 describe("AppSidebar", () => {
+  it("sidebar logo sits on a theme-token tile in light theme and is untiled in dark", () => {
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+
+    const logo = screen.getByTestId("sidebar-logo");
+    expect(logo.className).toContain("bg-foreground");
+    expect(logo.className).toContain("dark:bg-transparent");
+    expect(logo.className).toContain("dark:size-5");
+    expect(logo.querySelector("img")).not.toBeNull();
+  });
+
   it("clicking a task row invokes onSelectTask with that task", async () => {
     // AppSidebar's client prop is typed WsClient, not WsClientLike, since
     // it needs .close() elsewhere in the app -- FakeWsClient only
