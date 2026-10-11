@@ -620,6 +620,7 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - [x] ADR-0021 accepted (2026-10-10; §5 amended: queue keeps delivering after restart)
 - [ ] ADR-M implemented — AC 1–6 + 8 in the run-usage PR (branch `feat/run-usage-adr-0020`); AC 7 (proxy) in its own PR (branch `feat/proxy-baseurl-model-routing`, see Validation). Tick once both merge.
 - [x] ADR-O implemented
+- [x] ADR-O web composer follow-up (server queue replaces the client-side queue; branch `feat/composer-server-queue`, see Validation). Mobile not done.
 - [ ] Step 3 dogfood + gap log
 
 ## Validation
@@ -713,6 +714,22 @@ orchestration skill (`paseo-skills-profiles-2026-09.md` §e #4);
 - **AC8 no regressions** — `TestRunStart_WhenBusyReject_Unchanged` pins the byte-identical legacy error; the full existing `runs`/`wsapi`/`cmd/smind` suites (including `task_wait`) pass unchanged; `task_wait` code untouched.
 
 Known limitation: when `profileId` is set, `task_send` sends `source=human` so the server's non-human guard accepts the profile's human-authored auto-approving mode — which drops agent provenance (the header) for profile sends (comment in `cmd/smind/mcp_task_send.go`).
+
+
+**ADR-O web composer follow-up** (branch `feat/composer-server-queue`, `task test` + `task lint` + `cd web && bunx tsc -b packages/ui` green, 2026-10-11):
+
+- **AC1 types/topic** — `ChatQueueItem`, `WhenBusy`, `RunStartResult` union in `lib/types.ts`; `chat.queueUpdated` in `use-daemon-events` (`subscribes to chat.queueUpdated`).
+- **AC2 busy send queues** — `busy send calls run.start with whenBusy queue and renders the queued item from the server`, `idle send also passes whenBusy queue and starts the run`, `busy send restores the draft when run.start fails` (`composer.test.tsx`); `submitPrompt does not append a run when the server queued it` (`use-run-timeline.test.ts`). In a browser against a sandbox daemon the `run.start` frame carried `whenBusy:"queue"` and the idle chat started its run.
+- **AC3 interrupt** — `Cmd+Enter while running sends with whenBusy interrupt`, `Send now button is absent when idle`; `isSubmitKey` no longer treats Cmd/Ctrl+Enter as a plain submit (`Cmd+Enter is not a plain submit key`).
+- **AC4 queue view** — `use-chat-queue.test.ts`: initial `chat.queueList`, snapshot replace, other-chat snapshot ignored, priority-then-id order, delivered hidden, auto-cancelled shown 10 s then dropped, user-cancelled hidden; `renders an auto-cancelled item's reason`.
+- **AC5 cancel** — `cancel button calls chat.queueCancel with the item id` (exact `{itemId}` params), `cancel button is keyboard operable and labelled with the prompt` (structural: real `<button>`, named, focusable), `cancel calls chat.queueCancel and leaves the row until the snapshot`, `cancel error refetches the list and surfaces no error` (the delivered-before-cancel race). Against the sandbox daemon: Tab-focus + Enter and a mouse click each cancelled a queued row, the row left on the `chat.queueUpdated` snapshot, and the DB rows read `cancelled / cancelled by user`.
+- **AC6 delivered run appears** — `adopts and streams a server-delivered run from run.status`, `run.status racing the run.start response does not duplicate the run`, plus three race fixes found in review: `adoption retries when run.list did not yet contain the run`, `submitPrompt resolves with the server result when the chat was switched mid-flight`, `initial load racing an adopted run does not duplicate or double-attach it`. Against the sandbox daemon: `smind task send --when-busy=queue` (CLI) behind a running run was delivered at finish and its run appeared in the open browser with no reload, the queue row gone.
+- **AC7 isolation** — `ignores a stale chat.queueList response after a chat switch`, `ignores a stale queueList response from refresh() after a chat switch`, `a queueList response older than a newer chat.queueUpdated snapshot is ignored`, `refetches on a new client and on event.dropped`, `shows only the open chat's queue after a chat switch`.
+- **AC8 old queue gone** — `grep -rn "setQueued\|draining" web/packages/ui/src` prints nothing; `queued items from the server do not fire client-side on run end` fails if a drain effect returns.
+- **AC9 no double send** — `a second submit while one is in flight sends once`.
+- **AC10 visual** — Playwright, 1440×900, light and dark, composer with two queued items against a sandbox daemon (`SMIND_HOME` under `/tmp`, port 4733), reviewed by the leader: rows align with the composer card, readable in both themes. Screenshots: `/tmp/composer-queue-shots/` (not committed).
+- **Not verified** — (a) a browser-composer send *while a real run is live*: the sandbox's only runnable provider (`claude-native`, not logged in) finishes in under a second, so the busy-send path is covered by unit/integration tests and by the CLI-queued delivery above, not by driving the composer through a live run; (b) the "Send now" button and Cmd/Ctrl+Enter interrupt end to end and its screenshot (unit-tested only); (c) the auto-cancel row screenshot; (d) mobile (out of scope); (e) the desktop app.
+- **Decisions beyond the spec** — per-row "send now"/"edit" for an already-queued item is not built (needs new server verbs); cancel-race handling and the auto-cancel string coupling (`"cancelled by user"` vs `"delivery failed:`) are documented in `use-chat-queue.ts`.
 
 Not started: O1 (run provenance columns), O2 Wave 2 items.
 
