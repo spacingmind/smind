@@ -58,13 +58,25 @@ per-package timeout and writes a failure summary.
    branch names stay unique when many tasks with the same title are created
    concurrently on any OS. `UnixNano` in base36 currently collides on Windows
    (`internal/workspace/task.go:110`).
-6. **AC6 — `SKILL.md` with CRLF line endings parses.** It parses the same as
-   the LF version, as produced by a Windows editor or a `core.autocrlf=true`
-   checkout.
-7. **AC7 — Secrets are owner-only on Windows.** The auth token
-   (`internal/auth`) and the relay keypair (`internal/relay/e2ee`) get the
-   protection chosen under **D3**. Tests assert that protection on Windows
-   instead of asserting POSIX mode bits.
+6. **AC6 — Embedded skills stay LF on Windows checkouts.** _(Revised
+   2026-10-11: smind never parses `SKILL.md` itself. The failure was the
+   go:embed bundle being checked out CRLF under `core.autocrlf=true`, so a
+   `smind.exe` built there would ship CRLF skills.)_
+   `internal/skills/bundle/**` is `eol=lf` in `.gitattributes`, and
+   `TestSkillBundle_FrontmatterValid` passes on Windows.
+7. **AC7 — Secrets are owner-only on Windows.** Every file the daemon
+   writes that holds a secret gets the protection chosen under **D3**:
+   the auth token, the relay keypair (including tightening an existing
+   loose file), the relay bridge config, the relay server's cert key and
+   workspaces file, and the claude `--mcp-config` temp file. Tests assert
+   that protection on Windows instead of asserting POSIX mode bits.
+10. **AC10 — Sandbox checks are not escaped by Windows junctions.**
+    _(Added 2026-10-11, a security finding of this plan.)_ Every "path stays
+    inside the root" check follows directory junctions as well as symlinks:
+    acp `resolveScopedPath`, `internal/files`, `internal/skills`, the
+    cmd/smind MCP prompt file, and taskrunner permission details. The
+    escape tests run on Windows against a real junction, which needs no
+    privilege to create, instead of failing at symlink setup.
 8. **AC8 — Windows full suite green.**
    - `go test ./...` passes on `windows-latest` in `windows-full-suite.yml`
      with no failing package.
@@ -198,6 +210,32 @@ Settled for this plan:
   (`ci/windows-full-suite-nightly`, not merged yet) moves the full suite out
   of PR CI.
 - 2026-10-11: spec written. D1–D3 are open.
+- 2026-10-11: D1–D3 decided (ADR-0028).
+- 2026-10-12: branch `fix/windows-test-agent-exe` (not merged yet):
+  - **Group A:** fake agents built with `.exe`. Failures in the 7 agent
+    packages drop from ~170 to 26.
+  - **wsclient home isolation** (all OSes): its tests wrote worktrees into
+    the developer's real `~/.smind` / `~/.spacingmind`. Five orphaned test
+    worktrees were found in the real `~/.spacingmind` on this machine and
+    removed.
+  - **AC5:** `taskStamp` gives strictly increasing task-name suffixes.
+  - **AC7:** new `internal/securefile` (protected owner+SYSTEM DACL on
+    Windows, 0600 elsewhere), adopted at all six secret-file writes.
+  - **AC10:** new `internal/realpath` (`GetFinalPathNameByHandle` on
+    Windows) replaces `filepath.EvalSymlinks` in the five sandbox checks,
+    and the new `internal/testutil.Link` falls back to junctions. All four
+    junction escape tests failed before the fix and pass after it.
+  - Full suite after group A, D and the isolation fix: 29 failing tests in
+    13 packages, before securefile/realpath landed.
+- 2026-10-12: branch `ci/windows-full-suite-nightly` also gets the
+  `.gitattributes` rule for `internal/skills/bundle/**` (AC6).
+- Next:
+  - test-side groups: autocrlf in test repos, `SKILL.md` mode check,
+    `hostfs` `USERPROFILE`, the wsapi `stty` resize test;
+  - investigate G (config migration), H (store migration) and the runs
+    goroutine-count test;
+  - then AC1 (shims), AC2 (agent jobs), AC3 (shutdown endpoint), AC4
+    (setup `sh`), AC9 (release).
 
 ## Validation
 
