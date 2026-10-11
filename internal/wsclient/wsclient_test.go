@@ -43,6 +43,11 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
 	}
 
+	// CreateTask puts worktrees under config.Dir(); without this the tests
+	// wrote them into the developer's real ~/.smind (or ~/.spacingmind),
+	// unlike wsapi/runs/taskrunner whose TestMain already isolates it.
+	os.Setenv("SMIND_HOME", filepath.Join(dir, "smind-home"))
+
 	os.Exit(m.Run())
 }
 
