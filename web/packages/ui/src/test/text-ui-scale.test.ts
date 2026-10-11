@@ -50,8 +50,9 @@ function listFiles(dir: string): string[] {
   return out;
 }
 
+// Always "/"-separated, so EXEMPT_FILES matches on Windows too.
 function relPath(f: string): string {
-  return f.slice(SRC_DIR.length + 1);
+  return f.slice(SRC_DIR.length + 1).replaceAll("\\", "/");
 }
 
 describe("text-ui-* scale guard (zcode-visual-parity plan, P1 Step 3)", () => {
