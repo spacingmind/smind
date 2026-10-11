@@ -129,3 +129,21 @@ func (reg *Registry) applyReportedMode(r *run, mode string, initial bool) {
 		reg.notifyRunStatus(r)
 	}
 }
+
+// ProviderCatalogForRun returns the permission-mode catalog of runID's
+// provider, for callers that must evaluate mode policy before acting (the
+// wsapi layer's ADR-0019 decision-6 guard on non-human sources).
+func (reg *Registry) ProviderCatalogForRun(runID string) (taskrunner.ProviderInfo, error) {
+	r, err := reg.get(runID)
+	if err != nil {
+		return taskrunner.ProviderInfo{}, err
+	}
+	if r.runner == nil {
+		return taskrunner.ProviderInfo{}, fmt.Errorf("run %q has no live runner", runID)
+	}
+	catalog, ok := r.runner.ProviderCatalogFor(r.provider)
+	if !ok {
+		return taskrunner.ProviderInfo{}, fmt.Errorf("unknown provider %q", r.provider)
+	}
+	return catalog, nil
+}

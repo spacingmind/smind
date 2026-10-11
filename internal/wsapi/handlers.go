@@ -1620,12 +1620,37 @@ func handleRunSetPermissionMode(reg *runs.Registry) handlerFunc {
 			RunID      string `json:"runId"`
 			ModeID     string `json:"modeId"`
 			AutoAccept *bool  `json:"autoAccept"`
+			Source     string `json:"source"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("run.setPermissionMode: invalid params: %w", err)
 		}
 		if p.ModeID == "" && p.AutoAccept == nil {
 			return nil, fmt.Errorf("run.setPermissionMode: modeId or autoAccept is required")
+		}
+		if p.Source == "" {
+			p.Source = store.ChatQueueSourceHuman
+		}
+		switch p.Source {
+		case store.ChatQueueSourceHuman, store.ChatQueueSourceOrchestrator, store.ChatQueueSourceAgent:
+		default:
+			return nil, fmt.Errorf("run.setPermissionMode: invalid source %q", p.Source)
+		}
+		// ADR-0019 decision 6 (via ADR-0021's source provenance): an
+		// auto-approving mode or autoAccept=true picked by a non-human
+		// caller would amount to the orchestrator approving its own tool
+		// calls, so both are rejected here -- the same guard runs.start
+		// applies at enqueue time.
+		if p.Source != store.ChatQueueSourceHuman {
+			if p.ModeID != "" {
+				catalog, err := reg.ProviderCatalogForRun(p.RunID)
+				if err == nil && taskrunner.ModeAutoApproves(catalog, taskrunner.PermissionSettings{Mode: p.ModeID}) {
+					return nil, fmt.Errorf("run.setPermissionMode: a non-human caller may not pick an auto-approving permission mode (ADR-0019 decision 6); ask a human to switch modes")
+				}
+			}
+			if p.AutoAccept != nil && *p.AutoAccept {
+				return nil, fmt.Errorf("run.setPermissionMode: a non-human caller may not set autoAccept=true (ADR-0019 decision 6); ask a human to enable it")
+			}
 		}
 		if p.ModeID != "" {
 			if err := reg.SetPermissionMode(ctx, p.RunID, p.ModeID); err != nil {
