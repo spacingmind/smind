@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { useDefaultAgentId } from "@/hooks/use-default-agent";
-import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
+import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { accountHealthTestKey } from "@/lib/provider-health";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, ModeInfo, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
@@ -36,10 +36,12 @@ interface ProfileFormState {
   permissionMode: string;
   autoAccept: boolean;
   thinkingLevel: string;
+  /** ADR-0025: a model id from the provider's catalog; "" is the provider default. */
+  model: string;
   notes: string;
 }
 
-const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", notes: "" };
+const EMPTY_FORM: ProfileFormState = { name: "", provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "", notes: "" };
 
 function formFromProfile(p: AgentProfile): ProfileFormState {
   return {
@@ -48,6 +50,7 @@ function formFromProfile(p: AgentProfile): ProfileFormState {
     permissionMode: p.PermissionMode,
     autoAccept: p.AutoAccept,
     thinkingLevel: p.ThinkingLevel,
+    model: p.Model ?? "",
     notes: p.Notes,
   };
 }
@@ -167,6 +170,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
         permissionMode: form.permissionMode,
         autoAccept: supportsAutoAccept(providers, form.provider) && form.autoAccept,
         thinkingLevel: form.thinkingLevel,
+        model: form.model,
         notes: form.notes,
       };
       // Upsert from the RPC's own returned profile rather than waiting for
@@ -378,8 +382,8 @@ function ProfileForm({
         <div className="flex min-w-0 items-center gap-1.5">
           <Select
             value={form.provider}
-            // Modes are provider-scoped: a new provider starts from its own default.
-            onValueChange={(value) => setForm((f) => ({ ...f, provider: value, permissionMode: "", autoAccept: false }))}
+            // Modes and models are provider-scoped: a new provider starts from its own defaults.
+            onValueChange={(value) => setForm((f) => ({ ...f, provider: value, permissionMode: "", autoAccept: false, model: "" }))}
           >
             <SelectTrigger aria-label="Provider" data-testid={`${idPrefix}-provider`} className="w-full">
               <SelectValue placeholder="Select provider" />
@@ -422,6 +426,7 @@ function ProfileForm({
         ) : (
           <div aria-hidden />
         )}
+        <ProfileModelSelect form={form} setForm={setForm} providers={providers} idPrefix={idPrefix} />
       </div>
       {supportsAutoAccept(providers, form.provider) && (
         <label className="flex items-center gap-2 text-ui-sm text-foreground-muted" title={AUTO_ACCEPT_HELP}>
@@ -518,6 +523,51 @@ function ProviderHealthDot({
   );
 }
 
+/** Radix Select rejects an empty item value, so "Provider default" travels under this sentinel and maps back to "". */
+const DEFAULT_MODEL_VALUE = "__default__";
+
+/**
+ * The profile's Model field (ADR-0025): the selected provider's catalog plus
+ * "Provider default". Omitted -- not an empty select -- when the provider
+ * lists no models and none is saved (an ACP agent not probed yet); a saved
+ * id the catalog does not list still shows as itself so editing never
+ * silently drops it.
+ */
+function ProfileModelSelect({
+  form,
+  setForm,
+  providers,
+  idPrefix,
+}: {
+  form: ProfileFormState;
+  setForm: (update: (f: ProfileFormState) => ProfileFormState) => void;
+  providers: ProviderInfo[];
+  idPrefix: string;
+}) {
+  const models = providerModels(providers, form.provider);
+  if (models.length === 0 && !form.model) return null;
+  const listed = models.some((m) => m.id === form.model);
+  return (
+    <Select
+      value={form.model || DEFAULT_MODEL_VALUE}
+      onValueChange={(value) => setForm((f) => ({ ...f, model: value === DEFAULT_MODEL_VALUE ? "" : value }))}
+    >
+      <SelectTrigger aria-label="Model" data-testid={`${idPrefix}-model`} className="w-full">
+        <SelectValue placeholder="Model" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_MODEL_VALUE}>Provider default</SelectItem>
+        {form.model && !listed && <SelectItem value={form.model}>{form.model}</SelectItem>}
+        {models.map((m) => (
+          <SelectItem key={m.id} value={m.id} title={m.description}>
+            {m.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 function upsertProfile(list: AgentProfile[], p: AgentProfile): AgentProfile[] {
   const index = list.findIndex((existing) => existing.ID === p.ID);
   if (index === -1) return [...list, p];
@@ -530,10 +580,11 @@ function providerLabel(providers: ProviderInfo[], id: string): string {
   return providers.find((p) => p.id === id)?.label ?? id;
 }
 
-/** The card's one metadata line ("<provider> · <mode> · <thinking>", run-config IA): the provider's own mode label (ADR-0019), not the raw wire id -- omitted when the profile leaves the mode to the provider default and auto-accept off. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
+/** The card's one metadata line ("<provider> · <mode> · <model> · <thinking>", run-config IA): the provider's own mode label (ADR-0019), not the raw wire id -- omitted when the profile leaves the mode to the provider default and auto-accept off. Thinking is omitted for a non-Claude provider, same rule as the composer's own Thinking control. */
 function profileMetaLine(p: AgentProfile, providers: ProviderInfo[]): string {
   const parts = [providerLabel(providers, p.Provider)];
   if (p.PermissionMode || p.AutoAccept) parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
+  if (p.Model) parts.push(providerModels(providers, p.Provider).find((m) => m.id === p.Model)?.label ?? p.Model);
   if (p.Provider === "claude-native" && p.ThinkingLevel) parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }
