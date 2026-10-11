@@ -1040,3 +1040,73 @@ describe("runConfigPillLabel", () => {
     expect(runConfigPillLabel({ ...BASE, provider: "glm", autoAccept: true }, [], providers)).toBe("No agent · GLM · Default · Auto-accept");
   });
 });
+
+describe("MCP servers pill", () => {
+  it("mcp pill reflects the latest run only", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    // Older run has servers, newest has none -> no pill.
+    client.nth("run.list", 0).resolve([
+      doneRun({ ID: "run-old", StartedAt: "2024-01-01T00:00:00Z" }),
+      doneRun({ ID: "run-new", StartedAt: "2024-01-01T00:00:10Z" }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-old",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    client.nth("run.logs", 1).resolve({ runId: "run-new", status: "done", events: [] } satisfies RunLogsResult);
+    await flush();
+
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+  });
+
+  it("mcp pill shows the newest run's servers when it reported them", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([doneRun({ ID: "run-old", StartedAt: "2024-01-01T00:00:00Z" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-old",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    await flush();
+
+    expect(screen.getByTestId("run-mcp-indicator")).toHaveTextContent("MCP 1");
+  });
+
+  it("mcp pill is scoped to the chat's own runs", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([doneRun()]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-1",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    await flush();
+    expect(screen.getByTestId("run-mcp-indicator")).toHaveTextContent("MCP 1");
+
+    // Switch to the task's other chat: the scoping mechanism is run.list's
+    // own chatId filter, and the pane drops A's runs immediately -- the
+    // pill never lingers on chat B, and B's list is fetched for B's id.
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
+    await flush();
+
+    expect(client.nth("run.list", 1).params).toEqual({ chatId: CHAT_B.ID });
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+
+    // Chat B's own run carries no mcp_servers event -> no pill for B either.
+    client.nth("run.list", 1).resolve([doneRun({ ID: "run-b", ChatID: CHAT_B.ID })]);
+    await flush();
+    client.nth("run.logs", 1).resolve({ runId: "run-b", status: "done", events: [] } satisfies RunLogsResult);
+    await flush();
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+  });
+});

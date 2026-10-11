@@ -345,9 +345,15 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
 	}
-	mcpWire, inactive, unresolved, err := acpMcpServers(rows, client, r.lookPathFunc())
+	mcpWire, inactive, unresolved, states, err := acpMcpServers(rows, client, r.lookPathFunc())
 	if err != nil {
 		return fmt.Errorf("taskrunner: %s mcp servers: %w", provider, err)
+	}
+	if len(states) > 0 {
+		select {
+		case events <- Event{Type: EventTypeMcpServers, McpServers: states}:
+		case <-ctx.Done():
+		}
 	}
 	if len(unresolved) > 0 {
 		// One unresolvable server must not block the whole run: skip it
@@ -647,6 +653,10 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
 	}
 	if len(rows) > 0 {
+		select {
+		case events <- Event{Type: EventTypeMcpServers, McpServers: claudeMcpStates(rows, nil)}:
+		case <-ctx.Done():
+		}
 		mcpConfig, err := claudeMcpConfig(rows)
 		if err != nil {
 			return fmt.Errorf("taskrunner: claude mcp servers: %w", err)
@@ -742,6 +752,15 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 				if failed := claudeFailedMcpServers(sys.Raw); len(failed) > 0 {
 					r.sendSessionNote(ctx, events, fmt.Sprintf(
 						"MCP servers failed to start for claude-native: %s", strings.Join(failed, ", ")))
+					// Latest event wins: repeat the mcp_servers event with
+					// the CLI-reported failures marked failed, the rest
+					// still active.
+					if len(rows) > 0 {
+						select {
+						case events <- Event{Type: EventTypeMcpServers, McpServers: claudeMcpStates(rows, failed)}:
+						case <-ctx.Done():
+						}
+					}
 				}
 			}
 			for _, e := range claudeEvents(msg) {
@@ -923,6 +942,10 @@ func (r *Runner) runCodexNative(ctx context.Context, chatID, workspaceID int64, 
 		}
 		r.sendSessionNote(ctx, events, fmt.Sprintf(
 			"MCP servers configured but not supported for codex-native yet: %s", strings.Join(names, ", ")))
+		select {
+		case events <- Event{Type: EventTypeMcpServers, McpServers: codexMcpStates(rows)}:
+		case <-ctx.Done():
+		}
 	}
 	threadID, err := r.newOrResumeCodexThread(ctx, chatID, client, worktreePath, events)
 	if err != nil {

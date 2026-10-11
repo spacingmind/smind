@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Tests for task_wait (docs/plans/active/mcp-server.md step 4). Runs are
+// Tests for task_wait (docs/plans/completed/mcp-server.md step 4). Runs are
 // started via run.start directly (task_send is a later, out-of-scope step
 // -- ADR-0019), driven through the fake-agent-backed test daemon
 // newMCPSession/startTestRun already set up for the read-only tools.

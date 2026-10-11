@@ -1240,6 +1240,8 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 				rc.Emit("raw", toRunRawParams(e))
 			case taskrunner.EventTypeUsage:
 				rc.Emit("usage", runUsageParams{Usage: runs.UsageFromEvent(e.Usage)})
+			case taskrunner.EventTypeMcpServers:
+				rc.Emit("mcp_servers", runMcpServersParams{McpServers: e.McpServers})
 			case taskrunner.EventTypePermissionRequest:
 				rc.Emit("permission_request", permissionRequestParams{
 					RequestID: e.PermissionRequestID,
@@ -1286,6 +1288,15 @@ type runUsageParams struct {
 	Usage *runs.RunUsage `json:"usage"`
 }
 
+// runMcpServersParams is the params payload of an "mcp_servers" event
+// task.prompt/run.attach emit for taskrunner.EventTypeMcpServers
+// (ADR-0018's per-run indicator): each configured server's name,
+// transport, and status/reason -- never a command, args, url, env, or
+// header value.
+type runMcpServersParams struct {
+	McpServers []taskrunner.McpServerState `json:"mcpServers"`
+}
+
 // runLogEvent is the wire shape of one event in a run.logs response --
 // the same fields task.prompt/run.attach's streamed events and terminal
 // results carry, just batched instead of streamed. Type is "chunk",
@@ -1321,6 +1332,9 @@ type runLogEvent struct {
 	Payload json.RawMessage `json:"payload,omitempty"`
 	// Usage is populated for a "usage" entry (ADR-0020).
 	Usage *runs.RunUsage `json:"usage,omitempty"`
+	// McpServers is populated for an "mcp_servers" entry -- see
+	// runMcpServersParams.
+	McpServers []taskrunner.McpServerState `json:"mcpServers,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -1353,6 +1367,8 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 		return runLogEvent{Type: "raw", Kind: p.Kind, Payload: p.Payload}
 	case taskrunner.EventTypeUsage:
 		return runLogEvent{Type: "usage", Usage: runs.UsageFromEvent(e.Usage)}
+	case taskrunner.EventTypeMcpServers:
+		return runLogEvent{Type: "mcp_servers", McpServers: e.McpServers}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
 	case taskrunner.EventTypePermissionRequest:

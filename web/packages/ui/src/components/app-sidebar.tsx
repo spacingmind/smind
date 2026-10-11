@@ -641,7 +641,12 @@ export function AppSidebar({
           )}
           style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
         >
-          <img src="/logo.png" alt="" className="size-5 shrink-0" />
+          <span
+            data-testid="sidebar-logo"
+            className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground dark:size-5 dark:bg-transparent"
+          >
+            <img src="/logo.png" alt="" className="size-4 dark:size-5" />
+          </span>
           <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <ThemeToggle />

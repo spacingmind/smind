@@ -99,7 +99,7 @@ Anything touching those files waits for it to land on `develop`:
 ## Acceptance Criteria
 
 ### Step 0 — tracked in existing plans
-`docs/plans/active/mcp-server.md`, `docs/plans/active/agent-mcp-servers.md`,
+`docs/plans/completed/mcp-server.md`, `docs/plans/completed/agent-mcp-servers.md`,
 and the task-hierarchy items of `docs/plans/active/smind-control-parity.md`.
 
 ### M1 — request log for proxied traffic

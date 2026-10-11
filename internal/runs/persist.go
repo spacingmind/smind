@@ -33,6 +33,7 @@ type persistedEvent struct {
 	RawKind             string                        `json:"rawKind,omitempty"`
 	RawPayload          json.RawMessage               `json:"rawPayload,omitempty"`
 	Usage               *taskrunner.Usage             `json:"usage,omitempty"`
+	McpServers          []taskrunner.McpServerState   `json:"mcpServers,omitempty"`
 }
 
 func encodeEvent(e Event) (string, error) {
@@ -53,6 +54,7 @@ func encodeEvent(e Event) (string, error) {
 		RawKind:             e.RawKind,
 		RawPayload:          e.RawPayload,
 		Usage:               e.Usage,
+		McpServers:          e.McpServers,
 	})
 	if err != nil {
 		return "", err
@@ -82,5 +84,6 @@ func decodeEvent(data string) (Event, error) {
 		RawKind:             p.RawKind,
 		RawPayload:          p.RawPayload,
 		Usage:               p.Usage,
+		McpServers:          p.McpServers,
 	}, nil
 }

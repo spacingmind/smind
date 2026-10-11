@@ -266,7 +266,7 @@ Web (`web/packages/ui`, vitest):
 - Step 11 (MCP `task_send` guard) was **not done**. PR #223 landed only the
   read-only tools, and `task_send` doesn't exist yet. The requirement and
   its test (`TestMCPTools_TaskSendRejectsAutoApprovingMode`) are now in
-  `docs/plans/active/mcp-server.md` step 3, and ADR-0017's `task_send` row
+  `docs/plans/completed/mcp-server.md` step 3, and ADR-0017's `task_send` row
   names `permissionMode`/`autoAccept`/`profileId`.
   `taskrunner.ModeAutoApproves` is the check to call.
 - 2026-09-28: Opus review #6 and #7 fixed: `4e07e3b` persists live
