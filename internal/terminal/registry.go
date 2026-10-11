@@ -275,14 +275,17 @@ func (s *session) appendHistoryLocked(data []byte) {
 // is queryable even if the daemon dies right after, and a failure to
 // persist it fails Create itself (killing the just-spawned shell) rather
 // than silently starting an unpersisted session.
-func (reg *Registry) Create(taskID int64, worktreePath string) (string, error) {
+//
+// extraEnv ("K=V" entries, e.g. the task's SMIND_PORT) is appended to the
+// shell's environment.
+func (reg *Registry) Create(taskID int64, worktreePath string, extraEnv ...string) (string, error) {
 	if worktreePath == "" {
 		return "", fmt.Errorf("terminal: create: task %d has no worktree", taskID)
 	}
 
 	cmd := exec.Command(resolveShell())
 	cmd.Dir = worktreePath
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	cmd.Env = append(append(os.Environ(), "TERM=xterm-256color"), extraEnv...)
 
 	pty, err := startPty(cmd)
 	if err != nil {

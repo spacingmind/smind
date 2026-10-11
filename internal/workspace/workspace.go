@@ -244,3 +244,11 @@ func (m *Manager) ListWorkspaces() ([]store.Workspace, error) {
 func (m *Manager) ListWorkspaceAccountIDs(workspaceID int64) ([]int64, error) {
 	return m.store.ListWorkspaceAccountIDs(workspaceID)
 }
+
+// SetWorkspaceScripts updates a workspace's human-authored setup/teardown
+// scripts (ADR-0024): a nil argument keeps the stored script, a pointer to
+// "" clears it. Only wsapi's workspace.setScripts calls this; there is
+// deliberately no MCP route to it.
+func (m *Manager) SetWorkspaceScripts(id int64, setup, teardown *string) (store.Workspace, error) {
+	return m.store.SetWorkspaceScripts(id, setup, teardown)
+}

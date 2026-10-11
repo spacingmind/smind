@@ -46,10 +46,14 @@ type Workspace struct {
 	RoutingPolicy string
 	// SetupScript/TeardownScript are the human-authored worktree
 	// setup/teardown shell scripts (ADR-0024); "" = none.
-	SetupScript    string
-	TeardownScript string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// The script text is never serialised (ADR-0024: only workspace.get
+	// returns it, via its own result type); the Has* flags are.
+	SetupScript       string `json:"-"`
+	TeardownScript    string `json:"-"`
+	HasSetupScript    bool
+	HasTeardownScript bool
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 // Space is an optional grouping layer within a workspace, carrying its own

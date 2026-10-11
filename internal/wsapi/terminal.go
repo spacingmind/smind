@@ -39,7 +39,7 @@ func handleTerminalCreate(wm *workspace.Manager, treg *terminal.Registry) handle
 			return nil, fmt.Errorf("terminal.create: task %d has no worktree yet", p.TaskID)
 		}
 
-		id, err := treg.Create(p.TaskID, *task.WorktreePath)
+		id, err := treg.Create(p.TaskID, *task.WorktreePath, workspace.TaskEnv(task)...)
 		if err != nil {
 			return nil, fmt.Errorf("terminal.create: %w", err)
 		}

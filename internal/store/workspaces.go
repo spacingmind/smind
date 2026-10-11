@@ -36,6 +36,7 @@ func (s *Store) GetWorkspace(id int64) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, fmt.Errorf("get workspace %d: %w", id, err)
 	}
+	w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
 	return w, nil
 }
 
@@ -56,6 +57,7 @@ func (s *Store) ListWorkspaces() ([]Workspace, error) {
 		if err := rows.Scan(&w.ID, &w.Path, &w.Title, &w.RoutingPolicy, &w.CreatedAt, &w.UpdatedAt, &w.SetupScript, &w.TeardownScript); err != nil {
 			return nil, fmt.Errorf("scan workspace: %w", err)
 		}
+		w.HasSetupScript, w.HasTeardownScript = w.SetupScript != "", w.TeardownScript != ""
 		workspaces = append(workspaces, w)
 	}
 	return workspaces, rows.Err()

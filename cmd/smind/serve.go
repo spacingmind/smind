@@ -124,7 +124,7 @@ func cmdServe(args []string) int {
 		log.Printf("shutdown: %v", err)
 	}
 	wm.CancelSetups() // kill any still-running setup script's process group
-	srv.Close() // kill every still-running terminal session's shell/PTY
+	srv.Close()       // kill every still-running terminal session's shell/PTY
 	log.Printf("smind stopped")
 	return 0
 }
