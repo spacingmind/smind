@@ -6,11 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/mcpservers"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -1969,4 +1971,64 @@ func TestRegistry_ApplyReportedMode_NonInitialAfterSwitchIsApplied(t *testing.T)
 		t.Fatalf("RespondPermission() error = %v", err)
 	}
 	waitForStatus(t, reg, runID, StatusDone, 5*time.Second)
+}
+
+// TestRegistry_McpServersEventSurvivesRehydrate proves an
+// EventTypeMcpServers event (ADR-0018's per-run indicator, M4) survives a
+// daemon-restart rehydrate: a Registry rebuilt from the same store sees
+// the identical mcp_servers event the live run emitted. The runner is
+// wired to a real MCP source with one stdio and one capability-dropped
+// http server (the fakeagent advertises stdio only), so the ACP path
+// emits the event naturally. Not parallel: it sets FAKEAGENT_MCP_CAPS.
+func TestRegistry_McpServersEventSurvivesRehydrate(t *testing.T) {
+	t.Setenv("FAKEAGENT_MCP_CAPS", "stdio")
+	wm, st := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	reg := mcpservers.New(st)
+	if _, err := reg.Create(store.McpServer{Name: "pw", Transport: "stdio", Command: "go", Enabled: true}); err != nil {
+		t.Fatalf("Create(pw): %v", err)
+	}
+	if _, err := reg.Create(store.McpServer{Name: "remote", Transport: "http", URL: "https://r/mcp", Enabled: true}); err != nil {
+		t.Fatalf("Create(remote): %v", err)
+	}
+	runner := taskrunner.New(wm, taskrunner.WithACPCommand(taskrunner.ProviderGLM, []string{fakeACPAgentPath}), taskrunner.WithMcpServers(reg))
+	reg1 := newTestRegistry(t, st)
+
+	runID, err := reg1.Start(context.Background(), wm, runner, task.ID, 0, taskrunner.ProviderGLM, "hi", taskrunner.PermissionSettings{}, "")
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForStatus(t, reg1, runID, StatusDone, 5*time.Second)
+
+	wantHist, _, err := reg1.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg1 error = %v", err)
+	}
+	var wantEvents []taskrunner.Event
+	for _, e := range wantHist {
+		if e.Type == taskrunner.EventTypeMcpServers {
+			wantEvents = append(wantEvents, e)
+		}
+	}
+	if len(wantEvents) != 1 {
+		t.Fatalf("live history mcp_servers events = %d, want 1", len(wantEvents))
+	}
+
+	reg2 := newTestRegistry(t, st)
+	gotHist, _, err := reg2.History(runID)
+	if err != nil {
+		t.Fatalf("History() on reg2 (rehydrated) error = %v", err)
+	}
+	var gotEvents []taskrunner.Event
+	for _, e := range gotHist {
+		if e.Type == taskrunner.EventTypeMcpServers {
+			gotEvents = append(gotEvents, e)
+		}
+	}
+	if len(gotEvents) != 1 {
+		t.Fatalf("rehydrated history mcp_servers events = %d, want 1", len(gotEvents))
+	}
+	if !reflect.DeepEqual(gotEvents[0].McpServers, wantEvents[0].McpServers) {
+		t.Fatalf("rehydrated McpServers = %+v, want %+v", gotEvents[0].McpServers, wantEvents[0].McpServers)
+	}
 }
