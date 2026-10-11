@@ -14,6 +14,7 @@ type Config struct {
 	Server        ServerConfig        `yaml:"server"`
 	Orchestration OrchestrationConfig `yaml:"orchestration"`
 	Worktrees     WorktreesConfig     `yaml:"worktrees"`
+	Agents        AgentsConfig        `yaml:"agents"`
 }
 
 // WorktreesConfig holds daemon-wide knobs for task worktree setup/teardown
@@ -44,7 +45,6 @@ func (p PortsConfig) PortRange() (lo, hi int, ok bool, err error) {
 		return 0, 0, false, fmt.Errorf("worktrees.ports.range %q: need 1024 <= lo <= hi <= 65535", p.Range)
 	}
 	return lo, hi, true, nil
-	Agents        AgentsConfig        `yaml:"agents"`
 }
 
 // AgentsConfig holds per-agent tuning.
@@ -124,6 +124,7 @@ func Load() (Config, error) {
 	}
 	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)
 	}

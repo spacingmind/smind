@@ -86,6 +86,8 @@ func TestLoad_WorktreesBadRangeRejected(t *testing.T) {
 			t.Fatalf("range %q accepted, want error", r)
 		}
 	}
+}
+
 func TestLoad_GLMMaxTurns(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SMIND_HOME", home)
