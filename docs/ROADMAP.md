@@ -101,18 +101,57 @@ Definition of done: from a phone off-network — assign new work, get notified, 
 
 ## Phase 4 — Tauri desktop + polish (weeks 15-17)
 
-- [ ] Tauri 2 wrapper: tray icon, global shortcuts, native notifications, auto-update
-- [ ] Complete native-call abstraction layer
-- [ ] Full settings UI (accounts, pools, per-workspace policies)
+Status as of v0.10.0 (2026-10-11):
+
+- [x] Tauri 2 shell with tray, global shortcut, native notifications that
+      navigate to the task, deep links, window state, and an app menu
+      (`desktop-tauri-shell`, `desktop-quick-wins`).
+- [x] Bundled UI plus a loopback proxy and a scoped per-command IPC
+      bridge, with a connection picker for local, URL and relay daemons
+      (ADR-0013, `desktop-bundled-ui`, `desktop-relay-transport`).
+- [x] An app-managed local daemon: WSL2 on Windows, and a bundled sidecar
+      with auto-start on macOS. It updates only when no runs are in
+      flight (`desktop-managed-daemon`, `desktop-macos-app` M2/M5).
+- [x] Native feel in the ZCode style:
+  - custom window chrome with no launch flash (D1);
+  - no webview-isms (D2);
+  - desktop shortcuts and a native menu (D3);
+  - Reveal/Open in editor and a taskbar badge (D4) (`desktop-native-feel`).
+- [x] macOS app: per-arch DMGs (unsigned, ad-hoc), Dock lifecycle and a
+      Dock badge (`desktop-macos-app`). First shipped in v0.10.0.
+- [x] Native-call abstraction (`web/packages/ui/src/lib/platform.ts`,
+      gated on `isDesktop`).
+- [~] Settings UI. Done: accounts, providers, profiles, connections,
+      daemon, notifications, shortcuts, MCP servers. Not done: pools and
+      per-workspace routing policies.
+- [ ] Auto-update. It needs an updater signing key and an update channel
+      decision. Deferred.
+- [ ] Code signing and notarization (macOS Developer ID, Windows
+      Authenticode). Deferred: the builds are for personal use for now.
+- [ ] Manual verification still open: Windows/Linux chrome and
+      integrations, and the macOS Dock badge and notification click (see
+      each plan's Validation).
 
 ## Phase 5 — Automation (week 18+, demand-driven only)
 
 - [ ] Heartbeats: task self-evaluates and continues
 - [ ] Schedules: cron creates new tasks (e.g. daily triage)
-- [ ] Subagents: session spawns session, cross-provider
+- [~] Subagents: session spawns session, cross-provider. The primitives
+      exist:
+  - `smind mcp serve` with `task_new`, `task_send`, `task_wait` and
+    `task_stop`, plus an auto-approve guard (ADR-0017/0019);
+  - task parent/child with a depth guard;
+  - a per-chat prompt queue with `whenBusy` that survives restarts
+    (ADR-0021);
+  - agent MCP servers (ADR-0018);
+  - per-run usage (ADR-0020).
+
+  The remaining piece is dogfooding: Step 3 of
+  `orchestration-and-metering`.
 - [ ] GitHub integration: PR status / checkout PR as a task
 - [ ] Per-workspace audit log
-- [ ] Quota prediction
+- [ ] Quota prediction. Per-run and proxy usage are now recorded, but the
+      per-provider quota `Fetcher` is still a stub.
 
 ## Guiding principles
 
