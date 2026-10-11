@@ -421,6 +421,67 @@ deleted, not adapted):
 `hooks/use-daemon-events.test.ts`:
 - `subscribes to chat.queueUpdated`
 
+### ADR-O follow-up: structured `cancel_kind` (spec written 2026-10-11)
+
+Removes the string coupling PR #259 left in `use-chat-queue.ts`: the web
+hides user-cancelled items by matching the server string
+`"cancelled by user"`, while auto-cancels carry `"delivery failed: ..."`.
+The reason stays for display; visibility is decided by a structured field.
+Additive only (no ADR change; ADR-0021 §1 and §8 gain one column and one
+field). This is also the Step 3 dogfood task: it is implemented through
+smind itself (see the gap log).
+
+**Design:**
+
+- **Store.** `chat_queue.cancel_kind TEXT NOT NULL DEFAULT ''`, values
+  `'user'`, `'auto'`, or `''` (not cancelled). `schema.sql` carries it for
+  new databases; a migration (`chat_queue.cancel_kind`) adds it to old ones
+  and backfills already-cancelled rows: `cancel_reason = 'cancelled by user'`
+  becomes `'user'`, every other cancelled row becomes `'auto'`.
+  `store.ChatQueueItem` gains `CancelKind string`; `MarkCancelled` takes the
+  kind (`MarkCancelled(id, kind, reason)`), with exported constants
+  `ChatQueueCancelUser` / `ChatQueueCancelAuto`.
+- **Registry.** `CancelQueuedItem` (user, `chat.queueCancel`) stamps `user`;
+  both `delivery failed:` paths stamp `auto`. Reason strings are unchanged.
+- **Wire.** `chat.queueList` items and `chat.queueUpdated` snapshot items
+  carry `CancelKind` (Go-name key, the existing convention of
+  `chatQueueItemParams`). `""` while queued/delivered.
+- **CLI.** `smind task queue ls` is unchanged (it prints the reason).
+- **Web.** `ChatQueueItem.CancelKind: "" | "user" | "auto"`.
+  `useChatQueue` shows a cancelled item iff `CancelKind === "auto"` (for
+  10 s, as today); it no longer compares `CancelReason`. The string-coupling
+  comment is rewritten.
+
+**Acceptance criteria:**
+
+1. **Migration.** An old database (no column) opens, the column exists,
+   and previously cancelled rows are backfilled (`cancelled by user` ->
+   `user`, anything else -> `auto`); queued and delivered rows stay `''`.
+2. **Stamps.** A user `chat.queueCancel` yields `CancelKind == "user"`; a
+   delivery failure yields `"auto"`; both keep their `CancelReason`.
+3. **Wire.** `chat.queueList` and the `chat.queueUpdated` snapshot carry
+   `CancelKind` for every item.
+4. **Web.** `useChatQueue` hides `user`-cancelled items and shows `auto`
+   ones for 10 s, with no `CancelReason` string comparison left
+   (`grep -n '"cancelled by user"' web/packages/ui/src --include=*.ts --include=*.tsx`
+   finds only test fixtures, if anything).
+5. **No regressions.** Existing queue tests pass; a cancelled row with an
+   empty `CancelKind` (an older daemon) is not shown, because the safe
+   default for an unknown kind is hidden.
+
+**Test scenarios (exact names):**
+
+- `internal/store/migrate_test.go`: `TestMigrate_ChatQueueCancelKind`
+  (old-DB read-back and backfill).
+- `internal/store/chat_queue_test.go`: `TestChatQueue_MarkCancelledStampsKind`.
+- `internal/runs/queue_test.go`: `TestChatQueue_CancelKindUserVsAuto`
+  (user cancel via `CancelQueuedItem`; provider-mismatch auto-cancel).
+- `internal/wsapi/chat_queue_test.go`: extend `TestChatQueue_ListCancelAndEvent`
+  to assert `CancelKind` on `chat.queueList` and on the event snapshot.
+- `hooks/use-chat-queue.test.ts`: `does not show a user-cancelled item` and
+  `shows an auto-cancelled item with its reason for 10s then drops it` use
+  `CancelKind`; add `hides a cancelled item with an empty CancelKind`.
+
 ## Test Scenarios
 
 **M1** (httptest fake upstreams, through the real proxy handler):
