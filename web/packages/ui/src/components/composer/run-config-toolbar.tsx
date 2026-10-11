@@ -10,6 +10,7 @@ import {
   AUTO_ACCEPT_LABEL,
   describePermission,
   effectiveMode,
+  providerModels,
   providerModes,
   supportsAutoAccept,
 } from "@/lib/permission-modes";
@@ -29,7 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
+import type { AgentProfile, ModeInfo, ModelInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 // Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
 // the original dense sizing at `md:` and above -- plain responsive Tailwind
@@ -70,6 +71,8 @@ export interface RunConfigState {
   /** ACP providers only: approve every permission prompt. */
   autoAccept: boolean;
   thinkingLevel: ThinkingLevel;
+  /** ADR-0025: the requested model id for the selected provider; "" means the provider's default (nothing is sent). Provider-scoped like permissionMode, so a provider switch resets it. */
+  model: string;
 }
 
 export interface RunConfigContextValue {
@@ -79,6 +82,7 @@ export interface RunConfigContextValue {
     setPermissionMode: (mode: string) => void;
     setAutoAccept: (autoAccept: boolean) => void;
     setThinkingLevel: (level: ThinkingLevel) => void;
+    setModel: (model: string) => void;
     /** Applies a profile's stored config to the three fields (ADR-0014's client-side seed) and marks it as the base agent. */
     applyProfile: (profileId: string) => void;
     /** The agent menu's "No agent" entry: detaches from baseAgentId without touching the current field values. */
@@ -91,6 +95,8 @@ export interface RunConfigContextValue {
     providers: ProviderInfo[];
     /** The selected provider's own permission modes (provider.list's catalog). */
     modes: ModeInfo[];
+    /** The selected provider's model catalog (provider.list); empty when none is known, in which case the model picker is hidden. */
+    models: ModelInfo[];
     /** state.permissionMode resolved against the provider default -- what the run will actually use. */
     effectiveMode: string;
     /** Whether the selected provider takes autoAccept (ACP). */
@@ -110,7 +116,7 @@ export function useRunConfig(): RunConfigContextValue {
   return ctx;
 }
 
-const EMPTY_STATE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
+const EMPTY_STATE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
 
 /** Applies profile p's stored fields on top of prev -- shared by applyProfile and resetToAgent so "reset" really means "re-apply the same profile". A mode is provider-scoped, so it always comes from the profile ("" = that provider's default) rather than carrying prev's (possibly another provider's) mode over; an empty ThinkingLevel leaves the current value alone. */
 function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigState {
@@ -121,6 +127,7 @@ function applyProfileFields(prev: RunConfigState, p: AgentProfile): RunConfigSta
     permissionMode: p.PermissionMode,
     autoAccept: p.AutoAccept,
     thinkingLevel: (p.ThinkingLevel || prev.thinkingLevel) as ThinkingLevel,
+    model: p.Model ?? "",
   };
 }
 
@@ -208,7 +215,7 @@ export function RunConfigToolbar({
   // the user pick) anything else, regardless of what was seeded above.
   useEffect(() => {
     if (!boundProvider) return;
-    setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider, permissionMode: "", autoAccept: false }));
+    setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider, permissionMode: "", autoAccept: false, model: "" }));
   }, [boundProvider]);
 
   // The ★ default agent (Settings -> Agents): a task that has never had a
@@ -253,20 +260,22 @@ export function RunConfigToolbar({
   }, [profiles]);
 
   const setField = useCallback(
-    (patch: Partial<Pick<RunConfigState, "provider" | "permissionMode" | "autoAccept" | "thinkingLevel">>) => {
+    (patch: Partial<Pick<RunConfigState, "provider" | "permissionMode" | "autoAccept" | "thinkingLevel" | "model">>) => {
       setState((prev) => ({ ...prev, ...patch, custom: prev.baseAgentId !== null ? true : prev.custom }));
     },
     [],
   );
-  // Modes are provider-scoped (W1): switching provider resets to the new
-  // provider's own default mode and turns autoAccept off.
+  // Modes (W1) and models (ADR-0025) are provider-scoped: switching provider
+  // resets to the new provider's own default mode and model and turns
+  // autoAccept off, so a model id never leaks into a provider that lacks it.
   const setProvider = useCallback(
-    (provider: Provider) => setField({ provider, permissionMode: "", autoAccept: false }),
+    (provider: Provider) => setField({ provider, permissionMode: "", autoAccept: false, model: "" }),
     [setField],
   );
   const setPermissionMode = useCallback((permissionMode: string) => setField({ permissionMode }), [setField]);
   const setAutoAccept = useCallback((autoAccept: boolean) => setField({ autoAccept }), [setField]);
   const setThinkingLevel = useCallback((thinkingLevel: ThinkingLevel) => setField({ thinkingLevel }), [setField]);
+  const setModel = useCallback((model: string) => setField({ model }), [setField]);
 
   // The command palette's "Use agent: <name>" entry lands here (the
   // sidebar owns the palette entry; this toolbar owns the state). The
@@ -289,18 +298,19 @@ export function RunConfigToolbar({
   const value = useMemo<RunConfigContextValue>(() => {
     return {
       state,
-      actions: { setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
+      actions: { setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, setModel, applyProfile, clearAgent, resetToAgent },
       meta: {
         profiles,
         providers,
         modes: providerModes(providers, state.provider),
+        models: providerModels(providers, state.provider),
         effectiveMode: effectiveMode(providers, state.provider, state.permissionMode),
         supportsAutoAccept: supportsAutoAccept(providers, state.provider),
         disabled,
         boundProvider,
       },
     };
-  }, [state, setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
+  }, [state, setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, setModel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
 
   useEffect(() => {
     onChange?.(value);
@@ -526,4 +536,54 @@ function RunConfigToolbarThinking() {
 RunConfigToolbar.Agent = RunConfigToolbarAgent;
 RunConfigToolbar.Provider = RunConfigToolbarProvider;
 RunConfigToolbar.Mode = RunConfigToolbarMode;
+
+/** Radix Select rejects an empty-string item value, so "Default" travels under this sentinel and maps back to "" (nothing sent). */
+const DEFAULT_MODEL_VALUE = "__default__";
+
+/**
+ * ADR-0025's model picker: the selected provider's catalog (provider.list's
+ * `models`), "Default" first. Hidden -- not rendered as an empty select --
+ * when the provider lists no models (e.g. an ACP agent that has not been
+ * probed yet): there is nothing valid to choose, and the daemon already
+ * falls back to the provider's own default. A model carried in by a profile
+ * that the catalog does not list (the Claude catalog is a convenience, not
+ * an allowlist) still shows, as its raw id, instead of a blank trigger.
+ */
+function RunConfigToolbarModel() {
+  const { state, actions, meta } = useRunConfig();
+  if (meta.models.length === 0) return null;
+  const known = meta.models.find((m) => m.id === state.model);
+  const current = state.model ? (known?.label ?? state.model) : "Default";
+  return (
+    <Select
+      value={state.model || DEFAULT_MODEL_VALUE}
+      onValueChange={(v) => {
+        if (v) actions.setModel(v === DEFAULT_MODEL_VALUE ? "" : v);
+      }}
+      disabled={meta.disabled}
+    >
+      <SelectTrigger
+        aria-label="Model"
+        title={known?.description ?? (state.model ? undefined : "The provider's own default model")}
+        data-testid="composer-model-select"
+        className={SELECT_TRIGGER_CLASS}
+      >
+        <SelectValue placeholder="Select model">{current}</SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_MODEL_VALUE} title="The provider's own default model">
+          Default
+        </SelectItem>
+        {state.model && !known && <SelectItem value={state.model}>{state.model}</SelectItem>}
+        {meta.models.map((m) => (
+          <SelectItem key={m.id} value={m.id} title={m.description}>
+            {m.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 RunConfigToolbar.Thinking = RunConfigToolbarThinking;
+RunConfigToolbar.Model = RunConfigToolbarModel;

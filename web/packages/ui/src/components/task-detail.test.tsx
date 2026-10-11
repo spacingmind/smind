@@ -1001,7 +1001,7 @@ describe("run-config pill (run-config IA)", () => {
 });
 
 describe("runConfigPillLabel", () => {
-  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
+  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
   const providers: ProviderInfo[] = [
     { id: "claude-native", label: "Claude Code" },
     { id: "glm", label: "GLM" },
