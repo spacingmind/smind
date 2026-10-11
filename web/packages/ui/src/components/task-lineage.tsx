@@ -1,5 +1,5 @@
 import { StatusDot } from "@/components/ui/status-dot";
-import { pillStatus, pillStatusWithSubtree, statusSummary, usageChipText } from "@/lib/task-lineage";
+import { pillStatusWithSubtree, statusSummary, usageChipText } from "@/lib/task-lineage";
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
