@@ -4,6 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ArchiveTaskDialog, CreateWorkspaceDialog } from "@/components/crud-dialogs";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import type { Task } from "@/lib/types";
+import type { WsClient } from "@/lib/ws-client";
+
+/** ArchiveTaskDialog takes a full WsClient; the fake is structurally enough at runtime. */
+function wsFake(): FakeWsClient & WsClient {
+  return new FakeWsClient() as unknown as FakeWsClient & WsClient;
+}
 
 // visual-identity-console Item 4: a dialog's Cancel button is the "quiet"
 // call site -- non-committal next to the primary Create action, via the
@@ -45,7 +51,7 @@ function flush(): Promise<void> {
 
 describe("ArchiveTaskDialog children (PR-U2)", () => {
   it("archive dialog lists live children", async () => {
-    const client = new FakeWsClient();
+    const client = wsFake();
     render(
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
     );
@@ -64,7 +70,7 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
   });
 
   it("archive dialog with no children is unchanged", async () => {
-    const client = new FakeWsClient();
+    const client = wsFake();
     render(
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,
     );
@@ -78,7 +84,7 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
   });
 
   it("archive dialog confirms with task.archive for the parent only", async () => {
-    const client = new FakeWsClient();
+    const client = wsFake();
     const onArchived = vi.fn();
     const onOpenChange = vi.fn();
     render(
@@ -99,7 +105,7 @@ describe("ArchiveTaskDialog children (PR-U2)", () => {
   });
 
   it("archive dialog child-list failure still allows archive with a warning", async () => {
-    const client = new FakeWsClient();
+    const client = wsFake();
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     render(
       <ArchiveTaskDialog client={client} task={ARCHIVE_TASK} open={true} onOpenChange={vi.fn()} onArchived={vi.fn()} />,

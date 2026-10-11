@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TaskLineageHeader } from "@/components/task-lineage";
@@ -242,7 +242,7 @@ describe("task lineage header (in the pane)", () => {
     vi.advanceTimersByTime(200);
     await act(async () => {
       for (const call of client.calls) {
-        if (call.method === "run.logs" && !call.resolved) call.resolve({ runId: "run-1", status: "done", events: [] } satisfies RunLogsResult);
+        if (call.method === "run.logs") call.resolve({ runId: "run-1", status: "done", events: [] } satisfies RunLogsResult);
       }
     });
     act(() => {
