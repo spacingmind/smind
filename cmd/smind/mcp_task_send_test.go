@@ -242,3 +242,150 @@ func TestMCPTools_TaskSendChatScoped(t *testing.T) {
 		t.Fatalf("foreign chatId error = %q, want it to name the chat/task mismatch", msg)
 	}
 }
+
+// runModelsOf returns each run's persisted Model, keyed by run id.
+func runModelsOf(t *testing.T, env *mcpTestEnv) map[string]string {
+	t.Helper()
+	client := dialTestClient(t, env.srvURL)
+	var runs []struct {
+		ID    string
+		Model string
+	}
+	if err := client.Call(context.Background(), "run.list", map[string]any{}, &runs); err != nil {
+		t.Fatalf("run.list: %v", err)
+	}
+	out := map[string]string{}
+	for _, r := range runs {
+		out[r.ID] = r.Model
+	}
+	return out
+}
+
+// createModelProfile creates a profile carrying a model.
+func createModelProfile(t *testing.T, env *mcpTestEnv, provider, model string) int64 {
+	t.Helper()
+	client := dialTestClient(t, env.srvURL)
+	var profile struct {
+		ID int64 `json:"ID"`
+	}
+	if err := client.Call(context.Background(), "profile.create", map[string]any{"name": "m", "provider": provider, "model": model}, &profile); err != nil {
+		t.Fatalf("profile.create: %v", err)
+	}
+	return profile.ID
+}
+
+// TestMCPTools_TaskSendModel: task_send's model reaches run.start and is
+// recorded on the run; a malformed model is rejected by the daemon.
+func TestMCPTools_TaskSendModel(t *testing.T) {
+	env := newMCPSessionArgs(t, "models")
+	client := dialTestClient(t, env.srvURL)
+	taskID := newTestRepoTask(t, client)
+
+	var sent taskSendOutput
+	if isErr := callMCPTool(t, env.cs, "task_send", map[string]any{
+		"taskId": taskID, "provider": "glm", "prompt": "hi", "model": "fake-model-b",
+	}, &sent); isErr {
+		t.Fatal("task_send with a model returned an error result")
+	}
+	if got := runModelsOf(t, env)[sent.RunID]; got != "fake-model-b" {
+		t.Fatalf("run model = %q, want fake-model-b", got)
+	}
+
+	msg := taskSendErr(t, env, map[string]any{
+		"taskId": taskID, "provider": "glm", "prompt": "hi", "model": "--evil",
+	})
+	if !strings.Contains(msg, "model") {
+		t.Fatalf("bad model rejection = %q, want it to name the model", msg)
+	}
+}
+
+// TestProfile_ModelOverriddenByCall: through task_send, a selected
+// profile's model applies, and an explicit model on the call overrides it.
+func TestProfile_ModelOverriddenByCall(t *testing.T) {
+	env := newMCPSessionArgs(t, "models")
+	client := dialTestClient(t, env.srvURL)
+	taskID := newTestRepoTask(t, client)
+	profile := createModelProfile(t, env, "glm", "fake-model-a")
+
+	var viaProfile taskSendOutput
+	if isErr := callMCPTool(t, env.cs, "task_send", map[string]any{
+		"taskId": taskID, "prompt": "a", "profileId": profile, "whenBusy": "queue",
+	}, &viaProfile); isErr {
+		t.Fatal("task_send via profile returned an error result")
+	}
+	waitForRunStatus(t, client, viaProfile.RunID, "done")
+	var overridden taskSendOutput
+	if isErr := callMCPTool(t, env.cs, "task_send", map[string]any{
+		"taskId": taskID, "prompt": "b", "profileId": profile, "model": "fake-model-b", "whenBusy": "queue",
+	}, &overridden); isErr {
+		t.Fatal("task_send via profile + model returned an error result")
+	}
+	models := runModelsOf(t, env)
+	if models[viaProfile.RunID] != "fake-model-a" {
+		t.Fatalf("profile run model = %q, want fake-model-a", models[viaProfile.RunID])
+	}
+	if models[overridden.RunID] != "fake-model-b" {
+		t.Fatalf("overridden run model = %q, want fake-model-b", models[overridden.RunID])
+	}
+}
+
+// TestMCPTools_TaskSendModelDoesNotUnlockAutoApproving: picking a model is
+// not a permission decision (ADR-0025) -- a model next to an auto-approving
+// permissionMode or autoAccept is still rejected (ADR-0019 decision 6).
+func TestMCPTools_TaskSendModelDoesNotUnlockAutoApproving(t *testing.T) {
+	env := newMCPSession(t)
+	client := dialTestClient(t, env.srvURL)
+	taskID := newTestRepoTask(t, client)
+
+	msg := taskSendErr(t, env, map[string]any{
+		"taskId": taskID, "provider": "claude-native", "prompt": "hi",
+		"model": "claude-opus-5-5", "permissionMode": "bypassPermissions",
+	})
+	if !strings.Contains(msg, "auto-approves") {
+		t.Fatalf("rejection = %q, want the auto-approve guard", msg)
+	}
+	taskSendErr(t, env, map[string]any{
+		"taskId": taskID, "provider": "glm", "prompt": "hi", "model": "x", "autoAccept": true,
+	})
+	if n := len(runModelsOf(t, env)); n != 0 {
+		t.Fatalf("%d runs started despite the rejection, want 0", n)
+	}
+}
+
+// TestMCPTools_ProviderListHasModels: provider_list is not on this base, so
+// this asserts the provider.list wire shape the tool will pass through --
+// claude-native's static models with modelsDiscovered unset.
+func TestMCPTools_ProviderListHasModels(t *testing.T) {
+	env := newMCPSession(t)
+	client := dialTestClient(t, env.srvURL)
+	var listed struct {
+		Providers []struct {
+			ID               string `json:"id"`
+			ModelsDiscovered bool   `json:"modelsDiscovered"`
+			Models           []struct {
+				ID    string `json:"id"`
+				Label string `json:"label"`
+			} `json:"models"`
+		} `json:"providers"`
+	}
+	if err := client.Call(context.Background(), "provider.list", nil, &listed); err != nil {
+		t.Fatalf("provider.list: %v", err)
+	}
+	for _, p := range listed.Providers {
+		if p.ID != "claude-native" {
+			continue
+		}
+		if p.ModelsDiscovered {
+			t.Fatal("claude-native modelsDiscovered = true, want false (static catalog)")
+		}
+		ids := map[string]bool{}
+		for _, m := range p.Models {
+			ids[m.ID] = true
+		}
+		if !ids["sonnet"] || !ids["claude-opus-5-5"] {
+			t.Fatalf("claude-native models = %+v, want the static catalog", p.Models)
+		}
+		return
+	}
+	t.Fatal("claude-native missing from provider.list")
+}

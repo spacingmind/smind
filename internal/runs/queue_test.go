@@ -655,3 +655,55 @@ func TestChatQueue_NoDeliveryDuringCloseAll(t *testing.T) {
 	delivered := e.waitForQueuedStatus(t, out.QueueItemID, store.ChatQueueStatusDelivered)
 	waitForStatus(t, reg2, *delivered.RunID, StatusDone, 5*time.Second)
 }
+
+// TestStartWhenBusy_AutoApprovingErrorPointsToProfiles pins that the
+// ADR-0019 rejection tells a non-human caller what to do instead.
+func TestStartWhenBusy_AutoApprovingErrorPointsToProfiles(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "hang")
+	runID := e.startRun(t, "hi")
+	chatID := e.chatIDOf(t, runID)
+	t.Cleanup(func() { _ = e.reg.Stop(runID) })
+
+	_, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "x", taskrunner.PermissionSettings{Mode: "bypass_permissions"}, "", WhenBusyQueue, store.ChatQueueSourceOrchestrator, 0, 0)
+	if err == nil {
+		t.Fatal("StartWhenBusy error = nil, want the ADR-0019 rejection")
+	}
+	for _, want := range []string{"pass profileId of a human-authored profile", "profile_list", "autoApproves", "provider_list"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+}
+
+// TestChatQueue_ModelPreserved: a queued item keeps its requested model in
+// its run config and the delivered run starts with it (ADR-0025).
+func TestChatQueue_ModelPreserved(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnvArgs(t, "hang", []string{"models"})
+	runA := e.startRun(t, "a")
+	chatID := e.chatIDOf(t, runA)
+	waitForHistoryLen(t, e.reg, runA, 1, 5*time.Second)
+
+	out, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "b", taskrunner.PermissionSettings{}, "", WhenBusyQueue, store.ChatQueueSourceHuman, 0, 0, WithModel("fake-model-b"))
+	if err != nil || !out.Queued {
+		t.Fatalf("StartWhenBusy(queue, model) = %+v, %v, want queued", out, err)
+	}
+	item, err := e.st.GetChatQueueItem(out.QueueItemID)
+	if err != nil || !strings.Contains(item.RunConfig, `"model":"fake-model-b"`) {
+		t.Fatalf("queued run_config = %q, %v, want the model", item.RunConfig, err)
+	}
+
+	_ = e.reg.Stop(runA)
+	delivered := e.waitForQueuedStatus(t, out.QueueItemID, store.ChatQueueStatusDelivered)
+	row, err := e.st.GetRun(*delivered.RunID)
+	if err != nil || row.Model != "fake-model-b" {
+		t.Fatalf("delivered run = %+v, %v, want model fake-model-b", row, err)
+	}
+	t.Cleanup(func() { _ = e.reg.Stop(*delivered.RunID) })
+
+	// A bad model is rejected at enqueue time, before anything is stored.
+	if _, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "c", taskrunner.PermissionSettings{}, "", WhenBusyQueue, store.ChatQueueSourceHuman, 0, 0, WithModel("--model")); err == nil {
+		t.Fatal("StartWhenBusy(queue, bad model) error = nil, want rejected")
+	}
+}

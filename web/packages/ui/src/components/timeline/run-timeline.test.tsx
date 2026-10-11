@@ -24,6 +24,31 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
   };
 }
 
+describe("RunTimeline stop reason", () => {
+  it("labels a max_turn_requests run as turn limit reached", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "max_turn_requests" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.getAttribute("data-tone")).toBe("warning");
+    expect(el.textContent).toContain("Turn limit reached");
+    expect(el.textContent).toContain("Send a message to continue");
+  });
+
+  it("shows other stop reasons verbatim", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.textContent).toBe("cancelled");
+    expect(el.getAttribute("data-tone")).toBe("neutral");
+  });
+});
+
 describe("RunTimeline", () => {
   it("renders each event kind as its own row", () => {
     render(
@@ -45,6 +70,23 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("the answer");
     expect(screen.getByTestId("timeline-tool-call")).toHaveTextContent("Bash");
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
+  });
+
+  it("run header shows the requested model", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-model-chip")).toHaveTextContent("claude-opus-5-5");
+
+    // A default run (no model requested) has no chip.
+    rerender(
+      <ul>
+        <RunTimeline run={run([], { model: "" })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-model-chip")).not.toBeInTheDocument();
   });
 
   it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {

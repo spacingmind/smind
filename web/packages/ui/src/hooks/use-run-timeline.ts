@@ -5,6 +5,7 @@ import type { WsClientLike } from "@/lib/ws-client";
 import type {
   PermissionSettings,
   PermissionQuestion,
+  PermissionDetail,
   PermissionRequestEventParams,
   PermissionResolutionReason,
   PermissionResolvedEventParams,
@@ -32,6 +33,8 @@ export interface PendingPermission {
   questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request. */
   plan?: string;
+  /** Structured write/edit/execute detail from the daemon, when it sent one. */
+  detail?: PermissionDetail;
 }
 
 /**
@@ -250,6 +253,8 @@ export interface RunEntry {
    * retryWithHigherEffort below for how a *new* run gets a higher tier).
    */
   thinkingLevel: ThinkingLevel;
+  /** ADR-0025: the model the run was asked to use, "" for the provider's default. */
+  model?: string;
   /**
    * The run's most recent still-unanswered permission request, or
    * undefined if none is currently pending. Set when a "permission_request"
@@ -297,6 +302,7 @@ interface TimelineState {
     permission?: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
     whenBusy?: WhenBusy,
+    model?: string,
   ) => Promise<SubmitResult>;
   /**
    * Actually stops runId server-side (run.stop) -- unlike task switch/
@@ -396,6 +402,7 @@ function setPendingPermission(
       options: params.options,
       questions: params.questions,
       plan: params.plan,
+      detail: params.detail,
     },
   });
 }
@@ -504,6 +511,7 @@ function toRunEntry(r: RunSummary): RunEntry {
     permissionMode: r.PermissionMode,
     autoAccept: r.AutoAccept,
     thinkingLevel: r.ThinkingLevel,
+    model: r.Model ?? "",
   };
 }
 
@@ -611,6 +619,7 @@ export function useRunTimeline(
       permission?: PermissionSettings,
       thinkingLevel?: ThinkingLevel,
       whenBusy: WhenBusy = "queue",
+      model?: string,
     ) => {
       const session = sessionRef.current;
       if (!client || taskId === null || chatId === null || !session) {
@@ -626,6 +635,7 @@ export function useRunTimeline(
         ...(permission?.permissionMode ? { permissionMode: permission.permissionMode } : {}),
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
+        ...(model ? { model } : {}),
       });
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
@@ -651,6 +661,7 @@ export function useRunTimeline(
           permissionMode: permission?.permissionMode ?? "",
           autoAccept: permission?.autoAccept ?? false,
           thinkingLevel: thinkingLevel ?? "",
+          model: model ?? "",
         };
         setRuns((prev) => (prev ? [...prev, entry] : [entry]));
 

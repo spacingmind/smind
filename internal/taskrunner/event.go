@@ -213,6 +213,11 @@ type Event struct {
 	// EventTypePermissionRequest.
 	PermissionOptions []PermissionOption
 
+	// PermissionDetail describes what the requested edit/execute will do,
+	// populated for EventTypePermissionRequest when the provider supplies
+	// one (ACP only today); nil otherwise.
+	PermissionDetail *PermissionDetail
+
 	// PermissionOptionID is the option that was chosen, populated for
 	// EventTypePermissionResolved.
 	PermissionOptionID string

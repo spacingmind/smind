@@ -194,17 +194,31 @@ func ModeAutoApproves(catalog ProviderInfo, s PermissionSettings) bool {
 func (r *Runner) ProviderCatalog() []ProviderInfo {
 	providers := SupportedProviders()
 	for i, p := range providers {
-		if !acpProvider(p.ID) {
-			continue
+		switch {
+		case acpProvider(p.ID):
+			c, ok := r.acpCatalog(p.ID)
+			m, mok := r.acpModelCatalog(p.ID)
+			if !ok && !mok {
+				r.maybeProbeACPModes(p.ID)
+			}
+			if ok {
+				providers[i].Modes = append([]ModeInfo(nil), c.modes...)
+				providers[i].DefaultMode = c.defaultMode
+				providers[i].ModesDiscovered = true
+			}
+			if mok {
+				providers[i].Models = append([]ModelInfo(nil), m.models...)
+				providers[i].ModelsDiscovered = true
+			}
+		case p.ID == ProviderCodexNative:
+			m, ok := r.acpModelCatalog(p.ID)
+			if !ok {
+				r.maybeProbe(p.ID, r.probeCodexModels)
+				continue
+			}
+			providers[i].Models = append([]ModelInfo(nil), m.models...)
+			providers[i].ModelsDiscovered = true
 		}
-		c, ok := r.acpCatalog(p.ID)
-		if !ok {
-			r.maybeProbeACPModes(p.ID)
-			continue
-		}
-		providers[i].Modes = append([]ModeInfo(nil), c.modes...)
-		providers[i].DefaultMode = c.defaultMode
-		providers[i].ModesDiscovered = true
 	}
 	return providers
 }

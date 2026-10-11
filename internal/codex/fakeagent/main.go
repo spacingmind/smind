@@ -109,7 +109,26 @@ func call(method string, params any) message {
 	return <-ch
 }
 
+// noModelList (the "nomodellist" argument) makes model/list answer
+// method-not-found, like an older app-server.
+var noModelList bool
+
+// recordThreadModel writes the `model` a thread/start or thread/resume
+// carried to a "thread-model" file in cwd ("" when absent), so tests can
+// assert the field was (not) sent.
+func recordThreadModel(cwd, model string) {
+	if cwd == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(cwd, "thread-model"), []byte(model), 0o644)
+}
+
 func main() {
+	for _, a := range os.Args[1:] {
+		if a == "nomodellist" {
+			noModelList = true
+		}
+	}
 	reader := bufio.NewReaderSize(os.Stdin, 1<<20)
 	var threadCwd string
 
@@ -138,6 +157,7 @@ func handle(msg message, threadCwd *string) {
 			Cwd            string `json:"cwd"`
 			ApprovalPolicy string `json:"approvalPolicy"`
 			Sandbox        string `json:"sandbox"`
+			Model          string `json:"model"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		*threadCwd = params.Cwd
@@ -146,6 +166,7 @@ func handle(msg message, threadCwd *string) {
 		threadStateMu.Unlock()
 		recordThreadInitMethod(params.Cwd, "thread/start")
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
+		recordThreadModel(params.Cwd, params.Model)
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": threadID}})
 	case msg.Method == "thread/loaded/list":
 		threadStateMu.Lock()
@@ -187,9 +208,11 @@ func handle(msg message, threadCwd *string) {
 			Cwd            string `json:"cwd"`
 			ApprovalPolicy string `json:"approvalPolicy"`
 			Sandbox        string `json:"sandbox"`
+			Model          string `json:"model"`
 		}
 		_ = json.Unmarshal(msg.Params, &params)
 		recordThreadPolicy(params.Cwd, params.ApprovalPolicy, params.Sandbox)
+		recordThreadModel(params.Cwd, params.Model)
 		threadStateMu.Lock()
 		isArchived := archivedThreads[params.ThreadID]
 		isKnown := params.ThreadID == threadID
@@ -213,6 +236,33 @@ func handle(msg message, threadCwd *string) {
 		threadStateMu.Unlock()
 		recordThreadInitMethod(params.Cwd, "thread/resume")
 		respond(msg.ID, map[string]any{"thread": map[string]any{"id": params.ThreadID}})
+	case msg.Method == "model/list":
+		if noModelList {
+			writeMessage(message{ID: msg.ID, Error: &rpcError{Code: -32601, Message: "method not found: model/list"}})
+			return
+		}
+		var params struct {
+			Cursor string `json:"cursor"`
+		}
+		_ = json.Unmarshal(msg.Params, &params)
+		// Two pages, so a client's cursor loop is exercised; page two
+		// carries a hidden model that must be skipped.
+		if params.Cursor == "" {
+			respond(msg.ID, map[string]any{
+				"data": []map[string]any{
+					{"id": "gpt-fake-a", "model": "gpt-fake-a", "displayName": "GPT Fake A", "description": "first", "hidden": false, "isDefault": true},
+				},
+				"nextCursor": "page2",
+			})
+			return
+		}
+		respond(msg.ID, map[string]any{
+			"data": []map[string]any{
+				{"id": "gpt-fake-b", "model": "gpt-fake-b", "displayName": "GPT Fake B", "description": "second", "hidden": false, "isDefault": false},
+				{"id": "gpt-hidden", "model": "gpt-hidden", "displayName": "Hidden", "description": "", "hidden": true, "isDefault": false},
+			},
+			"nextCursor": nil,
+		})
 	case msg.Method == "turn/start":
 		respond(msg.ID, map[string]any{"turn": map[string]any{"id": turnID, "status": "inProgress"}})
 		go runTurnScript(*threadCwd)

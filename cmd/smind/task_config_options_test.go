@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,9 +84,9 @@ func captureStderr(t *testing.T, f func()) string {
 // internal/taskrunner/fakeagent binary, and returns its URL -- the CLI
 // tests dial it exactly the way dialDaemon does in production, via a
 // config.yaml port. Mirrors the account_test.go setup in this package.
-func newConfigOptionTestEnv(t *testing.T, home string) string {
+func newConfigOptionTestEnv(t *testing.T, home string, agentArgs ...string) string {
 	t.Helper()
-	return newConfigOptionTestEnvArgs(t, home)
+	return newConfigOptionTestEnvArgs(t, home, agentArgs...)
 }
 
 // newConfigOptionTestEnvArgs is newConfigOptionTestEnv with extra argv
@@ -265,6 +266,13 @@ func startTestRun(t *testing.T, srvURL, provider string, scenarios ...string) st
 		}
 		if err := os.WriteFile(filepath.Join(*got.WorktreePath, "scenario"), []byte(scenarios[0]), 0o644); err != nil {
 			t.Fatalf("write scenario: %v", err)
+		}
+		if scenarios[0] == "permission-write" {
+			// The file the fake agent's Write permission overwrites.
+			existing := strings.Repeat("existing line\n", 240)
+			if err := os.WriteFile(filepath.Join(*got.WorktreePath, "existing.txt"), []byte(existing), 0o644); err != nil {
+				t.Fatalf("write existing.txt: %v", err)
+			}
 		}
 	}
 

@@ -289,3 +289,36 @@ func TestStore_RunsSurviveReopen(t *testing.T) {
 		t.Fatalf("ListRunEvents() after reopen = %+v", events)
 	}
 }
+
+// TestRunStart_ModelPersistedOnRun: the requested model survives
+// CreateRun/GetRun/ListRecentRuns, and an unset model is stored as NULL.
+func TestRunStart_ModelPersistedOnRun(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	task := newTestTaskForRuns(t, s)
+	for id, model := range map[string]string{"run-model": "claude-opus-5-5", "run-nomodel": ""} {
+		if _, err := s.CreateRun(Run{ID: id, TaskID: task.ID, Provider: "claude-native", Prompt: "hi", Status: "running", StartedAt: time.Now().UTC(), Model: model}); err != nil {
+			t.Fatalf("CreateRun(%s) error = %v", id, err)
+		}
+		got, err := s.GetRun(id)
+		if err != nil || got.Model != model {
+			t.Fatalf("GetRun(%s) = %q, %v, want model %q", id, got.Model, err, model)
+		}
+	}
+	var isNull bool
+	if err := s.db.QueryRow(`SELECT model IS NULL FROM runs WHERE id = 'run-nomodel'`).Scan(&isNull); err != nil || !isNull {
+		t.Fatalf("unset model IS NULL = %v, %v, want true", isNull, err)
+	}
+	list, err := s.ListRecentRuns(10)
+	if err != nil {
+		t.Fatalf("ListRecentRuns() error = %v", err)
+	}
+	seen := map[string]string{}
+	for _, r := range list {
+		seen[r.ID] = r.Model
+	}
+	if seen["run-model"] != "claude-opus-5-5" || seen["run-nomodel"] != "" {
+		t.Fatalf("ListRecentRuns models = %v", seen)
+	}
+}

@@ -23,7 +23,7 @@ func TestMCPTools_NoApprovalToolInCatalog(t *testing.T) {
 			t.Fatalf("tools/list contains approval tool %q", name)
 		}
 	}
-	want := []string{"task_new", "task_list", "chat_list", "chat_new", "task_send", "task_status", "task_logs", "task_permissions", "task_wait", "task_stop", "workspace_list", "task_get", "run_list", "provider_list", "profile_list", "task_archive", "task_set_mode", "task_options", "task_set_option"}
+	want := []string{"task_new", "task_list", "chat_list", "chat_new", "task_send", "task_status", "task_logs", "task_permissions", "task_wait", "task_stop", "workspace_list", "task_get", "run_list", "provider_list", "profile_list", "task_archive", "task_set_mode", "task_options", "task_set_option", "task_diff", "queue_list", "queue_cancel", "usage_summary"}
 	got := mcpToolNames(t, env.cs)
 	for _, w := range want {
 		found := false
@@ -137,6 +137,32 @@ func TestMCPServer_InstructionsNameEveryTool(t *testing.T) {
 	for _, name := range mcpToolNames(t, env.cs) {
 		if !strings.Contains(init.Instructions, name) {
 			t.Fatalf("instructions do not mention tool %q", name)
+		}
+	}
+}
+
+// TestMCPServer_InstructionsExplainWaitLoopAndModes pins the dogfood G4/G2
+// wording: a pending permission is not completion (loop: wait, human
+// approves, wait again), and the way to cut prompts is a human-authored
+// profile or a non-auto-approving mode -- never an auto-approving one.
+func TestMCPServer_InstructionsExplainWaitLoopAndModes(t *testing.T) {
+	env := newMCPSession(t)
+	init := env.cs.InitializeResult()
+	if init == nil {
+		t.Fatal("no initialize result")
+	}
+	for _, want := range []string{
+		"waiting_permission",
+		"NOT completion",
+		"task_wait again",
+		"stopNote",
+		"largeShrink",
+		"profileId",
+		"accept_edits",
+		"autoApproves",
+	} {
+		if !strings.Contains(init.Instructions, want) {
+			t.Errorf("instructions do not mention %q", want)
 		}
 	}
 }

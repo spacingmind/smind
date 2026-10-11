@@ -1128,3 +1128,43 @@ func withoutUsage(events []runLogEvent) []runLogEvent {
 	}
 	return out
 }
+
+func TestWSAPIPermissionRequestCarriesDetail(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+
+	now := time.Now().UTC()
+	runID := "detail-run"
+	if _, err := db.CreateRun(store.Run{
+		ID: runID, TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "done", StartedAt: now, FinishedAt: &now, StopReason: "end_turn",
+	}); err != nil {
+		t.Fatalf("store.CreateRun() error = %v", err)
+	}
+	ev := `{"type":2,"permissionRequestId":"req-1","permissionSummary":"Write file: a.txt (replaces 240 -> 7 lines)","permissionOptions":[{"id":"allow-1","label":"Allow","kind":"allow_once"}],"permissionDetail":{"kind":"write","path":"a.txt","newLines":7,"replacesExisting":true,"largeShrink":true}}`
+	if _, err := db.AppendRunEvent(runID, 0, ev); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	sendRequest(t, ws, "logs", "run.logs", map[string]any{"runId": runID})
+	resp := readEnvelopeFor(t, ws, "logs", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.logs error = %v", resp.Error.Message)
+	}
+	var raw struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(resp.Result, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Events) != 1 {
+		t.Fatalf("events = %+v", raw.Events)
+	}
+	d, _ := raw.Events[0]["detail"].(map[string]any)
+	if d == nil || d["replacesExisting"] != true || d["largeShrink"] != true || d["path"] != "a.txt" {
+		t.Fatalf("detail = %+v", raw.Events[0]["detail"])
+	}
+}

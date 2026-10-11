@@ -95,7 +95,8 @@ CREATE TABLE IF NOT EXISTS runs (
     err_msg TEXT NOT NULL DEFAULT '',
     approval_policy TEXT NOT NULL DEFAULT 'manual',
     permission_mode TEXT NOT NULL DEFAULT '',
-    auto_accept INTEGER NOT NULL DEFAULT 0
+    auto_accept INTEGER NOT NULL DEFAULT 0,
+    model TEXT -- requested model (ADR-0025); NULL = provider default
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -126,6 +127,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     permission_mode TEXT NOT NULL DEFAULT '',
     auto_accept INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT NOT NULL DEFAULT '',
+    model TEXT, -- requested model (ADR-0025); NULL = provider default
     notes TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
@@ -207,7 +209,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id INTEGER NOT NULL REFERENCES chats(id),
     prompt TEXT NOT NULL,
-    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel
+    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel, model
     source TEXT NOT NULL,                  -- 'human' | 'orchestrator' | 'agent'
     from_task_id INTEGER,                  -- sender, when source='agent'
     from_chat_id INTEGER,

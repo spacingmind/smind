@@ -97,14 +97,27 @@ function ConfigOptionControl({
   // GLM's thinking-level tiers) -- a real dropdown of the agent's own
   // labels, read from the RPC response, never hardcoded here.
   if (option.options && option.options.length > 0) {
+    // ADR-0025: the live `model` option (Claude's synthetic one or an ACP
+    // agent's own) switches the running session, unlike the composer's
+    // Model picker, which sets the next run's -- so it is named apart from
+    // it, both for sighted users (tooltip) and assistive tech/tests (label).
+    const isModel = option.category === "model";
     return (
       <Select value={current} onValueChange={change} disabled={pending}>
         <SelectTrigger
-          aria-label={option.name}
-          title={option.description}
+          aria-label={isModel ? `${option.name} (this session)` : option.name}
+          title={isModel ? (option.description ?? "Switch the model for this running session") : option.description}
+          data-testid={isModel ? "run-config-option-model" : undefined}
           className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-ui-sm hover:bg-hover"
         >
-          <SelectValue placeholder={option.name} />
+          {isModel ? (
+            // Prefixed so it reads apart from the composer's next-run Model picker sitting beside it.
+            <SelectValue placeholder={option.name}>
+              This run: {option.options.find((c) => c.value === current)?.name ?? current}
+            </SelectValue>
+          ) : (
+            <SelectValue placeholder={option.name} />
+          )}
         </SelectTrigger>
         <SelectContent>
           {option.options.map((choice) => (
