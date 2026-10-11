@@ -34,6 +34,10 @@ describe("platform in a non-desktop build", () => {
     expect(() => desktop.onDaemonProgress(() => {})()).not.toThrow();
     await expect(desktop.editorsList()).rejects.toThrow(/unavailable/i);
     await expect(desktop.openInEditor("vscode", "/tmp/a")).rejects.toThrow(/unavailable/i);
+    await expect(desktop.appUpdateCheck()).rejects.toThrow(/unavailable/i);
+    await expect(desktop.appUpdateInstall()).rejects.toThrow(/unavailable/i);
+    expect(() => desktop.onAppUpdateProgress(() => {})()).not.toThrow();
+    expect(() => desktop.onAppUpdateCheckRequested(() => {})()).not.toThrow();
   });
 });
 
@@ -62,6 +66,10 @@ describe("platform in a desktop build", () => {
           return { platform: "macos", reachable: true, daemonVersion: "0.7.0", appVersion: "0.7.0", comparison: "same", managedState: "managed", pid: 123, installedPath: "/tmp/smind", logPath: "/tmp/smind.log", binaryInstalled: true };
         case "connection_version":
           return { reachable: true, daemonVersion: "0.6.0", appVersion: "0.7.0", comparison: "older" };
+        case "app_update_check":
+          return { kind: "upToDate", currentVersion: "0.7.0" };
+        case "app_update_install":
+          return undefined;
         default:
           throw new Error(`unexpected invoke command ${cmd}`);
       }
@@ -106,6 +114,12 @@ describe("platform in a desktop build", () => {
     const versionInfo = await desktop.connectionVersion("url:example");
     expect(versionInfo.comparison).toBe("older");
     expect(invoke).toHaveBeenCalledWith("connection_version", { id: "url:example" });
+
+    const updateCheck = await desktop.appUpdateCheck();
+    expect(updateCheck).toEqual({ kind: "upToDate", currentVersion: "0.7.0" });
+    expect(invoke).toHaveBeenCalledWith("app_update_check");
+    await desktop.appUpdateInstall();
+    expect(invoke).toHaveBeenCalledWith("app_update_install");
   });
 
   it("onDaemonProgress subscribes and forwards events, unsubscribing on cleanup", async () => {
@@ -124,6 +138,37 @@ describe("platform in a desktop build", () => {
 
     unsubscribe();
     expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("onAppUpdateProgress and onAppUpdateCheckRequested subscribe to the update events", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const unlisten = vi.fn();
+    const listen = vi.fn(async (_event: string, _handler: (e: { payload: unknown }) => void) => unlisten);
+    vi.doMock("@tauri-apps/api/event", () => ({ listen }));
+
+    const { desktop } = await import("@/lib/platform");
+    const cb = vi.fn();
+    desktop.onAppUpdateProgress(cb);
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("app-update-progress", expect.any(Function)));
+    listen.mock.calls[0][1]({ payload: { stage: "downloading", downloaded: 10, total: null } });
+    expect(cb).toHaveBeenCalledWith({ stage: "downloading", downloaded: 10, total: null });
+
+    const requested = vi.fn();
+    desktop.onAppUpdateCheckRequested(requested);
+    await vi.waitFor(() => expect(listen).toHaveBeenCalledWith("app-update-check-requested", expect.any(Function)));
+    listen.mock.calls[1][1]({ payload: null });
+    expect(requested).toHaveBeenCalledTimes(1);
+
+    expect(unlisten).not.toHaveBeenCalled();
+  });
+
+  it("appUpdateInstall turns Tauri's plain-string rejection into an Error with that message", async () => {
+    vi.stubEnv("VITE_SMIND_DESKTOP", "1");
+    const invoke = vi.fn(() => Promise.reject("signature verification failed"));
+    vi.doMock("@tauri-apps/api/core", () => ({ invoke }));
+
+    const { desktop } = await import("@/lib/platform");
+    await expect(desktop.appUpdateInstall()).rejects.toThrow("signature verification failed");
   });
 });
 
