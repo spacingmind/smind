@@ -548,7 +548,13 @@ func handleTaskArchive(wm *workspace.Manager, reg *runs.Registry) handlerFunc {
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.archive: invalid params: %w", err)
 		}
-		if runID, queued, active := reg.ActiveRunForTask(p.ID); active {
+		runID, queued, active, err := reg.ActiveRunForTask(p.ID)
+		if err != nil {
+			// Fail closed: an unreadable store must refuse the archive,
+			// never answer "no active runs" on a broken read.
+			return nil, fmt.Errorf("task.archive: task %d: %w", p.ID, err)
+		}
+		if active {
 			if queued {
 				return nil, fmt.Errorf("task.archive: task %d has a queued prompt waiting to run; cancel it or let it finish first", p.ID)
 			}

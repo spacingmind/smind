@@ -1254,7 +1254,12 @@ func newRunID() (string, error) {
 // belong to chats that have no run yet. The runID of the running run is
 // returned when one exists; for the queued case it is "" and queued is
 // true.
-func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, ok bool) {
+//
+// A store failure is returned as err rather than silently reported as
+// "not active": the archive guard must fail closed -- answering "no
+// active runs" off a broken store read could archive a task out from
+// under a live run.
+func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, active bool, err error) {
 	reg.mu.Lock()
 	for _, r := range reg.runs {
 		if r.taskID != taskID {
@@ -1265,25 +1270,25 @@ func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, 
 		r.mu.Unlock()
 		if running {
 			reg.mu.Unlock()
-			return r.id, false, true
+			return r.id, false, true, nil
 		}
 	}
 	reg.mu.Unlock()
 
 	chats, err := reg.st.ListChatsByTask(taskID, true)
 	if err != nil {
-		return "", false, false
+		return "", false, false, fmt.Errorf("list chats for task %d: %w", taskID, err)
 	}
 	for _, c := range chats {
 		items, err := reg.st.ListChatQueue(c.ID)
 		if err != nil {
-			return "", false, false
+			return "", false, false, fmt.Errorf("list queue for chat %d: %w", c.ID, err)
 		}
 		for _, item := range items {
 			if item.Status == store.ChatQueueStatusQueued {
-				return "", true, true
+				return "", true, true, nil
 			}
 		}
 	}
-	return "", false, false
+	return "", false, false, nil
 }

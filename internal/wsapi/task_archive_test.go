@@ -2,6 +2,7 @@ package wsapi
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -132,5 +133,35 @@ func TestTaskArchive_AllowedAfterStop(t *testing.T) {
 	}
 	if archived.ArchivedAt == nil {
 		t.Fatal("task.archive result has no ArchivedAt")
+	}
+}
+
+// TestTaskArchive_FailsClosedOnStoreError proves the archive guard fails
+// closed: with the store unreadable (closed DB), task.archive errors
+// instead of answering "no active runs" -- and the worktree survives.
+func TestTaskArchive_FailsClosedOnStoreError(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	// Break the store read the guard performs: closing db makes
+	// ListChatsByTask (and everything else) fail.
+	if err := db.Close(); err != nil {
+		t.Fatalf("db.Close() error = %v", err)
+	}
+
+	sendRequest(t, ws, "arch", "task.archive", map[string]any{"id": task.ID})
+	resp := readEnvelopeFor(t, ws, "arch", 5*time.Second)
+	if resp.Error == nil {
+		t.Fatal("task.archive with an unreadable store: error = nil, want a fail-closed refusal")
+	}
+	if !strings.Contains(resp.Error.Message, "task.archive") {
+		t.Fatalf("error = %q, want a task.archive-labeled refusal", resp.Error.Message)
+	}
+	if _, err := os.Stat(*task.WorktreePath); err != nil {
+		t.Fatalf("worktree dir gone after a failed-closed archive, want it kept: %v", err)
 	}
 }
