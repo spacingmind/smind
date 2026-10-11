@@ -4,12 +4,18 @@ on:
   push:
     branches: [master, develop]
   pull_request:
+  # GitHub merge queue (develop ruleset): the required `ci` check must also
+  # run on the queue's temporary merge-group branch, or queued PRs never merge.
+  merge_group:
 
 permissions:
   contents: read
 
 jobs:
   windows-terminal:
+    # Already ran on the PR and is not a required check; skipping it in the
+    # merge queue keeps each queued batch to the ~2-3 min `ci` job.
+    if: github.event_name != 'merge_group'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
