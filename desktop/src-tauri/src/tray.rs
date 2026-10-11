@@ -12,7 +12,7 @@
 use std::sync::{Arc, Mutex};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
-use tauri::tray::{TrayIcon, TrayIconBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Wry};
 use url::Url;
 
@@ -25,6 +25,26 @@ use crate::show_main;
 const ID_ATTENTION: &str = "attention";
 const ID_OPEN: &str = "open";
 const ID_QUIT: &str = "quit";
+
+/// What a tray icon click does. The menu is not in this enum: it is shown
+/// by the OS on right-click (`show_menu_on_left_click(false)`).
+#[derive(Debug, PartialEq, Eq)]
+enum ClickAction {
+    ShowWindow,
+    Ignore,
+}
+
+/// A left-button release opens the window (like the Open item); every other
+/// click event (press, right/middle button, enter/move/leave) is ignored.
+fn click_action(button: MouseButton, state: MouseButtonState) -> ClickAction {
+    match (button, state) {
+        (MouseButton::Left, MouseButtonState::Up) => ClickAction::ShowWindow,
+        _ => ClickAction::Ignore,
+    }
+}
+
+/// The tray menu's item ids, in order (separator excluded).
+const TRAY_MENU_IDS: [&str; 3] = [ID_ATTENTION, ID_OPEN, ID_QUIT];
 
 pub struct Tray {
     state: Arc<Mutex<Attention>>,
@@ -60,7 +80,14 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
         .icon(app.default_window_icon().unwrap().clone())
         .menu(&tray_menu)
         .tooltip(attention::label(0))
-        .show_menu_on_left_click(true)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button, button_state, .. } = event {
+                if click_action(button, button_state) == ClickAction::ShowWindow {
+                    show_main(tray.app_handle());
+                }
+            }
+        })
         .on_menu_event(move |app, event| match event.id().as_ref() {
             ID_OPEN => show_main(app),
             ID_QUIT => app.exit(0),
@@ -144,5 +171,24 @@ impl Tray {
         // supports it; Windows: a rendered taskbar overlay icon
         // (`overlay_icon`).
         self.badge.update(count);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tray_left_click_shows_the_window_not_the_menu() {
+        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Up), ClickAction::ShowWindow);
+        assert_eq!(click_action(MouseButton::Left, MouseButtonState::Down), ClickAction::Ignore);
+        assert_eq!(click_action(MouseButton::Right, MouseButtonState::Up), ClickAction::Ignore);
+        assert_eq!(click_action(MouseButton::Middle, MouseButtonState::Up), ClickAction::Ignore);
+    }
+
+    #[test]
+    fn tray_menu_still_has_open_and_quit() {
+        assert!(TRAY_MENU_IDS.contains(&ID_OPEN));
+        assert!(TRAY_MENU_IDS.contains(&ID_QUIT));
     }
 }
