@@ -7,6 +7,8 @@
 // layer and tests can feed it small input structs.
 package tasktree
 
+import "sort"
+
 // MaxNodes is the cap on the returned node list; a tree larger than this
 // is truncated and Build's second return value reports true.
 const MaxNodes = 500
@@ -23,24 +25,27 @@ type Task struct {
 	Archived    bool
 }
 
+// State is the task.tree node run-state vocabulary (see RunFact.State).
+type State string
+
 // RunFact is one task's latest-run snapshot: State is one of "running",
 // "waiting_permission", "done", "error", "stopped", "idle" (absent facts
 // mean "idle"), RunningRunIDs the task's own running runs (oldest-started
 // first), and PendingPermissions the task's own pending permission count.
 type RunFact struct {
-	State              string
+	State              State
 	RunningRunIDs      []string
 	PendingPermissions int
 }
 
 // Run state constants for RunFact.State / Node.Run.State.
 const (
-	StateRunning           = "running"
-	StateWaitingPermission = "waiting_permission"
-	StateDone              = "done"
-	StateError             = "error"
-	StateStopped           = "stopped"
-	StateIdle              = "idle"
+	StateRunning           State = "running"
+	StateWaitingPermission State = "waiting_permission"
+	StateDone              State = "done"
+	StateError             State = "error"
+	StateStopped           State = "stopped"
+	StateIdle              State = "idle"
 )
 
 // UsageTotals is a sum of usage over runs. Every numeric field except Runs
@@ -77,7 +82,7 @@ type Counts struct {
 
 // NodeRun is a node's own run snapshot.
 type NodeRun struct {
-	State              string   `json:"state"`
+	State              State    `json:"state"`
 	RunningRunIDs      []string `json:"runningRunIds"`
 	PendingPermissions int      `json:"pendingPermissions"`
 }
@@ -286,14 +291,14 @@ func Build(tasks []Task, facts map[int64]RunFact, usage map[int64]UsageTotals, r
 	return nodes, truncated
 }
 
-func factState(facts map[int64]RunFact, id int64) string {
+func factState(facts map[int64]RunFact, id int64) State {
 	if s := facts[id].State; s != "" {
 		return s
 	}
 	return StateIdle
 }
 
-func countOne(state string) Counts {
+func countOne(state State) Counts {
 	switch state {
 	case StateRunning:
 		return Counts{Running: 1}
@@ -388,9 +393,5 @@ func addF64(a, b *float64) *float64 {
 }
 
 func sortTasks(ts []*Task) {
-	for i := 1; i < len(ts); i++ {
-		for j := i; j > 0 && ts[j].ID < ts[j-1].ID; j-- {
-			ts[j], ts[j-1] = ts[j-1], ts[j]
-		}
-	}
+	sort.Slice(ts, func(i, j int) bool { return ts[i].ID < ts[j].ID })
 }
