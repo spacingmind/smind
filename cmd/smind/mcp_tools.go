@@ -28,6 +28,7 @@ func registerMCPTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_archive", Description: "Archive a finished task. Commits everything uncommitted as a checkpoint commit onto the task's checked-out branch (for a task created from an existing branch that is the user's own branch) and removes the worktree directory; ignored files (.env, node_modules) are NOT preserved. Refuses while the task has a running or queued run -- stop it with task_stop first. A checkpoint failure aborts and keeps the worktree intact."}, mcpTaskArchive(client))
 	registerMCPRunTools(srv, client)
 	registerMCPDiscoveryTools(srv, client)
+	registerMCPLiveTools(srv, client)
 }
 
 // callWS is the one wsapi invocation every tool handler funnels through:
