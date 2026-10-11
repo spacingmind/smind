@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -24,7 +25,7 @@ const mcpDiffMaxBytes = 256 * 1024
 func registerMCPReviewTools(srv *mcp.Server, client *wsclient.Client) {
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_diff", Description: "Read-only unified diff of a task's worktree against the commit its branch was created from (committed and uncommitted changes). Output is capped at 256 KiB; truncated: true means the diff was cut."}, mcpTaskDiff(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "queue_list", Description: "List a chat's queued prompts (all statuses, oldest first)."}, mcpQueueList(client))
-	mcp.AddTool(srv, &mcp.Tool{Name: "queue_cancel", Description: "Cancel a queued prompt that has not been delivered yet. It only removes the pending prompt; it cannot resolve permissions or change any run's settings."}, mcpQueueCancel(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "queue_cancel", Description: "Cancel a queued prompt that has not been delivered yet. Needs chatId and itemId; only a still-queued prompt in that chat that was queued by an orchestrator or agent (never one a human queued) can be cancelled. It cannot resolve permissions or change any run's settings."}, mcpQueueCancel(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "usage_summary", Description: "Read-only token/cost usage aggregated by groupBy. scope: proxy (groupBy account|model|day), runs (groupBy workspace|task|chat|run|provider|model) or all (default). since is inclusive, until exclusive."}, mcpUsageSummary(client))
 }
 
@@ -86,6 +87,7 @@ func mcpQueueList(client *wsclient.Client) mcp.ToolHandlerFor[queueListInput, qu
 }
 
 type queueCancelInput struct {
+	ChatID int64 `json:"chatId" jsonschema:"id of the chat the item is queued in (as listed by queue_list)"`
 	ItemID int64 `json:"itemId" jsonschema:"id of the queued item to cancel (from queue_list or task_send's queueItemId)"`
 }
 
@@ -96,6 +98,35 @@ type queueCancelOutput struct {
 
 func mcpQueueCancel(client *wsclient.Client) mcp.ToolHandlerFor[queueCancelInput, queueCancelOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in queueCancelInput) (*mcp.CallToolResult, queueCancelOutput, error) {
+		if in.ChatID <= 0 {
+			return nil, queueCancelOutput{}, fmt.Errorf("queue_cancel: chatId is required")
+		}
+		var list struct {
+			Items []struct {
+				ID     int64  `json:"ID"`
+				Status string `json:"Status"`
+				Source string `json:"Source"`
+			} `json:"items"`
+		}
+		if err := callWS(ctx, client, "queue_cancel", "chat.queueList", map[string]any{"chatId": in.ChatID}, &list); err != nil {
+			return nil, queueCancelOutput{}, err
+		}
+		found := false
+		for _, it := range list.Items {
+			if it.ID != in.ItemID {
+				continue
+			}
+			found = true
+			if it.Status != "queued" {
+				return nil, queueCancelOutput{}, fmt.Errorf("queue_cancel: item %d is %q, not queued; only a still-queued prompt can be cancelled", in.ItemID, it.Status)
+			}
+			if it.Source == "human" {
+				return nil, queueCancelOutput{}, fmt.Errorf("queue_cancel: item %d was queued by a human; an orchestrator may not cancel a human's prompt (ask them, or they can cancel it in the UI)", in.ItemID)
+			}
+		}
+		if !found {
+			return nil, queueCancelOutput{}, fmt.Errorf("queue_cancel: item %d is not in chat %d", in.ItemID, in.ChatID)
+		}
 		if err := callWS(ctx, client, "queue_cancel", "chat.queueCancel", map[string]any{"itemId": in.ItemID}, nil); err != nil {
 			return nil, queueCancelOutput{}, err
 		}

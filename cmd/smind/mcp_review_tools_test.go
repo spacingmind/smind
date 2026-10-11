@@ -103,7 +103,7 @@ func TestMCPTools_QueueListAndCancel(t *testing.T) {
 	}
 
 	var cancelled queueCancelOutput
-	if isErr := callMCPTool(t, env.cs, "queue_cancel", map[string]any{"itemId": sent.QueueItemID}, &cancelled); isErr || !cancelled.Cancelled {
+	if isErr := callMCPTool(t, env.cs, "queue_cancel", map[string]any{"chatId": chatID, "itemId": sent.QueueItemID}, &cancelled); isErr || !cancelled.Cancelled {
 		t.Fatalf("queue_cancel = %+v isErr=%v", cancelled, isErr)
 	}
 	callMCPTool(t, env.cs, "queue_list", map[string]any{"chatId": chatID}, &list)
@@ -124,5 +124,93 @@ func TestMCPTools_UsageSummary(t *testing.T) {
 	// Invalid groupBy surfaces the daemon's rejection as a tool error.
 	if msg := callMCPToolErr(t, env.cs, "usage_summary", map[string]any{"groupBy": "bogus"}); !strings.Contains(msg, "groupBy") {
 		t.Fatalf("error = %q, want the daemon's groupBy rejection", msg)
+	}
+}
+
+// busyChatEnv returns a session whose task's default chat is busy with a
+// hanging run, so further sends queue.
+func busyChatEnv(t *testing.T) (env *mcpTestEnv, client interface {
+	Call(ctx context.Context, method string, params, out any) error
+}, taskID, chatID int64) {
+	t.Helper()
+	env = newMCPSession(t)
+	c := dialTestClient(t, env.srvURL)
+	taskID = newTestRepoTask(t, c)
+	if err := os.WriteFile(filepath.Join(taskWorktree(t, c, taskID), "scenario"), []byte("hang"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var chats []struct {
+		ID int64 `json:"ID"`
+	}
+	if err := c.Call(context.Background(), "chat.list", map[string]any{"taskId": taskID}, &chats); err != nil {
+		t.Fatalf("chat.list: %v", err)
+	}
+	chatID = chats[0].ID
+	var busy struct {
+		RunID string `json:"runId"`
+	}
+	if err := c.Call(context.Background(), "run.start", map[string]any{"taskId": taskID, "chatId": chatID, "provider": "glm", "prompt": "busy"}, &busy); err != nil {
+		t.Fatalf("run.start: %v", err)
+	}
+	waitForFirstRunChunk(t, c, busy.RunID)
+	stopTestRuns(t, env, busy.RunID)
+	return env, c, taskID, chatID
+}
+
+func queueItemStatus(t *testing.T, env *mcpTestEnv, chatID, itemID int64) string {
+	t.Helper()
+	var list queueListOutput
+	callMCPTool(t, env.cs, "queue_list", map[string]any{"chatId": chatID}, &list)
+	for _, it := range list.Items {
+		if int64(it["ID"].(float64)) == itemID {
+			return it["Status"].(string)
+		}
+	}
+	return ""
+}
+
+func TestMCPTools_QueueCancelRefusesHumanItem(t *testing.T) {
+	env, client, taskID, chatID := busyChatEnv(t)
+
+	// run.start without a source is a human send (the web composer's path).
+	var queued struct {
+		QueueItemID int64 `json:"queueItemId"`
+	}
+	if err := client.Call(context.Background(), "run.start", map[string]any{
+		"taskId": taskID, "chatId": chatID, "provider": "glm", "prompt": "human instruction", "whenBusy": "queue",
+	}, &queued); err != nil || queued.QueueItemID == 0 {
+		t.Fatalf("human queue: %+v, %v", queued, err)
+	}
+	msg := callMCPToolErr(t, env.cs, "queue_cancel", map[string]any{"chatId": chatID, "itemId": queued.QueueItemID})
+	if !strings.Contains(msg, "human") {
+		t.Fatalf("error = %q, want a refusal naming the human source", msg)
+	}
+	if st := queueItemStatus(t, env, chatID, queued.QueueItemID); st != "queued" {
+		t.Fatalf("human item status = %q, want still queued", st)
+	}
+}
+
+func TestMCPTools_QueueCancelRefusesWrongChat(t *testing.T) {
+	env, _, taskID, chatID := busyChatEnv(t)
+	var sent taskSendOutput
+	if isErr := callMCPTool(t, env.cs, "task_send", map[string]any{"taskId": taskID, "chatId": chatID, "provider": "glm", "prompt": "mine"}, &sent); isErr || !sent.Queued {
+		t.Fatalf("task_send = %+v, want queued", sent)
+	}
+
+	msg := callMCPToolErr(t, env.cs, "queue_cancel", map[string]any{"chatId": chatID + 1000, "itemId": sent.QueueItemID})
+	if !strings.Contains(msg, "not in chat") {
+		t.Fatalf("wrong-chat error = %q", msg)
+	}
+	if st := queueItemStatus(t, env, chatID, sent.QueueItemID); st != "queued" {
+		t.Fatalf("item status = %q, want still queued", st)
+	}
+
+	// Once cancelled it is no longer queued, so a second cancel is refused.
+	var out queueCancelOutput
+	if isErr := callMCPTool(t, env.cs, "queue_cancel", map[string]any{"chatId": chatID, "itemId": sent.QueueItemID}, &out); isErr || !out.Cancelled {
+		t.Fatalf("cancel = %+v", out)
+	}
+	if msg := callMCPToolErr(t, env.cs, "queue_cancel", map[string]any{"chatId": chatID, "itemId": sent.QueueItemID}); !strings.Contains(msg, "not queued") {
+		t.Fatalf("second cancel error = %q", msg)
 	}
 }
