@@ -225,3 +225,24 @@ func TestDiscardTask_DoesNotDeletePreExistingBranch(t *testing.T) {
 		t.Fatal("task row not removed")
 	}
 }
+
+// TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch: a task created
+// from an existing (user-owned) branch whose port claim fails is discarded
+// without ever deleting that branch.
+func TestCreateTask_ExistingBranchPortExhaustionKeepsUserBranch(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	base := freeRange(t, 1)
+	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
+	w := setupWorkspace(t, m, "")
+	runGitT(t, w.Path, "branch", "user/feature")
+	if _, err := m.CreateTask(w.ID, nil, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.CreateTask(w.ID, nil, "second", WithExistingBranch("user/feature")); !errors.Is(err, ErrPortsExhausted) {
+		t.Fatalf("err = %v, want exhausted", err)
+	}
+	if out, _ := runGitOutput(w.Path, "branch", "--list", "user/feature"); !strings.Contains(out, "user/feature") {
+		t.Fatalf("user's branch was deleted; branches = %q", out)
+	}
+}

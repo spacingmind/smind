@@ -111,6 +111,11 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
 
+	// createdBranch is the branch this call itself creates ("" when it
+	// checks out a pre-existing one): the only branch discardTask may ever
+	// delete. A task from an existing branch must never delete the user's
+	// own branch on a later failure.
+	createdBranch := branch
 	var wtErr error
 	switch {
 	case p.baseRef != "":
@@ -118,8 +123,10 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	case p.branch != "":
 		wtErr = createTaskFromBranch(ws.Path, worktreePath, p.branch)
 		branch = p.branch
+		createdBranch = ""
 	case p.prSupplied:
 		branch = "smind/pr-" + strconv.Itoa(p.prNumber) + "-" + name
+		createdBranch = branch
 		wtErr = createTaskFromPR(ws.Path, worktreePath, branch, p.prNumber)
 	default:
 		wtErr = gitWorktreeAdd(ws.Path, worktreePath, branch)
@@ -153,7 +160,7 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	if _, err := m.claimPort(t.ID); err != nil {
 		// branch is generated above, so CreateTask created it. Any future
 		// mode that checks out a pre-existing branch must pass "" here.
-		m.discardTask(ws, t, branch)
+		m.discardTask(ws, t, createdBranch)
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
 	if ws.SetupScript != "" {
