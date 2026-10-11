@@ -10,18 +10,19 @@ in Decisions. Related: `desktop-native-feel.md` (D3 shortcuts),
 ### K — Terminal pane keeps its shell keys (QA item 12, High)
 
 - **K1.** With focus in the `terminal` scope on a non-Mac platform, a binding
-  whose *resolved* combo is Ctrl+letter (exactly Ctrl, no Shift/Alt/Meta, key A–Z;
-  `Mod` resolves to Ctrl off-Mac) does **not** fire. That covers the shipped rows
-  (`Mod+K` palette, `Mod+B` sidebar, `Mod+W` close tab, `Mod+L` composer,
-  `Mod+P` quick open, `Mod+F` find, desktop `Mod+T` new tab) and any user rebinding
-  to a Ctrl+letter, and each step of a chord. The keydown is neither
+  whose *resolved* combo is a shell control key (exactly Ctrl, no Shift/Alt/Meta,
+  key A–Z or `[` (ESC), `\` (SIGQUIT), `]`; `Mod` resolves to Ctrl off-Mac) does
+  **not** fire. That covers the shipped rows (`Mod+K` palette, `Mod+B` sidebar,
+  `Mod+W` close tab, `Mod+L` composer, `Mod+P` quick open, `Mod+F` find, desktop
+  `Mod+T` new tab, `Mod+[`/`Mod+]` previous/next task, `Mod+\` split right) and any
+  user rebinding to such a combo, and each step of a chord. The keydown is neither
   `preventDefault`ed nor `stopPropagation`ed, so xterm receives it.
 - **K2.** On macOS nothing changes: `Cmd+letter` bindings still fire in the
   terminal scope.
 - **K3.** Nothing changes in non-terminal scopes (`other`, `editable`, `modal`) on
-  any platform: `Ctrl+K`/`Ctrl+B`/`Ctrl+W` etc. still fire exactly as before.
-  Ctrl+Shift+letter, Alt-combos and non-letter keys (`Mod+[`, `Mod+\`, `Mod+,`,
-  `Mod+Digit`) are not shell keys for this purpose and keep firing in the terminal.
+  any platform: `Ctrl+K`/`Ctrl+B`/`Ctrl+W`/`Ctrl+[` etc. still fire exactly as before.
+  Ctrl+Shift+anything, Alt-combos and non-control keys (`Mod+,`, `Mod+Digit`) are
+  not shell keys for this purpose and keep firing in the terminal.
 - **K4.** Escape hatches: non-Mac-only rows (new `when.mac: false` gate) that fire
   from every scope including the terminal and never resolve to a Ctrl+letter:
 
@@ -34,6 +35,9 @@ in Decisions. Related: `desktop-native-feel.md` (D3 shortcuts),
   | `composer.focus` | `Mod+Shift+L` |
   | `quick-open.open` | `Mod+Shift+O` |
   | `tab.new` (desktop only) | `Mod+Shift+T` |
+  | `task.prev` | `Mod+Shift+[` |
+  | `task.next` | `Mod+Shift+]` |
+  | `pane.split.right` | `Alt+Shift+\` (`Mod+Shift+\` is already `pane.split.down`) |
 
   No hatch combo collides with an existing default (checked against the table).
 - **K5.** The shortcuts dialog lists the hatch rows on non-Mac only (they are
@@ -91,8 +95,12 @@ Names are the exact `it(...)` / `Test...` titles.
   default-prevented and no handler runs. Also a rebound `Ctrl+J` binding and the 2nd
   step of a chord.
 - `terminal-scope-mac-cmd-still-fires` — Mac, terminal scope: Cmd+K/B/W match.
+- `terminal-scope-ctrl-bracket-passes-through` — non-Mac terminal: Ctrl+[, Ctrl+],
+  Ctrl+\\ resolve to no match (`task.prev`/`task.next`/`pane.split.right`), the provider
+  leaves the event un-prevented; on Mac Cmd+[ / Cmd+] still fire in the terminal; the
+  hatches `Ctrl+Shift+[`, `Ctrl+Shift+]`, `Alt+Shift+\\` fire there.
 - `terminal-scope-ctrl-shift-and-non-letter-still-fire` — non-Mac terminal: Ctrl+Shift+W
-  (pane close), Ctrl+, and Ctrl+[ still match.
+  (pane close), Ctrl+Shift+\\ (split down) and Ctrl+, still match.
 - `non-terminal-scopes-ctrl-letters-unchanged` — non-Mac `other`/`editable`: Ctrl+K,
   Ctrl+B, Ctrl+W match as before.
 - `terminal-escape-hatch-fires-in-terminal` — non-Mac terminal: `Ctrl+Shift+P` →
@@ -136,9 +144,10 @@ Names are the exact `it(...)` / `Test...` titles.
   `global`. A rebound combo is covered for free, and the table stays the single place a
   binding is declared. Paseo does it per row (`when: { mac: false, terminal: false }`) and
   gives no hatch for most; we add hatches because the terminal is a first-class pane here.
-- **Letters only.** Ctrl+`[` (ESC), Ctrl+`\` (SIGQUIT) and Ctrl+`]` are also shell control
-  bytes but are out of the reported scope; left firing. Follow-up candidate (vim-in-terminal
-  users would notice Ctrl+[ → previous task).
+- **Letters plus `[` `\` `]` (supervisor decision, 2026-10-11).** Ctrl+`[` is ESC (vim
+  users), Ctrl+`\` is SIGQUIT, Ctrl+`]` is GS; the shell owns them like the letters, so
+  K1 covers them and `task.prev`/`task.next`/`pane.split.right` get Shift hatches. Ctrl+digit
+  and Ctrl+`,`/`.` are not control bytes and keep firing.
 - **Hatch combos.** `Ctrl+Shift+W` as suggested is already `pane.close`, so close-tab uses
   `Alt+Shift+W` (Paseo's own web close-tab combo, and it matches the existing
   `Alt+Shift+T/[/]` tab family). The others are the Shift variant of the default, which is
