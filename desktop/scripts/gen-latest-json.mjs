@@ -10,7 +10,7 @@ export const PLATFORMS = ["darwin-aarch64", "darwin-x86_64", "windows-x86_64"];
 
 const SEMVER_STABLE = /^\d+\.\d+\.\d+$/;
 
-function normalizeVersion(version) {
+export function normalizeVersion(version) {
   const v = String(version).replace(/^v/, "");
   if (!SEMVER_STABLE.test(v)) {
     throw new Error(
@@ -52,6 +52,14 @@ export function buildLatestJson({ version, tag, repo, notes, pubDate, files }) {
 // CLI: discover the three platform files in --dir, read their .sig files,
 // write the manifest to --out. Any missing or ambiguous file is fatal and
 // leaves no output file behind.
+function assertVersionIn(name, version, dir) {
+  if (!name.includes(version)) {
+    throw new Error(
+      `asset "${name}" in ${dir} does not contain the requested version "${version}"; stale or wrong-version artifacts would make clients loop on updates`
+    );
+  }
+}
+
 function find(dir, pattern) {
   const matches = readdirSync(dir).filter((f) => f.match(pattern));
   if (matches.length === 0) {
@@ -88,11 +96,15 @@ function main(argv) {
     : "";
   const pubDate = args["pub-date"] ?? new Date().toISOString();
 
+  const version = normalizeVersion(args.version);
   const assetFor = {
     "darwin-aarch64": find(args.dir, /^.*-macos-arm64\.app\.tar\.gz$/),
     "darwin-x86_64": find(args.dir, /^.*-macos-x86_64\.app\.tar\.gz$/),
     "windows-x86_64": find(args.dir, /^.*-setup\.exe$/),
   };
+  for (const asset of Object.values(assetFor)) {
+    assertVersionIn(asset, version, args.dir);
+  }
   const files = {};
   for (const [platform, asset] of Object.entries(assetFor)) {
     files[platform] = { asset, signature: readSig(args.dir, asset) };

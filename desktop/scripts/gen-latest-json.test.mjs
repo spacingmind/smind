@@ -108,14 +108,14 @@ test("latest-json-url-encodes-asset-names", () => {
   );
 });
 
-function fixtureDir() {
+function fixtureDir(version = "1.2.3") {
   const dir = mkdtempSync(join(tmpdir(), "gen-latest-json-"));
-  writeFileSync(join(dir, "smind-desktop-1.2.3-macos-arm64.app.tar.gz"), "a");
-  writeFileSync(join(dir, "smind-desktop-1.2.3-macos-arm64.app.tar.gz.sig"), "sig-arm64\n");
-  writeFileSync(join(dir, "smind-desktop-1.2.3-macos-x86_64.app.tar.gz"), "a");
-  writeFileSync(join(dir, "smind-desktop-1.2.3-macos-x86_64.app.tar.gz.sig"), "sig-x64\n");
-  writeFileSync(join(dir, "smind_1.2.3_x64-setup.exe"), "a");
-  writeFileSync(join(dir, "smind_1.2.3_x64-setup.exe.sig"), "sig-win\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz`), "a");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-arm64.app.tar.gz.sig`), "sig-arm64\n");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz`), "a");
+  writeFileSync(join(dir, `smind-desktop-${version}-macos-x86_64.app.tar.gz.sig`), "sig-x64\n");
+  writeFileSync(join(dir, `smind_${version}_x64-setup.exe`), "a");
+  writeFileSync(join(dir, `smind_${version}_x64-setup.exe.sig`), "sig-win\n");
   return dir;
 }
 
@@ -162,6 +162,28 @@ test("latest-json-cli-writes-file", () => {
     assert.notEqual(r3.status, 0);
     assert.ok(r3.stderr.toString().includes(".sig"));
     assert.ok(!existsSync(out2), "no output file on missing sig");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("latest-json-asset-version-mismatch-fails", () => {
+  // Fixtures built for 1.2.3, manifest requested for 1.2.4: the CLI must
+  // refuse and write no output, or clients would loop on "updates".
+  const dir = fixtureDir("1.2.3");
+  try {
+    const out = join(dir, "latest.json");
+    const r = spawnSync(process.execPath, [
+      cli,
+      "--dir", dir,
+      "--version", "1.2.4",
+      "--tag", "v1.2.4",
+      "--repo", "spacingmind/smind",
+      "--out", out,
+    ]);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr.toString(), /does not contain the requested version "1\.2\.4"/);
+    assert.ok(!existsSync(out), "no output file on version mismatch");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
