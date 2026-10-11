@@ -22,6 +22,7 @@ type createTaskParams struct {
 	baseRef      string
 	branch       string
 	prNumber     int
+	prSupplied   bool
 }
 
 // WithParentTask makes the new task a child of parentID, which CreateTask
@@ -92,13 +93,13 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	if p.branch != "" {
 		refModes++
 	}
-	if p.prNumber != 0 {
+	if p.prSupplied {
 		refModes++
 	}
 	if refModes > 1 {
 		return store.Task{}, fmt.Errorf("create task: pass at most one of baseRef, branch, prNumber")
 	}
-	if p.prNumber < 0 {
+	if p.prSupplied && p.prNumber <= 0 {
 		return store.Task{}, fmt.Errorf("create task: prNumber must be > 0")
 	}
 
@@ -113,7 +114,7 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	case p.branch != "":
 		wtErr = createTaskFromBranch(ws.Path, worktreePath, p.branch)
 		branch = p.branch
-	case p.prNumber > 0:
+	case p.prSupplied:
 		branch = "smind/pr-" + strconv.Itoa(p.prNumber) + "-" + name
 		wtErr = createTaskFromPR(ws.Path, worktreePath, branch, p.prNumber)
 	default:

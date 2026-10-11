@@ -67,3 +67,14 @@ func TestMCPTools_TaskNewBaseRef(t *testing.T) {
 		t.Fatalf("Branch = %q, want a smind/task-<slug> branch", branch)
 	}
 }
+
+// TestMCPTools_TaskNewPRNumberZeroRejected proves task_new rejects a
+// supplied prNumber <= 0 (the schema makes prNumber optional, so 0 can
+// arrive explicitly and must not be silently treated as unset).
+func TestMCPTools_TaskNewPRNumberZeroRejected(t *testing.T) {
+	env := newMCPSession(t)
+	wsID := createTestWorkspace(t, dialTestClient(t, env.srvURL))
+	if !callMCPTool(t, env.cs, "task_new", map[string]any{"workspaceId": wsID, "title": "T", "prNumber": 0}, nil) {
+		t.Fatal("task_new with prNumber=0: IsError = false, want rejection")
+	}
+}

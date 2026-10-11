@@ -97,3 +97,25 @@ func gitOut(t *testing.T, dir string, args ...string) string {
 	}
 	return string(out)
 }
+
+// TestTaskCreate_PRNumberZeroRejected proves a supplied prNumber <= 0 is
+// rejected at the wsapi layer rather than silently treated as unset.
+func TestTaskCreate_PRNumberZeroRejected(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	srv := newTestWSServer(t, wm, nil, db, "tok")
+	ws := dialWS(t, srv, "tok")
+
+	for i, n := range []int64{0, -3} {
+		sendRequest(t, ws, "1", "task.create", map[string]any{
+			"workspaceId": int64(1), "title": "T", "prNumber": n,
+		})
+		resp := readEnvelopeFor(t, ws, "1", 5*time.Second)
+		if resp.Error == nil {
+			t.Fatalf("prNumber=%d: error = nil, want rejection", n)
+		}
+		if !strings.Contains(resp.Error.Message, "prNumber must be > 0") {
+			t.Fatalf("case %d: error = %q, want 'prNumber must be > 0'", i, resp.Error.Message)
+		}
+	}
+}

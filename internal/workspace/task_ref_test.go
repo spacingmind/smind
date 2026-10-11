@@ -211,8 +211,10 @@ func TestManager_CreateTask_FromPR(t *testing.T) {
 
 func TestManager_CreateTask_FromPRInvalid(t *testing.T) {
 	m, wsID, _, _, _, _ := newTaskRefEnv(t)
-	if _, err := m.CreateTask(wsID, nil, "Zero", WithPullRequest(0)); err != nil {
-		t.Fatalf("CreateTask(prNumber=0) error = %v, want it treated as unset (0 is not a supplied mode)", err)
+	if _, err := m.CreateTask(wsID, nil, "Zero", WithPullRequest(0)); err == nil {
+		t.Fatal("CreateTask(prNumber=0) error = nil, want rejection (a supplied prNumber must be > 0)")
+	} else if !strings.Contains(err.Error(), "prNumber must be > 0") {
+		t.Fatalf("error = %q, want 'prNumber must be > 0'", err.Error())
 	}
 
 	_, err := m.CreateTask(wsID, nil, "Negative", WithPullRequest(-1))

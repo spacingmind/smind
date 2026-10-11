@@ -40,7 +40,7 @@ func WithExistingBranch(name string) CreateTaskOption {
 // non-GitHub remote or missing PR is a clear error with nothing left
 // behind. n must be > 0.
 func WithPullRequest(n int) CreateTaskOption {
-	return func(p *createTaskParams) { p.prNumber = n }
+	return func(p *createTaskParams) { p.prNumber = n; p.prSupplied = true }
 }
 
 // validateRefName rejects anything that could smuggle an option or a

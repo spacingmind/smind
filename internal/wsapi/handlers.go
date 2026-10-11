@@ -464,6 +464,9 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 			refModes++
 		}
 		if p.PRNum != nil {
+			if *p.PRNum <= 0 {
+				return nil, fmt.Errorf("task.create: prNumber must be > 0")
+			}
 			refModes++
 		}
 		if refModes > 1 {
