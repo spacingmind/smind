@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func TestMCPTools_TaskSendPromptFile(t *testing.T) {
@@ -48,12 +50,8 @@ func TestMCPTools_TaskSendPromptFileRejectsEscape(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("secret"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(secret, filepath.Join(wt, "link.txt")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(outside, filepath.Join(wt, "linkdir")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, secret, filepath.Join(wt, "link.txt"))
+	testutil.Link(t, outside, filepath.Join(wt, "linkdir"))
 	if err := os.WriteFile(filepath.Join(wt, "big.txt"), []byte(strings.Repeat("a", mcpPromptFileMaxBytes+1)), 0o644); err != nil {
 		t.Fatal(err)
 	}

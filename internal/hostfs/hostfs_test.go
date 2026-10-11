@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 // newTestRoot creates a real temp directory with a small tree inside it: a
@@ -89,9 +91,7 @@ func TestList_FollowsSymlinkedDirectory(t *testing.T) {
 	root := newTestRoot(t)
 	target := filepath.Join(root, "plain")
 	link := filepath.Join(root, "linked")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatalf("Symlink() error = %v", err)
-	}
+	testutil.Link(t, target, link)
 
 	result, err := List(root)
 	if err != nil {

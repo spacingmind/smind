@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func newHome(t *testing.T) string {
@@ -215,9 +217,7 @@ func TestSkillInstall_RefusesSymlinkEscape(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(home, ".claude", "skills")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, filepath.Join(home, ".claude", "skills"))
 	_, err := Install(Options{Home: home, Targets: []string{"claude"}})
 	if err == nil || !strings.Contains(err.Error(), "outside the home") {
 		t.Fatalf("err = %v, want refusal", err)
@@ -233,9 +233,7 @@ func TestSkillInstall_RefusesSymlinkEscape(t *testing.T) {
 	home2 := newHome(t)
 	root := targetRoot(home2, "agents")
 	os.MkdirAll(root, 0o755)
-	if err := os.Symlink(outside, filepath.Join(root, "smind")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, filepath.Join(root, "smind"))
 	if _, err := Install(Options{Home: home2, Targets: []string{"agents"}}); err == nil {
 		t.Fatal("want refusal for escaping skill dir symlink")
 	}
@@ -315,9 +313,7 @@ func TestSkillUninstall_RefusesSymlinkedSubdirEscape(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(outside, filepath.Join(dir, "sub")); err != nil {
-		t.Fatal(err)
-	}
+	testutil.Link(t, outside, filepath.Join(dir, "sub"))
 	m := manifest{Files: map[string]string{"sub/victim.txt": hashBytes([]byte("keep me"))}}
 	b, err := marshalManifest(m)
 	if err != nil {
