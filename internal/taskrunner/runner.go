@@ -59,6 +59,7 @@ type codexBackend interface {
 	ResumeSession(ctx context.Context, threadID, cwd string) (string, error)
 	Prompt(ctx context.Context, threadID, text string, updates chan<- codex.Update) (string, error)
 	ThreadTokenUsage(threadID string) (codex.TokenUsage, bool)
+	ListModels(ctx context.Context) ([]codex.ModelInfo, error)
 	Close() error
 }
 
