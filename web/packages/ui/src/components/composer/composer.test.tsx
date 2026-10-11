@@ -1,8 +1,11 @@
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Composer } from "@/components/composer/composer";
+import { TaskDetailPane } from "@/components/task-detail";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import type { ChatQueueItem, RunSummary, Task } from "@/lib/types";
 import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
@@ -97,6 +100,93 @@ function renderComposer(
 
 function textarea(): HTMLTextAreaElement {
   return screen.getByLabelText("Prompt") as HTMLTextAreaElement;
+}
+
+/** A minimal DaemonEvents fake: topic -> listeners, plus an emit helper. */
+function fakeEvents(): DaemonEvents & { emit(topic: string, payload: unknown): void } {
+  const listeners = new Map<string, Set<(payload: unknown) => void>>();
+  return {
+    subscribe(topic, listener) {
+      let set = listeners.get(topic);
+      if (!set) {
+        set = new Set();
+        listeners.set(topic, set);
+      }
+      set.add(listener);
+      return () => set!.delete(listener);
+    },
+    emit(topic, payload) {
+      for (const fn of listeners.get(topic) ?? []) fn(payload);
+    },
+  };
+}
+
+const TASK: Task = {
+  ID: 1,
+  WorkspaceID: 1,
+  SpaceID: null,
+  Title: "Task A",
+  Status: "active",
+  WorktreePath: "/tmp/a",
+  Branch: "task-a",
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: "2024-01-01T00:00:00Z",
+  ArchivedAt: null,
+};
+
+function queueItem(partial: Partial<ChatQueueItem> & { ID: number }): ChatQueueItem {
+  return {
+    ChatID: 10,
+    Prompt: `prompt ${partial.ID}`,
+    RunConfig: "{}",
+    Source: "human",
+    FromTaskID: null,
+    FromChatID: null,
+    Priority: 0,
+    Status: "queued",
+    RunID: null,
+    CancelReason: "",
+    CreatedAt: "2026-10-11T00:00:00Z",
+    UpdatedAt: "2026-10-11T00:00:00Z",
+    ...partial,
+  };
+}
+
+function runningSummary(): RunSummary {
+  return {
+    ID: "run-live",
+    TaskID: TASK.ID,
+    ChatID: 10,
+    Provider: "claude-native",
+    Prompt: "first turn",
+    Status: "running",
+    StartedAt: "2024-01-01T00:00:00Z",
+    FinishedAt: null,
+    StopReason: "",
+    Err: "",
+    PermissionMode: "acceptEdits",
+    AutoAccept: false,
+    ThinkingLevel: "",
+  };
+}
+
+/** Renders the whole pane (the real useChatQueue + composer wiring) against a fake client -- the integration harness for the server-queue tests. */
+function renderPane(client: FakeWsClient, events: DaemonEvents, chatId = 10) {
+  const chat = {
+    ID: chatId,
+    TaskID: TASK.ID,
+    Title: "Chat",
+    Provider: null,
+    AgentSession: null,
+    CreatedAt: "2024-01-01T00:00:00Z",
+    ArchivedAt: null,
+  };
+  const view = render(<TaskDetailPane client={client} task={TASK} chat={chat} isDefaultChat events={events} />);
+  return {
+    rerender: (nextChatId: number) =>
+      view.rerender(<TaskDetailPane client={client} task={TASK} chat={{ ...chat, ID: nextChatId }} isDefaultChat events={events} />),
+    unmount: view.unmount,
+  };
 }
 
 describe("Composer", () => {
@@ -498,6 +588,216 @@ describe("Composer", () => {
     rerender({ runningRunId: "run-7" });
     expect(screen.getByTestId("chat-send-button")).toHaveAttribute("data-variant", "default");
     expect(screen.getByTestId("chat-stop-button")).toHaveAttribute("data-variant", "execute");
+  });
+});
+
+describe("Composer server queue (ADR-0021 §9)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("busy send calls run.start with whenBusy queue and renders the queued item from the server", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    renderPane(client, events);
+
+    // A live run plus an initially empty queue.
+    client.nth("run.list", 0).resolve([runningSummary()]);
+    client.nth("chat.queueList", 0).resolve({ items: [] });
+    await flush();
+
+    fireEvent.change(textarea(), { target: { value: "then do this" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+
+    const start = client.calls.find((c) => c.method === "run.start")!;
+    expect(start.params).toMatchObject({ whenBusy: "queue", prompt: "then do this" });
+    act(() => {
+      start.resolve({ queued: true, queueItemId: 5 });
+    });
+    await flush();
+
+    // The onQueued refresh's queueList answers with the server's row.
+    client.nth("chat.queueList", 1).resolve({ items: [queueItem({ ID: 5, Prompt: "then do this" })] });
+    await flush();
+
+    expect(screen.getByTestId("composer-queue")).toBeInTheDocument();
+    expect(screen.getByTestId("composer-queue")).toHaveTextContent("then do this");
+    // No run entry was appended for a queued prompt: the timeline still
+    // holds exactly the original live run.
+    expect(within(screen.getByTestId("run-log-column")).getAllByRole("listitem").length).toBe(1);
+  });
+
+  it("idle send also passes whenBusy queue and starts the run", async () => {
+    const whenBusy: (string | undefined)[] = [];
+    renderComposer({
+      onSubmit: async (_provider, _prompt, _permission, _thinkingLevel, busy) => {
+        whenBusy.push(busy);
+        return { kind: "started", runId: "run-1" };
+      },
+    });
+
+    fireEvent.change(textarea(), { target: { value: "go" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(whenBusy).toEqual(["queue"]);
+  });
+
+  it("busy send restores the draft when run.start fails", async () => {
+    renderComposer({
+      runningRunId: "run-1",
+      onSubmit: async () => {
+        throw new Error("daemon said no");
+      },
+    });
+
+    fireEvent.change(textarea(), { target: { value: "queued text" } });
+    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    await flush();
+
+    expect(screen.getByText("daemon said no")).toBeInTheDocument();
+    expect(textarea()).toHaveValue("queued text");
+  });
+
+  it("Cmd+Enter while running sends with whenBusy interrupt", async () => {
+    const whenBusy: (string | undefined)[] = [];
+    renderComposer({
+      runningRunId: "run-1",
+      onSubmit: async (_provider, _prompt, _permission, _thinkingLevel, busy) => {
+        whenBusy.push(busy);
+        return { kind: "started", runId: "run-2" };
+      },
+    });
+
+    fireEvent.change(textarea(), { target: { value: "right now" } });
+    fireEvent.keyDown(textarea(), { key: "Enter", metaKey: true });
+    await flush();
+
+    expect(whenBusy).toEqual(["interrupt"]);
+  });
+
+  it("Send now button is absent when idle", () => {
+    const { rerender } = renderComposer({ runningRunId: null });
+    expect(screen.queryByTestId("chat-send-now-button")).not.toBeInTheDocument();
+
+    rerender({ runningRunId: "run-1" });
+    expect(screen.getByTestId("chat-send-now-button")).toBeInTheDocument();
+  });
+
+  it("cancel button calls chat.queueCancel with the item id", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    renderPane(client, events);
+
+    client.nth("run.list", 0).resolve([]);
+    client.nth("chat.queueList", 0).resolve({ items: [queueItem({ ID: 5, Prompt: "waiting" })] });
+    await flush();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel queued prompt: waiting" }));
+
+    expect(client.calls.some((c) => c.method === "chat.queueCancel")).toBe(true);
+    expect(client.calls.find((c) => c.method === "chat.queueCancel")!.params).toEqual({ itemId: 5 });
+  });
+
+  it("cancel button is keyboard operable and labelled with the prompt", async () => {
+    const cancelled: number[] = [];
+    renderComposer({
+      queuedItems: [queueItem({ ID: 7, Prompt: "keyboard reachable prompt" })],
+      onCancelQueued: (itemId) => {
+        cancelled.push(itemId);
+      },
+    });
+
+    // A real <button> with an accessible name is what makes Enter/Space
+    // click it from the keyboard -- asserted structurally, plus the click.
+    const button = screen.getByRole("button", { name: "Cancel queued prompt: keyboard reachable prompt" });
+    expect(button.tagName).toBe("BUTTON");
+    expect(button).not.toBeDisabled();
+    expect(button).not.toHaveAttribute("tabindex", "-1");
+
+    fireEvent.click(button);
+    expect(cancelled).toEqual([7]);
+  });
+
+  it("queued items from the server do not fire client-side on run end", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    renderPane(client, events);
+
+    client.nth("run.list", 0).resolve([runningSummary()]);
+    client.nth("chat.queueList", 0).resolve({ items: [queueItem({ ID: 5, Prompt: "waiting" })] });
+    await flush();
+
+    // The live run ends (its attach reaches the terminal result).
+    act(() => {
+      client.nth("run.attach", 0).resolve({ runId: "run-live", stopReason: "end_turn" });
+    });
+    await flush();
+
+    // A queued row exists and the run is over -- nothing client-side may
+    // fire it; that would be a second run.start (there was never a first).
+    expect(screen.getByTestId("composer-queue")).toHaveTextContent("waiting");
+    expect(client.calls.filter((c) => c.method === "run.start")).toHaveLength(0);
+
+    // The row leaves only when the server's snapshot says so.
+    act(() => {
+      events.emit("chat.queueUpdated", { chatId: 10, items: [] });
+    });
+    expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
+  });
+
+  it("a second submit while one is in flight sends once", async () => {
+    const sends: string[] = [];
+    renderComposer({
+      onSubmit: async (_provider, prompt) => {
+        sends.push(prompt);
+        return new Promise(() => {});
+      },
+    });
+
+    fireEvent.change(textarea(), { target: { value: "one at a time" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    // The submit is still unresolved (textarea disabled); a second Enter
+    // and a second click must both be no-ops.
+    fireEvent.keyDown(textarea(), { key: "Enter" });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+
+    expect(sends).toEqual(["one at a time"]);
+  });
+
+  it("shows only the open chat's queue after a chat switch", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    const { rerender } = renderPane(client, events, 10);
+
+    client.nth("run.list", 0).resolve([]);
+    client.nth("chat.queueList", 0).resolve({ items: [queueItem({ ID: 5, ChatID: 10, Prompt: "chat ten's item" })] });
+    await flush();
+    expect(screen.getByTestId("composer-queue")).toHaveTextContent("chat ten's item");
+
+    rerender(20);
+    await flush();
+    client.nth("chat.queueList", 1).resolve({ items: [] });
+    await flush();
+    expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
+
+    // A late snapshot for the old chat must not resurrect its row.
+    act(() => {
+      events.emit("chat.queueUpdated", { chatId: 10, items: [queueItem({ ID: 5, ChatID: 10 })] });
+    });
+    expect(screen.queryByTestId("composer-queue")).not.toBeInTheDocument();
+  });
+
+  it("renders an auto-cancelled item's reason", () => {
+    renderComposer({
+      queuedItems: [queueItem({ ID: 5, Status: "cancelled", CancelReason: "delivery failed: queue is full" })],
+    });
+
+    expect(screen.getByText("Not sent")).toBeInTheDocument();
+    expect(screen.getByText("delivery failed: queue is full")).toBeInTheDocument();
   });
 });
 
