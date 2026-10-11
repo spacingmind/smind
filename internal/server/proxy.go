@@ -183,12 +183,17 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		writeProviderError(w, provider, status, err.Error())
 	}
 
-	forwardBody, contentLength, meta, metaOK := readRequestBody(r, provider)
-	if metaOK {
-		if meta.Model != "" {
-			model := meta.Model
-			row.Model = &model
+	forwardBody, contentLength, meta, metaOK, prefix := readRequestBody(r, provider)
+	model := meta.Model
+	if !metaOK {
+		if m, ok := extractModelPrefix(prefix); ok {
+			model = m
 		}
+	}
+	if model != "" {
+		row.Model = &model
+	}
+	if metaOK {
 		stream := meta.Stream
 		row.Stream = &stream
 	}
@@ -210,27 +215,24 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		return
 	}
 	// When the model couldn't be determined (body over requestBodyParseCap
-	// or not parseable JSON), skip model narrowing and consider every
-	// provider account -- the pre-model-routing behavior of forwarding
-	// rather than rejecting a legitimate request we merely couldn't read.
-	// A parseable body that simply has no "model" still narrows (to
-	// no-list accounts only), per ADR-0020 §5(b).
+	// or not parseable JSON, and not recoverable from the buffered prefix
+	// either), fail closed per ADR-0020 §5(b): only accounts with no model
+	// list may serve the request -- never an account whose list could
+	// exclude it. A parseable body that simply has no "model" narrows the
+	// same way.
 	var candidateIDs []int64
-	if metaOK {
-		candidateIDs = selectModelCandidates(providerAccounts, meta.Model)
+	if metaOK || model != "" {
+		candidateIDs = selectModelCandidates(providerAccounts, model)
 	} else {
 		for _, a := range providerAccounts {
-			candidateIDs = append(candidateIDs, a.ID)
+			if len(a.Models) == 0 {
+				candidateIDs = append(candidateIDs, a.ID)
+			}
 		}
 	}
 	if len(candidateIDs) == 0 {
-		err := fmt.Errorf("no %s account serves model %q", provider, meta.Model)
-		row.Status = http.StatusBadRequest
-		row.Outcome = store.RequestLogOutcomeRouteError
-		row.Error = truncatedError(err)
-		row.DurationMs = time.Since(start).Milliseconds()
-		enqueue(row)
-		writeProviderModelNotFound(w, provider, err.Error())
+		writeRouteModelNotFound(w, &row, provider, start, enqueue,
+			modelRoutingError(provider, metaOK || model != "", model))
 		return
 	}
 
@@ -334,10 +336,33 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	enqueue(row)
 }
 
+// writeRouteModelNotFound is serve's shared no-candidates exit: records the
+// 400 as a route_error request_log row and writes the provider-shaped
+// model-not-found error, for both an explicit no-candidate model and an
+// undeterminable one.
+func writeRouteModelNotFound(w http.ResponseWriter, row *store.RequestLog, provider string, start time.Time, enqueue func(store.RequestLog), err error) {
+	row.Status = http.StatusBadRequest
+	row.Outcome = store.RequestLogOutcomeRouteError
+	row.Error = truncatedError(err)
+	row.DurationMs = time.Since(start).Milliseconds()
+	enqueue(*row)
+	writeProviderModelNotFound(w, provider, err.Error())
+}
+
+// modelRoutingError builds the message for a request with no candidates:
+// the normal model_not_found wording when the model was known, else the
+// fail-closed wording for an undeterminable model.
+func modelRoutingError(provider string, modelKnown bool, model string) error {
+	if modelKnown {
+		return fmt.Errorf("no %s account serves model %q", provider, model)
+	}
+	return fmt.Errorf("no %s account serves this request: model could not be determined (body over 5 MiB or not JSON) and every account has a model list", provider)
+}
+
 // selectModelCandidates narrows providerAccounts to the account ids that may
 // serve model (ADR-0020 §5): accounts whose globs explicitly match; else
 // accounts with no list; else none. An empty model matches only no-list
-// accounts. Callers skip this entirely when the model is undeterminable.
+// accounts.
 func selectModelCandidates(providerAccounts []accounts.Account, model string) []int64 {
 	var matched, unlisted []int64
 	for _, a := range providerAccounts {
@@ -361,6 +386,12 @@ func selectModelCandidates(providerAccounts []accounts.Account, model string) []
 // file's hard constraint: the client-request equivalent of "never buffer
 // a whole stream before forwarding").
 //
+// When ok is false, prefix is the raw buffered bytes (possibly fewer than
+// the cap for a non-JSON body under it), which serve feeds to
+// extractModelPrefix for a streaming best-effort model extraction; the
+// forwardBody reader still replays those exact bytes plus the live
+// remainder, so nothing is read or buffered twice.
+//
 // If the body fits within the cap, the returned reader is the fully
 // buffered (and possibly include_usage-rewritten) body, with an accurate
 // length; meta is populated and ok is true. If the body exceeds the cap,
@@ -368,10 +399,10 @@ func selectModelCandidates(providerAccounts []accounts.Account, model string) []
 // live remainder of r.Body without ever buffering the rest, contentLength
 // is r.ContentLength unchanged, and ok is false (model/stream unknown, no
 // include_usage rewrite attempted).
-func readRequestBody(r *http.Request, provider string) (forwardBody io.Reader, contentLength int64, meta requestMeta, ok bool) {
+func readRequestBody(r *http.Request, provider string) (forwardBody io.Reader, contentLength int64, meta requestMeta, ok bool, prefix []byte) {
 	buf, err := io.ReadAll(io.LimitReader(r.Body, requestBodyParseCap+1))
 	if err != nil || len(buf) > requestBodyParseCap {
-		return io.MultiReader(bytes.NewReader(buf), r.Body), r.ContentLength, requestMeta{}, false
+		return io.MultiReader(bytes.NewReader(buf), r.Body), r.ContentLength, requestMeta{}, false, buf
 	}
 
 	meta, ok = parseRequestMeta(buf)
@@ -379,7 +410,7 @@ func readRequestBody(r *http.Request, provider string) (forwardBody io.Reader, c
 	if ok && provider == providerOpenAI && meta.Stream {
 		body = injectIncludeUsage(buf)
 	}
-	return bytes.NewReader(body), int64(len(body)), meta, ok
+	return bytes.NewReader(body), int64(len(body)), meta, ok, nil
 }
 
 // truncatedError renders err as a short string suitable for

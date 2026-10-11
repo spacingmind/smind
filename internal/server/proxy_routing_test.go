@@ -2,10 +2,13 @@ package server
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spacingmind/smind/internal/store"
@@ -178,17 +181,75 @@ func TestProxy_ModelAwareRouting(t *testing.T) {
 	}
 }
 
-// When the model can't be determined (oversized or non-JSON body), model
-// narrowing is skipped: the request is forwarded to a provider account
-// rather than rejected with 400 even if every account has a model list.
-func TestProxy_UndeterminableModelSkipsNarrowing(t *testing.T) {
+// When the model can't be determined (oversized or non-JSON body), routing
+// fails closed per ADR-0020 §5(b): only no-model-list accounts may serve
+// the request; a glm-only setup never receives a claude-* request it can't
+// serve. When the model can be recovered from the buffered prefix of an
+// oversized body, normal narrowing applies.
+func TestProxy_UndeterminableModelFailsClosed(t *testing.T) {
 	t.Parallel()
 
-	oversized := append([]byte(`{"model":"claude-opus-4","pad":"`), bytes.Repeat([]byte("x"), requestBodyParseCap+1024)...)
-	oversized = append(oversized, []byte(`"}`)...)
-	cases := []struct{ name, body string }{
-		{"oversized body", string(oversized)},
-		{"non-JSON body", "not json"},
+	pad := bytes.Repeat([]byte("x"), requestBodyParseCap+64)
+	// model FIRST: recoverable from the buffered prefix even though the
+	// body is oversized.
+	modelFirst := append(append([]byte(`{"model":"claude-opus-4","pad":"`), pad...), []byte(`"}`)...)
+	// model AFTER a >5MiB pad: not recoverable from any bounded prefix.
+	modelLast := append(append([]byte(`{"pad":"`), pad...), []byte(`","model":"claude-opus-4"}`)...)
+
+	cases := []struct {
+		name     string
+		body     []byte
+		glmList  bool // add the glm-* listed account
+		addCld   bool // add a claude-* listed account
+		addNone  bool // add a no-list account
+		wantSts  int
+		wantHits []string // expected upstream hits (paths|keys), empty for none
+	}{
+		{
+			name:     "oversized, model first, only glm account",
+			body:     modelFirst,
+			glmList:  true,
+			wantSts:  http.StatusBadRequest,
+			wantHits: nil,
+		},
+		{
+			name:     "oversized, model first, glm + claude accounts",
+			body:     modelFirst,
+			glmList:  true,
+			addCld:   true,
+			wantSts:  http.StatusOK,
+			wantHits: []string{"/v1/messages|k-claude"},
+		},
+		{
+			name:     "oversized, model after pad, glm + no-list accounts",
+			body:     modelLast,
+			glmList:  true,
+			addNone:  true,
+			wantSts:  http.StatusOK,
+			wantHits: []string{"/v1/messages|k-any"},
+		},
+		{
+			name:     "oversized, model after pad, only glm account",
+			body:     modelLast,
+			glmList:  true,
+			wantSts:  http.StatusBadRequest,
+			wantHits: nil,
+		},
+		{
+			name:     "non-JSON body, only glm account",
+			body:     []byte("not json"),
+			glmList:  true,
+			wantSts:  http.StatusBadRequest,
+			wantHits: nil,
+		},
+		{
+			name:     "non-JSON body, glm + no-list accounts",
+			body:     []byte("not json"),
+			glmList:  true,
+			addNone:  true,
+			wantSts:  http.StatusOK,
+			wantHits: []string{"/v1/messages|k-any"},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,19 +258,66 @@ func TestProxy_UndeterminableModelSkipsNarrowing(t *testing.T) {
 			reg, router := newTestRouting(t, s)
 			p := newProxy(reg, router, s, withAnthropicHTTPClient(&http.Client{}))
 			t.Cleanup(p.Close)
-			// Every account has a model list and none matches claude-*.
-			if _, err := reg.AddWithCredentialModels(providerAnthropic, "glm", "k-glm", up.URL, []string{"glm-*"}); err != nil {
-				t.Fatal(err)
+			if tc.addCld {
+				if _, err := reg.AddWithCredentialModels(providerAnthropic, "claude", "k-claude", up.URL, []string{"claude-*"}); err != nil {
+					t.Fatal(err)
+				}
 			}
+			if tc.addNone {
+				if _, err := reg.AddWithCredentialModels(providerAnthropic, "any", "k-any", up.URL, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.glmList {
+				if _, err := reg.AddWithCredentialModels(providerAnthropic, "glm", "k-glm", up.URL, []string{"glm-*"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			w := httptest.NewRecorder()
-			p.handleAnthropic(w, httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(tc.body)))
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+			p.handleAnthropic(w, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(tc.body)))
+			if w.Code != tc.wantSts {
+				t.Fatalf("status = %d, want %d: %s", w.Code, tc.wantSts, w.Body.String())
 			}
-			if hits := up.snapshot(); len(hits) != 1 || hits[0] != "/v1/messages|k-glm" {
-				t.Fatalf("upstream hits = %v", hits)
+			if tc.wantSts == http.StatusBadRequest && !strings.Contains(w.Body.String(), "not_found_error") {
+				t.Fatalf("400 body = %s", w.Body.String())
+			}
+			if got := up.snapshot(); !reflect.DeepEqual(got, tc.wantHits) {
+				t.Fatalf("upstream hits = %v, want %v", got, tc.wantHits)
 			}
 		})
+	}
+}
+
+// The full oversized body reaches upstream byte-for-byte: the prefix
+// readRequestBody buffered for model extraction plus the live remainder.
+func TestProxy_UndeterminableModelForwardsFullBody(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStoreForProxy(t)
+	reg, router := newTestRouting(t, s)
+	p := newProxy(reg, router, s, withAnthropicHTTPClient(&http.Client{}))
+	t.Cleanup(p.Close)
+
+	var gotLen int64
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n, _ := io.Copy(io.Discard, r.Body)
+		atomic.StoreInt64(&gotLen, n)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(up.Close)
+	if _, err := reg.AddWithCredentialModels(providerAnthropic, "claude", "k-claude", up.URL, []string{"claude-*"}); err != nil {
+		t.Fatal(err)
+	}
+
+	body := append(append([]byte(`{"model":"claude-opus-4","pad":"`), bytes.Repeat([]byte("x"), requestBodyParseCap+1024)...), []byte(`"}`)...)
+	w := httptest.NewRecorder()
+	p.handleAnthropic(w, httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	if n := atomic.LoadInt64(&gotLen); n != int64(len(body)) {
+		t.Fatalf("upstream received %d bytes, want %d", n, len(body))
 	}
 }
 
