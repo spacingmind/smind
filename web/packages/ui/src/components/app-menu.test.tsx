@@ -99,6 +99,30 @@ describe("AppMenu", () => {
     expect(menuAction).toHaveBeenCalledWith("hide");
   });
 
+  it("check for updates is in the app menu on windows only", async () => {
+    for (const [os, shown] of [["windows", true], ["linux", false]] as const) {
+      vi.resetModules();
+      vi.doUnmock("@/lib/platform");
+      const menuAction = mockPlatform({ desktop: true, os });
+      const { AppMenu } = await import("@/components/app-menu");
+      const { KeyboardProvider } = await import("@/keyboard/keyboard-provider");
+      const { unmount } = render(
+        <KeyboardProvider>
+          <AppMenu />
+        </KeyboardProvider>,
+      );
+      fireEvent.pointerDown(screen.getByTestId("app-menu-trigger"), { button: 0 });
+      await screen.findByTestId("app-menu");
+      const item = screen.queryByTestId("app-menu-item-check-updates");
+      expect(item !== null, os).toBe(shown);
+      if (item) {
+        fireEvent.click(item);
+        await waitFor(() => expect(menuAction).toHaveBeenCalledWith("check-updates"));
+      }
+      unmount();
+    }
+  });
+
   it("app menu does not pull focus back to the trigger after an item runs", async () => {
     mockPlatform({ desktop: true, os: "windows" });
     const { AppMenu } = await import("@/components/app-menu");

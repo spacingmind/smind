@@ -84,6 +84,7 @@ export type NativeMenuActionId =
   | "about"
   | "log-folder"
   | "github"
+  | "check-updates"
   | "quit";
 
 /** The commands `capabilities/proxy.json` exposes to the bundled UI (AC5/ADR-0013 part D2), one method per command. */

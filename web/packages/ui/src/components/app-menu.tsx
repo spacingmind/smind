@@ -21,7 +21,7 @@ import { hasCaptionButtons } from "@/lib/window-chrome";
  * equals `menu.rs`'s `menu_action_for` string), or a native-only item reached
  * through the scoped `app_menu_action` command.
  */
-type AppMenuItem = { label: string; testId: string; shortcut?: string } & (
+type AppMenuItem = { label: string; testId: string; shortcut?: string; windowsOnly?: true } & (
   { action: ActionId } | { native: NativeMenuActionId }
 );
 
@@ -63,6 +63,10 @@ export const APP_MENU_SECTIONS: { title: string; items: AppMenuItem[] }[] = [
       { label: "About smind", testId: "about", native: "about" },
       { label: "Open Log Folder", testId: "log-folder", native: "log-folder" },
       { label: "smind on GitHub", testId: "github", native: "github" },
+      // desktop-auto-update U3: auto-update ships on Windows (and macOS); there is
+      // no Linux updater, so the item mirrors the native Help menu's gate
+      // (`update_menu_location` in menu.rs).
+      { label: "Check for Updates…", testId: "check-updates", native: "check-updates", windowsOnly: true },
     ],
   },
 ];
@@ -120,7 +124,7 @@ export function AppMenu() {
             <DropdownMenuLabel className="py-1 text-ui-sm text-muted-foreground">
               {section.title}
             </DropdownMenuLabel>
-            {section.items.map((item) => (
+            {section.items.filter((item) => !item.windowsOnly || desktopOS === "windows").map((item) => (
               <DropdownMenuItem
                 key={item.testId}
                 data-testid={`app-menu-item-${item.testId}`}

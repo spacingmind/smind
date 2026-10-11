@@ -438,6 +438,11 @@ const NATIVE_MENU_ACTIONS: &[(&str, &str)] = &[
     ("about", ID_ABOUT),
     ("log-folder", ID_LOG_FOLDER),
     ("github", ID_GITHUB),
+    // desktop-auto-update U3: Windows' Check for Updates… (Help menu there),
+    // reached from the header app menu; `app_menu_action` routes it through
+    // `handle_event`, whose update branch shows the window and emits
+    // `app-update-check-requested`.
+    ("check-updates", ID_HELP_CHECK_UPDATES),
     ("quit", ID_QUIT),
 ];
 
@@ -454,7 +459,7 @@ fn native_item_for(action: &str) -> Option<&'static str> {
 #[tauri::command]
 pub fn app_menu_action(app: AppHandle, id: String) -> Result<(), String> {
     let item = native_item_for(&id).ok_or_else(|| format!("app_menu_action: unknown id {id:?}"))?;
-    handle_native(&app, item);
+    handle_event(&app, item);
     Ok(())
 }
 
