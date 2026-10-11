@@ -1,5 +1,7 @@
 # Task hierarchy tiers (supervisor → leader → coder), made visible and manageable
 
+Size: L (8) — scope 2, PRs 2, risk 2 (concurrency guard), decisions 1, verify 1
+
 **Question (2026-10-11):** does smind now manage tasks like Paseo, but with
 *clearer layering*? The user runs a 3-tier workflow every day (a supervisor,
 then leaders, then coders). On Paseo the sub-agents are shown mostly flat,
@@ -331,7 +333,14 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
    `archive-finished` model: finished only, never running, never silent) and
    a "Stop all runs in this tree" action. Recommendation: build those two
    as explicit buttons later, not a cascade on archive.
-3. **`task.tree` is a new public wsapi method** (flat nodes + a nested MCP
+3. **Tier vocabulary.** The derived labels are `supervisor`/`leader`/`coder`
+   (the words in the request). `docs/WORKSPACE_PROTOCOL.md` (#290) names the
+   roles **Supervisor → Lead → Peer**. The labels are display text from one
+   function in Go (`tasktree.TierOf`) and one in TS (`tierOf`), so renaming is
+   a two-line change plus tests. Recommendation: use the protocol's words
+   (`supervisor`/`lead`/`peer`) so the UI and the process doc agree. Not
+   changed yet; tell me which you want.
+4. **`task.tree` is a new public wsapi method** (flat nodes + a nested MCP
    view). It is additive and exactly what the requested `task_tree` tool
    needs; flagging it because AGENTS.md (d) lists public API shape.
 
