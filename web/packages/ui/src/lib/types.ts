@@ -363,6 +363,33 @@ export interface PermissionQuestion {
   allowOther?: boolean;
 }
 
+/**
+ * Structured detail the daemon attaches to a permission_request (wire event
+ * params and run.logs entries alike). Every field but `kind` is optional.
+ */
+export interface PermissionDetail {
+  kind: "write" | "edit" | "execute" | "other";
+  path?: string;
+  newBytes?: number;
+  newLines?: number;
+  existingBytes?: number;
+  existingLines?: number;
+  /** The target file exists and this write replaces it entirely. */
+  replacesExisting?: boolean;
+  /** The target is outside the task worktree. */
+  outsideWorktree?: boolean;
+  /** Existing >= 20 lines and the new content is under half of it. */
+  largeShrink?: boolean;
+  preview?: string;
+  /** Unified-style text: lines start with ' ', '+', '-' or '@@'. */
+  diff?: string;
+  command?: string;
+  /** The preview/diff was cut. */
+  truncated?: boolean;
+  /** Existing contents deliberately not shown (sensitive/outside path). */
+  redacted?: boolean;
+}
+
 export interface PermissionRequestEventParams {
   requestId: string;
   summary: string;
@@ -371,6 +398,7 @@ export interface PermissionRequestEventParams {
   questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request: the plan as markdown, reviewed via Chat about it / Refuse / Approve rather than a plain option list. Same "additive, no producer yet" status as `questions`. */
   plan?: string;
+  detail?: PermissionDetail;
 }
 
 // Wire form of taskrunner.PermissionResolution (internal/taskrunner/event.go).
@@ -465,6 +493,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   requestId?: string;
   summary?: string;
   options?: PermissionOption[];
+  /** Populated for a "permission_request" entry -- see PermissionDetail. */
+  detail?: PermissionDetail;
   optionId?: string;
   reason?: PermissionResolutionReason;
   /** Populated for a "raw" entry (ADR 0010) -- the ACP session-update kind the normalizer didn't recognize (e.g. "plan"). */

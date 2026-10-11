@@ -5,6 +5,7 @@ import type { WsClientLike } from "@/lib/ws-client";
 import type {
   PermissionSettings,
   PermissionQuestion,
+  PermissionDetail,
   PermissionRequestEventParams,
   PermissionResolutionReason,
   PermissionResolvedEventParams,
@@ -32,6 +33,8 @@ export interface PendingPermission {
   questions?: PermissionQuestion[];
   /** Present only for a plan-review-shaped request. */
   plan?: string;
+  /** Structured write/edit/execute detail from the daemon, when it sent one. */
+  detail?: PermissionDetail;
 }
 
 /**
@@ -399,6 +402,7 @@ function setPendingPermission(
       options: params.options,
       questions: params.questions,
       plan: params.plan,
+      detail: params.detail,
     },
   });
 }

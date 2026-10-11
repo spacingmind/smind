@@ -103,7 +103,7 @@ func (reg *Registry) StartWhenBusy(ctx context.Context, wm *workspace.Manager, r
 	// permission configurations; only a human-authored profile may carry
 	// one, and a human source here is the interactive wire caller.
 	if source != store.ChatQueueSourceHuman && taskrunner.ModeAutoApproves(p.catalog, p.perm) {
-		return StartOutcome{}, fmt.Errorf("runs: start: a non-human caller may not pick an auto-approving permission configuration (ADR-0019); ask a human, or use a human-authored profile")
+		return StartOutcome{}, fmt.Errorf("runs: start: a non-human caller may not pick an auto-approving permission configuration (ADR-0019); ask a human, or use a human-authored profile: pass profileId of a human-authored profile with the mode you need (see profile_list), or choose a mode that is not marked autoApproves in provider_list")
 	}
 	taskID, chatID, provider, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.provider, p.prompt, p.perm, p.thinkingLevel
 

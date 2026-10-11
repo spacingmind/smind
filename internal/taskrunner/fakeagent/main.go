@@ -436,6 +436,38 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
+	if scenario == "permission-write" {
+		// A GLM-style whole-file Write permission on "existing.txt" (relative
+		// to the worktree), proving the daemon surfaces what it overwrites.
+		permResp := call("session/request_permission", map[string]any{
+			"sessionId": sessionID,
+			"toolCall": map[string]any{
+				"toolCallId": "tc-write-1",
+				"title":      "Write file: existing.txt",
+				"kind":       "edit",
+				"locations":  []map[string]any{{"path": "existing.txt"}},
+				"rawInput":   map[string]any{"path": "existing.txt", "content": "only\nseven\nlines\nhere\nnow\nplease\nok\n"},
+			},
+			"options": []map[string]any{
+				{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+				{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+			},
+		})
+		optionID := ""
+		if permResp.Error == nil {
+			var result struct {
+				Outcome struct {
+					OptionID string `json:"optionId"`
+				} `json:"outcome"`
+			}
+			_ = json.Unmarshal(permResp.Result, &result)
+			optionID = result.Outcome.OptionID
+		}
+		sessionUpdate("chose:" + optionID)
+		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
+		return
+	}
+
 	if scenario == "permission" {
 		// Deliberately issues the session/request_permission call as the
 		// very first thing, with no preceding session/update: a preceding
@@ -551,7 +583,21 @@ func runPromptScript(promptMsg message, cwd string) {
 		return
 	}
 
-	if scenario == "structured" {
+	if scenario == "structured" || scenario == "structured-permission" {
+		if scenario == "structured-permission" {
+			// Same as "structured" but behind a permission request, with a
+			// trailing usage_update, so one run carries every run.logs
+			// event type (tool_call, permission_*, chunk, thinking, raw,
+			// usage).
+			call("session/request_permission", map[string]any{
+				"sessionId": sessionID,
+				"toolCall":  map[string]any{"toolCallId": "tc-1", "title": "Run tests"},
+				"options": []map[string]any{
+					{"optionId": "allow-1", "name": "Allow", "kind": "allow_once"},
+					{"optionId": "deny-1", "name": "Deny", "kind": "reject_once"},
+				},
+			})
+		}
 		// Exercises every new ACP session/update kind
 		// docs/decisions/0008-structured-run-events.md added support for:
 		// a thought chunk, a user-message chunk, and a tool call reported
@@ -604,6 +650,12 @@ func runPromptScript(promptMsg message, cwd string) {
 				},
 			},
 		})
+		if scenario == "structured-permission" {
+			notify("session/update", map[string]any{
+				"sessionId": sessionID,
+				"update":    map[string]any{"sessionUpdate": "usage_update", "used": 10, "size": 1000},
+			})
+		}
 		sessionUpdate("done")
 		respond(promptMsg.ID, map[string]any{"stopReason": "end_turn"})
 		return
