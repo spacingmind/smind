@@ -1241,7 +1241,7 @@ func TestRunACP_WritePermissionCarriesDetail(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
