@@ -298,6 +298,129 @@ never go through the proxy. Usage comes from each agent's own events.
 - The web composer's client-side queue moves to the server queue.
   Queued items are visible, and cancellable, in every client.
 
+### ADR-O web composer follow-up (ADR-0021 §9; spec written 2026-10-11)
+
+Replaces the web composer's client-side queue (`useState<string[]>` plus
+a drain effect in `composer.tsx`) with the daemon's per-chat queue. No
+backend change. Mobile is out of scope.
+
+**Design (all inside ADR-0021 §9, nothing new architecturally):**
+
+- **Send.** A plain send (Enter or the Send/Queue button) always passes
+  `whenBusy: "queue"` on `run.start`, whether or not the UI thinks the
+  chat is running. An idle chat starts immediately under every mode, so
+  this removes the race where the UI's "running" flag is stale: a busy
+  chat queues instead of failing with the legacy "already has a running
+  run" error. The result is `{runId}` or `{queued, queueItemId}`.
+- **Interrupt.** While a run is live, Cmd/Ctrl+Enter and a "Send now"
+  button send with `whenBusy: "interrupt"` (Paseo's alternate-send
+  shortcut, `composer/input/input.tsx`). Per-item "send now" and "edit"
+  on an already-queued item are **not** built: they would need new
+  server verbs (cancel+re-enqueue is not atomic).
+- **Queue view.** `useChatQueue(client, events, chatId)` is the one
+  source of queue state. Initial state is `chat.queueList {chatId}`;
+  live updates replace the whole list from `chat.queueUpdated`
+  snapshots (ADR-0009 shape; the topic is added to `use-daemon-events`).
+  It refetches on a new client (reconnect) and on `event.dropped`, and
+  ignores snapshots and responses for any other chat.
+- **What shows.** `status === "queued"` items, ordered by `Priority`
+  desc then `ID`. `delivered` items vanish (their run arrives as a
+  normal run, below). A `cancelled` item with an auto-cancel reason
+  (non-empty and not `"cancelled by user"`, i.e. the `delivery failed:`
+  family from `internal/runs/queue.go`) shows with that reason for 10 s,
+  then disappears. A user cancel just disappears. The reason strings are
+  server-defined, so this coupling is noted in the hook's comment.
+- **Cancel.** A real `<button>` per row, focusable, with
+  `aria-label="Cancel queued prompt: <first 40 chars>"`, calls
+  `chat.queueCancel {itemId}`. The row is not removed optimistically: it
+  disappears when the snapshot arrives. If the call errors (typically
+  "not queued" because the item was delivered a moment earlier), the
+  hook refetches `chat.queueList` and shows no error; the truth is
+  whatever the list says.
+- **No optimistic queued rows.** After a `{queued}` result the composer
+  clears the draft and the hook refetches the list (covers an
+  `events.subscribe` that failed). Rows come from server state only.
+- **Delivered runs show up.** The server starts a delivered item's run
+  itself, so `useRunTimeline` also listens to `run.status` for its chat;
+  a `runId` it doesn't know triggers a `run.list {chatId}` merge, and a
+  `running` run is attached/streamed exactly once. `submitPrompt` and
+  this path dedupe on run id, so a `run.status` that races the
+  `run.start` response can't produce a duplicate run or a second
+  `run.attach`.
+
+**Acceptance criteria:**
+
+1. **Types and topic.** `ChatQueueItem` mirrors the wire shape;
+   `RunStartResult` becomes a union with `{queued, queueItemId}`;
+   `chat.queueUpdated` is in `use-daemon-events`'s `TOPICS`.
+2. **Busy send queues.** With a running run, Enter calls `run.start`
+   with `whenBusy: "queue"`; on `{queued:true, queueItemId}` the draft is
+   cleared, no run entry is appended, and the item appears once the
+   server says so. On error the draft is restored.
+3. **Interrupt.** Cmd/Ctrl+Enter and "Send now" while running call
+   `run.start` with `whenBusy: "interrupt"`; neither exists while idle.
+4. **Queue view.** Items render ordered by priority then id, from
+   `chat.queueList` on mount and from `chat.queueUpdated` afterwards.
+   Delivered items vanish; auto-cancelled items show their reason for
+   10 s.
+5. **Cancel.** Calls `chat.queueCancel {itemId}`, keyboard-operable, no
+   optimistic removal, an error leads to a refetch (not a stuck row,
+   not an error banner).
+6. **Delivered run appears.** A server-delivered run is added to the
+   timeline and streamed once, with no duplicate when `run.status`
+   races `run.start`.
+7. **State isolation.** Switching chats or tasks shows only that chat's
+   items (no flash of the previous chat's queue, a late response for the
+   old chat is ignored); a reconnect or `event.dropped` refetches.
+8. **Old queue gone.** `composer.tsx` has no client-side queue state, no
+   drain effect, no `composer-queued-item` rendering from local state;
+   `grep -n "setQueued\|draining" web/packages/ui/src` finds nothing.
+   The "Queue a follow-up — it sends when this run finishes" copy
+   stays true (it is now the server's behaviour).
+9. **No double send.** A second submit while one is in flight does
+   nothing: exactly one `run.start` per user action.
+10. **Visual.** Light and dark screenshots of the composer with two
+    queued items against a sandbox daemon, reviewed by the leader:
+    clean, aligned with the composer card, readable in both themes.
+
+**Test scenarios (vitest; exact names):**
+
+`hooks/use-chat-queue.test.ts`:
+- `loads initial items from chat.queueList (reload restores the queue)`
+- `replaces the list from a chat.queueUpdated snapshot for its chat`
+- `ignores chat.queueUpdated for another chat`
+- `orders by priority desc then id`
+- `hides delivered items`
+- `shows an auto-cancelled item with its reason for 10s then drops it`
+- `does not show a user-cancelled item`
+- `ignores a stale chat.queueList response after a chat switch`
+- `refetches on a new client and on event.dropped`
+- `cancel calls chat.queueCancel and leaves the row until the snapshot`
+- `cancel error refetches the list and surfaces no error` (the
+  delivered-before-cancel race)
+
+`components/composer/composer.test.tsx` (the old client-queue tests are
+deleted, not adapted):
+- `busy send calls run.start with whenBusy queue and renders the queued item from the server`
+- `idle send also passes whenBusy queue and starts the run`
+- `busy send restores the draft when run.start fails`
+- `Cmd+Enter while running sends with whenBusy interrupt`
+- `Send now button is absent when idle`
+- `cancel button calls chat.queueCancel with the item id`
+- `cancel button is keyboard operable and labelled with the prompt`
+- `queued items from the server do not fire client-side on run end` (the old-queue-gone behaviour test)
+- `a second submit while one is in flight sends once`
+- `shows only the open chat's queue after a chat switch`
+- `renders an auto-cancelled item's reason`
+
+`hooks/use-run-timeline.test.ts`:
+- `submitPrompt does not append a run when the server queued it`
+- `adopts and streams a server-delivered run from run.status`
+- `run.status racing the run.start response does not duplicate the run`
+
+`hooks/use-daemon-events.test.ts`:
+- `subscribes to chat.queueUpdated`
+
 ## Test Scenarios
 
 **M1** (httptest fake upstreams, through the real proxy handler):
