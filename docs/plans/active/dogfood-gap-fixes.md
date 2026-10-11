@@ -28,13 +28,31 @@ approval tools, no auto-approving profiles); G7 review tools; G9–G11.
   and `parseMaxTurnsFlag` come from the newest published version (1.14.0),
   not from the pinned one.
 - `--max-turns` appears in 1.6.1 (default 20); the default becomes 100 in
-  1.9.0; **cumulative** usage (`totalUsage`) appears in 1.11.0.
-- In 1.3.0, `PromptResponse.usage` is `lastUsage`: the **last model call's**
-  usage only (input ≈ one context window, small output). That is exactly the
-  observed `input=81403 output=97`. ADR-0020's differencing assumes the agent
-  reports **session-cumulative** counters, so with 1.3.0 it is
-  mathematically right but fed the wrong thing. From 1.11.0 the agent reports
-  cumulative totals, which fits ADR-0020 unchanged.
+  1.9.0; per-prompt summed usage (`totalUsage`) appears in 1.11.0.
+- **Measured, not just read** (scratch harness `/tmp/leader-glm-run/harness`:
+  the real agent binary against a local fake OpenAI-style SSE server that
+  emits tool calls and per-call usage; no Z.AI quota needed):
+  - 1.3.0 with `--max-turns 4` and `ACP_GLM_MAX_TURNS=4`: still 20 model
+    calls, then `max_turn_requests`. Both are ignored. This is the dogfood's
+    cause (the cap was 20 model turns, not 100).
+  - 1.14.0: `--max-turns 3` stops after 3 calls; `ACP_GLM_MAX_TURNS=4`
+    without a flag also works (the gap log's "the CLI default shadows the
+    env var" does not hold for 1.14.0 -- the flag is absent -> env applies).
+  - Usage: 1.3.0's `PromptResponse.usage` is the **last model call only**
+    (6 calls of 1k..6k prompt tokens -> 6000). 1.14.0's is the **sum of that
+    prompt's calls** (21000), and it is **per prompt, not session-cumulative**
+    (a second prompt on the same session reports only its own calls: 57000,
+    not 78000). The 1.3.0 shape is exactly the dogfood's
+    `input=81403 output=97`.
+- **ADR-0020 differencing vs this**: ADR-0020 says ACP `PromptResponse.usage`
+  is session-cumulative and differences it. For GLM 1.14.0 that is untrue,
+  but it does no harm today: smind spawns one agent process per run, the
+  snapshot's `instance` differs, so the baseline resets and each run is
+  charged the whole figure the agent reports (= that prompt's total, which
+  is right). Differencing would under-count if one process ever served two
+  prompts. So: no differencing change needed for GLM 1.14.0; the real bug is
+  the pinned 1.3.0 (last call only), fixed by the pin bump. We document the
+  per-prompt semantics in ADR-0020 and pin it with a test.
 - GLM's `accept_edits` mode is **not** flagged `autoApproves`
   (`acpBypassLike` matches only bypass/yolo/full/auto/dangerous/skip), so an
   orchestrator may pick it itself. It only auto-allows `write`-kind tool
@@ -44,7 +62,8 @@ approval tools, no auto-approving profiles); G7 review tools; G9–G11.
 ## Decisions
 
 1. **Bump the GLM pin** to a version with `--max-turns` and cumulative usage
-   (target `1.14.0`, latest; confirm with a live smoke before settling).
+   (target `1.14.0`, latest; the harness above already exercises its ACP
+   handshake, modes, tool loop, cap and usage against a fake model).
    Smaller than any smind-side workaround; there is no way to honour a turn
    cap on 1.3.0. Recorded as a dependency choice, not an architecture one.
 2. **`agents.glm.maxTurns` config key** (int, `0`/unset = the agent's own
@@ -164,16 +183,19 @@ approval tools, no auto-approving profiles); G7 review tools; G9–G11.
   agent reports a cap when `maxTurns` is 1 or 2 (credentials from real HOME).
 
 ### AC6 (G8): GLM usage is right
-- A captured raw ACP stream (fixture) for GLM at the new pin -- a
-  multi-turn run with `PromptResponse.usage` cumulative -- diffs to the
-  run's own totals; a second run on the same session diffs to its own turn
-  only. A last-call-only stream (the 1.3.0 shape) is **documented** as
-  unsupported in ADR-0020 notes, since it cannot be distinguished from
-  cumulative; the pin bump is the fix.
-- Tests: `TestDiffACPUsage_GLMCumulativeAcrossRuns`,
-  `TestDiffACPUsage_GLMMaxTurnRunCountsAllTurns`.
-- ADR-0020 gets a short "GLM agent versions" note (versions < 1.11 report
-  the last call only).
+- Raw capture of the real agent (fixture, from the harness above): a
+  multi-turn prompt, a second prompt on the same session, and a
+  `max_turn_requests` prompt, at 1.14.0.
+- Tests: `TestDiffACPUsage_GLMPerPromptTotalsNewInstancePerRun` (two runs,
+  different agent instances, per-prompt totals -> each run is charged its own
+  total), `TestDiffACPUsage_GLMMaxTurnRunCountsAllTurns` (the capped run's
+  usage is the sum of its turns), and a test that decodes the captured raw
+  `PromptResponse.usage` JSON (camelCase `inputTokens`, `cachedReadTokens`,
+  `thoughtTokens`) through `acp.PromptUsage` into the expected numbers.
+- ADR-0020 gets a "GLM agent versions" note: < 1.11 reports the last call
+  only (unusable; the pin must stay >= 1.11), >= 1.11 reports the prompt's
+  summed total, not session-cumulative, and why that is still right under
+  process-per-run.
 
 ### AC7 (mode guidance, supervisor addendum)
 - Server instructions (stacked PR on #264) and tool descriptions say: to cut
