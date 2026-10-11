@@ -727,9 +727,11 @@ real Windows pass).
   observed on Windows. *re-test.* Known cost: first paint uses matchMedia, so a
   disagreeing host may flip once on startup.
 - **W4.3 scrollbar buttons** — `index.css hides scrollbar buttons under the windows
-  desktop gate`. Caveat: Chromium ignores `::-webkit-scrollbar*` where
-  `scrollbar-width`/`scrollbar-color` are set (the thin-scrollbar rule), so the effect
-  on WebView2 is unverified. *re-test.*
+  desktop gate`, and `index.css under the windows gate sets no standard
+  scrollbar-width/scrollbar-color`. Chromium ignores `::-webkit-scrollbar*` wherever
+  `scrollbar-width`/`scrollbar-color` are set, so the Windows gate now themes the
+  scrollbar with the webkit pseudo-elements only (thin, `--color-border` thumb,
+  no arrow buttons). Checked in headless Chromium (light + dark). *re-test* on WebView2.
 - **W4.4 VS Code on WSL** — `vscode_on_wsl_uses_remote_wsl_and_the_linux_path`,
   `cursor_and_zed_on_wsl_still_use_the_translated_path`,
   `wsl_distro_with_odd_characters_is_rejected_for_remote`,
