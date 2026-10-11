@@ -30,6 +30,7 @@ mod notify;
 mod overlay_icon;
 mod state;
 mod tray;
+mod updater;
 mod window_chrome;
 #[cfg(test)]
 mod capability_tests;
@@ -43,7 +44,12 @@ const CONNECTIONS_FILE: &str = "connections.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
+    // updater. Its JS-facing permissions are never granted.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let builder = builder.plugin(updater_plugin());
+    builder
         // AC2: single instance must be registered before anything that
         // creates windows or tray icons.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -111,6 +117,8 @@ pub fn run() {
             daemon_manager::connection_version,
             window_chrome::window_ready,
             window_chrome::window_set_theme,
+            updater::app_update_check,
+            updater::app_update_install,
         ])
         .setup(|app| {
             // AC4: the built-in `local` entry always tracks
@@ -277,6 +285,8 @@ pub fn run() {
                 &connections_path,
             );
 
+            app.manage(updater::UpdateState::default());
+
             app.manage(DesktopState {
                 proxy: proxy_state,
                 connections_path,
@@ -300,6 +310,17 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building smind desktop")
         .run(lifecycle::handle_run_event);
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn updater_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry, tauri_plugin_updater::Config> {
+    // ADR-0023.3: a candidate is offered only if strictly newer than the
+    // running version AND a stable release (no pre-release part).
+    tauri_plugin_updater::Builder::new()
+        .default_version_comparator(|current, update| {
+            crate::updater::is_offerable(&current.to_string(), &update.version.to_string())
+        })
+        .build()
 }
 
 fn toggle_main(app: &tauri::AppHandle) {

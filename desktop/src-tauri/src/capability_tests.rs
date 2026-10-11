@@ -36,6 +36,8 @@ fn capability_allowlist_exact() {
         "allow-connection-version",
         "allow-window-ready",
         "allow-window-set-theme",
+        "allow-app-update-check",
+        "allow-app-update-install",
         "core:window:allow-minimize",
         "core:window:allow-toggle-maximize",
         "core:window:allow-internal-toggle-maximize",
