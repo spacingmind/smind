@@ -110,6 +110,11 @@ impl Tray {
         self.refresh(count);
     }
 
+    /// Re-applies the shown badge (see `Badge::reapply`).
+    pub fn reapply_badge(&self) {
+        self.badge.reapply();
+    }
+
     fn refresh(&self, count: usize) {
         if let Some(ui) = &self.ui {
             let label = attention::label(count);
@@ -117,10 +122,9 @@ impl Tray {
             let _ = ui.item.set_enabled(count > 0);
             let _ = ui.icon.set_tooltip(Some(&label));
         }
-        // Windows has no cross-platform badge API (only a per-window
-        // overlay icon image, which this quick pass doesn't have an
-        // asset for); macOS shows the Dock badge, Linux a launcher badge
-        // where the desktop environment supports it.
+        // macOS: Dock badge; Linux: launcher badge where the desktop
+        // supports it; Windows: a rendered taskbar overlay icon
+        // (`overlay_icon`).
         self.badge.update(count);
     }
 }

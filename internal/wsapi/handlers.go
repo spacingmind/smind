@@ -30,6 +30,7 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 		"account.list":             handleAccountList(acctReg),
 		"account.rename":           handleAccountRename(acctReg),
 		"account.updateCredential": handleAccountUpdateCredential(acctReg),
+		"account.updateModels":     handleAccountUpdateModels(acctReg),
 		"account.remove":           handleAccountRemove(acctReg),
 		"workspace.create":         handleWorkspaceCreate(wm),
 		"workspace.list":           handleWorkspaceList(wm),
@@ -99,17 +100,22 @@ func methodHandlers(wm *workspace.Manager, acctReg *accounts.Registry, runner *t
 // the WebSocket API. Account metadata is useful to clients; credential
 // material must stay in the registry/store and never be returned over RPC.
 type accountResult struct {
-	ID             int64  `json:"id"`
-	Provider       string `json:"provider"`
-	Label          string `json:"label"`
-	CredentialType string `json:"credentialType"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
+	ID             int64    `json:"id"`
+	Provider       string   `json:"provider"`
+	Label          string   `json:"label"`
+	CredentialType string   `json:"credentialType"`
+	Models         []string `json:"models"`
+	CreatedAt      string   `json:"createdAt"`
+	UpdatedAt      string   `json:"updatedAt"`
 }
 
 func accountResultFrom(a accounts.Account) accountResult {
+	models := a.Models
+	if models == nil {
+		models = []string{}
+	}
 	return accountResult{
-		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType,
+		ID: a.ID, Provider: a.Provider, Label: a.Label, CredentialType: a.CredentialType, Models: models,
 		CreatedAt: a.CreatedAt.Format(time.RFC3339), UpdatedAt: a.UpdatedAt.Format(time.RFC3339),
 	}
 }
@@ -124,6 +130,9 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			Label      string `json:"label"`
 			Credential string `json:"credential"`
 			BaseURL    string `json:"baseUrl,omitempty"`
+			// Models are path.Match globs for model-aware routing
+			// (ADR-0020 §5); empty = no list.
+			Models []string `json:"models,omitempty"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("account.add: invalid params: %w", err)
@@ -132,7 +141,7 @@ func handleAccountAdd(registry *accounts.Registry) handlerFunc {
 			return nil, fmt.Errorf("account.add: provider, label, and credential are required")
 		}
 
-		created, err := registry.AddWithCredential(p.Provider, p.Label, p.Credential, p.BaseURL)
+		created, err := registry.AddWithCredentialModels(p.Provider, p.Label, p.Credential, p.BaseURL, p.Models)
 		if err != nil {
 			return nil, fmt.Errorf("account.add: %w", err)
 		}
@@ -169,6 +178,33 @@ func handleAccountRename(registry *accounts.Registry) handlerFunc {
 		account, err := registry.Get(updated.ID)
 		if err != nil {
 			return nil, fmt.Errorf("account.rename: %w", err)
+		}
+		return accountResultFrom(account), nil
+	}
+}
+
+// handleAccountUpdateModels replaces an account's model globs
+// (ADR-0020 §5). Each glob is validated with path.Match syntax; an empty
+// (or absent) array clears the list.
+func handleAccountUpdateModels(registry *accounts.Registry) handlerFunc {
+	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
+		if registry == nil {
+			return nil, fmt.Errorf("account.updateModels: accounts registry is unavailable")
+		}
+		var p struct {
+			ID     int64    `json:"id"`
+			Models []string `json:"models"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("account.updateModels: invalid params: %w", err)
+		}
+		updated, err := registry.SetModels(p.ID, p.Models)
+		if err != nil {
+			return nil, fmt.Errorf("account.updateModels: %w", err)
+		}
+		account, err := registry.Get(updated.ID)
+		if err != nil {
+			return nil, fmt.Errorf("account.updateModels: %w", err)
 		}
 		return accountResultFrom(account), nil
 	}
@@ -1202,6 +1238,8 @@ func attachAndStream(ctx context.Context, rc *requestContext, reg *runs.Registry
 				rc.Emit("tool_call", toRunToolCallParams(e))
 			case taskrunner.EventTypeRaw:
 				rc.Emit("raw", toRunRawParams(e))
+			case taskrunner.EventTypeUsage:
+				rc.Emit("usage", runUsageParams{Usage: runs.UsageFromEvent(e.Usage)})
 			case taskrunner.EventTypePermissionRequest:
 				rc.Emit("permission_request", permissionRequestParams{
 					RequestID: e.PermissionRequestID,
@@ -1242,6 +1280,12 @@ func terminalResult(reg *runs.Registry, runID string) (any, error) {
 	}
 }
 
+// runUsageParams is the params of the "usage" event task.prompt/run.attach
+// stream when a turn reports its usage (ADR-0020).
+type runUsageParams struct {
+	Usage *runs.RunUsage `json:"usage"`
+}
+
 // runLogEvent is the wire shape of one event in a run.logs response --
 // the same fields task.prompt/run.attach's streamed events and terminal
 // results carry, just batched instead of streamed. Type is "chunk",
@@ -1275,6 +1319,8 @@ type runLogEvent struct {
 	// runRawParams for the shared shape this mirrors.
 	Kind    string          `json:"kind,omitempty"`
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Usage is populated for a "usage" entry (ADR-0020).
+	Usage *runs.RunUsage `json:"usage,omitempty"`
 }
 
 // toRunLogEvent translates one taskrunner.Event into its run.logs wire
@@ -1305,6 +1351,8 @@ func toRunLogEvent(e taskrunner.Event) runLogEvent {
 	case taskrunner.EventTypeRaw:
 		p := toRunRawParams(e)
 		return runLogEvent{Type: "raw", Kind: p.Kind, Payload: p.Payload}
+	case taskrunner.EventTypeUsage:
+		return runLogEvent{Type: "usage", Usage: runs.UsageFromEvent(e.Usage)}
 	case taskrunner.EventTypeDone:
 		return runLogEvent{Type: "done", StopReason: e.StopReason}
 	case taskrunner.EventTypePermissionRequest:

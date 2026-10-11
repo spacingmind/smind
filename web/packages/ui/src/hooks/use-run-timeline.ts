@@ -199,6 +199,10 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
     ];
   }
 
+  // Per-turn usage (ADR-0020) is bookkeeping for usage reporting, not
+  // transcript: the timeline has no row for it yet.
+  if (type === "usage") return items;
+
   if (type === "raw") {
     return [
       ...items,

@@ -9,8 +9,11 @@ type Account struct {
 	Label          string
 	CredentialType string
 	CredentialData string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Models is a JSON array of path.Match globs ("" = no list; stored as
+	// NULL).
+	Models    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // RoutingDecision records which account a session was routed to, for session
@@ -281,4 +284,46 @@ type UsageSummary struct {
 	CacheReadTokens  int64
 	CacheWriteTokens int64
 	ReasoningTokens  int64
+}
+
+// RunUsage is one run's usage row (ADR-0020): what the agent itself
+// reported for the run, never estimated. Every token/cost/context field is
+// nil ("unknown") rather than 0 when the backend didn't report it.
+// WorkspaceID is filled from the run's task at upsert time. SessionSnapshot
+// is the ACP session-cumulative counters as JSON (nil elsewhere). No prompt
+// text and no credential ever lands here.
+type RunUsage struct {
+	RunID             string
+	WorkspaceID       *int64
+	TaskID            int64
+	ChatID            *int64
+	Provider          string
+	Model             *string
+	InputTokens       *int64
+	CachedInputTokens *int64
+	CacheWriteTokens  *int64
+	OutputTokens      *int64
+	ReasoningTokens   *int64
+	CostUSD           *float64
+	ContextUsed       *int64
+	ContextSize       *int64
+	SessionSnapshot   *string
+	Source            string
+	UpdatedAt         time.Time
+}
+
+// RunUsageSummary is one grouped row of usage.summary's runs scope: the
+// number of runs and the summed usage for one key (a workspace, task, chat,
+// run, provider, or model, depending on groupBy). Like UsageSummary, sums
+// only include non-NULL fields.
+type RunUsageSummary struct {
+	Key              string
+	Count            int64
+	InputTokens      int64
+	OutputTokens     int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
+	ReasoningTokens  int64
+	// CostUSD is nil when no run in the group reported a cost (unknown, not 0).
+	CostUSD *float64
 }

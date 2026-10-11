@@ -40,6 +40,11 @@ func newTestServer(t *testing.T, token string) *Server {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+	// Cleanups run LIFO, so this drains the proxy's async request_log
+	// writer before the store above is closed and t.TempDir is removed --
+	// otherwise a row still in flight writes to a closed DB and recreates
+	// SQLite's -wal/-shm files under a directory being deleted.
+	t.Cleanup(srv.Close)
 	return srv
 }
 

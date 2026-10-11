@@ -173,6 +173,30 @@ func runFakeClaudeCLI() {
 			"result":      "done",
 		})
 
+	case "usage", "usage-no-model":
+		// A result carrying per-model usage and cost, for the usage event.
+		stdin.Scan() // consume the prompt line
+		result := map[string]any{
+			"type":           "result",
+			"subtype":        "success",
+			"session_id":     "sess-1",
+			"stop_reason":    "end_turn",
+			"result":         "done",
+			"total_cost_usd": 0.5,
+			"modelUsage": map[string]any{
+				"claude-small": map[string]any{"inputTokens": 10, "outputTokens": 5, "costUSD": 0.1, "contextWindow": 200000},
+				"claude-big": map[string]any{
+					"inputTokens": 100, "outputTokens": 40, "cacheReadInputTokens": 300,
+					"cacheCreationInputTokens": 20, "costUSD": 0.4, "contextWindow": 1000000,
+				},
+			},
+		}
+		if scenario == "usage-no-model" {
+			delete(result, "modelUsage")
+			delete(result, "total_cost_usd")
+		}
+		writeLine(result)
+
 	case "hang":
 		stdin.Scan() // consume the prompt line, then never respond or exit
 		time.Sleep(time.Hour)
