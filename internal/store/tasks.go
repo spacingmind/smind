@@ -348,3 +348,9 @@ func nullToTimePtr(n sql.NullTime) *time.Time {
 	v := n.Time
 	return &v
 }
+
+// nullString maps "" to SQL NULL, for optional TEXT columns where empty
+// means "unset" (runs.model, agent_profiles.model).
+func nullString(v string) sql.NullString {
+	return sql.NullString{String: v, Valid: v != ""}
+}

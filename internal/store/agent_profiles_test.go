@@ -127,7 +127,7 @@ func TestStore_DeleteAgentProfileMissing(t *testing.T) {
 func assertAgentProfilesEqual(t *testing.T, got, want AgentProfile) {
 	t.Helper()
 	if got.ID != want.ID || got.Name != want.Name || got.Provider != want.Provider ||
-		got.PermissionMode != want.PermissionMode || got.AutoAccept != want.AutoAccept || got.ThinkingLevel != want.ThinkingLevel || got.Notes != want.Notes {
+		got.PermissionMode != want.PermissionMode || got.AutoAccept != want.AutoAccept || got.ThinkingLevel != want.ThinkingLevel || got.Model != want.Model || got.Notes != want.Notes {
 		t.Errorf("agent profile fields = %+v, want %+v", got, want)
 	}
 	if !got.CreatedAt.Equal(want.CreatedAt) || !got.UpdatedAt.Equal(want.UpdatedAt) {

@@ -737,3 +737,64 @@ func TestMigrate_ChatQueueCancelKind(t *testing.T) {
 		s.Close()
 	}
 }
+
+// TestMigrate_ModelColumns: a database whose runs and agent_profiles tables
+// predate the model columns (ADR-0025) gets them on Open, and the old rows
+// read back with no model.
+func TestMigrate_ModelColumns(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-model.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+	for _, table := range []string{"runs", "agent_profiles"} {
+		if _, err := s.db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN model`); err != nil {
+			t.Fatalf("drop %s.model: %v", table, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at) VALUES ('old-run', ?, ?, 'glm', 'hi', 'done', ?)`,
+		task.ID, chat.ID, now,
+	); err != nil {
+		t.Fatalf("seed old run: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO agent_profiles (id, name, provider, created_at, updated_at) VALUES (1, 'old', 'glm', ?, ?)`, now, now,
+	); err != nil {
+		t.Fatalf("seed old profile: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		run, err := s.GetRun("old-run")
+		if err != nil {
+			t.Fatalf("GetRun() error = %v", err)
+		}
+		prof, err := s.GetAgentProfile(1)
+		if err != nil {
+			t.Fatalf("GetAgentProfile() error = %v", err)
+		}
+		if run.Model != "" || prof.Model != "" {
+			t.Fatalf("migrated models = %q / %q, want empty (NULL)", run.Model, prof.Model)
+		}
+		var isNull bool
+		if err := s.db.QueryRow(`SELECT model IS NULL FROM runs WHERE id = 'old-run'`).Scan(&isNull); err != nil || !isNull {
+			t.Fatalf("runs.model IS NULL = %v, %v, want true", isNull, err)
+		}
+		s.Close()
+	}
+}
