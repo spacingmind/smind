@@ -114,6 +114,6 @@ Usage:
 
 Every subcommand except "serve" and "skill" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
-~/.spacingmind/token (override the home directory with $SMIND_HOME).
+~/.smind/token (override the home directory with $SMIND_HOME).
 `)
 }

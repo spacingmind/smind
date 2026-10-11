@@ -366,7 +366,7 @@ Environment: this Mac (Apple Silicon, macOS 27). It had **no Rust
 toolchain and no go-task**; I installed both with `brew install rust
 go-task` (rust 1.99, go-task 3.54) and later `actionlint`. All runtime
 scenarios ran against an **isolated** `HOME`, `SMIND_HOME` and port
-(`/tmp/smind-e2e`, port 4749/4750). The user's `~/.spacingmind`, the real
+(`/tmp/smind-e2e`, port 4749/4750). The user's `~/.smind`, the real
 app-data dir and port 4648 were never touched (4648 was free throughout).
 Another agent's (D1) build with the same identifier was running for part of
 the session, and its single-instance socket (`/tmp/<identifier>_si.sock`)

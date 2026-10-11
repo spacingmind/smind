@@ -5,7 +5,7 @@
 Goal: repo lives, binary runs.
 
 - [x] Init repo `spacingmind/smind`: go.mod, cmd/smind, internal/{config,server}
-- [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.spacingmind/config.yaml`
+- [x] Health endpoint `GET /healthz` listen :4648, config load from `~/.smind/config.yaml`
 - [x] Bun workspace `web/` + Vite React placeholder, embed into binary
 - [x] Taskfile: `task build` (1 binary); `task dev` (hot reload both)
 - [x] CI: GitHub Actions — go test + bun build + lint
@@ -18,7 +18,7 @@ Definition of done: `smind` binary runs, `localhost:4648` shows placeholder UI.
 Goal: proxy Anthropic/OpenAI-compatible requests across multiple accounts.
 
 - [x] SQLite: accounts, routing decisions, quota snapshots (`internal/store`)
-- [x] Accounts registry: typed credential registry + OAuth refresh (`internal/accounts`, on top of `internal/store` — superseded the original `~/.spacingmind/accounts/` file-store idea)
+- [x] Accounts registry: typed credential registry + OAuth refresh (`internal/accounts`, on top of `internal/store` — superseded the original `~/.smind/accounts/` file-store idea)
 - [x] TLS fingerprinting (utls) for outbound provider requests (`internal/transport`, HTTP/1.1 only)
 - [x] Quota poller: TTL-cached per-account usage (`internal/quota`) — polling/caching mechanism done; the actual per-provider usage-API calls are a stubbed `Fetcher` interface, not yet implemented
 - [x] Routing engine: session affinity (24h TTL), failover chain, routing policy v1 (`hard`/`pool` fill-first) — `internal/routing`
