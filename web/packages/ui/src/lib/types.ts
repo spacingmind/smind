@@ -622,3 +622,32 @@ export interface FsListDirResult {
   parent: string;
   entries: FsListDirEntry[];
 }
+// One entry in an mcp.list/mcp.get response, or the result of mcp.create/
+// mcp.update/mcp.setEnabled (internal/wsapi/mcp_handlers.go's
+// mcpServerResult): lowercase json tags. Every env/headers VALUE is
+// redacted server-side to the literal "[redacted]" (keys preserved) --
+// the UI must never expect or show a real secret value, and sending the
+// "[redacted]" placeholder back on mcp.update means "keep the stored
+// secret". Full-replace semantics: mcp.update carries every field.
+export interface McpServer {
+  id: number;
+  name: string;
+  transport: McpTransport;
+  /** stdio only. */
+  command: string;
+  /** stdio only. */
+  args: string[];
+  /** stdio only; values always "[redacted]" on read. */
+  env: Record<string, string>;
+  /** http/sse only. */
+  url: string;
+  /** http/sse only; values always "[redacted]" on read. */
+  headers: Record<string, string>;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// internal/store.McpServer's transport values, carried over the wire as
+// their underlying strings (ADR-0018).
+export type McpTransport = "stdio" | "http" | "sse";

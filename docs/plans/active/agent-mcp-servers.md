@@ -159,6 +159,11 @@ accepted):
    capability-dropped servers (ACP) per ADR-0018's wsapi/UI section.
    Depends on step 2; can start once step 3's capability-drop signal has
    somewhere to report to.
+   - [x] **Settings CRUD half** (feat/agent-mcp-settings-ui): Settings ->
+     MCP servers (`mcp-servers-section.tsx`). Shipped separately from step 3.
+   - [ ] **Per-run "active MCP servers" indicator**: not built as dedicated
+     UI. Step 3 reports capability-dropped servers (names only) as an
+     `EventTypeSessionNote` on the run timeline instead of a new event type.
 8. **Secret-redaction audit.** A focused pass confirming acceptance
    criterion 9 end to end for ACP and Claude native (Codex deferred per
    ADR-0018 resolved decisions 1 and 5). Depends on steps 3, 4.
@@ -215,6 +220,19 @@ accepted):
   (daemon's conflict error surfaced), `TestRunMcpAddInvalidTransport
   ExitsNonzero`; dispatch contract in `TestMcp_Usage` (mcp_serve_test.go).
   Verified green: `task test`, `task lint`.
+- Step 7 (Settings CRUD half): `web/packages/ui/src/components/settings/
+  mcp-servers-section.test.tsx` -- list with transport badge never rendering
+  secret values, empty state, create stdio (env as object) / http (url +
+  headers, no command), per-transport validation before any RPC, enabled
+  toggle -> `mcp.setEnabled`, inline delete confirmation -> `mcp.delete`,
+  edit keeps `[redacted]` placeholders (exact `mcp.update` params asserted),
+  daemon conflict error inline, live `mcpServer.*` events, Playwright
+  quick-fill. Verified: `bunx tsc -b packages/ui`, full UI vitest suite,
+  `task lint`. Manually verified against a sandbox daemon
+  (`SMIND_HOME` temp, real built UI, headless Chromium): light + dark
+  screenshots of list / edit / new / delete-confirm; the page DOM never
+  contained the seeded secret; editing one env value in the UI left the
+  other stored secret intact (read back from SQLite).
 - Update-semantics fixes (code review, post-step-2): `internal/store/`
   `TestStore_UpdateMcpServerPreservesEnabled` — update never touches the
   enabled column (only `SetMcpServerEnabled` owns it): enabled stays
