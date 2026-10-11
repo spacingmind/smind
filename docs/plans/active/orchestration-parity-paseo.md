@@ -128,7 +128,7 @@ rule d), so it is **not built in this plan**.
 | G28 | Create a workspace from MCP | `create_workspace` (adopts a path) | `workspace.create` wsapi/CLI | Registers an arbitrary path as a place agents run | P2 | XS | **D10 recommend human-only** |
 | G29 | Rename / labels on tasks, archive chat from MCP | `rename_workspace`, labels, `update_agent` | `chat.archive`, `chat.rename` wsapi | cosmetic | P2 | S | No (later) |
 | G30 | Skill auto-sync, selection UI, startup repair | `syncSkills` + manifest + UI | none | daemon subsystem | P2 | L | **D11 ADR** |
-| G31 | Dogfood gaps from the `cancel_kind` leader ("Step 3 dogfood gap log") | n/a | **not landed yet** | fold in when it appears | ? | ? | pending |
+| G31 | Dogfood gap log from the `cancel_kind` leader (`orchestration-and-metering.md` "Step 3 dogfood gap log", landed in #265) | n/a | 11 gaps (D-G1…D-G11) | folded in below, section 5 | see §5 | see §5 | see §5 |
 
 ## 3. Build scope (no ADR needed)
 
@@ -506,20 +506,85 @@ opt-in manual injection of `smind mcp serve`, PR creation stays human/CLI,
 | D10 | **`workspace_create` via MCP** (G28) | Registers an arbitrary path as somewhere agents run. | **Human-only** (CLI/web). |
 | D11 | **Skill auto-sync, selection UI, startup repair** (G30) | New daemon capability + sync contract. | CLI `smind skill install` first (this plan); revisit once the bundle has proven useful. |
 
-## 5. Coordination
+## 5. Dogfood gap log fold-in (G31)
 
-The `cancel_kind` leader (`feat/queue-cancel-kind`) is dogfooding smind
-orchestration. As of this plan's first commit neither that branch nor its
-"Step 3 dogfood gap log" is on `origin` (`git ls-remote` empty, no new
-section in `orchestration-and-metering.md` on `origin/develop`). G16
-(queue tools over MCP) is deliberately left to land after its `cancel_kind`
-change, to avoid touching `chat.queueCancel`. Fold its gap list into the
-table (G31) when it appears.
+The `cancel_kind` leader ran one real task end to end through smind (GLM
+peer driven over `smind mcp serve`; 11 gaps, D-G1…D-G11 below to avoid
+clashing with this plan's G-numbers; source:
+`orchestration-and-metering.md`, "Step 3 dogfood gap log"). This plan does
+not duplicate its code (`cancel_kind` is on develop, #265); it maps each gap
+to a PR here or to a decision.
+
+| Dogfood gap | Severity | Overlap with this plan | Disposition |
+|---|---|---|---|
+| D-G1 MCP `task_status` / `task_logs` always fail output validation (raw-JSON `input`/`payload` typed as an array) | **Blocker** | none; my PR-A tests did not cover event-bearing runs | **PR-G (P0)**: declare those fields `any`; stdio e2e test on a run that has events |
+| D-G2 permission wall: ~43 approvals for one task; no allowlist | High | ADR-0017 #1 / ADR-0019 #6 are intentional (D3: keep) | Not built. Product/doc items: the `smind` skill documents the human-authored "worktree sandbox" profile recipe (PR-D); a CLI to flip `autoAccept` live on one run is a **decision (new)**, see §4 D12 |
+| D-G3 write prompt hides what it writes (whole-file `Write`) | High | none | **PR-G (P1)**: permission summary shows size and line-count change, flags "overwrites existing file" (summary text only, no new approval path) |
+| D-G4 `task_wait` returns at once while a permission is pending, so a driver can't wait | High | Same function as G12 (wait-any, PR-C); wait-any inherits the problem | **PR-G (P0)**: optional `ignorePermissionIds` on `task_wait` / `runIds` calls so it blocks until a *new* permission, a terminal state, or the timeout; description says how a human approves out of band |
+| D-G5 GLM stops at `max_turn_requests`, reported as `done`; turn cap not configurable | High | none | Config key `agents.glm.maxTurns` passed as `--max-turns` is **PR-G (P1)**; a distinct `needs-continue` run state is a wire/run-model change: **decision D13** |
+| D-G6 CLI can approve but not reject | Med | none (human path, not MCP) | **PR-G (P1)**: `smind task deny <runId> [requestId]`, `task approve --help` works |
+| D-G7 MCP too thin to review work | Med | G1–G5 and G9 here cover `task_get`, `run_list`, `provider_list`, `task_archive` (PR-A/B); G16 queue tools were waiting on `cancel_kind` | **PR-G (P1)**: read-only `task_diff`, `queue_list`, `queue_cancel` (unblocked by #265; cancel reuses `chat.queueCancel` unchanged), `usage_summary`; `RunID` column in `task queue ls` |
+| D-G8 GLM usage numbers look wrong | Med | none | Needs a raw capture from a real multi-turn GLM run; **not built** (needs a live GLM account; tracked in `orchestration-and-metering.md`) |
+| D-G9 driver pays twice for long prompts | Med | none | **PR-G (P2)**: `task_send` `promptFile` restricted to a path **inside the task's worktree** (no `..`, no symlink escape, size-capped) |
+| D-G10 setup frictions: worktree starts from HEAD, no `node_modules`, `task new` prints only `created` | Med | G6 (`baseRef`) and G17 (setup scripts, PR-E) fix the first two | `smind task new` printing id/path/branch is **PR-G (P2)**; `--port`/env for the daemon port stays a papercut |
+| D-G11 `task logs` very noisy for GLM | Low | none | Not built (UI/CLI polish; `--compact` can follow on demand) |
+
+### PR-G: dogfood fixes (D-G1, D-G3, D-G4, D-G5 config, D-G6, D-G7 rest, D-G9, D-G10 print)
+
+Based on PR-C (it changes `task_wait`). Acceptance criteria:
+
+1. `task_status` and `task_logs` succeed on a run whose events carry
+   `input`/`payload` objects; output is valid against the generated schema.
+2. `task_wait` (single or `runIds`) accepts `ignorePermissionIds` (ids of
+   already-surfaced requests); with every pending request ignored it keeps
+   waiting until a new request, terminal state, or timeout; unknown ids are
+   harmless; default behavior unchanged.
+3. Permission summaries for a file write state byte size and, for an
+   existing file, `old -> new` line counts plus an "overwrites existing
+   file" marker; the approval path itself is untouched.
+4. `agents.glm.maxTurns` (config.yaml, default unset = agent default) is
+   passed as `--max-turns <n>` to the GLM ACP command; invalid values
+   rejected at config load.
+5. `smind task deny <runId> [requestId]` rejects a pending request via
+   `run.respondPermission` (human CLI only; no MCP tool); `smind task
+   approve --help` prints usage.
+6. MCP read-only tools `task_diff` (task id, capped size), `queue_list`
+   (chat id), `usage_summary` (wraps `usage.summary`), and `queue_cancel`
+   (item id; wraps `chat.queueCancel`, which is a state change a human can
+   already make and cannot widen permissions).
+7. `task_send` `promptFile`: path resolved relative to the task's
+   worktree, rejected if absolute, containing `..`, escaping via symlink,
+   or over 64 KiB; mutually exclusive with `prompt`.
+8. `smind task new` prints id, branch and worktree path.
+
+Named tests: `TestMCPTools_TaskStatusWithEvents`, `TestMCPTools_TaskLogsWithEvents`
+(stdio e2e, event-bearing run), `TestMCPTools_TaskWaitIgnorePermissionIds`,
+`TestMCPTools_TaskWaitAnyIgnorePermissionIds`,
+`TestPermissionSummary_WriteShowsLineCountChange`,
+`TestPermissionSummary_WriteNewFileSize`, `TestLoad_GLMMaxTurns`,
+`TestGLMCommand_PassesMaxTurns`, `TestTaskDeny_RejectsPending`,
+`TestTaskApprove_HelpFlag`, `TestMCPTools_TaskDiff`, `TestMCPTools_QueueListAndCancel`,
+`TestMCPTools_UsageSummary`, `TestMCPTools_NoApprovalToolInCatalog` (extended),
+`TestMCPTools_TaskSendPromptFile`, `TestMCPTools_TaskSendPromptFileRejectsEscape`
+(absolute, `..`, symlink, oversize), `TestTaskNew_PrintsIDBranchPath`.
+
+New decisions raised by the fold-in (not built, recommendation attached):
+
+- **D12: CLI/UI to flip `autoAccept` live on one run** (D-G2). `run.setPermissionMode`
+  with a human source already allows it; the gap is discoverability. Recommend
+  a `smind task mode <runId> [--auto-accept on|off] [mode]` human-only CLI,
+  needs no ADR (it exposes an existing human-source RPC) but is your call.
+- **D13: `needs-continue` run state for `max_turn_requests`** (D-G5). Today
+  such a run ends `done` with only `stopReason` telling the truth. Recommend
+  adding it as a distinct terminal status, which ripples through `run.status`,
+  the CLI, `task_wait`, the web timeline and the queue's "finished" trigger;
+  needs an ADR.
 
 ## Progress
 
 - [x] Phase A: inventory + gap table (this file)
-- [ ] G31: fold in the dogfood gap log when it lands
+- [x] G31: dogfood gap log folded in (§5)
+- [ ] PR-G: dogfood fixes (D-G1 blocker, D-G4, D-G3, D-G5 config, D-G6, D-G7 rest, D-G9, D-G10)
 - [ ] PR-A: discovery tools + MCP instructions
 - [ ] PR-B: baseRef/branch/PR task creation + `task_archive`
 - [ ] PR-C: `task_set_mode`, `task_options`/`task_set_option`, `task_wait` wait-any
