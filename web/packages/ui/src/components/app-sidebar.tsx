@@ -417,9 +417,8 @@ export function AppSidebar({
       for (const node of nodes) {
         if (node.task.ID === selectedTaskId) return true;
         chain.push(node.task.ID);
-        const found = walk(node.children);
+        if (walk(node.children)) return true;
         chain.pop();
-        if (found) return true;
       }
       return false;
     };
@@ -1679,10 +1678,14 @@ const TaskRow = memo(function TaskRow({
   const isUnread = unread.has(task.ID);
   const isTaskPinned = pinned.has(task.ID);
   const status = statusOverrides.get(task.ID) ?? task.Status;
+  // No li here: the caller wraps the row, because a tree parent's li must
+  // also contain its nested children list (a flat row's li contains only
+  // the row).
   return (
-          <SidebarMenuSubItem>
-            <HoverCard openDelay={400} closeDelay={100}>
-              <HoverCardTrigger asChild>
+    <>
+      <HoverCard openDelay={400} closeDelay={100}>
+        <HoverCardTrigger asChild>
+
             <SidebarMenuSubButton
               className="h-auto flex-col items-stretch gap-0.5 py-1"
               isActive={task.ID === selectedTaskId}
@@ -1824,40 +1827,40 @@ const TaskRow = memo(function TaskRow({
               </span>
               <TaskMetaRow stat={stat} status={status} />
             </SidebarMenuSubButton>
-              </HoverCardTrigger>
-              <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-                <TaskHoverCardBody task={task} stat={stat} status={status} />
-              </HoverCardContent>
-            </HoverCard>
-            <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={`Actions for ${task.Title}`}
-                    data-testid="sidebar-task-actions-trigger"
-                    data-task-id={task.ID}
-                    className="size-5 p-0"
-                  >
-                    <MoreHorizontal />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
-                  <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
-                    {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
-                    <Circle /> Mark unread
-                  </DropdownMenuItem>
-                  <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
-                    <Archive /> Archive task
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
-          </SidebarMenuSubItem>
+            </HoverCardTrigger>
+            <HoverCardContent data-testid="task-hover-card" side="right" align="start">
+              <TaskHoverCardBody task={task} stat={stat} status={status} />
+            </HoverCardContent>
+          </HoverCard>
+          <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Actions for ${task.Title}`}
+                  data-testid="sidebar-task-actions-trigger"
+                  data-task-id={task.ID}
+                  className="size-5 p-0"
+                >
+                  <MoreHorizontal />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
+                <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
+                  {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
+                  <Circle /> Mark unread
+                </DropdownMenuItem>
+                <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
+                  <Archive /> Archive task
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </span>
+    </>
   );
 });
 
@@ -1918,19 +1921,20 @@ function TaskRows({
     return (
       <>
         {tasks.map((task) => (
-          <TaskRow
-            key={task.ID}
-            task={task}
-            tierLabel={null}
-            hasChildren={false}
-            isCollapsed={false}
-            rollup={null}
-            selectedTaskId={selectedTaskId}
-            onSelectTask={onSelectTask}
-            onArchiveTask={onArchiveTask}
-            spaces={spaces}
-            onMoveTask={onMoveTask}
-          />
+          <SidebarMenuSubItem key={task.ID}>
+            <TaskRow
+              task={task}
+              tierLabel={null}
+              hasChildren={false}
+              isCollapsed={false}
+              rollup={null}
+              selectedTaskId={selectedTaskId}
+              onSelectTask={onSelectTask}
+              onArchiveTask={onArchiveTask}
+              spaces={spaces}
+              onMoveTask={onMoveTask}
+            />
+          </SidebarMenuSubItem>
         ))}
       </>
     );

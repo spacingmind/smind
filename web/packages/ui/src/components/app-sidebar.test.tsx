@@ -1384,3 +1384,201 @@ describe("AppSidebar long-title truncation", () => {
     }
   });
 });
+
+/**
+ * PR-U1: the sidebar tree view's task hierarchy -- children nested under
+ * their parent, collapsible with an attention rollup on a collapsed
+ * parent. Fixtures carry ParentTaskID exactly as the daemon wire does.
+ */
+describe("AppSidebar task tree (PR-U1)", () => {
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  const PARENT: Task = { ...TASK, ID: 1, Title: "Parent task" };
+  const CHILD: Task = { ...TASK, ID: 2, Title: "Child task", ParentTaskID: 1 };
+  const OTHER_CHILD: Task = { ...TASK, ID: 4, Title: "Other child", ParentTaskID: 1 };
+  const GRANDCHILD: Task = { ...TASK, ID: 3, Title: "Grandchild task", ParentTaskID: 2 };
+
+  async function mountTree(
+    props: Partial<Parameters<typeof AppSidebar>[0]> = {},
+    tasks: Task[] = [PARENT, CHILD, OTHER_CHILD, GRANDCHILD],
+  ) {
+    const client = new FakeWsClient();
+    const utils = render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} {...props} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], tasks);
+    await screen.findAllByTestId("sidebar-task-row");
+    return { client, ...utils };
+  }
+
+  function rowOf(id: number): HTMLElement {
+    return screen.getAllByTestId("sidebar-task-row").find((r) => r.dataset.taskId === String(id))!;
+  }
+
+  it("renders a child nested under its parent", async () => {
+    await mountTree();
+
+    const childRow = rowOf(CHILD.ID);
+    // Nested, not flat: the child's row lives inside the parent row's
+    // own list item.
+    expect(rowOf(PARENT.ID).closest("li")!.contains(childRow)).toBe(true);
+    // The parent carries the chevron and a supervisor tier label with
+    // its child count; the child a plain coder label, no chevron.
+    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-tier"]')).toHaveTextContent("supervisor · 2");
+    // A child that is itself a parent (leader) carries a chevron; a leaf
+    // grandchild does not.
+    expect(childRow.querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    const grandchildRow = rowOf(GRANDCHILD.ID);
+    expect(grandchildRow.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
+    expect(grandchildRow.querySelector('[data-testid="task-tier"]')).toHaveTextContent("coder");
+  });
+
+  it("collapsing a parent hides its subtree", async () => {
+    await mountTree();
+
+    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+
+    expect(screen.queryByText("Child task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
+    expect(screen.getByText("Parent task")).toBeInTheDocument();
+    // And it persists: a remount rebuilds from localStorage collapsed.
+  });
+
+  it("collapsed parent shows the attention rollup of a descendant needing a permission", async () => {
+    await mountTree({ attention: new Map([[CHILD.ID, new Set<AttentionReason>(["permission"])]]) });
+    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+
+    const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
+    expect(rollup).toBeInTheDocument();
+    expect(rollup).toHaveAttribute("data-rollup-reason", "permission");
+    expect(rollup).toHaveAttribute("aria-label", "1 descendants need attention: a permission is waiting");
+    expect(rollup).toHaveTextContent("1");
+  });
+
+  it("collapsed parent rollup shows the most urgent reason and a count", async () => {
+    await mountTree({
+      attention: new Map([
+        [CHILD.ID, new Set<AttentionReason>(["permission"])],
+        [GRANDCHILD.ID, new Set<AttentionReason>(["finished"])],
+      ]),
+      runStatus: new Map([[OTHER_CHILD.ID, "error" as const]]),
+    });
+    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+
+    const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
+    expect(rollup).toBeInTheDocument();
+    // error outranks permission and finished, and all three descendants count.
+    expect(rollup).toHaveAttribute("data-rollup-reason", "error");
+    expect(rollup).toHaveTextContent("3");
+  });
+
+  it("expanded parent shows no rollup", async () => {
+    await mountTree({ attention: new Map([[CHILD.ID, new Set<AttentionReason>(["error"])]]) });
+
+    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]')).not.toBeInTheDocument();
+  });
+
+  it("rollup appears live when run.status error arrives for a grandchild", async () => {
+    const { rerender, client } = await mountTree({ runStatus: new Map() });
+    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]')).not.toBeInTheDocument();
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar
+          client={client as never}
+          selectedTaskId={null}
+          runStatus={new Map([[GRANDCHILD.ID, "error" as const]])}
+        />
+      </SidebarProvider>,
+    );
+
+    const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
+    expect(rollup).toBeInTheDocument();
+    expect(rollup).toHaveAttribute("data-rollup-reason", "error");
+  });
+
+  it("child created via task.created event nests live", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [PARENT, CHILD]);
+    await screen.findByText("Child task");
+
+    stub.fire("task.created", { task: GRANDCHILD });
+
+    const grandchild = await waitFor(() => rowOf(GRANDCHILD.ID));
+    expect(rowOf(CHILD.ID).closest("li")!.contains(grandchild)).toBe(true);
+    // The new grandchild promoted its parent to leader.
+    expect(rowOf(CHILD.ID).querySelector('[data-testid="task-tier"]')).toHaveTextContent("leader · 1");
+  });
+
+  it("task.archived of a parent leaves its live child as a root row", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} events={stub.events} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [PARENT, CHILD]);
+    await screen.findByText("Child task");
+
+    stub.fire("task.archived", { task: PARENT });
+
+    // The orphan child survives as a top-level row: present, and not
+    // nested inside any other row's list item.
+    const child = await waitFor(() => rowOf(CHILD.ID));
+    expect(screen.queryByText("Parent task")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("sidebar-task-row").map((r) => r.dataset.taskId)).toEqual(["2"]);
+    expect(child.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+  });
+
+  it("selecting a hidden child expands its ancestors", async () => {
+    const { rerender, client } = await mountTree({ selectedTaskId: null }, [PARENT, CHILD, GRANDCHILD]);
+    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={GRANDCHILD.ID} />
+      </SidebarProvider>,
+    );
+
+    expect(await screen.findByText("Grandchild task")).toBeInTheDocument();
+    expect(rowOf(GRANDCHILD.ID).getAttribute("data-active")).not.toBeNull();
+  });
+
+  it("reconnect refetch rebuilds the same tree", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client, WORKSPACE, [], [PARENT, CHILD, GRANDCHILD]);
+    expect(rowOf(CHILD.ID).closest("li")!.contains(rowOf(GRANDCHILD.ID))).toBe(true);
+
+    // A reconnect swaps the client, forcing the full refetch.
+    const client2 = new FakeWsClient();
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client2 as never} selectedTaskId={null} />
+      </SidebarProvider>,
+    );
+    await resolveWorkspaceTree(client2, WORKSPACE, [], [PARENT, CHILD, GRANDCHILD]);
+
+    const child = await waitFor(() => rowOf(CHILD.ID));
+    expect(rowOf(PARENT.ID).closest("li")!.contains(child)).toBe(true);
+    expect(child.closest("li")!.contains(rowOf(GRANDCHILD.ID))).toBe(true);
+  });
+});
