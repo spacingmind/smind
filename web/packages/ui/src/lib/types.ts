@@ -65,9 +65,8 @@ export interface Space {
 // ThinkingLevel), not scoped to any workspace. PermissionMode/ThinkingLevel
 // may be "" (unset -- the provider's own default mode applies):
 // the composer's own default applies in that case, same as an omitted
-// task.prompt field does today. No `Model` field -- dropped from v1 per the
-// ADR's 2026-09-25 review (task.prompt has no model parameter to apply it
-// to).
+// task.prompt field does today. Model (ADR-0025) is the profile's requested
+// model id, "" (NULL) meaning the provider's default.
 export interface AgentProfile {
   ID: number;
   Name: string;
@@ -77,6 +76,8 @@ export interface AgentProfile {
   /** ACP providers only: approve every permission prompt. */
   AutoAccept: boolean;
   ThinkingLevel: string;
+  /** ADR-0025: a model id from the provider's catalog, or "" for the provider's default (absent on an older daemon). */
+  Model?: string;
   Notes: string;
   CreatedAt: string;
   UpdatedAt: string;
@@ -133,6 +134,16 @@ export interface PermissionSettings {
 // all. "" (omitted) preserves today's SDK default exactly.
 export type ThinkingLevel = "" | "off" | "standard" | "extended";
 
+// One entry of a provider's model catalog (internal/taskrunner.ModelInfo,
+// ADR-0025). `default` marks the model the provider uses when none is
+// requested.
+export interface ModelInfo {
+  id: string;
+  label: string;
+  description?: string;
+  default?: boolean;
+}
+
 // internal/taskrunner.ProviderInfo's Kind: "cli" marks a provider that's
 // spawned as an external CLI subprocess managing its own authentication out
 // of band (e.g. GLM's `npx -y glm-acp-agent`) -- the daemon tracks no
@@ -176,6 +187,10 @@ export interface ProviderInfo {
   supportsAutoAccept?: boolean;
   /** Whether a running run's mode can be switched (run.setPermissionMode) -- false for Codex. */
   liveModeSwitch?: boolean;
+  /** ADR-0025: the provider's model catalog. Empty/absent when none is known (an ACP agent not probed yet). */
+  models?: ModelInfo[];
+  /** True once `models` came from the agent itself rather than a static catalog. */
+  modelsDiscovered?: boolean;
 }
 
 // Result of provider.list (internal/wsapi/handlers.go's providerListResult).
@@ -218,6 +233,8 @@ export interface RunSummary {
   AutoAccept: boolean;
   /** Claude-only; "" (unset) for every other provider or a run started before the thinking-level selector was touched. Not persisted across a daemon restart -- a rehydrated run always reports "". */
   ThinkingLevel: ThinkingLevel;
+  /** ADR-0025: the model this run was asked to use; "" (or absent on an older daemon) means the provider's default. */
+  Model?: string;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional

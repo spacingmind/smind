@@ -138,6 +138,7 @@ export function Composer({
     permission: PermissionSettings,
     thinkingLevel?: ThinkingLevel,
     whenBusy?: "queue" | "interrupt",
+    model?: string,
   ) => Promise<SubmitResult>;
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
@@ -166,11 +167,12 @@ export function Composer({
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.
   const [runConfig, setRunConfig] = useState<RunConfigContextValue | null>(null);
-  const { provider, permissionMode, autoAccept, thinkingLevel } = runConfig?.state ?? {
+  const { provider, permissionMode, autoAccept, thinkingLevel, model } = runConfig?.state ?? {
     provider: "claude-native" as Provider,
     permissionMode: "",
     autoAccept: false,
     thinkingLevel: "" as ThinkingLevel,
+    model: "",
   };
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -224,6 +226,7 @@ export function Composer({
           { permissionMode, autoAccept },
           provider === "claude-native" && thinkingLevel ? thinkingLevel : undefined,
           whenBusy,
+          model || undefined,
         );
         if (result.kind === "queued") onQueued?.();
         return true;
@@ -234,7 +237,7 @@ export function Composer({
         setSubmitting(false);
       }
     },
-    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, onQueued],
+    [onSubmit, provider, permissionMode, autoAccept, thinkingLevel, model, onQueued],
   );
 
   // A plain submit always hands the prompt to the daemon's queue whenBusy
@@ -380,6 +383,7 @@ export function Composer({
             <RunConfigToolbar.Provider />
             <RunConfigToolbar.Mode />
             <RunConfigToolbar.Thinking />
+            <RunConfigToolbar.Model />
             {configOptions && (
               <RunConfigOptions
                 options={configOptions.options}
