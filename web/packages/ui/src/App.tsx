@@ -59,7 +59,8 @@ import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
-import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
+import type { ActionId } from "@/keyboard/actions";
+import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
@@ -145,6 +146,20 @@ export function App({
   );
 }
 
+/**
+ * The only shortcut actions that dispatch while Settings covers the shell.
+ * Everything else (task/tab/pane/chat navigation, new tab, quick open,
+ * run.interrupt, sidebar toggle, ...) belongs to handlers that stay mounted
+ * in the hidden shell and must not act on it unseen.
+ */
+const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
+  "palette.open",
+  "shortcuts.help",
+  "settings.open",
+  "theme.cycle",
+  "app.quit",
+];
+
 function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // Item 21: below the 768px breakpoint (Tailwind's own `md`, and the
   // number `hooks/use-mobile.ts` already used for the shadcn Sidebar's
@@ -188,6 +203,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // asking for a section while Settings is already open (shortcuts.help,
   // a deep link) remounts it onto that section instead of being ignored.
   const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
+  useActionRestriction(activeView === "settings" ? SETTINGS_SAFE_ACTIONS : null);
   const openSettings = useCallback((sectionId?: string) => {
     setSettingsInitialSectionId(sectionId ?? null);
     setSettingsOpenNonce((n) => n + 1);
@@ -1427,13 +1443,13 @@ function useTaskChangedFiles(client: WsClient | null, task: Task | null): string
 /**
  * Claims `sidebar.toggle` from inside SidebarProvider (where `useSidebar()` is
  * legal) and renders nothing. While Settings covers the shell the toggle is
- * off (the hidden sidebar must come back exactly as it was left), and a
- * compact-layout sidebar sheet that was open when Settings opened is closed --
+ * restricted away with every other shell action (see SETTINGS_SAFE_ACTIONS),
+ * and a compact-layout sidebar sheet that was open when Settings opened is closed --
  * it portals out of the hidden shell and would otherwise float over Settings.
  */
 function SidebarToggleAction({ settingsOpen }: { settingsOpen: boolean }) {
   const { toggleSidebar, setOpenMobile } = useSidebar();
-  useActionHandler("sidebar.toggle", toggleSidebar, { enabled: !settingsOpen });
+  useActionHandler("sidebar.toggle", toggleSidebar);
   useEffect(() => {
     if (settingsOpen) setOpenMobile(false);
   }, [settingsOpen, setOpenMobile]);

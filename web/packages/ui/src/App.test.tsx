@@ -2394,6 +2394,65 @@ describe("App settings view (dogfood Item 4)", () => {
     expect(screen.getByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
   });
 
+  it("shell shortcuts are inert while settings is open: task.next does not change the selection", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    const chatListsBefore = socket.sent.filter((e) => e.method === "chat.list").length;
+
+    // Mod+] (task.next) and Alt+Shift+] (tab.next) would both act on the hidden shell.
+    const keyEvent = new KeyboardEvent("keydown", { key: "]", code: "BracketRight", ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => {
+      document.dispatchEvent(keyEvent);
+      fireEvent.keyDown(document, { key: "]", code: "BracketRight", altKey: true, shiftKey: true });
+    });
+    await flush();
+    expect(keyEvent.defaultPrevented).toBe(false);
+    expect(socket.sent.filter((e) => e.method === "chat.list").length).toBe(chatListsBefore);
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: chatHeadingName(TASK_B) })).not.toBeInTheDocument();
+
+    // Back in the workspace the same shortcut works again.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "]", code: "BracketRight", ctrlKey: true });
+    });
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+  });
+
+  it("settings-safe shortcuts still work over settings: Shift+? deep-links to Shortcuts", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+  });
+
   it("a command-palette task pick while in settings leaves settings", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
