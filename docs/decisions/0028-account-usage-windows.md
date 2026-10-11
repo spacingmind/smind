@@ -22,8 +22,15 @@ per-chat card (PR-E) is now required and comes before the footer; accounts are
 named by their user-set label; Settings is being rebuilt as a full-screen,
 registry-driven screen (parallel PR `feat/settings-fullscreen`), so the Usage
 section plugs into the registry; and a zero-extra-call **passive rate-limit
-signal** is proposed as **D14 (Proposed, needs the Human)**. See section 5
-(Web), section 7 (D14) and the Decisions list.
+signal** was proposed as D14. See section 5 (Web) and the Decisions list.
+
+**Amended 2026-10-12 (Human, round 3): D14 is Accepted**, reshaped to the
+model of `refs/cliproxyapi` (verified at `4b5f1ea`): the routing signal is a
+**hard rejection only** (an upstream 429 whose headers declare the shared 5-hour
+or 7-day window `rejected`), which puts the account in a persisted **cooldown
+until the reset**; success-response headers are **observation only** and never
+drive routing. Section 7 is rewritten accordingly; section 4 gains the cooldown
+rule; the plan's PR-F is rescoped and can land right after PR-B.
 
 Spec and PR split: [`docs/plans/active/account-usage-windows.md`](../plans/active/account-usage-windows.md).
 
@@ -472,13 +479,21 @@ only the third can reach the network:
   refreshes the cache). A counted exhausted
   window with **no** `ResetsAt` counts only while its snapshot is at most
   `2 × ttl` old.
+- **Cooldown from a hard upstream rejection (D14, section 7).** Independently
+  of the fetched windows, an account in **cooldown** (a proxied response
+  showed the shared 5-hour or 7-day window `rejected`) is exhausted until the
+  cooldown's end, for all models, or, for a model-scoped rejection, only for
+  that model. Routing reads it from the cache like everything else
+  (`Reader`), with no fetch; recovery is time-based. The overage rule below
+  does **not** suppress a cooldown: it is evidence of an actual refusal.
 - **Suppressed when overage is on.** If `Report.OverageEnabled == true`
   (Anthropic "extra usage"), the account keeps serving past the window, so
   it is not exhausted. `nil` (unknown) does not suppress.
 - **Unknown never exhausts.** A cold cache, `status: error`,
   `unavailable` (expired / rejected / no_quota), a legacy or too-new
   payload, polling disabled, or `accountUsage.routing: false` all mean "not
-  exhausted". Errors from the poller are never returned by the router; the
+  exhausted" (a persisted cooldown, which comes from real traffic and not from
+  the usage endpoint, still applies unless `accountUsage.passive` is off). Errors from the poller are never returned by the router; the
   current `check quota for account N` error path is removed.
 - **An exhausted verdict outlives a failing endpoint.** Because the last good
   report is kept (section 3), an account that was exhausted at the last good
@@ -695,106 +710,166 @@ removed or reshaped.
 - Disclosure: the feature calls two undocumented endpoints using the user's
   tokens. The Settings switch states this in one sentence (D2).
 
-### 7. Passive rate-limit signal from proxied responses (D14, Proposed)
+### 7. Rejection cooldown and observed rate-limit headers (D14, Accepted 2026-10-12)
 
-**Status: Proposed. Needs the Human's decision; nothing in sections 1 to 6
-depends on it.** It answers the routing freshness gap accepted in the call
-budget: because only user surfaces fetch, the router cannot know about an
-account nobody has looked at.
+**Status: Accepted** by the Human on 2026-10-12, **reshaped to cliproxyapi's
+model** (`refs/cliproxyapi` at `4b5f1ea`). It answers the routing freshness gap
+accepted in the call budget: because only user surfaces fetch, the router
+cannot know about an account nobody has looked at. The proxy already receives
+the upstream response for every proxied request, with the serving account
+known, so two things can be learned with **zero extra HTTP calls**. They are
+kept strictly apart, as cliproxyapi keeps them:
 
-**Idea.** The proxy already receives the upstream response for every proxied
-request, with the account that served it known. Provider rate-limit **response
-headers** (and an explicit upstream rejection) can be parsed into the same
-snapshot store as a **passive** report: **zero extra calls**, no fetch path,
-never triggers a fetch. It only sees proxied traffic (external clients and
-Claude Code pointed at `:4648`; smind's own runs bypass the proxy, ADR-0020),
-which is exactly the traffic the router serves.
+1. a **routing signal**: a *hard rejection*, which starts a **cooldown**;
+2. an **observation**: rate-limit headers on any response, used for
+   **display only** and never read by routing.
 
-**Evidence (from refs only; no real endpoint was called).**
+Fetched reports (sections 1 to 3) remain the display source for plan windows
+and the source of the **100% exhaustion** rule (D1). The proxy only sees
+proxied traffic (external clients and Claude Code pointed at `:4648`); smind's
+own runs bypass it (ADR-0020), which is exactly the traffic the router serves.
 
-| Provider | Headers seen in the refs | Source |
-|---|---|---|
-| Anthropic (OAuth) | `anthropic-ratelimit-unified-status` (`allowed` / `rejected`, SDK also `allowed_warning`), `-5h-status`, `-5h-reset` (epoch s), `-5h-utilization` (fraction, e.g. `0.0`), `-7d-status`, `-7d-reset`, `-7d-utilization` (e.g. `0.53`), `-7d_oi-status` / `-reset` (a model-specific window the refs call Fable-only), `-representative-claim` (`five_hour`, `seven_day`), `-reset`, `-overage-status`, `-overage-disabled-reason`, `-fallback-percentage`, plus `Retry-After` on 429 | `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals_test.go:68-110` (header set with utilization values), `.../quota_signals.go:26-54,150-200` (observation and header allowlist, bounds), `.../internal/runtime/executor/helps/claude_ratelimit.go:19-60` (status and reset semantics, "Fable-only" 7d_oi rule), `.../claude_executor_ratelimit_test.go:30-41,517-530` (429 with `rejected`, and an ordinary 429 with 5h/7d `allowed` that must **not** block sibling models), `.../conductor_cooldown.go:913-918` (observed on every result, success or failure) |
-| Anthropic (CLI event) | `rate_limit_event`: `status` (`allowed` / `allowed_warning` / `rejected`), `resets_at`, `rate_limit_type` (`five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet`, `overage`), `utilization` (fraction 0 to 1), overage fields: confirms the header data is real and its units | `refs/claude-agent-sdk-python/src/claude_agent_sdk/types.py:1370-1395`, `.../_internal/message_parser.py:364` |
-| Codex (ChatGPT backend) | `x-codex-primary-used-percent`, `-primary-window-minutes`, `-primary-reset-at` (epoch s), the same for `x-codex-secondary-*`, extra limit families by prefix (`x-codex-bengalfox-*` with `-limit-name`), `x-codex-credits-has-credits` / `-unlimited` / `-balance`, `x-codex-plan-type`, `x-codex-active-limit` | `refs/codex/codex-rs/codex-api/src/rate_limits.rs:28-60,200-315` (parser), `refs/codex/codex-rs/core/tests/suite/client.rs:3206-3222` (header example), `refs/codex/codex-rs/codex-api/src/api_bridge.rs:199`, `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals_test.go:101-110` |
-| OpenAI `x-ratelimit-*` | Not carried by Codex responses (cliproxyapi's own comment says only Grok emits them); not plan windows. **Ignored.** | `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals.go:177-184` |
+#### 7.1 Routing signal: hard rejection starts a cooldown
 
-**What it can tell (Anthropic, per proxied response for the serving account):**
-per-window status (`allowed` / `allowed_warning` / `rejected`), reset time, and
-utilization for the 5-hour and 7-day windows, the overall status, whether
-overage is allowed (this also gives evidence for D9), and which window is the
-representative claim. A window the response marks `rejected` is a **hard
-exhaustion verdict until its reset**, learned on the very request that hit it.
-(Codex: used percent, window length and reset for primary and secondary,
-credits and plan: **only if** the proxied upstream is the ChatGPT Codex
-backend.)
+Mirrors `refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go`
+(`ClaudeHeadersIndicateUnifiedRateLimitRejection`, `ParseClaudeRateLimitReset`)
+and its two call sites, `claude_executor_request.go:297-301` and
+`claude_executor_fast_error.go:149-150`, which classify only a **429**.
 
-**What it cannot tell:**
-- anything about an account with no proxied traffic, or about smind's own runs
-  (they bypass the proxy);
-- anything for API-key accounts (no plan windows);
-- what a **bare 429** means: without an explicit `rejected` window it can be a
-  per-model or burst limit (the cliproxyapi test above exists to prevent
-  treating it as account exhaustion), so a bare 429 is **never** an exhaustion
-  signal;
-- which model the `7d_oi` window belongs to (name unknown), so it is shown but
-  never counted for routing;
-- data between requests: it goes stale exactly when traffic stops;
-- that the headers exist on every response, or will keep their names: they are
-  undocumented. That Anthropic sends them on every 200 is **unverified** from
-  the refs (cliproxyapi observes them on every result and its fixture shows
-  `allowed` values, which suggests it does); header **names and units** come
-  from test fixtures in the refs, not from a capture we made;
-- for Codex: smind's proxy default upstream for OpenAI is `api.openai.com/v1`
-  (`internal/server/upstream.go:11`), not the ChatGPT backend that emits
-  `x-codex-*`, so the Codex parser is **expected to be inert** through the
-  proxy until that is verified.
+- **When.** An Anthropic-provider upstream response with status **429** whose
+  headers explicitly declare a rejection:
+  - `anthropic-ratelimit-unified-5h-status: rejected`, or
+  - `anthropic-ratelimit-unified-7d-status: rejected`, or
+  - `anthropic-ratelimit-unified-status: rejected` **unless** it is a
+    `7d_oi`-only rejection (`5h-status` and `7d-status` both `allowed` and
+    `7d_oi-status` `rejected`), the case cliproxyapi's `isFableOnlyRejection`
+    keeps model-scoped.
+  Header names are case-insensitive. A 2xx or any other status never starts a
+  cooldown.
+- **Credential-wide cooldown.** For a shared 5h or 7d rejection (or a unified
+  rejection that is not `7d_oi`-only) the account is **exhausted for every
+  model** until the cooldown end.
+- **Model-scoped cooldown.** For a `7d_oi`-only rejection the cooldown applies
+  **only to the model of the rejected request** (the proxy knows it; the
+  window's own model name is not known), keyed `(account, model)`. Other models
+  on the account keep routing.
+- **Cooldown end = the latest applicable deadline, plus grace.** Candidates
+  (exactly as `ParseClaudeRateLimitReset`): `Retry-After` (delta-seconds,
+  HTTP-date or RFC 3339); `-5h-reset` only if `5h` is `rejected`; `-7d-reset`
+  only if `7d` is `rejected`; `-7d_oi-reset` only if `7d_oi` is `rejected` and
+  it is not a `7d_oi`-only rejection; `-unified-reset` when the unified status
+  is `rejected` (or when no unified status is present and neither shared window
+  is `allowed`). Reset values are epoch seconds (fractions allowed), RFC 3339
+  or HTTP-date. Take the **latest** future deadline (conservative), add a
+  **bounded random grace of 1 to 30 seconds** (cryptographic RNG, as
+  cliproxyapi), and clamp the result to at most 8 days from now (a garbage
+  header cannot park an account). If a rejection is declared but **no valid
+  future deadline** exists, fall back to the generic exponential cooldown 1, 2,
+  4 … 30 min (persisted level, reset by the next non-rejected response on that
+  account).
+- **A bare 429 is not exhaustion.** A 429 without an explicit `rejected`
+  window (no unified headers, or 5h and 7d `allowed`) is an ordinary
+  model-level or burst limit (cliproxyapi's
+  `claude_executor_ratelimit_test.go:517-530` exists so it does not block
+  sibling models). It never cools the account down and never shows as
+  exhausted. Its only effect is a **transient per-(account, model) back-off**
+  of the proxy's routing for `min(Retry-After, 60 s)` when `Retry-After` is
+  present, and nothing when it is not; the 429 itself is passed to the client
+  unchanged, as today. `Retry-After` alone never starts a cooldown.
+- **Persisted.** The cooldown lives in a new table (below) and survives a
+  daemon restart. It is cleared when its end passes (time-based, no fetch), and
+  when the account's credential changes (`account.updateCredential`, re-login),
+  like the rejected-credential rule of the call budget. A newer fetched report
+  does **not** clear it: a hard refusal on real traffic outranks a polled
+  number.
+- **Codex.** No cooldown path in this ADR: the `x-codex-*` parser is
+  observation-only (7.2).
 
-**Design if accepted.**
-- **Write-only observer.** The proxy gets a `quota.Observer` (`Observe(account,
-  headers, status, now)`), separate from `Reader` and from `Touch`/`Refresh`.
-  It has no network path and no way to start a fetch (call-budget rules 3 and
-  4 stand); passive observations are **not** attempts and never touch
-  `quota_poll_state`.
-- **Typed, bounded parsing.** Only a fixed allowlist of header names is read;
-  values must be at most 512 characters with no control characters, at most
-  64 headers; values become typed fields (numbers, enums, timestamps). Raw
-  headers and values are never stored or logged.
-- **Report shape.** `Window` gains `Source` (`"fetched"` | `"passive"`) and
-  `Status` (`"allowed"` | `"allowed_warning"` | `"rejected"`); utilization
-  fraction × 100 becomes `UsedPct`; epoch seconds become `ResetsAt`; `5h` →
-  `five_hour`, `7d` → `weekly`, `7d_oi` → a `feature`-scoped window (display
-  only); overage `allowed` / `rejected` → `OverageEnabled`; `x-codex-*` windows
-  named by `window-minutes`. Tone comes from `Status` when there is no
-  percent (`allowed_warning` → warning, `rejected` → danger).
-- **Storage.** The same snapshot store, a second row kind: `quota_snapshots`
-  gains `kind TEXT NOT NULL DEFAULT 'fetched'` (an `addColumnIfMissing`
-  migration entry), retention keeps the latest row per account and kind. A
-  passive write happens only when the parsed observation **changed** and at
-  most once per account per 60 s, unless the exhausted verdict flips, so the
-  proxy hot path does not write per response (the write goes through the
-  existing async writer pattern).
-- **Precedence (lower than a fresh fetch).** `Peek` returns an effective
-  report: the latest fetched report, with passive windows overlaid per window
-  id **only when** the passive observation is newer than the fetched report
-  **and** either the fetched report is older than the TTL or the passive window
-  is `rejected`. So a **fresh fetched report's numbers win over passive
-  numbers**, a rejection seen on real traffic after the fetch is not ignored,
-  and a passive `allowed` newer than a stale fetched "exhausted" verdict
-  clears it without any call. Passive windows are flagged `source:"passive"`
-  on the wire and the UI says "from recent traffic".
-- **Routing.** Passive account-wide windows count like fetched ones
-  (section 4): a passive `rejected` 5-hour or 7-day window makes the account
-  exhausted for the next request, until its reset.
-- **Config.** `accountUsage.passive` (default true; false makes the observer a
-  no-op). `accountUsage.enabled: false` also disables it.
+#### 7.2 Observation: response headers are display-only
 
-**Recommended default: accept**, Anthropic first (headers with utilization,
-fixtures built from the refs' header sets), Codex parser shipped but fixtures-
-only and expected inert until the upstream question is answered; precedence as
-above; default on. It is a separate PR (PR-F) after PR-B, so declining it
-changes nothing else. Alternative: skip it and accept that routing is blind to
-accounts nobody has looked at (Consequences).
+Mirrors `refs/cliproxyapi/sdk/cliproxy/auth/quota_signals.go`
+(`ObserveResponseHeadersForProvider`, whose doc says "Cooldown and scheduling
+fields are never read or written here"):
+
+- **Any** upstream response (success or failure) for a supported provider may
+  carry quota headers; the allowlisted ones replace the account's previous
+  observation. **Replaced, not merged**, so a watermark that only appears on
+  the response that produced it cannot linger; a response with **no** quota
+  signal leaves the previous observation untouched.
+- **Allowlist, provider-scoped, bounded.** Anthropic: `anthropic-ratelimit-
+  unified-*` and `Retry-After`. Codex: `x-codex-*` (plan type, active limit,
+  credits, primary/secondary and additional-limit used-percent, window-minutes,
+  reset-after-seconds, reset-at, allowed, limit-reached), and `x-ratelimit-*` is
+  ignored (cliproxyapi `quota_signals.go:177-184`). At most **64** headers, each
+  value at most **512** characters, no control characters (a CR/LF could forge
+  a log line), unrelated headers (for example `Anthropic-Workspace-Id`) dropped.
+- **Typed, not raw.** Smind parses the allowlisted values into typed fields
+  and stores those (a deviation from cliproxyapi's raw header map, to keep the
+  rule that raw header values are never stored or logged): window id, status
+  (`allowed` | `allowed_warning` | `rejected`), utilization (a 0 to 1 fraction
+  becomes `UsedPct`), reset time, representative claim, overage status. `5h` →
+  `five_hour`, `7d` → `weekly`, `7d_oi` → a `feature`-scoped display-only
+  window.
+- **Never drives routing.** Observed windows are not read by the router, are not
+  inputs to the 100% rule, and do not start or clear a cooldown. The routing
+  facing interface (`quota.Reader`) exposes fetched windows and cooldowns, not
+  observations; the display facing path exposes observations.
+- **Display.** A card shows the fetched report. Where there is no fetched report
+  or it is older than the TTL, a newer observation's windows are shown flagged
+  `source:"observed"` ("from recent traffic, 3m ago"); an observation never
+  overrides a fresh fetched report's numbers. A cooldown shows as "Rate limited
+  until 14:05 (seen on a proxied request)".
+- **Write rate.** An observation is written only when the parsed values
+  changed, at most once per account per 60 s; a cooldown is written immediately.
+  Writes go through the existing async writer pattern, so the proxy response is
+  never delayed.
+
+#### 7.3 Codex (fixtures-only, inert)
+
+`refs/cliproxyapi/internal/runtime/executor/helps/codex_quota.go`
+(`ParseCodexQuotaEventHeaders`) normalizes Codex websocket quota events into
+the same `x-codex-*` header form the HTTP responses use; the HTTP header names
+are in `refs/codex/codex-rs/codex-api/src/rate_limits.rs:28-60,200-315`. Smind
+ships a parser for both forms, **fixtures-only**, feeding the **observation**
+path only (no cooldown). It is **inert while the proxy's OpenAI upstream is
+`api.openai.com/v1`** (`internal/server/upstream.go:11`), which is not the
+ChatGPT backend that emits these headers and has no websocket path in smind's
+proxy. It becomes live only if that upstream question is answered later.
+
+#### 7.4 Interfaces, storage, and what it can and cannot tell
+
+- **Interfaces (no fetch path).** The proxy holds a write-only
+  `quota.Observer` (`Observe(Response{AccountID, Provider, Model, Status,
+  Header, At})`); routing holds the read-only `quota.Reader` (`Peek`,
+  `Cooldown(accountID, model, now)`). Neither can reach `Touch`/`Refresh` or
+  the network; call-budget rules 3 and 4 stand; observations and cooldowns are
+  not attempts and never touch `quota_poll_state`. Across proxied traffic the
+  usage endpoints see **zero extra HTTP calls**.
+- **Storage.** New table `quota_cooldown(account_id, scope_model, until,
+  reason, level, observed_at, PRIMARY KEY(account_id, scope_model))`
+  (`scope_model` is `''` for credential-wide), created from `schema.sql`
+  (`CREATE TABLE IF NOT EXISTS`), deleted with the account. Observations use
+  the snapshot store as a second row kind: `quota_snapshots.kind TEXT NOT NULL
+  DEFAULT 'fetched'` (`'fetched'` | `'observed'`, an `addColumnIfMissing`
+  migration entry), retention keeps the latest row per account and kind.
+- **Report shape.** `Window` gains `Source` (`"fetched"` | `"observed"`) and
+  `Status`; `AccountUsage` gains an optional `cooldown {until, scope
+  ("account"|"model"), model?, reason}`. Both are reserved on the wire in PR-C.
+  Tone comes from `Status` when there is no percent (`allowed_warning` →
+  warning, `rejected` → danger).
+- **Config.** `accountUsage.passive` (default true) turns the observer into a
+  no-op; `accountUsage.enabled: false` also disables it.
+- **Can tell:** a hard refusal on the very request that hit it, with its reset
+  time, for the serving account, immediately and across restarts; recent
+  per-window status, utilization and reset for display.
+- **Cannot tell:** anything about an account with no proxied traffic, or about
+  smind's own runs; API-key accounts (no plan windows); what a bare 429 means;
+  which model the `7d_oi` window belongs to (the rejected request's model is
+  used); data between requests; or that the headers exist on every response or
+  keep their names (undocumented; names and units here come from cliproxyapi's
+  code and test fixtures, not from a capture of ours; that Anthropic sends them
+  on every 200 is unverified, which is why success headers never drive
+  routing).
 
 ## Decisions (accepted 2026-10-11)
 
@@ -863,8 +938,19 @@ rule d).
   `docs/plans/active/settings-fullscreen.md`: a full-screen Settings screen
   with its own sidebar and content view). Settings → Usage plugs into the
   registry (`registerSettingsSection`) and assumes no in-shell layout.
-- **D14 (Proposed, needs the Human): a zero-extra-call passive rate-limit
-  signal from proxied upstream responses.** See section 7. Not accepted yet.
+- **D14 (Accepted 2026-10-12, cliproxyapi model): zero-extra-call signals from
+  proxied upstream responses.** (1) **Routing signal = hard rejection only**:
+  an Anthropic 429 whose headers declare the shared 5h or 7d window `rejected`
+  (or unified `rejected` that is not 7d_oi-only) puts the account in a
+  persisted cooldown until the latest reset (`-unified-*-reset` /
+  `Retry-After`) plus a random 1 to 30 s grace; a 7d_oi-only rejection cools
+  down only the matching model; a bare 429 is **not** exhaustion. (2)
+  **Success-response headers are observation-only** (display; replaced not
+  merged; at most 64 headers, 512 characters), never routing. (3) Fetched
+  reports remain the display source and the 100% exhaustion rule (D1);
+  cooldown state persists across restarts; zero extra HTTP calls. (4) Codex
+  `x-codex-*` and quota-event parsers are fixtures-only and inert while the
+  OpenAI upstream is `api.openai.com`. See section 7.
 
 **Amendments, 2026-10-12 (Human, firm rule: do not call the rate-limited
 endpoints carelessly).** These replace the parts of D2, D3, D6 and D10 they
@@ -950,9 +1036,10 @@ specific manual probe (see the plan's Validation).
   `resetsAt`, but an account nobody has viewed is unknown and routed to
   (fail-open). With the desktop app's footer item visible and focused the
   cache stays within one TTL; a headless daemon with no UI open gets no
-  fresh data. This is the accepted price of the call budget; D14 (section 7, Proposed)
-  would narrow it for accounts that carry proxied traffic without any extra
-  call.
+  fresh data. This is the accepted price of the call budget; D14 (section 7, Accepted)
+  narrows it for accounts that carry proxied traffic: a hard rejection seen on
+  a proxied response cools the account down immediately, with no extra call.
+  Accounts with no proxied traffic stay unknown.
 - Token-refresh races become possible between the proxy and the poller;
   the new per-account `EnsureFresh` lock is part of PR-A and protects the
   proxy too.

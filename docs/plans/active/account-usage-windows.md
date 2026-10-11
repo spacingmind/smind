@@ -16,8 +16,18 @@ Usage**; order **D1 → E → D2**; accounts are named by `accounts.label`
 (fallback Claude/Codex only if empty or a provider default); Settings → Usage
 plugs into the registry of the full-screen Settings screen (parallel PR
 `feat/settings-fullscreen`); and a zero-extra-call **passive rate-limit
-signal** is **D14 (Proposed, needs the Human)** with a conditional **PR-F**
-(AC59–AC66).
+signal** is **D14, now Accepted (round 3, below)** with **PR-F** (AC59–AC66).
+
+**Amended 2026-10-12, round 3 (Human): D14 accepted, cliproxyapi model**
+(`refs/cliproxyapi` @ `4b5f1ea`, ADR-0028 §7): the **routing signal is a hard
+rejection only** (an Anthropic 429 whose headers declare the shared 5h or 7d
+window `rejected`) → a persisted **cooldown until the latest reset + 1–30 s
+grace**; a `7d_oi`-only rejection cools down only the requested model; a bare
+429 is **not** exhaustion; success-response headers are **observation-only**
+(display, replaced not merged, ≤64 headers, ≤512 chars) and never drive
+routing; fetched reports stay the display source and the D1 100% rule; zero
+extra HTTP calls; Codex parsers fixtures-only and inert. PR-F can land right
+after PR-B.
 
 **Amended 2026-10-12 (Human, firm):** usage endpoints are rate-limited; never
 call them carelessly. ADR-0028 §3 "Call budget (hard rules)" is binding;
@@ -34,7 +44,7 @@ Not in scope: routing smind's own runs (ADR-0020), per-run token usage
 (unchanged), pace prediction (`runsOutAt`; the UI port omits Paseo's
 "at risk / runs out" row), usage history, API-key balance
 fetchers, providers other than Anthropic and OpenAI/ChatGPT OAuth,
-least-pressure pool ordering, passive 429-based cooldown, per-account
+least-pressure pool ordering, 429-based cooldown from anything other than an explicit `rejected` window (D14 covers the explicit case), per-account
 opt-out, de-duplicating two smind accounts that hold the same login.
 
 ## Acceptance Criteria
@@ -358,52 +368,86 @@ Web: Paseo's Usage UX ported (PR-D1 Settings + modal, PR-E chat hover card, PR-D
 - **AC68** (D1) Command palette: "Usage: open plan usage" opens the Usage modal
   (and from inside Settings, the modal portals above the Settings screen).
 
-PR-F, conditional on D14 (Proposed; ADR-0028 §7). Not started until the Human
-accepts D14. The observer is write-only and never fetches.
+PR-F: rejection cooldown and observed headers (D14, Accepted; ADR-0028 §7).
+Mirrors `refs/cliproxyapi/internal/runtime/executor/helps/claude_ratelimit.go`
+(`ClaudeHeadersIndicateUnifiedRateLimitRejection`, `ParseClaudeRateLimitReset`;
+call sites `claude_executor_request.go:297-301`, `claude_executor_fast_error.go:149-150`),
+`sdk/cliproxy/auth/quota_signals.go` and `helps/codex_quota.go`. The observer is
+write-only and never fetches.
 
-- **AC59** `quota.Observer` (write-only: `Observe(account, headers, status, now)`)
-  is the only thing the proxy holds for passive data; it has no path to
-  `Touch`/`Refresh`/the network; across proxied traffic the usage `httptest`
-  server sees **0** requests; with `accountUsage.passive: false` or
-  `enabled: false` it is a no-op.
-- **AC60** Anthropic parse (allowlisted names only): `…-5h-status`/`-reset`/
-  `-utilization`, `-7d-*`, `-unified-status`, `-reset`, `-representative-claim`,
-  `-overage-status`; utilization fraction × 100 → `UsedPct`, epoch seconds →
-  `ResetsAt`; `5h` → `five_hour`, `7d` → `weekly`, `7d_oi` → a `feature`-scoped,
-  display-only window; overage `allowed`/`rejected` → `OverageEnabled`;
-  unknown, missing, non-numeric, over-long (> 512) or control-character values
-  and more than 64 headers are ignored; raw header values are never stored or
-  logged.
-- **AC61** Exhaustion rule: only an explicit `rejected` window status (or a
-  utilization at or above the threshold) marks a window exhausted; a **bare
-  429** (no `rejected` header, or 5h and 7d `allowed`) never does; `Retry-After`
-  alone never does.
-- **AC62** Codex parse (fixtures-only, expected inert through the proxy):
-  `x-codex-primary-*` / `x-codex-secondary-*` percent, window-minutes → window
-  name (300 → `five_hour`, 10080 → `weekly`), reset-at, additional families by
-  prefix → `feature` scope with `-limit-name`, `x-codex-credits-*` → balance,
-  `x-codex-plan-type` → `PlanLabel`; `x-ratelimit-*` is ignored.
-- **AC63** Precedence: `Peek` returns the fetched report with passive windows
-  overlaid per window id only when the passive observation is newer than the
-  fetched report and (the fetched report is older than the TTL, or the passive
-  window is `rejected`); a fresh fetched report's numbers win; passive windows
-  are flagged `source:"passive"`.
-- **AC64** Storage and write rate: `quota_snapshots.kind` (`fetched` |
-  `passive`, default `fetched`, `addColumnIfMissing` migration entry),
-  retention keeps the latest row per account and kind; a passive write happens
-  only when the parsed observation changed and at most once per account per
-  60 s unless the exhausted verdict flips; passive writes never touch
-  `quota_poll_state`, the TTL or the forced budget; the proxy never blocks on
-  the write.
-- **AC65** Routing: a passive `rejected` 5-hour or 7-day window makes the account
-  exhausted for the very next routed request, until its reset, with **0** usage
-  requests; a passive `allowed` newer than a stale fetched "exhausted" verdict
-  clears it; `7d_oi` and feature windows never count.
-- **AC66** Surfaces: wire `Window.source` / `Window.status`; tone from status when
-  there is no percent (`allowed_warning` warning, `rejected` danger); the UI
-  marks passive windows "from recent traffic"; an `account.usage` event is
-  emitted when the effective report changes; `accountUsage.passive` (default
-  true) loads and validates.
+- **AC59** *No extra calls.* The proxy holds a write-only `quota.Observer`
+  (`Observe(Response{AccountID, Provider, Model, Status, Header, At})`); routing
+  holds the read-only `quota.Reader` (`Peek`, `Cooldown(accountID, model, now)`).
+  Neither can reach `Touch`/`Refresh` or the network; across 1000 proxied
+  responses (rejections, successes, bare 429s) the usage `httptest` server sees
+  **0** requests; observations and cooldowns never touch `quota_poll_state`;
+  with `accountUsage.passive: false` or `enabled: false` the observer is a no-op.
+- **AC60** *Rejection detection* (mirror of
+  `ClaudeHeadersIndicateUnifiedRateLimitRejection`, **only on status 429**): true
+  when `…-5h-status` is `rejected`; or `…-7d-status` is `rejected`; or
+  `…-unified-status` is `rejected` and it is **not** a `7d_oi`-only rejection
+  (`5h-status` and `7d-status` both `allowed`, `7d_oi-status` `rejected`);
+  header names case-insensitive; a 2xx, a non-429 error, or a 429 without
+  these never starts a cooldown. A truth table over (unified, 5h, 7d, 7d_oi) ×
+  (rejected/allowed/absent) is the test.
+- **AC61** *Cooldown end* (mirror of `ParseClaudeRateLimitReset`): candidates
+  `Retry-After` (seconds, HTTP-date, RFC 3339); `-5h-reset` only if 5h
+  `rejected`; `-7d-reset` only if 7d `rejected`; `-7d_oi-reset` only if
+  `7d_oi` `rejected` and not oi-only; `-unified-reset` when unified is
+  `rejected` (or no unified status and neither shared window `allowed`);
+  values epoch seconds (fractions allowed), RFC 3339 or HTTP-date; **latest**
+  future deadline + a cryptographically random **1–30 s** grace; clamped to ≤ 8
+  days; a declared rejection with no valid future deadline falls back to the
+  generic exponential cooldown 1, 2, 4 … 30 min (persisted level, reset by the
+  next non-rejected response on that account).
+- **AC62** *Scope and bare 429.* Shared 5h/7d (or non-oi unified) rejection →
+  credential-wide cooldown (all models); `7d_oi`-only rejection → cooldown only
+  for `(account, requested model)`; a **bare 429** (no `rejected`, or 5h and 7d
+  `allowed`) is **not** exhaustion: no cooldown, never shown as exhausted, only
+  a transient per-`(account, model)` routing back-off of `min(Retry-After, 60 s)`
+  when `Retry-After` is present and nothing otherwise; the 429 is passed to the
+  client unchanged; `Retry-After` alone never starts a cooldown.
+- **AC63** *Observation only.* For a supported provider, any response's
+  allowlisted headers (Anthropic `anthropic-ratelimit-unified-*` + `Retry-After`;
+  Codex `x-codex-*`; `x-ratelimit-*` ignored) replace the account's previous
+  observation (**replaced, not merged**); a response with no quota signal leaves
+  it untouched; at most **64** headers, values ≤ **512** chars, no control
+  characters; unrelated headers (e.g. `Anthropic-Workspace-Id`) dropped;
+  values stored **typed** (no raw header text in storage, logs or wire):
+  `5h` → `five_hour`, `7d` → `weekly`, utilization fraction × 100, reset epoch
+  → time, status, representative claim, overage status, `7d_oi` → display-only
+  `feature` window. Observations are **never read by routing**, are not inputs
+  to the 100% rule and neither start nor clear a cooldown. Codex: parser for the
+  `x-codex-*` HTTP headers and for websocket quota events
+  (`helps/codex_quota.go` `ParseCodexQuotaEventHeaders`), **fixtures-only**,
+  observation path only, **inert** while the proxy's OpenAI upstream is
+  `api.openai.com`.
+- **AC64** *Routing.* A cooldown makes the account exhausted for the very next
+  routed request with **0** usage requests: pool skips it, hard returns the
+  existing error naming the cooldown end, affinity replaces a pinned cooled
+  account, model-scoped cooldown excludes only that model; recovery is
+  time-based at the cooldown end (no fetch); D9 overage does **not** suppress a
+  cooldown; a fetched report (newer, lower usage) does **not** clear it;
+  `account.updateCredential` does; success-response headers never change any
+  routing decision; the fetched-report 100% rule (D1) is unchanged.
+- **AC65** *Storage and persistence.* New table `quota_cooldown(account_id,
+  scope_model, until, reason, level, observed_at, PRIMARY KEY(account_id,
+  scope_model))` from `schema.sql` (`CREATE TABLE IF NOT EXISTS`), deleted with
+  the account; `quota_snapshots.kind` (`fetched` | `observed`, default
+  `fetched`, `addColumnIfMissing` migration entry), latest row per account and
+  kind; a cooldown is written immediately and **survives a daemon restart**
+  (cooldown, fallback level and model scope); an observation is written only
+  when its parsed values changed and at most once per account per 60 s, through
+  the async writer, never delaying the proxy response.
+- **AC66** *Surfaces and config.* The wire type reserves (in PR-C) optional
+  `cooldown {until, scope, model?, reason}` and `Window.source`
+  (`fetched` | `observed`) / `Window.status`; PR-F populates them; the UI shows
+  "Rate limited until 14:05 (seen on a proxied request)" and marks observed
+  windows "from recent traffic" only where there is no fetched report or it is
+  older than the TTL, never overriding a fresh fetched report's numbers; an
+  `account.usage` event is emitted when a cooldown starts or ends or the
+  observation changes; `accountUsage.passive` (default true) loads and
+  validates.
 
 Process
 
@@ -560,34 +604,51 @@ Persistence (AC52):
 - `route_routing_disabled_never_consults_windows` (`routing:false`) and `route_polling_disabled_same_as_today`.
 - Proxy (`internal/server`): `proxy_1000_requests_zero_usage_calls` (cold, stale, backoff, exhausted); `proxy_passes_model_to_router`; `proxy_exhausted_pool_returns_503_with_reset_message`; existing model-aware and fail-closed tests stay green.
 
-### Go tests: passive signal (PR-F, conditional on D14; `internal/quota/passive_test.go`)
+### Go tests: rejection cooldown and observation (PR-F, D14; `internal/quota/passive_test.go`, `internal/server`)
 
-Fixtures are built from the header sets in the refs
-(`refs/cliproxyapi/sdk/cliproxy/auth/quota_signals_test.go:68-110`,
-`.../claude_executor_ratelimit_test.go:30-41,517-530`,
-`refs/codex/codex-rs/core/tests/suite/client.rs:3206-3222`), not from a live
-call.
+Fixtures are built from the header sets in `refs/cliproxyapi`
+(`sdk/cliproxy/auth/quota_signals_test.go:68-110`,
+`internal/runtime/executor/claude_executor_ratelimit_test.go:30-41,517-530`) and
+`refs/codex/codex-rs/core/tests/suite/client.rs:3206-3222`, never from a live
+call. The proxy tests use a fake upstream plus the usage `httptest` counter.
 
-- `passive_observer_is_write_only` (compile-time: no `Touch`/`Refresh`/fetcher reachable from `Observer`); `passive_zero_usage_requests_across_1000_proxied_responses` (usage `httptest` server sees 0).
-- `passive_anthropic_allowed_full_header_set`: 5h 0.0, 7d 0.53, resets, representative claim, overage → windows `five_hour` 0%, `weekly` 53%, `source:"passive"`, `OverageEnabled` per `overage-status`.
-- `passive_anthropic_rejected_7d`: 429 header set → weekly `rejected`, reset parsed, account exhausted.
-- `passive_anthropic_rejected_5h`.
-- `passive_anthropic_ordinary_429_with_allowed_windows_is_not_exhaustion` (the cliproxyapi sibling-models case): no exhaustion, no state change.
-- `passive_bare_429_and_retry_after_alone_never_exhaust`.
-- `passive_anthropic_7d_oi_is_display_only_feature_scope_and_never_counts_for_routing`.
-- `passive_anthropic_unknown_malformed_overlong_control_char_values_ignored`; `passive_header_count_cap_64`.
-- `passive_codex_primary_secondary_windows_by_minutes` (300 → `five_hour`, 10080 → `weekly`), `passive_codex_additional_family_is_feature_scope`, `passive_codex_credits_and_plan`, `passive_codex_x_ratelimit_headers_ignored`.
-- `passive_precedence_fresh_fetched_numbers_win`: fetched 80% at T, passive 60% at T+1 min (fetch younger than TTL) → 80%.
-- `passive_precedence_rejection_after_fetch_overrides_fresh_fetch`: fetched 80% at T, passive `rejected` at T+1 min → exhausted.
-- `passive_precedence_stale_fetch_yields_to_newer_passive`; `passive_allowed_newer_clears_stale_exhausted_verdict_without_any_call`.
-- `passive_older_than_fetched_is_ignored`.
-- `passive_write_only_on_change_and_at_most_once_per_60s` (200 identical responses → 1 write), `passive_write_immediate_when_exhausted_verdict_flips`.
-- `passive_write_does_not_touch_poll_state_ttl_or_forced_budget`: after passive writes, `Touch` still makes exactly 1 request per TTL and forced budget is unchanged.
-- `passive_write_does_not_block_the_proxy_response` (slow store, response latency unchanged).
-- `passive_storage_kind_column_migration_on_existing_db`; `passive_retention_latest_per_account_and_kind`.
-- `passive_routing_next_request_skips_account_after_rejected_response` (end to end through the proxy with a fake upstream).
-- `passive_disabled_by_config_and_by_enabled_false`.
-- `passive_no_raw_headers_in_stored_json_logs_wire` (sentinel header values).
+Required names (Human):
+- `passive_rejected_5h_cools_down_until_reset`: 429 with `5h-status: rejected`, `5h-reset` = now+2h → account in cooldown until reset + grace; the next routed request goes to another account; at reset+grace it is eligible again (fake clock) with no fetch.
+- `passive_7d_oi_only_scopes_model`: 5h and 7d `allowed`, `7d_oi` `rejected` (unified `rejected`) → cooldown only for `(account, requested model)`; another model on the account still routes; a credential-wide rejection afterwards cools all models.
+- `passive_bare_429_not_exhausted`: 429 with no rejected header, and 429 with 5h/7d `allowed`: no cooldown, not exhausted, sibling models unaffected; with `Retry-After: 30` only a ≤ 60 s `(account, model)` routing back-off; with `Retry-After: 3600` still ≤ 60 s.
+- `passive_success_headers_never_affect_routing`: 200 responses carrying `rejected`/`allowed_warning`/utilization 1.0 headers → routing decisions identical to no headers (table over pool, hard, affinity); observation stored, display only.
+- `passive_cooldown_persists_restart`: cooldown (credential-wide and model-scoped, and the fallback level) written, close and reopen the store → `Reader.Cooldown` still reports it until `until`; expired entries are ignored after restart.
+- `passive_zero_http_calls`: 1000 proxied responses (rejections, successes, bare 429s, malformed headers) → the usage `httptest` server sees exactly 0 requests, `quota_poll_state` unchanged.
+
+Detection and reset (AC60, AC61):
+- `passive_rejection_truth_table`: all combinations of unified/5h/7d/7d_oi × rejected/allowed/absent, case-insensitive names, only on 429 (a 200 or 500 with the same headers → no cooldown); includes the `isFableOnlyRejection` shape.
+- `passive_reset_latest_deadline_wins`: `Retry-After` 600 s vs `5h-reset` +2h vs `7d-reset` +3d (7d rejected) → +3d; a reset for a window that is not rejected is ignored.
+- `passive_reset_formats`: epoch seconds, fractional seconds, RFC 3339, HTTP-date, `Retry-After` delta and date.
+- `passive_grace_is_1_to_30_seconds_and_never_negative` (injected RNG bounds, 1000 draws).
+- `passive_reset_in_the_past_or_garbage_falls_back_to_exponential_1_to_30_min` and `passive_fallback_level_resets_after_a_non_rejected_response`.
+- `passive_cooldown_clamped_to_8_days`.
+- `passive_credential_change_clears_cooldown`; `passive_newer_fetched_report_does_not_clear_cooldown`; `passive_overage_enabled_does_not_suppress_cooldown`.
+
+Routing integration (AC64):
+- `passive_pool_skips_cooled_account_next_request_end_to_end` (proxy + fake upstream + counter).
+- `passive_hard_policy_error_names_cooldown_end`; `passive_affinity_replaces_cooled_pinned_account`.
+- `passive_model_scoped_cooldown_only_excludes_that_model_in_pool_and_hard`.
+- `passive_fetched_100_percent_rule_unchanged_by_observations`.
+
+Observation (AC63):
+- `observed_replaces_not_merges_snapshot` (a watermark present on response 1 and absent on response 2, both with signals → gone; a response with no signal → previous kept).
+- `observed_bounds_64_headers_512_chars_no_control_chars` (CR/LF value dropped), `observed_unrelated_headers_dropped` (`Anthropic-Workspace-Id`), `observed_provider_scoped` (an `x-codex-*` header on an Anthropic response is ignored and vice versa).
+- `observed_anthropic_full_header_set_typed`: 5h 0.0, 7d 0.53, resets, representative claim, overage → `five_hour` 0%, `weekly` 53%, `source:"observed"`; `7d_oi` → display-only `feature` window.
+- `observed_x_ratelimit_headers_ignored`.
+- `observed_codex_http_headers_primary_secondary_additional_credits_plan` (300 → `five_hour`, 10080 → `weekly`) and `observed_codex_websocket_quota_event_normalized` (`ParseCodexQuotaEventHeaders` shapes, both additional-limit spellings), fixtures-only; `observed_codex_inert_through_proxy_with_openai_upstream`.
+- `observed_write_only_on_change_and_at_most_once_per_60s` (200 identical responses → 1 write); `observed_write_does_not_block_proxy_response` (slow store).
+- `observed_display_rule`: fresh fetched numbers win; no/old fetched report → observed windows shown flagged; never read by `Reader` routing methods (compile-time: `Reader` exposes no observation accessor).
+- `observed_no_raw_headers_in_stored_json_logs_wire` (sentinel header values).
+
+Storage and config (AC65, AC66):
+- `quota_cooldown_table_created_on_existing_db`; `quota_snapshots_kind_column_migration_on_existing_db`; `quota_cooldown_deleted_with_account`; `retention_latest_per_account_and_kind`.
+- `observer_disabled_by_config_and_by_enabled_false`; `config_accountusage_passive_default_and_validation`.
+- wsapi (PR-C reserved fields): `account_usage_cooldown_and_observed_fields_round_trip`; web: `card_shows_rate_limited_until_and_from_recent_traffic_only_when_no_fresh_fetch`.
 
 ### Go tests: secrets (`internal/quota`, `internal/wsapi`)
 
@@ -752,7 +813,7 @@ supervisor looks at a couple before the PR is opened.
 
 ## Implementation split (non-stacked, each branches from `origin/develop`)
 
-Order: **PR-A1 → PR-A2 → (PR-B ∥ PR-C) → PR-D1 → PR-E → PR-D2 → close-out;** **PR-F** (passive signal) only if the Human accepts D14, after PR-B.
+Order: **PR-A1 → PR-A2 → (PR-B ∥ PR-C) → PR-D1 → PR-E → PR-D2 → close-out;** **PR-F** (D14, accepted) can land right after PR-B (the PR-C wire fields are reserved from the start, so PR-F needs no wsapi change).
 B and C may be worked in parallel because their write scopes do not overlap,
 except one wiring line each in `cmd/smind/serve.go`; whichever merges second
 rebases onto develop. D1 needs C's RPC and event merged; D2 is sequenced after
@@ -763,11 +824,11 @@ D1 is merged (not stacked on it). Points use the WORKSPACE_PROTOCOL axes.
 | **PR-A1** types, fetchers, snapshot store | AC1–AC11, AC14, AC16, AC58 (Go half): `Report` model, `AccountKey`, `DisplayName`, Anthropic and OpenAI fetchers with fixtures, API-key/unsupported → no_quota, per-account `EnsureFresh` lock, `GetLatestQuotaSnapshot` + prune. **Fixtures only; live probes after Human go-ahead.** No poller yet: nothing calls the fetchers outside tests | `internal/quota/{types,report,anthropic,openai,fetcher}*.go` (+ `testdata/`), `internal/store/quota_snapshots.go` (+ test), `internal/accounts/refresh.go` (lock only) | ADR accepted (done) | M (4): scope 1, PRs 1, risk 2, decisions 0, verify 0 |
 | **PR-A2** poller, call budget, config, wiring | AC12–AC13, AC15, AC44–AC52: `Poller` with `Peek`/`Touch`/`Refresh`, `quota.Reader`, TTL/floor/budget/single-flight, persisted backoff and rejected state (`quota_poll_state`), `accountUsage` config, serve.go wiring replacing `noopQuotaFetcher` (display data can now flow; routing still ignores it) | `internal/quota/{poller,budget,reader}*.go` (+ tests), `internal/store/{quota_poll_state.go,schema.sql,accounts.go (delete cascade)}` (+ tests), `internal/config/config.go`, `cmd/smind/serve.go` | PR-A1 merged | M (5): scope 1, PRs 1, risk 2, decisions 0, verify 1 |
 | **PR-B** routing integration | AC17–AC23: `WithModel`, windows → exhausted rules (reads `quota.Reader` only, never fetches), error text with reset, `isExhausted` rewrite, proxy passes model | `internal/routing/**`, `internal/server/proxy.go` (the `Route` call and its error text only), one line in `serve.go` | PR-A2 merged | M (4): scope 1, PRs 1, risk 2, decisions 0, verify 0 |
-| **PR-C** wsapi, CLI, MCP | AC24–AC27, AC53: `account.usage` RPC (`cached`/`touch`/`refresh` modes, `displayName` on the wire, AC58) + per-fetch event + topic, run-scoped refresh → touch, `smind account usage`, MCP `account_usage`, instructions, catalog tests, the `enabled` state the UI reads | `internal/wsapi/{account_usage.go,events.go,handlers.go}` (+ tests), `cmd/smind/{account.go,mcp_*.go}` (+ tests), one line in `serve.go` | PR-A2 merged | M (3): scope 1, PRs 1, risk 1, decisions 0, verify 0 |
+| **PR-C** wsapi, CLI, MCP | AC24–AC27, AC53: `account.usage` RPC (`cached`/`touch`/`refresh` modes, `displayName` on the wire, AC58; optional `cooldown` and `Window.source`/`status` fields **reserved** for PR-F, AC66) + per-fetch event + topic, run-scoped refresh → touch, `smind account usage`, MCP `account_usage`, instructions, catalog tests, the `enabled` state the UI reads | `internal/wsapi/{account_usage.go,events.go,handlers.go}` (+ tests), `cmd/smind/{account.go,mcp_*.go}` (+ tests), one line in `serve.go` | PR-A2 merged | M (3): scope 1, PRs 1, risk 1, decisions 0, verify 0 |
 | **PR-D1** web core: Settings → Usage + modal | AC32–AC40, AC54, AC58 (web half), AC67, AC68 (no footer, no chat card yet): types/model/format/copy/tone, preferences (`displayAs`, account pick, "Show summary in sidebar" stored, default off), report store + event wiring, display-name use, cards, plain window bars, balance bars, meter, refresh buttons, problem copy, modal (dialog/sheet) + account filter + Settings popover, segmented control, provider logo marks, the **registered** Plan usage block in Settings → Usage (works in both the in-shell and the full-screen Settings containers), command-palette entry; screenshots for the modal and Settings (and, once `feat/settings-fullscreen` is on develop, inside it) | `web/packages/ui/src/{lib/account-usage/**, hooks/use-account-usage.ts, hooks/use-usage-preferences.ts, components/account-usage/{usage-card,usage-list,usage-body,usage-controls,usage-options,usage-modal,usage-window-bar,usage-balance-bar,usage-meter,usage-refresh-button,usage-source-icon}.tsx, components/ui/segmented-control.tsx, components/settings/usage-section.tsx, components/command-palette.tsx (one entry)}` (+ tests), `lib/storage.ts` (one key) | PR-C merged. Independent of `feat/settings-fullscreen` (registry contract only); rebase onto it if it lands first | M (4): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
 | **PR-E** (**required**) chat plan usage on hover | AC42, AC55–AC57 (+ AC41 chat screenshots): hover card on `ChatUsageTotal` and `RunUsagePill` (HoverCard on hover-capable pointers, existing Popover on touch), shared `ChatPlanUsage` section, provider → account-provider map, all-OAuth-accounts-of-provider compact list with filter-selected first, cache-only reads, "No plan data yet / Open Usage", trigger visible with plan data only | `web/packages/ui/src/components/{chat-usage-total.tsx, run-usage-pill.tsx, task-detail.tsx (pass the chat provider only), account-usage/{chat-plan-usage,plan-usage-compact}.tsx}`, `lib/account-usage/chat-provider.ts` (+ tests) | PR-D1 merged | M (3): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
 | **PR-D2** web sidebar footer item (default off) and pins | AC28–AC31, AC41 (footer part), AC54 (footer cadence): footer Usage row with logos/defaults/pinned percents, layout chooser (`ResizeObserver` measuring), pinnable window rows, pin glyph, the switch wiring (row exists only while on), hidden/plain states, collapsed rail, footer screenshots | `web/packages/ui/src/components/{app-sidebar.tsx (footer slot + provider only), account-usage/{usage-sidebar-item,usage-sidebar-root}.tsx, account-usage/usage-window-bar.tsx (pinnable mode)}`, `lib/account-usage/pinned.ts` (+ tests) | PR-E merged (order D1 → E → D2) | M (3): scope 1, PRs 1, risk 0, decisions 0, verify 1 |
-| **PR-F** (conditional on **D14**) passive rate-limit signal | AC59–AC66: `quota.Observer`, Anthropic and Codex header parsers (fixtures built from the refs' header sets), effective-report merge in `Peek`, `quota_snapshots.kind` + migration, throttled async write, proxy hook after the upstream response, `accountUsage.passive`, wire `source`/`status`, routing uses passive exhaustion | `internal/quota/{observer,passive*,merge}*.go` (+ `testdata/`), `internal/store/{quota_snapshots.go,migrate.go}` (+ tests), `internal/server/proxy.go` (one observer call after the upstream response), `internal/config/config.go` (one key), wsapi wire fields | PR-B and PR-C merged; **Human accepts D14** | M (4): scope 1, PRs 1, risk 1 (parsing untrusted headers, hot-path write), decisions 1, verify 0 |
+| **PR-F** (D14, **Accepted 2026-10-12**) rejection cooldown + observed headers | AC59–AC66: `quota.Observer` (write-only) and `Reader.Cooldown`, Anthropic rejection detection and reset parsing (mirror of `ClaudeHeadersIndicateUnifiedRateLimitRejection` / `ParseClaudeRateLimitReset`, 1–30 s grace, 8-day clamp, exponential fallback), 7d_oi model scope, bare-429 non-exhaustion, `quota_cooldown` table (persisted), observation parser + typed store (`quota_snapshots.kind`, replace-not-merge, bounds), Codex `x-codex-*` and quota-event parsers fixtures-only/inert, router consults cooldown, proxy hook after the upstream response, `accountUsage.passive` | `internal/quota/{observer,cooldown,reader,observed*,codex_quota}*.go` (+ `testdata/`), `internal/store/{quota_cooldown.go,quota_snapshots.go,schema.sql,migrate.go,accounts.go (delete cascade)}` (+ tests), `internal/routing/router.go` (cooldown check only), `internal/server/proxy.go` (one observer call right after the upstream response), `internal/config/config.go` (one key) | PR-B merged (PR-C's reserved wire fields not required for PR-F) | M (4): scope 1, PRs 1, risk 1 (untrusted headers, hot-path write, persisted routing state), decisions 0, verify 1 |
 | **Close-out** docs | AC43: ROADMAP/README/stale backlog text, plan → `completed/` with Validation | `docs/**`, `README.md` | all | S |
 
 Note: "PR-A" elsewhere in this plan and the ADR means PR-A1 and PR-A2
@@ -826,8 +887,8 @@ scratch).
   Usage UX. Round 2 (2026-10-12): footer item **off by default**, plan usage
   on **chat hover** (PR-E required) and in Settings → Usage, order
   D1 → E → D2, display name = `accounts.label`, Settings → Usage plugs into
-  the registry. **D14 (passive rate-limit signal) is Proposed**, awaiting the
-  Human. Not reopened inside a PR.
+  the registry. Round 3: **D14 Accepted** (cliproxyapi model: hard-rejection
+  cooldown only, observation-only headers, fetched reports stay display + D1). Not reopened inside a PR.
 - Decided here, not in the ADR (small, reversible):
   1. Naming: "Plan usage" (windows, `account.usage`) vs "Token usage"
      (`usage.summary`, `run_usage`) in every surface. Provider display names:
@@ -895,8 +956,16 @@ scratch).
   refs/cliproxyapi, refs/codex, refs/claude-agent-sdk-python); plan ACs
   AC28/AC30/AC32–AC34/AC37/AC54 amended, AC42 required, AC55–AC58, AC67,
   AC68 added, conditional PR-F (AC59–AC66) added.
+- 2026-10-12 (round 3): Human accepted D14 reshaped to cliproxyapi's model
+  (verified by the Supervisor in `refs/cliproxyapi` @ `4b5f1ea`). ADR §7
+  rewritten (7.1 hard-rejection cooldown, 7.2 observation-only headers, 7.3
+  Codex fixtures-only, 7.4 interfaces/storage), §4 gets the cooldown rule;
+  PR-F ACs AC59–AC66 and tests rewritten, including
+  `passive_rejected_5h_cools_down_until_reset`, `passive_7d_oi_only_scopes_model`,
+  `passive_bare_429_not_exhausted`, `passive_success_headers_never_affect_routing`,
+  `passive_cooldown_persists_restart`, `passive_zero_http_calls`.
 - [x] D1–D13 answered by the user
-- [ ] **D14 (passive rate-limit signal) decided by the Human**
+- [x] D14 accepted by the Human (2026-10-12, cliproxyapi model); ADR §7 rewritten; PR-F rescoped
 - [ ] PR-A1 types, fetchers, snapshot store (fixtures only)
 - [ ] PR-A2 poller with the call budget, persisted state, config, wiring
 - [ ] Human go-ahead for the manual live probe (see Validation)
@@ -905,7 +974,7 @@ scratch).
 - [ ] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry)
 - [ ] PR-E chat hover card (required)
 - [ ] PR-D2 web footer item (default off) and pins
-- [ ] PR-F (conditional on D14) passive rate-limit signal
+- [ ] PR-F rejection cooldown + observed headers (right after PR-B)
 - [ ] Manual live check against one real account per provider
 - [ ] Close-out docs; plan moved to `completed/`
 
@@ -953,7 +1022,7 @@ Mapping for the implementation PRs (fill in as each lands):
 | AC41 | light/dark × 1440×900 / 390×844 screenshot set attached to PR-D1 and PR-D2, viewed by the implementer and the supervisor |
 | AC42, AC55–AC57 | PR-E hover-card tests (cache-only request assertions) + hover/touch/narrow screenshots |
 | AC58 | `displayname_*` Go tests, wire/CLI/MCP tests, web label tests |
-| AC59–AC66 | PR-F `passive_*` tests (conditional on D14) |
+| AC59–AC66 | PR-F `passive_*` / `observed_*` tests (D14, accepted), exact usage-request counts and restart persistence |
 | AC67–AC68 | PR-D1 section-in-both-containers tests, palette test |
 | AC43 | `task test`, `task lint`, ADR/plan/ROADMAP diffs |
 | Real endpoints | the manual live probe above, after Human go-ahead (not automated; fixtures can drift from real responses) |
