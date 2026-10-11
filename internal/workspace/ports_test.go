@@ -3,7 +3,10 @@ package workspace
 import (
 	"errors"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -165,4 +168,60 @@ func wsFixture() store.Workspace {
 
 func taskFixture(wsID int64) store.Task {
 	return store.Task{WorkspaceID: wsID, Title: "t", Status: "created"}
+}
+
+func TestCreateTask_PortExhaustionLeavesNothing(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	base := freeRange(t, 1)
+	m.SetWorktreesConfig(WorktreesSettings{HasPorts: true, PortLo: base, PortHi: base})
+	w := setupWorkspace(t, m, "")
+	first, err := m.CreateTask(w.ID, nil, "first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.CreateTask(w.ID, nil, "second"); !errors.Is(err, ErrPortsExhausted) {
+		t.Fatalf("err = %v, want exhausted", err)
+	}
+	tasks, _ := m.store.ListTasksByWorkspace(w.ID)
+	if len(tasks) != 1 || tasks[0].ID != first.ID {
+		t.Fatalf("tasks = %+v, want only the first", tasks)
+	}
+	entries, _ := os.ReadDir(filepath.Dir(*first.WorktreePath))
+	if len(entries) != 1 {
+		t.Fatalf("worktree dirs = %d, want 1", len(entries))
+	}
+	out, err := runGitOutput(w.Path, "branch", "--list", "smind/task-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(strings.Fields(strings.ReplaceAll(out, "+", ""))); n != 1 {
+		t.Fatalf("generated branches = %q, want only the first task's", out)
+	}
+}
+
+// TestDiscardTask_DoesNotDeletePreExistingBranch: a branch CreateTask did not
+// create (createdBranch == "") must survive discardTask.
+func TestDiscardTask_DoesNotDeletePreExistingBranch(t *testing.T) {
+	t.Parallel()
+	m := newTestManager(t)
+	w := setupWorkspace(t, m, "")
+	runGitT(t, w.Path, "branch", "user/feature")
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGitT(t, w.Path, "worktree", "add", wt, "user/feature")
+	branch := "user/feature"
+	task, err := m.store.CreateTask(store.Task{WorkspaceID: w.ID, Title: "t", Status: "created", WorktreePath: &wt, Branch: &branch})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.discardTask(w, task, "")
+	if out, _ := runGitOutput(w.Path, "branch", "--list", "user/feature"); !strings.Contains(out, "user/feature") {
+		t.Fatalf("pre-existing branch deleted; branches = %q", out)
+	}
+	if dirExists(wt) {
+		t.Fatal("worktree not removed")
+	}
+	if _, err := m.store.GetTask(task.ID); err == nil {
+		t.Fatal("task row not removed")
+	}
 }

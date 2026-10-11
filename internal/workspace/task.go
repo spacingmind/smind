@@ -151,6 +151,8 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 	// mark setup running before the task is announced; the script itself
 	// starts below, once the task is fully materialized.
 	if _, err := m.claimPort(t.ID); err != nil {
+		// branch is generated above, so CreateTask created it. Any future
+		// mode that checks out a pre-existing branch must pass "" here.
 		m.discardTask(ws, t, branch)
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
@@ -189,12 +191,19 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 }
 
 // discardTask undoes a just-created task whose port allocation failed: the
-// row, the worktree and its branch, so a failed CreateTask leaves nothing.
-func (m *Manager) discardTask(ws store.Workspace, t store.Task, branch string) {
+// row, the worktree, and createdBranch.
+//
+// createdBranch must be the branch CreateTask itself created for this task,
+// or "" when the task's branch pre-existed (e.g. a user's own branch checked
+// out into the worktree). Only a branch we created may be force-deleted
+// here: `git branch -D` on a user's branch would destroy their work.
+func (m *Manager) discardTask(ws store.Workspace, t store.Task, createdBranch string) {
 	if t.WorktreePath != nil {
 		_ = gitWorktreeRemove(ws.Path, *t.WorktreePath)
 	}
-	_ = runGit(ws.Path, "branch", "-D", branch)
+	if createdBranch != "" {
+		_ = runGit(ws.Path, "branch", "-D", createdBranch)
+	}
 	_ = m.store.DeleteTask(t.ID)
 }
 
