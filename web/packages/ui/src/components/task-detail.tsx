@@ -6,6 +6,7 @@ import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
 import { McpServersIndicator } from "@/components/mcp-servers-indicator";
+import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
@@ -17,6 +18,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { useLiveTask } from "@/hooks/use-live-task";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
@@ -47,7 +49,7 @@ export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile
  */
 export function TaskDetailPane({
   client,
-  task,
+  task: taskProp,
   chat,
   isDefaultChat,
   otherRunningChat,
@@ -76,6 +78,9 @@ export function TaskDetailPane({
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
 }) {
+  // Worktree setup state changes after the task was selected (ADR-0024), so
+  // follow the task's own update events instead of the selection snapshot.
+  const { task, apply: applyTask } = useLiveTask(taskProp, events);
   const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort } = useRunTimeline(
     client,
     task.ID,
@@ -213,6 +218,8 @@ export function TaskDetailPane({
           <>
             <span className="uppercase">{task.Status}</span>
             {task.Branch && <span className="truncate">{task.Branch}</span>}
+            <SetupBadge status={task.SetupStatus} />
+            <PortChip port={task.Port} />
             {runConfigState && (
               <button
                 type="button"
@@ -239,6 +246,8 @@ export function TaskDetailPane({
           </Button>
         }
       />
+
+      <SetupDetails client={client} task={task} onTask={applyTask} />
 
       {connectionStatus === "reconnecting" && (
         <Alert
