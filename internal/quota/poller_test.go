@@ -3,453 +3,349 @@ package quota
 import (
 	"context"
 	"errors"
-	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/store"
 )
 
-type fakeFetcher struct {
-	calls int32
-	usage Usage
-	err   error
-}
-
-func (f *fakeFetcher) Fetch(ctx context.Context, account store.Account) (Usage, error) {
-	atomic.AddInt32(&f.calls, 1)
-	if f.err != nil {
-		return Usage{}, f.err
-	}
-	return f.usage, nil
-}
-
-func (f *fakeFetcher) callCount() int {
-	return int(atomic.LoadInt32(&f.calls))
-}
-
-func newTestStore(t *testing.T) *store.Store {
+func fakeEnv(t *testing.T, f *fakeReportFetcher, opts ...Option) *env {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	return newEnv(t, func(*accounts.Registry) ReportFetcher { return f }, opts...)
+}
+
+func failing(status int) func(context.Context, accounts.Account) (Report, error) {
+	return func(context.Context, accounts.Account) (Report, error) {
+		fe := httpStatusError(status, 0)
+		return errorReport(fe.Error(), time.Now()), fe
+	}
+}
+
+func Test_poller_ttl_hit_no_fetch(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+
+	first := e.touch(id)
+	e.clk.Advance(time.Minute)
+	second := e.touch(id)
+
+	if f.Calls() != 1 {
+		t.Fatalf("fetches = %d, want 1", f.Calls())
+	}
+	if first.Report == nil || second.Report == nil || second.Stale {
+		t.Errorf("results = %+v / %+v, want a fresh report both times", first, second)
+	}
+	if !second.Report.FetchedAt.Equal(first.Report.FetchedAt) {
+		t.Errorf("FetchedAt changed on a cache hit")
+	}
+}
+
+func Test_poller_ttl_expired_touch_refetches(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+
+	e.touch(id)
+	e.clk.Advance(5 * time.Minute)
+	res := e.touch(id)
+
+	if f.Calls() != 2 {
+		t.Fatalf("fetches = %d, want 2", f.Calls())
+	}
+	if !res.Report.FetchedAt.Equal(e.clk.Now()) {
+		t.Errorf("FetchedAt = %v, want the fake clock %v", res.Report.FetchedAt, e.clk.Now())
+	}
+}
+
+func Test_poller_peek_no_io(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	entered := make(chan struct{}, 4)
+	f := &fakeReportFetcher{fn: func(ctx context.Context, _ accounts.Account) (Report, error) {
+		entered <- struct{}{}
+		<-release
+		return availableTestReport(), nil
+	}}
+	e := fakeEnv(t, f)
+	a, b := e.addOAuth("a"), e.addOAuth("b")
+
+	if res := e.p.Peek(b); res.Report != nil || res.InFlight {
+		t.Fatalf("cold Peek = %+v, want no report, not in flight", res)
+	}
+	done := make(chan Result, 1)
+	go func() { done <- e.touch(a) }()
+	<-entered // the fetch for a is blocked in the fetcher
+
+	for i := 0; i < 100; i++ {
+		e.p.Peek(a)
+		e.p.Peek(b)
+	}
+	if res := e.p.Peek(a); !res.InFlight {
+		t.Errorf("Peek during fetch: InFlight = false, want true")
+	}
+	if f.Calls() != 1 {
+		t.Errorf("fetches = %d, want exactly the one Touch", f.Calls())
+	}
+	close(release)
+	if res := <-done; res.Report == nil {
+		t.Errorf("Touch result has no report")
+	}
+	if f.Calls() != 1 {
+		t.Errorf("fetches = %d after release, want 1", f.Calls())
+	}
+}
+
+func Test_poller_error_keeps_last_good(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+
+	good := e.touch(id)
+	f.fn = failing(503)
+	e.clk.Advance(5 * time.Minute)
+	got := e.touch(id)
+
+	if f.Calls() != 2 {
+		t.Fatalf("fetches = %d, want 2", f.Calls())
+	}
+	if got.Report == nil || got.Report.Status != StatusAvailable || !got.Report.FetchedAt.Equal(good.Report.FetchedAt) {
+		t.Errorf("report = %+v, want the earlier available report untouched", got.Report)
+	}
+	if !got.Stale || got.LastError != "http 503" {
+		t.Errorf("Stale/LastError = %v/%q, want true/http 503", got.Stale, got.LastError)
+	}
+	snap, ok, err := e.st.GetLatestQuotaSnapshot(id)
+	if err != nil || !ok {
+		t.Fatalf("snapshot = %v, %v", ok, err)
+	}
+	if rep, _ := DecodeReport(snap.UsageData); rep.Status != StatusAvailable {
+		t.Errorf("stored report status = %s, want available", rep.Status)
+	}
+}
+
+func Test_poller_prunes_old_snapshots(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f)
+	a, b := e.addOAuth("a"), e.addOAuth("b")
+
+	for i := 0; i < 5; i++ {
+		e.touch(a)
+		e.touch(b)
+		e.clk.Advance(5 * time.Minute)
+	}
+	snaps, err := e.st.ListQuotaSnapshots()
 	if err != nil {
-		t.Fatalf("store.Open() error = %v", err)
+		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		if err := s.Close(); err != nil {
-			t.Errorf("Close() error = %v", err)
-		}
-	})
-	return s
+	per := map[int64]int{}
+	for _, s := range snaps {
+		per[s.AccountID]++
+	}
+	if per[a] != 1 || per[b] != 1 {
+		t.Errorf("rows per account = %v, want one each", per)
+	}
 }
 
-func newTestAccount(t *testing.T, s *store.Store) store.Account {
-	t.Helper()
-	a, err := s.CreateAccount(store.Account{
-		Provider:       "anthropic",
-		Label:          "personal",
-		CredentialType: "oauth",
-		CredentialData: "refresh-token-abc",
-	})
-	if err != nil {
-		t.Fatalf("CreateAccount() error = %v", err)
-	}
-	return a
-}
-
-func TestPoller_Get(t *testing.T) {
+func Test_poller_disabled_no_calls(t *testing.T) {
 	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f, WithEnabled(false))
+	id := e.addOAuth("tok")
 
-	freshUsage := Usage{TokensUsed: 100, TokensLimit: 1000, ResetsAt: time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)}
-	cachedUsage := Usage{TokensUsed: 500, TokensLimit: 1000, ResetsAt: time.Now().UTC().Add(24 * time.Hour).Truncate(time.Second)}
-
-	tests := []struct {
-		name          string
-		seedSnapshot  func(now time.Time) *store.QuotaSnapshot // nil = no snapshot seeded
-		fetcher       *fakeFetcher
-		wantUsage     Usage
-		wantErr       bool
-		wantFetchCall int
-	}{
-		{
-			name: "cache hit returns cached usage without fetching",
-			seedSnapshot: func(now time.Time) *store.QuotaSnapshot {
-				data, _ := cachedUsage.Marshal()
-				return &store.QuotaSnapshot{
-					UsageData: data,
-					PolledAt:  now,
-					ExpiresAt: now.Add(5 * time.Minute),
-				}
-			},
-			fetcher:       &fakeFetcher{usage: freshUsage},
-			wantUsage:     cachedUsage,
-			wantFetchCall: 0,
-		},
-		{
-			name:          "cache miss fetches and persists",
-			seedSnapshot:  nil,
-			fetcher:       &fakeFetcher{usage: freshUsage},
-			wantUsage:     freshUsage,
-			wantFetchCall: 1,
-		},
-		{
-			name: "cache expired fetches again",
-			seedSnapshot: func(now time.Time) *store.QuotaSnapshot {
-				data, _ := cachedUsage.Marshal()
-				return &store.QuotaSnapshot{
-					UsageData: data,
-					PolledAt:  now.Add(-time.Hour),
-					ExpiresAt: now.Add(-time.Minute),
-				}
-			},
-			fetcher:       &fakeFetcher{usage: freshUsage},
-			wantUsage:     freshUsage,
-			wantFetchCall: 1,
-		},
-		{
-			name:          "fetch error propagates and writes nothing",
-			seedSnapshot:  nil,
-			fetcher:       &fakeFetcher{err: context.DeadlineExceeded},
-			wantErr:       true,
-			wantFetchCall: 1,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			s := newTestStore(t)
-			account := newTestAccount(t, s)
-
-			if tt.seedSnapshot != nil {
-				snap := tt.seedSnapshot(time.Now().UTC())
-				snap.AccountID = account.ID
-				if _, err := s.CreateQuotaSnapshot(*snap); err != nil {
-					t.Fatalf("CreateQuotaSnapshot() error = %v", err)
-				}
-			}
-
-			beforeSnapshots, err := s.ListQuotaSnapshots()
-			if err != nil {
-				t.Fatalf("ListQuotaSnapshots() error = %v", err)
-			}
-
-			p := New(s, tt.fetcher)
-			got, err := p.Get(context.Background(), account.ID, 5*time.Minute)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("Get() error = nil, want error")
-				}
-			} else if err != nil {
-				t.Fatalf("Get() error = %v", err)
-			}
-
-			if tt.fetcher.callCount() != tt.wantFetchCall {
-				t.Errorf("Fetch call count = %d, want %d", tt.fetcher.callCount(), tt.wantFetchCall)
-			}
-
-			if !tt.wantErr {
-				if got.TokensUsed != tt.wantUsage.TokensUsed || got.TokensLimit != tt.wantUsage.TokensLimit || !got.ResetsAt.Equal(tt.wantUsage.ResetsAt) {
-					t.Errorf("Get() = %+v, want %+v", got, tt.wantUsage)
-				}
-			}
-
-			afterSnapshots, err := s.ListQuotaSnapshots()
-			if err != nil {
-				t.Fatalf("ListQuotaSnapshots() error = %v", err)
-			}
-
-			switch {
-			case tt.wantErr:
-				if len(afterSnapshots) != len(beforeSnapshots) {
-					t.Errorf("snapshot count after error = %d, want unchanged %d", len(afterSnapshots), len(beforeSnapshots))
-				}
-			case tt.wantFetchCall == 1:
-				if len(afterSnapshots) != len(beforeSnapshots)+1 {
-					t.Errorf("snapshot count after fetch = %d, want %d", len(afterSnapshots), len(beforeSnapshots)+1)
-				}
-			default:
-				if len(afterSnapshots) != len(beforeSnapshots) {
-					t.Errorf("snapshot count after cache hit = %d, want unchanged %d", len(afterSnapshots), len(beforeSnapshots))
-				}
-			}
-		})
-	}
-}
-
-func TestUsage_MarshalUnmarshal(t *testing.T) {
-	t.Parallel()
-
-	u := Usage{TokensUsed: 42, TokensLimit: 100, ResetsAt: time.Now().UTC().Truncate(time.Second)}
-
-	data, err := u.Marshal()
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
-	}
-
-	got, err := Unmarshal(data)
-	if err != nil {
-		t.Fatalf("Unmarshal() error = %v", err)
-	}
-
-	if got.TokensUsed != u.TokensUsed || got.TokensLimit != u.TokensLimit || !got.ResetsAt.Equal(u.ResetsAt) {
-		t.Errorf("Unmarshal(Marshal(u)) = %+v, want %+v", got, u)
-	}
-}
-
-func TestUsage_UnmarshalMalformedData(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		data string
-	}{
-		{name: "empty", data: ""},
-		{name: "malformed json", data: `{"tokens_used":`},
-		{name: "wrong resets_at type", data: `{"tokens_used":1,"tokens_limit":2,"resets_at":false}`},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			if _, err := Unmarshal(tt.data); err == nil {
-				t.Fatalf("Unmarshal(%q) error = nil, want error", tt.data)
-			}
-		})
-	}
-}
-
-func TestPoller_GetReturnsCachedUnmarshalError(t *testing.T) {
-	t.Parallel()
-
-	s := newTestStore(t)
-	account := newTestAccount(t, s)
-	fetcher := &fakeFetcher{usage: Usage{TokensUsed: 1, TokensLimit: 10}}
-
-	if _, err := s.CreateQuotaSnapshot(store.QuotaSnapshot{
-		AccountID: account.ID,
-		UsageData: `{"tokens_used":`,
-		PolledAt:  time.Now().UTC(),
-		ExpiresAt: time.Now().UTC().Add(time.Minute),
-	}); err != nil {
-		t.Fatalf("CreateQuotaSnapshot() error = %v", err)
-	}
-
-	_, err := New(s, fetcher).Get(context.Background(), account.ID, time.Minute)
-	if err == nil {
-		t.Fatalf("Get() error = nil, want cached unmarshal error")
-	}
-	if fetcher.callCount() != 0 {
-		t.Fatalf("Fetch call count = %d, want 0", fetcher.callCount())
-	}
-}
-
-func TestPoller_GetZeroOrNegativeTTLDoesNotHitCacheAgain(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		ttl  time.Duration
-	}{
-		{name: "zero", ttl: 0},
-		{name: "negative", ttl: -time.Minute},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			s := newTestStore(t)
-			account := newTestAccount(t, s)
-			fetcher := &fakeFetcher{usage: Usage{TokensUsed: 7, TokensLimit: 100}}
-			p := New(s, fetcher)
-
-			if _, err := p.Get(context.Background(), account.ID, tt.ttl); err != nil {
-				t.Fatalf("first Get() error = %v", err)
-			}
-			if _, err := p.Get(context.Background(), account.ID, tt.ttl); err != nil {
-				t.Fatalf("second Get() error = %v", err)
-			}
-			if fetcher.callCount() != 2 {
-				t.Fatalf("Fetch call count = %d, want 2", fetcher.callCount())
-			}
-		})
-	}
-}
-
-func TestPoller_GetCachesZeroValueUsage(t *testing.T) {
-	t.Parallel()
-
-	s := newTestStore(t)
-	account := newTestAccount(t, s)
-	fetcher := &fakeFetcher{usage: Usage{}}
-	p := New(s, fetcher)
-
-	got, err := p.Get(context.Background(), account.ID, time.Minute)
-	if err != nil {
-		t.Fatalf("first Get() error = %v", err)
-	}
-	if got != (Usage{}) {
-		t.Fatalf("first Get() = %+v, want zero-value Usage", got)
-	}
-
-	got, err = p.Get(context.Background(), account.ID, time.Minute)
-	if err != nil {
-		t.Fatalf("second Get() error = %v", err)
-	}
-	if got != (Usage{}) {
-		t.Fatalf("second Get() = %+v, want zero-value Usage", got)
-	}
-	if fetcher.callCount() != 1 {
-		t.Fatalf("Fetch call count = %d, want 1", fetcher.callCount())
-	}
-}
-
-func TestPoller_GetUsesLatestSnapshotForAccountByPolledAt(t *testing.T) {
-	t.Parallel()
-
-	s := newTestStore(t)
-	account := newTestAccount(t, s)
-	other := newTestAccount(t, s)
-	now := time.Now().UTC().Truncate(time.Second)
-	oldUsage := Usage{TokensUsed: 1, TokensLimit: 100, ResetsAt: now.Add(time.Hour)}
-	newUsage := Usage{TokensUsed: 2, TokensLimit: 100, ResetsAt: now.Add(2 * time.Hour)}
-	otherUsage := Usage{TokensUsed: 99, TokensLimit: 100, ResetsAt: now.Add(3 * time.Hour)}
-
-	for _, snap := range []struct {
-		accountID int64
-		usage     Usage
-		polledAt  time.Time
-	}{
-		{accountID: account.ID, usage: newUsage, polledAt: now.Add(-time.Minute)},
-		{accountID: other.ID, usage: otherUsage, polledAt: now},
-		{accountID: account.ID, usage: oldUsage, polledAt: now.Add(-time.Hour)},
+	for _, res := range []Result{
+		e.p.Peek(id), e.touch(id), e.refresh(id), e.p.RefreshAll(context.Background(), []int64{id})[0],
 	} {
-		data, err := snap.usage.Marshal()
-		if err != nil {
-			t.Fatalf("Marshal() error = %v", err)
+		if res.Enabled || res.Report != nil || res.NextRefreshAt != nil || res.RefreshBlocked != "" {
+			t.Errorf("disabled result = %+v, want zero apart from the id", res)
 		}
-		if _, err := s.CreateQuotaSnapshot(store.QuotaSnapshot{
-			AccountID: snap.accountID,
-			UsageData: data,
-			PolledAt:  snap.polledAt,
-			ExpiresAt: now.Add(time.Hour),
-		}); err != nil {
-			t.Fatalf("CreateQuotaSnapshot() error = %v", err)
+		if res.AccountID != id {
+			t.Errorf("AccountID = %d, want %d", res.AccountID, id)
 		}
 	}
-
-	fetcher := &fakeFetcher{usage: Usage{TokensUsed: 1000, TokensLimit: 1000}}
-	got, err := New(s, fetcher).Get(context.Background(), account.ID, time.Minute)
-	if err != nil {
-		t.Fatalf("Get() error = %v", err)
+	if f.Calls() != 0 {
+		t.Errorf("fetches = %d, want 0", f.Calls())
 	}
-	if got.TokensUsed != newUsage.TokensUsed || got.TokensLimit != newUsage.TokensLimit || !got.ResetsAt.Equal(newUsage.ResetsAt) {
-		t.Fatalf("Get() = %+v, want %+v", got, newUsage)
+	if n := e.p.stateLoads.Load(); n != 0 {
+		t.Errorf("state loads = %d, want 0 (no store access when disabled)", n)
 	}
-	if fetcher.callCount() != 0 {
-		t.Fatalf("Fetch call count = %d, want 0", fetcher.callCount())
+	if e.p.Enabled() {
+		t.Errorf("Enabled() = true")
 	}
 }
 
-type blockingFetcher struct {
-	calls   int32
-	usage   Usage
-	started chan struct{}
-	release chan struct{}
-}
-
-func (f *blockingFetcher) Fetch(ctx context.Context, account store.Account) (Usage, error) {
-	atomic.AddInt32(&f.calls, 1)
-	select {
-	case f.started <- struct{}{}:
-	default:
-	}
-	select {
-	case <-ctx.Done():
-		return Usage{}, ctx.Err()
-	case <-f.release:
-		return f.usage, nil
-	}
-}
-
-func (f *blockingFetcher) callCount() int {
-	return int(atomic.LoadInt32(&f.calls))
-}
-
-func TestPoller_GetConcurrentExpiredCacheMisses(t *testing.T) {
+func Test_poller_account_deleted(t *testing.T) {
 	t.Parallel()
-
-	s := newTestStore(t)
-	account := newTestAccount(t, s)
-	cachedUsage := Usage{TokensUsed: 1, TokensLimit: 100}
-	data, err := cachedUsage.Marshal()
-	if err != nil {
-		t.Fatalf("Marshal() error = %v", err)
+	release := make(chan struct{})
+	entered := make(chan struct{}, 2)
+	block := false
+	f := &fakeReportFetcher{}
+	f.fn = func(context.Context, accounts.Account) (Report, error) {
+		if block {
+			entered <- struct{}{}
+			<-release
+		}
+		return availableTestReport(), nil
 	}
-	if _, err := s.CreateQuotaSnapshot(store.QuotaSnapshot{
-		AccountID: account.ID,
-		UsageData: data,
-		PolledAt:  time.Now().UTC().Add(-time.Hour),
-		ExpiresAt: time.Now().UTC().Add(-time.Minute),
-	}); err != nil {
-		t.Fatalf("CreateQuotaSnapshot() error = %v", err)
-	}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+	e.touch(id)
 
-	const workers = 2
-	fetcher := &blockingFetcher{
-		usage:   Usage{TokensUsed: 5, TokensLimit: 100},
-		started: make(chan struct{}, workers),
-		release: make(chan struct{}),
+	if err := e.reg.Delete(id); err != nil {
+		t.Fatal(err)
 	}
-	p := New(s, fetcher)
-
-	var wg sync.WaitGroup
-	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			got, err := p.Get(context.Background(), account.ID, time.Minute)
-			if err != nil {
-				errs <- err
-				return
-			}
-			if got.TokensUsed != fetcher.usage.TokensUsed || got.TokensLimit != fetcher.usage.TokensLimit {
-				errs <- errors.New("Get returned unexpected usage")
-			}
-		}()
+	if _, ok, _ := e.st.GetQuotaPollState(id); ok {
+		t.Errorf("poll state row survived the account")
+	}
+	if _, ok, _ := e.st.GetLatestQuotaSnapshot(id); ok {
+		t.Errorf("snapshot survived the account")
+	}
+	if res := e.p.Peek(id); res.Report != nil || !res.Enabled || res.AccountID != id {
+		t.Errorf("Peek of deleted account = %+v", res)
+	}
+	if res := e.touch(id); res.Report != nil {
+		t.Errorf("Touch of deleted account = %+v", res)
+	}
+	if f.Calls() != 1 {
+		t.Errorf("fetches = %d, want 1 (none for a deleted account)", f.Calls())
 	}
 
-	deadline := time.After(2 * time.Second)
-	for started := 0; started < workers; started++ {
+	// Deleted while a fetch is in flight: the late result is swallowed.
+	id2 := e.addOAuth("tok2")
+	block = true
+	done := make(chan Result, 1)
+	go func() { done <- e.touch(id2) }()
+	<-entered
+	if err := e.reg.Delete(id2); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	e.p.Close() // waits for the goroutine
+	if _, ok, _ := e.st.GetLatestQuotaSnapshot(id2); ok {
+		t.Errorf("late fetch result was stored for a deleted account")
+	}
+}
+
+func Test_poller_notifies_after_every_completed_fetch(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	notified := make(chan Result, 16)
+	e := fakeEnv(t, f, WithOnFetch(func(r Result) { notified <- r }))
+	id := e.addOAuth("tok")
+	recv := func() Result {
+		t.Helper()
 		select {
-		case <-fetcher.started:
-		case <-deadline:
-			t.Fatalf("timed out waiting for concurrent fetches; started %d of %d", started, workers)
-		}
-	}
-	close(fetcher.release)
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Errorf("concurrent Get() error = %v", err)
+		case r := <-notified:
+			return r
+		case <-time.After(10 * time.Second):
+			t.Fatal("no notification")
+			return Result{}
 		}
 	}
 
-	if fetcher.callCount() != workers {
-		t.Fatalf("Fetch call count = %d, want %d simultaneous cache misses to fetch independently", fetcher.callCount(), workers)
+	e.touch(id) // fetch 1
+	if r := recv(); r.AccountID != id || r.Report == nil {
+		t.Errorf("notification 1 = %+v", r)
 	}
-	snapshots, err := s.ListQuotaSnapshots()
-	if err != nil {
-		t.Fatalf("ListQuotaSnapshots() error = %v", err)
+	e.touch(id) // cache hit: no notification
+	e.clk.Advance(time.Hour)
+	e.refresh(id) // fetch 2, identical result
+	if r := recv(); r.Report == nil || r.Stale {
+		t.Errorf("notification 2 = %+v", r)
 	}
-	if len(snapshots) != workers+1 {
-		t.Fatalf("snapshot count = %d, want %d", len(snapshots), workers+1)
+	f.fn = failing(503)
+	e.clk.Advance(time.Hour)
+	e.refresh(id) // fetch 3, error
+	if r := recv(); r.LastError != "http 503" || !r.Stale {
+		t.Errorf("notification 3 = %+v", r)
+	}
+	e.p.Close()
+	if n := len(notified); n != 0 {
+		t.Errorf("%d extra notifications, want 0 (cache hit must not notify)", n)
+	}
+	if f.Calls() != 3 {
+		t.Errorf("fetches = %d, want 3", f.Calls())
+	}
+}
+
+func Test_poller_ttl_floor_clamped(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want time.Duration }{
+		{time.Second, 5 * time.Minute},
+		{0, 5 * time.Minute},
+		{10 * time.Minute, 10 * time.Minute},
+	} {
+		if got := New(nil, nil, nil, WithTTL(tc.in)).TTL(); got != tc.want {
+			t.Errorf("WithTTL(%v).TTL() = %v, want %v", tc.in, got, tc.want)
+		}
+	}
+	if got := New(nil, nil, nil).TTL(); got != 5*time.Minute {
+		t.Errorf("default TTL = %v, want 5m", got)
+	}
+}
+
+func Test_poller_legacy_payload_is_no_report(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+	now := e.clk.Now()
+	for _, payload := range []string{`{"tokens_used":1,"tokens_limit":2,"resets_at":"2026-01-01T00:00:00Z"}`, `{"v":99,"status":"available"}`, `not json`} {
+		if _, err := e.st.CreateQuotaSnapshot(store.QuotaSnapshot{AccountID: id, UsageData: payload, PolledAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+		if res := e.p.Peek(id); res.Report != nil || res.Stale {
+			t.Errorf("Peek(%q) = %+v, want no report", payload, res)
+		}
+	}
+	if res := e.touch(id); res.Report == nil || res.Report.Status != StatusAvailable {
+		t.Errorf("Touch over a legacy row = %+v, want a fresh report", res)
+	}
+	snaps, _ := e.st.ListQuotaSnapshots()
+	if len(snaps) != 1 {
+		t.Errorf("rows = %d, want the legacy rows replaced by 1", len(snaps))
+	}
+}
+
+func Test_poller_error_report_stored_when_no_good_report(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{fn: failing(503)}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+
+	res := e.touch(id)
+	if res.Report == nil || res.Report.Status != StatusError || res.Report.Error != "http 503" {
+		t.Fatalf("report = %+v, want the stored error report", res.Report)
+	}
+	if !res.Stale || res.LastError != "http 503" {
+		t.Errorf("Stale/LastError = %v/%q", res.Stale, res.LastError)
+	}
+	if peek := e.p.Peek(id); peek.Report == nil || peek.Report.Status != StatusError {
+		t.Errorf("Peek = %+v, want the error report", peek)
+	}
+	// A later success replaces it.
+	f.fn = nil
+	e.clk.Advance(time.Hour)
+	if res := e.touch(id); res.Report.Status != StatusAvailable || res.Stale || res.LastError != "" {
+		t.Errorf("after recovery = %+v", res)
+	}
+}
+
+func Test_poller_non_fetcherror_is_fixed_vocabulary(t *testing.T) {
+	t.Parallel()
+	f := &fakeReportFetcher{fn: func(context.Context, accounts.Account) (Report, error) {
+		return Report{}, errors.New("secret-token-abc leaked in error")
+	}}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+	res := e.touch(id)
+	if res.LastError != "error" {
+		t.Errorf("LastError = %q, want the fixed value", res.LastError)
 	}
 }
