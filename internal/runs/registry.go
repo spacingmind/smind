@@ -108,6 +108,13 @@ type Registry struct {
 	// Lock ordering: deliverMu before mu, never the reverse.
 	deliverMu sync.Mutex
 
+	// testHookAfterLatch, when non-nil, is called by TryBeginArchive
+	// between setting the archive latch and the active-run check -- a test
+	// seam so a test can deterministically attempt a run start inside the
+	// exact window the latch must close. Nil in production. Guarded by mu
+	// for writes; read on the TryBeginArchive path only.
+	testHookAfterLatch func()
+
 	// closing latches once CloseAll begins: queue delivery must not start
 	// a chat's next prompt while the daemon is shutting down (a run
 	// started there would miss CloseAll's snapshot and its subprocess
@@ -537,11 +544,12 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// also refuses a task mid-archive (TryBeginArchive), closing the
 	// guard-vs-removal TOCTOU window on the start side.
 	var busyRunID string
+	var archiving bool
 	func() {
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
 		if reg.taskArchivingLocked(taskID) {
-			busyRunID = "\x00archiving"
+			archiving = true
 			return
 		}
 		for _, existing := range reg.runs {
@@ -558,7 +566,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		}
 		reg.runs[id] = r
 	}()
-	if busyRunID == "\x00archiving" {
+	if archiving {
 		cancel()
 		return "", fmt.Errorf("runs: start: %w", ErrTaskArchiving)
 	}
@@ -1300,39 +1308,50 @@ var ErrTaskArchiving = errors.New("task is being archived")
 // ErrTaskArchiving. The caller must call release exactly once, typically
 // via defer, whether or not the archive itself succeeds.
 func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
-	// The active check runs outside reg.mu (it hits the store), then the
-	// lock is re-taken to decide+mark atomically against run starts
-	// (which check reg.archiving under the same lock). A run that starts
-	// in between is harmless: it either wins the race into reg.runs
-	// before the re-check below fails to see it (the run-start side's own
-	// critical section refuses only once archiving[taskID] is set) or is
-	// refused there -- and the final safety net is that ArchiveTask
-	// removing a worktree under a just-started run is bounded by the
-	// start path's own refusals from the moment the latch is set, which
-	// is exactly the window this closes.
+	// The latch is set BEFORE the active-run check, and that order is the
+	// whole point: once reg.archiving[taskID] is set (under reg.mu), no
+	// run-start path -- Start, StartWhenBusy, queue delivery -- can
+	// register a run for the task, because each refuses with
+	// ErrTaskArchiving while the latch is held. The subsequent
+	// ActiveRunForTask scan therefore sees every run that existed before
+	// the latch, and none can appear after it; a run racing in before the
+	// latch is either already in reg.runs (seen by the scan) or blocked
+	// by it. Had the check run first, a run starting between the check
+	// and the latch would be invisible -- the exact TOCTOU this closes.
+	reg.mu.Lock()
+	if reg.archiving[taskID] {
+		reg.mu.Unlock()
+		return nil, fmt.Errorf("task %d is already being archived", taskID)
+	}
+	reg.archiving[taskID] = true
+	hook := reg.testHookAfterLatch
+	reg.mu.Unlock()
+
+	if hook != nil {
+		hook()
+	}
+
+	unlatch := func() {
+		reg.mu.Lock()
+		delete(reg.archiving, taskID)
+		reg.mu.Unlock()
+	}
+
 	runID, queued, active, err := reg.ActiveRunForTask(taskID)
 	if err != nil {
+		unlatch()
 		return nil, err
 	}
 	if active {
+		unlatch()
 		if queued {
 			return nil, fmt.Errorf("has a queued prompt waiting to run; cancel it or let it finish first")
 		}
 		return nil, fmt.Errorf("has a running run (%s); stop it (run.stop) first", runID)
 	}
-	reg.mu.Lock()
-	defer reg.mu.Unlock()
-	if reg.archiving[taskID] {
-		return nil, fmt.Errorf("task %d is already being archived", taskID)
-	}
-	reg.archiving[taskID] = true
 	var once sync.Once
 	return func() {
-		once.Do(func() {
-			reg.mu.Lock()
-			delete(reg.archiving, taskID)
-			reg.mu.Unlock()
-		})
+		once.Do(unlatch)
 	}, nil
 }
 
