@@ -46,6 +46,7 @@ type acpBackend interface {
 type claudeBackend interface {
 	Prompt(ctx context.Context, text string, updates chan<- claudecode.Message) (claudecode.ResultMessage, error)
 	SetPermissionMode(ctx context.Context, mode string) error
+	SetModel(ctx context.Context, model *string) error
 	Close() error
 }
 
@@ -179,8 +180,12 @@ type Runner struct {
 	// claudeClients holds each chat's live Claude Code client for the
 	// duration of its turn (see live_mode.go), guarded by sessionMu.
 	claudeClients map[int64]claudeBackend
-	modeMu        sync.Mutex
-	acpModeProbe  bool
+	// claudeModels is each live Claude chat's current requested model
+	// ("" = provider default), for the synthetic model config option.
+	// Guarded by sessionMu, like claudeClients.
+	claudeModels map[int64]string
+	modeMu       sync.Mutex
+	acpModeProbe bool
 
 	// mcpServers, when set via WithMcpServers, supplies the configured
 	// MCP servers passed to ACP and Claude-native turns (ADR-0018). Nil
@@ -213,6 +218,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		acpSessions:   map[int64]*acpSessionState{},
 		acpModes:      map[Provider]acpModeCacheEntry{},
 		claudeClients: map[int64]claudeBackend{},
+		claudeModels:  map[int64]string{},
 		sessionStore:  NewMemorySessionStore(),
 		acpCommands: map[Provider][]string{
 			ProviderGLM:  acp.GLMCommand(),
@@ -755,6 +761,7 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 	}
 	defer client.Close()
 	r.trackClaudeClient(chatID, client)
+	r.setClaudeModel(chatID, model)
 	defer r.untrackClaudeClient(chatID)
 
 	updates := make(chan claudecode.Message)

@@ -2,6 +2,7 @@ package taskrunner
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -336,4 +337,119 @@ func TestRunStart_ModelEmptyIsDefault(t *testing.T) {
 			t.Fatalf("thread/start model = %q, want none", got)
 		}
 	})
+}
+
+func TestConfigOptions_ClaudeSyntheticModelOption(t *testing.T) {
+	t.Parallel()
+	r := New(nil)
+
+	// No live session: nothing to switch, nothing listed.
+	if got := r.ConfigOptions(7, ProviderClaudeNative); len(got) != 0 {
+		t.Fatalf("ConfigOptions() with no live session = %+v, want none", got)
+	}
+
+	r.trackClaudeClient(7, &fakeClaudeModeClient{})
+	r.setClaudeModel(7, "claude-opus-5-5")
+	got := r.ConfigOptions(7, ProviderClaudeNative)
+	if len(got) != 1 {
+		t.Fatalf("ConfigOptions() = %+v, want exactly the synthetic model option", got)
+	}
+	o := got[0]
+	if o.ConfigID != "model" || o.Category != "model" || o.Type != "select" {
+		t.Fatalf("option = %+v, want configId/category model, select", o)
+	}
+	if cur := configCurrentValue(o.CurrentValue); cur != "claude-opus-5-5" {
+		t.Fatalf("currentValue = %q, want claude-opus-5-5", cur)
+	}
+	var ids []string
+	for _, c := range o.Options {
+		ids = append(ids, c.Value)
+	}
+	for _, want := range []string{ClaudeModelDefault, "sonnet", "opus", "haiku", "claude-opus-5-5"} {
+		found := false
+		for _, id := range ids {
+			found = found || id == want
+		}
+		if !found {
+			t.Errorf("choices %v missing %q", ids, want)
+		}
+	}
+
+	// An unset model reports the default choice as current.
+	r.setClaudeModel(7, "")
+	if cur := configCurrentValue(r.ConfigOptions(7, ProviderClaudeNative)[0].CurrentValue); cur != ClaudeModelDefault {
+		t.Fatalf("currentValue with no model = %q, want %q", cur, ClaudeModelDefault)
+	}
+
+	// The turn ending removes it again.
+	r.untrackClaudeClient(7)
+	if got := r.ConfigOptions(7, ProviderClaudeNative); len(got) != 0 {
+		t.Fatalf("ConfigOptions() after the turn = %+v, want none", got)
+	}
+}
+
+func TestSetConfigOption_ClaudeModelCallsSetModel(t *testing.T) {
+	t.Parallel()
+	r := New(nil)
+	fake := &fakeClaudeModeClient{}
+	r.trackClaudeClient(7, fake)
+
+	opts, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", "sonnet")
+	if err != nil {
+		t.Fatalf("SetSessionConfigOption(model=sonnet) error = %v", err)
+	}
+	if len(fake.modelCalls) != 1 || fake.modelCalls[0] == nil || *fake.modelCalls[0] != "sonnet" {
+		t.Fatalf("SetModel calls = %v, want one call with sonnet", fake.modelCalls)
+	}
+	if len(opts) != 1 || configCurrentValue(opts[0].CurrentValue) != "sonnet" {
+		t.Fatalf("returned options = %+v, want current sonnet", opts)
+	}
+	if cur := configCurrentValue(r.ConfigOptions(7, ProviderClaudeNative)[0].CurrentValue); cur != "sonnet" {
+		t.Fatalf("listed currentValue = %q, want sonnet", cur)
+	}
+
+	// The catalog default (and empty) reset with nil.
+	for _, v := range []string{ClaudeModelDefault, ""} {
+		fake.modelCalls = nil
+		if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", v); err != nil {
+			t.Fatalf("SetSessionConfigOption(model=%q) error = %v", v, err)
+		}
+		if len(fake.modelCalls) != 1 || fake.modelCalls[0] != nil {
+			t.Fatalf("SetModel calls for %q = %v, want one nil call", v, fake.modelCalls)
+		}
+	}
+
+	// Bad syntax never reaches the client; neither does another option id.
+	fake.modelCalls = nil
+	if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", "--evil"); err == nil {
+		t.Error("model=--evil accepted")
+	}
+	if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "thinking-level", "low"); err == nil {
+		t.Error("unknown claude config id accepted")
+	}
+	if len(fake.modelCalls) != 0 {
+		t.Fatalf("SetModel called for rejected input: %v", fake.modelCalls)
+	}
+
+	// No live session: an error, not a silent no-op.
+	r.untrackClaudeClient(7)
+	if _, err := r.SetSessionConfigOption(context.Background(), 7, ProviderClaudeNative, "model", "opus"); err == nil {
+		t.Error("model switch with no live session = nil error")
+	}
+}
+
+func TestSetConfigOption_CodexModelRejected(t *testing.T) {
+	t.Parallel()
+	r := New(nil)
+	if got := r.ConfigOptions(1, ProviderCodexNative); len(got) != 0 {
+		t.Fatalf("codex ConfigOptions() = %+v, want none (no synthetic option)", got)
+	}
+	_, err := r.SetSessionConfigOption(context.Background(), 1, ProviderCodexNative, "model", "gpt-fake-a")
+	if err == nil || !strings.Contains(err.Error(), "applies from the next run: pass `model` to task_send") {
+		t.Fatalf("SetSessionConfigOption(codex model) = %v, want the next-run refusal", err)
+	}
+	// Other options keep today's not-supported answer.
+	if _, err := r.SetSessionConfigOption(context.Background(), 1, ProviderCodexNative, "thinking-level", "low"); !errors.Is(err, ErrConfigOptionsNotSupported) {
+		t.Fatalf("codex thinking-level err = %v, want ErrConfigOptionsNotSupported", err)
+	}
 }

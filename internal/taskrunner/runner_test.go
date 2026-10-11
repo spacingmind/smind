@@ -1088,13 +1088,20 @@ func TestRunner_SetPermissionMode(t *testing.T) {
 
 // fakeClaudeModeClient is a claudeBackend that only records
 // SetPermissionMode calls.
-type fakeClaudeModeClient struct{ mode string }
+type fakeClaudeModeClient struct {
+	mode       string
+	modelCalls []*string
+}
 
 func (f *fakeClaudeModeClient) Prompt(context.Context, string, chan<- claudecode.Message) (claudecode.ResultMessage, error) {
 	return claudecode.ResultMessage{}, nil
 }
 func (f *fakeClaudeModeClient) SetPermissionMode(_ context.Context, mode string) error {
 	f.mode = mode
+	return nil
+}
+func (f *fakeClaudeModeClient) SetModel(_ context.Context, model *string) error {
+	f.modelCalls = append(f.modelCalls, model)
 	return nil
 }
 func (f *fakeClaudeModeClient) Close() error { return nil }

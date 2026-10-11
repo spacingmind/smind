@@ -32,6 +32,7 @@ func (r *Runner) untrackClaudeClient(chatID int64) {
 	r.sessionMu.Lock()
 	defer r.sessionMu.Unlock()
 	delete(r.claudeClients, chatID)
+	delete(r.claudeModels, chatID)
 }
 
 // SetPermissionMode switches chatID's live session to mode, using the
