@@ -33,7 +33,7 @@ function pressCtrl(key: string, code: string, extra: Partial<KeyboardEventInit> 
   fireEvent.keyDown(document, { key, code, ctrlKey: true, ...extra });
 }
 
-async function renderClaimed(action: "tab.new" | "tab.jump" | "pane.split.right") {
+async function renderClaimed(action: "tab.new" | "tab.jump" | "pane.split.right" | "app.quit") {
   const fire = vi.fn();
   const { KeyboardProvider, useActionHandler } = await import("@/keyboard/keyboard-provider");
   function Claim() {
@@ -175,5 +175,49 @@ describe("menu-accelerator-no-double-fire", () => {
     const fire = await renderClaimed("tab.new");
     fireEvent.keyDown(document, { key: "t", code: "KeyT", altKey: true, shiftKey: true });
     expect(fire).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ctrl+q", () => {
+  it("ctrl+q quits on desktop non-macOS and is inert on web", async () => {
+    mockPlatform({ desktop: true });
+    const quit = await renderClaimed("app.quit");
+    pressCtrl("q", "KeyQ");
+    expect(quit).toHaveBeenCalledTimes(1);
+    // Also while typing in a text field: quitting is not a text-editing key.
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+    fireEvent.keyDown(input, { key: "q", code: "KeyQ", ctrlKey: true });
+    expect(quit).toHaveBeenCalledTimes(2);
+    input.remove();
+
+    vi.resetModules();
+    vi.doUnmock("@/lib/platform");
+    mockPlatform({ desktop: false });
+    const web = await renderClaimed("app.quit");
+    pressCtrl("q", "KeyQ");
+    expect(web).not.toHaveBeenCalled();
+  });
+
+  it("ctrl+q is not claimed while the terminal pane has focus", async () => {
+    mockPlatform({ desktop: true });
+    const quit = await renderClaimed("app.quit");
+    const term = document.createElement("div");
+    term.setAttribute("data-keyboard-terminal", "");
+    const helper = document.createElement("textarea");
+    term.appendChild(helper);
+    document.body.appendChild(term);
+    const ev = new KeyboardEvent("keydown", {
+      key: "q",
+      code: "KeyQ",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    helper.dispatchEvent(ev);
+    expect(quit).not.toHaveBeenCalled();
+    // Not swallowed either: XON must reach the shell.
+    expect(ev.defaultPrevented).toBe(false);
+    term.remove();
   });
 });

@@ -68,7 +68,7 @@ import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
-import { isDesktop } from "@/lib/platform";
+import { desktop, isDesktop } from "@/lib/platform";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
@@ -698,6 +698,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
+
+  useActionHandler("app.quit", () => {
+    desktop.quit().catch(() => {});
+  });
 
   const { preference, setPreference } = useTheme();
   useActionHandler("theme.cycle", () => {

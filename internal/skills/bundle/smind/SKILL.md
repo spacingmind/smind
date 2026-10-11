@@ -16,6 +16,8 @@ A **task** is a worktree plus a branch. A task has one or more **chats** (conver
 5. **Review.** `task_logs { runId, tail }` for the transcript. Read the change with `task_diff { taskId }` (read-only, capped) or with git in the task's `worktreePath` (`git log origin/develop..HEAD`, `git diff origin/develop...HEAD`). Run the repo's checks yourself. A run saying "done" is a claim, not evidence.
 6. **Iterate or finish.** Send follow-ups with `task_send` to the same task. `task_stop { runId }` stops a run. When the work is pushed or merged, `task_archive { taskId }`.
 
+Use `task_tree { workspaceId | taskId }` to see all of a task's children in one call -- each with its status, pending permissions, and subtree usage -- instead of listing and inspecting them one by one; then `task_wait { childrenOf: taskId }` waits for the first of those children's running runs (idle right away when none is running).
+
 Lost a run id (for example after your context was compacted)? `run_list { taskId }` finds it. `task_list` and `task_get` show tasks, `chat_list` shows a task's chats, `chat_new` opens a fresh conversation in the same worktree.
 
 ## Queueing

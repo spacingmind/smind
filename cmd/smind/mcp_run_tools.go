@@ -279,9 +279,12 @@ func isTerminalRunStatus(status string) bool {
 const mcpWaitMaxRunIDs = 16
 
 // taskWaitInput is task_wait's argument shape: either runId (wait on one
-// run) or runIds (wait for the first of 2-16 runs), never both.
+// run), runIds (wait for the first of 2-16 runs), or childrenOf (wait for
+// the first of a task's direct live children's running runs) -- never more
+// than one of the three.
 type taskWaitInput struct {
 	RunID               string   `json:"runId,omitempty" jsonschema:"id of the run to wait on (returned by run.start/task.prompt); use this or runIds"`
+	ChildrenOf          int64    `json:"childrenOf,omitempty" jsonschema:"taskId whose direct live children's running runs to wait for (resolved via the task tree); use this instead of runId/runIds"`
 	RunIDs              []string `json:"runIds,omitempty" jsonschema:"wait-any: 2-16 distinct run ids; returns as soon as any one of them is terminal or has a pending permission request, naming it in runId. Use this or runId, not both"`
 	IgnorePermissionIDs []string `json:"ignorePermissionIds,omitempty" jsonschema:"permission request ids you have already surfaced to the human; a pending request with one of these ids does not end the wait, so it continues until a NEW pending request, a terminal status, or the timeout"`
 	TimeoutSeconds      int      `json:"timeoutSeconds,omitempty" jsonschema:"how long to wait before returning timedOut: true (default 120s, always caller-overridable); a timeout is not a failure -- re-issue task_wait with the same runId/runIds to keep waiting"`
@@ -351,6 +354,13 @@ func buildTaskWaitOutput(result runLogsResult, ignore map[string]bool, timedOut 
 // run.wait RPC). With runIds it waits for the first of several runs.
 func mcpTaskWait(client *wsclient.Client) mcp.ToolHandlerFor[taskWaitInput, taskWaitOutput] {
 	return func(ctx context.Context, _ *mcp.CallToolRequest, in taskWaitInput) (*mcp.CallToolResult, taskWaitOutput, error) {
+		if in.ChildrenOf != 0 {
+			if in.RunID != "" || len(in.RunIDs) > 0 {
+				return nil, taskWaitOutput{}, fmt.Errorf("task_wait: childrenOf is exclusive: do not pass runId or runIds with it")
+			}
+			out, err := taskWaitChildrenOf(ctx, client, in)
+			return nil, out, err
+		}
 		timeout := mcpWaitDefaultTimeout
 		if in.TimeoutSeconds > 0 {
 			timeout = time.Duration(in.TimeoutSeconds) * time.Second
