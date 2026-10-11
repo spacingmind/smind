@@ -21,6 +21,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 const (
@@ -105,5 +107,5 @@ func CertFingerprint(cert tls.Certificate) string {
 }
 
 func writeFile0600(path string, data []byte) error {
-	return os.WriteFile(path, data, 0o600)
+	return securefile.WriteFile(path, data)
 }

@@ -1,9 +1,10 @@
 package auth
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 func TestLoadOrCreateToken_Creates(t *testing.T) {
@@ -17,12 +18,14 @@ func TestLoadOrCreateToken_Creates(t *testing.T) {
 		t.Fatal("LoadOrCreateToken() returned an empty token")
 	}
 
-	info, err := os.Stat(TokenPath(dir))
+	// Owner-only: 0600 on Unix, a protected owner+SYSTEM DACL on Windows
+	// (ADR-0028 D3) -- the parity plan's TestTokenFile_OwnerOnlyACL_Windows.
+	private, err := securefile.IsPrivate(TokenPath(dir))
 	if err != nil {
-		t.Fatalf("Stat(%s) error = %v", TokenPath(dir), err)
+		t.Fatalf("IsPrivate(%s) error = %v", TokenPath(dir), err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("token file mode = %o, want 0600", perm)
+	if !private {
+		t.Errorf("token file %s is readable by others, want owner-only", TokenPath(dir))
 	}
 }
 
