@@ -2119,7 +2119,11 @@ describe("App pane focus vs. web-find's per-pane focus-within (rebase interop)",
   });
 });
 
-describe("App drag-to-split (Item 8)", () => {
+// The pointer-driven drag tests render the whole App and replay a dnd-kit
+// drag; on GitHub runners they run right at vitest's 5s default and time out
+// intermittently, and a timed-out test keeps running and fails the next ones
+// in the file. Give this block headroom instead of letting it flake.
+describe("App drag-to-split (Item 8)", { timeout: 20_000 }, () => {
   interface StubRect {
     left: number;
     top: number;
