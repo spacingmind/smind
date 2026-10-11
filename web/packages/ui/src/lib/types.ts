@@ -35,8 +35,6 @@ export interface Task {
   CreatedAt: string;
   UpdatedAt: string;
   ArchivedAt: string | null;
-  /** The parent task id; null/absent for a root task. */
-  ParentTaskID?: number | null;
   /** The setup/port fields are optional only so an older daemon (and bare test fixtures) still type-check; read them as ""/null when absent. */
   SetupStatus?: SetupStatus;
   /** Failure reason when SetupStatus is "failed". */
@@ -45,6 +43,8 @@ export interface Task {
   SetupLog?: string;
   /** The allocated SMIND_PORT, or null when no port range is configured. */
   Port?: number | null;
+  /** The parent task id; null/absent for a root task. */
+  ParentTaskID?: number | null;
 }
 
 // Mirrors internal/store.Space field-for-field -- same no-json-tags,
