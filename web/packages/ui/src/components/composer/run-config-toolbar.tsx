@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { Bot, Brain, CheckCheck, ChevronDown, Cpu, RotateCcw, ShieldCheck, SquareTerminal } from "lucide-react";
+import { Bot, Brain, CheckCheck, ChevronDown, Cpu, RotateCcw, ShieldAlert, ShieldCheck, SquareTerminal } from "lucide-react";
 
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
@@ -465,11 +465,19 @@ function RunConfigToolbarProvider() {
 function RunConfigToolbarMode() {
   const { state, actions, meta } = useRunConfig();
   const current = meta.modes.find((m) => m.id === meta.effectiveMode);
+  // The mode auto-approves (or ACP Auto-accept is on) -- the pill warns
+  // (ShieldAlert + warning colour) without changing any mode semantics.
+  const dangerous = current?.autoApproves === true || state.autoAccept;
   return (
     <>
       <Select value={meta.effectiveMode} onValueChange={(v) => v && actions.setPermissionMode(v)} disabled={meta.disabled}>
-        <SelectTrigger aria-label="Permission mode" title={current?.description} className={PILL_TRIGGER_CLASS}>
-          <ShieldCheck aria-hidden className="shrink-0" />
+        <SelectTrigger
+          aria-label="Permission mode"
+          title={current?.description}
+          data-danger={dangerous ? "true" : undefined}
+          className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
+        >
+          {dangerous ? <ShieldAlert aria-hidden className="shrink-0" /> : <ShieldCheck aria-hidden className="shrink-0" />}
           <SelectValue placeholder="Select mode" className="max-sm:hidden" />
         </SelectTrigger>
         <SelectContent>
@@ -490,7 +498,7 @@ function RunConfigToolbarMode() {
           disabled={meta.disabled}
           onClick={() => actions.setAutoAccept(!state.autoAccept)}
           aria-label="Auto-accept"
-          className={cn(PILL_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
+          className={cn(PILL_TRIGGER_CLASS, state.autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
         >
           <CheckCheck aria-hidden className="shrink-0" />
           <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
