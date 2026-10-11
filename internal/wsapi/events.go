@@ -21,54 +21,58 @@ const (
 	TopicTaskStatus        = "task.status"
 	TopicRunStatus         = "run.status"
 	TopicPermissionPending = "permission.pending"
-	TopicWorkspaceCreated  = "workspace.created"
-	TopicWorkspaceDeleted  = "workspace.deleted"
-	TopicSpaceCreated      = "space.created"
-	TopicSpaceDeleted      = "space.deleted"
-	TopicTaskCreated       = "task.created"
-	TopicTaskUpdated       = "task.updated"
-	TopicTaskArchived      = "task.archived"
-	TopicTaskDeleted       = "task.deleted"
-	TopicChatCreated       = "chat.created"
-	TopicChatUpdated       = "chat.updated"
-	TopicChatArchived      = "chat.archived"
-	TopicChatQueueUpdated  = "chat.queueUpdated"
-	TopicProfileCreated    = "profile.created"
-	TopicProfileUpdated    = "profile.updated"
-	TopicProfileDeleted    = "profile.deleted"
-	TopicAccountUpdated    = "account.updated"
-	TopicAccountRemoved    = "account.removed"
-	TopicMcpServerCreated  = "mcpServer.created"
-	TopicMcpServerUpdated  = "mcpServer.updated"
-	TopicMcpServerDeleted  = "mcpServer.deleted"
+	// TopicPermissionResolved is published when a pending permission
+	// request leaves the pending state (see permissionResolvedPayload).
+	TopicPermissionResolved = "permission.resolved"
+	TopicWorkspaceCreated   = "workspace.created"
+	TopicWorkspaceDeleted   = "workspace.deleted"
+	TopicSpaceCreated       = "space.created"
+	TopicSpaceDeleted       = "space.deleted"
+	TopicTaskCreated        = "task.created"
+	TopicTaskUpdated        = "task.updated"
+	TopicTaskArchived       = "task.archived"
+	TopicTaskDeleted        = "task.deleted"
+	TopicChatCreated        = "chat.created"
+	TopicChatUpdated        = "chat.updated"
+	TopicChatArchived       = "chat.archived"
+	TopicChatQueueUpdated   = "chat.queueUpdated"
+	TopicProfileCreated     = "profile.created"
+	TopicProfileUpdated     = "profile.updated"
+	TopicProfileDeleted     = "profile.deleted"
+	TopicAccountUpdated     = "account.updated"
+	TopicAccountRemoved     = "account.removed"
+	TopicMcpServerCreated   = "mcpServer.created"
+	TopicMcpServerUpdated   = "mcpServer.updated"
+	TopicMcpServerDeleted   = "mcpServer.deleted"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
 // subscribing to an unknown topic name is an error per the ADR.
 var knownTopics = map[string]bool{
-	TopicTaskStatus:        true,
-	TopicRunStatus:         true,
-	TopicPermissionPending: true,
-	TopicWorkspaceCreated:  true,
-	TopicWorkspaceDeleted:  true,
-	TopicSpaceCreated:      true,
-	TopicSpaceDeleted:      true,
-	TopicTaskCreated:       true,
-	TopicTaskUpdated:       true,
-	TopicTaskArchived:      true,
-	TopicTaskDeleted:       true,
-	TopicChatCreated:       true,
-	TopicChatUpdated:       true,
-	TopicChatArchived:      true,
-	TopicChatQueueUpdated:  true,
-	TopicProfileCreated:    true,
-	TopicProfileUpdated:    true,
-	TopicProfileDeleted:    true,
-	TopicAccountUpdated:    true,
-	TopicAccountRemoved:    true,
-	TopicMcpServerCreated:  true,
-	TopicMcpServerUpdated:  true,
-	TopicMcpServerDeleted:  true,
+	TopicTaskStatus:         true,
+	TopicRunStatus:          true,
+	TopicPermissionPending:  true,
+	TopicPermissionResolved: true,
+	TopicWorkspaceCreated:   true,
+	TopicWorkspaceDeleted:   true,
+	TopicSpaceCreated:       true,
+	TopicSpaceDeleted:       true,
+	TopicTaskCreated:        true,
+	TopicTaskUpdated:        true,
+	TopicTaskArchived:       true,
+	TopicTaskDeleted:        true,
+	TopicChatCreated:        true,
+	TopicChatUpdated:        true,
+	TopicChatArchived:       true,
+	TopicChatQueueUpdated:   true,
+	TopicProfileCreated:     true,
+	TopicProfileUpdated:     true,
+	TopicProfileDeleted:     true,
+	TopicAccountUpdated:     true,
+	TopicAccountRemoved:     true,
+	TopicMcpServerCreated:   true,
+	TopicMcpServerUpdated:   true,
+	TopicMcpServerDeleted:   true,
 }
 
 // subscriberQueueCap is the per-connection event queue bound (ADR 0005):
@@ -104,6 +108,19 @@ type permissionPendingPayload struct {
 	RequestID string                   `json:"requestId"`
 	Summary   string                   `json:"summary"`
 	Options   []permissionOptionParams `json:"options"`
+}
+
+// permissionResolvedPayload is the payload of permission.resolved events:
+// {runId, taskId, chatId, requestId, optionId?, reason}. Reason is one of
+// human, timeout, providerCancelled, runEnded; OptionID is absent when no
+// option was chosen.
+type permissionResolvedPayload struct {
+	RunID     string `json:"runId"`
+	TaskID    int64  `json:"taskId"`
+	ChatID    int64  `json:"chatId"`
+	RequestID string `json:"requestId"`
+	OptionID  string `json:"optionId,omitempty"`
+	Reason    string `json:"reason"`
 }
 
 // Lifecycle event payloads (ADR 0009). The create/update/archive payloads
