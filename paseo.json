@@ -1,0 +1,18 @@
+{
+  "worktree": {
+    "setup": [
+      "cd web && bun install --frozen-lockfile"
+    ]
+  },
+  "metadataGeneration": {
+    "branchName": {
+      "instructions": "Use type/short-kebab-slug, e.g. feat/task-tree, fix/wsl-daemon-start, docs/adr-0026. Types: feat, fix, docs, test, chore, ci, refactor."
+    },
+    "commitMessage": {
+      "instructions": "Conventional Commits: type(scope): imperative summary under ~72 chars, then a short body explaining why. Scopes follow the area (web, desktop, cli, runs, wsapi, store, ...)."
+    },
+    "pullRequest": {
+      "instructions": "Title in Conventional Commits form (it drives release-please). Body: what changed, how it was verified (commands + screenshots for UI), what is NOT verified, and decisions not covered by the spec. Base branch: develop. Never stack PRs."
+    }
+  }
+}
