@@ -16,8 +16,9 @@ type QuotaPollState struct {
 	LastAttemptAt       time.Time // zero = never (NULL)
 	NextAllowedAt       time.Time // zero = no backoff (NULL)
 	ConsecutiveFailures int
-	// ForcedAt holds unix-millis timestamps of poll attempts forced by
-	// quota-exhaustion routing, oldest first. Save keeps only the newest 6.
+	// ForcedAt holds unix-millis timestamps of attempts made by an explicit
+	// Refresh (the per-hour forced budget), oldest first. Save keeps only the
+	// newest 6.
 	ForcedAt   []int64
 	RejectedFP string
 	LastError  string
