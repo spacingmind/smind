@@ -291,6 +291,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
 		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
+		model:              row.Model,
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -332,6 +333,11 @@ type run struct {
 	// rehydrated run never re-drives, so there's nothing for a stored value
 	// to feed.
 	thinkingLevel taskrunner.ThinkingLevel
+
+	// model is the model this run was asked to use (ADR-0025), "" for the
+	// provider's default; set at Start, immutable thereafter, and also
+	// persisted on the run row (store.Run.Model) so history shows the ask.
+	model string
 
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
@@ -422,6 +428,7 @@ func (r *run) statusLocked() RunStatus {
 		PermissionMode: r.perm.Mode,
 		AutoAccept:     r.perm.AutoAccept,
 		ThinkingLevel:  r.thinkingLevel,
+		Model:          r.model,
 		Usage:          UsageFromEvent(r.usage),
 	}
 }
@@ -510,8 +517,12 @@ func (reg *Registry) withStoredUsage(out []RunSummary) {
 // its doc comment), ignored entirely by every other provider. The empty
 // string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
 // exactly.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
-	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel)
+//
+// WithModel (ADR-0025) names the model the run is asked to use; omitted or
+// empty means the provider's default and the spawn is unchanged.
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, opts ...StartOption) (string, error) {
+	model := startModel(opts)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
 		return "", err
 	}
@@ -538,6 +549,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		runner:             runner,
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
+		model:              model,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -611,7 +623,7 @@ func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *ta
 	if _, err := reg.st.CreateRun(store.Run{
 		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
 		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model,
 	}); err != nil {
 		reg.mu.Lock()
 		delete(reg.runs, r.id)
@@ -638,6 +650,7 @@ type startParams struct {
 	prompt        string
 	perm          taskrunner.PermissionSettings
 	thinkingLevel taskrunner.ThinkingLevel
+	model         string
 	// catalog is the resolved provider catalog StartWhenBusy's
 	// orchestrator guard (ADR-0019 decision 6 at enqueue time,
 	// ADR-0021 §6) checks against.
@@ -648,7 +661,7 @@ type startParams struct {
 // and archiving, provider bind/match, the provider catalog, permission
 // settings (with default-mode normalization), and thinking level. Every
 // error is wrapped "runs: start: ..." exactly as before.
-func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (startParams, error) {
+func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, model string) (startParams, error) {
 	task, err := wm.GetTask(taskID)
 	if err != nil {
 		return startParams{}, fmt.Errorf("runs: start: %w", err)
@@ -699,8 +712,11 @@ func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chat
 	if !thinkingLevel.IsValid() {
 		return startParams{}, fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
 	}
+	if err := taskrunner.ValidateModel(catalog, model); err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
 
-	return startParams{taskID: taskID, chatID: chat.ID, provider: provider, prompt: prompt, perm: perm, thinkingLevel: thinkingLevel, catalog: catalog}, nil
+	return startParams{taskID: taskID, chatID: chat.ID, provider: provider, prompt: prompt, perm: perm, thinkingLevel: thinkingLevel, model: model, catalog: catalog}, nil
 }
 
 // runningRunForChat reports whether chatID has a StatusRunning run, and
@@ -758,7 +774,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	<-forwardDone
 	reg.finish(r, err)
 }

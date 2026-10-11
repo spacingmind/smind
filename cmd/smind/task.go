@@ -348,7 +348,7 @@ func cmdTaskList(args []string) int {
 }
 
 // cmdTaskSendUsage is printed on any argument error in cmdTaskSend.
-const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--when-busy reject|queue|interrupt]"
+const cmdTaskSendUsage = "usage: smind task send <taskId> <provider> <prompt> [--chat <chatId>] [--mode <permissionMode>] [--auto-accept] [--model <model>] [--when-busy reject|queue|interrupt]"
 
 // approvalPolicyRemovedMsg is printed for the removed --approval-policy
 // flag (ADR-0019): a hard error pointing at the replacement.
@@ -374,7 +374,7 @@ func cmdTaskSend(args []string) int {
 	// Parsed by hand for the same reason as cmdTaskLogs: the prompt is
 	// free-form positional text, so stdlib flag parsing can't reliably
 	// separate it from flags.
-	var taskIDArg, provider, mode, chatArg, whenBusy string
+	var taskIDArg, provider, mode, chatArg, whenBusy, model string
 	var autoAccept bool
 	var promptParts []string
 	for i := 0; i < len(args); i++ {
@@ -407,6 +407,15 @@ func cmdTaskSend(args []string) int {
 			mode = args[i]
 		case strings.HasPrefix(a, "--mode="):
 			mode = strings.TrimPrefix(a, "--mode=")
+		case a == "--model":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, cmdTaskSendUsage)
+				return 2
+			}
+			i++
+			model = args[i]
+		case strings.HasPrefix(a, "--model="):
+			model = strings.TrimPrefix(a, "--model=")
 		case a == "--auto-accept":
 			autoAccept = true
 		case a == "--approval-policy" || strings.HasPrefix(a, "--approval-policy="):
@@ -468,6 +477,11 @@ func cmdTaskSend(args []string) int {
 	}
 	if autoAccept {
 		params["autoAccept"] = true
+	}
+	// --model (ADR-0025): omitted leaves the provider's default. Validated
+	// by the daemon against the provider's catalog before anything spawns.
+	if model != "" {
+		params["model"] = model
 	}
 	if chatID != 0 {
 		params["chatId"] = chatID

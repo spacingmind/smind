@@ -61,6 +61,16 @@ var capsMode string
 // file in the session's cwd, so tests can observe it.
 var modesMode string
 
+// modelsMode is set by a "models" argument: the agent then advertises a
+// category-"model" select config option (fakeModelIDs, current
+// fakeModelIDs[0]) in session/new and session/load. Applying one via
+// set_config_option records "set_config_option:model:<value>" to a
+// "session-model" file in the session's cwd; a value starting "bad-" is
+// rejected with an invalid-params error.
+var modelsMode bool
+
+var fakeModelIDs = []string{"fake-model-a", "fake-model-b"}
+
 var fakeModeIDs = []string{"default", "accept_edits", "bypass_permissions"}
 
 // noDefaultModeIDs is modes:nodefault's catalog -- deliberately no
@@ -171,6 +181,8 @@ func main() {
 			modesMode = strings.TrimPrefix(a, "modes:")
 		} else if a == "live-opts" {
 			liveOpts = true
+		} else if a == "models" {
+			modelsMode = true
 		} else {
 			capsMode = a
 		}
@@ -323,6 +335,20 @@ func defaultConfigOptions() []map[string]any {
 			"category":     "mode",
 			"type":         "select",
 			"currentValue": "default",
+			"options":      choices,
+		})
+	}
+	if modelsMode {
+		choices := make([]map[string]any, len(fakeModelIDs))
+		for i, id := range fakeModelIDs {
+			choices[i] = map[string]any{"value": id, "name": "Model " + id}
+		}
+		opts = append(opts, map[string]any{
+			"configId":     "model",
+			"name":         "Model",
+			"category":     "model",
+			"type":         "select",
+			"currentValue": fakeModelIDs[0],
 			"options":      choices,
 		})
 	}

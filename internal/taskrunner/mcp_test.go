@@ -233,7 +233,7 @@ func runMcpPrompt(t *testing.T, r *Runner, task store.Task) []Event {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -386,7 +386,7 @@ func TestRunner_RunPrompt_CodexNoteMcpServersUnsupported(t *testing.T) {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -434,7 +434,7 @@ func runClaudeMcp(t *testing.T, r *Runner, task store.Task) []string {
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 	}()
 	drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -592,7 +592,7 @@ func TestRunner_RunPrompt_ClaudeNativeMcpConfigRemovedAfterRun(t *testing.T) {
 		events := make(chan Event)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+			errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 		}()
 		drainEvents(events)
 		if err := <-errCh; err == nil {
@@ -610,7 +610,7 @@ func TestRunner_RunPrompt_ClaudeNativeMcpConfigRemovedAfterRun(t *testing.T) {
 		events := make(chan Event)
 		errCh := make(chan error, 1)
 		go func() {
-			errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+			errCh <- r.RunPrompt(ctx, task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 		}()
 		// Wait for the first event (the run is live, CLI spawned), then cancel.
 		<-events
@@ -806,7 +806,7 @@ func TestRunner_RunPrompt_ACPSessionErrorsScrubMcpSecrets(t *testing.T) {
 			events := make(chan Event)
 			errCh := make(chan error, 1)
 			go func() {
-				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", events)
+				errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", nil, PermissionSettings{}, "", "", events)
 			}()
 			got := drainEvents(events)
 			err := <-errCh
@@ -881,7 +881,7 @@ func TestRunner_RunPrompt_ClaudeNativeFailedMcpServerEmitsNoteWithoutSecrets(t *
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -1032,7 +1032,7 @@ func TestRunner_RunPrompt_ClaudeNativeEmitsMcpServersAndFailedUpdate(t *testing.
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -1074,7 +1074,7 @@ func TestRunner_RunPrompt_ClaudeNativeNoSecondMcpEventWithoutFailures(t *testing
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderClaudeNative, "hi", denyAllDecider{}, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {
@@ -1106,7 +1106,7 @@ func TestRunner_RunPrompt_CodexEmitsMcpServersProviderUnsupported(t *testing.T) 
 	events := make(chan Event)
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", events)
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderCodexNative, "hi", nil, PermissionSettings{}, "", "", events)
 	}()
 	got := drainEvents(events)
 	if err := <-errCh; err != nil {

@@ -40,6 +40,7 @@ type taskSendInput struct {
 	ChatID         *int64 `json:"chatId,omitempty" jsonschema:"optional id of the chat (conversation thread) to send to; defaults to the task's default chat"`
 	PermissionMode string `json:"permissionMode,omitempty" jsonschema:"one of the provider's own permission mode ids (see provider.list); may not name an auto-approving mode"`
 	AutoAccept     bool   `json:"autoAccept,omitempty" jsonschema:"approve every permission prompt without asking a human (ACP providers only); may not be set by an orchestrating agent"`
+	Model          string `json:"model,omitempty" jsonschema:"optional model id for the run: any id from the chosen provider's catalog (see provider_list models; claude-native also takes any syntax-valid id such as sonnet or claude-opus-5-5). Omit for the provider default; overrides the profile's model"`
 	ProfileID      *int64 `json:"profileId,omitempty" jsonschema:"optional id of a human-authored agent profile supplying the provider and permission settings"`
 	WhenBusy       string `json:"whenBusy,omitempty" jsonschema:"what to do when the chat already has a running run: reject (error), queue (append, delivered at the next turn boundary -- the default), or interrupt (stop the running run and deliver first)"`
 	FromTaskID     *int64 `json:"fromTaskId,omitempty" jsonschema:"optional: your own task id, for the [message from task #T, chat #C] provenance header on the delivered prompt"`
@@ -89,6 +90,7 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 		}
 
 		provider := in.Provider
+		model := in.Model
 		settings := taskrunner.PermissionSettings{Mode: in.PermissionMode, AutoAccept: in.AutoAccept}
 		explicitMode := in.PermissionMode != ""
 		explicitAutoAccept := in.AutoAccept
@@ -105,6 +107,7 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 				Provider       string `json:"Provider"`
 				PermissionMode string `json:"PermissionMode"`
 				AutoAccept     bool   `json:"AutoAccept"`
+				Model          string `json:"Model"`
 			}
 			if err := callWS(ctx, client, "task_send", "profile.get", map[string]any{"id": *in.ProfileID}, &profile); err != nil {
 				return nil, taskSendOutput{}, err
@@ -115,6 +118,12 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 				return nil, taskSendOutput{}, fmt.Errorf("task_send: provider %q does not match profileId %d's provider %q", provider, *in.ProfileID, profile.Provider)
 			}
 			settings = taskrunner.PermissionSettings{Mode: profile.PermissionMode, AutoAccept: profile.AutoAccept}
+			// A profile's model applies unless the call names its own
+			// (ADR-0025). Choosing a model is not a permission decision, so
+			// unlike permissionMode it may ride along with profileId.
+			if model == "" {
+				model = profile.Model
+			}
 		} else if provider == "" && in.ChatID != nil {
 			// An already-bound chat pins the provider; a fresh chat does
 			// not, and run.start's bind-on-first-prompt needs one.
@@ -173,6 +182,9 @@ func mcpTaskSend(client *wsclient.Client) mcp.ToolHandlerFor[taskSendInput, task
 			"taskId": in.TaskID, "provider": provider, "prompt": in.Prompt,
 			"permissionMode": settings.Mode, "autoAccept": settings.AutoAccept,
 			"whenBusy": whenBusy, "source": source,
+		}
+		if model != "" {
+			params["model"] = model
 		}
 		if in.ChatID != nil {
 			params["chatId"] = *in.ChatID
