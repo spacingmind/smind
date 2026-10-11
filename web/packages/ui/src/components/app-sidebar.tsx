@@ -1562,7 +1562,7 @@ function AggregateSlot({ status, label }: { status: StatusDotStatus | null; labe
  * shows its coarse lifecycle status instead of a fabricated "0 files",
  * which would read as "no changes" and be a different, wrong claim.
  */
-function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
+function TaskMetaRow({ stat, status, tierLabel }: { stat?: TaskStat; status: string; tierLabel?: string | null }) {
   return (
     <span
       data-testid="sidebar-task-meta"
@@ -1574,6 +1574,17 @@ function TaskMetaRow({ stat, status }: { stat?: TaskStat; status: string }) {
       // hangs off to the left of the title it belongs to.
       className="flex h-4 w-full items-center gap-1.5 overflow-hidden pl-8 text-ui-xs text-muted-foreground"
     >
+      {/*
+       * The tier label (PR-U1) lives on this second line, not next to the
+       * title: a shrink-0 chip beside the title ate the title's width on a
+       * 255px sidebar ("Shi…"), while the branch name down here can
+       * truncate harmlessly. Untiered roots render no label.
+       */}
+      {tierLabel && (
+        <span data-testid="task-tier" className="shrink-0">
+          {tierLabel}
+        </span>
+      )}
       {stat ? (
         <>
           <GitBranch className="size-2.5 shrink-0" />
@@ -1647,6 +1658,7 @@ const TaskRow = memo(function TaskRow({
   task,
   tierLabel,
   hasChildren,
+  reserveChevron,
   isCollapsed,
   onToggleCollapse,
   rollup,
@@ -1657,9 +1669,11 @@ const TaskRow = memo(function TaskRow({
   onMoveTask,
 }: {
   task: Task;
-  /** "<tier>" or "<tier> · <childCount>"; absent for an untiered root. */
+  /** "<tier>" or "<tier> · <childCount>"; absent for an untiered root. Rendered on the meta row, not the title row. */
   tierLabel: string | null;
   hasChildren: boolean;
+  /** Whether childless rows in this sibling list still render the empty w-3 chevron slot so titles align (see TaskRows). */
+  reserveChevron: boolean;
   isCollapsed: boolean;
   onToggleCollapse?: (taskId: number) => void;
   /** The collapsed-parent attention rollup (PR-U1), or null when there is nothing to show. */
@@ -1702,13 +1716,13 @@ const TaskRow = memo(function TaskRow({
                */}
               <span className="flex w-full min-w-0 items-center gap-2">
               {/*
-               * Collapse chevron (PR-U1), only on rows that have children
-               * -- and only then, so leaf and untiered-root rows keep
-               * exactly the geometry they had before the tree wiring. The
+               * Collapse chevron (PR-U1), on rows that have children. The
                * slot is always w-3 on parent rows (not only collapsed or
                * expanded) so toggling never shifts the run-status dot next
-               * to it; childless rows render no slot at all, matching
-               * today's layout byte-for-byte.
+               * to it. Childless siblings of a parent render the *empty*
+               * reserved slot instead, so every title in that sibling list
+               * shares one left edge; a list where nothing has children
+               * reserves nothing and keeps today's geometry exactly.
                */}
               {hasChildren ? (
                 <button
@@ -1725,6 +1739,8 @@ const TaskRow = memo(function TaskRow({
                     className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
                   />
                 </button>
+              ) : reserveChevron ? (
+                <span className="w-3 shrink-0" />
               ) : null}
               {/*
                * Leading run-status dot -- the task's latest run, live off
@@ -1763,19 +1779,12 @@ const TaskRow = memo(function TaskRow({
                   />
                 )}
               </span>
-              <span className="min-w-0 truncate">{task.Title}</span>
               {/*
-               * Tier label (PR-U1): a muted, no-new-colour text tag naming
-               * the task's derived role, with the child count on a parent
-               * ("leader · 3") so a collapsed parent still says how big its
-               * subtree is. Absent for an untiered root -- most tasks --
-               * so the common row stays visually unchanged.
+               * flex-1 so the title always takes the row's leftover width:
+               * it and only it may shrink (via min-w-0 truncate) when the
+               * rollup or the slots need room on a narrow sidebar.
                */}
-              {tierLabel && (
-                <span data-testid="task-tier" className="shrink-0 text-ui-xs text-muted-foreground">
-                  {tierLabel}
-                </span>
-              )}
+              <span className="min-w-0 flex-1 truncate">{task.Title}</span>
               {/*
                * Collapsed-parent attention rollup (PR-U1): the loudest
                * reason among the hidden descendants plus how many need
@@ -1788,7 +1797,7 @@ const TaskRow = memo(function TaskRow({
                 <span
                   data-testid="task-rollup"
                   data-rollup-reason={rollup.reason}
-                  aria-label={`${rollup.count} descendants need attention: ${ATTENTION_LABEL[rollup.reason]}`}
+                  aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
                   className="flex shrink-0 items-center gap-1"
                 >
                   <StatusDot status={attentionDotStatus(rollup.reason)} />
@@ -1825,7 +1834,7 @@ const TaskRow = memo(function TaskRow({
                 )}
               </span>
               </span>
-              <TaskMetaRow stat={stat} status={status} />
+              <TaskMetaRow stat={stat} status={status} tierLabel={tierLabel} />
             </SidebarMenuSubButton>
             </HoverCardTrigger>
             <HoverCardContent data-testid="task-hover-card" side="right" align="start">
@@ -1926,6 +1935,7 @@ function TaskRows({
               task={task}
               tierLabel={null}
               hasChildren={false}
+              reserveChevron={false}
               isCollapsed={false}
               rollup={null}
               selectedTaskId={selectedTaskId}
@@ -1940,7 +1950,13 @@ function TaskRows({
     );
   }
 
-  const renderNode = (node: TaskNode): ReactNode => {
+  // Per sibling list: if any root here is a parent, childless roots in
+  // the same list reserve the (empty) chevron slot so every title in the
+  // list shares one left edge. A list of childless roots reserves nothing
+  // -- those keep exactly the pre-tree geometry, roots and all.
+  const rootsReserveChevron = nodes.some((n) => n.children.length > 0);
+
+  const renderNode = (node: TaskNode, reserveChevron: boolean): ReactNode => {
     const { task, tier, children } = node;
     const isCollapsed = collapsed?.has(task.ID) ?? false;
     // Rollups only exist where children are hidden -- an expanded parent's
@@ -1954,6 +1970,7 @@ function TaskRows({
           task={task}
           tierLabel={tier ? (children.length > 0 ? `${tier} · ${children.length}` : tier) : null}
           hasChildren={children.length > 0}
+          reserveChevron={reserveChevron}
           isCollapsed={isCollapsed}
           onToggleCollapse={onToggleCollapse}
           rollup={rollup.reason ? { reason: rollup.reason, count: rollup.count } : null}
@@ -1968,16 +1985,19 @@ function TaskRows({
           // default SidebarMenuSub mx-3.5/px-2.5 compound: this list sits
           // at the same second nesting level SpaceLikeItem already fixed
           // (see its own comment about not compounding indents), and the
-          // per-level step below is what visually encodes depth.
+          // per-level step below is what visually encodes depth. The
+          // chevron reservation applies one level down too, against this
+          // parent's own children (a lone grandchild under a parent of
+          // parents aligns with its nieces/nephews, not with the roots).
           <SidebarMenuSub className="ml-3 border-l border-sidebar-border pl-1">
-            {children.map((child) => renderNode(child))}
+            {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0)))}
           </SidebarMenuSub>
         )}
       </SidebarMenuSubItem>
     );
   };
 
-  return <>{nodes.map((node) => renderNode(node))}</>;
+  return <>{nodes.map((node) => renderNode(node, rootsReserveChevron))}</>;
 }
 
 /**

@@ -1429,13 +1429,11 @@ describe("AppSidebar task tree (PR-U1)", () => {
     // The parent carries the chevron and a supervisor tier label with
     // its child count; the child a plain coder label, no chevron.
     expect(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
-    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-tier"]')).toHaveTextContent("supervisor · 2");
     // A child that is itself a parent (leader) carries a chevron; a leaf
     // grandchild does not.
     expect(childRow.querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
     const grandchildRow = rowOf(GRANDCHILD.ID);
     expect(grandchildRow.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
-    expect(grandchildRow.querySelector('[data-testid="task-tier"]')).toHaveTextContent("coder");
   });
 
   it("collapsing a parent hides its subtree", async () => {
@@ -1456,7 +1454,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
     expect(rollup).toBeInTheDocument();
     expect(rollup).toHaveAttribute("data-rollup-reason", "permission");
-    expect(rollup).toHaveAttribute("aria-label", "1 descendants need attention: a permission is waiting");
+    expect(rollup).toHaveAttribute("aria-label", "1 descendant needs attention: a permission is waiting");
     expect(rollup).toHaveTextContent("1");
   });
 
@@ -1556,6 +1554,49 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
     expect(await screen.findByText("Grandchild task")).toBeInTheDocument();
     expect(rowOf(GRANDCHILD.ID).getAttribute("data-active")).not.toBeNull();
+  });
+
+  it("tier label renders in the meta row, not the title row", async () => {
+    await mountTree();
+
+    const parentRow = rowOf(PARENT.ID);
+    // The label lives on the meta (second) line...
+    const tier = parentRow.querySelector('[data-testid="task-tier"]');
+    expect(tier).toBeInTheDocument();
+    expect(tier).toHaveTextContent("supervisor · 2");
+    expect(tier!.closest('[data-testid="sidebar-task-meta"]')).toBeInTheDocument();
+    // ...and the title line is [slots][title flex-1][attention] only.
+    const title = within(parentRow).getByText("Parent task");
+    expect(title.className).toContain("flex-1");
+    expect(title.parentElement!.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+  });
+
+  it("siblings of a parent reserve the chevron slot so titles align", async () => {
+    // OTHER_ROOT is a childless sibling of PARENT in the same list.
+    const OTHER_ROOT: Task = { ...TASK, ID: 9, Title: "Lone root" };
+    await mountTree({}, [PARENT, CHILD, OTHER_ROOT]);
+
+    const lone = rowOf(OTHER_ROOT.ID);
+    // No toggle button (it has nothing to collapse)...
+    expect(lone.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
+    // ...but the reserved empty slot is there, and the title keeps the
+    // flex-1 shrink behaviour either way.
+    const titleRow = within(lone).getByText("Lone root").parentElement!;
+    expect(titleRow.children[0]!.tagName).toBe("SPAN");
+    expect(titleRow.children[0]!.className).toContain("w-3");
+  });
+
+  it("lists without parents do not reserve a chevron slot", async () => {
+    const LONE_A: Task = { ...TASK, ID: 20, Title: "Lone A" };
+    const LONE_B: Task = { ...TASK, ID: 21, Title: "Lone B" };
+    await mountTree({}, [LONE_A, LONE_B]);
+
+    for (const row of screen.getAllByTestId("sidebar-task-row")) {
+      const titleRow = within(row).getByText(/Lone [AB]/).parentElement!;
+      // First child of the title row is the run-status slot, not a
+      // reserved chevron span -- today's geometry, unchanged.
+      expect(titleRow.children[0]).toHaveAttribute("data-testid", "task-run-status-slot");
+    }
   });
 
   it("reconnect refetch rebuilds the same tree", async () => {
