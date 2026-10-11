@@ -786,3 +786,18 @@ html[data-desktop-os="windows"] body * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
 }
+
+/*
+ * W4, no scrollbar arrow buttons on Windows (the classic ▲▼ end buttons
+ * showed up on the sidebar and tab strip). Same Windows-only gate as the
+ * rule above; the buttons are removed, the thumb and track are left to
+ * that rule. NOTE: Chromium ignores ::-webkit-scrollbar* pseudo-elements on
+ * an element whose scrollbar-width/scrollbar-color is non-auto, so this
+ * only bites where the thin-scrollbar rule above doesn't reach; it is
+ * unverified on a real WebView2 host and is on the re-test list.
+ */
+html[data-desktop-os="windows"] ::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}

@@ -96,6 +96,14 @@ describe("desktop overscroll / cursor / scrollbars (D2.4, D2.6, D2.7)", () => {
     expect(BROWSER_CSS.replace(/\.terminal-xterm-shell \.xterm-viewport \{[\s\S]*?\}/g, "")).not.toMatch(/scrollbar-width/);
   });
 
+  it("index.css hides scrollbar buttons under the windows desktop gate", () => {
+    const rule = desktopRules.find((r) => r.includes("::-webkit-scrollbar-button")) ?? "";
+    expect(rule).toContain('html[data-desktop-os="windows"] ::-webkit-scrollbar-button');
+    expect(rule).toMatch(/display: none;\s*width: 0;\s*height: 0;/);
+    // Desktop-Windows only: the browser build never sees it.
+    expect(BROWSER_CSS).not.toMatch(/scrollbar-button/);
+  });
+
   it("the xterm scrollbar rules are untouched (still scrollbar-width: none)", () => {
     expect(CSS).toMatch(/\.terminal-xterm-shell \.xterm-viewport \{\s*scrollbar-width: none/);
   });
