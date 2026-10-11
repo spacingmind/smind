@@ -459,3 +459,20 @@ editors are simply not offered); on a Windows host with WSL installed,
 `Platform::Wsl2` is chosen even if the Local daemon were a native Windows
 one, which yields an explicit "not an absolute Linux path" error.
 
+
+**Native-app screenshot attempt (2026-10-11): not obtained.** Built the real
+app (`npx tauri build --debug --bundles app`, isolated identifier, `HOME` /
+`SMIND_HOME` under `/tmp`, throwaway daemon + git repo with one workspace and
+one task) and launched `smind-desktop` directly and via `open`, with the
+sandbox disabled. The Mac's session was locked (`CGSSessionScreenIsLocked =
+true`; full-screen captures show only the login window), the app logged
+`web content process terminated`, and a per-window `screencapture -l` of the
+app returned only the empty window chrome (traffic lights, no page). So the
+Reveal / Open-in-editor items on the workspace menu and on a file-tree row were
+**not** seen in the real WKWebView in light or dark; the headless-browser
+renders above remain the only visual evidence. The attempt used a
+temporary, uncommitted build-time driver (it dispatched the workspace-menu
+`pointerdown` and the file-row `contextmenu` on a timer, since there is no
+Accessibility permission to click); a re-run needs an unlocked, awake
+display. Rerun recipe: `/tmp/d4shots/run.sh dark` then `/tmp/d4shots/run.sh
+light` (local to the coordinator's Mac).
