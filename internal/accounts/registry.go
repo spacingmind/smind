@@ -45,11 +45,17 @@ type Registry struct {
 	// subscription events. Mirrors internal/profiles.Registry's pattern.
 	notifierMu sync.Mutex
 	notifier   Notifier
+
+	// refreshMu guards refreshLocks. Entries are kept for the Registry's
+	// lifetime rather than dropped when unused: account counts are small
+	// and pinning avoids lock-reuse races.
+	refreshMu    sync.Mutex
+	refreshLocks map[int64]chan struct{}
 }
 
 // New returns a Registry backed by s.
 func New(s *store.Store) *Registry {
-	return &Registry{store: s}
+	return &Registry{store: s, refreshLocks: make(map[int64]chan struct{})}
 }
 
 // SetNotifier registers n. Nil-safe, matching profiles.Registry.

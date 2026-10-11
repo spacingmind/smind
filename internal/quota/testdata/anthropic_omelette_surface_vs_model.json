@@ -1,0 +1,6 @@
+{
+  "seven_day_omelette": { "utilization": 12, "resets_at": "2026-06-04T00:00:00Z" },
+  "limits": [
+    { "kind": "weekly_scoped", "percent": 30, "resets_at": "2026-06-04T00:00:00Z", "scope": { "model": null, "surface": { "id": null, "display_name": "Omelette" } } }
+  ]
+}
