@@ -212,6 +212,23 @@ export interface ProviderTestResult {
 // enum with no json tag remapping.
 export type RunStatusValue = "running" | "done" | "error" | "stopped";
 
+// Mirrors internal/runs.RunUsage (ADR-0020): a run's reported usage from
+// its own agent events. Every field but `source` is optional/null and
+// null means "not reported" -- NEVER 0, which is a real reported value.
+// `source` names which agent surface produced it.
+export interface RunUsage {
+  inputTokens?: number | null;
+  cachedInputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  outputTokens?: number | null;
+  reasoningTokens?: number | null;
+  costUsd?: number | null;
+  model?: string | null;
+  contextUsed?: number | null;
+  contextSize?: number | null;
+  source: string;
+}
+
 // Mirrors internal/runs.RunStatus (aliased as RunSummary for run.list's
 // result) field-for-field. Like Workspace/Task, this struct carries no
 // `json:` tags, so its wire shape is the exact PascalCase Go field names.
@@ -235,6 +252,8 @@ export interface RunSummary {
   ThinkingLevel: ThinkingLevel;
   /** ADR-0025: the model this run was asked to use; "" (or absent on an older daemon) means the provider's default. */
   Model?: string;
+  /** ADR-0020: the run's usage totals -- lowercase json tag, so unlike the PascalCase fields above. Absent for an old run or one that reported nothing. */
+  usage?: RunUsage;
 }
 
 // internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
@@ -473,6 +492,7 @@ export type RunEventType =
   | "permission_request"
   | "permission_resolved"
   | "mcp_servers"
+  | "usage"
   | "raw";
 
 // One event in a run.logs response (internal/wsapi/handlers.go's
@@ -503,6 +523,8 @@ export interface RunLogEvent extends Partial<RunToolCallEventParams> {
   payload?: unknown;
   /** Populated for an "mcp_servers" entry -- the run's current per-server state, latest event wins. */
   mcpServers?: McpServerState[];
+  /** Populated for a "usage" entry (ADR-0020) -- the run's usage, latest event wins. */
+  usage?: RunUsage;
 }
 
 // Terminal result of run.logs (internal/wsapi/handlers.go's runLogsResult).
@@ -765,3 +787,25 @@ export interface McpServer {
 // internal/store.McpServer's transport values, carried over the wire as
 // their underlying strings (ADR-0018).
 export type McpTransport = "stdio" | "http" | "sse";
+
+// One row of a usage.summary response (internal/wsapi's usage summary
+// row, ADR-0020): per-group sums. Token sums are COALESCE(SUM, 0) on the
+// server, so a group where no row reported a field reads 0 -- the
+// `unreported` array names those fields (absent when everything was
+// reported) and a null costUsd means no run reported a cost.
+export interface UsageSummaryRow {
+  scope: "proxy" | "runs";
+  key: string;
+  count: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  costUsd?: number | null;
+  unreported?: Array<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens" | "reasoningTokens">;
+}
+
+export type UsageScope = "runs" | "proxy" | "all";
+export type UsageGroupBy = "task" | "provider" | "model" | "workspace";
+export type UsageRange = "today" | "7d" | "30d";
