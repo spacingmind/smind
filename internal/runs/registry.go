@@ -549,6 +549,15 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		return "", &SetupBusyError{TaskID: taskID}
 	}
 
+	// The tree root is resolved from the store BEFORE reg.mu is taken:
+	// parent links are immutable while a run exists, and the store call
+	// must not run under the registry lock (it would serialize every
+	// start behind one store round trip).
+	treeRoot, err := reg.treeRootOf(taskID)
+	if err != nil {
+		return "", err
+	}
+
 	id, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)
@@ -572,6 +581,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		status:             StatusRunning,
 		subscribers:        make(map[int]*subQueue),
 		pendingPermissions: make(map[string]chan string),
+		treeRoot:           treeRoot,
 	}
 
 	// The "at most one running run per chat" guard and this run's
@@ -580,9 +590,12 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// running run yet" and both proceed -- whichever acquires reg.mu first
 	// registers and the other sees it on its own check. The same section
 	// also refuses a task mid-archive (TryBeginArchive), closing the
-	// guard-vs-removal TOCTOU window on the start side.
+	// guard-vs-removal TOCTOU window on the start side. The per-tree
+	// concurrency count and the registration share the same section, so
+	// concurrent Starts in one tree can't both slip past the limit.
 	var busyRunID string
 	var archiving bool
+	var treeFull *TreeBusyError
 	func() {
 		reg.mu.Lock()
 		defer reg.mu.Unlock()
@@ -602,6 +615,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 				return
 			}
 		}
+		if running := reg.runningInTreeLocked(treeRoot); running >= reg.maxConcurrentRunsPerTreeLocked() {
+			treeFull = &TreeBusyError{RootTaskID: treeRoot, Limit: reg.maxConcurrentRunsPerTreeLocked(), Running: running}
+			return
+		}
 		reg.runs[id] = r
 	}()
 	if archiving {
@@ -611,6 +628,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	if busyRunID != "" {
 		cancel()
 		return "", &ChatBusyError{ChatID: chatID, RunID: busyRunID}
+	}
+	if treeFull != nil {
+		cancel()
+		return "", treeFull
 	}
 	if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
 		cancel()
