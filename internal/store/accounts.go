@@ -109,6 +109,9 @@ func (s *Store) DeleteAccount(id int64) error {
 	if _, err := s.db.Exec(`DELETE FROM quota_snapshots WHERE account_id = ?`, id); err != nil {
 		return fmt.Errorf("delete account %d: delete quota snapshots: %w", id, err)
 	}
+	if _, err := s.db.Exec(`DELETE FROM quota_poll_state WHERE account_id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: delete quota poll state: %w", id, err)
+	}
 	if _, err := s.db.Exec(`DELETE FROM workspace_accounts WHERE account_id = ?`, id); err != nil {
 		return fmt.Errorf("delete account %d: delete workspace accounts: %w", id, err)
 	}
