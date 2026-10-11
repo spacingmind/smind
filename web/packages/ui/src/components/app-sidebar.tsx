@@ -1225,6 +1225,26 @@ function WorkspaceItem({
   const flat = workspace.spaces.length === 0;
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
+  const items = [
+    { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
+    { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+    ...(localPathActions
+      ? [
+          {
+            label: localPathActions.revealLabel,
+            icon: <FolderOpen />,
+            onSelect: () => localPathActions.reveal(workspace.Path),
+          },
+          ...localPathActions.editors.map((editor) => ({
+            label: `Open in ${editor.label}`,
+            icon: <SquareArrowOutUpRight />,
+            onSelect: () => localPathActions.open(editor.id, workspace.Path),
+          })),
+        ]
+      : []),
+    { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
+    { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
+  ];
 
   return (
     <SidebarMenuItem>
@@ -1240,26 +1260,7 @@ function WorkspaceItem({
       </SidebarMenuButton>
       <SidebarMenuAction>
         <RowMenu
-          items={[
-            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
-            { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
-            ...(localPathActions
-              ? [
-                  {
-                    label: localPathActions.revealLabel,
-                    icon: <FolderOpen />,
-                    onSelect: () => localPathActions.reveal(workspace.Path),
-                  },
-                  ...localPathActions.editors.map((editor) => ({
-                    label: `Open in ${editor.label}`,
-                    icon: <SquareArrowOutUpRight />,
-                    onSelect: () => localPathActions.open(editor.id, workspace.Path),
-                  })),
-                ]
-              : []),
-            { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
-            { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
-          ]}
+          items={items}
           triggerProps={{
             "data-testid": "sidebar-workspace-actions-trigger",
             "data-workspace-id": workspace.ID,
