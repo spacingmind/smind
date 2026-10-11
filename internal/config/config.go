@@ -4,7 +4,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -91,26 +90,15 @@ func Default() Config {
 	}
 }
 
-// Dir returns the smind home directory (~/.spacingmind).
-func Dir() string {
-	if v := os.Getenv("SMIND_HOME"); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".spacingmind"
-	}
-	return filepath.Join(home, ".spacingmind")
-}
-
-// Path returns the config file location.
-func Path() string {
-	return filepath.Join(Dir(), "config.yaml")
-}
-
 // Load reads the config file, falling back to defaults for missing keys.
 // A missing file is not an error.
+//
+// Load first performs the one-time home migration: when SMIND_HOME is unset
+// and ~/.smind does not exist while ~/.spacingmind is a directory, the
+// legacy tree is renamed to ~/.smind and a compat symlink is left behind.
+// Migration never fails the load; see home.go.
 func Load() (Config, error) {
+	migrateIfDue()
 	cfg := Default()
 	data, err := os.ReadFile(Path())
 	if os.IsNotExist(err) {

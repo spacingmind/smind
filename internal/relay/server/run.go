@@ -58,7 +58,7 @@ const DefaultListenAddr = ":7400"
 const DefaultGRPCWebListenAddr = ":7401"
 
 // RelayDir returns the relay's data directory under the smind home
-// (~/.spacingmind/relay, $SMIND_HOME override).
+// (~/.smind/relay, $SMIND_HOME override).
 func RelayDir() string {
 	return filepath.Join(config.Dir(), "relay")
 }

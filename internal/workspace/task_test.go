@@ -12,7 +12,7 @@ import (
 
 // TestMain points config.Dir() (via SMIND_HOME) at a scratch directory for
 // the whole package, so CreateTask's worktrees land under a throwaway path
-// instead of the real ~/.spacingmind.
+// instead of the real ~/.smind.
 func TestMain(m *testing.M) {
 	dir, err := os.MkdirTemp("", "smind-workspace-test-")
 	if err != nil {

@@ -254,7 +254,7 @@ Usage:
 The relay is a dumb pipe: it authenticates workspaces (SCRAM-style
 challenge-response) and forwards opaque ciphertext between the daemon and
 paired mobile devices. It never sees plaintext. Data lives under
-$SMIND_HOME/relay (default ~/.spacingmind/relay): a self-signed TLS
+$SMIND_HOME/relay (default ~/.smind/relay): a self-signed TLS
 certificate (pin its fingerprint, printed at startup, at pairing time)
 and the workspace secret hashes.
 

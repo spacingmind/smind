@@ -25,7 +25,7 @@ ACP agent, etc.), or in an upstream provider's own service, should be
 reported to that project/provider directly.
 
 smind routes requests across multiple accounts on your behalf and stores
-OAuth credentials locally (`~/.spacingmind/`). A report involving
+OAuth credentials locally (`~/.smind/`). A report involving
 credential handling, token refresh, or account isolation is very much in
 scope.
 

@@ -9,7 +9,7 @@ See [README.md](README.md) for what smind is and how to build/run it.
 ## Workspace map
 
 - `cmd/` — Go binary entrypoints (`cmd/smind` is the daemon).
-- `internal/config` — config loading (`~/.spacingmind/config.yaml`, `SMIND_HOME` override).
+- `internal/config` — config loading (`~/.smind/config.yaml`, `SMIND_HOME` override).
 - `internal/server` — HTTP server: API routes + embedded web UI (`internal/server/dist`).
 - `web/` — bun workspace root for the web UI (`web/packages/ui`, React + Vite).
 - `docs/` — architecture notes, ADRs (`docs/decisions/`), and active/completed plans (`docs/plans/`).
