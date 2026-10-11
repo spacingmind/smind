@@ -209,6 +209,7 @@ CREATE TABLE IF NOT EXISTS chat_queue (
     status TEXT NOT NULL,                  -- 'queued' | 'delivered' | 'cancelled'
     run_id TEXT,                           -- set on delivery
     cancel_reason TEXT NOT NULL DEFAULT '',
+    cancel_kind TEXT NOT NULL DEFAULT '',  -- 'user' | 'auto' once cancelled
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );

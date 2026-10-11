@@ -46,6 +46,7 @@ function item(partial: Partial<ChatQueueItem> & { ID: number }): ChatQueueItem {
     Status: "queued",
     RunID: null,
     CancelReason: "",
+    CancelKind: "",
     CreatedAt: "2026-10-11T00:00:00Z",
     UpdatedAt: "2026-10-11T00:00:00Z",
     ...partial,
@@ -139,7 +140,7 @@ describe("useChatQueue", () => {
     const client = new FakeWsClient();
     const { result } = renderHook(() => useChatQueue(client, null, 10));
     resolveList(client, 0, [
-      item({ ID: 1, Status: "cancelled", CancelReason: "delivery failed: queue is full" }),
+      item({ ID: 1, Status: "cancelled", CancelKind: "auto", CancelReason: "delivery failed: queue is full" }),
     ]);
     await flush();
 
@@ -155,7 +156,16 @@ describe("useChatQueue", () => {
   it("does not show a user-cancelled item", async () => {
     const client = new FakeWsClient();
     const { result } = renderHook(() => useChatQueue(client, null, 10));
-    resolveList(client, 0, [item({ ID: 1, Status: "cancelled", CancelReason: "cancelled by user" })]);
+    resolveList(client, 0, [item({ ID: 1, Status: "cancelled", CancelKind: "user", CancelReason: "cancelled by user" })]);
+    await flush();
+
+    expect(result.current.items).toHaveLength(0);
+  });
+
+  it("hides a cancelled item with an empty CancelKind", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useChatQueue(client, null, 10));
+    resolveList(client, 0, [item({ ID: 1, Status: "cancelled", CancelKind: "", CancelReason: "delivery failed: queue is full" })]);
     await flush();
 
     expect(result.current.items).toHaveLength(0);

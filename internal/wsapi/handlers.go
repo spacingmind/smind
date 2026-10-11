@@ -881,6 +881,7 @@ type chatQueueItemParams struct {
 	Status       string    `json:"Status"`
 	RunID        *string   `json:"RunID"`
 	CancelReason string    `json:"CancelReason"`
+	CancelKind   string    `json:"CancelKind"`
 	CreatedAt    time.Time `json:"CreatedAt"`
 	UpdatedAt    time.Time `json:"UpdatedAt"`
 }
@@ -1172,17 +1173,29 @@ func handleRunStart(wm *workspace.Manager, runner *taskrunner.Runner, reg *runs.
 // handleRunList returns every run the Registry knows about, or (with
 // chatId set) just that chat's runs -- ADR-0016 P1.4's additive filter;
 // an omitted/zero chatId preserves today's unfiltered behavior exactly.
+// taskId (nonzero) restricts to that task's runs across all of its chats,
+// and status (non-empty) to runs in exactly that status ("running",
+// "done", ...) -- both additive filters for the discovery path; a call
+// naming neither keeps the exact pre-filter reg.List behavior (no cap).
 func handleRunList(reg *runs.Registry) handlerFunc {
 	return func(_ context.Context, _ *requestContext, raw json.RawMessage) (any, error) {
 		var p struct {
-			ChatID int64 `json:"chatId"`
+			ChatID int64  `json:"chatId"`
+			TaskID int64  `json:"taskId"`
+			Status string `json:"status"`
 		}
 		if len(raw) > 0 {
 			if err := json.Unmarshal(raw, &p); err != nil {
 				return nil, fmt.Errorf("run.list: invalid params: %w", err)
 			}
 		}
-		return reg.List(p.ChatID), nil
+		if p.Status != "" && !runs.ValidRunListStatus(runs.Status(p.Status)) {
+			return nil, fmt.Errorf("run.list: unknown status %q (valid: running, done, error, stopped, interrupted)", p.Status)
+		}
+		if p.TaskID == 0 && p.Status == "" {
+			return reg.List(p.ChatID), nil
+		}
+		return reg.ListFiltered(p.TaskID, p.ChatID, runs.Status(p.Status)), nil
 	}
 }
 

@@ -345,6 +345,58 @@ func TestChatQueue_BadItemCancelledNotLooped(t *testing.T) {
 	}
 }
 
+// TestChatQueue_CancelKindUserVsAuto pins the structured cancel kind
+// alongside the display reason: a user cancel through CancelQueuedItem
+// stamps 'user', a failed delivery (here a provider mismatch, as in
+// TestChatQueue_BadItemCancelledNotLooped) stamps 'auto', and both keep
+// their CancelReason untouched.
+func TestChatQueue_CancelKindUserVsAuto(t *testing.T) {
+	t.Parallel()
+	e := newQueuedTestEnv(t, "hang")
+
+	// User: a queued item cancelled through the chat.queueCancel path.
+	runID := e.startRun(t, "a")
+	chatID := e.chatIDOf(t, runID)
+	t.Cleanup(func() { _ = e.reg.Stop(runID) })
+	user, err := e.reg.StartWhenBusy(context.Background(), e.wm, e.runner, e.task.ID, chatID, taskrunner.ProviderGLM, "user cancel me", taskrunner.PermissionSettings{}, "", WhenBusyQueue, store.ChatQueueSourceHuman, 0, 0)
+	if err != nil {
+		t.Fatalf("queue user item error = %v", err)
+	}
+	if err := e.reg.CancelQueuedItem(user.QueueItemID); err != nil {
+		t.Fatalf("CancelQueuedItem() error = %v", err)
+	}
+	userItem := e.waitForQueuedStatus(t, user.QueueItemID, store.ChatQueueStatusCancelled)
+	if userItem.CancelKind != store.ChatQueueCancelUser {
+		t.Fatalf("user cancel kind = %q, want %q", userItem.CancelKind, store.ChatQueueCancelUser)
+	}
+	if userItem.CancelReason != "cancelled by user" {
+		t.Fatalf("user cancel reason = %q, want the exact display string", userItem.CancelReason)
+	}
+
+	// Auto: a provider-mismatch item whose delivery fails. Its own env,
+	// so an idle chat (not the user half's hanging run) delivers it.
+	autoEnv := newQueuedTestEnv(t, "")
+	chat, err := autoEnv.wm.DefaultChat(autoEnv.task.ID)
+	if err != nil {
+		t.Fatalf("DefaultChat() error = %v", err)
+	}
+	if _, err := autoEnv.wm.BindChatProvider(chat.ID, string(taskrunner.ProviderGLM)); err != nil {
+		t.Fatalf("BindChatProvider() error = %v", err)
+	}
+	auto, err := autoEnv.st.EnqueueChatPrompt(chat.ID, "bad", `{"provider":"codex-native"}`, store.ChatQueueSourceHuman, 0, 0, 0)
+	if err != nil {
+		t.Fatalf("enqueue auto item error = %v", err)
+	}
+	autoEnv.reg.DeliverQueued()
+	autoItem := autoEnv.waitForQueuedStatus(t, auto.ID, store.ChatQueueStatusCancelled)
+	if autoItem.CancelKind != store.ChatQueueCancelAuto {
+		t.Fatalf("auto cancel kind = %q, want %q", autoItem.CancelKind, store.ChatQueueCancelAuto)
+	}
+	if !strings.HasPrefix(autoItem.CancelReason, "delivery failed:") {
+		t.Fatalf("auto cancel reason = %q, want the delivery failed: family", autoItem.CancelReason)
+	}
+}
+
 // TestChatQueue_AgentProvenanceHeader pins ADR-0021 §4: an agent-source
 // item's delivered prompt begins with "[message from task #T, chat #C]"
 // then a newline; human items are delivered verbatim.

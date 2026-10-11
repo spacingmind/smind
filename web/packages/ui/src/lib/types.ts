@@ -217,7 +217,7 @@ export type RunStartResult = { runId: string } | { queued: true; queueItemId: nu
 // (internal/wsapi/handlers.go's chatQueueItemParams, ADR-0021 §8) --
 // store.ChatQueueItem's fields under their Go names as JSON keys, same
 // convention as Chat above. Status covers the item's whole lifecycle;
-// RunID is set once delivered, CancelReason once cancelled.
+// RunID is set once delivered, CancelReason/CancelKind once cancelled.
 export interface ChatQueueItem {
   ID: number;
   ChatID: number;
@@ -230,8 +230,10 @@ export interface ChatQueueItem {
   Priority: number;
   Status: "queued" | "delivered" | "cancelled";
   RunID: string | null;
-  /** "cancelled by user", or the server's "delivery failed: ..." family. */
+  /** Display text only ("cancelled by user", "delivery failed: ..."); branch on CancelKind, never on this string. */
   CancelReason: string;
+  /** Who cancelled: "user" (vanishes at once) or "auto" (shows its reason for the TTL); "" while queued/delivered. */
+  CancelKind: "" | "user" | "auto";
   CreatedAt: string;
   UpdatedAt: string;
 }
