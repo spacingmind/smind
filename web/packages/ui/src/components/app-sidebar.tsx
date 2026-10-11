@@ -1733,14 +1733,14 @@ const TaskRow = memo(function TaskRow({
                     e.stopPropagation();
                     onToggleCollapse?.(task.ID);
                   }}
-                  className="flex w-3 shrink-0 items-center justify-center text-muted-foreground"
+                  className="-mr-1 flex w-3 shrink-0 items-center justify-center text-muted-foreground"
                 >
                   <ChevronRight
                     className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
                   />
                 </button>
               ) : reserveChevron ? (
-                <span className="w-3 shrink-0" />
+                <span className="-mr-1 w-3 shrink-0" />
               ) : null}
               {/*
                * Leading run-status dot -- the task's latest run, live off
@@ -1989,7 +1989,7 @@ function TaskRows({
           // chevron reservation applies one level down too, against this
           // parent's own children (a lone grandchild under a parent of
           // parents aligns with its nieces/nephews, not with the roots).
-          <SidebarMenuSub className="ml-3 border-l border-sidebar-border pl-1">
+          <SidebarMenuSub className="ml-3 mr-0 border-l border-sidebar-border pl-1 pr-0">
             {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0)))}
           </SidebarMenuSub>
         )}
