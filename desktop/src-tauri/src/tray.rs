@@ -43,8 +43,22 @@ fn click_action(button: MouseButton, state: MouseButtonState) -> ClickAction {
     }
 }
 
-/// The tray menu's item ids, in order (separator excluded).
-const TRAY_MENU_IDS: [&str; 3] = [ID_ATTENTION, ID_OPEN, ID_QUIT];
+/// What a tray menu item does.
+#[derive(Debug, PartialEq, Eq)]
+enum MenuAction {
+    Open,
+    Quit,
+    Attention,
+}
+
+fn menu_action(id: &str) -> Option<MenuAction> {
+    match id {
+        ID_OPEN => Some(MenuAction::Open),
+        ID_QUIT => Some(MenuAction::Quit),
+        ID_ATTENTION => Some(MenuAction::Attention),
+        _ => None,
+    }
+}
 
 pub struct Tray {
     state: Arc<Mutex<Attention>>,
@@ -88,10 +102,10 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
                 }
             }
         })
-        .on_menu_event(move |app, event| match event.id().as_ref() {
-            ID_OPEN => show_main(app),
-            ID_QUIT => app.exit(0),
-            ID_ATTENTION => {
+        .on_menu_event(move |app, event| match menu_action(event.id().as_ref()) {
+            Some(MenuAction::Open) => show_main(app),
+            Some(MenuAction::Quit) => app.exit(0),
+            Some(MenuAction::Attention) => {
                 let most_recent = click_state.lock().unwrap().most_recent_task();
                 if let Some(task_id) = most_recent {
                     let ctx = ClickContext {
@@ -102,7 +116,7 @@ fn build_ui(app: &AppHandle, click_state: Arc<Mutex<Attention>>, cache: Workspac
                     notify::navigate_to_task(&ctx, task_id);
                 }
             }
-            _ => {}
+            None => {}
         })
         .build(app)?;
 
@@ -188,7 +202,8 @@ mod tests {
 
     #[test]
     fn tray_menu_still_has_open_and_quit() {
-        assert!(TRAY_MENU_IDS.contains(&ID_OPEN));
-        assert!(TRAY_MENU_IDS.contains(&ID_QUIT));
+        assert_eq!(menu_action(ID_OPEN), Some(MenuAction::Open));
+        assert_eq!(menu_action(ID_QUIT), Some(MenuAction::Quit));
+        assert_eq!(menu_action("nope"), None);
     }
 }
