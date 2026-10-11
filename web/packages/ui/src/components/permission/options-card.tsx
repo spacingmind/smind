@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { PermissionDetailView } from "@/components/permission/permission-detail";
 import { Alert } from "@/components/ui/alert";
 import { PermissionOptionButton, recommendedOptionId } from "@/components/permission/permission-option-button";
 import type { PendingPermission } from "@/hooks/use-run-timeline";
@@ -43,7 +44,14 @@ export function OptionsCard({
       testId="pending-permission"
       variant="warning"
       title={pending.summary}
-      description={respondError ? `respond failed: ${respondError}` : undefined}
+      description={
+        respondError || pending.detail ? (
+          <>
+            {pending.detail && <PermissionDetailView detail={pending.detail} />}
+            {respondError && <div>{`respond failed: ${respondError}`}</div>}
+          </>
+        ) : undefined
+      }
     >
       {pending.options.map((option, index) => (
         <PermissionOptionButton
