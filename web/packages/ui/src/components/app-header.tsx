@@ -1,3 +1,4 @@
+import { AppMenu } from "@/components/app-menu";
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -39,6 +40,7 @@ export function AppHeader({ statusText, sidebarPx }: { statusText: string; sideb
         {statusText}
       </span>
       <div className="ml-auto" />
+      <AppMenu />
       <DesktopWindowControls />
     </header>
   );

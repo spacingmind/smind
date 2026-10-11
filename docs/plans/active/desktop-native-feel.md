@@ -682,9 +682,60 @@ Named tests:
 
 - [ ] W1 — WSL start (PR-A)
 - [ ] W2 — badge clears (PR-A)
-- [ ] W3 — tray/menu/Find/Ctrl+Q (PR-B)
-- [ ] W4 — devtools/theme/scrollbars/VS Code (PR-B)
+- [x] W3 — tray/menu/Find/Ctrl+Q (PR-B)
+- [x] W4 — devtools/theme/scrollbars/VS Code (PR-B)
 
 ### Validation (W1–W4)
 
 _To be filled as each criterion is confirmed._
+
+#### PR-B (W3, W4)
+
+Confirmed by unit tests (no Windows host available; items marked *re-test* need a
+real Windows pass).
+
+- **W3.1 tray left-click** — `tray_left_click_shows_the_window_not_the_menu`,
+  `tray_menu_still_has_open_and_quit` (pure `click_action` / `menu_action`).
+  *re-test:* click the tray icon on Windows.
+- **W3.2 header app menu** — `app-menu button renders only on desktop non-macOS`,
+  `app menu items dispatch the same actions as the native menu`,
+  `app menu does not pull focus back to the trigger after an item runs`; native-only
+  items go through the single allowlisted `app_menu_action` (allowlist + unknown-id
+  rejection tested, `capability_tests.rs` extended). Light/dark screenshots taken
+  from a throwaway harness (not committed).
+- **W3.3 Find from the menu** — root cause confirmed in code (focus-gated
+  `enabled`); `menu-dispatched pane.find reaches the last focused pane after focus
+  left it`; Ctrl+F path unchanged (existing find tests green).
+- **W3.4 Ctrl+Q** — `ctrl+q quits on desktop non-macOS and is inert on web`,
+  `ctrl+q is not claimed while the terminal pane has focus` (decision: not claimed in
+  the terminal, XON); `app_quit` allowlisted + registered. *re-test:* Ctrl+Q on Windows.
+- **W3.5 accelerators** — `menu_accelerators_follow_the_platform_table`. Windows/Linux
+  keep Reload, zoom, F11, Quit (+ debug F12) per the spec; not proven to dispatch on
+  an undecorated window, so the header menu shows only Quit's Ctrl+Q. *re-test.*
+- **W4.1 DevTools** — `tauri_dependency_does_not_enable_devtools`; `cargo check
+  --release` passes (the menu arm is `cfg(debug_assertions)`); debug builds keep
+  F12 / View > Toggle DevTools. *re-test:* no Inspect in a release build's
+  right-click menu.
+- **W4.2 System theme** — mechanism (tauri-runtime-wry 2.11 / wry 0.55): on Windows
+  the WebView2 profile's preferred colour scheme is set to an explicit Light/Dark
+  only from tao's `ThemeChanged` event and never to Auto, so `prefers-color-scheme`
+  can lag or disagree with the OS. Fix: on desktop, "system" follows
+  `getCurrentWindow().theme()` / `onThemeChanged` (read after
+  `window_set_theme("system")` released any forced theme); matchMedia stays the
+  bootstrap and the web path. Tests: the three named web tests; `core:window:allow-theme`
+  added to the capability allowlist. The mechanism is from source reading, not
+  observed on Windows. *re-test.* Known cost: first paint uses matchMedia, so a
+  disagreeing host may flip once on startup.
+- **W4.3 scrollbar buttons** — `index.css hides scrollbar buttons under the windows
+  desktop gate`, and `index.css under the windows gate sets no standard
+  scrollbar-width/scrollbar-color`. Chromium ignores `::-webkit-scrollbar*` wherever
+  `scrollbar-width`/`scrollbar-color` are set, so the Windows gate now themes the
+  scrollbar with the webkit pseudo-elements only (thin, `--color-border` thumb,
+  no arrow buttons). Checked in headless Chromium (light + dark). *re-test* on WebView2.
+- **W4.4 VS Code on WSL** — `vscode_on_wsl_uses_remote_wsl_and_the_linux_path`,
+  `cursor_and_zed_on_wsl_still_use_the_translated_path`,
+  `wsl_distro_with_odd_characters_is_rejected_for_remote`,
+  `vscode_remote_argv_keeps_the_editor_allowlist`. The distro charset is
+  `[A-Za-z0-9._-]` (spaces rejected, stricter than the spec's draft). `Code.exe
+  --remote` rather than the `code.cmd` shim is unverified. *re-test.*
+

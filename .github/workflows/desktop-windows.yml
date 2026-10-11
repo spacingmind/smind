@@ -1,10 +1,15 @@
 name: desktop-windows
 
 # Builds the Tauri desktop thin client for Windows (NSIS .exe + .msi) and
-# uploads the installers as a workflow artifact. Unsigned; no release is
-# published here -- release-please.yml calls this as a reusable workflow
-# (workflow_call) to attach the installers to an actual GitHub Release. See
-# docs/plans/completed/desktop-tauri-shell.md and
+# uploads the installers as a workflow artifact. Windows code signing
+# (Authenticode) is out of scope. The *updater* artifacts (the NSIS
+# *-setup.exe + its .exe.sig, minisign-signed with the
+# TAURI_SIGNING_PRIVATE_KEY secret) are built only when that secret is
+# present, via tauri build --config src-tauri/tauri.updater.conf.json
+# (ADR-0023.4); PR/fork/manual builds have no secret and skip them. No
+# release is published here -- release-please.yml calls this as a reusable
+# workflow (workflow_call) to attach the installers to an actual GitHub
+# Release. See docs/plans/completed/desktop-tauri-shell.md and
 # docs/plans/completed/release-binaries.md.
 on:
   push:
@@ -14,6 +19,21 @@ on:
       - ".github/workflows/desktop-windows.yml"
   workflow_dispatch:
   workflow_call:
+    inputs:
+      require-updater-signing:
+        description: >-
+          Fail the build when TAURI_SIGNING_PRIVATE_KEY is absent instead of
+          silently producing a release that can't self-update.
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY:
+        description: Minisign private key for updater artifact signing.
+        required: false
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD:
+        description: Password for the updater signing key (empty = none).
+        required: false
 
 permissions:
   contents: read
@@ -42,9 +62,30 @@ jobs:
         working-directory: desktop
         run: npm ci
 
+      # The secret is exposed only here and only in the build step's env --
+      # never to other steps or third-party actions. The script prints
+      # sign=true/sign=false (or fails when require-updater-signing is set)
+      # without echoing the key.
+      - name: Decide updater signing
+        id: sign
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          REQUIRE_UPDATER_SIGNING: ${{ inputs.require-updater-signing }}
+        run: desktop/scripts/updater-signing-mode.sh >> "$GITHUB_OUTPUT"
+
       - name: Build installers
+        if: steps.sign.outputs.sign != 'true'
         working-directory: desktop
         run: npx tauri build
+
+      - name: Build installers (with updater artifacts)
+        if: steps.sign.outputs.sign == 'true'
+        working-directory: desktop
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx tauri build --config src-tauri/tauri.updater.conf.json
 
       # Stage into a flat dir: uploading the nsis/*.exe and msi/*.msi globs
       # directly preserves those two subdirectories in the artifact, which
@@ -57,6 +98,20 @@ jobs:
           mkdir -p dist
           cp desktop/src-tauri/target/release/bundle/nsis/*.exe dist/
           cp desktop/src-tauri/target/release/bundle/msi/*.msi dist/
+
+      # Updater asset for Windows is the NSIS *-setup.exe (not the .msi);
+      # stage its .exe.sig next to the already-staged installer.
+      - name: Stage updater signature
+        if: steps.sign.outputs.sign == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          setup_exe="$(compgen -G 'dist/*-setup.exe')"
+          [ -n "$setup_exe" ] || { echo "::error::no *-setup.exe staged in dist"; exit 1; }
+          sig="desktop/src-tauri/target/release/bundle/nsis/$(basename "$setup_exe").sig"
+          [ -f "$sig" ] || { echo "::error::expected updater signature $sig is missing"; exit 1; }
+          cp "$sig" dist/
+          ls -l dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

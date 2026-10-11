@@ -44,7 +44,8 @@ export type ActionId =
   | "pane.focus.right"
   | "pane.focus.up"
   | "pane.focus.down"
-  | "pane.move-tab.next";
+  | "pane.move-tab.next"
+  | "app.quit";
 
 /**
  * Where keyboard focus is, as far as shortcut routing cares.

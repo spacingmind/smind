@@ -150,22 +150,32 @@ jobs:
           if-no-files-found: error
 
   build-desktop-windows:
-    needs: prepare
+    # `release-please` in needs so require-updater-signing can read its
+    # release_created output; the always() + result check keeps the
+    # workflow_dispatch dry-run path working when release-please is skipped.
+    needs: [release-please, prepare]
     if: always() && needs.prepare.result == 'success'
     permissions:
       contents: read
     uses: ./.github/workflows/desktop-windows.yml
+    with:
+      require-updater-signing: ${{ needs.release-please.outputs.release_created == 'true' }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
   # The macOS app bundles the darwin daemon, so it waits for build-binaries
   # and reuses that job's per-arch artifact instead of compiling Go again.
   build-desktop-macos:
-    needs: [prepare, build-binaries]
+    needs: [release-please, prepare, build-binaries]
     if: always() && needs.prepare.result == 'success' && needs.build-binaries.result == 'success'
     permissions:
       contents: read
     uses: ./.github/workflows/desktop-macos.yml
     with:
       daemon-version: ${{ needs.prepare.outputs.version }}
+      require-updater-signing: ${{ needs.release-please.outputs.release_created == 'true' }}
+    secrets:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
   # Collects every build's artifact, computes one checksums.txt over all of
   # them, and (on a real release only) attaches everything to the Release.
@@ -183,6 +193,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      # checkout must come BEFORE download-artifact: it cleans untracked
+      # files, which would wipe the downloaded dist/ artifacts.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
@@ -193,9 +213,9 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          files=(*.tar.gz *.exe *.msi *.dmg)
+          files=(*.tar.gz *.exe *.msi *.dmg *.sig)
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "expected release artifacts, found none" >&2
+            echo "expected release assets, found none" >&2
             exit 1
           fi
           sha256sum "${files[@]}" | sort -k2 > checksums.txt
@@ -208,6 +228,7 @@ jobs:
             dist/*.exe
             dist/*.msi
             dist/*.dmg
+            dist/*.sig
             dist/checksums.txt
           if-no-files-found: error
 
@@ -220,8 +241,33 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          assets=(*.tar.gz *.exe *.msi *.dmg checksums.txt)
+          assets=(*.tar.gz *.exe *.msi *.dmg *.sig checksums.txt)
           gh release upload "$TAG" "${assets[@]}" --clobber --repo "${{ github.repository }}"
+
+      # Must come after the asset upload above: latest.json references the
+      # other release assets, and clients must never see a manifest that
+      # points at a file that isn't there yet (ADR-0023.3). Real releases
+      # only -- a workflow_dispatch dry run stamps a `-dev+<sha>` version,
+      # which is not a valid stable manifest version. No secret is
+      # referenced here; the manifest only needs public asset URLs.
+      - name: Generate and upload latest.json
+        if: needs.release-please.outputs.release_created == 'true'
+        working-directory: dist
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json body -q .body --repo "${{ github.repository }}" > notes.md
+          node ../desktop/scripts/gen-latest-json.mjs \
+            --dir . \
+            --version "${TAG#v}" \
+            --tag "$TAG" \
+            --repo "${{ github.repository }}" \
+            --notes-file notes.md \
+            --out latest.json
+          jq -r '.platforms | to_entries[] | "\(.key): \(.value.url)"' latest.json
+          gh release upload "$TAG" latest.json --clobber --repo "${{ github.repository }}"
 
   # Keeps `master` meaningful as "the code that has been released": after
   # a real release's assets are attached, fast-forward master to the tag.
