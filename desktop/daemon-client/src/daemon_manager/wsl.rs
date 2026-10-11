@@ -136,16 +136,75 @@ pub fn test_executable_argv(distro: &str) -> Vec<String> {
     vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "test".into(), "-x".into(), format!("$HOME/{BIN_SUBPATH}")]
 }
 
+/// Ticks (100 ms each) the start script waits for the port to be free
+/// before launching, and for the daemon to listen after launching.
+const FREE_WAIT_TICKS: u32 = 50;
+const LISTEN_WAIT_TICKS: u32 = 150;
+
+/// start_script builds the `sh -c` body that starts the daemon and stays
+/// alive until it is listening. It is a single line (`;`-joined) so it
+/// survives the `wsl.exe` argv boundary unchanged. `bin` and `log` are
+/// embedded inside double quotes (callers pass `$HOME/...` paths); `port`
+/// and the tick counts are numbers. POSIX sh only (dash-safe).
+///
+/// Steps: wait (bounded) for the port to be free so a Restart right after
+/// `kill` doesn't race the old process; start the daemon detached and keep
+/// `$!`; poll until `ss` shows the port listening, failing fast if the
+/// child died (`kill -0`) and killing it on timeout; then `sleep 1` and
+/// exit 0. `setsid` in a non-interactive sh execs in place (the shell is
+/// not a process-group leader), so `$!` is the daemon's own pid.
+fn start_script(bin: &str, log: &str, port: u16, free_wait_ticks: u32, listen_wait_ticks: u32) -> String {
+    let probe = format!("$(ss -H -tln \"sport = :{port}\" 2>/dev/null)");
+    let secs = listen_wait_ticks / 10;
+    [
+        "n=0".to_string(),
+        format!("while [ -n \"{probe}\" ] && [ $n -lt {free_wait_ticks} ]; do sleep 0.1; n=$((n+1)); done"),
+        format!("setsid nohup \"{bin}\" serve >>\"{log}\" 2>&1 </dev/null & pid=$!"),
+        "n=0".to_string(),
+        format!(
+            "while [ $n -lt {listen_wait_ticks} ]; do \
+if ! kill -0 $pid 2>/dev/null; then echo 'daemon exited before listening' >&2; tail -n 20 \"{log}\" >&2; exit 1; fi; \
+if [ -n \"{probe}\" ]; then sleep 1; exit 0; fi; \
+sleep 0.1; n=$((n+1)); done"
+        ),
+        "kill $pid 2>/dev/null".to_string(),
+        format!("echo 'daemon did not listen on port {port} within {secs}s' >&2"),
+        format!("tail -n 20 \"{log}\" >&2"),
+        "exit 1".to_string(),
+    ]
+    .join("; ")
+}
+
 /// start_detached_argv is the one place a shell is used: detaching a
 /// process from its controlling session and redirecting its output to a
 /// log file both need shell syntax (`&`, `>>`), and there is no argv-only
-/// equivalent. Every value embedded in the shell string here is a fixed,
-/// app-computed path under the managed install dir -- never user input --
-/// so this doesn't violate the "no shell interpolation of untrusted
-/// values" rule.
-pub fn start_detached_argv(distro: &str) -> Vec<String> {
-    let script = format!("setsid nohup \"$HOME/{BIN_SUBPATH}\" serve >>\"$HOME/{LOG_SUBPATH}\" 2>&1 </dev/null &");
+/// equivalent. Only fixed, app-computed paths under the managed install
+/// dir, the `u16` port and fixed numeric timeouts are embedded -- never
+/// user input.
+///
+/// The shell deliberately stays alive until the daemon is listening
+/// (2026-10-11 Windows QA): when `sh` exited right after `&`, `wsl.exe`
+/// tore the session down before the child had detached, killing it and
+/// leaving a 0-byte log. See `start_script` for the sequence.
+pub fn start_detached_argv(distro: &str, port: u16) -> Vec<String> {
+    let bin = format!("$HOME/{BIN_SUBPATH}");
+    let log = format!("$HOME/{LOG_SUBPATH}");
+    let script = start_script(&bin, &log, port, FREE_WAIT_TICKS, LISTEN_WAIT_TICKS);
     vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "sh".into(), "-c".into(), script]
+}
+
+/// start_outcome maps the start script's result to a clear error. The
+/// script writes its diagnosis (plus the log tail) to stderr.
+pub fn start_outcome(exit_ok: bool, stderr: &str) -> Result<(), String> {
+    if exit_ok {
+        return Ok(());
+    }
+    let msg = stderr.trim();
+    if msg.is_empty() {
+        Err("failed to start daemon: wsl.exe reported failure with no output".to_string())
+    } else {
+        Err(format!("failed to start daemon: {msg}"))
+    }
 }
 
 /// port_owner_argv finds the pid bound to `port` via `ss`'s own
@@ -290,14 +349,135 @@ mod tests {
         }
     }
 
-    #[test]
-    fn start_detached_argv_only_embeds_fixed_paths() {
-        let argv = start_detached_argv("Ubuntu");
+    fn script_of(port: u16) -> String {
+        let argv = start_detached_argv("Ubuntu", port);
         assert_eq!(argv[0], WSL_EXE);
-        let script = argv.last().unwrap();
-        assert!(script.contains(BIN_SUBPATH));
-        assert!(script.contains(LOG_SUBPATH));
+        argv.last().unwrap().clone()
+    }
+
+    #[test]
+    fn start_detached_argv_waits_for_the_port_before_exiting() {
+        let script = script_of(4648);
         assert!(script.contains("setsid nohup"));
+        assert!(script.contains("pid=$!"));
+        assert!(script.contains("ss -H -tln \"sport = :4648\""));
+        assert!(script.contains("sleep 1; exit 0"));
+        // The listening poll comes after the launch.
+        assert!(script.find("pid=$!").unwrap() < script.rfind("sleep 1; exit 0").unwrap());
+    }
+
+    #[test]
+    fn start_detached_argv_embeds_only_fixed_paths_and_the_port() {
+        let script = script_of(4648);
+        assert!(script.contains(&format!("\"$HOME/{BIN_SUBPATH}\"")));
+        assert!(script.contains(&format!("\"$HOME/{LOG_SUBPATH}\"")));
+        assert!(script.contains("4648"));
+        let other = script_of(9999);
+        assert_eq!(script.replace("4648", "9999"), other);
+    }
+
+    #[test]
+    fn start_detached_argv_has_bounded_waits_and_kills_its_own_child_on_timeout() {
+        let script = script_of(4648);
+        assert!(script.contains("-lt 50"));
+        assert!(script.contains("-lt 150"));
+        assert!(script.contains("kill $pid"));
+        assert!(script.contains("daemon did not listen on port 4648 within 15s"));
+        assert!(script.ends_with("exit 1"));
+    }
+
+    #[test]
+    fn start_detached_argv_fails_fast_when_the_child_exits() {
+        let script = script_of(4648);
+        assert!(script.contains("kill -0 $pid"));
+        assert!(script.contains("daemon exited before listening"));
+        assert!(script.contains("tail -n 20"));
+    }
+
+    #[test]
+    fn start_outcome_maps_exit_status_and_stderr_to_a_clear_error() {
+        assert_eq!(start_outcome(true, "ignored"), Ok(()));
+        assert_eq!(start_outcome(false, "  daemon exited before listening\nboom\n"), Err("failed to start daemon: daemon exited before listening\nboom".to_string()));
+        let empty = start_outcome(false, " \n").unwrap_err();
+        assert!(empty.starts_with("failed to start daemon: "));
+        assert!(empty.len() > "failed to start daemon: ".len());
+    }
+
+    fn have(tool: &str) -> bool {
+        std::process::Command::new("sh").args(["-c", &format!("command -v {tool} >/dev/null 2>&1")]).status().map(|s| s.success()).unwrap_or(false)
+    }
+
+    fn free_port() -> u16 {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        l.local_addr().unwrap().port()
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("smind-wsl-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[cfg(unix)]
+    fn write_exec(path: &std::path::Path, body: &str) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(path, body).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_script_runs_under_a_real_sh_and_reports_ready() {
+        if !(have("ss") && have("setsid") && have("python3")) {
+            return;
+        }
+        let dir = temp_dir("ready");
+        let port = free_port();
+        let bin = dir.join("fakebin");
+        write_exec(&bin, &format!("#!/bin/sh\necho $$ > \"{}/pid\"\nexec python3 -m http.server {port} --bind 127.0.0.1\n", dir.display()));
+        let log = dir.join("log");
+        let script = start_script(bin.to_str().unwrap(), log.to_str().unwrap(), port, 10, 100);
+        let out = std::process::Command::new("sh").args(["-c", &script]).output().unwrap();
+        let pid = std::fs::read_to_string(dir.join("pid")).unwrap_or_default().trim().to_string();
+        if !pid.is_empty() {
+            let _ = std::process::Command::new("kill").arg(&pid).status();
+        }
+        assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_script_times_out_and_leaves_no_orphan() {
+        if !(have("ss") && have("setsid")) {
+            return;
+        }
+        let dir = temp_dir("timeout");
+        let port = free_port();
+        let bin = dir.join("fakebin");
+        write_exec(&bin, &format!("#!/bin/sh\necho $$ > \"{}/pid\"\nexec sleep 30\n", dir.display()));
+        let log = dir.join("log");
+        let script = start_script(bin.to_str().unwrap(), log.to_str().unwrap(), port, 10, 10);
+        let out = std::process::Command::new("sh").args(["-c", &script]).output().unwrap();
+        assert!(!out.status.success());
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(&format!("daemon did not listen on port {port}")), "stderr: {err}");
+        let pid = std::fs::read_to_string(dir.join("pid")).unwrap().trim().to_string();
+        let mut gone = false;
+        for _ in 0..30 {
+            let alive = std::process::Command::new("kill").args(["-0", &pid]).stderr(std::process::Stdio::null()).status().unwrap().success();
+            if !alive {
+                gone = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        if !gone {
+            let _ = std::process::Command::new("kill").args(["-9", &pid]).status();
+        }
+        assert!(gone, "fake child {pid} survived the timeout");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
