@@ -2,6 +2,7 @@ package runs
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,5 +106,21 @@ func TestSetup_RejectWhenBusyNamesSetup(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "setup script") {
 			t.Fatalf("mode %q error = %v, want one naming the setup script", mode, err)
 		}
+	}
+}
+
+// TestSetup_StartRefusedWhileSetupRunning: the plain Start path (task.prompt,
+// run.start default, CLI) must not start a run inside a half-installed
+// worktree either.
+func TestSetup_StartRefusedWhileSetupRunning(t *testing.T) {
+	t.Parallel()
+	e := newSetupBusyEnv(t, "0")
+	_, err := e.reg.Start(context.Background(), e.wm, e.runner, e.task.ID, 0, taskrunner.ProviderGLM, "x", taskrunner.PermissionSettings{}, "")
+	var sb *SetupBusyError
+	if err == nil || !errors.As(err, &sb) || !strings.Contains(err.Error(), "setup script") {
+		t.Fatalf("Start() error = %v, want *SetupBusyError naming the setup script", err)
+	}
+	if got := e.reg.List(0); len(got) != 0 {
+		t.Fatalf("a run was registered: %+v", got)
 	}
 }

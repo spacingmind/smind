@@ -512,6 +512,12 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	}
 	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
 
+	// ADR-0024 §2: never start a run in a worktree whose setup script is
+	// still running (StartWhenBusy and the queue check this too).
+	if t, terr := wm.GetTask(taskID); terr == nil && t.SetupStatus == workspace.SetupRunning {
+		return "", &SetupBusyError{TaskID: taskID}
+	}
+
 	id, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: start: %w", err)

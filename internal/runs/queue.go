@@ -317,6 +317,11 @@ func (reg *Registry) deliverOne(chatID int64) {
 		runID, err := reg.Start(context.Background(), wm, runner, chat.TaskID, chatID, taskrunner.Provider(cfg.Provider), deliverPrompt(item), taskrunner.PermissionSettings{Mode: cfg.PermissionMode, AutoAccept: cfg.AutoAccept}, taskrunner.ThinkingLevel(cfg.ThinkingLevel))
 		if err != nil {
 			var busyErr *ChatBusyError
+			var setupErr *SetupBusyError
+			if errors.As(err, &setupErr) {
+				// Setup was re-run since the check above; its finish delivers.
+				return
+			}
 			if errors.As(err, &busyErr) {
 				// Someone else's run won the start race; their finish will
 				// deliver this item. Leave it queued.
