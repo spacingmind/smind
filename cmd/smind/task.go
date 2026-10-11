@@ -110,7 +110,15 @@ func renderPermissionRequest(runID, requestID, summary string, options []permiss
 	for _, o := range options {
 		fmt.Fprintf(&b, "  - %s: %s (%s)\n", o.ID, o.Label, o.Kind)
 	}
-	fmt.Fprintf(&b, "  -> smind task approve %s %s\n", runID, requestID)
+	fmt.Fprintf(&b, "  -> approve: smind task approve %s %s\n", runID, requestID)
+	rejectID := "<optionId>"
+	for _, o := range options {
+		if strings.HasPrefix(o.Kind, "reject") {
+			rejectID = o.ID
+			break
+		}
+	}
+	fmt.Fprintf(&b, "  -> reject:  smind task approve %s %s %s\n", runID, requestID, rejectID)
 	return b.String()
 }
 
@@ -850,7 +858,8 @@ func cmdTaskPermissions(args []string) int {
 }
 
 // cmdTaskApproveUsage is printed on any argument error in cmdTaskApprove.
-const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]"
+const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [optionId]\n" +
+	"  optionId defaults to the first allow option; pass a reject option's id to deny instead"
 
 // cmdTaskApprove answers a run's pending permission request via
 // run.respondPermission -- closing the gap where a run whose provider
@@ -864,7 +873,11 @@ const cmdTaskApproveUsage = "usage: smind task approve <runId> [requestId] [opti
 // internal/runs.firstOptionByKind's own selection so `task approve
 // <runId>` with no further arguments does the obvious thing.
 func cmdTaskApprove(args []string) int {
-	if len(args) < 1 || len(args) > 2 {
+	if len(args) >= 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Println(cmdTaskApproveUsage)
+		return 0
+	}
+	if len(args) < 1 || len(args) > 3 {
 		fmt.Fprintln(os.Stderr, cmdTaskApproveUsage)
 		return 2
 	}
@@ -888,7 +901,7 @@ func cmdTaskApprove(args []string) int {
 	}
 
 	var target *pendingPermission
-	if len(args) == 2 {
+	if len(args) >= 2 {
 		requestID := args[1]
 		for i := range pending {
 			if pending[i].RequestID == requestID {
@@ -905,10 +918,27 @@ func cmdTaskApprove(args []string) int {
 	}
 
 	optionID := ""
-	for _, o := range target.Options {
-		if o.Kind == "allow_once" || o.Kind == "allow_always" {
-			optionID = o.ID
-			break
+	if len(args) == 3 {
+		for _, o := range target.Options {
+			if o.ID == args[2] {
+				optionID = o.ID
+				break
+			}
+		}
+		if optionID == "" {
+			ids := make([]string, 0, len(target.Options))
+			for _, o := range target.Options {
+				ids = append(ids, o.ID)
+			}
+			fmt.Fprintf(os.Stderr, "task approve: request %q has no option %q; valid option ids: %s\n", target.RequestID, args[2], strings.Join(ids, ", "))
+			return 1
+		}
+	} else {
+		for _, o := range target.Options {
+			if o.Kind == "allow_once" || o.Kind == "allow_always" {
+				optionID = o.ID
+				break
+			}
 		}
 	}
 	if optionID == "" {
