@@ -127,6 +127,10 @@ type Registry struct {
 	// losing it for the restart's redelivery, ADR-0021 §5).
 	closing atomic.Bool
 
+	// maxConcurrentRunsPerTree overrides defaultMaxConcurrentRunsPerTree
+	// when > 0 (see SetMaxConcurrentRunsPerTree). Guarded by mu.
+	maxConcurrentRunsPerTree int
+
 	// archiving holds the task ids currently mid-archive (TryBeginArchive
 	// adds, its release func removes). While a task id is in it, every
 	// run-start path (Start, StartWhenBusy, queue delivery) refuses with
@@ -321,6 +325,12 @@ type run struct {
 	provider  taskrunner.Provider
 	prompt    string
 	startedAt time.Time
+
+	// treeRoot is the root task id of this run's task tree, resolved via
+	// treeRootOf before reg.mu is taken and immutable thereafter -- the
+	// per-tree concurrency guard counts runs by it. 0 on a rehydrated run
+	// (those are never StatusRunning, so they never count).
+	treeRoot int64
 
 	// runner is the Runner Start drove (will drive) this run with,
 	// captured so ListConfigOptions/SetConfigOption can reach the run's
