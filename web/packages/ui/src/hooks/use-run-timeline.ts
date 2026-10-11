@@ -543,11 +543,14 @@ export function useRunTimeline(
 
         const mine = [...list].sort((a, b) => a.StartedAt.localeCompare(b.StartedAt));
 
-        const initial: RunEntry[] = mine.map(toRunEntry);
-        setRuns(initial);
-        for (const r of mine) knownRuns.current.add(r.ID);
+        // An adoption may have landed while this fetch was in flight;
+        // only the entries it doesn't already know about are new. Fresh
+        // (older) history goes first, adopted entries after.
+        const fresh = mine.filter((r) => !knownRuns.current.has(r.ID));
+        for (const r of fresh) knownRuns.current.add(r.ID);
+        setRuns((prev) => [...fresh.map(toRunEntry), ...(prev ?? [])]);
 
-        for (const r of mine) {
+        for (const r of fresh) {
           if (r.Status === "running") {
             streamRun(client, session, setRuns, r.ID);
           } else {
@@ -602,14 +605,15 @@ export function useRunTimeline(
         ...(permission?.autoAccept ? { autoAccept: true } : {}),
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
-      if (session.cancelled) {
-        throw new Error("selection changed");
-      }
-
       // ADR-0021 §2: a queued result has no run yet -- no entry is
       // appended; the server delivers it later and run.status adopts it.
       if (!("runId" in result)) return { kind: "queued" as const, queueItemId: result.queueItemId };
       const runId = result.runId;
+
+      // A superseded selection still gets the truthful result -- the
+      // server already started the run -- but no UI mutation, which is
+      // now the new selection's to make.
+      if (session.cancelled) return { kind: "started" as const, runId };
 
       // A run.status that arrived while the run.start response was in
       // flight may already have adopted (and attached) this run.
@@ -644,11 +648,12 @@ export function useRunTimeline(
     if (!client || taskId === null || chatId === null || !events) return;
     return events.subscribe("run.status", (payload) => {
       const p = payload as Partial<RunStatusEventPayload>;
-      if (p.chatId !== chatId || !p.runId) return;
-      if (knownRuns.current.has(p.runId)) return;
+      const runId = p.runId;
+      if (p.chatId !== chatId || !runId) return;
+      if (knownRuns.current.has(runId)) return;
       const session = sessionRef.current;
-      if (!session || adopting.current.has(p.runId)) return;
-      adopting.current.add(p.runId);
+      if (!session || adopting.current.has(runId)) return;
+      adopting.current.add(runId);
 
       client
         .call<RunSummary[]>("run.list", { chatId })
@@ -656,13 +661,7 @@ export function useRunTimeline(
           if (session.cancelled) return;
           const unknown = [...list]
             .sort((a, b) => a.StartedAt.localeCompare(b.StartedAt))
-            .filter((r) => {
-              if (knownRuns.current.has(r.ID)) {
-                adopting.current.delete(r.ID);
-                return false;
-              }
-              return true;
-            });
+            .filter((r) => !knownRuns.current.has(r.ID));
           if (unknown.length === 0) return;
           for (const r of unknown) knownRuns.current.add(r.ID);
           setRuns((prev) => (prev ? [...prev, ...unknown.map(toRunEntry)] : unknown.map(toRunEntry)));
@@ -685,7 +684,12 @@ export function useRunTimeline(
             }
           }
         })
-        .catch(() => {});
+        .catch(() => {})
+        // An empty/error answer may simply predate the run's arrival --
+        // allow the next run.status for this run to try again.
+        .finally(() => {
+          adopting.current.delete(runId);
+        });
     });
   }, [client, taskId, chatId, events]);
 
