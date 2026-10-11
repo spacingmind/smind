@@ -9,12 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/spacingmind/smind/internal/winjob"
 )
 
 // shCandidates lists sh.exe locations relative to the directory holding
@@ -50,10 +49,6 @@ func defaultShLookup() (string, error) {
 	return findSh()
 }
 
-// ntResumeProcess resumes a process created suspended (ntdll is not in
-// golang.org/x/sys/windows).
-var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
-
 // runScript is the Windows mirror of setup_unix.go's contract: the same
 // POSIX script runs as `sh -c <script>` with cwd = worktree, and env
 // entries ("K=V") are appended to the daemon's environment and only ever
@@ -77,7 +72,8 @@ func runScript(ctx context.Context, worktree, script string, env []string, timeo
 	// Bound the wait for output pipes held open by orphaned grandchildren.
 	cmd.WaitDelay = 2 * time.Second
 
-	job, err := startInKillOnCloseJob(cmd)
+	// Own process group (Ctrl+C isolation) and a kill-on-close Job Object, see internal/winjob.
+	job, err := winjob.Start(cmd, windows.CREATE_NEW_PROCESS_GROUP)
 	if err != nil {
 		return "", fmt.Errorf("start script: %w", err)
 	}
@@ -94,102 +90,18 @@ func runScript(ctx context.Context, worktree, script string, env []string, timeo
 	select {
 	case err := <-done:
 		// Reap any stragglers left in the job (an orphaned grandchild).
-		job.kill()
+		job.Close()
 		if err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 			return out.String(), fmt.Errorf("script failed: %w", err)
 		}
 		return out.String(), nil
 	case <-timer:
-		job.kill()
+		job.Close()
 		<-done
 		return out.String(), fmt.Errorf("script timed out after %s", timeout)
 	case <-ctx.Done():
-		job.kill()
+		job.Close()
 		<-done
 		return out.String(), fmt.Errorf("script cancelled: %w", ctx.Err())
 	}
-}
-
-// startInKillOnCloseJob starts cmd created suspended in its own process
-// group, assigns it to a fresh kill-on-close Job Object, and only then
-// resumes it (NtResumeProcess) -- so there is no window in which the
-// shell or anything it spawns runs outside the job: a grandchild cannot
-// start before the shell is in the job. The returned job is the kill
-// switch: closing its handle terminates the whole tree.
-func startInKillOnCloseJob(cmd *exec.Cmd) (*killOnCloseJob, error) {
-	job, err := newKillOnCloseJob()
-	if err != nil {
-		return nil, err
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_SUSPENDED | windows.CREATE_NEW_PROCESS_GROUP,
-	}
-	if err := cmd.Start(); err != nil {
-		_ = windows.CloseHandle(job)
-		return nil, err
-	}
-	proc, err := windows.OpenProcess(
-		windows.PROCESS_SET_QUOTA|windows.PROCESS_SUSPEND_RESUME|windows.PROCESS_TERMINATE,
-		false, uint32(cmd.Process.Pid))
-	if err == nil {
-		err = windows.AssignProcessToJobObject(job, proc)
-		if err == nil {
-			if r1, _, _ := ntResumeProcess.Call(uintptr(proc)); r1 != 0 {
-				err = fmt.Errorf("NtResumeProcess: NTSTATUS 0x%x", r1)
-			}
-		}
-	}
-	_ = windows.CloseHandle(proc)
-	if err != nil {
-		killFailedStart(cmd, job)
-		return nil, err
-	}
-	return &killOnCloseJob{handle: job}, nil
-}
-
-// killFailedStart reaps a child that was created but never resumed into
-// the job successfully, and drops the job with it.
-func killFailedStart(cmd *exec.Cmd, job windows.Handle) {
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
-	_ = windows.CloseHandle(job)
-}
-
-// killOnCloseJob holds a kill-on-close Job Object containing the shell
-// and everything it spawns (see internal/terminal's identical helper --
-// kept local per package until deduplicated).
-type killOnCloseJob struct {
-	handle    windows.Handle
-	closeOnce sync.Once
-}
-
-// kill closes the job handle, making the OS terminate the whole tree.
-// Once-guarded because the natural-exit path releases the same handle and
-// Windows recycles handle values: a second unguarded CloseHandle could
-// close an unrelated handle in the daemon.
-func (j *killOnCloseJob) kill() {
-	j.closeOnce.Do(func() { _ = windows.CloseHandle(j.handle) })
-}
-
-// newKillOnCloseJob creates a Job Object whose processes are killed when
-// its last handle closes, and returns our handle -- deliberately the only
-// one, so closing it is what triggers the kill.
-func newKillOnCloseJob() (windows.Handle, error) {
-	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-
-	job, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := windows.SetInformationJobObject(
-		job,
-		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info)),
-	); err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, err
-	}
-	return job, nil
 }
