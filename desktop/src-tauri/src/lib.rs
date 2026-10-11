@@ -44,7 +44,12 @@ const CONNECTIONS_FILE: &str = "connections.json";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // ADR-0023: updater plugin on macOS/Windows only; Linux (deb) has no
+    // updater. Its JS-facing permissions are never granted.
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    let builder = builder.plugin(updater_plugin());
+    builder
         // AC2: single instance must be registered before anything that
         // creates windows or tray icons.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -94,10 +99,6 @@ pub fn run() {
         // tauri-plugin-single-instance's deep-link feature (registered
         // above), which is why single-instance is set up first.
         .plugin(tauri_plugin_deep_link::init())
-        // ADR-0023: updater plugin on macOS/Windows only; Linux (deb)
-        // has no updater. Its JS-facing permissions are never granted.
-        .plugin(updater_plugin())
-
         .invoke_handler(tauri::generate_handler![
             commands::connections_list,
             commands::connections_add,

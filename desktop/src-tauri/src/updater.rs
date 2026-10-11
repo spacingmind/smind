@@ -4,7 +4,7 @@
 //! `app_update_check` reports `unsupported` and install rejects.
 
 use serde::Serialize;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::Mutex;
 
 pub const NOTES_CAP: usize = 4000;
 
@@ -88,6 +88,11 @@ impl<T> PendingUpdate<T> {
         *self.inner.lock().unwrap() = Some(update);
     }
 
+    /// Put an update back (a failed install must stay retryable).
+    pub fn restore(&self, update: T) {
+        self.set(update);
+    }
+
     pub fn take(&self) -> Result<T, String> {
         self.inner
             .lock()
@@ -101,6 +106,19 @@ impl<T> Default for PendingUpdate<T> {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Settle an install attempt: a failure puts the update back so the
+/// UI's retry doesn't hit "No update is pending".
+pub fn settle_install<T>(
+    pending: &PendingUpdate<T>,
+    update: T,
+    result: Result<(), String>,
+) -> Result<(), String> {
+    if result.is_err() {
+        pending.restore(update);
+    }
+    result
 }
 
 /// RAII in-progress guard: `begin` fails with the contract's error while
@@ -126,6 +144,14 @@ impl InstallInProgress {
         Self {
             flag: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Err with the contract's error while an install runs (no claim).
+    pub fn ensure_idle(&self) -> Result<(), String> {
+        if self.flag.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("An update is already in progress".to_string());
+        }
+        Ok(())
     }
 
     pub fn begin(&self) -> Result<InstallGuard<'_>, String> {
@@ -168,6 +194,7 @@ pub async fn app_update_check(
     {
         use tauri_plugin_updater::UpdaterExt;
 
+        state.install.ensure_idle()?;
         let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
         match updater.check().await {
             Ok(Some(update)) => {
@@ -178,6 +205,8 @@ pub async fn app_update_check(
                     notes: cap_notes(update.body.clone()),
                     date: update.date.map(|d| d.to_string()),
                 };
+                // An install may have started while the check ran.
+                state.install.ensure_idle()?;
                 state.pending.set(update);
                 Ok(result)
             }
@@ -210,7 +239,7 @@ pub async fn app_update_install(
         let update = state.pending.take()?;
         let download_app = app.clone();
         let install_app = app.clone();
-        update
+        let result = update
             .download_and_install(
                 move |downloaded, total| {
                     let _ = download_app.emit(
@@ -233,7 +262,8 @@ pub async fn app_update_install(
             .map_err(|e| {
                 log::info!("smind desktop: update install failed: {e}");
                 e.to_string()
-            })?;
+            });
+        settle_install(&state.pending, update, result)?;
         // Windows: the NSIS installer exits the app itself. macOS: the
         // call never resolves -- restart does not return.
         #[cfg(target_os = "macos")]
@@ -242,10 +272,6 @@ pub async fn app_update_install(
         Ok(())
     }
 }
-
-// Silence "unused" on the one cfg branch that doesn't name them.
-#[allow(unused)]
-fn _unused(_: &MutexGuard<'_, ()>) {}
 
 #[cfg(test)]
 mod tests {
@@ -326,6 +352,30 @@ mod tests {
     }
 
     #[test]
+    fn failed_install_keeps_update_pending() {
+        let pending: PendingUpdate<u8> = PendingUpdate::new();
+        pending.set(7);
+        let update = pending.take().unwrap();
+        let err = settle_install(&pending, update, Err("boom".to_string()));
+        assert_eq!(err, Err("boom".to_string()));
+        assert_eq!(pending.take(), Ok(7), "retry still finds the update");
+        // Success does not restore it.
+        assert_eq!(settle_install(&pending, 7, Ok(())), Ok(()));
+        assert!(pending.take().is_err());
+    }
+
+    #[test]
+    fn check_rejected_while_install_in_progress() {
+        let install = InstallInProgress::new();
+        assert!(install.ensure_idle().is_ok());
+        let _guard = install.begin().unwrap();
+        assert_eq!(
+            install.ensure_idle(),
+            Err("An update is already in progress".to_string())
+        );
+    }
+
+    #[test]
     fn install_rejects_concurrent_call() {
         let install = InstallInProgress::new();
         {
@@ -389,7 +439,7 @@ mod tests {
             ("tauri.macos.conf.json", include_str!("../tauri.macos.conf.json")),
             ("tauri.windows.conf.json", include_str!("../tauri.windows.conf.json")),
         ] {
-            let c: Value = serde_json::from_str(src).expect("{name} parses");
+            let c: Value = serde_json::from_str(src).unwrap_or_else(|e| panic!("{name} parses: {e}"));
             let create = c["bundle"]["createUpdaterArtifacts"].clone();
             assert!(
                 create.is_null() || create == Value::Bool(false),
