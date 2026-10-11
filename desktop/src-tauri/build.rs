@@ -36,6 +36,8 @@ fn main() {
             "connections_select",
             "connections_get_current",
             "open_external",
+            "app_quit",
+            "app_menu_action",
             "editors_list",
             "open_in_editor",
             "daemon_status",

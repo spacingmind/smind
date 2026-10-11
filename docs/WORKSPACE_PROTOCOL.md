@@ -140,7 +140,7 @@ read-only review of an exact commit.
 ## Process safety
 
 - Run sandbox daemons with an isolated `SMIND_HOME` and port. Never touch
-  `~/.spacingmind` or the user's running daemon.
+  `~/.smind` or the user's running daemon.
 - Record the PIDs you start and kill only those. **Never use `pkill` or
   `killall` by name pattern.** Other sessions' processes run on this
   machine.

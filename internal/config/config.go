@@ -4,7 +4,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 )
@@ -77,13 +76,17 @@ type OrchestrationConfig struct {
 	// grandchildren but rejects a great-grandchild. Enforced by
 	// internal/workspace.Manager.CreateTask.
 	MaxDepth int `yaml:"maxDepth"`
+	// MaxConcurrentRunsPerTree caps how many runs may be StatusRunning at
+	// once across one task tree (a root task and all its descendants).
+	// Default 4; Load rejects values < 1.
+	MaxConcurrentRunsPerTree int `yaml:"maxConcurrentRunsPerTree"`
 }
 
 // Default returns the built-in defaults.
 func Default() Config {
 	return Config{
 		Server:        ServerConfig{Port: 4648},
-		Orchestration: OrchestrationConfig{MaxDepth: 2},
+		Orchestration: OrchestrationConfig{MaxDepth: 2, MaxConcurrentRunsPerTree: 4},
 		Worktrees: WorktreesConfig{
 			SetupTimeoutSeconds:    600,
 			TeardownTimeoutSeconds: 120,
@@ -91,26 +94,15 @@ func Default() Config {
 	}
 }
 
-// Dir returns the smind home directory (~/.spacingmind).
-func Dir() string {
-	if v := os.Getenv("SMIND_HOME"); v != "" {
-		return v
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ".spacingmind"
-	}
-	return filepath.Join(home, ".spacingmind")
-}
-
-// Path returns the config file location.
-func Path() string {
-	return filepath.Join(Dir(), "config.yaml")
-}
-
 // Load reads the config file, falling back to defaults for missing keys.
 // A missing file is not an error.
+//
+// Load first performs the one-time home migration: when SMIND_HOME is unset
+// and ~/.smind does not exist while ~/.spacingmind is a directory, the
+// legacy tree is renamed to ~/.smind and a compat symlink is left behind.
+// Migration never fails the load; see home.go.
 func Load() (Config, error) {
+	migrateIfDue()
 	cfg := Default()
 	data, err := os.ReadFile(Path())
 	if os.IsNotExist(err) {
@@ -124,6 +116,9 @@ func Load() (Config, error) {
 	}
 	if _, _, _, err := cfg.Worktrees.Ports.PortRange(); err != nil {
 		return cfg, fmt.Errorf("config %s: %w", Path(), err)
+	}
+	if n := cfg.Orchestration.MaxConcurrentRunsPerTree; n < 1 {
+		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", Path(), n)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)
