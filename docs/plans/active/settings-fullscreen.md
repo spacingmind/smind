@@ -115,6 +115,14 @@ References (read-only, ported not invented):
 - `App settings view > a command-palette task pick while in settings leaves settings`
 - existing "settings view shows with no task selected" test keeps passing.
 
+## Review round 1 (Supervisor, PR #297) — changes
+
+- **Shell shortcuts inert while Settings is open.** New `useActionRestriction(allowed)` in the keyboard provider narrows dispatch (keys, native menu, palette `runAction`) to an allow-list; a restricted key is left to the browser (no `preventDefault`). `App.tsx` restricts to `SETTINGS_SAFE_ACTIONS` = `palette.open`, `shortcuts.help`, `settings.open`, `theme.cycle`, `app.quit`. Tests: `useActionRestriction` (2, provider), `App settings view > shell shortcuts are inert while settings is open: task.next does not change the selection` (verified to fail without the restriction), `settings-safe shortcuts still work over settings`.
+- **Nav grouping (Paseo-style):** ungrouped app sections first — General · Appearance · Notifications (110) · Shortcuts (120) — then the Connection group (desktop only: Connections, Daemon), then Agents & providers (Agents, MCP servers, Providers, Usage). A divider ends a group if an ungrouped section is registered after one. Tests: nav-order, "Notifications and Shortcuts precede the Agents & providers heading", separator.
+- **No duplicate titles/actions:** `settings-title.tsx` (`SettingsSectionTitle` + `SectionTitleInHeaderProvider`). The screen provides `titleInHeader`; sections with a name-repeating `<h3>` (Agents, MCP servers, Providers, Usage, Notifications, Daemon) drop it and keep their actions (and Usage's description) right-aligned; rendered standalone they keep the title. Agents/MCP empty states lost their second "New …" CTA — the header button is the single primary action.
+- **Content column:** centred `max-w-4xl px-8` (ZCode's `SETTINGS_FRAME_CONTENT_CLASSNAME`; Paseo centres 720px) owned by the screen, identical for every section (gutter at 1440 ≈ 174px, was ≈ 230px).
+- **Known limitation (accepted):** crossing the 768px breakpoint remounts the active section (desktop ↔ narrow are different trees), so a section's unsaved local state (an open form) is lost on resize.
+
 ## Progress
 
 - [x] Spec (this file)
@@ -123,6 +131,7 @@ References (read-only, ported not invented):
 - [x] S2 Lead: `App.tsx` keep-mounted overlay + palette hook + App tests (605cecb)
 - [x] S1c Peer (glm): section nav icons — REJECT as delivered (hit turn limit, uncommitted, stray `m` before `order:` in 6 files); Lead fixed + committed
 - [x] Screenshots light/dark at 1440×900 and 390×844 (found + fixed: ragged label alignment without icons; empty 48px strip above the back row in a browser)
+- [x] Review round 1 changes above (commits after a0343ae)
 - [x] `task test` (web 1682/1682, Go + desktop scripts), `task lint`, `bun run typecheck`
 
 Deviations from the spec: Decision 6 also lets Escape on a *narrow detail*
@@ -140,4 +149,4 @@ pop back to the list before closing; `settings.open` while open is a no-op;
 - AC6 settings-screen.test `SettingsScreen narrow` (list → detail, back, initialSectionId, Escape); screenshots `narrow-*-2-list`, `-3-detail-appearance`, `-4-list-again`.
 - AC7 PARTIAL: settings-screen.chrome.test (drag regions, window controls on Windows/Linux, macOS left inset), desktop-chrome.test (macOS opaque panes + vibrancy sidebar hook). **Not verified in a real Tauri window** (no headless desktop run available); plan stays in `active/` for that reason.
 - AC8 registry untouched; all 11 settings test files pass (123 tests).
-- AC9 `tmp/screenshots/` (gitignored) — wide/narrow × light/dark, reviewed.
+- AC9 (round 2 shots) `tmp/screenshots/` (gitignored) — wide/narrow × light/dark, reviewed.
