@@ -446,13 +446,41 @@ func handleTaskCreate(wm *workspace.Manager) handlerFunc {
 			SpaceID      *int64 `json:"spaceId"`
 			ParentTaskID *int64 `json:"parentTaskId"`
 			Title        string `json:"title"`
+			// BaseRef/Branch/PRNumber pick the task's starting point
+			// (exactly one of the three; all omitted = off HEAD) --
+			// validated again inside workspace.CreateTask.
+			BaseRef string `json:"baseRef"`
+			Branch  string `json:"branch"`
+			PRNum   *int64 `json:"prNumber"`
 		}
 		if err := json.Unmarshal(raw, &p); err != nil {
 			return nil, fmt.Errorf("task.create: invalid params: %w", err)
 		}
+		refModes := 0
+		if p.BaseRef != "" {
+			refModes++
+		}
+		if p.Branch != "" {
+			refModes++
+		}
+		if p.PRNum != nil {
+			refModes++
+		}
+		if refModes > 1 {
+			return nil, fmt.Errorf("task.create: pass at most one of baseRef, branch, prNumber")
+		}
 		var opts []workspace.CreateTaskOption
 		if p.ParentTaskID != nil {
 			opts = append(opts, workspace.WithParentTask(*p.ParentTaskID))
+		}
+		if p.BaseRef != "" {
+			opts = append(opts, workspace.WithBaseRef(p.BaseRef))
+		}
+		if p.Branch != "" {
+			opts = append(opts, workspace.WithExistingBranch(p.Branch))
+		}
+		if p.PRNum != nil {
+			opts = append(opts, workspace.WithPullRequest(int(*p.PRNum)))
 		}
 		return wm.CreateTask(p.WorkspaceID, p.SpaceID, p.Title, opts...)
 	}
