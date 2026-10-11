@@ -67,7 +67,7 @@ export function useChatFind(containerRef: RefObject<HTMLElement | null>, revisio
   }, []);
 
   const openBar = useCallback(() => setOpen(true), []);
-  useActionHandler("pane.find", openBar, { enabled: focused });
+  useActionHandler("pane.find", openBar, { enabled: focused, menuFallback: true });
 
   useEffect(() => {
     if (open) barRef.current?.focus();
