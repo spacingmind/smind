@@ -19,6 +19,9 @@ type CreateTaskOption func(*createTaskParams)
 
 type createTaskParams struct {
 	parentTaskID *int64
+	baseRef      string
+	branch       string
+	prNumber     int
 }
 
 // WithParentTask makes the new task a child of parentID, which CreateTask
@@ -48,6 +51,17 @@ func WithParentTask(parentID int64) CreateTaskOption {
 // slug plus a nanosecond timestamp suffix keeps the name readable while
 // guaranteeing it won't collide with another task sharing the same title.
 //
+// The task's starting point is chosen with exactly one optional ref mode:
+// WithBaseRef (new branch smind/task-<slug> at that ref's commit),
+// WithExistingBranch (check out an existing branch into the worktree, no
+// new branch), or WithPullRequest (new branch smind/pr-<n>-<slug> from the
+// PR head, GitHub only). Omitting all three keeps the default behavior
+// (new branch off the checkout's current HEAD). Supplying more than one is
+// rejected up front, before any git command runs. Every user-supplied
+// ref/branch is validated (empty, leading '-', whitespace/control chars,
+// '..', git check-ref-format, rev-parse --verify) before a worktree is
+// touched; git is only ever invoked with discrete argv, never a shell.
+//
 // WithParentTask(parentID) makes the new task a child of parentID: rejected
 // up front, before any worktree is touched, if parentID doesn't exist, if
 // it belongs to a different workspace, or if the new task would sit deeper
@@ -71,12 +85,48 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		}
 	}
 
+	refModes := 0
+	if p.baseRef != "" {
+		refModes++
+	}
+	if p.branch != "" {
+		refModes++
+	}
+	if p.prNumber != 0 {
+		refModes++
+	}
+	if refModes > 1 {
+		return store.Task{}, fmt.Errorf("create task: pass at most one of baseRef, branch, prNumber")
+	}
+	if p.prNumber < 0 {
+		return store.Task{}, fmt.Errorf("create task: prNumber must be > 0")
+	}
+
 	name := slugify(title) + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
 
-	if err := gitWorktreeAdd(ws.Path, worktreePath, branch); err != nil {
-		return store.Task{}, fmt.Errorf("create task worktree: %w", err)
+	var wtErr error
+	switch {
+	case p.baseRef != "":
+		wtErr = createTaskFromBaseRef(ws.Path, worktreePath, branch, p.baseRef)
+	case p.branch != "":
+		wtErr = createTaskFromBranch(ws.Path, worktreePath, p.branch)
+		branch = p.branch
+	case p.prNumber > 0:
+		branch = "smind/pr-" + strconv.Itoa(p.prNumber) + "-" + name
+		wtErr = createTaskFromPR(ws.Path, worktreePath, branch, p.prNumber)
+	default:
+		wtErr = gitWorktreeAdd(ws.Path, worktreePath, branch)
+	}
+	if wtErr != nil {
+		// A half-created worktree directory must not outlive the failure:
+		// no task row exists yet, so nothing but this cleanup stands
+		// between the caller and a stray directory.
+		if dirExists(worktreePath) {
+			_, _ = runGitOutput(ws.Path, "worktree", "remove", "--force", worktreePath)
+		}
+		return store.Task{}, fmt.Errorf("create task worktree: %w", wtErr)
 	}
 
 	t, err := m.store.CreateTask(store.Task{
