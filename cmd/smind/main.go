@@ -47,6 +47,8 @@ func run(args []string) int {
 		return cmdUsage(args[1:])
 	case "mcp":
 		return cmdMcp(args[1:])
+	case "skill":
+		return cmdSkill(args[1:])
 	case "version", "--version", "-v":
 		return cmdVersion(osStdout)
 	case "-h", "--help", "help":
@@ -106,7 +108,11 @@ Usage:
   smind usage [--since <RFC3339>] [--until <RFC3339>]     token usage per account, model, or day
       [--by account|model|day]
 
-Every subcommand except "serve" talks to a locally running daemon over its
+  smind skill ls [--target claude|agents|codex|all]       bundled orchestration skills x targets (installed/modified/missing)
+  smind skill install [--target ...] [--force] [name...]  install the bundled skills (explicit; no daemon needed)
+  smind skill uninstall [--target ...] [name...]          remove only the files smind installed
+
+Every subcommand except "serve" and "skill" talks to a locally running daemon over its
 WebSocket API, authenticating with the token the daemon itself wrote to
 ~/.spacingmind/token (override the home directory with $SMIND_HOME).
 `)
