@@ -215,14 +215,85 @@ approval tools, no auto-approving profiles); G7 review tools; G9–G11.
 
 ## Progress
 
-- [ ] spec committed
-- [ ] WP1 MCP + CLI (AC1, AC2, AC4)
-- [ ] WP2 daemon permission detail (AC3 Go side)
-- [ ] WP3 GLM pin/config/usage/stop note (AC5, AC6, AC7 error text) — pin+flag, config, serve wiring, usage tests + ADR-0020 note done; AC7 error text not in this branch
-- [ ] WP4 web card + stop label + screenshots (AC3 web, AC5 web)
-- [x] CLI/MCP rendering of detail (AC3) + stop note in CLI/MCP (AC5): cmd/smind permission_detail.go, mcp_run_tools.go
-- [ ] stacked PR on #264 for instructions (AC2, AC7)
+- [x] spec committed
+- [x] WP1 MCP + CLI (AC1, AC2, AC4)
+- [x] WP2 daemon permission detail (AC3 Go side)
+- [x] WP3 GLM pin / `agents.glm.maxTurns` / usage evidence (AC5 config half, AC6)
+- [x] WP4 web card + stop label (AC3 web, AC5 web)
+- [x] CLI/MCP rendering of detail (AC3) + stop note in CLI/MCP (AC5)
+- [x] instructions wording (AC2, AC7): PR #264 landed on develop meanwhile, so
+  the change went into this PR (`cmd/smind/mcp_instructions.go`) instead of
+  a stacked one
+- [x] AC7 error text and the `accept_edits` pin test (WP1 step 4)
 
 ## Validation
 
-(filled in as criteria are confirmed)
+How each criterion was satisfied. "Live" = a real `smind serve` sandbox
+(isolated `SMIND_HOME`, own ports, PIDs recorded and the only ones stopped)
+running the real `glm-acp-agent@1.14.0` binary against a local fake
+OpenAI-style model server (the Z.AI account was 429-limited, and a fake model
+makes the cap/usage numbers deterministic).
+
+- **AC1** `TestMCPRoundTrip_TaskStatusWithEvents`,
+  `TestMCPRoundTrip_TaskLogsWithEvents`,
+  `TestMCPRunEventOutputSchema_JSONFieldsAreNotArrays` pass. Negative control:
+  with the event fields reverted to `json.RawMessage` the same tests fail
+  with the dogfood's exact error (`.../payload: type: map[...] has type
+  "object", want one of "null, array"`). Validation stays on; only the declared
+  shape changed (`any`). Live: `task_status`, `task_logs`,
+  `task_permissions`, `task_wait` over stdio on a real run with a pending
+  write permission all returned results (tool_call `input` object intact).
+- **AC2** `TestTaskWait_*`, `TestMCPToolDescriptions_TaskWaitLoopWording`,
+  `TestMCPServer_InstructionsExplainWaitLoopAndModes` pass; a run that already
+  ended never reports `waiting_permission`
+  (`TestTaskWait_TerminalRunWithStalePermissionIsNotWaiting`, found in
+  review: a stopped run with an unresolved request would have looped a
+  driver forever). Live: `task_wait` on a run with a pending write returned
+  `state: waiting_permission` with `pendingPermissions` and the message. No
+  approval tool was added (`TestMCPTools_NoApprovalToolInCatalog`).
+- **AC3** Go: `TestPermissionDetail_*` (including FIFO, symlink-escape,
+  outside-worktree and sensitive-name cases, found in review: the first cut
+  would have hung on a FIFO and hid the overwrite signal for restricted
+  paths), `TestACPDeciderAdapter_*`, `TestRunsPermissionRequestEventCarriesDetail`,
+  `TestWSAPIPermissionRequestCarriesDetail`, `TestRunACP_WritePermissionCarriesDetail`.
+  CLI/MCP: `TestRenderPermissionRequest_*`, `TestMCPTaskPermissions_IncludesDetail`,
+  `TestMCPTaskWait_PendingPermissionsIncludeDetail`. Web: the eight named
+  `permission-detail` tests. Live: a GLM `Write file` onto a 40-line
+  `schema.sql` showed `replaces 40 -> 7 lines (1.0 KB -> 0.1 KB) OVERWRITES`
+  in the CLI summary, the MCP summary and the web card. Light and dark
+  screenshots of the card were taken with a headless Chrome against the
+  built UI (`/tmp/leader-shot/{light,dark}-card.png`, not committed): the
+  overwrite badge, danger callout and diff read cleanly in both themes.
+- **AC4** `TestTaskApprove_*` pass. Live: `task approve <run> <req> nope`
+  listed the valid ids; `... reject` rejected and `schema.sql` was untouched.
+- **AC5** `TestGLMCommand_*`, `TestConfig_GLMMaxTurns*`,
+  `TestGLMCommandOption_MaxTurns`/`glmCommandOverride`, `TestStopNote_*`,
+  `TestMCPTaskWait_StopNoteOnTurnCap`, `TestRenderDone_TurnCapHint`, web
+  `labels a max_turn_requests run as turn limit reached`. Live: with
+  `agents.glm.maxTurns: 3` a looping run stopped after exactly 3 model calls
+  with `max_turn_requests`.
+- **AC6** `TestACPPromptUsage_DecodesGLMRawResponse` and the
+  `TestDiffACPUsage_GLM*` tests pin the measured raw shapes. Live: that capped
+  run was metered `input=6000 output=30` = the sum of its 3 calls (not the
+  last call), via `smind usage --scope runs --by run`. ADR-0020 has the GLM
+  version note.
+- **AC7** `TestStartWhenBusy_AutoApprovingErrorPointsToProfiles`,
+  `TestModeAutoApproves_GLMAcceptEditsIsNotAutoApproving`.
+- **AC8** `task test` (Go all `ok`, web 119 files / 1492 tests),
+  `task lint`, `cd web && bunx tsc -b packages/ui` all exit 0 on the merged
+  tree. One Go test, `TestChatQueue_AgentProvenanceHeader` (`internal/runs`),
+  failed once on a TempDir cleanup race and passed on rerun and x5; two
+  `App.test.tsx` tests timed out once under full-suite load and passed alone
+  (same family as the known flaky CI tests).
+
+**Not verified**
+- A real Z.AI run (account was rate-limited): the agent binary, ACP handshake,
+  tool loop, cap and usage are real; the model is a fake.
+- Permission detail for Claude-native and Codex-native providers (ACP/GLM
+  only; their requests carry no `detail`).
+- `execute` detail reads only `rawInput.command`; GLM's real key for a
+  command prompt was not captured, so the command preview may be empty.
+- The card on narrow/mobile widths; the Windows path for the FIFO guard.
+- `permission_request` hydration from `run.logs` in the web client (no such
+  construction site exists today: the pending card is fed by the live and
+  `run.attach` backfill events).
