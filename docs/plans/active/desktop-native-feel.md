@@ -476,3 +476,215 @@ temporary, uncommitted build-time driver (it dispatched the workspace-menu
 Accessibility permission to click); a re-run needs an unlocked, awake
 display. Rerun recipe: `/tmp/d4shots/run.sh dark` then `/tmp/d4shots/run.sh
 light` (local to the coordinator's Mac).
+
+## Windows QA fixes (2026-10-11)
+
+Source: a real Windows QA pass (Windows 11 build 26200, WSL 3.0.1, Ubuntu
+26.04) of desktop 0.10.0. Checked against `origin/develop` (`2041b0f`) on
+2026-10-11 — every item below still reproduces by code reading. QA item
+numbers are kept in brackets so the PR's re-test list maps 1:1.
+
+Two PRs into `develop`:
+
+- **PR-A** `fix/windows-wsl-daemon-start-badge` — W1 (WSL daemon start) and
+  W2 (badge clears).
+- **PR-B** `fix/windows-desktop-chrome-qa` — W3 (tray/menu/Find/Ctrl+Q) and W4
+  (devtools, theme, scrollbars, VS Code on WSL).
+
+### W1 — WSL daemon never starts [QA 16, 17]
+
+Root cause: `start_detached_argv` (`desktop/daemon-client/src/daemon_manager/wsl.rs`)
+runs `sh -c 'setsid nohup … serve … &'`. The shell exits at once, `wsl.exe`
+tears the session down before the child has detached, and the daemon dies with
+a 0-byte log. `sleep 3` after the `&` keeps it alive (QA reproduced).
+
+Acceptance criteria:
+
+1. The start script keeps `sh -c` (and so the `wsl.exe` session) alive until the
+   daemon's port is **listening**, polling `ss -H -tln sport = :<port>` every
+   100 ms with a hard timeout (≤ 15 s). It never waits forever.
+2. It fails fast (non-zero exit, message on stderr including the last lines of
+   the log) when the child exits before listening (`kill -0` check), and on
+   timeout it **kills the child it started** (no orphan) and exits non-zero.
+3. Before starting, it waits (bounded, ≤ 5 s) for the port to be free, so a
+   Restart straight after `kill` doesn't race the old process's shutdown.
+4. A short grace `sleep 1` after the port is seen listening, so the session
+   isn't torn down in the same instant the daemon finishes detaching.
+5. `start_detached_argv` takes the port; the only values embedded in the shell
+   string are the fixed paths plus the `u16` port and fixed numeric timeouts.
+6. Install and Restart both surface the real start error. **Restart never
+   leaves the user without a daemon silently:** if the start fails, one
+   automatic retry runs; if that fails too, the command returns `Err` with the
+   log tail, and no `Running`/managed status is reported (status is recomputed
+   from the live port, never from the stale record).
+7. The readiness decision is a pure function (`wsl::start_outcome` or similar)
+   over (exit code, stdout/stderr) so it is unit-tested without WSL.
+
+Named tests (Rust, `smind_daemon_client::daemon_manager::wsl`):
+
+- `start_detached_argv_waits_for_the_port_before_exiting`
+- `start_detached_argv_embeds_only_fixed_paths_and_the_port`
+- `start_detached_argv_has_bounded_waits_and_kills_its_own_child_on_timeout`
+- `start_detached_argv_fails_fast_when_the_child_exits`
+- `start_script_runs_under_a_real_sh_and_reports_ready` (runs the script body
+  under the host `sh` with a fake binary that listens, skipped where `ss`/`sh`
+  are absent)
+- `start_script_times_out_and_leaves_no_orphan` (fake binary that never listens)
+- `start_outcome_maps_exit_status_and_stderr_to_a_clear_error`
+
+Tauri-side (`desktop/src-tauri/src/daemon_manager.rs`):
+
+- `restart_start_failure_retries_once_then_reports_the_error` (the decision
+  extracted as a pure function, injected start closure)
+- `failed_restart_never_reports_managed_running`
+
+### W2 — taskbar badge doesn't clear after a permission is answered [QA 15]
+
+Root cause: `Attention` clears a task only on `run.status == running`
+(`client_watch.rs`), and a run waiting on a permission is already `running`, so
+answering it emits nothing the client sees; only a reconnect clears it.
+
+Acceptance criteria:
+
+1. The daemon publishes a new bus topic **`permission.resolved`**
+   (`{runId, taskId, chatId, requestId, optionId?, reason}`; `reason` ∈
+   `human|timeout|providerCancelled|runEnded`) whenever a pending request leaves
+   the pending state: answered via `run.respondPermission`, auto-denied on
+   timeout, provider-cancelled, or its run stopped. Additive per ADR-0005
+   ("the set is open-ended"); registered in `knownTopics`; no existing payload
+   changes. AutoAccept (never pending) publishes nothing.
+2. The desktop client subscribes to it and calls
+   `Attention::on_permission_resolved(request_id)`, decrementing by request id.
+3. **Old-daemon compatibility:** `events.subscribe` rejects unknown topics, so
+   the desktop sends `permission.resolved` in a **separate** subscribe message
+   after the existing one; failure of that message is ignored (an older daemon
+   just keeps the old reconnect/running-only clearing).
+4. A non-`running` `run.status` (done/error/stopped/interrupted) clears every
+   pending entry for that task (`Attention::on_run_ended`).
+5. The tray tooltip/menu label and taskbar overlay follow the count.
+
+Named tests:
+
+- Go: `TestPermissionResolvedPublishedOnHumanAnswer`,
+  `TestPermissionResolvedPublishedOnTimeout`,
+  `TestPermissionResolvedPublishedWhenRunStopped`,
+  `TestPermissionResolvedIsAKnownTopic`,
+  `TestAutoAcceptPublishesNoPermissionResolved`.
+- Rust `attention`: `resolved_clears_only_that_request`,
+  `resolved_for_unknown_request_is_a_noop`, `run_ended_clears_its_task_only`,
+  `most_recent_task_falls_back_after_resolve`.
+- Rust `protocol`/`client`: `permission_resolved_payload_decodes`,
+  `subscribe_messages_put_permission_resolved_in_its_own_message`,
+  `run_status_done_emits_run_ended`.
+
+### W3 — tray and menu on Windows [QA 5, 9, 11, 14]
+
+Acceptance criteria:
+
+1. Left-click on the tray icon shows/focuses the main window (like the tray's
+   Open item); the menu stays on right-click
+   (`show_menu_on_left_click(false)` + `TrayIconEvent::Click{Left, Up}` handler).
+2. **Menu bar decision:** the window is undecorated on Windows/Linux, so the
+   native menu bar is not drawn (it only appears on F10 with the Alt-key
+   fallback). Following ZCode/Paseo, the actions live in the UI header: a
+   header **app-menu button** (hamburger, desktop non-macOS only) opening a
+   menu with the same File/View/Window/Help actions, wired to the same
+   handlers. The native menu stays installed (macOS needs it; on Windows/Linux
+   it still serves accelerators and F10). No new ADR (within ADR-0013's scoped
+   IPC).
+3. **Find from the menu works.** Root cause to confirm and fix: `pane.find` is
+   registered with `enabled: findFocused` (focus-within gating) and a native
+   menu click moves focus out of the pane, so no handler claims the action.
+   Menu/app-menu-dispatched `pane.find` must target the last-focused find-able
+   pane.
+4. **Ctrl+Q quits on Windows.** Root cause to confirm (undecorated window: the
+   native accelerator never reaches the menu, and the web binding table has no
+   Quit). Fix by handling Ctrl+Q for desktop non-macOS in the renderer
+   (`desktop.quit()` via a scoped IPC command that calls `app.exit(0)`), or a
+   global shortcut — whichever the investigation supports. Must not steal
+   terminal keys (Ctrl+Q is XON in a terminal: terminal-focused behaviour is
+   decided in the plan and tested).
+5. **Accelerator display consistency (D3's rule):** on Windows/Linux no
+   renderer-action item carries an accelerator (already true) **and** the
+   menu/app-menu shows no accelerator text that the platform doesn't honour.
+   Native-only items that do work keep theirs. The macOS menu is unchanged.
+   A test pins the table: for each item, accelerator present on macOS only
+   unless explicitly listed as honoured everywhere (Reload, zoom, F11, Quit
+   after the Ctrl+Q fix).
+
+Named tests:
+
+- Rust: `tray_left_click_shows_the_window_not_the_menu` (pure decision fn over
+  the click event), `tray_menu_still_has_open_and_quit`,
+  `menu_accelerators_follow_the_platform_table`.
+- Web: `app-menu button renders only on desktop non-macOS`,
+  `app menu items dispatch the same actions as the native menu`,
+  `menu-dispatched pane.find reaches the last focused pane after focus left
+  it`, `ctrl+q quits on desktop non-macOS and is inert on web`,
+  `ctrl+q is not claimed while the terminal pane has focus` (or the
+  documented alternative).
+
+### W4 — low-priority Windows polish [QA 5-adjacent items]
+
+Acceptance criteria:
+
+1. **DevTools only in debug builds.** The unconditional `devtools` feature on
+   the `tauri` dependency is removed (Tauri's devtools API stays available in
+   `debug_assertions` builds without it), so the release webview has no
+   Inspect / More tools entries. The menu item is already debug-only. Test:
+   a `cargo` check that `tauri` in `Cargo.toml` lacks the feature (a unit test
+   reading the manifest, like `surface_colors_match_index_css`) and a note on
+   how the debug build is verified.
+2. **Theme "System" on Windows.** Root cause to find (WebView2
+   `prefers-color-scheme` vs the Tauri/OS theme; `window_set_theme("system")`
+   → `set_theme(None)`). Fix so that with System selected, the resolved theme
+   follows the OS even when WebView2's media query disagrees: on desktop the
+   renderer reads the native theme (`getCurrentWindow().theme()` /
+   `onThemeChanged`) as the source of truth for "system". Terminal and
+   scrollbars follow `html.dark`.
+3. **Scrollbar arrow buttons hidden** (sidebar, tab strip, anywhere): under
+   `html[data-desktop-os="windows"]`,
+   `::-webkit-scrollbar-button { display: none; width: 0; height: 0 }`.
+4. **VS Code on WSL paths.** For `Platform::Wsl2` and editor `vscode`, spawn
+   `code --remote wsl+<distro> <linux-path>` instead of passing the
+   `\\wsl.localhost\…` UNC path. The allowlist, editor ids, the `wslpath`
+   existence check (still used for Cursor/Zed/file manager) and argv-only
+   spawning are unchanged. A distro name is validated (charset
+   `[A-Za-z0-9._ -]`) before being embedded in `wsl+<distro>` (one argv
+   element, never a shell).
+
+Named tests:
+
+- Rust `editors`: `vscode_on_wsl_uses_remote_wsl_and_the_linux_path`,
+  `cursor_and_zed_on_wsl_still_use_the_translated_path`,
+  `wsl_distro_with_odd_characters_is_rejected_for_remote`,
+  `vscode_remote_argv_keeps_the_editor_allowlist`.
+- Rust: `tauri_dependency_does_not_enable_devtools`.
+- Web: `desktop system theme follows the native window theme, not matchMedia`,
+  `desktop native theme change re-resolves system`,
+  `web system theme still follows matchMedia`.
+- Web/CSS: `index.css hides scrollbar buttons under the windows desktop gate`.
+
+### Decisions (W1–W4)
+
+- **`permission.resolved` is an additive daemon topic**, not a desktop-side
+  guess (observing `run.respondPermission` in the proxy would miss answers from
+  other clients/timeouts). This is the one place this bundle touches the daemon;
+  it is within ADR-0005's open-ended topic rule, so no new ADR, but it is called
+  out in the PR for review. The standing "no backend changes" constraint of D1–D4
+  was scoped to those PRs.
+- **Restart safety** is retry-once + clear error + status from the live port,
+  not a rollback: the old process is already gone once Restart has decided to
+  kill it, so the only honest outcomes are "new daemon up" or "error shown".
+- **Menu bar on Windows → header app-menu button** (ZCode/Paseo reference).
+
+### Progress (W1–W4)
+
+- [ ] W1 — WSL start (PR-A)
+- [ ] W2 — badge clears (PR-A)
+- [ ] W3 — tray/menu/Find/Ctrl+Q (PR-B)
+- [ ] W4 — devtools/theme/scrollbars/VS Code (PR-B)
+
+### Validation (W1–W4)
+
+_To be filled as each criterion is confirmed._
