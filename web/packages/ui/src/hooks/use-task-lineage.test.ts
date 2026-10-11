@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import type { Task, TaskTreeResult } from "@/lib/types";
+import type { Task } from "@/lib/types";
+import type { TaskTreeResult } from "@/lib/task-lineage";
 import type { TaskTreeNode } from "@/lib/task-lineage";
 
 /** Flushes pending microtasks, wrapped in `act` so React commits before assertions. */
