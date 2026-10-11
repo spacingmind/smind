@@ -724,6 +724,12 @@ type runPermissionDecider struct {
 }
 
 func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
+	return d.DecideDetailed(ctx, summary, nil, options)
+}
+
+// DecideDetailed implements taskrunner.DetailedPermissionDecider: detail
+// (possibly nil) is recorded on the permission_request event.
+func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, error) {
 	requestID, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: permission request id: %w", err)
@@ -742,6 +748,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 				PermissionRequestID: requestID,
 				PermissionSummary:   summary,
 				PermissionOptions:   options,
+				PermissionDetail:    detail,
 			})
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                 taskrunner.EventTypePermissionResolved,
@@ -767,6 +774,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 		PermissionRequestID: requestID,
 		PermissionSummary:   summary,
 		PermissionOptions:   options,
+		PermissionDetail:    detail,
 	})
 
 	timer := time.NewTimer(d.reg.getPermissionTimeout())

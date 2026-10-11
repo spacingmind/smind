@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
@@ -181,5 +182,36 @@ func TestClaudeDeciderAdapter_PropagatesError(t *testing.T) {
 	if allow || updatedInput != nil || denyMessage != "" || updatedPermissions != nil || interrupt {
 		t.Fatalf("on error want zero values, got allow=%v updatedInput=%+v denyMessage=%q updatedPermissions=%+v interrupt=%v",
 			allow, updatedInput, denyMessage, updatedPermissions, interrupt)
+	}
+}
+
+type detailRecordingDecider struct {
+	recordingDecider
+	gotDetail *PermissionDetail
+}
+
+func (d *detailRecordingDecider) DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error) {
+	d.gotDetail = detail
+	return d.Decide(ctx, summary, options)
+}
+
+func TestACPDeciderAdapter_SummaryIncludesHeadlineAndPassesDetail(t *testing.T) {
+	t.Parallel()
+	wt := t.TempDir()
+	mustWrite(t, wt+"/schema.sql", numberedLines(240))
+	d := &detailRecordingDecider{recordingDecider: recordingDecider{optionID: "o"}}
+	adapter := acpDeciderAdapter{decider: d, worktree: wt}
+	raw := writeCall(t, "edit", "schema.sql", numberedLines(7))
+	req := acp.RequestPermissionParams{ToolCall: raw, Options: []acp.PermissionOption{{OptionID: "o", Name: "Allow", Kind: acp.PermissionAllowOnce}}}
+	if _, err := adapter.Decide(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if d.gotDetail == nil || !d.gotDetail.ReplacesExisting {
+		t.Fatalf("detail = %+v", d.gotDetail)
+	}
+	for _, want := range []string{"Write file: schema.sql (", "240 -> 7 lines", "OVERWRITES"} {
+		if !strings.Contains(d.gotSummary, want) {
+			t.Fatalf("summary %q missing %q", d.gotSummary, want)
+		}
 	}
 }

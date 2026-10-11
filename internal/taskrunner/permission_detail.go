@@ -228,8 +228,10 @@ func capText(s string, maxBytes, maxLines int) (string, bool) {
 	return s, t1 || t2
 }
 
-func capPreview(s string) (string, bool) { return capText(s, detailPreviewMaxBytes, detailPreviewMaxLines) }
-func capDiff(s string) (string, bool)    { return capText(s, detailDiffMaxBytes, detailDiffMaxLines) }
+func capPreview(s string) (string, bool) {
+	return capText(s, detailPreviewMaxBytes, detailPreviewMaxLines)
+}
+func capDiff(s string) (string, bool) { return capText(s, detailDiffMaxBytes, detailDiffMaxLines) }
 
 // isSensitiveName reports whether a file's base name looks like it holds
 // secrets.
