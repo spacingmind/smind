@@ -36,6 +36,13 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
   // their 10s grace window, plus the pending timers that end them.
   const autoCancelledAt = useRef(new Map<number, number>());
   const timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  // Stale-response guards: the chat this hook currently serves, the
+  // client it served it with, and how many live snapshots have arrived --
+  // a queueList answer that predates a switch, a reconnect, or a newer
+  // snapshot must never clobber the newer state.
+  const chatIdRef = useRef<number | null>(chatId);
+  const clientRef = useRef<WsClientLike | null>(client);
+  const snapshotSeq = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -46,31 +53,37 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
 
   const fetch = useCallback(() => {
     if (!client || chatId === null) return;
-    let cancelled = false;
+    // Capture the world as it was when the request left: a late answer
+    // from a superseded chat/client, or one a newer snapshot has already
+    // overtaken, is dropped rather than applied.
+    const reqChatId = chatId;
+    const reqClient = client;
+    const reqSeq = snapshotSeq.current;
     client
       .call<{ items: ChatQueueItem[] }>("chat.queueList", { chatId })
       .then((result) => {
-        if (!cancelled) setAll(result.items ?? []);
+        if (chatIdRef.current !== reqChatId || clientRef.current !== reqClient || snapshotSeq.current !== reqSeq) return;
+        setAll(result.items ?? []);
       })
       .catch(() => {});
-    // A chat switch (this effect re-running) must also drop this fetch's
-    // cleanup -- guard via the closure, mirroring use-run-timeline's
-    // session pattern without a second ref.
-    return () => {
-      cancelled = true;
-    };
   }, [client, chatId]);
 
   useEffect(() => {
+    chatIdRef.current = chatId;
+    clientRef.current = client;
     setAll([]);
     autoCancelledAt.current.clear();
     if (!client || chatId === null) return;
+    // An in-flight queueList from the previous selection is stale by
+    // definition; advancing the sequence drops its response too.
+    snapshotSeq.current += 1;
 
     const offFetch = fetch();
     if (!events) return offFetch;
     const offQueue = events.subscribe("chat.queueUpdated", (payload) => {
       const p = payload as { chatId?: number; items?: ChatQueueItem[] };
       if (p.chatId !== chatId) return;
+      snapshotSeq.current += 1;
       setAll(p.items ?? []);
     });
     const offDropped = events.subscribe("event.dropped", () => {

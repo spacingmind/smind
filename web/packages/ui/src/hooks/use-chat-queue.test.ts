@@ -179,6 +179,46 @@ describe("useChatQueue", () => {
     expect(result.current.items.map((i) => i.ID)).toEqual([9]);
   });
 
+  it("ignores a stale queueList response from refresh() after a chat switch", async () => {
+    const client = new FakeWsClient();
+    const { result, rerender } = renderHook(({ chatId }) => useChatQueue(client, null, chatId), {
+      initialProps: { chatId: 10 as number | null },
+    });
+
+    // refresh() while on chat 10, then switch to 11 before it answers.
+    act(() => {
+      result.current.refresh();
+    });
+    rerender({ chatId: 11 });
+    await flush();
+
+    // The stale call (chat 10's) resolves last and must be ignored;
+    // chat 11's own fetch says empty.
+    resolveList(client, 0, [item({ ID: 1 })]);
+    resolveList(client, 1, []);
+    await flush();
+    expect(result.current.items).toHaveLength(0);
+  });
+
+  it("a queueList response older than a newer chat.queueUpdated snapshot is ignored", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    const { result } = renderHook(() => useChatQueue(client, events, 10));
+
+    // A refresh is in flight when a newer snapshot lands with the truth.
+    act(() => {
+      result.current.refresh();
+    });
+    act(() => {
+      events.emit("chat.queueUpdated", { chatId: 10, items: [item({ ID: 3 })] });
+    });
+    resolveList(client, 1, []);
+    await flush();
+
+    // The older, emptier queueList answer must not overwrite item 3.
+    expect(result.current.items.map((i) => i.ID)).toEqual([3]);
+  });
+
   it("refetches on a new client and on event.dropped", async () => {
     const client1 = new FakeWsClient();
     const client2 = new FakeWsClient();
