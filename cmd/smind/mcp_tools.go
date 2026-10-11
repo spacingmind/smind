@@ -20,7 +20,7 @@ import (
 // request. task_send/task_wait/task_stop (steps 3-5 of the plan) land in
 // later tasks.
 func registerMCPTools(srv *mcp.Server, client *wsclient.Client) {
-	mcp.AddTool(srv, &mcp.Tool{Name: "task_new", Description: "Create a new smind task (agent workspace) in a workspace. Returns the created task with its id, worktree path, and branch."}, mcpTaskNew(client))
+	mcp.AddTool(srv, &mcp.Tool{Name: "task_new", Description: "Create a new smind task (agent workspace) in a workspace. Returns the created task with its id, worktree path, and branch. The task's starting point is chosen with exactly ONE optional argument among baseRef (new branch at that ref's commit, e.g. origin/develop; the daemon best-effort fetches the remote branch first and falls back to the stale tracking ref), branch (check out an EXISTING local or origin-tracking branch into the worktree, no new branch; a later archive checkpoints onto that same branch), or prNumber (GitHub-hosted origin only: fetch refs/pull/<n>/head and branch smind/pr-<n>-<slug> from it). Supplying more than one is an error; omitting all three branches off the workspace checkout's current HEAD."}, mcpTaskNew(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "task_list", Description: "List a workspace's smind tasks (id, title, status, branch)."}, mcpTaskList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_list", Description: "List a task's chats (conversation threads)."}, mcpChatList(client))
 	mcp.AddTool(srv, &mcp.Tool{Name: "chat_new", Description: "Create a new chat (conversation thread) under a task."}, mcpChatNew(client))
@@ -45,6 +45,11 @@ type taskNewInput struct {
 	SpaceID      *int64 `json:"spaceId,omitempty" jsonschema:"optional space id within the workspace to group the task under"`
 	ParentTaskID *int64 `json:"parentTaskId,omitempty" jsonschema:"optional id of an existing task in the same workspace to make this task a child of"`
 	Title        string `json:"title" jsonschema:"title for the new task"`
+	// BaseRef/Branch/PRNumber are mutually exclusive ref modes; the
+	// jsonschema descriptions state the exclusion so the model sees it.
+	BaseRef string `json:"baseRef,omitempty" jsonschema:"optional git ref (e.g. origin/develop) to branch the new task branch from at that ref's commit; mutually exclusive with branch and prNumber"`
+	Branch  string `json:"branch,omitempty" jsonschema:"optional name of an EXISTING branch (local, or origin/<name>) to check out into the new worktree without creating a new branch; mutually exclusive with baseRef and prNumber"`
+	PRNum   *int64 `json:"prNumber,omitempty" jsonschema:"optional GitHub pull request number to build the task from (GitHub-hosted origin only); mutually exclusive with baseRef and branch"`
 }
 
 // Output-shape note: the outputs below deliberately wrap daemon results
@@ -74,6 +79,15 @@ func mcpTaskNew(client *wsclient.Client) mcp.ToolHandlerFor[taskNewInput, taskNe
 		}
 		if in.ParentTaskID != nil {
 			params["parentTaskId"] = *in.ParentTaskID
+		}
+		if in.BaseRef != "" {
+			params["baseRef"] = in.BaseRef
+		}
+		if in.Branch != "" {
+			params["branch"] = in.Branch
+		}
+		if in.PRNum != nil {
+			params["prNumber"] = *in.PRNum
 		}
 		var task map[string]any
 		if err := callWS(ctx, client, "task_new", "task.create", params, &task); err != nil {
