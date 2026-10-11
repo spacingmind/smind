@@ -42,7 +42,7 @@ pub trait AssetSource: Send + Sync + 'static {
 
 pub struct ProxyState {
     pub secret: String,
-    pub registry: Mutex<Registry>,
+    pub registry: std::sync::Arc<Mutex<Registry>>,
     pub assets: Box<dyn AssetSource>,
     pub http_client: reqwest::Client,
     /// The relay transport for the currently-selected connection, if it
@@ -60,7 +60,7 @@ impl ProxyState {
     pub fn new(secret: String, registry: Registry, assets: Box<dyn AssetSource>) -> Arc<Self> {
         Arc::new(Self {
             secret,
-            registry: Mutex::new(registry),
+            registry: std::sync::Arc::new(Mutex::new(registry)),
             assets,
             http_client: reqwest::Client::new(),
             relay: Mutex::new(None),
