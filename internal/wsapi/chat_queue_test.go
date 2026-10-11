@@ -120,6 +120,26 @@ func TestChatQueue_ListCancelAndEvent(t *testing.T) {
 	if len(snap.Items) != 2 || snap.Items[1].Status != "cancelled" {
 		t.Fatalf("post-cancel snapshot = %+v, want q2 cancelled", snap)
 	}
+	if snap.Items[1].CancelKind != "user" {
+		t.Fatalf("post-cancel snapshot CancelKind = %q, want \"user\"", snap.Items[1].CancelKind)
+	}
+
+	// The queueList answer carries the same structured kind.
+	sendRequest(t, ws, "ls2", "chat.queueList", map[string]any{"chatId": chatID})
+	resp = ec.nextResponse("ls2", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("chat.queueList(after cancel) error = %v", resp.Error.Message)
+	}
+	var listAfter chatQueueListResult
+	if err := json.Unmarshal(resp.Result, &listAfter); err != nil {
+		t.Fatalf("decode chat.queueList(after cancel): %v", err)
+	}
+	if len(listAfter.Items) != 2 || listAfter.Items[1].CancelKind != "user" || listAfter.Items[1].Status != "cancelled" {
+		t.Fatalf("chat.queueList(after cancel) = %+v, want q2 cancelled with CancelKind user", listAfter)
+	}
+	if listAfter.Items[0].CancelKind != "" {
+		t.Fatalf("queued item CancelKind = %q, want \"\" while queued", listAfter.Items[0].CancelKind)
+	}
 
 	// Deliver q1 by stopping the running run, then cancel it again:
 	// delivered items are not cancellable.

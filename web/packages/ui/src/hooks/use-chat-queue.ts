@@ -15,11 +15,11 @@ const AUTO_CANCELLED_TTL_MS = 10_000;
  * ever stored -- a snapshot or late response for another chat is
  * ignored, so a chat switch can't flash the old queue.
  *
- * Cancel reason strings ("cancelled by user", the "delivery failed:"
- * family) are server-defined (internal/runs/queue.go) -- the coupling is
- * deliberate and unavoidable: the UI decides *visibility* (a user cancel
- * vanishes at once; an auto-cancel shows its reason briefly) from that
- * one field.
+ * CancelKind decides visibility (a user cancel vanishes at once; an
+ * auto-cancel shows its CancelReason briefly) -- the structured field the
+ * daemon stamps alongside the display-only reason string, so the UI never
+ * string-matches on the reason. A cancelled item with an empty/unknown
+ * kind is hidden, matching the user-cancel case.
  */
 export function useChatQueue(client: WsClientLike | null, events: DaemonEvents | null, chatId: number | null): {
   items: ChatQueueItem[];
@@ -102,7 +102,7 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
     const live = new Set<number>();
     for (const item of all) {
       if (item.Status !== "cancelled") continue;
-      if (!item.CancelReason || item.CancelReason === "cancelled by user") continue;
+      if (item.CancelKind !== "auto") continue;
       live.add(item.ID);
       if (!autoCancelledAt.current.has(item.ID)) {
         autoCancelledAt.current.set(item.ID, now);
@@ -125,7 +125,7 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
       .sort((a, b) => b.Priority - a.Priority || a.ID - b.ID);
     const cancelledVisible = all.filter((item) => {
       if (item.Status !== "cancelled") return false;
-      if (!item.CancelReason || item.CancelReason === "cancelled by user") return false;
+      if (item.CancelKind !== "auto") return false;
       // An item not yet in the map was first seen on this very render
       // (the effect below records it right after commit) -- visible.
       const seen = autoCancelledAt.current.get(item.ID);

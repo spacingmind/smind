@@ -105,6 +105,29 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "accounts", "models", "TEXT")
 		},
 	},
+	{
+		// Structured cancel kind on chat_queue items: 'user' (the
+		// chat.queueCancel RPC) or 'auto' (delivery failed). The reason
+		// string stays display text; the kind is what clients branch on.
+		// Pre-existing cancelled rows get theirs backfilled from the
+		// reason the daemon wrote at the time ('cancelled by user' is the
+		// only user-cancel reason it ever stored), every other cancelled
+		// row was a delivery failure. Idempotent: the backfill only
+		// touches rows whose kind is still '' and which are no longer
+		// queued, and a fresh database has no cancelled rows at all.
+		name: "chat_queue.cancel_kind",
+		apply: func(db *sql.DB) error {
+			if err := addColumnIfMissing(db, "chat_queue", "cancel_kind", "TEXT NOT NULL DEFAULT ''"); err != nil {
+				return err
+			}
+			if _, err := db.Exec(`UPDATE chat_queue
+				SET cancel_kind = CASE WHEN cancel_reason = 'cancelled by user' THEN 'user' ELSE 'auto' END
+				WHERE status = 'cancelled' AND cancel_kind = ''`); err != nil {
+				return fmt.Errorf("backfill chat_queue.cancel_kind: %w", err)
+			}
+			return nil
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and
