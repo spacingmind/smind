@@ -46,6 +46,8 @@ fn main() {
             "connection_version",
             "window_ready",
             "window_set_theme",
+            "app_update_check",
+            "app_update_install",
         ]),
     );
     tauri_build::try_build(attributes).expect("smind desktop: tauri_build::try_build failed");
