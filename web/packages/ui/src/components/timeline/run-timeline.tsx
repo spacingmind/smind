@@ -51,7 +51,19 @@ export const RunTimeline = memo(function RunTimeline({
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-xl border">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-sm text-foreground-muted">
-        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+          {run.model && (
+            // ADR-0025: only a *requested* model is shown -- a default run has no chip.
+            <span
+              data-testid="run-model-chip"
+              title={`Requested model: ${run.model}`}
+              className="max-w-40 shrink truncate rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
+            >
+              {run.model}
+            </span>
+          )}
+        </span>
         <span className="flex shrink-0 items-center gap-1.5">
           <StatusDot status={RUN_STATUS_DOT[run.status]} />
           <span className="uppercase" data-testid="run-status">
