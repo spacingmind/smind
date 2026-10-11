@@ -171,14 +171,26 @@ func TestRenderPermissionRequest(t *testing.T) {
 
 	got := renderPermissionRequest("run-1", "req-2", "Bash(git push)", []permissionOptionParams{
 		{ID: "opt-allow", Label: "Allow once", Kind: "allow_once"},
-	})
-	if !strings.Contains(got, "-> smind task approve run-1 req-2\n") {
-		t.Fatalf("renderPermissionRequest() = %q, want a hint line `-> smind task approve run-1 req-2`", got)
+	}, nil)
+	if !strings.Contains(got, "-> approve: smind task approve run-1 req-2\n") {
+		t.Fatalf("renderPermissionRequest() = %q, want a hint line `-> approve: smind task approve run-1 req-2`", got)
 	}
 	if !strings.Contains(got, "[permission] Bash(git push) (request req-2)") {
 		t.Fatalf("renderPermissionRequest() = %q, want the summary and request id", got)
 	}
 	if !strings.Contains(got, "opt-allow: Allow once (allow_once)") {
 		t.Fatalf("renderPermissionRequest() = %q, want every option rendered", got)
+	}
+}
+
+func TestRenderPermissionRequest_DenyHint(t *testing.T) {
+	t.Parallel()
+
+	got := renderPermissionRequest("run-1", "req-2", "x", []permissionOptionParams{
+		{ID: "opt-allow", Label: "Allow", Kind: "allow_once"},
+		{ID: "opt-no", Label: "Deny", Kind: "reject_once"},
+	}, nil)
+	if !strings.Contains(got, "-> deny:    smind task deny run-1 req-2\n") {
+		t.Fatalf("renderPermissionRequest() = %q, want a deny hint", got)
 	}
 }

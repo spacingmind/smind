@@ -86,6 +86,34 @@ describe("useRunTimeline", () => {
     expect(client.calls.some((c) => c.method === "run.attach")).toBe(false);
   });
 
+  it("keeps detail on the pending permission from a live event and from run.logs", async () => {
+    const client = new FakeWsClient();
+    const events = fakeEvents();
+    const detail = { kind: "write" as const, path: "a.sql", replacesExisting: true, largeShrink: true, newLines: 7, existingLines: 240 };
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10, events));
+    resolveList(client, 0, []);
+    await flush();
+    act(() => {
+      events.emit("run.status", { runId: "run-d", taskId: 1, chatId: 10, status: "running" });
+    });
+    resolveList(client, 1, [summary({ ID: "run-d", Status: "running" })]);
+    await flush();
+    await waitFor(() => expect(client.calls.some((c) => c.method === "run.attach")).toBe(true));
+
+    // Live event.
+    act(() => {
+      client.emit("run.attach", 0, "permission_request", { requestId: "r1", summary: "Write file", options: [], detail });
+    });
+    expect(result.current.runs?.[0].pendingPermission?.detail).toEqual(detail);
+
+    // Backfilled run.logs-shaped entry replayed through the same attach path
+    // (a finished run's run.logs never leaves a pending permission).
+    act(() => {
+      client.emit("run.attach", 0, "permission_request", { requestId: "r2", summary: "Write file", options: [], detail: { ...detail, path: "b.sql" } });
+    });
+    expect(result.current.runs?.[0].pendingPermission?.detail?.path).toBe("b.sql");
+  });
+
   it("adopts and streams a server-delivered run from run.status", async () => {
     const client = new FakeWsClient();
     const events = fakeEvents();

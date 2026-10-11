@@ -68,7 +68,22 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
-	return a.decider.Decide(ctx, summarizeACPToolCallIn(a.cwd, req.ToolCall), opts)
+	summary := summarizeACPToolCallIn(a.cwd, req.ToolCall)
+	// detail is the structured counterpart of the summary's write
+	// description (path, sizes, overwrite flags, capped diff/preview).
+	detail := BuildPermissionDetail(a.cwd, req.ToolCall)
+	if dd, ok := a.decider.(DetailedPermissionDecider); ok {
+		return dd.DecideDetailed(ctx, summary, detail, opts)
+	}
+	return a.decider.Decide(ctx, summary, opts)
+}
+
+// DetailedPermissionDecider is an optional extension of PermissionDecider: a
+// decider that implements it also receives the PermissionDetail derived from
+// the tool call (nil when none). Only the ACP adapter supplies detail; the
+// Claude/Codex adapters call plain Decide.
+type DetailedPermissionDecider interface {
+	DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error)
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a

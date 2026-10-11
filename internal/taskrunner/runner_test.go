@@ -1216,3 +1216,43 @@ func TestRunner_StartModeAppliedBeforeSessionIsSwitchable(t *testing.T) {
 		t.Fatalf("session-mode log = %q, want only the start-up set_mode", log)
 	}
 }
+
+type detailStubDecider struct {
+	stubDecider
+	detail *PermissionDetail
+}
+
+func (d *detailStubDecider) DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error) {
+	d.mu.Lock()
+	d.detail = detail
+	d.mu.Unlock()
+	return d.Decide(ctx, summary, options)
+}
+
+func TestRunACP_WritePermissionCarriesDetail(t *testing.T) {
+	t.Parallel()
+	wm, task := newTestTask(t, "permission-write")
+	if err := os.WriteFile(filepath.Join(*task.WorktreePath, "existing.txt"), []byte(numberedLines(240)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := glmRunner(wm)
+	decider := &detailStubDecider{stubDecider: stubDecider{optionID: "deny-1"}}
+
+	events := make(chan Event)
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- r.RunPrompt(context.Background(), task.ID, task.ID, ProviderGLM, "hi", decider, PermissionSettings{}, "", "", events)
+	}()
+	drainEvents(events)
+	if err := <-errCh; err != nil {
+		t.Fatalf("RunPrompt() error = %v", err)
+	}
+	decider.mu.Lock()
+	defer decider.mu.Unlock()
+	if decider.detail == nil || !decider.detail.ReplacesExisting || !decider.detail.LargeShrink {
+		t.Fatalf("detail = %+v", decider.detail)
+	}
+	if !strings.Contains(decider.summary, "240 -> 7 lines") || !strings.Contains(decider.summary, "overwrites existing file") {
+		t.Fatalf("summary = %q", decider.summary)
+	}
+}

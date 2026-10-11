@@ -79,6 +79,14 @@ own events (`refs/paseo/packages/server/src/server/agent/agent-sdk-types.ts`,
      spawns one process per run, so in practice each ACP run is charged
      the cumulative figure its process reports; differencing applies
      where one process serves several runs.
+   - **GLM agent versions.** glm-acp-agent < 1.11 reports only the last
+     model call's usage in `PromptResponse.usage` (unusable, hence the
+     pin in `internal/acp/glm.go`). >= 1.11 reports the prompt's summed
+     total across its model calls, per prompt and not session-cumulative.
+     That is still right under process-per-run (each run is charged the
+     whole figure); a shared-process design must not difference it. See
+     `docs/plans/active/dogfood-gap-fixes.md` (AC6) and
+     `internal/taskrunner/usage_glm_test.go`.
    - **First-run limitation.** A session or thread that predates this
      change has no stored snapshot, so its first run afterwards is charged
      the whole cumulative figure (including earlier runs' usage). There is
