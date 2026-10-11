@@ -58,6 +58,16 @@ type PermissionDecider interface {
 // so this is a direct translation with no synthesized options needed.
 type acpDeciderAdapter struct {
 	decider PermissionDecider
+	// worktree resolves relative tool-call paths for BuildPermissionDetail.
+	worktree string
+}
+
+// DetailedPermissionDecider is an optional extension of PermissionDecider:
+// a decider that implements it also receives the PermissionDetail derived
+// from the tool call (nil when none). Only the ACP adapter supplies detail;
+// the Claude/Codex adapters call plain Decide.
+type DetailedPermissionDecider interface {
+	DecideDetailed(ctx context.Context, summary string, detail *PermissionDetail, options []PermissionOption) (string, error)
 }
 
 func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermissionParams) (string, error) {
@@ -65,7 +75,15 @@ func (a acpDeciderAdapter) Decide(ctx context.Context, req acp.RequestPermission
 	for i, o := range req.Options {
 		opts[i] = PermissionOption{ID: o.OptionID, Label: o.Name, Kind: string(o.Kind)}
 	}
-	return a.decider.Decide(ctx, summarizeACPToolCall(req.ToolCall), opts)
+	detail := BuildPermissionDetail(a.worktree, req.ToolCall)
+	summary := summarizeACPToolCall(req.ToolCall)
+	if h := detail.Headline(); h != "" {
+		summary += " (" + h + ")"
+	}
+	if dd, ok := a.decider.(DetailedPermissionDecider); ok {
+		return dd.DecideDetailed(ctx, summary, detail, opts)
+	}
+	return a.decider.Decide(ctx, summary, opts)
 }
 
 // summarizeACPToolCall builds a human-readable summary of the tool call a

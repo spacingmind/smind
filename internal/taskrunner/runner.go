@@ -324,7 +324,7 @@ func (r *Runner) runACP(ctx context.Context, chatID int64, workspaceID int64, pr
 	var opts []acp.Option
 	switch {
 	case decider != nil:
-		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider}))
+		opts = append(opts, acp.WithPermissionPolicy(acpDeciderAdapter{decider: decider, worktree: worktreePath}))
 	case perm.AutoAccept:
 		opts = append(opts, acp.WithPermissionPolicy(acp.AutoApprovePolicy{}))
 	case r.acpPermissionPolicy != nil:

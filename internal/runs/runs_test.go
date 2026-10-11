@@ -2032,3 +2032,38 @@ func TestRegistry_McpServersEventSurvivesRehydrate(t *testing.T) {
 		t.Fatalf("rehydrated McpServers = %+v, want %+v", gotEvents[0].McpServers, wantEvents[0].McpServers)
 	}
 }
+
+func TestRunsPermissionRequestEventCarriesDetail(t *testing.T) {
+	t.Parallel()
+	reg, r, _ := startedRun(t, taskrunner.PermissionSettings{AutoAccept: true})
+	decider := runPermissionDecider{reg: reg, r: r}
+	detail := &taskrunner.PermissionDetail{Kind: "write", Path: "a.txt", NewLines: 7, ReplacesExisting: true, LargeShrink: true}
+
+	if _, err := decider.DecideDetailed(context.Background(), "Write file: a.txt", detail, allowDenyOptions); err != nil {
+		t.Fatalf("DecideDetailed() error = %v", err)
+	}
+	r.mu.Lock()
+	hist := append([]taskrunner.Event(nil), r.history...)
+	r.mu.Unlock()
+	var req *taskrunner.Event
+	for i := range hist {
+		if hist[i].Type == taskrunner.EventTypePermissionRequest {
+			req = &hist[i]
+		}
+	}
+	if req == nil || req.PermissionDetail == nil || !req.PermissionDetail.ReplacesExisting {
+		t.Fatalf("permission_request = %+v, want detail recorded", req)
+	}
+
+	data, err := encodeEvent(*req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := decodeEvent(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.PermissionDetail == nil || *back.PermissionDetail != *detail {
+		t.Fatalf("round trip detail = %+v, want %+v", back.PermissionDetail, detail)
+	}
+}
