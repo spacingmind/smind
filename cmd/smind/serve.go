@@ -102,6 +102,7 @@ func cmdServe(args []string) int {
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
+	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),
 		Handler:           srv.Handler(),
