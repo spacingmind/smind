@@ -1,5 +1,7 @@
 import { useCallback, useState } from "react";
 
+import { Bell } from "lucide-react";
+
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { useNotificationPermission, type NotificationPermissionState } from "@/hooks/use-notification-permission";
@@ -137,5 +139,6 @@ registerSettingsSection({
   id: "notifications",
   label: "Notifications",
   order: 250,
+  icon: <Bell aria-hidden className="size-3.5" />,
   render: (ctx) => <NotificationsSection {...ctx} />,
 });

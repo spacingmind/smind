@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Info, MoreHorizontal, Plus } from "lucide-react";
+import { Info, MoreHorizontal, Plus, KeyRound } from "lucide-react";
 
 import { ConnectAccountPanel, useProviderTest } from "@/components/accounts-dialog";
 import {
@@ -839,5 +839,6 @@ registerSettingsSection({
   label: "Providers",
   groupLabel: "Agents & providers",
   order: 180,
+  icon: <KeyRound aria-hidden className="size-3.5" />,
   render: (ctx) => <ProvidersSection {...ctx} />,
 });

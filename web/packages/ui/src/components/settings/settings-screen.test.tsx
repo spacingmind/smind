@@ -494,4 +494,14 @@ describe("SettingsScreen layout", () => {
       inert.remove();
     }
   });
+
+  it("gives every registered section a nav icon so the labels align", () => {
+    renderScreen();
+
+    const navItems = document.querySelectorAll('[data-testid^="settings-nav-"]');
+    expect(navItems.length).toBeGreaterThan(0);
+    for (const item of navItems) {
+      expect(item.querySelector("svg")).not.toBeNull();
+    }
+  });
 });

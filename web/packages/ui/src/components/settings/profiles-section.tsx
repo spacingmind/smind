@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { MoreHorizontal, Plus, Star } from "lucide-react";
+import { MoreHorizontal, Plus, Star, Bot } from "lucide-react";
 
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
@@ -592,5 +592,6 @@ registerSettingsSection({
   label: "Agents",
   groupLabel: "Agents & providers",
   order: 175,
+  icon: <Bot aria-hidden className="size-3.5" />,
   render: (ctx) => <ProfilesSection {...ctx} />,
 });
