@@ -48,8 +48,7 @@ describe("SHORTCUT_BINDINGS", () => {
     // The web table: jsdom is not a desktop build, and the desktop-only
     // Mod+T / Mod+Digit rows would shadow the web defaults in the map.
     const byAction = new Map(
-      platformBindings(SHORTCUT_BINDINGS, false, false)
-        .filter((b) => !b.id.endsWith("-terminal"))
+      platformBindings(SHORTCUT_BINDINGS, false, false).filter((b) => b.when?.mac === undefined) // base rows only
         .map((b) => [b.action, b.combo]),
     );
     expect(byAction.get("sidebar.toggle")).toBe("Mod+B");
