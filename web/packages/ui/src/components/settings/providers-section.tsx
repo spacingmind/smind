@@ -6,6 +6,7 @@ import {
   registerSettingsSection,
   type SettingsSectionContext,
 } from "@/components/settings/settings-registry";
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -251,19 +252,21 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
 
   return (
     <div className="flex flex-col gap-4" data-testid="settings-section-providers">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-ui-base font-medium text-foreground">Providers</h3>
-        <Button
-          variant="outline"
-          size="sm"
-          aria-expanded={connecting}
-          data-testid="providers-connect-toggle"
-          onClick={() => setConnecting((v) => !v)}
-        >
-          <Plus aria-hidden className="size-3.5" />
-          Connect account
-        </Button>
-      </div>
+      <SettingsSectionTitle
+        title="Providers"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            aria-expanded={connecting}
+            data-testid="providers-connect-toggle"
+            onClick={() => setConnecting((v) => !v)}
+          >
+            <Plus aria-hidden className="size-3.5" />
+            Connect account
+          </Button>
+        }
+      />
       {connecting && (
         <ConnectAccountPanel
           client={client}

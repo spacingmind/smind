@@ -110,6 +110,25 @@ describe("SettingsScreen shell", () => {
     }
   });
 
+  it("does not repeat the section name as an in-body title (the header already shows it), but keeps the section's actions", () => {
+    renderScreen();
+
+    for (const [id, label, action] of [
+      ["agents", "Agents", "profile-new-button"],
+      ["mcp-servers", "MCP servers", "mcp-new-button"],
+      ["providers", "Providers", "providers-connect-toggle"],
+      ["usage", "Usage", "usage-refresh"],
+    ] as const) {
+      fireEvent.click(screen.getByTestId(`settings-nav-${id}`));
+      expect(screen.getByRole("heading", { level: 1, name: label })).toBeInTheDocument();
+      expect(screen.queryByRole("heading", { level: 3, name: label })).not.toBeInTheDocument();
+      expect(screen.getByTestId(action)).toBeInTheDocument();
+    }
+
+    fireEvent.click(screen.getByTestId("settings-nav-notifications"));
+    expect(screen.queryByRole("heading", { level: 3, name: "Notifications" })).not.toBeInTheDocument();
+  });
+
   it("the Providers nav entry renders ADR-0015's real Providers section, not the old open-accounts stub", () => {
     renderScreen();
 

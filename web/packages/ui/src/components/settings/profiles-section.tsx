@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { MoreHorizontal, Plus, Star, Bot } from "lucide-react";
 
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
@@ -216,10 +217,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-section-profiles">
       <section className="flex flex-col gap-2">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-ui-base font-medium text-foreground">Agents</h3>
-          {newAgentButton}
-        </div>
+        <SettingsSectionTitle title="Agents" actions={newAgentButton} />
 
         {profiles === null ? (
           <p className="text-ui-base text-muted-foreground">Loading…</p>
@@ -228,12 +226,9 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
             {profiles.length === 0 && openCard !== "new" && (
               <div data-testid="profiles-empty-state" className="flex flex-col items-start gap-2">
                 <p className="text-ui-base text-muted-foreground">
-                  No agents yet — create one to reuse a provider/mode/thinking bundle from the composer's
-                  Agents picker.
+                  No agents yet — create one with New agent to reuse a provider/mode/thinking bundle from the
+                  composer's Agents picker.
                 </p>
-                <Button type="button" size="sm" data-testid="profiles-empty-new-button" onClick={openNew}>
-                  <Plus aria-hidden className="size-3.5" /> New agent
-                </Button>
               </div>
             )}
             {(profiles.length > 0 || openCard === "new") && (

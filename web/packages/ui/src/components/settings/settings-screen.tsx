@@ -13,6 +13,7 @@ import "@/components/settings/shortcuts-section";
 import "@/components/settings/usage-section";
 
 import { DesktopWindowControls } from "@/components/desktop-window-controls";
+import { SectionTitleInHeaderProvider } from "@/components/settings/settings-title";
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -179,6 +180,13 @@ export function SettingsScreen({
   }, [narrow, view, onNavigateBack]);
 
   const active = sections.find((s) => s.id === activeId) ?? null;
+  // Every layout puts the section's name in its header, so a section's own
+  // in-body title is dropped (its actions stay) -- see settings-title.tsx.
+  const activeContent = (
+    <SectionTitleInHeaderProvider value>
+      {active ? active.render({ client, events }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
+    </SectionTitleInHeaderProvider>
+  );
   const dragRegion = isDesktop ? "deep" : undefined;
   const { fullscreen } = useWindowState();
   const leftInset = isDesktop ? headerLeftInsetPx(desktopOS, fullscreen, 0) : 0;
@@ -245,7 +253,7 @@ export function SettingsScreen({
         </header>
         <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
           <div className="w-full p-4">
-            {active ? active.render({ client, events }) : <EmptyState testId="settings-empty" title="No settings sections registered" />}
+            {activeContent}
           </div>
         </main>
       </div>
@@ -318,12 +326,8 @@ export function SettingsScreen({
             <DesktopWindowControls />
           </header>
           <main className="min-h-0 flex-1 overflow-y-auto" data-testid="settings-content">
-            <div className="mx-auto w-full max-w-3xl p-6">
-              {active ? (
-                active.render({ client, events })
-              ) : (
-                <EmptyState testId="settings-empty" title="No settings sections registered" />
-              )}
+            <div className="mx-auto w-full max-w-4xl px-8 py-6">
+              {activeContent}
             </div>
           </main>
         </div>
