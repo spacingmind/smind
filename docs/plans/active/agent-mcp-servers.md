@@ -105,6 +105,100 @@ question is unresolved.
   starts normally and reports them as unsupported for the provider; no
   servers reach Codex.
 
+### Per-run "active MCP servers" indicator (step 7, second half)
+
+Today the capability/transport-dropped servers are visible only as a
+session note, which `run.logs` renders as an assistant "chunk" and the live
+`run.attach` stream drops entirely; there is no structured "which servers
+did this run start with" signal and no UI. This adds one additive run event
+and one UI affordance.
+
+Wire shape (names and fixed enums only -- no command, args, url, env, or
+header value is ever part of it):
+
+- `taskrunner.EventTypeMcpServers` (appended after `EventTypeUsage`;
+  `Event.McpServers []McpServerState`). `McpServerState` =
+  `{name, transport, status, reason?}` (JSON keys lowercase).
+  `status` is `"active"` | `"dropped"` | `"failed"`. `reason` is set when
+  status is not active and is one of `"transport_unsupported"` (the agent
+  doesn't advertise the transport), `"command_not_found"` (stdio command
+  not resolvable in PATH), `"provider_unsupported"` (Codex, deferred) or
+  `"failed_to_start"` (Claude CLI `init` reported `status:"failed"`).
+- Sent once per turn when at least one server applies to the run's
+  workspace (nothing at all when none do, so a run with no servers behaves
+  exactly as before). ACP: after capability/`LookPath` filtering, before
+  the session is created. Claude-native: at start with every row `active`,
+  then again after the CLI `init` message *only* if it reported failures
+  (latest event wins). Codex: every row `dropped`/`provider_unsupported`.
+  The existing session notes stay as they are.
+- Persisted in `run_events` like any event (additive `mcpServers` field in
+  `persistedEvent`), replayed by `run.attach` backfill and `run.logs`.
+- `run.attach`/`task.prompt` stream event `mcp_servers` with params
+  `{mcpServers: [...]}`; `run.logs` entry `{type:"mcp_servers",
+  mcpServers:[...]}`. No `RunSummary` change.
+
+UI: the chat header (next to the run-config pill) shows a small pill
+(plug icon + `MCP 2`, or `MCP 2/3` plus a warning dot when any server is
+dropped/failed) for the chat's **latest run only** -- an earlier run's
+servers are never shown for a later run that reported none, and the pill is
+scoped to the chat the pane shows. Clicking it opens a popover listing each
+server by name with its transport and either "Active" or "Not active --
+<human reason>". No value of any kind is displayed.
+
+Acceptance criteria:
+
+- M1. An ACP run with servers sends one `mcp_servers` event whose entries
+  are `active` for the servers put on the wire and `dropped` with the right
+  `reason` for transport-unsupported and unresolvable-command servers; a
+  run with no applicable servers sends none.
+- M2. A Claude-native run sends the initial all-`active` event, and a
+  second event marking a CLI-reported failed server `failed` /
+  `failed_to_start`; no failures means no second event.
+- M3. A Codex run sends all servers `dropped` / `provider_unsupported`.
+- M4. The event is persisted and survives replay: `run.logs` after the run
+  and a late `run.attach` backfill both carry it; a daemon-restart
+  rehydrated run still carries it.
+- M5. Redaction (ADR-0018): with secrets seeded into env values, header
+  values, args, command and url of every kind of server, the raw bytes of
+  the `run.logs` response, the `run.attach` stream frames, and the
+  persisted `run_events.event_data` row contain none of them (and none of
+  the command/url/args either).
+- M6. The UI timeline never renders `mcp_servers` as a transcript row or
+  an "unknown event" placeholder; `RunEntry.mcpServers` is the latest
+  event's list for that run.
+- M7. The header pill appears only when the chat's latest run has
+  `mcpServers`, shows the active/total counts, and flags dropped/failed;
+  switching to another chat or a newer run without servers hides it.
+- M8. The popover lists every server by name + transport + status/reason
+  text and renders no env/header/command/url value; light and dark
+  screenshots reviewed by hand.
+
+Test scenarios:
+
+- `TestAcpMcpServerStates_ActiveDroppedAndUnresolved` (`internal/taskrunner/mcp_test.go`)
+  -- pure mapping of rows + capabilities to `[]McpServerState` (M1).
+- `TestRunner_RunPrompt_ACPEmitsMcpServersEvent` /
+  `..._ACPNoMcpServersEventWhenNoneConfigured` /
+  `..._ClaudeNativeEmitsMcpServersAndFailedUpdate` /
+  `..._ClaudeNativeNoSecondMcpEventWithoutFailures` /
+  `..._CodexEmitsMcpServersProviderUnsupported` (M1-M3), through the real
+  runner with the fakeagent / fake CLI.
+- `TestEventCodec_McpServersRoundTrip` (`internal/runs/persist_test.go`) and
+  `TestRegistry_McpServersEventSurvivesRehydrate` (M4).
+- `TestRunLogs_McpServersEntry`, `TestRunAttach_McpServersStreamEvent`
+  (`internal/wsapi`) (M4) and `TestMcpServersEvent_NoSecretReachesWire`
+  (`internal/wsapi`, raw bytes of logs + attach frames + the stored row;
+  seeds env, header, arg, command and url secrets) (M5).
+- `appendTimelineEvent ignores mcp_servers`, `RunEntry.mcpServers folded
+  from run.logs backfill and live stream (latest wins)` in
+  `use-run-timeline` tests (M6).
+- `McpServersIndicator` tests (`mcp-servers-indicator.test.tsx`): hidden
+  without servers; `MCP 2` active-only; `MCP 1/3` + warning marker with
+  dropped/failed; popover rows with reason text; DOM never contains a
+  seeded secret (M7/M8).
+- `TaskDetailPane` test: pill reflects the latest run only; a newer run
+  with no servers hides it; a different chat's pane doesn't show it (M7).
+
 ### Follow-up: keep Claude-native MCP secrets off argv
 
 Step 4 hands servers to the `claude` CLI as inline `--mcp-config <json>`, so
@@ -150,6 +244,12 @@ Test scenarios (`internal/taskrunner/mcp_test.go`):
   of 8 are out of v1), `exec.LookPath` for bare commands, workspace
   restriction table without UI, plaintext + redaction, disabled servers
   invisible.
+- Per-run indicator (step 7, second half): an additive run event
+  (`EventTypeMcpServers`, enum append-only per ADR-0008) rather than a
+  `RunSummary` field, because the event is persisted/replayed by the
+  existing `run_events` path for free and `RunSummary` has no persistence of
+  its own. Payload is names + transport + fixed status/reason enums only.
+  The pill reflects the latest run, not a task-wide union.
 - No architectural decision should be made by an implementing agent that
   isn't already resolved in ADR-0018 or this section — if a step's ADR
   question is still open when an implementation agent picks it up, it
@@ -197,9 +297,10 @@ accepted):
    somewhere to report to.
    - [x] **Settings CRUD half** (feat/agent-mcp-settings-ui): Settings ->
      MCP servers (`mcp-servers-section.tsx`). Shipped separately from step 3.
-   - [ ] **Per-run "active MCP servers" indicator**: not built as dedicated
-     UI. Step 3 reports capability-dropped servers (names only) as an
-     `EventTypeSessionNote` on the run timeline instead of a new event type.
+   - [ ] **Per-run "active MCP servers" indicator** (spec above, M1-M8).
+     Previously only a session note on the run timeline. Sub-steps:
+     7a backend event + persistence + wire (M1-M5); 7b UI pill + popover
+     (M6-M8).
 8. [x] **Secret-redaction audit.** A focused pass confirming acceptance
    criterion 9 end to end for ACP and Claude native (Codex deferred per
    ADR-0018 resolved decisions 1 and 5). Depends on steps 3, 4.
