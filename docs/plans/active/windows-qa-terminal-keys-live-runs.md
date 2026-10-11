@@ -167,12 +167,32 @@ Names are the exact `it(...)` / `Test...` titles.
 ## Progress
 
 - [x] Spec written; items checked against origin/develop (2026-10-11)
-- [ ] K — keys
-- [ ] L — live runs
-- [ ] W — workspace context menu
-- [ ] C — CLI approve
-- [ ] Adversarial review, screenshots, PR
+- [x] K — keys (`isShellControlKey` matcher rule, `when.mac` gate, 10 hatch rows, rows ordered next to their base row)
+- [x] L — live runs (`permission.pending` adoption trigger; #259 already covered `run.status`)
+- [x] W — workspace row context menu (single `items` list feeds "..." and the context menu)
+- [x] C — CLI `task approve <run> <req> <opt>`
+- [x] Adversarial review, light/dark screenshots, real-browser terminal check
+- [ ] Windows re-test by the user (see PR description); then `git mv` to `completed/`
 
 ## Validation
 
-(filled in as the work lands; each AC above maps to a named test or screenshot)
+Commands: `task test` (Go + web), `task lint`, `cd web && bunx tsc -b packages/ui`, all green on the PR branch
+(web: 126 files / 1570 tests). One `internal/wsapi` TempDir-cleanup flake
+(`TestServer_RunConfigOptions_GLM_RealSelectRoundTrip`, known CI flake, package untouched) passed 3/3 on rerun.
+Earlier web failures reported by coders only occurred while four agents ran vitest concurrently; none on a quiet machine.
+
+| AC | How it was confirmed |
+|---|---|
+| K1 | `terminal-scope-ctrl-letters-pass-through` and `terminal-scope-ctrl-bracket-passes-through` (matcher + keyboard-provider keydown, event not default-prevented). Real Chrome, Win32 user agent, focus in the xterm of a sandbox daemon: `Ctrl+K` opened nothing, `Ctrl+W` kept both tabs. |
+| K2 | `terminal-scope-mac-cmd-still-fires` |
+| K3 | `non-terminal-scopes-ctrl-letters-unchanged`, `terminal-scope-ctrl-shift-and-non-letter-still-fire`; full existing keyboard suites unchanged |
+| K4 | `terminal-escape-hatch-fires-in-terminal` (table-driven over all 10 rows), `no-duplicate-default-combos`; real Chrome: `Ctrl+Shift+P` opened the palette and `Alt+Shift+W` closed the tab from the terminal |
+| K5 | `escape-hatch-rows-hidden-on-mac`, `shortcuts-dialog-lists-terminal-hatch-rows`; screenshots `shortcuts-dialog-{light,dark}` (Settings → Shortcuts on a Win32 UA, rows labelled "… (in a terminal)" next to their base row) |
+| K6 | existing rebind/conflict/override suites green with the extra rows; shortcut-help-search matches "terminal" |
+| L1–L5 | six named tests in `use-run-timeline.test.tsx`; only the `permission.pending` adoption test failed before the fix |
+| W1–W3 | `workspace row context menu mirrors the actions menu (with/without localPathActions)`, `right click on a workspace row does not toggle expansion`, `workspace context menu Delete workspace opens the delete flow`; real Chrome: left click collapses, right click does not toggle; screenshots `workspace-context-menu-{light,dark}` |
+| C1–C3 | `TestTaskApproveExplicitOption`, `TestTaskApproveUnknownOptionListsValid`, `TestTaskApproveDefaults`, `TestTaskDenyRejectsThirdArg` |
+
+Not verifiable here: a real Windows webview (`Win32` was spoofed on macOS Chrome); the Reveal/Open-in-editor items
+(desktop local daemon only; covered by the mocked `useLocalPathActions` test); a CLI-started run appearing live in a
+real UI (covered by the fake-client tests, not run end to end).
