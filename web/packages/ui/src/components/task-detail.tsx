@@ -5,6 +5,9 @@ import { PermissionModeControl } from "@/components/permission-mode-control";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
+import { ChatUsageTotal } from "@/components/chat-usage-total";
+import { McpServersIndicator } from "@/components/mcp-servers-indicator";
+import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
@@ -15,21 +18,25 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { PaneHeader } from "@/components/ui/pane-header";
+import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { useLiveTask } from "@/hooks/use-live-task";
+import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { describePermission, effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
+import { describePermission, effectiveMode, providerModels, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, Chat, Provider, ProviderInfo, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
-/** The task header's run-config pill text ("<Agent> · <Provider> · <Mode> · <Thinking>", the mode in the provider's own words -- ADR-0019) -- pure so it can be unit-tested without mounting the whole pane. */
+/** The task header's run-config pill text ("<Agent> · <Provider> · <Mode> · <Model> · <Thinking>", the mode in the provider's own words -- ADR-0019) -- pure so it can be unit-tested without mounting the whole pane. */
 export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile[], providers: ProviderInfo[]): string {
   const agent = state.baseAgentId ? profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
   const agentSegment = agent ? agent.Name : state.custom ? "Custom" : "No agent";
   const providerLabel = providers.find((p) => p.id === state.provider)?.label ?? state.provider;
   const parts = [agentSegment, providerLabel, describePermission(providers, state.provider, state.permissionMode, state.autoAccept)];
+  if (state.model) parts.push(providerModels(providers, state.provider).find((m) => m.id === state.model)?.label ?? state.model);
   if (state.provider === "claude-native") parts.push(thinkingLevelLabel(state.thinkingLevel));
   return parts.join(" · ");
 }
@@ -44,12 +51,13 @@ export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile
  */
 export function TaskDetailPane({
   client,
-  task,
+  task: taskProp,
   chat,
   isDefaultChat,
   otherRunningChat,
   onJumpToChat,
   connectionStatus = "connected",
+  events,
   onOpenFile,
   onOpenDiffTab,
 }: {
@@ -65,16 +73,25 @@ export function TaskDetailPane({
   onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
+  /** The app's single-subscription event stream, optional so existing tests/mounts render unchanged: feeds both run.status adoption and the chat's queue view. */
+  events?: DaemonEvents | null;
   /** Opens a worktree-relative path as a file tab. Optional: without it, a tool-call card naming a file simply isn't click-through. */
   onOpenFile?: (path: string) => void;
   /** Brings the task's Diff tab forward -- the composer's diff-stat pill's click target. Optional: without it (no tab strip above) the pill is omitted. */
   onOpenDiffTab?: () => void;
 }) {
+  // Worktree setup state changes after the task was selected (ADR-0024), so
+  // follow the task's own update events instead of the selection snapshot.
+  const { task, apply: applyTask } = useLiveTask(taskProp, events);
   const { runs, error, submitPrompt, stopRun, respondPermission, setPermissionMode, retryWithHigherEffort } = useRunTimeline(
     client,
     task.ID,
     chat.ID,
+    events,
   );
+  // The daemon's per-chat prompt queue (ADR-0021 §9) -- one owner here,
+  // the composer only renders/cancels what it's handed.
+  const queue = useChatQueue(client, events ?? null, chat.ID);
   // provider.list's id→label map for the run headers ("label ?? id",
   // run-config IA): run entries carry only the wire provider id, and the
   // header should say "Claude Code", not "claude-native". Empty until the
@@ -135,18 +152,24 @@ export function TaskDetailPane({
   // keep streaming in above/below it.
   const pendingRuns = runs?.filter((run) => run.pendingPermission) ?? [];
 
+  // The chat's most recent run only -- the header pill shows that run's
+  // MCP servers, never an older run's (no fallback when it reported none).
+  const latestRun = runs?.[runs.length - 1];
+
   // The task's live run, if any. A task has at most one at a time, so the
   // first match is the one the composer's Stop and queue drain act on.
   const runningRun = runs?.find((run) => run.status === "running") ?? null;
   const runningRunId = runningRun?.id ?? null;
 
-  // GLM/Kimi's own live-session-scoped config-option control (thinking
-  // level, etc, see use-run-config-options) -- Claude/Codex/no-live-run
-  // pass null, which the hook treats as "nothing to show". Keyed off the
+  // The live-session-scoped config-option control (GLM/Kimi's thinking
+  // level etc, see use-run-config-options; Claude's synthetic `model`
+  // option, ADR-0025) -- Codex (no live option, its model applies from the
+  // next run) and no-live-run pass null, which the hook treats as "nothing
+  // to show". Keyed off the
   // running run's own item count so a fresh option list is fetched as the
   // session progresses (see the hook's own doc comment for why there's no
   // dedicated push notification for this instead).
-  const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi") ? runningRun.id : null;
+  const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
   const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
 
   // Auto-follow keys off the total item count across every run: that is
@@ -199,6 +222,8 @@ export function TaskDetailPane({
           <>
             <span className="uppercase">{task.Status}</span>
             {task.Branch && <span className="truncate">{task.Branch}</span>}
+            <SetupBadge status={task.SetupStatus} />
+            <PortChip port={task.Port} />
             {runConfigState && (
               <button
                 type="button"
@@ -209,6 +234,8 @@ export function TaskDetailPane({
                 {runConfigPillLabel(runConfigState, profiles, providers)}
               </button>
             )}
+            <McpServersIndicator servers={latestRun?.mcpServers} />
+            <ChatUsageTotal runs={runs} />
           </>
         }
         actions={
@@ -224,6 +251,8 @@ export function TaskDetailPane({
           </Button>
         }
       />
+
+      <SetupDetails client={client} task={task} onTask={applyTask} />
 
       {connectionStatus === "reconnecting" && (
         <Alert
@@ -370,6 +399,9 @@ export function TaskDetailPane({
         runningRunId={runningRunId}
         diffStat={wholeDiff.stat}
         onOpenDiff={onOpenDiffTab}
+        queuedItems={queue.items}
+        onCancelQueued={queue.cancel}
+        onQueued={queue.refresh}
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}

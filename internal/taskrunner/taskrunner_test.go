@@ -173,6 +173,30 @@ func runFakeClaudeCLI() {
 			"result":      "done",
 		})
 
+	case "usage", "usage-no-model":
+		// A result carrying per-model usage and cost, for the usage event.
+		stdin.Scan() // consume the prompt line
+		result := map[string]any{
+			"type":           "result",
+			"subtype":        "success",
+			"session_id":     "sess-1",
+			"stop_reason":    "end_turn",
+			"result":         "done",
+			"total_cost_usd": 0.5,
+			"modelUsage": map[string]any{
+				"claude-small": map[string]any{"inputTokens": 10, "outputTokens": 5, "costUSD": 0.1, "contextWindow": 200000},
+				"claude-big": map[string]any{
+					"inputTokens": 100, "outputTokens": 40, "cacheReadInputTokens": 300,
+					"cacheCreationInputTokens": 20, "costUSD": 0.4, "contextWindow": 1000000,
+				},
+			},
+		}
+		if scenario == "usage-no-model" {
+			delete(result, "modelUsage")
+			delete(result, "total_cost_usd")
+		}
+		writeLine(result)
+
 	case "hang":
 		stdin.Scan() // consume the prompt line, then never respond or exit
 		time.Sleep(time.Hour)
@@ -223,6 +247,22 @@ func runFakeClaudeCLI() {
 			fmt.Fprintf(os.Stderr, "fake claude cli: write env: %v\n", err)
 			os.Exit(1)
 		}
+		// When --mcp-config names a file, snapshot its contents and the
+		// file/dir permission bits at spawn time (the runner removes the
+		// file once the run ends), so a test can assert on them.
+		for i, a := range os.Args[1:] {
+			if a != "--mcp-config" || i+2 >= len(os.Args) {
+				continue
+			}
+			cfg := os.Args[i+2]
+			if data, err := os.ReadFile(cfg); err == nil {
+				_ = os.WriteFile(filepath.Join(wd, "mcp-config-content"), data, 0o644)
+				fi, _ := os.Stat(cfg)
+				di, _ := os.Stat(filepath.Dir(cfg))
+				modes := fmt.Sprintf("%o %o", fi.Mode().Perm(), di.Mode().Perm())
+				_ = os.WriteFile(filepath.Join(wd, "mcp-config-modes"), []byte(modes), 0o644)
+			}
+		}
 		stdin.Scan() // consume the prompt line
 		writeLine(map[string]any{
 			"type":       "assistant",
@@ -232,6 +272,35 @@ func runFakeClaudeCLI() {
 				"content": []map[string]any{
 					{"type": "text", "text": "ok"},
 				},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "result",
+			"subtype":    "success",
+			"session_id": "sess-1",
+			"result":     "ok",
+		})
+
+	case "mcp-init":
+		// Emits an init system message reporting MCP server statuses the
+		// way the real CLI does, so a test can assert failed servers are
+		// surfaced.
+		stdin.Scan() // consume the prompt line
+		writeLine(map[string]any{
+			"type":       "system",
+			"subtype":    "init",
+			"session_id": "sess-1",
+			"mcp_servers": []map[string]any{
+				{"name": "pw", "status": "connected"},
+				{"name": "broken", "status": "failed"},
+			},
+		})
+		writeLine(map[string]any{
+			"type":       "assistant",
+			"session_id": "sess-1",
+			"message": map[string]any{
+				"role":    "assistant",
+				"content": []map[string]any{{"type": "text", "text": "ok"}},
 			},
 		})
 		writeLine(map[string]any{

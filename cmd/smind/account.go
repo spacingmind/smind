@@ -18,12 +18,13 @@ import (
 // account WebSocket methods. Keeping this separate from store.Account avoids
 // ever decoding credential_data into the CLI response path.
 type accountResult struct {
-	ID             int64  `json:"id"`
-	Provider       string `json:"provider"`
-	Label          string `json:"label"`
-	CredentialType string `json:"credentialType"`
-	CreatedAt      string `json:"createdAt"`
-	UpdatedAt      string `json:"updatedAt"`
+	ID             int64    `json:"id"`
+	Provider       string   `json:"provider"`
+	Label          string   `json:"label"`
+	CredentialType string   `json:"credentialType"`
+	Models         []string `json:"models"`
+	CreatedAt      string   `json:"createdAt"`
+	UpdatedAt      string   `json:"updatedAt"`
 }
 
 func cmdAccount(args []string) int {
@@ -50,21 +51,35 @@ func cmdAccount(args []string) int {
 
 func cmdAccountAdd(args []string) int {
 	var baseURL string
+	var models []string
 	positional := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if args[i] == "--base-url" {
 			if i+1 >= len(args) {
-				fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] <provider> <label> < credential")
+				fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] [--models <glob,glob>] <provider> <label> < credential")
 				return 2
 			}
 			baseURL = args[i+1]
 			i++
 			continue
 		}
+		if args[i] == "--models" {
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] [--models <glob,glob>] <provider> <label> < credential")
+				return 2
+			}
+			for _, g := range strings.Split(args[i+1], ",") {
+				if g = strings.TrimSpace(g); g != "" {
+					models = append(models, g)
+				}
+			}
+			i++
+			continue
+		}
 		positional = append(positional, args[i])
 	}
 	if len(positional) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] <provider> <label> < credential")
+		fmt.Fprintln(os.Stderr, "usage: smind account add [--base-url <url>] [--models <glob,glob>] <provider> <label> < credential")
 		return 2
 	}
 	credential, err := io.ReadAll(os.Stdin)
@@ -89,6 +104,9 @@ func cmdAccountAdd(args []string) int {
 	}
 	if baseURL != "" {
 		params["baseUrl"] = baseURL
+	}
+	if len(models) > 0 {
+		params["models"] = models
 	}
 	var account accountResult
 	err = client.Call(context.Background(), "account.add", params, &account)
@@ -119,10 +137,14 @@ func cmdAccountList(args []string) int {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 2, 2, ' ', 0)
-	fmt.Fprintln(tw, "ID\tPROVIDER\tLABEL\tCREDENTIALTYPE\tCREATED\tUPDATED")
+	fmt.Fprintln(tw, "ID\tPROVIDER\tLABEL\tCREDENTIALTYPE\tMODELS\tCREATED\tUPDATED")
 	for _, account := range accounts {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\n", account.ID, account.Provider, account.Label,
-			account.CredentialType, account.CreatedAt, account.UpdatedAt)
+		modelsCol := "-"
+		if len(account.Models) > 0 {
+			modelsCol = strings.Join(account.Models, ",")
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\n", account.ID, account.Provider, account.Label,
+			account.CredentialType, modelsCol, account.CreatedAt, account.UpdatedAt)
 	}
 	tw.Flush()
 	return 0

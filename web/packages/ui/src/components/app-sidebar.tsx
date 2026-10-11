@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Circle,
   FolderGit2,
+  SquareTerminal,
+  FolderOpen,
   FolderTree,
   GitBranch,
   KeyRound,
@@ -23,6 +25,7 @@ import {
   Plus,
   Search,
   Settings,
+  SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react";
 
@@ -69,6 +72,8 @@ import {
   DeleteSpaceDialog,
   DeleteWorkspaceDialog,
 } from "@/components/crud-dialogs";
+import { SetupBadge } from "@/components/task-setup";
+import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -84,6 +89,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "@/components/ui/toast";
+import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
 import { desktopOS, isDesktop } from "@/lib/platform";
 import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights } from "@/lib/window-chrome";
@@ -299,6 +305,7 @@ type CrudTarget =
   | { kind: "space"; workspace: WorkspaceWithTree }
   | { kind: "task"; workspace: WorkspaceWithTree; spaceId: number | null }
   | { kind: "archive"; task: Task }
+  | { kind: "scripts"; workspace: WorkspaceWithTree }
   | { kind: "deleteWorkspace"; workspace: WorkspaceWithTree }
   | { kind: "deleteSpace"; space: SpaceWithTasks };
 
@@ -589,6 +596,7 @@ export function AppSidebar({
   // open. The tree's `expanded` set is never touched while searching, so
   // clearing the query restores exactly the expansion state it had.
   const { fullscreen } = useWindowState();
+  const localPathActions = useLocalPathActions();
   const lights = isDesktop && hasTrafficLights(desktopOS, fullscreen);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -637,7 +645,12 @@ export function AppSidebar({
           )}
           style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
         >
-          <img src="/logo.png" alt="" className="size-5 shrink-0" />
+          <span
+            data-testid="sidebar-logo"
+            className="grid size-6 shrink-0 place-items-center rounded-md bg-foreground dark:size-5 dark:bg-transparent"
+          >
+            <img src="/logo.png" alt="" className="size-4 dark:size-5" />
+          </span>
           <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
           <div className="ml-auto flex shrink-0 items-center gap-1">
             <ThemeToggle />
@@ -814,8 +827,10 @@ export function AppSidebar({
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
                       onMoveTask={moveTask}
+                      onEditScripts={() => setCrud({ kind: "scripts", workspace: ws })}
                       onDeleteWorkspace={() => setCrud({ kind: "deleteWorkspace", workspace: ws })}
                       onDeleteSpace={(space) => setCrud({ kind: "deleteSpace", space })}
+                      localPathActions={localPathActions}
                       selectedTaskId={selectedTaskId}
                       onSelectTask={onSelectTask}
                     />
@@ -931,6 +946,15 @@ export function AppSidebar({
               open
               onOpenChange={(o) => !o && setCrud(null)}
               onArchived={refresh}
+            />
+          )}
+          {crud?.kind === "scripts" && (
+            <WorkspaceScriptsDialog
+              client={client}
+              workspace={crud.workspace}
+              open
+              onOpenChange={(o) => !o && setCrud(null)}
+              onSaved={refresh}
             />
           )}
           {crud?.kind === "deleteWorkspace" && (
@@ -1172,8 +1196,10 @@ function WorkspaceItem({
   onAddTask,
   onArchiveTask,
   onMoveTask,
+  onEditScripts,
   onDeleteWorkspace,
   onDeleteSpace,
+  localPathActions,
   selectedTaskId,
   onSelectTask,
 }: {
@@ -1184,8 +1210,11 @@ function WorkspaceItem({
   onAddTask: (spaceId: number | null) => void;
   onArchiveTask: (task: Task) => void;
   onMoveTask: (task: Task, spaceId: number | null) => void;
+  onEditScripts: () => void;
   onDeleteWorkspace: () => void;
   onDeleteSpace: (space: SpaceWithTasks) => void;
+  /** Reveal / Open-in-editor for the workspace folder; null (items absent) unless the desktop app is on its local daemon. */
+  localPathActions: LocalPathActions | null;
   selectedTaskId: number | null;
   onSelectTask?: (task: Task) => void;
 }) {
@@ -1214,6 +1243,21 @@ function WorkspaceItem({
           items={[
             { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
             { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+            ...(localPathActions
+              ? [
+                  {
+                    label: localPathActions.revealLabel,
+                    icon: <FolderOpen />,
+                    onSelect: () => localPathActions.reveal(workspace.Path),
+                  },
+                  ...localPathActions.editors.map((editor) => ({
+                    label: `Open in ${editor.label}`,
+                    icon: <SquareArrowOutUpRight />,
+                    onSelect: () => localPathActions.open(editor.id, workspace.Path),
+                  })),
+                ]
+              : []),
+            { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
             { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
           ]}
           triggerProps={{
@@ -1609,7 +1653,8 @@ function TaskRows({
                * in the accessible name, so neither a test nor a screen
                * reader has to tell them apart by colour.
                */}
-              <span data-testid="task-attention-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
+              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
                 {reason && (
                   <StatusDot
                     status={attentionDotStatus(reason)}

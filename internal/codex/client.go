@@ -36,6 +36,7 @@ type threadStartParams struct {
 	Cwd            string `json:"cwd,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
+	Model          string `json:"model,omitempty"`
 }
 
 type thread struct {
@@ -60,6 +61,7 @@ type threadResumeParams struct {
 	Cwd            string `json:"cwd,omitempty"`
 	ApprovalPolicy string `json:"approvalPolicy,omitempty"`
 	Sandbox        string `json:"sandbox,omitempty"`
+	Model          string `json:"model,omitempty"`
 }
 
 type threadUnarchiveParams struct {
@@ -97,6 +99,31 @@ type turnCompletedNotification struct {
 	Turn     turn   `json:"turn"`
 }
 
+// TokenUsage is one tokenUsage breakdown decoded from
+// thread/tokenUsage/updated (ThreadTokenUsageUpdatedNotification). Client
+// keeps the notification's `total`: the thread's cumulative usage so far.
+// (`last` is only the most recent single model response, so a turn that
+// loops through tools has several of them.) Every field is a pointer so a
+// field missing on the wire stays nil.
+type TokenUsage struct {
+	InputTokens           *int64 `json:"inputTokens"`
+	CachedInputTokens     *int64 `json:"cachedInputTokens"`
+	CacheWriteInputTokens *int64 `json:"cacheWriteInputTokens"`
+	OutputTokens          *int64 `json:"outputTokens"`
+	ReasoningOutputTokens *int64 `json:"reasoningOutputTokens"`
+	TotalTokens           *int64 `json:"totalTokens"`
+	// ModelContextWindow is tokenUsage.modelContextWindow.
+	ModelContextWindow *int64 `json:"-"`
+}
+
+type threadTokenUsageUpdatedNotification struct {
+	ThreadID   string `json:"threadId"`
+	TokenUsage struct {
+		Total              TokenUsage `json:"total"`
+		ModelContextWindow *int64     `json:"modelContextWindow"`
+	} `json:"tokenUsage"`
+}
+
 // turnResult is what a completed (or failed/interrupted) turn resolves to,
 // decoded from a turn/completed notification's Turn.Status/Error.
 type turnResult struct {
@@ -119,6 +146,10 @@ type Client struct {
 	approvalPolicy string
 	sandbox        string
 
+	// model is sent as `model` on every thread/start and thread/resume
+	// (see WithModel); empty omits the field, leaving Codex's default.
+	model string
+
 	// mu guards updateSubs/turnWaiters, both keyed by threadID -- not
 	// turnID, deliberately: a turn's own id is only known once turn/start's
 	// response arrives, which would create a window (between issuing the
@@ -135,6 +166,10 @@ type Client struct {
 	mu          sync.Mutex
 	updateSubs  map[string]*updateSub
 	turnWaiters map[string]chan turnResult
+
+	// tokenUsage is each thread's latest tokenUsage.total this turn (the
+	// thread-cumulative figure), reset by Prompt; guarded by mu.
+	tokenUsage map[string]TokenUsage
 }
 
 // updateSub tracks one thread's subscriber channel plus a WaitGroup of
@@ -172,6 +207,74 @@ func WithThreadPolicy(approvalPolicy, sandbox string) Option {
 	return func(c *Client) { c.approvalPolicy, c.sandbox = approvalPolicy, sandbox }
 }
 
+// WithModel sets the `model` sent on every thread/start and thread/resume.
+// Empty (the default) omits the field entirely.
+func WithModel(model string) Option {
+	return func(c *Client) { c.model = model }
+}
+
+// ModelInfo is one entry of the app-server's model/list.
+type ModelInfo struct {
+	ID          string
+	DisplayName string
+	Description string
+	IsDefault   bool
+}
+
+type modelListParams struct {
+	Cursor string `json:"cursor,omitempty"`
+}
+
+type modelListResponse struct {
+	Data []struct {
+		ID          string `json:"id"`
+		Model       string `json:"model"`
+		DisplayName string `json:"displayName"`
+		Description string `json:"description"`
+		Hidden      bool   `json:"hidden"`
+		IsDefault   bool   `json:"isDefault"`
+	} `json:"data"`
+	NextCursor string `json:"nextCursor"`
+}
+
+// maxModelListPages bounds ListModels' cursor loop against a misbehaving
+// server that never stops returning a cursor.
+const maxModelListPages = 20
+
+// ListModels returns the models the app-server offers (model/list),
+// following pagination and skipping hidden ones. The model id is the
+// entry's `model` field (what thread/start's `model` accepts), falling back
+// to `id`.
+func (c *Client) ListModels(ctx context.Context) ([]ModelInfo, error) {
+	var out []ModelInfo
+	cursor := ""
+	for page := 0; page < maxModelListPages; page++ {
+		raw, err := c.conn.call(ctx, "model/list", modelListParams{Cursor: cursor})
+		if err != nil {
+			return nil, fmt.Errorf("codex: model/list: %w", err)
+		}
+		var res modelListResponse
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return nil, fmt.Errorf("codex: model/list: decode response: %w", err)
+		}
+		for _, m := range res.Data {
+			if m.Hidden {
+				continue
+			}
+			id := m.Model
+			if id == "" {
+				id = m.ID
+			}
+			out = append(out, ModelInfo{ID: id, DisplayName: m.DisplayName, Description: m.Description, IsDefault: m.IsDefault})
+		}
+		if res.NextCursor == "" {
+			break
+		}
+		cursor = res.NextCursor
+	}
+	return out, nil
+}
+
 // New spawns command[0] with command[1:] as arguments and wires up a codex
 // app-server connection to it, registering this Client's approval-request
 // handlers. Call Initialize before anything else.
@@ -181,6 +284,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 		logWriter:   io.Discard,
 		updateSubs:  make(map[string]*updateSub),
 		turnWaiters: make(map[string]chan turnResult),
+		tokenUsage:  make(map[string]TokenUsage),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -196,6 +300,7 @@ func New(command []string, opts ...Option) (*Client, error) {
 	conn.handleRequest("item/fileChange/requestApproval", c.handleFileChangeApproval)
 	conn.handleNotification("item/agentMessage/delta", c.handleAgentMessageDelta)
 	conn.handleNotification("turn/completed", c.handleTurnCompleted)
+	conn.handleNotification("thread/tokenUsage/updated", c.handleTokenUsageUpdated)
 
 	return c, nil
 }
@@ -219,7 +324,7 @@ func (c *Client) Initialize(ctx context.Context) error {
 // NewSession starts a new codex thread rooted at cwd (the task's worktree
 // path), returning its thread id.
 func (c *Client) NewSession(ctx context.Context, cwd string) (string, error) {
-	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox})
+	raw, err := c.conn.call(ctx, "thread/start", threadStartParams{Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model})
 	if err != nil {
 		return "", fmt.Errorf("codex: thread/start: %w", err)
 	}
@@ -283,7 +388,7 @@ func (c *Client) threadLoaded(ctx context.Context, threadID string) (bool, error
 }
 
 func (c *Client) resumeThread(ctx context.Context, threadID, cwd string) error {
-	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox}); err != nil {
+	if _, err := c.conn.call(ctx, "thread/resume", threadResumeParams{ThreadID: threadID, Cwd: cwd, ApprovalPolicy: c.approvalPolicy, Sandbox: c.sandbox, Model: c.model}); err != nil {
 		return fmt.Errorf("codex: thread/resume: %w", err)
 	}
 	return nil
@@ -319,6 +424,7 @@ func (c *Client) Prompt(ctx context.Context, threadID, text string, updates chan
 	c.mu.Lock()
 	c.updateSubs[threadID] = sub
 	c.turnWaiters[threadID] = waiter
+	delete(c.tokenUsage, threadID)
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -369,6 +475,33 @@ func (c *Client) handleAgentMessageDelta(raw json.RawMessage) {
 	}
 	defer sub.wg.Done()
 	sub.ch <- Update{Text: n.Delta}
+}
+
+// ThreadTokenUsage returns the latest tokenUsage.total threadID's current
+// (or just finished) turn reported, and false if none arrived. It is the
+// thread's cumulative usage as of the turn's end, not the turn's own: callers
+// difference it against the previous turn's figure. Only the last
+// notification is kept, not a sum: each carries the running thread total.
+func (c *Client) ThreadTokenUsage(threadID string) (TokenUsage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, ok := c.tokenUsage[threadID]
+	return u, ok
+}
+
+func (c *Client) handleTokenUsageUpdated(raw json.RawMessage) {
+	var n threadTokenUsageUpdatedNotification
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return
+	}
+	u := n.TokenUsage.Total
+	u.ModelContextWindow = n.TokenUsage.ModelContextWindow
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, ok := c.turnWaiters[n.ThreadID]; ok {
+		c.tokenUsage[n.ThreadID] = u
+	}
 }
 
 func (c *Client) handleTurnCompleted(raw json.RawMessage) {

@@ -5,8 +5,10 @@ import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-le
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
 import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
+import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
+import { describeStopReason } from "@/components/timeline/stop-reason";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
 import type { RunStatusValue } from "@/lib/types";
 
@@ -46,12 +48,25 @@ export const RunTimeline = memo(function RunTimeline({
   providerLabels?: Record<string, string>;
 } & TimelineRowContext) {
   const elapsed = formatElapsed(run.startedAt, run.finishedAt);
+  const stop = run.stopReason ? describeStopReason(run.stopReason) : null;
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
     <li data-testid="run-entry" data-run-id={run.id} className="rounded-xl border">
       <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-sm text-foreground-muted">
-        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+          {run.model && (
+            // ADR-0025: only a *requested* model is shown -- a default run has no chip.
+            <span
+              data-testid="run-model-chip"
+              title={`Requested model: ${run.model}`}
+              className="max-w-40 shrink truncate rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
+            >
+              {run.model}
+            </span>
+          )}
+        </span>
         <span className="flex shrink-0 items-center gap-1.5">
           <StatusDot status={RUN_STATUS_DOT[run.status]} />
           <span className="uppercase" data-testid="run-status">
@@ -99,7 +114,18 @@ export const RunTimeline = memo(function RunTimeline({
 
       <div className="flex items-center gap-2 border-t px-3 py-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
         {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
-        {run.stopReason && <span data-testid="run-stop-reason">{run.stopReason}</span>}
+        {stop && (
+          <span
+            data-testid="run-stop-reason"
+            data-tone={stop.tone}
+            title={stop.hint}
+            className={stop.tone === "warning" ? "text-warning" : undefined}
+          >
+            {stop.label}
+            {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
+          </span>
+        )}
+        <RunUsagePill usage={run.usage} />
         <CopyTurnButton run={run} />
       </div>
     </li>

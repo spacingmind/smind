@@ -99,7 +99,9 @@ func (s *Store) SummarizeRequestLogs(since, until *time.Time, groupBy string) ([
 	query := fmt.Sprintf(`SELECT %s AS grp, COUNT(*),
 		COALESCE(SUM(input_tokens), 0), COALESCE(SUM(output_tokens), 0),
 		COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_write_tokens), 0),
-		COALESCE(SUM(reasoning_tokens), 0)
+		COALESCE(SUM(reasoning_tokens), 0),
+		COUNT(input_tokens), COUNT(output_tokens), COUNT(cache_read_tokens),
+		COUNT(cache_write_tokens), COUNT(reasoning_tokens)
 		FROM request_log%s GROUP BY grp ORDER BY grp`, col, where)
 
 	rows, err := s.db.Query(query, args...)
@@ -111,13 +113,38 @@ func (s *Store) SummarizeRequestLogs(since, until *time.Time, groupBy string) ([
 	var out []UsageSummary
 	for rows.Next() {
 		var u UsageSummary
+		var inCount, outCount, cacheReadCount, cacheWriteCount, reasoningCount int64
 		if err := rows.Scan(&u.Key, &u.Count, &u.InputTokens, &u.OutputTokens,
-			&u.CacheReadTokens, &u.CacheWriteTokens, &u.ReasoningTokens); err != nil {
+			&u.CacheReadTokens, &u.CacheWriteTokens, &u.ReasoningTokens,
+			&inCount, &outCount, &cacheReadCount, &cacheWriteCount, &reasoningCount); err != nil {
 			return nil, fmt.Errorf("scan usage summary: %w", err)
 		}
+		u.Unreported = unreportedTokenFields(inCount, outCount, cacheReadCount, cacheWriteCount, reasoningCount)
 		out = append(out, u)
 	}
 	return out, rows.Err()
+}
+
+// unreportedTokenFields names the token fields (in fixed wire order) whose
+// per-field COUNT of non-NULL rows is 0 -- i.e. no row in the group
+// reported that field. Nil when every field was reported at least once.
+func unreportedTokenFields(input, output, cacheRead, cacheWrite, reasoning int64) []string {
+	var fields []string
+	for _, f := range []struct {
+		name  string
+		count int64
+	}{
+		{"inputTokens", input},
+		{"outputTokens", output},
+		{"cacheReadTokens", cacheRead},
+		{"cacheWriteTokens", cacheWrite},
+		{"reasoningTokens", reasoning},
+	} {
+		if f.count == 0 {
+			fields = append(fields, f.name)
+		}
+	}
+	return fields
 }
 
 // whereClause builds the shared WHERE clause ListRequestLogs and

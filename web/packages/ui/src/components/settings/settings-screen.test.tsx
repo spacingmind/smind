@@ -32,6 +32,14 @@ afterEach(() => {
 });
 
 describe("SettingsScreen shell", () => {
+  it("lists Usage in the nav under Agents & providers", () => {
+    renderScreen();
+
+    const usage = screen.getByTestId("settings-nav-usage");
+    expect(usage).toBeInTheDocument();
+    expect(usage).toHaveTextContent("Usage");
+  });
+
   it("renders the built-in General and Appearance sections, General active by default (nav regroup puts it first)", () => {
     renderScreen();
 
@@ -54,9 +62,9 @@ describe("SettingsScreen shell", () => {
     expect(screen.queryByTestId("settings-nav-connections")).not.toBeInTheDocument();
     expect(screen.queryByTestId("settings-nav-daemon")).not.toBeInTheDocument();
 
-    // Order: General · Appearance · Agents & providers · Notifications ·
-    // Shortcuts (desktop inserts Connection between the group and
-    // Notifications).
+    // Order: General · Appearance · Agents & providers (Agents, MCP
+    // servers, Providers) · Notifications · Shortcuts (desktop inserts
+    // Connection between the group and Notifications).
     const ids = screen
       .getAllByRole("listitem")
       .map((li) => li.querySelector("[data-testid^='settings-nav-']")?.getAttribute("data-testid"))
@@ -65,7 +73,9 @@ describe("SettingsScreen shell", () => {
       "settings-nav-general",
       "settings-nav-appearance",
       "settings-nav-agents",
+      "settings-nav-mcp-servers",
       "settings-nav-providers",
+      "settings-nav-usage",
       "settings-nav-notifications",
       "settings-nav-shortcuts",
     ]);

@@ -61,6 +61,9 @@ func TestServer_RunAttach_SecondConnectionMidRun(t *testing.T) {
 			texts = append(texts, p.Text)
 			continue
 		}
+		if env.Event == "usage" {
+			continue
+		}
 		term = env
 		break
 	}
@@ -384,6 +387,7 @@ func TestServer_RunLogs_Tail(t *testing.T) {
 	if err := json.Unmarshal(fullResp.Result, &full); err != nil {
 		t.Fatalf("decode run.logs result: %v", err)
 	}
+	full.Events = withoutUsage(full.Events)
 	if len(full.Events) != 3 {
 		t.Fatalf("full run.logs events = %d, want 3", len(full.Events))
 	}
@@ -443,7 +447,7 @@ func TestServer_RunLogs_StructuredEvents(t *testing.T) {
 	}
 
 	var types []string
-	for _, e := range logs.Events {
+	for _, e := range withoutUsage(logs.Events) {
 		types = append(types, e.Type)
 	}
 	want := []string{"raw", "thinking", "user_message", "tool_call", "tool_call", "chunk", "done"}
@@ -774,6 +778,9 @@ func TestServer_RunRespondPermission_CrossConnection(t *testing.T) {
 	}
 
 	term := readEnvelopeFor(t, starter, "1", 5*time.Second)
+	if term.Event == "usage" {
+		term = readEnvelopeFor(t, starter, "1", 5*time.Second)
+	}
 	if term.Error != nil {
 		t.Fatalf("task.prompt terminal error = %v, want success", term.Error.Message)
 	}
@@ -936,6 +943,7 @@ func TestServer_RunStart_KimiProvider(t *testing.T) {
 		}
 		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
 	}
+	logs.Events = withoutUsage(logs.Events)
 	if len(logs.Events) != 3 {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
@@ -981,6 +989,7 @@ func TestServer_RunStart_CodexNativeProvider(t *testing.T) {
 		}
 		sendRequest(t, ws, "2", "run.logs", map[string]any{"runId": started.RunID})
 	}
+	logs.Events = withoutUsage(logs.Events)
 	if len(logs.Events) != 3 {
 		t.Fatalf("run.logs events = %d, want 3: %+v", len(logs.Events), logs.Events)
 	}
@@ -1106,5 +1115,56 @@ func TestServer_RunConfigOptions_GLM_RealSelectRoundTrip(t *testing.T) {
 	resp = readEnvelopeFor(t, ws, "5", 5*time.Second)
 	if resp.Error == nil {
 		t.Fatal("run.setConfigOption with an unrecognized configId: error = nil, want the daemon's rejection surfaced, not a silent no-op")
+	}
+}
+
+// withoutUsage drops the turn's usage event, which these tests aren't about.
+func withoutUsage(events []runLogEvent) []runLogEvent {
+	var out []runLogEvent
+	for _, e := range events {
+		if e.Type != "usage" {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestWSAPIPermissionRequestCarriesDetail(t *testing.T) {
+	t.Parallel()
+	wm, db := newTestWorkspaceManager(t)
+	task := newTestTask(t, wm, "")
+	runner := newTestRunner(wm)
+
+	now := time.Now().UTC()
+	runID := "detail-run"
+	if _, err := db.CreateRun(store.Run{
+		ID: runID, TaskID: task.ID, Provider: "glm", Prompt: "hi",
+		Status: "done", StartedAt: now, FinishedAt: &now, StopReason: "end_turn",
+	}); err != nil {
+		t.Fatalf("store.CreateRun() error = %v", err)
+	}
+	ev := `{"type":2,"permissionRequestId":"req-1","permissionSummary":"Write file: a.txt (replaces 240 -> 7 lines)","permissionOptions":[{"id":"allow-1","label":"Allow","kind":"allow_once"}],"permissionDetail":{"kind":"write","path":"a.txt","newLines":7,"replacesExisting":true,"largeShrink":true}}`
+	if _, err := db.AppendRunEvent(runID, 0, ev); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestWSServer(t, wm, runner, db, "tok")
+	ws := dialWS(t, srv, "tok")
+	sendRequest(t, ws, "logs", "run.logs", map[string]any{"runId": runID})
+	resp := readEnvelopeFor(t, ws, "logs", 5*time.Second)
+	if resp.Error != nil {
+		t.Fatalf("run.logs error = %v", resp.Error.Message)
+	}
+	var raw struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(resp.Result, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(raw.Events) != 1 {
+		t.Fatalf("events = %+v", raw.Events)
+	}
+	d, _ := raw.Events[0]["detail"].(map[string]any)
+	if d == nil || d["replacesExisting"] != true || d["largeShrink"] != true || d["path"] != "a.txt" {
+		t.Fatalf("detail = %+v", raw.Events[0]["detail"])
 	}
 }

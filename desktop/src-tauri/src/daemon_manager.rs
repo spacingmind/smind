@@ -6,13 +6,14 @@
 //! process, hitting the network) plus Tauri glue (app data dir, event
 //! emission, app version). See `docs/plans/active/desktop-managed-daemon.md`.
 
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use smind_daemon_client::daemon_manager::managed::{self, ManagedRecord, ManagedState};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use smind_daemon_client::daemon_manager::{native, release, version, wsl};
 
 use crate::state::DesktopState;
@@ -84,16 +85,34 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
 /// as `resolve_distro` caches the distro name: it's spawning `wsl.exe`
 /// (once per call, uncached) that made every `daemon_status` poll flash a
 /// console window on Windows.
-fn detect_platform(state: &DesktopState) -> Platform {
+pub(crate) fn detect_platform(state: &DesktopState) -> Platform {
+    detect_platform_cached(&state.daemon_manager_platform)
+}
+
+/// platform_for is the pure decision: macOS is native-capable, and only a
+/// real Windows target can be Wsl2 (with `wsl.exe` reachable). Linux --
+/// including WSLg, where Windows interop exposes a `wsl.exe` -- is
+/// Unsupported: its daemon runs natively and there is no Windows host to
+/// translate paths for or spawn from.
+fn platform_for(target_os: &str, has_wsl: impl FnOnce() -> bool) -> Platform {
+    match target_os {
+        "macos" => Platform::Macos,
+        "windows" if has_wsl() => Platform::Wsl2,
+        _ => Platform::Unsupported,
+    }
+}
+
+pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platform {
     if cfg!(target_os = "macos") {
         return Platform::Macos;
     }
-    let mut cache = state.daemon_manager_platform.lock().unwrap();
+    let mut cache = cache.lock().unwrap();
     if let Some(p) = *cache {
         return p;
     }
-    let has_wsl = wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false);
-    let platform = if has_wsl { Platform::Wsl2 } else { Platform::Unsupported };
+    let platform = platform_for(std::env::consts::OS, || {
+        wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false)
+    });
     *cache = Some(platform);
     platform
 }
@@ -134,6 +153,39 @@ async fn probe_healthz(base_url: &url::Url) -> (bool, Option<String>) {
     }
 }
 
+/// poll_until_ready calls `probe` up to `attempts` times, `interval` apart
+/// (no wait before the first), and returns the first `Some`.
+async fn poll_until_ready<T, F, Fut>(mut probe: F, attempts: u32, interval: std::time::Duration) -> Option<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Option<T>>,
+{
+    for attempt in 0..attempts {
+        if attempt > 0 {
+            tokio::time::sleep(interval).await;
+        }
+        if let Some(v) = probe().await {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// wait_for_healthz waits (bounded, ~10s) for a freshly spawned daemon to
+/// answer `/healthz` and returns the version it reports. A fixed short
+/// sleep isn't enough: a first start creates the database and can take
+/// well over half a second, and verifying too early would record nothing
+/// and leave a perfectly good daemon looking unmanaged.
+async fn wait_for_healthz(base_url: &url::Url) -> Option<String> {
+    poll_until_ready(
+        || async { Some(probe_healthz(base_url).await).filter(|(reachable, _)| *reachable).map(|(_, v)| v) },
+        40,
+        std::time::Duration::from_millis(250),
+    )
+    .await
+    .flatten()
+}
+
 fn now_unix_seconds() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs().to_string()).unwrap_or_else(|_| "0".to_string())
 }
@@ -147,6 +199,145 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
     Ok(native::Layout::new(&base))
 }
 
+/// Where install/update gets the daemon binary from. macOS takes it from
+/// inside the app bundle (desktop-macos-app M2: the release the app itself
+/// shipped with, so app and daemon versions always match); WSL2 keeps
+/// downloading the matching GitHub Release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallSource {
+    Bundled,
+    Release,
+}
+
+fn install_source(platform: Platform) -> InstallSource {
+    match platform {
+        Platform::Macos => InstallSource::Bundled,
+        Platform::Wsl2 | Platform::Unsupported => InstallSource::Release,
+    }
+}
+
+/// bundled_daemon_path is where Tauri's `externalBin` puts the sidecar
+/// (`tauri.macos.conf.json`): next to the app's own executable, i.e.
+/// `smind.app/Contents/MacOS/smind`.
+fn bundled_daemon_path(exe_dir: &Path) -> PathBuf {
+    exe_dir.join("smind")
+}
+
+fn bundled_daemon_path_for_app() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("could not locate the app executable: {e}"))?;
+    let exe_dir = exe.parent().ok_or_else(|| "the app executable has no parent directory".to_string())?;
+    Ok(bundled_daemon_path(exe_dir))
+}
+
+/// install_bundled_binary copies the app's bundled daemon into the managed
+/// layout and makes it executable. It *copies* rather than running the
+/// binary in place: an unsigned app opened from Downloads is
+/// App-Translocated to a random read-only path, which would break the
+/// exe-path match checks (and vanish when the app moves). The copy is
+/// staged next to its destination and renamed into place, so replacing the
+/// binary of a still-running daemon (an update) never rewrites the file it
+/// is executing from. A missing or empty source -- the latter is the
+/// placeholder `build.rs` writes for dev builds -- is a clear error, never
+/// a download fallback.
+fn install_bundled_binary(bundled: &Path, layout: &native::Layout) -> Result<(), String> {
+    let meta = std::fs::metadata(bundled)
+        .map_err(|e| format!("the bundled daemon is missing from the app ({}: {e}) -- reinstall smind", bundled.display()))?;
+    if !meta.is_file() || meta.len() == 0 {
+        return Err(format!(
+            "the bundled daemon at {} is empty -- this build has no daemon staged (build the app with `task desktop:mac`)",
+            bundled.display()
+        ));
+    }
+    let bin_dir = layout.bin_path.parent().expect("smind desktop: bin_path always has a parent");
+    std::fs::create_dir_all(bin_dir).map_err(|e| format!("create {}: {e}", bin_dir.display()))?;
+
+    let staging = layout.bin_path.with_extension("new");
+    let _ = std::fs::remove_file(&staging);
+    std::fs::copy(bundled, &staging).map_err(|e| format!("copy the bundled daemon to {}: {e}", staging.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o755)).map_err(|e| format!("chmod {}: {e}", staging.display()))?;
+    }
+    // A downloaded (quarantined) app hands its quarantine flag to the copy;
+    // best-effort clear so Gatekeeper never judges the spawned daemon.
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(&staging).output();
+    std::fs::rename(&staging, &layout.bin_path).map_err(|e| format!("install the daemon at {}: {e}", layout.bin_path.display()))
+}
+
+/// LaunchAction is what the app does about the local daemon at startup
+/// (desktop-macos-app M2.3/M2.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchAction {
+    /// Nothing is serving: install the bundled daemon and start it.
+    InstallAndStart,
+    /// A daemon *we* manage is older than the app: don't restart it here --
+    /// the UI owns the update decision, because it knows whether agent runs
+    /// are in flight (desktop-macos-app M5).
+    OfferUpdate,
+    /// Leave everything as it is.
+    NoOp,
+    /// Something we don't manage holds the port: never touched
+    /// automatically -- the existing banner offers take-over from
+    /// `managed_state`, nothing else to do here.
+    UnmanagedBanner,
+}
+
+/// launch_decision is the pure startup policy, over the same three facts
+/// `DaemonStatus` already carries. The one rule above all: an unmanaged
+/// daemon (the user's own `smind serve`) is never killed automatically.
+fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: version::Comparison) -> LaunchAction {
+    match (reachable, managed_state) {
+        (_, ManagedState::Unmanaged) => LaunchAction::UnmanagedBanner,
+        (false, ManagedState::NotRunning) => LaunchAction::InstallAndStart,
+        // Our own process holds the port but isn't answering (yet): don't
+        // pile a second install on top of it.
+        (false, ManagedState::Managed) => LaunchAction::NoOp,
+        (true, ManagedState::Managed) if comparison == version::Comparison::Older => LaunchAction::OfferUpdate,
+        (true, _) => LaunchAction::NoOp,
+    }
+}
+
+/// auto_start runs once per app launch, after `DesktopState` is managed:
+/// installs/starts the bundled daemon when nothing is serving, and
+/// updates a managed one that's older than the app, both through the same
+/// `install_or_update` (and `daemon-progress` events) the Install/Update
+/// buttons use. macOS only, and only while the built-in local connection
+/// is the selected one -- someone using a remote daemon didn't ask for a
+/// local one. Failures surface as a progress event plus the log; the
+/// banner and Settings -> Daemon keep working for a manual retry.
+pub async fn auto_start(app: AppHandle) {
+    let state = app.state::<DesktopState>();
+    if detect_platform(&state) != Platform::Macos {
+        return;
+    }
+    let local_selected = state.proxy.registry.lock().unwrap().current().id == smind_daemon_client::proxy::connections::LOCAL_ID;
+    if !local_selected {
+        return;
+    }
+    let status = compute_status(&app, &state).await;
+    let action = launch_decision(status.reachable, status.managed_state, status.comparison);
+    log::info!("daemon auto-start: {action:?} (reachable={}, {:?}, {:?})", status.reachable, status.managed_state, status.comparison);
+    if !matches!(action, LaunchAction::InstallAndStart) {
+        return;
+    }
+    match install_or_update(&app, &state).await {
+        Ok(_) => {
+            // The window usually loaded before the daemon was serving and
+            // is sitting on "Can't reach Local" (the UI has no auto-retry),
+            // so reload it now -- the same call as View -> Reload.
+            if let Some(win) = app.get_webview_window(crate::MAIN_WINDOW) {
+                let _ = win.eval("window.location.reload()");
+            }
+        }
+        Err(e) => {
+            log::warn!("daemon auto-start failed: {e}");
+            emit_progress(&app, "error", format!("Couldn't start the daemon: {e}"));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // WSL2
 // ---------------------------------------------------------------------------
@@ -154,8 +345,12 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
 /// resolve_distro detects the default WSL distro once per app run and
 /// caches it -- the default distro is not expected to change while the
 /// app is running.
-fn resolve_distro(state: &DesktopState) -> Result<String, String> {
-    let mut cache = state.daemon_manager_distro.lock().unwrap();
+pub(crate) fn resolve_distro(state: &DesktopState) -> Result<String, String> {
+    resolve_distro_cached(&state.daemon_manager_distro)
+}
+
+pub(crate) fn resolve_distro_cached(cache: &Mutex<Option<String>>) -> Result<String, String> {
+    let mut cache = cache.lock().unwrap();
     if let Some(d) = cache.as_ref() {
         return Ok(d.clone());
     }
@@ -347,11 +542,11 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             let port_owner_before = native::find_port_owner(port).ok().flatten();
             managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port)?;
 
-            emit_progress(app, "downloading", "Downloading the daemon release…");
-            let (os, arch) = release::native_target(std::env::consts::OS, std::env::consts::ARCH)?;
-            let urls = release::release_urls(&app_version, os, arch);
-            let client = reqwest::Client::new();
-            native::install_from_release(&client, &urls, &layout).await.map_err(|e| e.to_string())?;
+            // M2: the daemon ships inside the app, so there is no release
+            // download here.
+            debug_assert_eq!(install_source(platform), InstallSource::Bundled);
+            emit_progress(app, "installing", "Installing the bundled daemon…");
+            install_bundled_binary(&bundled_daemon_path_for_app()?, &layout)?;
 
             emit_progress(app, "starting", "Starting the daemon…");
             // Bug 2: only signal the previously-managed pid if it's still
@@ -382,8 +577,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             // caught Bug 1: if the new process failed to bind because the
             // port was already taken, the port's owner is still the old
             // occupant, whose exe path won't match.
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let (_, daemon_version) = probe_healthz(&base_url).await;
+            let daemon_version = wait_for_healthz(&base_url).await;
             let port_owner_after = native::find_port_owner(port).ok().flatten();
             let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
             let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
@@ -399,6 +593,7 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             let port_owner_before = find_port_owner(platform, Some(&distro), port);
             managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port)?;
 
+            debug_assert_eq!(install_source(platform), InstallSource::Release);
             emit_progress(app, "downloading", "Downloading the daemon release…");
             let arch = wsl_arch(&distro)?;
             let urls = release::release_urls(&app_version, "linux", arch);
@@ -512,7 +707,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
             let child = native::spawn_detached(&layout).map_err(|e| e.to_string())?;
             drop(child);
 
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = wait_for_healthz(&base_url).await;
             let port_owner_after = native::find_port_owner(port).ok().flatten();
             let exe_matches_after = port_owner_after.map(|pid| macos_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
             let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
@@ -637,4 +832,160 @@ pub async fn connection_version(app: AppHandle, state: tauri::State<'_, DesktopS
     let (reachable, daemon_version) = probe_healthz(&url).await;
     let comparison = daemon_version.as_deref().map(|d| version::compare(&app_version, d)).unwrap_or(version::Comparison::Unknown);
     Ok(ConnectionVersionInfo { reachable, daemon_version, app_version, comparison })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    use smind_daemon_client::daemon_manager::managed::ManagedState;
+    use smind_daemon_client::daemon_manager::version::Comparison;
+
+    fn layout_in(dir: &Path) -> native::Layout {
+        native::Layout::new(&dir.join("managed-daemon"))
+    }
+
+    fn fake_bundle(dir: &Path, contents: &[u8]) -> std::path::PathBuf {
+        let exe_dir = dir.join("smind.app/Contents/MacOS");
+        fs::create_dir_all(&exe_dir).unwrap();
+        let bundled = bundled_daemon_path(&exe_dir);
+        fs::write(&bundled, contents).unwrap();
+        bundled
+    }
+
+    #[test]
+    fn macos_install_sources_bundled_binary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bundled = fake_bundle(tmp.path(), b"#!/bin/sh\necho daemon\n");
+        let layout = layout_in(tmp.path());
+
+        // The install takes the bundle path and a layout only -- it has no
+        // HTTP client or release URLs to download from.
+        install_bundled_binary(&bundled, &layout).unwrap();
+
+        assert_eq!(fs::read(&layout.bin_path).unwrap(), b"#!/bin/sh\necho daemon\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&layout.bin_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o111, 0o111, "installed daemon must be executable, got {mode:o}");
+        }
+        assert_eq!(install_source(Platform::Macos), InstallSource::Bundled);
+        // Replacing an existing install (an update) works and leaves no staging file behind.
+        fs::write(&bundled, b"v2").unwrap();
+        install_bundled_binary(&bundled, &layout).unwrap();
+        assert_eq!(fs::read(&layout.bin_path).unwrap(), b"v2");
+        let leftovers: Vec<_> = fs::read_dir(layout.bin_path.parent().unwrap()).unwrap().map(|e| e.unwrap().file_name()).collect();
+        assert_eq!(leftovers, vec![std::ffi::OsString::from("smind")]);
+    }
+
+    #[test]
+    fn macos_install_missing_bundled_binary_is_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = layout_in(tmp.path());
+        let missing = bundled_daemon_path(&tmp.path().join("nowhere"));
+
+        let err = install_bundled_binary(&missing, &layout).unwrap_err();
+        assert!(err.contains("bundled daemon"), "unclear error: {err}");
+        assert!(err.contains(&missing.display().to_string()), "error should name the path: {err}");
+        assert!(!err.to_lowercase().contains("download"), "no download fallback: {err}");
+        assert!(!layout.bin_path.exists());
+
+        // An empty file is the dev-build placeholder (build.rs): same clear error, nothing installed.
+        let empty = fake_bundle(tmp.path(), b"");
+        let err = install_bundled_binary(&empty, &layout).unwrap_err();
+        assert!(err.contains("empty"), "unclear error: {err}");
+        assert!(!layout.bin_path.exists());
+    }
+
+    #[test]
+    fn macos_autostart_when_unreachable() {
+        use Comparison::*;
+        use LaunchAction::*;
+        use ManagedState::*;
+
+        // No daemon reachable and nothing on the port -> install + start.
+        assert_eq!(launch_decision(false, NotRunning, Unknown), InstallAndStart);
+        // Managed and older -> the UI offers the update; Rust never restarts.
+        assert_eq!(launch_decision(true, Managed, Older), OfferUpdate);
+        // Managed and same/newer (or unversioned dev build) -> no-op.
+        for c in [Same, Newer, Unknown] {
+            assert_eq!(launch_decision(true, Managed, c), NoOp, "managed + {c:?}");
+        }
+        // Unmanaged (any comparison) -> never touched, banner state only.
+        for c in [Older, Same, Newer, Unknown] {
+            assert_eq!(launch_decision(true, Unmanaged, c), UnmanagedBanner, "unmanaged + {c:?}");
+        }
+        // Something holds the port but doesn't answer: if it's ours it may
+        // still be starting -- leave it; if it isn't ours, leave it alone too.
+        assert_eq!(launch_decision(false, Managed, Unknown), NoOp);
+        assert_eq!(launch_decision(false, Unmanaged, Unknown), UnmanagedBanner);
+        // Healthy daemon we can't attribute to a port owner (lsof blind,
+        // or a non-local URL): nothing to do.
+        assert_eq!(launch_decision(true, NotRunning, Older), NoOp);
+    }
+
+    #[test]
+    fn launch_decision_offers_update_instead_of_restarting() {
+        use Comparison::*;
+        use LaunchAction::*;
+        use ManagedState::*;
+
+        // An older managed daemon is never restarted by auto_start; the UI
+        // decides once it knows the run state.
+        assert_eq!(launch_decision(true, Managed, Older), OfferUpdate);
+        // Nothing serving still installs and starts the bundled daemon.
+        assert_eq!(launch_decision(false, NotRunning, Older), InstallAndStart);
+        assert_eq!(launch_decision(false, NotRunning, Unknown), InstallAndStart);
+    }
+
+    #[test]
+    fn daemon_start_waits_for_slow_binder() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        // The daemon answers on the 4th probe (a first start creating its DB).
+        let mut calls = 0;
+        let got = rt.block_on(poll_until_ready(
+            || {
+                calls += 1;
+                let ready = calls >= 4;
+                async move { ready.then_some("0.9.1".to_string()) }
+            },
+            10,
+            std::time::Duration::from_millis(1),
+        ));
+        assert_eq!(got.as_deref(), Some("0.9.1"));
+        assert_eq!(calls, 4);
+
+        // Never answering gives up after exactly `attempts` probes.
+        let mut calls = 0;
+        let got: Option<()> = rt.block_on(poll_until_ready(
+            || {
+                calls += 1;
+                async { None }
+            },
+            5,
+            std::time::Duration::from_millis(1),
+        ));
+        assert!(got.is_none());
+        assert_eq!(calls, 5);
+    }
+
+    #[test]
+    fn wsl2_only_on_a_windows_target() {
+        assert_eq!(platform_for("windows", || true), Platform::Wsl2);
+        assert_eq!(platform_for("windows", || false), Platform::Unsupported);
+        // WSLg: a Linux app with wsl.exe interop is not a Windows host, and
+        // never even probes for it.
+        assert_eq!(platform_for("linux", || panic!("must not probe wsl.exe")), Platform::Unsupported);
+        assert_eq!(platform_for("macos", || panic!("must not probe wsl.exe")), Platform::Macos);
+    }
+
+    #[test]
+    fn wsl_install_still_downloads() {
+        assert_eq!(install_source(Platform::Wsl2), InstallSource::Release);
+        let urls = release::release_urls("0.9.1", "linux", "amd64");
+        assert_eq!(urls.tarball, "https://github.com/spacingmind/smind/releases/download/v0.9.1/smind_0.9.1_linux_amd64.tar.gz");
+        assert_eq!(urls.checksums, "https://github.com/spacingmind/smind/releases/download/v0.9.1/checksums.txt");
+    }
 }

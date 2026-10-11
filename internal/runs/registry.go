@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -31,6 +34,20 @@ import (
 // and run.logs exist for, without needing real eviction-by-age or
 // persistence for this pass.
 const finishedRetentionCap = 200
+
+// ChatBusyError is the "one running run per chat" rejection (ADR-0016
+// §4): a typed error so the queue's delivery path can distinguish "someone
+// else won the race" (leave the item queued; that run's finish will
+// deliver) from a real validation failure (cancel the item). Its text is
+// byte-identical to the pre-queue error, so old clients see no change.
+type ChatBusyError struct {
+	ChatID int64
+	RunID  string
+}
+
+func (e *ChatBusyError) Error() string {
+	return fmt.Sprintf("runs: start: chat %d already has a running run (%s)", e.ChatID, e.RunID)
+}
 
 // defaultPermissionTimeout is how long a pending permission request (see
 // runPermissionDecider.Decide) waits for either a human response
@@ -70,6 +87,53 @@ type Registry struct {
 	// permissionTimeout overrides defaultPermissionTimeout when non-zero --
 	// see SetPermissionTimeout.
 	permissionTimeout time.Duration
+
+	// starterWM/starterRunner, wired via SetStarter (ADR-0021 §3), are the
+	// dependencies queue delivery needs to start runs itself -- the same
+	// wm/runner Start's callers pass in. Nil until wsapi.New wires them;
+	// delivery is a no-op before that (except in tests, which call
+	// SetStarter explicitly).
+	starterWM     *workspace.Manager
+	starterRunner *taskrunner.Runner
+
+	// deliveryAttempts counts delivery attempts per chat_queue item id, so
+	// a test can prove delivery never tight-loops on one bad item
+	// (ADR-0021 §3: cancel and move on). Guarded by mu.
+	deliveryAttempts map[int64]int
+
+	// testAfterSetupCheck, when non-nil, runs in StartWhenBusy between the
+	// task's setup-status read and the enqueue. Test seam only; nil in
+	// production.
+	testAfterSetupCheck func()
+
+	// deliverMu serializes queue delivery per Registry (see queue.go's
+	// deliverOne): the busy-check -> NextQueued -> Start -> MarkDelivered
+	// sequence must be atomic, so concurrent callers (finish and the
+	// enqueue path's race-coverage call) can't both start the same item.
+	// Lock ordering: deliverMu before mu, never the reverse.
+	deliverMu sync.Mutex
+
+	// testHookAfterLatch, when non-nil, is called by TryBeginArchive
+	// between setting the archive latch and the active-run check -- a test
+	// seam so a test can deterministically attempt a run start inside the
+	// exact window the latch must close. Nil in production. Guarded by mu
+	// for writes; read on the TryBeginArchive path only.
+	testHookAfterLatch func()
+
+	// closing latches once CloseAll begins: queue delivery must not start
+	// a chat's next prompt while the daemon is shutting down (a run
+	// started there would miss CloseAll's snapshot and its subprocess
+	// could outlive the daemon; the item would also be marked delivered,
+	// losing it for the restart's redelivery, ADR-0021 §5).
+	closing atomic.Bool
+
+	// archiving holds the task ids currently mid-archive (TryBeginArchive
+	// adds, its release func removes). While a task id is in it, every
+	// run-start path (Start, StartWhenBusy, queue delivery) refuses with
+	// ErrTaskArchiving: closing the TOCTOU window where the archive guard
+	// sees no active run but a run starts between the check and the
+	// worktree removal. Guarded by mu.
+	archiving map[int64]bool
 }
 
 // SetPermissionTimeout overrides how long a pending permission request
@@ -102,6 +166,7 @@ func (reg *Registry) getPermissionTimeout() time.Duration {
 type Notifier interface {
 	NotifyRunStatus(s RunStatus)
 	NotifyPermissionPending(runID string, taskID, chatID int64, requestID, summary string, options []taskrunner.PermissionOption)
+	NotifyChatQueueUpdated(chatID int64, items []store.ChatQueueItem)
 }
 
 // SetNotifier registers n; nil-safe (notifications with no notifier are
@@ -155,7 +220,7 @@ func (reg *Registry) notifyRunStatus(r *run) {
 //     a rehydrated run immediately delivers its backfilled history then
 //     closes, same as attaching to any other already-finished run.
 func New(st *store.Store) (*Registry, error) {
-	reg := &Registry{runs: make(map[string]*run), st: st}
+	reg := &Registry{runs: make(map[string]*run), st: st, deliveryAttempts: make(map[int64]int), archiving: make(map[int64]bool)}
 
 	if _, err := st.MarkRunningRunsInterrupted(string(StatusInterrupted)); err != nil {
 		return nil, fmt.Errorf("runs: reconcile interrupted runs: %w", err)
@@ -226,6 +291,7 @@ func rehydrateRun(st *store.Store, row store.Run) (*run, error) {
 		provider:           taskrunner.Provider(row.Provider),
 		prompt:             row.Prompt,
 		perm:               taskrunner.PermissionSettings{Mode: row.PermissionMode, AutoAccept: row.AutoAccept},
+		model:              row.Model,
 		startedAt:          row.StartedAt,
 		ctx:                ctx,
 		cancel:             cancel,
@@ -267,6 +333,11 @@ type run struct {
 	// rehydrated run never re-drives, so there's nothing for a stored value
 	// to feed.
 	thinkingLevel taskrunner.ThinkingLevel
+
+	// model is the model this run was asked to use (ADR-0025), "" for the
+	// provider's default; set at Start, immutable thereafter, and also
+	// persisted on the run row (store.Run.Model) so history shows the ask.
+	model string
 
 	// ctx is this run's own background context (the one Start derived via
 	// context.WithCancel and handed to drive/RunPrompt) -- cancel closes
@@ -328,6 +399,11 @@ type run struct {
 	// request currently awaiting an answer, keyed by request id -- see
 	// runPermissionDecider and RespondPermission.
 	pendingPermissions map[string]chan string
+
+	// usage is the latest usage event this run recorded (ADR-0020); nil if
+	// it never emitted one, and always nil on a rehydrated run (List/History
+	// read the persisted run_usage row for those). Guarded by mu.
+	usage *taskrunner.Usage
 }
 
 // getPerm returns r's current permission settings under its mutex.
@@ -352,6 +428,56 @@ func (r *run) statusLocked() RunStatus {
 		PermissionMode: r.perm.Mode,
 		AutoAccept:     r.perm.AutoAccept,
 		ThinkingLevel:  r.thinkingLevel,
+		Model:          r.model,
+		Usage:          UsageFromEvent(r.usage),
+	}
+}
+
+// upsertUsage persists u as r's run_usage row. Best-effort: a store failure
+// is logged, never fails the run.
+func (reg *Registry) upsertUsage(r *run, u *taskrunner.Usage) {
+	row := store.RunUsage{
+		RunID: r.id, TaskID: r.taskID, Provider: string(r.provider),
+		Model: u.Model, InputTokens: u.Input, CachedInputTokens: u.CachedInput,
+		CacheWriteTokens: u.CacheWrite, OutputTokens: u.Output, ReasoningTokens: u.Reasoning,
+		CostUSD: u.CostUSD, ContextUsed: u.ContextUsed, ContextSize: u.ContextSize,
+		Source: string(u.Source),
+	}
+	if r.chatID != 0 {
+		row.ChatID = &r.chatID
+	}
+	if u.SessionSnapshot != nil {
+		if b, err := json.Marshal(u.SessionSnapshot); err == nil {
+			snap := string(b)
+			row.SessionSnapshot = &snap
+		}
+	}
+	if err := reg.st.UpsertRunUsage(row); err != nil {
+		log.Printf("runs: persist usage for run %s: %v", r.id, err)
+	}
+}
+
+// withStoredUsage fills in Usage on finished/rehydrated summaries that have
+// none in memory, from run_usage, in one batched query.
+func (reg *Registry) withStoredUsage(out []RunSummary) {
+	var ids []string
+	for _, s := range out {
+		if s.Usage == nil && s.Status != StatusRunning {
+			ids = append(ids, s.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	rows, err := reg.st.ListRunUsage(ids)
+	if err != nil {
+		log.Printf("runs: load usage: %v", err)
+		return
+	}
+	for i := range out {
+		if u, ok := rows[out[i].ID]; ok && out[i].Usage == nil {
+			out[i].Usage = runUsageFromStore(u)
+		}
 	}
 }
 
@@ -391,53 +517,21 @@ func (r *run) statusLocked() RunStatus {
 // its doc comment), ignored entirely by every other provider. The empty
 // string (taskrunner.ThinkingLevelUnspecified) preserves today's behavior
 // exactly.
-func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel) (string, error) {
-	if _, err := wm.GetTask(taskID); err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
-	}
-
-	chat, err := resolveChat(wm, taskID, chatID)
+//
+// WithModel (ADR-0025) names the model the run is asked to use; omitted or
+// empty means the provider's default and the spawn is unchanged.
+func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, opts ...StartOption) (string, error) {
+	model := startModel(opts)
+	p, err := prepareStart(wm, runner, taskID, chatID, provider, prompt, perm, thinkingLevel, model)
 	if err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
+		return "", err
 	}
-	if chat.ArchivedAt != nil {
-		return "", fmt.Errorf("runs: start: chat %d is archived", chat.ID)
-	}
-	if chat.Provider == nil {
-		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
-			return "", fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
-		}
-	}
-	// Re-checked against chat as BindChatProvider actually left it, not
-	// just the pre-bind read above: store.BindChatProvider is a
-	// write-if-still-NULL, so two concurrent first prompts to the same
-	// unbound chat with different providers both reach this point seeing
-	// Provider == nil, but only one of them actually wins the bind -- the
-	// other's write silently no-ops and must still be rejected here rather
-	// than proceeding as if it had bound its own value.
-	if *chat.Provider != string(provider) {
-		return "", fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
-	}
-	chatID = chat.ID
+	taskID, chatID, prompt, perm, thinkingLevel = p.taskID, p.chatID, p.prompt, p.perm, p.thinkingLevel
 
-	catalog, ok := runner.ProviderCatalogFor(provider)
-	if !ok {
-		return "", fmt.Errorf("runs: start: unknown provider %q", provider)
-	}
-	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
-		return "", fmt.Errorf("runs: start: %w", err)
-	}
-	// An empty mode resolves to the provider default -- for an ACP agent
-	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
-	// treats as "leave the agent in its own start mode" unless the agent
-	// really has a mode by that name; the run then records the agent's
-	// actual mode as soon as its session reports it (applyReportedMode).
-	if perm.Mode == "" {
-		perm.Mode = catalog.DefaultMode
-	}
-
-	if !thinkingLevel.IsValid() {
-		return "", fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
+	// ADR-0024 §2: never start a run in a worktree whose setup script is
+	// still running (StartWhenBusy and the queue check this too).
+	if t, terr := wm.GetTask(taskID); terr == nil && t.SetupStatus == workspace.SetupRunning {
+		return "", &SetupBusyError{TaskID: taskID}
 	}
 
 	id, err := newRunID()
@@ -455,6 +549,7 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		runner:             runner,
 		perm:               perm,
 		thinkingLevel:      thinkingLevel,
+		model:              model,
 		startedAt:          time.Now(),
 		ctx:                runCtx,
 		cancel:             cancel,
@@ -468,8 +563,169 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 	// registration happen under the same reg.mu critical section, so two
 	// concurrent Start calls for the same chat can't both observe "no
 	// running run yet" and both proceed -- whichever acquires reg.mu first
-	// registers and the other sees it on its own check.
+	// registers and the other sees it on its own check. The same section
+	// also refuses a task mid-archive (TryBeginArchive), closing the
+	// guard-vs-removal TOCTOU window on the start side.
+	var busyRunID string
+	var archiving bool
+	func() {
+		reg.mu.Lock()
+		defer reg.mu.Unlock()
+		if reg.taskArchivingLocked(taskID) {
+			archiving = true
+			return
+		}
+		for _, existing := range reg.runs {
+			if existing.chatID != chatID {
+				continue
+			}
+			existing.mu.Lock()
+			running := existing.status == StatusRunning
+			existing.mu.Unlock()
+			if running {
+				busyRunID = existing.id
+				return
+			}
+		}
+		reg.runs[id] = r
+	}()
+	if archiving {
+		cancel()
+		return "", fmt.Errorf("runs: start: %w", ErrTaskArchiving)
+	}
+	if busyRunID != "" {
+		cancel()
+		return "", &ChatBusyError{ChatID: chatID, RunID: busyRunID}
+	}
+	if err := reg.registerAndDrive(r, runCtx, runner); err != nil {
+		cancel()
+		return "", err
+	}
+	return id, nil
+}
+
+// registerAndDrive is Start's tail after a run is registered in the
+// in-memory map under reg.mu: persist the run row (rolling the in-memory
+// registration back on failure, so the concurrency guard stays correct and
+// no subprocess is started for a run whose row didn't reach disk), notify,
+// and launch the driving goroutine. Shared by Start and the queue's
+// delivery path so a delivered prompt runs through the exact same code
+// (ADR-0021 §3).
+func (reg *Registry) registerAndDrive(r *run, runCtx context.Context, runner *taskrunner.Runner) error {
 	reg.mu.Lock()
+	reg.runs[r.id] = r
+	reg.mu.Unlock()
+
+	// Persisted after registration but before driving the turn: a
+	// persistence failure here still leaves the concurrency guard above
+	// correct (this run is removed again immediately), and never starts an
+	// agent subprocess for a run whose row didn't make it to disk.
+	if _, err := reg.st.CreateRun(store.Run{
+		ID: r.id, TaskID: r.taskID, ChatID: r.chatID, Provider: string(r.provider), Prompt: r.prompt,
+		Status: string(StatusRunning), StartedAt: r.startedAt,
+		PermissionMode: r.perm.Mode, AutoAccept: r.perm.AutoAccept, Model: r.model,
+	}); err != nil {
+		reg.mu.Lock()
+		delete(reg.runs, r.id)
+		reg.mu.Unlock()
+		return fmt.Errorf("runs: start: persist run: %w", err)
+	}
+
+	reg.notifyRunStatus(r)
+
+	go reg.drive(runCtx, r, runner)
+	return nil
+}
+
+// startParams is everything a validated Start needs: the inputs after
+// resolution/normalization (chatID resolved to a concrete chat, an empty
+// permission mode filled in with the provider default). Extracted so the
+// queue's enqueue path (StartWhenBusy) validates exactly like a direct
+// Start -- ADR-0021 AC2's "validates the run config exactly as a direct
+// start would".
+type startParams struct {
+	taskID        int64
+	chatID        int64
+	provider      taskrunner.Provider
+	prompt        string
+	perm          taskrunner.PermissionSettings
+	thinkingLevel taskrunner.ThinkingLevel
+	model         string
+	// catalog is the resolved provider catalog StartWhenBusy's
+	// orchestrator guard (ADR-0019 decision 6 at enqueue time,
+	// ADR-0021 §6) checks against.
+	catalog taskrunner.ProviderInfo
+}
+
+// prepareStart is Start's validation half: unknown task, chat resolution
+// and archiving, provider bind/match, the provider catalog, permission
+// settings (with default-mode normalization), and thinking level. Every
+// error is wrapped "runs: start: ..." exactly as before.
+func prepareStart(wm *workspace.Manager, runner *taskrunner.Runner, taskID, chatID int64, provider taskrunner.Provider, prompt string, perm taskrunner.PermissionSettings, thinkingLevel taskrunner.ThinkingLevel, model string) (startParams, error) {
+	task, err := wm.GetTask(taskID)
+	if err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	if task.ArchivedAt != nil {
+		return startParams{}, fmt.Errorf("runs: start: task %d is archived", taskID)
+	}
+
+	chat, err := resolveChat(wm, taskID, chatID)
+	if err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	if chat.ArchivedAt != nil {
+		return startParams{}, fmt.Errorf("runs: start: chat %d is archived", chat.ID)
+	}
+	if chat.Provider == nil {
+		if chat, err = wm.BindChatProvider(chat.ID, string(provider)); err != nil {
+			return startParams{}, fmt.Errorf("runs: start: bind chat %d provider: %w", chat.ID, err)
+		}
+	}
+	// Re-checked against chat as BindChatProvider actually left it, not
+	// just the pre-bind read above: store.BindChatProvider is a
+	// write-if-still-NULL, so two concurrent first prompts to the same
+	// unbound chat with different providers both reach this point seeing
+	// Provider == nil, but only one of them actually wins the bind -- the
+	// other's write silently no-ops and must still be rejected here rather
+	// than proceeding as if it had bound its own value.
+	if *chat.Provider != string(provider) {
+		return startParams{}, fmt.Errorf("runs: start: chat %d is bound to provider %q, got %q", chat.ID, *chat.Provider, provider)
+	}
+
+	catalog, ok := runner.ProviderCatalogFor(provider)
+	if !ok {
+		return startParams{}, fmt.Errorf("runs: start: unknown provider %q", provider)
+	}
+	if err := taskrunner.ValidatePermissionSettings(catalog, perm); err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+	// An empty mode resolves to the provider default -- for an ACP agent
+	// whose modes aren't discovered yet that's ACPModeDefault, which runACP
+	// treats as "leave the agent in its own start mode" unless the agent
+	// really has a mode by that name; the run then records the agent's
+	// actual mode as soon as its session reports it (applyReportedMode).
+	if perm.Mode == "" {
+		perm.Mode = catalog.DefaultMode
+	}
+
+	if !thinkingLevel.IsValid() {
+		return startParams{}, fmt.Errorf("runs: start: invalid thinking level %q", thinkingLevel)
+	}
+	if err := taskrunner.ValidateModel(catalog, model); err != nil {
+		return startParams{}, fmt.Errorf("runs: start: %w", err)
+	}
+
+	return startParams{taskID: taskID, chatID: chat.ID, provider: provider, prompt: prompt, perm: perm, thinkingLevel: thinkingLevel, model: model, catalog: catalog}, nil
+}
+
+// runningRunForChat reports whether chatID has a StatusRunning run, and
+// that run's id. The scan happens under reg.mu so the "busy, so enqueue"
+// vs "idle, so start" decision in StartWhenBusy is atomic with every other
+// Start and with finish's own state transitions.
+func (reg *Registry) runningRunForChat(chatID int64) (string, bool) {
+	reg.mu.Lock()
+	defer reg.mu.Unlock()
 	for _, existing := range reg.runs {
 		if existing.chatID != chatID {
 			continue
@@ -478,35 +734,10 @@ func (reg *Registry) Start(ctx context.Context, wm *workspace.Manager, runner *t
 		running := existing.status == StatusRunning
 		existing.mu.Unlock()
 		if running {
-			reg.mu.Unlock()
-			cancel()
-			return "", fmt.Errorf("runs: start: chat %d already has a running run (%s)", chatID, existing.id)
+			return existing.id, true
 		}
 	}
-	reg.runs[id] = r
-	reg.mu.Unlock()
-
-	// Persisted after registration but before driving the turn: a
-	// persistence failure here still leaves the concurrency guard above
-	// correct (this run is removed again immediately), and never starts an
-	// agent subprocess for a run whose row didn't make it to disk.
-	if _, err := reg.st.CreateRun(store.Run{
-		ID: id, TaskID: taskID, ChatID: chatID, Provider: string(provider), Prompt: prompt,
-		Status: string(StatusRunning), StartedAt: r.startedAt,
-		PermissionMode: perm.Mode, AutoAccept: perm.AutoAccept,
-	}); err != nil {
-		reg.mu.Lock()
-		delete(reg.runs, id)
-		reg.mu.Unlock()
-		cancel()
-		return "", fmt.Errorf("runs: start: persist run: %w", err)
-	}
-
-	reg.notifyRunStatus(r)
-
-	go reg.drive(runCtx, r, runner)
-
-	return id, nil
+	return "", false
 }
 
 // resolveChat returns the chat Start should use: wm.DefaultChat(taskID) if
@@ -543,7 +774,7 @@ func (reg *Registry) drive(ctx context.Context, r *run, runner *taskrunner.Runne
 	}()
 
 	decider := runPermissionDecider{reg: reg, r: r}
-	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, events)
+	err := runner.RunPrompt(ctx, r.taskID, r.chatID, r.provider, r.prompt, decider, r.getPerm(), r.thinkingLevel, r.model, events)
 	<-forwardDone
 	reg.finish(r, err)
 }
@@ -568,6 +799,12 @@ type runPermissionDecider struct {
 }
 
 func (d runPermissionDecider) Decide(ctx context.Context, summary string, options []taskrunner.PermissionOption) (string, error) {
+	return d.DecideDetailed(ctx, summary, nil, options)
+}
+
+// DecideDetailed implements taskrunner.DetailedPermissionDecider: detail
+// (possibly nil) is recorded on the permission_request event.
+func (d runPermissionDecider) DecideDetailed(ctx context.Context, summary string, detail *taskrunner.PermissionDetail, options []taskrunner.PermissionOption) (string, error) {
 	requestID, err := newRunID()
 	if err != nil {
 		return "", fmt.Errorf("runs: permission request id: %w", err)
@@ -586,6 +823,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 				PermissionRequestID: requestID,
 				PermissionSummary:   summary,
 				PermissionOptions:   options,
+				PermissionDetail:    detail,
 			})
 			d.reg.record(d.r, taskrunner.Event{
 				Type:                 taskrunner.EventTypePermissionResolved,
@@ -611,6 +849,7 @@ func (d runPermissionDecider) Decide(ctx context.Context, summary string, option
 		PermissionRequestID: requestID,
 		PermissionSummary:   summary,
 		PermissionOptions:   options,
+		PermissionDetail:    detail,
 	})
 
 	timer := time.NewTimer(d.reg.getPermissionTimeout())
@@ -759,6 +998,9 @@ func (reg *Registry) record(r *run, e Event) {
 	if e.Type == taskrunner.EventTypeDone {
 		r.stopReason = e.StopReason
 	}
+	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
+		r.usage = e.Usage
+	}
 	seq := r.nextEventSeq
 	r.nextEventSeq++
 	subs := make([]*subQueue, 0, len(r.subscribers))
@@ -778,6 +1020,10 @@ func (reg *Registry) record(r *run, e Event) {
 		_, _ = reg.st.AppendRunEvent(r.id, seq, data)
 	}
 
+	if e.Type == taskrunner.EventTypeUsage && e.Usage != nil {
+		reg.upsertUsage(r, e.Usage)
+	}
+
 	for _, q := range subs {
 		q.push(e)
 	}
@@ -789,7 +1035,14 @@ func (reg *Registry) finish(r *run, err error) {
 	r.mu.Lock()
 	stopRequested := r.stopRequested
 	stopReason := r.stopReason
+	usage := r.usage
 	r.mu.Unlock()
+
+	// Idempotent re-upsert so the row reflects the final value. A run that
+	// never emitted usage gets no row.
+	if usage != nil {
+		reg.upsertUsage(r, usage)
+	}
 
 	var status Status
 	var errMsg string
@@ -837,6 +1090,14 @@ func (reg *Registry) finish(r *run, err error) {
 	}
 
 	reg.retain(r.id)
+
+	// Queue delivery (ADR-0021 §3): the finished run is recorded and every
+	// lock (reg.mu, r.mu) has been released by this point, so starting the
+	// chat's next queued prompt here can never deadlock against finish.
+	// Runs after retain but before the closedCh signal so a CloseAll
+	// caller that waits on closedCh still sees "this run is fully done"
+	// including its queue hand-off.
+	reg.deliverOne(r.chatID)
 
 	// Signal last, same reasoning as internal/terminal.Registry's own
 	// finish: CloseAll blocks on this to know the run's subprocess is
@@ -944,9 +1205,15 @@ func (reg *Registry) History(runID string) ([]Event, RunStatus, error) {
 		return nil, RunStatus{}, err
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	hist := append([]Event(nil), r.history...)
-	return hist, r.statusLocked(), nil
+	status := r.statusLocked()
+	r.mu.Unlock()
+	if status.Usage == nil && status.Status != StatusRunning {
+		if u, err := reg.st.GetRunUsage(runID); err == nil {
+			status.Usage = runUsageFromStore(u)
+		}
+	}
+	return hist, status, nil
 }
 
 // Stop cancels runID's background context, from any caller regardless of
@@ -1001,6 +1268,8 @@ func (reg *Registry) Stop(runID string) error {
 // (blocking on each run's closedCh, mirroring
 // internal/terminal.Registry.CloseAll's exact same reasoning and shape).
 func (reg *Registry) CloseAll() {
+	reg.closing.Store(true)
+
 	reg.mu.Lock()
 	running := make([]*run, 0, len(reg.runs))
 	for _, r := range reg.runs {
@@ -1047,6 +1316,7 @@ func (reg *Registry) List(chatID int64) []RunSummary {
 		out = append(out, r.statusLocked())
 		r.mu.Unlock()
 	}
+	reg.withStoredUsage(out)
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.After(out[j].StartedAt) })
 	return out
 }
@@ -1057,4 +1327,118 @@ func newRunID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// ErrTaskArchiving is the run-start refusal while a task is mid-archive:
+// starting a run inside a worktree that is being checkpointed and removed
+// would destroy the run's working directory out from under it.
+var ErrTaskArchiving = errors.New("task is being archived")
+
+// TryBeginArchive is the archive path's half of closing the TOCTOU window
+// around the active-run guard: under reg.mu it refuses (nil, error) when
+// the task already has an active run or queued prompt (the same
+// ActiveRunForTask outcome), and otherwise marks the task as archiving --
+// from that instant until the returned release func runs, every run-start
+// path (Start, StartWhenBusy, queue delivery) refuses with
+// ErrTaskArchiving. The caller must call release exactly once, typically
+// via defer, whether or not the archive itself succeeds.
+func (reg *Registry) TryBeginArchive(taskID int64) (func(), error) {
+	// The latch is set BEFORE the active-run check, and that order is the
+	// whole point: once reg.archiving[taskID] is set (under reg.mu), no
+	// run-start path -- Start, StartWhenBusy, queue delivery -- can
+	// register a run for the task, because each refuses with
+	// ErrTaskArchiving while the latch is held. The subsequent
+	// ActiveRunForTask scan therefore sees every run that existed before
+	// the latch, and none can appear after it; a run racing in before the
+	// latch is either already in reg.runs (seen by the scan) or blocked
+	// by it. Had the check run first, a run starting between the check
+	// and the latch would be invisible -- the exact TOCTOU this closes.
+	reg.mu.Lock()
+	if reg.archiving[taskID] {
+		reg.mu.Unlock()
+		return nil, fmt.Errorf("task %d is already being archived", taskID)
+	}
+	reg.archiving[taskID] = true
+	hook := reg.testHookAfterLatch
+	reg.mu.Unlock()
+
+	if hook != nil {
+		hook()
+	}
+
+	unlatch := func() {
+		reg.mu.Lock()
+		delete(reg.archiving, taskID)
+		reg.mu.Unlock()
+	}
+
+	runID, queued, active, err := reg.ActiveRunForTask(taskID)
+	if err != nil {
+		unlatch()
+		return nil, err
+	}
+	if active {
+		unlatch()
+		if queued {
+			return nil, fmt.Errorf("has a queued prompt waiting to run; cancel it or let it finish first")
+		}
+		return nil, fmt.Errorf("has a running run (%s); stop it (run.stop) first", runID)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(unlatch)
+	}, nil
+}
+
+// taskArchivingLocked reports whether taskID is mid-archive; callers must
+// hold reg.mu.
+func (reg *Registry) taskArchivingLocked(taskID int64) bool {
+	return reg.archiving[taskID]
+}
+
+// ActiveRunForTask reports whether any of taskID's chats has an active
+// run: one that is StatusRunning, or (queued=true) a chat_queue item
+// still waiting to be delivered. It exists for the daemon's archive
+// guard (task.archive must refuse while work is in flight), scanning the
+// registry's in-memory runs plus the persisted queue, since queued items
+// belong to chats that have no run yet. The runID of the running run is
+// returned when one exists; for the queued case it is "" and queued is
+// true.
+//
+// A store failure is returned as err rather than silently reported as
+// "not active": the archive guard must fail closed -- answering "no
+// active runs" off a broken store read could archive a task out from
+// under a live run.
+func (reg *Registry) ActiveRunForTask(taskID int64) (runID string, queued bool, active bool, err error) {
+	reg.mu.Lock()
+	for _, r := range reg.runs {
+		if r.taskID != taskID {
+			continue
+		}
+		r.mu.Lock()
+		running := r.status == StatusRunning
+		r.mu.Unlock()
+		if running {
+			reg.mu.Unlock()
+			return r.id, false, true, nil
+		}
+	}
+	reg.mu.Unlock()
+
+	chats, err := reg.st.ListChatsByTask(taskID, true)
+	if err != nil {
+		return "", false, false, fmt.Errorf("list chats for task %d: %w", taskID, err)
+	}
+	for _, c := range chats {
+		items, err := reg.st.ListChatQueue(c.ID)
+		if err != nil {
+			return "", false, false, fmt.Errorf("list queue for chat %d: %w", c.ID, err)
+		}
+		for _, item := range items {
+			if item.Status == store.ChatQueueStatusQueued {
+				return "", true, true, nil
+			}
+		}
+	}
+	return "", false, false, nil
 }

@@ -4,11 +4,43 @@ on:
   push:
     branches: [master, develop]
   pull_request:
+  # GitHub merge queue (develop ruleset): the required `ci` check must also
+  # run on the queue's temporary merge-group branch, or queued PRs never merge.
+  merge_group:
 
 permissions:
   contents: read
 
 jobs:
+  windows-terminal:
+    # Already ran on the PR and is not a required check; skipping it in the
+    # merge queue keeps each queued batch to the ~2-3 min `ci` job.
+    if: github.event_name != 'merge_group'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Mark repo safe for git
+        run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test terminal package
+        run: go test -v ./internal/terminal/...
+
+      - name: Test full suite (non-blocking, input for runtime-parity plan)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: go test -timeout 8m ./...
+
   ci:
     runs-on: ubuntu-latest
     steps:

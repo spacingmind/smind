@@ -259,7 +259,7 @@ implementation plan doesn't silently assume gRPC applies there too.
 gRPC.** The mobile client's grpc-web-over-WebSocket choice above was
 driven by a constraint specific to browsers/React Native (no native
 HTTP/2/gRPC without a grpc-web proxy layer). The desktop app's Rust
-relay client (`docs/plans/active/desktop-relay-transport.md`) is a
+relay client (`docs/plans/completed/desktop-relay-transport.md`) is a
 native process with no such constraint, so it speaks native gRPC
 directly to the relay's plain gRPC listener (`DefaultListenAddr`,
 `internal/relay/server/run.go`), generated from `relay.proto` via

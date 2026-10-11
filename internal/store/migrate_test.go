@@ -632,3 +632,169 @@ func TestMigrate_PermissionModesBackfillRunsOnce(t *testing.T) {
 		}
 	}
 }
+
+// TestMigrate_AccountsModelsColumn: a database whose accounts table predates
+// accounts.models gets the column on Open, and its old rows read back as
+// "no list".
+func TestMigrate_AccountsModelsColumn(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-accounts.db")
+	db, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open raw db error = %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := db.Exec(`CREATE TABLE accounts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT, provider TEXT NOT NULL, label TEXT NOT NULL,
+		credential_type TEXT NOT NULL, credential_data TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)`); err != nil {
+		t.Fatalf("create old accounts table: %v", err)
+	}
+	if _, err := db.Exec(
+		`INSERT INTO accounts (id, provider, label, credential_type, credential_data, created_at, updated_at)
+		 VALUES (1, 'anthropic', 'old', 'api_key', '{"key":"k"}', ?, ?)`, now, now,
+	); err != nil {
+		t.Fatalf("seed old account: %v", err)
+	}
+	db.Close()
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		got, err := s.GetAccount(1)
+		if err != nil {
+			t.Fatalf("GetAccount() error = %v", err)
+		}
+		if got.Models != "" || got.Label != "old" {
+			t.Fatalf("migrated account = %+v, want no models", got)
+		}
+		s.Close()
+	}
+}
+
+// TestMigrate_ChatQueueCancelKind: a database whose chat_queue table
+// predates cancel_kind gets the column on Open, and its cancelled rows are
+// backfilled -- 'cancelled by user' to 'user', every other cancelled row to
+// 'auto' -- while queued and delivered rows stay empty.
+func TestMigrate_ChatQueueCancelKind(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-chat-queue.db")
+
+	// A database from just before cancel_kind: today's schema minus the
+	// column. Built by opening fresh, then dropping it.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+	if _, err := s.db.Exec(`ALTER TABLE chat_queue DROP COLUMN cancel_kind`); err != nil {
+		t.Fatalf("drop cancel_kind: %v", err)
+	}
+	// Raw rows (MarkCancelled now writes the column this database doesn't
+	// have yet): one per status, both cancelled flavours.
+	now := time.Now().UTC()
+	for prompt, stmt := range map[string]string{
+		"queued":         `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'queued', 'human', 'queued', '', ?, ?)`,
+		"delivered":      `INSERT INTO chat_queue (chat_id, prompt, source, status, run_id, cancel_reason, created_at, updated_at) VALUES (?, 'delivered', 'human', 'delivered', 'run-1', '', ?, ?)`,
+		"user cancelled": `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'user cancelled', 'human', 'cancelled', 'cancelled by user', ?, ?)`,
+		"auto cancelled": `INSERT INTO chat_queue (chat_id, prompt, source, status, cancel_reason, created_at, updated_at) VALUES (?, 'auto cancelled', 'human', 'cancelled', 'delivery failed: x', ?, ?)`,
+	} {
+		if _, err := s.db.Exec(stmt, chat.ID, now, now); err != nil {
+			t.Fatalf("seed %q: %v", prompt, err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		var col string
+		if err := s.db.QueryRow(`SELECT name FROM pragma_table_info('chat_queue') WHERE name = 'cancel_kind'`).Scan(&col); err != nil {
+			t.Fatalf("chat_queue.cancel_kind column not found: %v", err)
+		}
+		items, err := s.ListChatQueue(chat.ID)
+		if err != nil {
+			t.Fatalf("ListChatQueue() error = %v", err)
+		}
+		want := map[string]string{"queued": "", "delivered": "", "user cancelled": ChatQueueCancelUser, "auto cancelled": ChatQueueCancelAuto}
+		for _, item := range items {
+			if item.CancelKind != want[item.Prompt] {
+				t.Errorf("Open() #%d item %q cancel_kind = %q, want %q", i, item.Prompt, item.CancelKind, want[item.Prompt])
+			}
+		}
+		s.Close()
+	}
+}
+
+// TestMigrate_ModelColumns: a database whose runs and agent_profiles tables
+// predate the model columns (ADR-0025) gets them on Open, and the old rows
+// read back with no model.
+func TestMigrate_ModelColumns(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "old-model.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	task := newTestTaskForRuns(t, s)
+	chat, err := s.CreateChat(task.ID, "")
+	if err != nil {
+		t.Fatalf("CreateChat() error = %v", err)
+	}
+	for _, table := range []string{"runs", "agent_profiles"} {
+		if _, err := s.db.Exec(`ALTER TABLE ` + table + ` DROP COLUMN model`); err != nil {
+			t.Fatalf("drop %s.model: %v", table, err)
+		}
+	}
+	now := time.Now().UTC()
+	if _, err := s.db.Exec(
+		`INSERT INTO runs (id, task_id, chat_id, provider, prompt, status, started_at) VALUES ('old-run', ?, ?, 'glm', 'hi', 'done', ?)`,
+		task.ID, chat.ID, now,
+	); err != nil {
+		t.Fatalf("seed old run: %v", err)
+	}
+	if _, err := s.db.Exec(
+		`INSERT INTO agent_profiles (id, name, provider, created_at, updated_at) VALUES (1, 'old', 'glm', ?, ?)`, now, now,
+	); err != nil {
+		t.Fatalf("seed old profile: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	for i := 0; i < 2; i++ { // second Open proves idempotence
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		run, err := s.GetRun("old-run")
+		if err != nil {
+			t.Fatalf("GetRun() error = %v", err)
+		}
+		prof, err := s.GetAgentProfile(1)
+		if err != nil {
+			t.Fatalf("GetAgentProfile() error = %v", err)
+		}
+		if run.Model != "" || prof.Model != "" {
+			t.Fatalf("migrated models = %q / %q, want empty (NULL)", run.Model, prof.Model)
+		}
+		var isNull bool
+		if err := s.db.QueryRow(`SELECT model IS NULL FROM runs WHERE id = 'old-run'`).Scan(&isNull); err != nil || !isNull {
+			t.Fatalf("runs.model IS NULL = %v, %v, want true", isNull, err)
+		}
+		s.Close()
+	}
+}

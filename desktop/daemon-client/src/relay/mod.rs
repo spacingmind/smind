@@ -1,6 +1,6 @@
 //! Rust-side E2EE relay client (ADR-0013 part C): pairing, crypto/framing,
 //! admission, pairing persistence, and the gRPC transport + reconnect
-//! loop. See `docs/plans/active/desktop-relay-transport.md`.
+//! loop. See `docs/plans/completed/desktop-relay-transport.md`.
 
 pub mod admission;
 pub mod channel;

@@ -121,27 +121,39 @@ pub fn kill_process(pid: u32) -> io::Result<()> {
     }
 }
 
-/// exe_path_for_pid resolves the full command a pid was launched with, so
+/// exe_path_for_pid resolves the executable a pid was launched from, so
 /// callers can verify a pid found via `find_port_owner` is really the
 /// binary this app manages before trusting or signalling it (AC3's
-/// stale-record / unmanaged-adoption guard). `ps -o args=`/`command=`
-/// (unlike `-o comm=`, which on Linux truncates to a 15-character bare
-/// name with no path at all) reports the full invoked command line on
-/// both macOS and Linux -- only the first (whitespace-separated) token,
-/// the executable path itself, is kept; any arguments (`serve`) are not
-/// part of the identity check.
+/// stale-record / unmanaged-adoption guard).
+///
+/// macOS (where this path runs for real) asks `ps -o comm=`, which there
+/// is the executable's full path with spaces intact -- essential, because
+/// the managed layout lives under `~/Library/Application Support/`, and
+/// splitting `args=` on whitespace cut that path at "Application" so the
+/// identity check could never match. Elsewhere `comm=` is a truncated
+/// 15-character bare name with no path at all, so `args=` (the full
+/// command line) is used and only its first token, the executable path,
+/// is kept; any arguments (`serve`) are not part of the identity check.
 pub fn exe_path_for_pid(pid: u32) -> io::Result<Option<String>> {
     let mut cmd = Command::new("ps");
-    cmd.arg("-p").arg(pid.to_string()).arg("-o").arg("args=");
+    cmd.arg("-p").arg(pid.to_string()).arg("-o").arg(if cfg!(target_os = "macos") { "comm=" } else { "args=" });
     let output = crate::windows_process::no_window(&mut cmd).output()?;
     if !output.status.success() {
         return Ok(None);
     }
-    Ok(parse_ps_args_output(&String::from_utf8_lossy(&output.stdout)))
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(if cfg!(target_os = "macos") { parse_ps_comm_output(&stdout) } else { parse_ps_args_output(&stdout) })
 }
 
 pub fn parse_ps_args_output(stdout: &str) -> Option<String> {
     stdout.split_whitespace().next().map(str::to_string)
+}
+
+/// parse_ps_comm_output keeps the whole (trimmed) line: a macOS `comm=`
+/// path may contain spaces.
+pub fn parse_ps_comm_output(stdout: &str) -> Option<String> {
+    let line = stdout.lines().next()?.trim();
+    (!line.is_empty()).then(|| line.to_string())
 }
 
 /// exe_matches is the pure identity check `managed::safe_to_kill`/
@@ -238,6 +250,14 @@ mod tests {
     fn parse_ps_args_output_extracts_the_executable_path() {
         assert_eq!(parse_ps_args_output("/opt/smind/bin/smind serve\n").as_deref(), Some("/opt/smind/bin/smind"));
         assert_eq!(parse_ps_args_output(""), None);
+    }
+
+    #[test]
+    fn parse_ps_comm_keeps_spaces_in_the_path() {
+        let managed = "/Users/me/Library/Application Support/dev.spacingmind.desktop/managed-daemon/bin/smind";
+        assert_eq!(parse_ps_comm_output(&format!("{managed}\n")).as_deref(), Some(managed));
+        assert!(exe_matches(&parse_ps_comm_output(&format!("{managed}\n")).unwrap(), Path::new(managed)));
+        assert_eq!(parse_ps_comm_output("\n"), None);
     }
 
     #[test]

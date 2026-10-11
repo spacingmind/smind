@@ -2,6 +2,7 @@ package runs
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -67,5 +68,33 @@ func TestEncodeDecodeEvent_RawPayload_RoundTripsLargeNestedPayload(t *testing.T)
 	}
 	if string(got.RawPayload) != string(want.RawPayload) {
 		t.Fatalf("decodeEvent() RawPayload did not round-trip byte for byte\ngot  len=%d\nwant len=%d", len(got.RawPayload), len(want.RawPayload))
+	}
+}
+
+// TestEventCodec_McpServersRoundTrip: an EventTypeMcpServers event's
+// McpServers survive encode/decode byte for byte (ADR-0018's per-run
+// indicator, M4).
+func TestEventCodec_McpServersRoundTrip(t *testing.T) {
+	t.Parallel()
+	want := taskrunner.Event{
+		Type: taskrunner.EventTypeMcpServers,
+		McpServers: []taskrunner.McpServerState{
+			{Name: "pw", Transport: "stdio", Status: taskrunner.McpStatusActive},
+			{Name: "remote", Transport: "http", Status: taskrunner.McpStatusDropped, Reason: taskrunner.McpReasonTransportUnsupported},
+		},
+	}
+	data, err := encodeEvent(want)
+	if err != nil {
+		t.Fatalf("encodeEvent() error = %v", err)
+	}
+	if !strings.Contains(data, `"mcpServers"`) {
+		t.Fatalf("encodeEvent() = %s, want an mcpServers field", data)
+	}
+	got, err := decodeEvent(data)
+	if err != nil {
+		t.Fatalf("decodeEvent() error = %v", err)
+	}
+	if !reflect.DeepEqual(got.McpServers, want.McpServers) {
+		t.Fatalf("decodeEvent() McpServers = %+v, want %+v", got.McpServers, want.McpServers)
 	}
 }

@@ -33,6 +33,10 @@ binary that serves both the API and an embedded web UI.
 - **CLI** — `workspace`/`space`/`task` management and `task
   send`/`attach`/`logs`/`stop`, modeled on real-world daemon CLIs (detaching
   never stops a run in progress).
+- **MCP server** — `smind mcp serve` exposes the same orchestration surface
+  ([ADR-0017](docs/decisions/0017-mcp-server.md)) to agent harnesses over
+  stdio, so an orchestrating agent can drive sub-agents without shelling
+  out to the CLI.
 
 ## Install
 
@@ -54,6 +58,31 @@ From source:
 go install github.com/spacingmind/smind/cmd/smind@latest
 ```
 
+### macOS desktop app
+
+Each release attaches one unsigned `.dmg` per architecture
+(`smind-desktop-<version>-macos-arm64.dmg` for Apple Silicon,
+`…-macos-x86_64.dmg` for Intel; macOS 13 or newer). The app bundles the
+matching `smind` daemon and starts it for you on first launch, so there is
+nothing else to install. Quitting the app leaves the daemon running; reopen
+it from the Dock to reconnect.
+
+The app is not signed or notarized, so Gatekeeper blocks a DMG downloaded
+through a browser. After dragging `smind.app` to `/Applications`, clear the
+quarantine flag once:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/smind.app
+```
+
+To build and install it yourself (needs Go, bun and Rust; a locally built app
+has no quarantine flag and opens straight away):
+
+```sh
+task desktop:mac:install   # builds smind.app + .dmg, copies the app to /Applications
+task desktop:mac           # build only; output under desktop/src-tauri/target/<triple>/release/bundle/
+```
+
 ### Installing the daemon from a release manually
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
@@ -72,9 +101,10 @@ tar -xzf "smind_${version}_${os}_${arch}.tar.gz"
 ./smind --version
 ```
 
-There is no native Windows daemon binary yet (blocked on `internal/terminal`,
-see ADR-0013); Windows users run the desktop app, which manages the daemon
-via WSL2.
+There is no native Windows daemon binary yet; `internal/terminal` is now
+cross-platform (see docs/plans/active/windows-native-terminal.md), but the
+rest of the daemon's Windows runtime parity is still follow-up work. Windows
+users run the desktop app, which manages the daemon via WSL2.
 
 ## Quickstart
 
@@ -103,6 +133,53 @@ Each run uses its provider's own permission modes
 
 Anything the chosen mode still escalates waits for a human in the web UI or
 `smind task approve`. The web UI's prompt form has the same mode picker.
+
+### MCP server (`smind mcp serve`)
+
+`smind mcp serve` ([ADR-0017](docs/decisions/0017-mcp-server.md)) runs an
+MCP server over stdio, for orchestrating agents (Claude Code, Cursor, ...)
+to drive smind sub-agents without the CLI shell-and-poll loop:
+
+```json
+{ "mcpServers": { "smind": { "command": "smind", "args": ["mcp", "serve"] } } }
+```
+
+The daemon (`smind serve`) must already be running; the server reuses the
+CLI's own token and fails fast if it can't connect. Tools:
+`task_new`, `task_list`, `chat_list`, `chat_new`, `task_send`,
+`task_wait`, `task_status`, `task_logs`, `task_permissions`, `task_stop`.
+`task_send` returns a `runId` immediately; `task_wait` blocks until the run
+finishes, a permission goes pending, or its timeout elapses.
+
+There are deliberately **no approval tools** — an orchestrating agent must
+never resolve a sub-agent's permission request; it surfaces it (via
+`task_permissions`/`task_wait`) and the human approves in the web UI or
+with `smind task approve`. For the same reason ([ADR-0019](docs/decisions/0019-provider-native-permission-modes.md)
+decision 6), `task_send` rejects an auto-approving `permissionMode`
+(bypass modes) or `autoAccept: true` chosen by the caller itself — to run
+with such settings, pass a human-authored agent profile's `profileId`
+instead.
+
+## Orchestration skills
+
+smind bundles five agent skills (`smind`, `smind-leader`, `smind-handoff`,
+`smind-advisor`, `smind-committee`) that teach an orchestrating agent the
+MCP tool loop and the leader/coder pattern. They are plain `SKILL.md` files
+embedded in the binary and installed only when you ask:
+
+```sh
+smind skill ls                       # bundled skills x targets: installed/modified/missing
+smind skill install [--target claude|agents|codex|all] [--force]
+smind skill uninstall
+```
+
+Install writes only under `~/.claude/skills`, `~/.agents/skills` and
+`~/.codex/skills`, tracks what it wrote in a per-skill
+`.smind-managed-files.json` manifest, never overwrites a file you edited
+(without `--force`) and never touches other skills. No daemon is needed.
+To let an agent drive smind, add the MCP server: `smind mcp add smind stdio
+--command smind --arg mcp --arg serve` (or run `smind mcp serve` as a stdio
+server).
 
 ## Dev quickstart
 

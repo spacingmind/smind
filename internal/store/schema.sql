@@ -5,7 +5,10 @@ CREATE TABLE IF NOT EXISTS accounts (
     credential_type TEXT NOT NULL,
     credential_data TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    -- JSON array of path.Match globs this account serves (ADR-0020 §5);
+    -- NULL = no list.
+    models TEXT
 );
 
 CREATE TABLE IF NOT EXISTS routing_decisions (
@@ -31,7 +34,9 @@ CREATE TABLE IF NOT EXISTS workspaces (
     title TEXT NOT NULL,
     routing_policy TEXT NOT NULL,
     created_at TIMESTAMP NOT NULL,
-    updated_at TIMESTAMP NOT NULL
+    updated_at TIMESTAMP NOT NULL,
+    setup_script TEXT,
+    teardown_script TEXT
 );
 
 CREATE TABLE IF NOT EXISTS workspace_accounts (
@@ -60,7 +65,11 @@ CREATE TABLE IF NOT EXISTS tasks (
     branch TEXT,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
-    archived_at TIMESTAMP
+    archived_at TIMESTAMP,
+    setup_status TEXT,
+    setup_error TEXT,
+    setup_log TEXT,
+    port INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS chats (
@@ -86,7 +95,8 @@ CREATE TABLE IF NOT EXISTS runs (
     err_msg TEXT NOT NULL DEFAULT '',
     approval_policy TEXT NOT NULL DEFAULT 'manual',
     permission_mode TEXT NOT NULL DEFAULT '',
-    auto_accept INTEGER NOT NULL DEFAULT 0
+    auto_accept INTEGER NOT NULL DEFAULT 0,
+    model TEXT -- requested model (ADR-0025); NULL = provider default
 );
 
 CREATE TABLE IF NOT EXISTS run_events (
@@ -117,6 +127,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     permission_mode TEXT NOT NULL DEFAULT '',
     auto_accept INTEGER NOT NULL DEFAULT 0,
     thinking_level TEXT NOT NULL DEFAULT '',
+    model TEXT, -- requested model (ADR-0025); NULL = provider default
     notes TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL
@@ -193,3 +204,45 @@ CREATE INDEX IF NOT EXISTS idx_run_events_run_id ON run_events(run_id);
 CREATE INDEX IF NOT EXISTS idx_terminal_sessions_task_id ON terminal_sessions(task_id);
 CREATE INDEX IF NOT EXISTS idx_request_log_started_at ON request_log(started_at);
 CREATE INDEX IF NOT EXISTS idx_request_log_account_id ON request_log(account_id);
+
+CREATE TABLE IF NOT EXISTS chat_queue (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id INTEGER NOT NULL REFERENCES chats(id),
+    prompt TEXT NOT NULL,
+    run_config TEXT NOT NULL DEFAULT '{}', -- JSON: provider, permissionMode, autoAccept, thinkingLevel, model
+    source TEXT NOT NULL,                  -- 'human' | 'orchestrator' | 'agent'
+    from_task_id INTEGER,                  -- sender, when source='agent'
+    from_chat_id INTEGER,
+    priority INTEGER NOT NULL DEFAULT 0,   -- 1 for interrupt items (delivered first)
+    status TEXT NOT NULL,                  -- 'queued' | 'delivered' | 'cancelled'
+    run_id TEXT,                           -- set on delivery
+    cancel_reason TEXT NOT NULL DEFAULT '',
+    cancel_kind TEXT NOT NULL DEFAULT '',  -- 'user' | 'auto' once cancelled
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_queue_chat_status ON chat_queue(chat_id, status, priority DESC, id);
+
+-- run_usage: one row per run of what the agent itself reported (ADR-0020).
+-- Additive; NULL means "not reported", never estimated. workspace_id is
+-- denormalized from tasks at upsert time. No prompt text, no secrets.
+CREATE TABLE IF NOT EXISTS run_usage (
+    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+    workspace_id INTEGER,
+    task_id INTEGER NOT NULL,
+    chat_id INTEGER,
+    provider TEXT NOT NULL,
+    model TEXT,
+    input_tokens INTEGER,
+    cached_input_tokens INTEGER,
+    cache_write_tokens INTEGER,
+    output_tokens INTEGER,
+    reasoning_tokens INTEGER,
+    cost_usd REAL,
+    context_used INTEGER,
+    context_size INTEGER,
+    session_snapshot TEXT, -- JSON, ACP only
+    source TEXT NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_run_usage_task_id ON run_usage(task_id);

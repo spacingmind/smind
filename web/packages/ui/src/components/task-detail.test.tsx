@@ -214,7 +214,7 @@ describe("TaskDetailPane", () => {
     expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
 
     // run.attach must not have been issued before run.start resolves.
     expect(client.calls.some((c) => c.method === "run.attach")).toBe(false);
@@ -590,7 +590,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
   });
 
   it("defaults the permission-mode selector to the provider default and omits permissionMode from run.start", async () => {
@@ -607,7 +607,7 @@ describe("TaskDetailPane", () => {
     await flush();
 
     const startCall = client.nth("run.start", 0);
-    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing" });
+    expect(startCall.params).toEqual({ taskId: TASK_A.ID, chatId: CHAT_A.ID, provider: "claude-native", prompt: "do the thing", whenBusy: "queue" });
   });
 
   it("sends the picked permissionMode in run.start", async () => {
@@ -630,6 +630,7 @@ describe("TaskDetailPane", () => {
       provider: "claude-native",
       prompt: "do the thing",
       permissionMode: "plan",
+      whenBusy: "queue",
     });
   });
 
@@ -669,11 +670,11 @@ describe("TaskDetailPane", () => {
     expect(within(screen.getByTestId("composer-toolbar-row")).getByLabelText("Thinking Level")).toBeInTheDocument();
   });
 
-  it("omits the config-options control entirely for a Claude run", async () => {
+  it("omits the config-options control entirely for a Codex run (its model applies from the next run, ADR-0025)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
-    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "codex-native" })]);
     await flush();
     client.emit("run.attach", 0, "chunk", { text: "hi" });
     await flush();
@@ -755,6 +756,37 @@ describe("TaskDetailPane", () => {
     });
 
     expect(screen.getByLabelText("Thinking Level")).toHaveTextContent("High");
+  });
+
+  it("model option change calls run.setConfigOption", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun({ Provider: "claude-native" })]);
+    await flush();
+    client.nth("run.listConfigOptions", 0).resolve({
+      options: [
+        {
+          configId: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "default",
+          options: [
+            { value: "default", name: "Default" },
+            { value: "opus", name: "Opus (latest)" },
+          ],
+        },
+      ],
+    });
+    await flush();
+
+    // Named apart from the composer's own (next-run) Model picker.
+    fireEvent.click(screen.getByLabelText("Model (this session)"));
+    fireEvent.click(await screen.findByRole("option", { name: "Opus (latest)" }));
+    await flush();
+
+    expect(client.nth("run.setConfigOption", 0).params).toEqual({ runId: "run-1", configId: "model", value: "opus" });
   });
 
   it("surfaces a failed run.setConfigOption as an error instead of silently no-op'ing", async () => {
@@ -893,6 +925,7 @@ describe("TaskDetailPane", () => {
       prompt: "do the thing",
       permissionMode: "plan",
       thinkingLevel: "standard",
+      whenBusy: "queue",
     });
   });
 
@@ -999,7 +1032,7 @@ describe("run-config pill (run-config IA)", () => {
 });
 
 describe("runConfigPillLabel", () => {
-  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "" };
+  const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
   const providers: ProviderInfo[] = [
     { id: "claude-native", label: "Claude Code" },
     { id: "glm", label: "GLM" },
@@ -1038,5 +1071,155 @@ describe("runConfigPillLabel", () => {
   it("uses the provider's own mode label and notes auto-accept", () => {
     expect(runConfigPillLabel({ ...BASE, permissionMode: "plan" }, [], providers)).toBe("No agent · Claude Code · Plan Mode · Standard");
     expect(runConfigPillLabel({ ...BASE, provider: "glm", autoAccept: true }, [], providers)).toBe("No agent · GLM · Default · Auto-accept");
+  });
+});
+
+describe("MCP servers pill", () => {
+  it("mcp pill reflects the latest run only", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    // Older run has servers, newest has none -> no pill.
+    client.nth("run.list", 0).resolve([
+      doneRun({ ID: "run-old", StartedAt: "2024-01-01T00:00:00Z" }),
+      doneRun({ ID: "run-new", StartedAt: "2024-01-01T00:00:10Z" }),
+    ]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-old",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    client.nth("run.logs", 1).resolve({ runId: "run-new", status: "done", events: [] } satisfies RunLogsResult);
+    await flush();
+
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+  });
+
+  it("mcp pill shows the newest run's servers when it reported them", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([doneRun({ ID: "run-old", StartedAt: "2024-01-01T00:00:00Z" })]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-old",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    await flush();
+
+    expect(screen.getByTestId("run-mcp-indicator")).toHaveTextContent("MCP 1");
+  });
+
+  it("mcp pill is scoped to the chat's own runs", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([doneRun()]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-1",
+      status: "done",
+      events: [{ type: "mcp_servers", mcpServers: [{ name: "github", transport: "stdio", status: "active" }] }],
+    } satisfies RunLogsResult);
+    await flush();
+    expect(screen.getByTestId("run-mcp-indicator")).toHaveTextContent("MCP 1");
+
+    // Switch to the task's other chat: the scoping mechanism is run.list's
+    // own chatId filter, and the pane drops A's runs immediately -- the
+    // pill never lingers on chat B, and B's list is fetched for B's id.
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
+    await flush();
+
+    expect(client.nth("run.list", 1).params).toEqual({ chatId: CHAT_B.ID });
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+
+    // Chat B's own run carries no mcp_servers event -> no pill for B either.
+    client.nth("run.list", 1).resolve([doneRun({ ID: "run-b", ChatID: CHAT_B.ID })]);
+    await flush();
+    client.nth("run.logs", 1).resolve({ runId: "run-b", status: "done", events: [] } satisfies RunLogsResult);
+    await flush();
+    expect(screen.queryByTestId("run-mcp-indicator")).not.toBeInTheDocument();
+  });
+});
+
+describe("chat usage total", () => {
+  it("task-detail: the header total updates live from a usage event", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
+
+    client.emit("run.attach", 0, "usage", {
+      usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.31, source: "claude_result" },
+    });
+    await flush();
+
+    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("12.3k in · 1.2k out · $0.31");
+  });
+
+  it("task-detail: no double counting when a usage event follows the run.list usage", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([
+      runningRun({ usage: { inputTokens: 10000, outputTokens: 1000, source: "claude_result" } }),
+    ]);
+    await flush();
+    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("10k in · 1k out");
+
+    // The live event REPLACES the seeded value, never adds to it.
+    client.emit("run.attach", 0, "usage", {
+      usage: { inputTokens: 12345, outputTokens: 1234, source: "claude_result" },
+    });
+    await flush();
+
+    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("12.3k in · 1.2k out");
+  });
+
+  it("task-detail: switching chats drops the previous chat's total", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([
+      runningRun({ usage: { inputTokens: 10000, outputTokens: 1000, source: "claude_result" } }),
+    ]);
+    await flush();
+    expect(screen.getByTestId("chat-usage-total")).toHaveTextContent("10k in");
+
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
+    await flush();
+
+    // Gone immediately -- no stale total while chat B's list is in flight.
+    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
+
+    client.nth("run.list", 1).resolve([]);
+    await flush();
+    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
+  });
+
+  it("task-detail: a late usage event from the previous chat's stream is ignored", async () => {
+    const client = new FakeWsClient();
+    const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+
+    client.nth("run.list", 0).resolve([runningRun()]);
+    await flush();
+
+    rerender(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_B} isDefaultChat={false} />);
+    client.nth("run.list", 1).resolve([]);
+    await flush();
+    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
+
+    // The old chat's still-open run.attach delivers a usage event after the
+    // switch -- the cancelled session must drop it.
+    client.emit("run.attach", 0, "usage", {
+      usage: { inputTokens: 99999, outputTokens: 99999, source: "claude_result" },
+    });
+    await flush();
+
+    expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
   });
 });

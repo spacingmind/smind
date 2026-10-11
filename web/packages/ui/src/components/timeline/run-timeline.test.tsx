@@ -1,12 +1,13 @@
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { TimelineRow } from "@/components/timeline/timeline-row";
 import { FOLLOW_THRESHOLD_PX, useAutoFollow } from "@/components/timeline/use-auto-follow";
-import { buildTimeline, type RunEntry, type TimelineItem } from "@/hooks/use-run-timeline";
-import type { RunLogEvent } from "@/lib/types";
+import { buildTimeline, useRunTimeline, type RunEntry, type TimelineItem } from "@/hooks/use-run-timeline";
+import { FakeWsClient } from "@/test/fake-ws-client";
+import type { RunLogEvent, RunLogsResult, RunSummary } from "@/lib/types";
 
 function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry {
   return {
@@ -22,6 +23,31 @@ function run(events: RunLogEvent[], overrides: Partial<RunEntry> = {}): RunEntry
     ...overrides,
   };
 }
+
+describe("RunTimeline stop reason", () => {
+  it("labels a max_turn_requests run as turn limit reached", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "max_turn_requests" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.getAttribute("data-tone")).toBe("warning");
+    expect(el.textContent).toContain("Turn limit reached");
+    expect(el.textContent).toContain("Send a message to continue");
+  });
+
+  it("shows other stop reasons verbatim", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "x" }], { stopReason: "cancelled" })} />
+      </ul>,
+    );
+    const el = screen.getByTestId("run-stop-reason");
+    expect(el.textContent).toBe("cancelled");
+    expect(el.getAttribute("data-tone")).toBe("neutral");
+  });
+});
 
 describe("RunTimeline", () => {
   it("renders each event kind as its own row", () => {
@@ -44,6 +70,23 @@ describe("RunTimeline", () => {
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("the answer");
     expect(screen.getByTestId("timeline-tool-call")).toHaveTextContent("Bash");
     expect(screen.getByTestId("timeline-unknown")).toHaveTextContent("todo_list");
+  });
+
+  it("run header shows the requested model", () => {
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} />
+      </ul>,
+    );
+    expect(screen.getByTestId("run-model-chip")).toHaveTextContent("claude-opus-5-5");
+
+    // A default run (no model requested) has no chip.
+    rerender(
+      <ul>
+        <RunTimeline run={run([], { model: "" })} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-model-chip")).not.toBeInTheDocument();
   });
 
   it("shows the provider's label when a providerLabels map is given, the raw id otherwise (label ?? id)", () => {
@@ -149,6 +192,28 @@ describe("RunTimeline", () => {
 
     expect(screen.getAllByTestId("timeline-assistant")).toHaveLength(2);
     expect(screen.getByTestId("timeline-unknown")).toBeInTheDocument();
+  });
+
+  it("run footer shows the usage pill", () => {
+    render(
+      <ul>
+        <RunTimeline
+          run={run([], {
+            stopReason: "end_turn",
+            usage: { inputTokens: 12345, outputTokens: 1234, costUsd: 0.042, source: "claude_result" },
+          })}
+        />
+      </ul>,
+    );
+
+    const footer = screen.getByTestId("run-footer");
+    expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("12.3k in · 1.2k out · $0.042");
+    // The pill sits between the stop reason and the Copy button.
+    const stop = within(footer).getByTestId("run-stop-reason");
+    const pill = within(footer).getByTestId("run-usage-pill");
+    const copy = within(footer).getByTestId("run-copy-button");
+    expect(stop.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(pill.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("shows the turn's elapsed time and copies the turn as plain text", async () => {
@@ -332,5 +397,73 @@ describe("useAutoFollow", () => {
     el.scrollTop = 600 - FOLLOW_THRESHOLD_PX - 1;
     fireEvent.scroll(el);
     expect(el).toHaveAttribute("data-following", "false");
+  });
+});
+
+describe("useRunTimeline mcpServers", () => {
+  function summary(overrides: Partial<RunSummary> = {}): RunSummary {
+    return {
+      ID: "run-1",
+      TaskID: 1,
+      ChatID: 10,
+      Provider: "claude-native",
+      Prompt: "do the thing",
+      Status: "done",
+      StartedAt: "2024-01-01T00:00:00Z",
+      FinishedAt: "2024-01-01T00:00:05Z",
+      StopReason: "end_turn",
+      Err: "",
+      PermissionMode: "",
+      AutoAccept: false,
+      ThinkingLevel: "",
+      ...overrides,
+    };
+  }
+
+  it("RunEntry.mcpServers folded from run.logs backfill", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary()]);
+    await act(async () => {});
+    await act(async () => {
+      client.nth("run.logs", 0).resolve({
+        runId: "run-1",
+        status: "done",
+        stopReason: "end_turn",
+        events: [
+          { type: "mcp_servers", mcpServers: [{ name: "a", transport: "stdio", status: "dropped", reason: "command_not_found" }] },
+          { type: "mcp_servers", mcpServers: [{ name: "a", transport: "stdio", status: "active" }] },
+        ],
+      } satisfies RunLogsResult);
+    });
+
+    // Latest of the two events wins, never an accumulation.
+    await waitFor(() => expect(result.current.runs?.[0]?.mcpServers).toEqual([{ name: "a", transport: "stdio", status: "active" }]));
+  });
+
+  it("RunEntry.mcpServers updated live from the run.attach stream, latest wins", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary({ Status: "running", FinishedAt: null })]);
+    await act(async () => {});
+    await act(async () => {
+      client.emit("run.attach", 0, "mcp_servers", {
+        mcpServers: [
+          { name: "github", transport: "stdio", status: "failed", reason: "command_not_found" },
+          { name: "search", transport: "http", status: "active" },
+        ],
+      });
+    });
+    expect(result.current.runs?.[0]?.mcpServers).toEqual([
+      { name: "github", transport: "stdio", status: "failed", reason: "command_not_found" },
+      { name: "search", transport: "http", status: "active" },
+    ]);
+
+    await act(async () => {
+      client.emit("run.attach", 0, "mcp_servers", { mcpServers: [{ name: "search", transport: "http", status: "active" }] });
+    });
+    expect(result.current.runs?.[0]?.mcpServers).toEqual([{ name: "search", transport: "http", status: "active" }]);
   });
 });

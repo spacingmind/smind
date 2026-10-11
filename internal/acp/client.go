@@ -2,6 +2,8 @@ package acp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -189,6 +191,24 @@ type agentCapabilityFlags struct {
 	SessionCapabilities struct {
 		Resume json.RawMessage `json:"resume"`
 	} `json:"sessionCapabilities"`
+	// Mcp is the v2 capabilities shape's top-level "mcp" key, when present
+	// (each transport is an object there: {} = supported, absent/null/
+	// false = not -- see SupportsMcpStdio). McpCapabilities is the v1
+	// shape; stdio needs no v1 key at all because ACP v1 makes stdio
+	// support mandatory for every agent.
+	Mcp             json.RawMessage `json:"mcp"`
+	McpCapabilities struct {
+		HTTP json.RawMessage `json:"http"`
+		SSE  json.RawMessage `json:"sse"`
+	} `json:"mcpCapabilities"`
+}
+
+// truthy reports whether a capability's raw JSON value means "supported":
+// non-empty, not JSON null, and not boolean false. Covers both the v1
+// boolean form ("true") and the v2 object form ("{}").
+func truthy(raw json.RawMessage) bool {
+	s := string(raw)
+	return len(raw) > 0 && s != "null" && s != "false"
 }
 
 // capabilityFlags decodes c.AgentCapabilities, ignoring a decode error (an
@@ -214,6 +234,55 @@ func (c *Client) SupportsLoadSession() bool {
 // resumes a session without replaying its history.
 func (c *Client) SupportsResumeSession() bool {
 	return c.capabilityFlags().SessionCapabilities.Resume != nil
+}
+
+// SupportsMcpStdio reports whether the connected agent can take
+// stdio-transport MCP servers in a session's mcpServers (ADR-0018
+// "Capability checks"). A v2 agent (top-level "mcp" capabilities key)
+// must advertise mcp.stdio as an object; a v1 agent supports stdio
+// unconditionally -- ACP v1 makes stdio mandatory -- so it's true even
+// with no mcpCapabilities key at all. Malformed capabilities decode to
+// the v1 baseline.
+func (c *Client) SupportsMcpStdio() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			Stdio json.RawMessage `json:"stdio"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.Stdio)
+	}
+	return true
+}
+
+// SupportsMcpHttp reports whether the connected agent can take
+// http-transport MCP servers: v2's mcp.http object, or v1's
+// mcpCapabilities.http boolean. Missing or malformed => false.
+func (c *Client) SupportsMcpHttp() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			HTTP json.RawMessage `json:"http"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.HTTP)
+	}
+	return truthy(f.McpCapabilities.HTTP)
+}
+
+// SupportsMcpSSE reports whether the connected agent can take
+// sse-transport MCP servers: v2's mcp.sse object, or v1's
+// mcpCapabilities.sse boolean. Missing or malformed => false.
+func (c *Client) SupportsMcpSSE() bool {
+	f := c.capabilityFlags()
+	if len(f.Mcp) > 0 {
+		var mcp struct {
+			SSE json.RawMessage `json:"sse"`
+		}
+		_ = json.Unmarshal(f.Mcp, &mcp)
+		return truthy(mcp.SSE)
+	}
+	return truthy(f.McpCapabilities.SSE)
 }
 
 // ConfigOption mirrors ACP v2's SessionConfigOption: one entry of the
@@ -268,7 +337,46 @@ type promptParams struct {
 }
 
 type promptResult struct {
-	StopReason string `json:"stopReason"`
+	StopReason string       `json:"stopReason"`
+	Usage      *PromptUsage `json:"usage"`
+}
+
+// PromptUsage is PromptResponse.usage (ACP's unstable end-of-turn token
+// usage). The counters are cumulative for the session, not per turn. Every
+// field is a pointer so a field the agent left out stays nil.
+type PromptUsage struct {
+	InputTokens       *int64 `json:"inputTokens"`
+	OutputTokens      *int64 `json:"outputTokens"`
+	ThoughtTokens     *int64 `json:"thoughtTokens"`
+	CachedReadTokens  *int64 `json:"cachedReadTokens"`
+	CachedWriteTokens *int64 `json:"cachedWriteTokens"`
+	TotalTokens       *int64 `json:"totalTokens"`
+}
+
+// SessionUpdateUsageUpdate is the agent reporting context used/size and
+// optionally cumulative session cost (ACP's UsageUpdate).
+const SessionUpdateUsageUpdate = "usage_update"
+
+// UsageUpdate is a usage_update session notification's payload. Used and
+// Size are the context window's current fill and total; Cost, if present,
+// is cumulative for the session.
+type UsageUpdate struct {
+	Used *int64 `json:"used"`
+	Size *int64 `json:"size"`
+	Cost *struct {
+		Amount   *float64 `json:"amount"`
+		Currency string   `json:"currency"`
+	} `json:"cost"`
+}
+
+// ParseUsageUpdate decodes u as a usage_update, reporting false for any
+// other update type or an undecodable payload.
+func ParseUsageUpdate(u SessionUpdate) (UsageUpdate, bool) {
+	var uu UsageUpdate
+	if u.Type != SessionUpdateUsageUpdate || json.Unmarshal(u.Raw, &uu) != nil {
+		return UsageUpdate{}, false
+	}
+	return uu, true
 }
 
 // Client is an ACP client: it spawns an agent subprocess, performs the
@@ -283,6 +391,10 @@ type Client struct {
 	sessionCwd   map[string]string
 	sessionModes map[string]SessionModeState
 	updateSubs   map[string]*updateSub
+	promptUsage  map[string]PromptUsage
+
+	// instanceID identifies this agent process: unique per New.
+	instanceID string
 
 	ProtocolVersion   int
 	AgentCapabilities json.RawMessage
@@ -314,6 +426,8 @@ func New(command []string, opts ...Option) (*Client, error) {
 		sessionCwd:   make(map[string]string),
 		sessionModes: make(map[string]SessionModeState),
 		updateSubs:   make(map[string]*updateSub),
+		promptUsage:  make(map[string]PromptUsage),
+		instanceID:   newInstanceID(),
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -331,6 +445,19 @@ func New(command []string, opts ...Option) (*Client, error) {
 	conn.handleNotification("session/update", c.handleSessionUpdate)
 
 	return c, nil
+}
+
+// InstanceID identifies the agent process this Client spawned: unique per
+// New, so two Clients never share one even for the same command. ACP says
+// nothing about whether an agent's session-cumulative usage counters outlive
+// its process, so callers that difference them (taskrunner) treat a change
+// of InstanceID as a possible counter restart.
+func (c *Client) InstanceID() string { return c.instanceID }
+
+func newInstanceID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:]) // never fails (Go 1.24+ crashes instead)
+	return hex.EncodeToString(b[:])
 }
 
 // Initialize performs the ACP initialize handshake, advertising fs
@@ -362,8 +489,8 @@ func (c *Client) Initialize(ctx context.Context) error {
 // and fs/write_text_file requests for this session are validated against.
 // It also returns the session's initial config options, if the agent sent
 // any.
-func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/new", newSessionParams{Cwd: cwd, McpServers: []any{}})
+func (c *Client) NewSession(ctx context.Context, cwd string, mcpServers []any) (string, []ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/new", newSessionParams{Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return "", nil, fmt.Errorf("acp: session/new: %w", err)
 	}
@@ -386,8 +513,8 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (string, []ConfigOp
 // calling LoadSession; this package's own callers don't need the replay
 // and let it go unsubscribed, which handleSessionUpdate silently drops
 // (see its doc comment).
-func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/load", loadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/load", loadSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return nil, fmt.Errorf("acp: session/load: %w", err)
 	}
@@ -405,8 +532,8 @@ func (c *Client) LoadSession(ctx context.Context, sessionID, cwd string) ([]Conf
 // an agent that advertises the sessionCapabilities.resume capability (see
 // SupportsResumeSession) but not loadSession -- the session's own history
 // isn't replayed back to the client, unlike LoadSession.
-func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string) ([]ConfigOption, error) {
-	raw, err := c.conn.call(ctx, "session/resume", resumeSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: []any{}})
+func (c *Client) ResumeSession(ctx context.Context, sessionID, cwd string, mcpServers []any) ([]ConfigOption, error) {
+	raw, err := c.conn.call(ctx, "session/resume", resumeSessionParams{SessionID: sessionID, Cwd: cwd, McpServers: nonNilMcpServers(mcpServers)})
 	if err != nil {
 		return nil, fmt.Errorf("acp: session/resume: %w", err)
 	}
@@ -533,6 +660,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 	sub := &updateSub{ch: updates}
 	c.mu.Lock()
 	c.updateSubs[sessionID] = sub
+	delete(c.promptUsage, sessionID)
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
@@ -554,7 +682,21 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string, updates cha
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return "", fmt.Errorf("acp: session/prompt: decode response: %w", err)
 	}
+	if res.Usage != nil {
+		c.mu.Lock()
+		c.promptUsage[sessionID] = *res.Usage
+		c.mu.Unlock()
+	}
 	return res.StopReason, nil
+}
+
+// PromptUsage returns the PromptResponse.usage of sessionID's latest Prompt
+// (session-cumulative), and false if that response carried none.
+func (c *Client) PromptUsage(sessionID string) (PromptUsage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	u, ok := c.promptUsage[sessionID]
+	return u, ok
 }
 
 func (c *Client) handleSessionUpdate(raw json.RawMessage) {

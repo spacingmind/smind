@@ -1,0 +1,163 @@
+name: desktop-macos
+
+# Builds the Tauri desktop app for macOS -- one .dmg per architecture (arm64
+# and x86_64, no universal binary) -- and uploads them as workflow artifacts
+# named smind-desktop-<version>-macos-<arch>.dmg. Unsigned and not
+# notarized (ad-hoc signature only); signing and notarization are out of
+# scope here, like desktop-windows.yml, and no secrets are referenced. No
+# release is published here: release-please.yml calls this as a reusable
+# workflow (workflow_call) and attaches the DMGs to the GitHub Release.
+#
+# The app bundles the matching darwin `smind` daemon (tauri.macos.conf.json
+# externalBin). When called from release-please.yml it reuses that run's
+# per-arch daemon artifact (`daemon-version` input) instead of compiling Go
+# a second time with different flags; on a PR (or manual run) there is no
+# such artifact, so it builds the daemon itself with `task desktop:mac:daemon`
+# (stamped with the app version). See docs/plans/active/desktop-macos-app.md.
+on:
+  pull_request:
+    paths:
+      - "desktop/**"
+      - "web/packages/ui/**"
+      - ".github/workflows/desktop-macos.yml"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      daemon-version:
+        description: >-
+          Version of the already-built smind_<version>_darwin_<arch> artifacts
+          in this run to bundle. Empty builds the daemon here instead.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build ${{ matrix.arch }}
+    # macos-latest is arm64; the x86_64 app is cross-compiled from it.
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            goarch: arm64
+            target: aarch64-apple-darwin
+          - arch: x86_64
+            goarch: amd64
+            target: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # beforeBuildCommand builds web/packages/ui (VITE_SMIND_DESKTOP=1) with
+      # bun before rust-embed embeds it into the app binary.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.target }}
+
+      # The src-tauri unit tests (launch decision, bundled-binary install,
+      # badge, tray gate) run on the host arch only. A debug build writes an
+      # empty sidecar placeholder (build.rs); the real daemon is staged over
+      # it below.
+      - name: cargo test (desktop shell)
+        if: matrix.arch == 'arm64'
+        working-directory: desktop/src-tauri
+        run: cargo test
+
+      # Release path: reuse the daemon this run's build-binaries job already
+      # built for this arch (same ldflags/version as the GitHub Release one).
+      - name: Download bundled daemon
+        if: inputs.daemon-version != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: smind_${{ inputs.daemon-version }}_darwin_${{ matrix.goarch }}
+          path: daemon
+
+      - name: Stage bundled daemon from the release build
+        if: inputs.daemon-version != ''
+        run: |
+          set -euo pipefail
+          mkdir -p desktop/src-tauri/binaries
+          tar -xzf daemon/*.tar.gz -C daemon smind
+          install -m 0755 daemon/smind "desktop/src-tauri/binaries/smind-${{ matrix.target }}"
+
+      # PR / manual path: no release artifact exists, so build it here.
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        if: inputs.daemon-version == ''
+        with:
+          go-version-file: go.mod
+
+      - name: Build bundled daemon
+        if: inputs.daemon-version == ''
+        run: |
+          set -euo pipefail
+          brew install go-task
+          task desktop:mac:daemon TARGET=${{ matrix.target }}
+
+      - name: Install Tauri CLI
+        working-directory: desktop
+        run: npm ci
+
+      - name: Build app + dmg
+        working-directory: desktop
+        run: npx tauri build --target ${{ matrix.target }}
+
+      # ci-macos-both-arches: each embedded binary really is this arch, and
+      # the bundled daemon reports the app's version (never run an x86_64
+      # binary on this arm64 runner -- Rosetta isn't guaranteed).
+      - name: Verify bundle
+        run: |
+          set -euo pipefail
+          app="desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/smind.app"
+          want="${{ matrix.arch }}"
+          for bin in "$app/Contents/MacOS/smind-desktop" "$app/Contents/MacOS/smind"; do
+            got="$(lipo -archs "$bin")"
+            echo "$bin: $got"
+            [ "$got" = "$want" ] || { echo "::error::$bin is $got, expected $want"; exit 1; }
+          done
+          app_version="$(jq -r .version desktop/src-tauri/tauri.conf.json)"
+          plist_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")"
+          [ "$plist_version" = "$app_version" ] || { echo "::error::Info.plist version $plist_version != $app_version"; exit 1; }
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleURLTypes:0:CFBundleURLSchemes:0' "$app/Contents/Info.plist" | grep -qx smind
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            daemon_version="$("$app/Contents/MacOS/smind" --version)"
+            echo "bundled daemon: $daemon_version"
+            # A manual dry run of the release workflow stamps `<x>-dev+<sha>`;
+            # every other build must match the app version exactly.
+            case "${{ inputs.daemon-version }}" in
+              *-dev*) ;;
+              *) case "$daemon_version" in "smind $app_version "*) ;; *) echo "::error::daemon '$daemon_version' != app $app_version"; exit 1 ;; esac ;;
+            esac
+          fi
+
+      # Stage into a flat dir under the documented name; the release job's
+      # flat *.dmg glob relies on there being no subdirectories.
+      - name: Stage dmg
+        run: |
+          set -euo pipefail
+          version="$(jq -r .version desktop/src-tauri/tauri.conf.json)"
+          mkdir -p dist
+          cp desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg \
+            "dist/smind-desktop-${version}-macos-${{ matrix.arch }}.dmg"
+          ls -l dist
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: smind-desktop-macos-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error

@@ -100,6 +100,65 @@ tasks:
     cmds:
       - ./scripts/check-version-sync.sh
 
+  desktop:mac:daemon:
+    desc: Build the darwin smind daemon the macOS app bundles, for TARGET (default host arch), into desktop/src-tauri/binaries
+    deps: [build:web]
+    vars:
+      TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
+    cmds:
+      # The bundled daemon is the same release as the app: stamp it with the
+      # desktop version (tauri.conf.json, kept equal to the release manifest
+      # by `task check:versions`), not the `-dev+<sha>` the plain `task build`
+      # uses, so /healthz reports exactly the app's version. Same flags as the
+      # release build otherwise (CGO off, web UI embedded by `build:web`).
+      - |
+        set -eu
+        v=`jq -r .version desktop/src-tauri/tauri.conf.json`
+        short=`git rev-parse --short HEAD`
+        case "{{.TARGET}}" in
+          aarch64-apple-darwin) goarch=arm64 ;;
+          x86_64-apple-darwin) goarch=amd64 ;;
+          *) echo "unsupported TARGET {{.TARGET}}" >&2; exit 1 ;;
+        esac
+        mkdir -p desktop/src-tauri/binaries
+        echo "building bundled smind $v ($short) for darwin/$goarch"
+        CGO_ENABLED=0 GOOS=darwin GOARCH=$goarch go build -buildvcs=false -ldflags "-X github.com/spacingmind/smind/internal/version.Version=$v -X github.com/spacingmind/smind/internal/version.Commit=$short" -o desktop/src-tauri/binaries/smind-{{.TARGET}} ./cmd/smind
+
+  desktop:mac:
+    desc: Build the unsigned macOS app (smind.app + .dmg) for the host arch, daemon bundled (TARGET=x86_64-apple-darwin to cross-build)
+    platforms: [darwin]
+    vars:
+      TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
+    cmds:
+      - task: desktop:mac:daemon
+        vars: { TARGET: "{{.TARGET}}" }
+      - cd desktop && npm ci && npx tauri build --target {{.TARGET}}
+      - |
+        echo "built:"
+        ls -d desktop/src-tauri/target/{{.TARGET}}/release/bundle/macos/*.app desktop/src-tauri/target/{{.TARGET}}/release/bundle/dmg/*.dmg
+
+  desktop:mac:install:
+    desc: Build (if needed) and copy smind.app into /Applications, replacing any previous copy
+    platforms: [darwin]
+    vars:
+      TARGET: '{{.TARGET | default (ternary "aarch64-apple-darwin" "x86_64-apple-darwin" (eq ARCH "arm64"))}}'
+    cmds:
+      - task: desktop:mac
+        vars: { TARGET: "{{.TARGET}}" }
+      - |
+        set -eu
+        if pgrep -x smind-desktop >/dev/null; then
+          echo "smind is running -- quit it (Cmd+Q) before replacing /Applications/smind.app" >&2
+          exit 1
+        fi
+        rm -rf /Applications/smind.app
+        # ditto keeps the bundle's signature/xattrs intact; a locally built
+        # app carries no com.apple.quarantine, so it opens without a
+        # Gatekeeper prompt. -cr is a belt-and-braces clear, not a fix.
+        ditto desktop/src-tauri/target/{{.TARGET}}/release/bundle/macos/smind.app /Applications/smind.app
+        xattr -cr /Applications/smind.app
+        echo "installed /Applications/smind.app"
+
   tidy:
     desc: go mod tidy
     cmds:
