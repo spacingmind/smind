@@ -124,7 +124,7 @@ Both sides are built against this; a change needs the plan updated first.
 4. `signature` is the `.sig` file's content, trimmed. `version` has no
    leading `v` and must be a stable semver (a pre-release version is
    rejected).
-5. `node --test desktop/scripts/` runs in `task test`.
+5. `node --test 'desktop/scripts/*.test.mjs'` runs in `task test`.
 
 ### U6 — CI/release
 
