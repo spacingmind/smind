@@ -78,8 +78,8 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
     // definition; advancing the sequence drops its response too.
     snapshotSeq.current += 1;
 
-    const offFetch = fetch();
-    if (!events) return offFetch;
+    fetch();
+    if (!events) return;
     const offQueue = events.subscribe("chat.queueUpdated", (payload) => {
       const p = payload as { chatId?: number; items?: ChatQueueItem[] };
       if (p.chatId !== chatId) return;
@@ -90,7 +90,6 @@ export function useChatQueue(client: WsClientLike | null, events: DaemonEvents |
       fetch();
     });
     return () => {
-      offFetch?.();
       offQueue();
       offDropped();
     };

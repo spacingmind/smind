@@ -370,7 +370,9 @@ export function TaskDetailPane({
         runningRunId={runningRunId}
         diffStat={wholeDiff.stat}
         onOpenDiff={onOpenDiffTab}
-        onSubmit={submitPrompt}
+        onSubmit={async (provider, prompt, permission, thinkingLevel) => {
+          await submitPrompt(provider, prompt, permission, thinkingLevel);
+        }}
         onStop={stopRun}
         textareaRef={composerTextareaRef}
         toolbarRef={toolbarRef}
