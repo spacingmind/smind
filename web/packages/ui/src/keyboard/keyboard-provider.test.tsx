@@ -75,7 +75,12 @@ describe("KeyboardProvider dispatch", () => {
       </KeyboardProvider>,
     );
 
-    fireEvent.keyDown(document, { key: "3", code: "Digit3", ctrlKey: true, altKey: true });
+    fireEvent.keyDown(document, {
+      key: "3",
+      code: "Digit3",
+      ctrlKey: true,
+      altKey: true,
+    });
     expect(fire).toHaveBeenCalledWith({ digit: 3 });
   });
 
@@ -359,7 +364,12 @@ describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
 
     const textarea = screen.getByLabelText("composer");
     textarea.focus();
-    fireEvent.keyDown(textarea, { key: "h", code: "KeyH", altKey: true, shiftKey: true });
+    fireEvent.keyDown(textarea, {
+      key: "h",
+      code: "KeyH",
+      altKey: true,
+      shiftKey: true,
+    });
 
     expect(fire).toHaveBeenCalledTimes(1);
   });
@@ -372,7 +382,12 @@ describe("editableWhenRebound (pane-focus defaults vs. a rebind)", () => {
       </KeyboardProvider>,
     );
 
-    fireEvent.keyDown(document, { key: "ArrowLeft", code: "ArrowLeft", ctrlKey: true, shiftKey: true });
+    fireEvent.keyDown(document, {
+      key: "ArrowLeft",
+      code: "ArrowLeft",
+      ctrlKey: true,
+      shiftKey: true,
+    });
 
     expect(fire).toHaveBeenCalledTimes(1);
   });
@@ -553,5 +568,74 @@ describe("KeyboardProvider terminal scope", () => {
     // the escape hatch still fires there
     fireEvent.keyDown(target, { key: "p", code: "KeyP", ctrlKey: true, shiftKey: true });
     expect(fire).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("menu-dispatched actions", () => {
+  function FindPane({ onFire, focused }: { onFire: (payload: unknown) => void; focused: boolean }) {
+    useActionHandler("pane.find", onFire, {
+      enabled: focused,
+      menuFallback: true,
+    });
+    return null;
+  }
+
+  type PaneProps = { fire: () => void; focused: boolean };
+
+  function renderPanes(a: PaneProps, b: PaneProps) {
+    let run: ReturnType<typeof useKeyboard>["runAction"] = () => false;
+    function Probe() {
+      run = useKeyboard().runAction;
+      return null;
+    }
+    const tree = (pa: PaneProps, pb: PaneProps) => (
+      <KeyboardProvider>
+        <Probe />
+        <FindPane onFire={pa.fire} focused={pa.focused} />
+        <FindPane onFire={pb.fire} focused={pb.focused} />
+      </KeyboardProvider>
+    );
+    const utils = render(tree(a, b));
+    return {
+      run: (...args: Parameters<typeof run>) => run(...args),
+      rerender: (pa: PaneProps, pb: PaneProps) => utils.rerender(tree(pa, pb)),
+    };
+  }
+
+  it("menu-dispatched pane.find reaches the last focused pane after focus left it", () => {
+    const fireA = vi.fn();
+    const fireB = vi.fn();
+    const panes = renderPanes({ fire: fireA, focused: false }, { fire: fireB, focused: false });
+
+    // Nothing has been focused yet: nothing to target.
+    expect(panes.run("pane.find", null, { source: "menu" })).toBe(false);
+
+    // Pane B was focused, then focus left everything (the menu click).
+    panes.rerender({ fire: fireA, focused: false }, { fire: fireB, focused: true });
+    panes.rerender({ fire: fireA, focused: false }, { fire: fireB, focused: false });
+
+    // A keystroke-style run (no menu source) still needs an enabled handler.
+    expect(panes.run("pane.find")).toBe(false);
+    expect(fireB).not.toHaveBeenCalled();
+
+    expect(panes.run("pane.find", null, { source: "menu" })).toBe(true);
+    expect(fireB).toHaveBeenCalledTimes(1);
+    expect(fireA).not.toHaveBeenCalled();
+
+    // Focusing A later makes A the target.
+    panes.rerender({ fire: fireA, focused: true }, { fire: fireB, focused: false });
+    panes.rerender({ fire: fireA, focused: false }, { fire: fireB, focused: false });
+    panes.run("pane.find", null, { source: "menu" });
+    expect(fireA).toHaveBeenCalledTimes(1);
+    expect(fireB).toHaveBeenCalledTimes(1);
+  });
+
+  it("an enabled pane still wins over the fallback", () => {
+    const fireA = vi.fn();
+    const fireB = vi.fn();
+    const panes = renderPanes({ fire: fireA, focused: false }, { fire: fireB, focused: true });
+    panes.run("pane.find", null, { source: "menu" });
+    expect(fireB).toHaveBeenCalledTimes(1);
+    expect(fireA).not.toHaveBeenCalled();
   });
 });
