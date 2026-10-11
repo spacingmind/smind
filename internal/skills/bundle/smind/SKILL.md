@@ -40,7 +40,7 @@ Give each parallel worker its own task (its own worktree). Two chats in one task
 
 ## Nested orchestration
 
-A task agent can orchestrate too if it has this MCP server. Add it once as an agent MCP server: `smind mcp add smind -- smind mcp serve`. Then children must be created with `parentTaskId` set to the parent task, so the depth guard applies.
+A task agent can orchestrate too if it has this MCP server. Add it once as an agent MCP server: `smind mcp add smind stdio --command smind --arg mcp --arg serve`. Then children must be created with `parentTaskId` set to the parent task, so the depth guard applies.
 
 ## Rules of thumb
 
