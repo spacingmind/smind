@@ -180,7 +180,7 @@ Both sides are built against this; a change needs the plan updated first.
   comment:` header), `endpoints` is exactly the one https GitHub
   `releases/latest/download/latest.json` URL, `dangerousInsecureTransportProtocol`
   is absent.
-- `createUpdaterArtifacts_opt_in_only` — absent (or false) in the base and
+- `create_updater_artifacts_opt_in_only` — absent (or false) in the base and
   both platform configs; `true` in `tauri.updater.conf.json`.
 - `capability_allowlist_exact` (updated) and
   `capability_app_grants_match_build_rs_commands` (unchanged logic) include
