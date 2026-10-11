@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/spacingmind/smind/internal/shimguard"
 )
 
 // RPCError is a JSON-RPC 2.0 error object, returned by a peer in response to
@@ -96,7 +98,7 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("acp: empty command")
 	}
-	if err := validateShimCommand(command); err != nil {
+	if err := shimguard.Validate("acp", command); err != nil {
 		return nil, err
 	}
 
