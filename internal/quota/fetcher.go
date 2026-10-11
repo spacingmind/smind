@@ -4,7 +4,10 @@ import (
 	"context"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
+
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/transport"
 )
 
 // ReportFetcher retrieves an account's plan usage from its provider.
@@ -73,6 +76,23 @@ func newAccountFetcher(creds CredentialSource, providers map[string]providerSpec
 		now = time.Now
 	}
 	return &AccountFetcher{creds: creds, providers: providers, now: now}
+}
+
+// NewAccountFetcher returns the production fetcher: the two fixed provider
+// endpoints over the same uTLS clients the proxy uses (Firefox for Anthropic,
+// Chrome for OpenAI, both behind bot detection) and the providers' own
+// refreshers. It makes no request until Fetch is called.
+func NewAccountFetcher(creds CredentialSource) *AccountFetcher {
+	return newAccountFetcher(creds, map[string]providerSpec{
+		"anthropic": {
+			source:    newAnthropicSource(transport.Client(utls.HelloFirefox_Auto)),
+			refresher: accounts.NewAnthropicRefresher(),
+		},
+		"openai": {
+			source:    newOpenAISource(transport.Client(utls.HelloChrome_Auto)),
+			refresher: accounts.NewOpenAIRefresher(),
+		},
+	}, nil)
 }
 
 // Fetch implements ReportFetcher.

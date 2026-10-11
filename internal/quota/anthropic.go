@@ -141,7 +141,7 @@ func parseAnthropicUsage(body []byte, now time.Time) (Report, bool) {
 	for _, limit := range scoped {
 		w := anthropicScopedWindow(limit)
 		for suffix := 2; taken[w.ID]; suffix++ {
-			w.ID = anthropicScopedWindowID(limit) + "_" + itoa(suffix)
+			w.ID = anthropicScopedWindowID(limit) + "_" + strconv.Itoa(suffix)
 		}
 		taken[w.ID] = true
 		report.Windows = append(report.Windows, w)
@@ -371,8 +371,4 @@ func anthropicExtraUsage(raw json.RawMessage) *bool {
 
 func anthropicRawPresent(raw json.RawMessage) bool {
 	return len(raw) > 0 && !bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
-}
-
-func itoa(n int) string {
-	return strconv.Itoa(n)
 }

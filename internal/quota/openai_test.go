@@ -647,3 +647,33 @@ func TestOpenai_ctx_cancel(t *testing.T) {
 		t.Errorf("report = %+v, want zero", r)
 	}
 }
+
+func TestOpenai_duplicate_durations_get_unique_ids(t *testing.T) {
+	t.Parallel()
+
+	body := `{"rate_limit":{"primary_window":{"used_percent":1,"limit_window_seconds":604800},"secondary_window":{"used_percent":2,"limit_window_seconds":604800}}}`
+	r, ok := parseOpenAIUsage([]byte(body), time.Unix(1_700_000_000, 0))
+	if !ok || len(r.Windows) != 2 {
+		t.Fatalf("parse ok=%v windows=%d, want 2 windows", ok, len(r.Windows))
+	}
+	if r.Windows[0].ID == r.Windows[1].ID {
+		t.Fatalf("window ids collide: %q", r.Windows[0].ID)
+	}
+	if r.Windows[0].ID != "weekly" {
+		t.Errorf("first id = %q, want weekly (stable)", r.Windows[0].ID)
+	}
+}
+
+func TestOpenai_absurd_numbers_are_ignored(t *testing.T) {
+	t.Parallel()
+
+	body := `{"rate_limit":{"primary_window":{"used_percent":5,"reset_at":1e300,"limit_window_seconds":1e300}}}`
+	r, ok := parseOpenAIUsage([]byte(body), time.Unix(1_700_000_000, 0))
+	if !ok || len(r.Windows) != 1 {
+		t.Fatalf("parse ok=%v windows=%d, want 1", ok, len(r.Windows))
+	}
+	w := r.Windows[0]
+	if w.ResetsAt != nil || w.DurationSeconds != nil || w.ID != "unknown_primary" {
+		t.Errorf("window = %+v, want no reset/duration and id unknown_primary", w)
+	}
+}

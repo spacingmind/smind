@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -22,6 +23,10 @@ const openaiUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
 
 // openaiAuthClaim is the JWT claim namespace OpenAI scopes auth metadata to.
 const openaiAuthClaim = "https://api.openai.com/auth"
+
+// maxEpochSeconds bounds numeric seconds fields (a reset time or a window
+// length) to sane values before they are converted to int64.
+const maxEpochSeconds = 1e11
 
 // openaiSource fetches plan usage from ChatGPT's usage endpoint with an
 // OAuth access token. The token is used for one request and never logged,
@@ -240,7 +245,7 @@ func openaiAppendRateLimit(r *Report, raw json.RawMessage, scope *Scope, summary
 			nameID, label = "unknown_primary", "Primary limit"
 		}
 		var durationSeconds *int64
-		if d := wj.LimitWindowSeconds.ptr(); d != nil && *d > 0 {
+		if d := wj.LimitWindowSeconds.ptr(); d != nil && *d > 0 && *d < maxEpochSeconds {
 			secs := int64(*d)
 			nameID, label, short = openaiDurationName(secs)
 			durationSeconds = &secs
@@ -250,6 +255,11 @@ func openaiAppendRateLimit(r *Report, raw json.RawMessage, scope *Scope, summary
 			id = scope.ID + ":" + nameID
 			winLabel = scope.Name + " · " + label
 			winShort = strings.TrimSpace(scope.Name + " " + short)
+		}
+		// Two slots can report the same duration; ids are UI keys.
+		base := id
+		for n := 2; openaiHasWindow(r, id); n++ {
+			id = fmt.Sprintf("%s_%d", base, n)
 		}
 		w := newWindow(id, winLabel, winShort, summary, wj.UsedPercent.ptr(), openaiEpochTime(wj.ResetAt))
 		w.Scope = scope
@@ -306,7 +316,7 @@ func openaiEpochTime(raw json.RawMessage) *time.Time {
 		s = strings.TrimSpace(str)
 	}
 	secs, err := strconv.ParseFloat(s, 64)
-	if err != nil {
+	if err != nil || math.IsNaN(secs) || secs < 0 || secs >= maxEpochSeconds {
 		return nil
 	}
 	t := time.Unix(int64(secs), 0).UTC()
@@ -317,4 +327,13 @@ func openaiEpochTime(raw json.RawMessage) *time.Time {
 // net/url's QueryEscape, except spaces become %20 instead of +.
 func openaiEscapeIdentity(s string) string {
 	return strings.ReplaceAll(url.QueryEscape(s), "+", "%20")
+}
+
+func openaiHasWindow(r *Report, id string) bool {
+	for _, w := range r.Windows {
+		if w.ID == id {
+			return true
+		}
+	}
+	return false
 }
