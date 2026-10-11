@@ -267,7 +267,7 @@ makes the cap/usage numbers deterministic).
 - **AC4** `TestTaskApprove_*` pass. Live: `task approve <run> <req> nope`
   listed the valid ids; `... reject` rejected and `schema.sql` was untouched.
 - **AC5** `TestGLMCommand_*`, `TestConfig_GLMMaxTurns*`,
-  `TestGLMCommandOption_MaxTurns`/`glmCommandOverride`, `TestStopNote_*`,
+  `TestGLMCommandOption` (on `glmCommandOverride`), `TestStopNote_*`,
   `TestMCPTaskWait_StopNoteOnTurnCap`, `TestRenderDone_TurnCapHint`, web
   `labels a max_turn_requests run as turn limit reached`. Live: with
   `agents.glm.maxTurns: 3` a looping run stopped after exactly 3 model calls
