@@ -200,9 +200,40 @@ export interface RunSummary {
   ThinkingLevel: ThinkingLevel;
 }
 
-// Result of run.start (internal/wsapi/handlers.go's runStartResult).
-export interface RunStartResult {
-  runId: string;
+// internal/runs.WhenBusy's values (ADR-0021 §2), run.start's optional
+// `whenBusy` param: what the daemon does when the chat already has a
+// running run -- legacy reject (the default), queue the prompt, or
+// interrupt the live run. The queue/interrupt results come back as
+// RunStartResult's queued variant instead of a runId.
+export type WhenBusy = "reject" | "queue" | "interrupt";
+
+// Result of run.start (internal/wsapi/handlers.go's runStartResult and,
+// when the chat was busy and whenBusy was queue/interrupt, its
+// runQueuedResult -- ADR-0021 §2). Only reachable by explicitly passing
+// whenBusy, so a call without it stays the runId variant.
+export type RunStartResult = { runId: string } | { queued: true; queueItemId: number };
+
+// One entry in a chat.queueList result or chat.queueUpdated snapshot
+// (internal/wsapi/handlers.go's chatQueueItemParams, ADR-0021 §8) --
+// store.ChatQueueItem's fields under their Go names as JSON keys, same
+// convention as Chat above. Status covers the item's whole lifecycle;
+// RunID is set once delivered, CancelReason once cancelled.
+export interface ChatQueueItem {
+  ID: number;
+  ChatID: number;
+  Prompt: string;
+  /** The run.start run config as a JSON string, opaque to the UI. */
+  RunConfig: string;
+  Source: string;
+  FromTaskID: number | null;
+  FromChatID: number | null;
+  Priority: number;
+  Status: "queued" | "delivered" | "cancelled";
+  RunID: string | null;
+  /** "cancelled by user", or the server's "delivery failed: ..." family. */
+  CancelReason: string;
+  CreatedAt: string;
+  UpdatedAt: string;
 }
 
 // Result of run.setPermissionMode (internal/wsapi/handlers.go's

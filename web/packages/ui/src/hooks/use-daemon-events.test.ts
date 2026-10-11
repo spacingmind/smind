@@ -57,6 +57,7 @@ describe("useDaemonEvents", () => {
         "chat.created",
         "chat.updated",
         "chat.archived",
+        "chat.queueUpdated",
       ],
     });
 
@@ -148,6 +149,26 @@ describe("useDaemonEvents", () => {
     });
     notify(socket2, "run.status", { runId: "r2", taskId: 2, status: "done" });
     expect(listener).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes to chat.queueUpdated", async () => {
+    const socket = new FakeSocket();
+    const client = new WsClient(socket);
+    renderHook(() => useDaemonEvents(client));
+    await flush();
+
+    const sub = socket.sent.find((e) => e.method === "events.subscribe");
+    expect((sub!.params as { topics: string[] }).topics).toContain("chat.queueUpdated");
+
+    // And it dispatches to listeners on that topic like any other.
+    const { result } = renderHook(() => useDaemonEvents(client));
+    await flush();
+    const listener = vi.fn();
+    act(() => {
+      result.current!.subscribe("chat.queueUpdated", listener);
+    });
+    notify(socket, "chat.queueUpdated", { chatId: 1, items: [] });
+    expect(listener).toHaveBeenCalledWith({ chatId: 1, items: [] });
   });
 
   it("a failed events.subscribe (daemon without the RPC) never throws into the render", async () => {

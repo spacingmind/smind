@@ -559,7 +559,7 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         throw new Error("no chat selected");
       }
 
-      const { runId } = await client.call<RunStartResult>("run.start", {
+      const result = await client.call<RunStartResult>("run.start", {
         taskId,
         chatId,
         provider,
@@ -569,6 +569,11 @@ export function useRunTimeline(client: WsClientLike | null, taskId: number | nul
         ...(thinkingLevel ? { thinkingLevel } : {}),
       });
       if (session.cancelled) return;
+      // ADR-0021 §2: whenBusy queue/interrupt comes back as the queued
+      // variant with no runId -- a narrow here until the submitPrompt
+      // rework in the next change turns this into a real result.
+      if (!("runId" in result)) return;
+      const runId = result.runId;
 
       const entry: RunEntry = {
         id: runId,
