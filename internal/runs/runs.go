@@ -90,6 +90,10 @@ type RunStatus struct {
 	// and-retry-effort.md's Item B).
 	ThinkingLevel taskrunner.ThinkingLevel
 
+	// Model is the model this run was asked to use (ADR-0025), "" for the
+	// provider's default; persisted, so it survives a daemon restart.
+	Model string
+
 	// Usage is what the agent itself reported this run consumed (ADR-0020);
 	// nil until the run has emitted a usage event (a run whose backend
 	// reports nothing never gets one).

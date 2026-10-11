@@ -127,7 +127,7 @@ func (r *Registry) Delete(id int64) error {
 // to store: an empty name, an unknown provider id, a permission mode /
 // autoAccept the provider's static catalog rejects (ADR-0019 -- an ACP
 // provider accepts any mode id, since its modes are the agent's own), or a
-// thinkingLevel string that internal/taskrunner itself would reject from
+// thinkingLevel or model string that internal/taskrunner itself would reject from
 // task.prompt -- so a stored profile can never carry a combination the wire
 // would reject if applied directly.
 func validate(p store.AgentProfile) error {
@@ -143,6 +143,13 @@ func validate(p store.AgentProfile) error {
 	}
 	if p.ThinkingLevel != "" && !taskrunner.ThinkingLevel(p.ThinkingLevel).IsValid() {
 		return fmt.Errorf("invalid thinkingLevel %q", p.ThinkingLevel)
+	}
+	// Against the same static catalog as the mode above: syntax always, and
+	// membership only for a provider whose models are known without a
+	// running agent (none today -- ADR-0025), so the string reaches run
+	// start, which validates it against the live catalog.
+	if err := taskrunner.ValidateModel(info, p.Model); err != nil {
+		return err
 	}
 	return nil
 }
