@@ -182,6 +182,12 @@ type pendingPermissionOut struct {
 // logic fetchPendingPermissions (cmd/smind/task.go) implements for the
 // CLI. Read-only by construction: nothing here can resolve a request.
 func pendingPermissionsFrom(result runLogsResult) []pendingPermissionOut {
+	// A finished run has nothing left to approve: a request still
+	// unresolved in its transcript (e.g. the run was stopped mid-request)
+	// is stale and must not make a looping driver wait on a dead run.
+	if isTerminalRunStatus(result.Status) {
+		return nil
+	}
 	resolved := map[string]bool{}
 	for _, e := range result.Events {
 		if e.Type == "permission_resolved" {

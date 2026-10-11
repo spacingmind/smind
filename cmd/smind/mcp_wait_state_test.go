@@ -106,3 +106,49 @@ func TestMCPToolDescriptions_TaskWaitLoopWording(t *testing.T) {
 		t.Fatalf("saw %d of the 3 tools", seen)
 	}
 }
+
+func staleRequestRun(status string) runLogsResult {
+	return runLogsResult{RunID: "r1", Status: status, Events: []runLogEvent{
+		{Type: "permission_request", RequestID: "req-1", Summary: "one", Options: []permissionOptionParams{{ID: "a", Kind: "allow_once"}}},
+	}}
+}
+
+func TestTaskWait_TerminalRunWithStalePermissionIsNotWaiting(t *testing.T) {
+	for _, status := range []string{"done", "error", "stopped"} {
+		out := buildTaskWaitOutput(staleRequestRun(status), false)
+		if out.State != status {
+			t.Errorf("status %s: state = %q, want %q", status, out.State, status)
+		}
+		if len(out.PendingPermissions) != 0 || out.PendingPermission != nil || out.Message != "" {
+			t.Errorf("status %s: pending = %+v / %+v msg %q, want none", status, out.PendingPermission, out.PendingPermissions, out.Message)
+		}
+	}
+
+	// End to end: stop a real run while its request is pending.
+	env := newMCPSession(t)
+	runID := startTestRun(t, env.srvURL, "glm", "permission")
+	var waiting taskWaitOutput
+	callMCPTool(t, env.cs, "task_wait", map[string]any{"runId": runID, "timeoutSeconds": 10}, &waiting)
+	if waiting.State != "waiting_permission" {
+		t.Fatalf("state = %q, want waiting_permission before the stop", waiting.State)
+	}
+	callMCPTool(t, env.cs, "task_stop", map[string]any{"runId": runID}, nil)
+	client := dialTestClient(t, env.srvURL)
+	waitForRunStatus(t, client, runID, "stopped")
+	var out taskWaitOutput
+	callMCPTool(t, env.cs, "task_wait", map[string]any{"runId": runID, "timeoutSeconds": 5}, &out)
+	if out.State != "stopped" || len(out.PendingPermissions) != 0 {
+		t.Fatalf("task_wait after stop = %+v, want state stopped and no pending", out)
+	}
+}
+
+func TestMCPTaskPermissions_FinishedRunWithStaleRequestIsEmpty(t *testing.T) {
+	for _, status := range []string{"done", "error", "stopped"} {
+		if got := pendingPermissionsFrom(staleRequestRun(status)); len(got) != 0 {
+			t.Errorf("status %s: pending = %+v, want none", status, got)
+		}
+	}
+	if got := pendingPermissionsFrom(staleRequestRun("running")); len(got) != 1 {
+		t.Errorf("running: pending = %+v, want 1", got)
+	}
+}
