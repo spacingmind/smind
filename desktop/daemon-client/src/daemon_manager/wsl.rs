@@ -154,11 +154,15 @@ const LISTEN_WAIT_TICKS: u32 = 150;
 /// exit 0. `setsid` in a non-interactive sh execs in place (the shell is
 /// not a process-group leader), so `$!` is the daemon's own pid.
 fn start_script(bin: &str, log: &str, port: u16, free_wait_ticks: u32, listen_wait_ticks: u32) -> String {
-    let probe = format!("$(ss -H -tln \"sport = :{port}\" 2>/dev/null)");
+    let probe = format!("$(ss -H -tln sport = :{port} 2>/dev/null)");
     let secs = listen_wait_ticks / 10;
+    let free_secs = free_wait_ticks / 10;
     [
         "n=0".to_string(),
         format!("while [ -n \"{probe}\" ] && [ $n -lt {free_wait_ticks} ]; do sleep 0.1; n=$((n+1)); done"),
+        // Still held after the wait: starting now would fail to bind while
+        // the old listener makes the poll below report a false "ready".
+        format!("if [ -n \"{probe}\" ]; then echo 'port {port} is still in use after {free_secs}s' >&2; exit 1; fi"),
         format!("setsid nohup \"{bin}\" serve >>\"{log}\" 2>&1 </dev/null & pid=$!"),
         "n=0".to_string(),
         format!(
@@ -186,11 +190,19 @@ sleep 0.1; n=$((n+1)); done"
 /// (2026-10-11 Windows QA): when `sh` exited right after `&`, `wsl.exe`
 /// tore the session down before the child had detached, killing it and
 /// leaving a 0-byte log. See `start_script` for the sequence.
+///
+/// Transport: a bare `--` makes wsl.exe hand the command line to the
+/// user's default shell, which would expand `$(..)`/`$!` and eat quotes
+/// before our `sh` sees them. So the script travels base64-encoded
+/// (alphabet free of shell metacharacters, like `write_file_base64_argv`)
+/// and `--exec` skips the outer shell; only spaces and `|` are structural.
 pub fn start_detached_argv(distro: &str, port: u16) -> Vec<String> {
+    use base64::Engine;
     let bin = format!("$HOME/{BIN_SUBPATH}");
     let log = format!("$HOME/{LOG_SUBPATH}");
     let script = start_script(&bin, &log, port, FREE_WAIT_TICKS, LISTEN_WAIT_TICKS);
-    vec![WSL_EXE.into(), "-d".into(), distro.into(), "--".into(), "sh".into(), "-c".into(), script]
+    let b64 = base64::engine::general_purpose::STANDARD.encode(script);
+    vec![WSL_EXE.into(), "-d".into(), distro.into(), "--exec".into(), "sh".into(), "-c".into(), format!("printf %s {b64} | base64 -d | sh")]
 }
 
 /// start_outcome maps the start script's result to a clear error. The
@@ -349,10 +361,27 @@ mod tests {
         }
     }
 
+    /// The base64 payload inside the transport command (last argv element).
+    fn payload_of(argv: &[String]) -> String {
+        argv.last().unwrap().strip_prefix("printf %s ").unwrap().strip_suffix(" | base64 -d | sh").unwrap().to_string()
+    }
+
+    /// The decoded script body of `start_detached_argv`.
     fn script_of(port: u16) -> String {
+        use base64::Engine;
         let argv = start_detached_argv("Ubuntu", port);
         assert_eq!(argv[0], WSL_EXE);
-        argv.last().unwrap().clone()
+        let raw = base64::engine::general_purpose::STANDARD.decode(payload_of(&argv)).unwrap();
+        String::from_utf8(raw).unwrap()
+    }
+
+    #[test]
+    fn start_detached_argv_contains_no_shell_metacharacters_outside_the_pipeline() {
+        let argv = start_detached_argv("Ubuntu", 4648);
+        assert_eq!(&argv[..6], &[WSL_EXE, "-d", "Ubuntu", "--exec", "sh", "-c"]);
+        let last = argv.last().unwrap();
+        assert_eq!(last.replace(&payload_of(&argv), ""), "printf %s  | base64 -d | sh");
+        assert!(!argv.iter().any(|a| a == "--"));
     }
 
     #[test]
@@ -360,7 +389,8 @@ mod tests {
         let script = script_of(4648);
         assert!(script.contains("setsid nohup"));
         assert!(script.contains("pid=$!"));
-        assert!(script.contains("ss -H -tln \"sport = :4648\""));
+        assert!(script.contains("ss -H -tln sport = :4648 "));
+        assert!(!script.contains("\"sport"));
         assert!(script.contains("sleep 1; exit 0"));
         // The listening poll comes after the launch.
         assert!(script.find("pid=$!").unwrap() < script.rfind("sleep 1; exit 0").unwrap());
@@ -383,6 +413,9 @@ mod tests {
         assert!(script.contains("-lt 150"));
         assert!(script.contains("kill $pid"));
         assert!(script.contains("daemon did not listen on port 4648 within 15s"));
+        assert!(script.contains("port 4648 is still in use after 5s"));
+        // The busy check runs before the launch.
+        assert!(script.find("still in use").unwrap() < script.find("setsid nohup").unwrap());
         assert!(script.ends_with("exit 1"));
     }
 
@@ -424,6 +457,70 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         std::fs::write(path, body).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn start_script_logic_under_sh_with_stubbed_ss_and_setsid() {
+        use std::process::Command;
+        const READY: &str = "touch \"$STATE/listening\"\nexec sleep 30";
+        const DIES: &str = "exit 3";
+        const NEVER: &str = "exec sleep 30";
+
+        // (name, fake-bin body, ss always busy, expected exit ok, stderr needle, bin should start)
+        let cases: [(&str, &str, bool, bool, &str, bool); 4] = [
+            ("ready", READY, false, true, "", true),
+            ("dies", DIES, false, false, "daemon exited before listening", true),
+            ("never", NEVER, false, false, "did not listen", true),
+            ("busy", READY, true, false, "still in use", false),
+        ];
+        for (name, body, busy, want_ok, needle, should_start) in cases {
+            let dir = temp_dir(&format!("stub-{name}"));
+            let state = dir.join("state");
+            let stubs = dir.join("stubs");
+            std::fs::create_dir_all(&state).unwrap();
+            std::fs::create_dir_all(&stubs).unwrap();
+            let port = 4321;
+            write_exec(&stubs.join("setsid"), "#!/bin/sh\nexec \"$@\"\n");
+            let cond = if busy { "true".to_string() } else { format!("[ -f \"{}/listening\" ]", state.display()) };
+            write_exec(&stubs.join("ss"), &format!("#!/bin/sh\nif {cond}; then echo 'LISTEN 0 4096 127.0.0.1:{port} 0.0.0.0:*'; fi\n"));
+            let bin = dir.join("fakebin");
+            write_exec(&bin, &format!("#!/bin/sh\nSTATE=\"{s}\"\necho $$ > \"$STATE/pid\"\n{body}\n", s = state.display()));
+            let log = dir.join("log");
+            let script = start_script(bin.to_str().unwrap(), log.to_str().unwrap(), port, 5, 20);
+            let path = format!("{}:{}", stubs.display(), std::env::var("PATH").unwrap_or_default());
+            let out = Command::new("sh").args(["-c", &script]).env("PATH", path).output().unwrap();
+            let err = String::from_utf8_lossy(&out.stderr).to_string();
+
+            let pid = std::fs::read_to_string(state.join("pid")).ok().map(|p| p.trim().to_string());
+            let alive = |pid: &str| Command::new("kill").args(["-0", pid]).stderr(std::process::Stdio::null()).status().unwrap().success();
+            let mut survivor = None;
+            if let Some(pid) = &pid {
+                for _ in 0..30 {
+                    if !alive(pid) {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+                if alive(pid) {
+                    survivor = Some(pid.clone());
+                }
+            }
+            // Cleanup of only the pid this case recorded.
+            if let Some(pid) = &survivor {
+                let _ = Command::new("kill").args(["-9", pid]).status();
+            }
+
+            assert_eq!(out.status.success(), want_ok, "{name}: stderr: {err}");
+            assert!(err.contains(needle), "{name}: stderr {err:?} lacks {needle:?}");
+            assert_eq!(pid.is_some(), should_start, "{name}: fake bin started = {}", pid.is_some());
+            match name {
+                // A ready daemon legitimately keeps running; only the timeout case must leave nothing.
+                "ready" => {}
+                _ => assert!(survivor.is_none(), "{name}: fake child survived"),
+            }
+            let _ = std::fs::remove_dir_all(&dir);
+        }
     }
 
     #[cfg(unix)]
