@@ -162,16 +162,51 @@ persistence + ★ default agent.
 ## Progress
 
 - [x] Spec committed
-- [ ] Step 1 — `lib/model-browser.ts` + ported tests
-- [ ] Step 2 — `model-picker.tsx` (popover + sheet, keyboard) + tests
-- [ ] Step 3 — wire into toolbar/composer (`setProviderModel`, health, remove
-      old parts), migrate composer tests
-- [ ] Step 4 — screenshot pass + fixes
+- [x] Step 1 — `lib/model-browser.ts` + ported tests
+- [x] Step 2 — `model-picker.tsx` (popover + sheet, keyboard) + tests
+- [x] Step 3 — wire into toolbar/composer (`setProviderModel`, health hook,
+      old parts removed), composer + task-detail tests migrated
+- [x] Step 4 — screenshot pass + fixes (highlight starts on the current
+      selection; calmer search focus; guard-safe 16px mobile search)
 
 ## Peer log
 
-_(filled in as Peers report)_
+- `peer-glm` (`5b12901a`, Step 1: pure logic + 18 ported tests): **ACCEPT**
+  (`8c2d1b62`, `3f15b62e`). Reviewed the diff; its ranking follows the brief's
+  scoring (ties keep input order) instead of Paseo's `scoreTextFields`.
+- `peer-sonnet` (`96d35cb1`, Step 2: picker UI + 12 tests): **ACCEPT**
+  (`185f724c`, `69776699`, `6f653de4`) with Lead fixes after review: type-scale
+  tokens, highlight starting on the current selection, calmer search focus.
+  Used Sonnet rather than GLM because the popover/sheet/keyboard work is the
+  trickier outcome.
+- `peer-sonnet` (`d8dcbab0`, Step 3: composer/toolbar test migration, 18
+  failing tests, nothing deleted, 3 added): **ACCEPT** (`891e8d76`,
+  `35677a50`).
+- Lead: the lazy health hook (`9bf5c191`), toolbar/composer wiring
+  (`c2a9bf3d`), the 4 `task-detail.test.tsx` migrations and the text-scale
+  guard fix.
 
 ## Validation
 
-_(filled in when every AC is confirmed)_
+Verified 2026-10-12 on `feat/composer-combined-model-picker` (develop merged).
+
+- AC1-AC10: `model-browser.test.ts` (18), `model-picker.test.tsx` (12),
+  `use-provider-health.test.ts` (3), migrated `composer.test.tsx` /
+  `run-config-toolbar.test.tsx` / `task-detail.test.tsx` (incl. provider
+  switch resets mode, same-provider pick keeps mode, default model omits
+  `model`, health once per client, unhealthy provider disabled, bound chat).
+- AC11: web `tsc -b` clean, full web suite 1740/1740 (run with
+  `--testTimeout=90000 --maxWorkers=3`: the machine was at load 15-20 and the
+  default 5 s timeout flakes a different App/composer test per run, unrelated
+  to this change); `task lint`, `go test ./...` and the desktop node tests
+  pass. There is no ESLint config in `web/` yet.
+- AC12: light+dark screenshots at 1440x900 and 390x844 (closed trigger,
+  provider view, root with profiles, search filtered, no match, unhealthy
+  provider, bound chat, provider switch result, GLM view; at 390px the picker
+  is the bottom sheet and the trigger is icon-only), rendered from the real
+  `<Composer>` against a fake client (local harness, `tmp/`). Not run against
+  a live daemon.
+- Residual: a model row's secondary line is `description ?? id` (as Paseo does),
+  so a catalog model without a description shows its raw id; the trigger shows
+  `Provider · Model` (e.g. `GLM · GLM 5.3`), a little redundant when the labels
+  repeat.
