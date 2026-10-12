@@ -37,7 +37,9 @@ function makeEventsStub() {
   };
 }
 
-function run(id: string, taskId: number, status: RunStatusValue, startedAt: string, chatId = taskId): RunSummary {
+const isoFromNow = (msAgo: number): string => new Date(Date.now() - msAgo).toISOString();
+
+function run(id: string, taskId: number, status: RunStatusValue, startedAt: string, chatId = taskId, finishedAt?: string): RunSummary {
   return {
     ID: id,
     TaskID: taskId,
@@ -46,7 +48,7 @@ function run(id: string, taskId: number, status: RunStatusValue, startedAt: stri
     Prompt: "do it",
     Status: status,
     StartedAt: startedAt,
-    FinishedAt: status === "running" ? null : startedAt,
+    FinishedAt: status === "running" ? null : (finishedAt ?? isoFromNow(0)),
     StopReason: "",
     Err: "",
     PermissionMode: "", AutoAccept: false,
@@ -189,5 +191,61 @@ describe("useTaskAttention loaded", () => {
     next.nth("run.list").resolve([]);
     await flush();
     expect(result.current.loaded).toBe(true);
+  });
+});
+
+describe("useTaskAttention finished recency window", () => {
+  it("task-attention-finished-recent-run-dots: a run finished 1h ago gets the finished dot", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    client.nth("run.list").resolve([run("r1", 1, "done", "2024-01-01T00:00:00Z", 1, isoFromNow(60 * 60 * 1000))]);
+    await flush();
+
+    expect(result.current.attention.get(1)).toEqual(new Set(["finished"]));
+  });
+
+  it("task-attention-finished-old-run-quiet: a run finished 29 days ago dots nothing but still reports runStatus", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    client.nth("run.list").resolve([run("r1", 1, "done", "2024-01-01T00:00:00Z", 1, isoFromNow(29 * 24 * 60 * 60 * 1000))]);
+    await flush();
+
+    expect(result.current.attention.get(1)).toBeUndefined();
+    expect(result.current.runStatus.get(1)).toBe("done");
+  });
+
+  it("task-attention-finished-unrecorded-finish-ages-from-start: a terminal run with no FinishedAt ages from StartedAt", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    const old = { ...run("r1", 1, "done", isoFromNow(29 * 24 * 60 * 60 * 1000)), FinishedAt: null };
+    const fresh = { ...run("r2", 2, "done", isoFromNow(60 * 1000)), FinishedAt: null };
+    client.nth("run.list").resolve([old, fresh]);
+    await flush();
+
+    expect(result.current.attention.get(1)).toBeUndefined();
+    expect(result.current.attention.get(2)).toEqual(new Set(["finished"]));
+  });
+
+  it("task-attention-error-old-run-still-attention: an error run finished 29 days ago still gets the error dot", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    client.nth("run.list").resolve([run("r1", 1, "error", "2024-01-01T00:00:00Z", 1, isoFromNow(29 * 24 * 60 * 60 * 1000))]);
+    await flush();
+
+    expect(result.current.attention.get(1)).toEqual(new Set(["error"]));
+  });
+
+  it("task-attention-live-finish-dots: a live terminal run.status for a non-selected task still dots finished", async () => {
+    const client = new FakeWsClient();
+    const stub = makeEventsStub();
+    const { result } = renderHook(() => useTaskAttention(client, null, stub.events));
+    client.nth("run.list").resolve([]);
+    await flush();
+
+    stub.fire("run.status", { runId: "r1", taskId: 7, status: "running" });
+    stub.fire("run.status", { runId: "r1", taskId: 7, status: "done" });
+
+    expect(result.current.attention.get(7)).toEqual(new Set(["finished"]));
+    expect(result.current.runStatus.get(7)).toBe("done");
   });
 });
