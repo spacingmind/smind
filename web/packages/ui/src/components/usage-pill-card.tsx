@@ -1,19 +1,29 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useCanHover } from "@/hooks/use-can-hover";
 
 const PILL_CLASS =
   "flex shrink-0 items-center gap-1 truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground";
 
+const OPEN_DELAY_MS = 200;
+const CLOSE_DELAY_MS = 150;
+
+/** How the card got opened decides what closes it and whether it takes focus. */
+type OpenedBy = "hover" | "focus" | "click";
+
 /**
- * A usage pill and the card it opens (ADR-0028 PR-E): a hover card where the
- * pointer can hover -- it opens on pointer hover or keyboard focus after a
- * short delay, stays open while the pointer is over it, and Escape closes
- * it -- and the existing tap-to-open popover on touch devices, with the same
- * content. A click opens the hover card too, so the pill still works as the
- * button it always was.
+ * A usage pill and the card it opens (ADR-0028 PR-E). One Popover everywhere,
+ * so a pointer-capability change never swaps primitives under an open card:
+ *
+ * - hover-capable pointers: the card opens on pointer hover or keyboard focus
+ *   after a short delay, stays open while the pointer is over the pill or the
+ *   card, and closes on leave / blur; Escape closes it. Hover and focus opens
+ *   never steal focus.
+ * - a click or tap (any device; Enter/Space on the pill too) toggles it as the
+ *   plain popover the pill always was: focus moves into the card, so a keyboard
+ *   user can Tab to "Open Usage"; it stays until dismissed.
+ * - `(hover: none)` touch devices have no hover, so a tap is the only way in.
  */
 export function UsagePillCard({
   testId,
@@ -28,29 +38,86 @@ export function UsagePillCard({
   /** What the pill shows (an icon and a one-line summary). */
   pill: ReactNode;
   contentTestId: string;
-  /** The card's content; `close` dismisses the card (the "Open Usage" link uses it). */
+  /** The card's content; `close` dismisses the card without handing focus back (the "Open Usage" link uses it). */
   children: (close: () => void) => ReactNode;
 }) {
   const canHover = useCanHover();
   const [open, setOpen] = useState(false);
-  const close = () => setOpen(false);
-  const triggerProps = { "data-testid": testId, "aria-label": label, className: PILL_CLASS, children: pill } as const;
-  const contentProps = { "data-testid": contentTestId, align: "start", className: "w-64 p-3" } as const;
+  const openedBy = useRef<OpenedBy>("click");
+  const restoreFocus = useRef(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  if (!canHover) {
-    return (
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger type="button" {...triggerProps} />
-        <PopoverContent {...contentProps}>{children(close)}</PopoverContent>
-      </Popover>
+  const clearTimer = () => {
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => clearTimer, []);
+
+  const schedule = (by: OpenedBy, next: boolean) => {
+    clearTimer();
+    timer.current = setTimeout(
+      () => {
+        timer.current = null;
+        if (next) {
+          if (!open) openedBy.current = by;
+          setOpen(true);
+        } else if (openedBy.current !== "click") {
+          setOpen(false);
+        }
+      },
+      next ? OPEN_DELAY_MS : CLOSE_DELAY_MS,
     );
-  }
+  };
+
+  // The pointer that stopped hovering also stops being able to: nothing pending outlives the capability.
+  useEffect(() => {
+    if (!canHover) clearTimer();
+  }, [canHover]);
+
+  const close = () => {
+    clearTimer();
+    restoreFocus.current = false;
+    setOpen(false);
+  };
+  const onOpenChange = (next: boolean) => {
+    clearTimer();
+    if (next) openedBy.current = "click";
+    restoreFocus.current = true;
+    setOpen(next);
+  };
+  const touch = (e: { pointerType: string }) => e.pointerType === "touch" || e.pointerType === "pen";
+
   return (
-    <HoverCard open={open} onOpenChange={setOpen} openDelay={200} closeDelay={150}>
-      <HoverCardTrigger asChild>
-        <button type="button" {...triggerProps} onClick={() => setOpen(true)} />
-      </HoverCardTrigger>
-      <HoverCardContent {...contentProps}>{children(close)}</HoverCardContent>
-    </HoverCard>
+    <Popover open={open} onOpenChange={onOpenChange}>
+      <PopoverTrigger
+        type="button"
+        data-testid={testId}
+        aria-label={label}
+        className={PILL_CLASS}
+        onPointerEnter={(e) => canHover && !touch(e) && schedule("hover", true)}
+        onPointerLeave={(e) => canHover && !touch(e) && schedule("hover", false)}
+        onFocus={() => canHover && schedule("focus", true)}
+        onBlur={() => {
+          if (canHover && openedBy.current === "focus") schedule("focus", false);
+        }}
+      >
+        {pill}
+      </PopoverTrigger>
+      <PopoverContent
+        data-testid={contentTestId}
+        align="start"
+        className="w-64 p-3"
+        onOpenAutoFocus={(e) => {
+          if (openedBy.current !== "click") e.preventDefault();
+        }}
+        onCloseAutoFocus={(e) => {
+          if (openedBy.current !== "click" || !restoreFocus.current) e.preventDefault();
+        }}
+        onPointerEnter={() => canHover && clearTimer()}
+        onPointerLeave={(e) => canHover && !touch(e) && openedBy.current === "hover" && schedule("hover", false)}
+      >
+        {children(close)}
+      </PopoverContent>
+    </Popover>
   );
 }

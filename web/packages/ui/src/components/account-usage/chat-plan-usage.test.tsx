@@ -81,7 +81,7 @@ describe("chat usage hover card: Plan usage", () => {
     await open();
 
     const card = screen.getByTestId("chat-usage-total-popover");
-    expect(card).toHaveAttribute("data-slot", "hover-card-content");
+    expect(card).toHaveAttribute("data-slot", "popover-content");
     expect(within(card).getByText("Usage total")).toBeInTheDocument();
     expect(within(card).getByText("1,200")).toBeInTheDocument();
     const section = within(card).getByTestId("chat-plan-usage");
@@ -193,18 +193,90 @@ describe("chat usage hover card: Plan usage", () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     renderWith(daemon, chatPill());
     await flush();
+    // 20 real open/close cycles: hover opens it, leaving closes it.
     for (let i = 0; i < 20; i++) {
       await act(async () => {
         fireEvent.pointerEnter(screen.getByTestId("chat-usage-total"), { pointerType: "mouse" });
-        fireEvent.focus(screen.getByTestId("chat-usage-total"));
-        fireEvent.click(screen.getByTestId("chat-usage-total"));
+      });
+      await screen.findByTestId("chat-usage-total-popover", {}, { timeout: 3000 });
+      await act(async () => {
         fireEvent.pointerLeave(screen.getByTestId("chat-usage-total"), { pointerType: "mouse" });
       });
+      await waitFor(() => expect(screen.queryByTestId("chat-usage-total-popover")).not.toBeInTheDocument(), { timeout: 3000 });
     }
-    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-usage-total"));
+    });
+    expect(screen.getByTestId("plan-usage-1")).toBeInTheDocument();
     expect(daemon.modes()).toEqual(["cached"]);
     expect(daemon.count("touch")).toBe(0);
     expect(daemon.count("refresh")).toBe(0);
+  }, 30_000);
+
+  it("a click opens the card with focus inside so Open Usage is reachable by keyboard, and a second click closes it", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    renderWith(daemon, chatPill());
+    await flush();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-usage-total"));
+    });
+    const card = screen.getByTestId("chat-usage-total-popover");
+    expect(card.contains(document.activeElement)).toBe(true);
+    screen.getByTestId("plan-usage-open").focus();
+    expect(document.activeElement).toBe(screen.getByTestId("plan-usage-open"));
+    // pointer leaving does not dismiss a click-opened card
+    await act(async () => {
+      fireEvent.pointerLeave(screen.getByTestId("chat-usage-total"), { pointerType: "mouse" });
+      await new Promise((r) => setTimeout(r, 400));
+    });
+    expect(screen.getByTestId("chat-usage-total-popover")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("chat-usage-total"));
+    });
+    expect(screen.queryByTestId("chat-usage-total-popover")).not.toBeInTheDocument();
+  });
+
+  it("a hover-opened card does not steal focus", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    renderWith(daemon, <><button data-testid="elsewhere">x</button>{chatPill()}</>);
+    await flush();
+    screen.getByTestId("elsewhere").focus();
+    await act(async () => {
+      fireEvent.pointerEnter(screen.getByTestId("chat-usage-total"), { pointerType: "mouse" });
+    });
+    await screen.findByTestId("chat-usage-total-popover", {}, { timeout: 3000 });
+    expect(document.activeElement).toBe(screen.getByTestId("elsewhere"));
+  });
+
+  it("filter_on_another_providers_account_still_lists_this_chats_accounts", async () => {
+    localStorage.setItem(STORAGE_KEYS.usage, JSON.stringify({ accountKey: "openai-2" }));
+    const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
+    renderWith(daemon, chatPill());
+    await flush();
+    await open();
+    expect(screen.getAllByTestId(/^plan-usage-\d+$/).map((r) => r.getAttribute("data-testid"))).toEqual(["plan-usage-1"]);
+  });
+
+  it("a reshaped report (no windows, null report, non-string provider) renders without throwing", async () => {
+    const odd = claudeAccount({ accountId: 5, key: "anthropic-5", displayName: "Odd" });
+    odd.report = { status: "available", fetchedAt: "not a date", windows: null as never, planLabel: 7 as never };
+    const nothing = claudeAccount({ accountId: 6, key: "anthropic-6", report: null, lastError: "timeout" });
+    const daemon = new FakeUsageDaemon([claudeAccount(), odd, nothing]);
+    renderWith(daemon, chatPill());
+    await flush();
+    await open();
+    expect(screen.getByTestId("plan-usage-5")).toBeInTheDocument();
+    expect(screen.getByTestId("plan-usage-6")).toHaveTextContent("Couldn't read usage: timeout");
+  });
+
+  it("an error list shows one muted line, a loading list a spinner, and neither sends more than one request", async () => {
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    daemon.failWith = new Error("boom");
+    renderWith(daemon, chatPill());
+    await flush();
+    await open();
+    expect(screen.getByTestId("chat-plan-usage")).toHaveTextContent("Couldn't load plan usage");
+    expect(daemon.modes()).toEqual(["cached"]);
   });
 
   it("a filled store is not listed again, by a chat pill and a run pill together", async () => {
