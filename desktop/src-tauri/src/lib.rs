@@ -297,13 +297,11 @@ pub fn run() {
                 tray,
                 client_task: Mutex::new(client_task),
                 relay_task: Mutex::new(relay_task),
-                daemon_manager_distro: std::sync::Arc::new(Mutex::new(None)),
-                daemon_manager_platform: std::sync::Arc::new(Mutex::new(None)),
             });
 
             // desktop-macos-app M2.3/M2.4: install + start the bundled
             // daemon when none is reachable, or update an older managed
-            // one; macOS only (WSL2 keeps its explicit Install button).
+            // one; macOS only (Windows keeps its explicit Install button).
             #[cfg(target_os = "macos")]
             tauri::async_runtime::spawn(daemon_manager::auto_start(app.handle().clone()));
 

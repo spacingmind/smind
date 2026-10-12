@@ -1,5 +1,5 @@
 //! Every child process this app spawns is a console-subsystem tool
-//! (`wsl.exe`, `lsof`, `kill`, `ps`, `tar`, the managed daemon binary
+//! (`lsof`, `kill`, `ps`, `tar`, the managed daemon binary
 //! itself...). On Windows, a GUI app spawning one of these without
 //! `CREATE_NO_WINDOW` gets a console window flashed on screen for the
 //! split second it runs -- `daemon_status` alone fires several of these
