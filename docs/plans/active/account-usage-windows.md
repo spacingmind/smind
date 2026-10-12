@@ -121,7 +121,7 @@ Call budget (hard rules, PR-A; ADR-0028 §3). Every count below is asserted
 on an `httptest` server that counts requests; the clock is injected.
 
 - **AC44** *Entry points.* `quota.Poller` exposes `Peek`, `Touch`, `Refresh`.
-  `quota.Reader` (interface: `Peek` only) is what routing, the proxy and the
+  `quota.Reader` (interface: `Peek` plus the plain accessor `TTL()`; no method takes a context or can fetch) is what routing, the proxy and the
   event path hold, so no fetch path exists from them at compile time.
   `Peek` never makes a request, whatever the cache state.
 - **AC45** *Touch floor.* At most **1 network fetch per account per TTL (5 min)**,
@@ -539,7 +539,7 @@ reopens the SQLite store at the same path to simulate a daemon restart. Every
 test asserts an **exact** request count.
 
 Entry points and floors (AC44–AC47):
-- `budget_reader_has_no_fetch_surface`: compile-time assertion that `quota.Reader` has only `Peek`, and that `*Poller` satisfies it.
+- `budget_reader_has_no_fetch_surface`: compile-time assertion that `*Poller` satisfies `quota.Reader`, and a reflection allowlist: `Peek` and `TTL` only, no method takes a `context.Context` (PR-B added `TTL`; PR-F adds `Cooldown`).
 - `budget_peek_never_calls`: cold cache, stale cache, backoff, rejected: 1000 `Peek` → 0 requests.
 - `budget_touch_within_ttl_zero_calls`: first `Touch` → 1; 100 more within the TTL → still 1.
 - `budget_touch_ttl_boundary`: at TTL−1 s → 0 more; at TTL → exactly 1 more.
@@ -969,9 +969,9 @@ scratch).
 - [x] PR-A1 types, fetchers, snapshot store (fixtures only) — merged #298
 - [x] PR-A2 poller with the call budget, persisted state, config, wiring — PR open (2026-10-12), awaiting review
 - [ ] Human go-ahead for the manual live probe (see Validation)
-- [ ] PR-B routing integration
-- [ ] PR-C wsapi, CLI, MCP
-- [ ] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry)
+- [x] PR-B routing integration — PR open (2026-10-12), awaiting review (see Progress / Validation notes below)
+- [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
+- [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
 - [ ] PR-E chat hover card (required)
 - [ ] PR-D2 web footer item (default off) and pins
 - [ ] PR-F rejection cooldown + observed headers (right after PR-B)
@@ -1102,3 +1102,130 @@ Unverified at spec time (the implementing PRs must confirm and record):
 - How run-scoped callers are identified at the wsapi layer for the
   `refresh` denial (ADR-0027 describes the same need; PR-C must reuse the
   existing mechanism rather than invent one).
+  **Resolved in PR-C (2026-10-12): there is none.** ADR-0027 run tokens are
+  proposed, not built; every ws client (browser, CLI, `smind mcp serve`, an
+  agent's shell) holds the daemon token, and `source`/`fromTaskId` on
+  `run.start` are self-reported. PR-C therefore adds only an unexported
+  `conn.runScoped` seam (default false, plumbed to `requestContext`) that
+  downgrades `refresh` to `touch`; nothing sets it yet. **Known gap:** an
+  agent with a shell can run `smind account usage --refresh`; the daemon's
+  30 s floor and 6/h budget still cap it at 18 requests/hour/account, and the
+  MCP tool has no refresh input. Closing the gap is part of the ADR-0027
+  run-token work (set `runScoped` at auth time, add an end-to-end test).
+
+### PR-C record (wsapi, CLI, MCP)
+
+- Wire (what PR-D1 consumes): `account.usage` params `{accountIds?, mode?}`
+  (default `cached`), result `{enabled, ttlSeconds, reports: AccountUsage[]}`;
+  `AccountUsage` = `{accountId, key, provider, displayName, credentialType,
+  stale, nextRefreshAt|null (RFC3339 UTC, rounded up to the second),
+  refreshBlocked|null, inFlight, lastError|null, report|null, cooldown?}`.
+  Deviations from the ADR §5 example, both deliberate: `displayName`
+  replaces `label` (AC58), and `inFlight` is added (the caller's 20 s wait
+  ended before the fetch did). Event `account.usage` payload `{usage:
+  AccountUsage}`; removal is signalled by the existing `account.removed`
+  (no separate usage event), so a UI should ignore a usage event for an
+  account it does not know.
+- `quota.Window` reserves `source`/`status`, `AccountUsage` reserves
+  `cooldown`; all `omitempty`, never populated before PR-F.
+- `quota.Poller.SetOnFetch` was added so `AttachUsage` can wire the event
+  after the bus exists (`serve.go` +1 line). It must be called before the
+  poller is used; the unsynchronized write is safe today because nothing can
+  fetch before `ListenAndServe` (reviewer residual).
+- CLI default is `touch`; `--refresh` is the only way to send `refresh`.
+  MCP `account_usage` hard-codes `touch`, input is only `accountIds`.
+- Residual (reviewer): provider-supplied label strings are not
+  control-character-stripped in the poller's `capText` (CLI strips them on
+  output; the MCP tool forwards them) - candidate for a poller follow-up.
+
+### PR-B notes (2026-10-12)
+
+- **Shape.** `Route(..., opts ...RouteOption)` with `routing.WithModel`; router
+  options `WithUsageRouting` (default true), `WithExhaustThresholdPct`
+  (default 100; a value outside 1..100 is ignored, because `config.Load`
+  returns the parsed value together with its validation error and `serve.go`
+  continues with it), `WithClock`. `quota.Reader` gained `TTL()` (the
+  no-`ResetsAt` rule needs it); no `Reader` method can fetch.
+- **Rules as built.** Counted windows via `Window.AppliesTo`; exhausted iff a
+  counted window is at/over threshold (or `RemainingPct <= 0`) and `now <
+  ResetsAt` (a window with no `ResetsAt` counts for `2 x TTL` after
+  `FetchedAt`); `OverageEnabled == true` suppresses; anything not
+  `StatusAvailable`, no report, or polling disabled is not exhausted;
+  `Stale` is ignored, so an exhausted verdict outlives failing refetches. An
+  account's reset time is the latest of its exhausting windows; the pool error
+  names the earliest across candidates, the hard error names the account's
+  (both RFC3339 UTC). A 503 from the proxy keeps `route request: ...` (D12).
+- **Peek hot path.** `Poller` keeps a per-account in-memory snapshot cache
+  (write-through from `complete()`, cold/negative results cached, read errors
+  not cached, `Peek` returns deep clones). A warm `Peek` makes no snapshot
+  read and no JSON decode (`BenchmarkPeekWarm` about 27 us/op, 57 allocs). It
+  still does one `accounts` primary-key read via `AccountSource.Get`, only to
+  fingerprint the credential for `RefreshBlocked`; routing ignores that
+  field. A routing-only peek that skips it can be added with PR-F's
+  `Cooldown` if profiling shows it matters. Known and out of scope:
+  `Router.latestDecision` scans every routing decision per `Route` (about
+  10 ms per call with ~1000 rows); a per-session query in `internal/store`
+  would fix it.
+- **Zero-fetch proof.** `TestRoute_NeverFetches` (real enabled Poller,
+  counting fetcher; cold, stale, backoff and in-flight-blocked accounts; about
+  1000 Route calls, pool and hard, with and without a model) and
+  `TestProxy_1000RequestsZeroUsageCalls` (1000 proxied requests that walk past
+  a stale, an exhausted, a backoff and an in-flight account to the one healthy
+  one). Mutation-checked: a router that calls `Poller.Touch` on each Peek
+  fails both.
+
+### PR-D1 record (web: Settings -> Usage, modal, palette; 2026-10-12)
+
+- **Built.** `lib/account-usage/{types,tone,format,copy,model,preferences}.ts`
+  (ported from Paseo's `usage/*`, with their unit tests), `hooks/use-account-usage.ts`
+  (one report store per `WsClient` + the touch driver), `hooks/use-usage-preferences.ts`,
+  `hooks/use-usage-modal.ts` (open-state store: `openUsageModal()` is what a footer
+  item or hover card calls), `components/account-usage/{usage-card,list,body,controls,
+  options,modal,window-bar,balance-bar,meter,refresh-button,source-icon}`,
+  `components/ui/segmented-control.tsx`, the **Plan usage** block in
+  `settings/usage-section.tsx` (token table retitled **Token usage**), the
+  `usage.open` keyboard action (no key binding) plus the palette entry "Usage: open
+  plan usage", and the two `account.*` topics in `useDaemonEvents`.
+- **Call discipline as built (AC54).** The only `account.usage` call sites are
+  `UsageStore.list` (`cached` or `touch`) and `UsageStore.refresh` (`refresh`,
+  from a button press). `touch` is sent only by a surface that is open (modal
+  open, Settings -> Usage mounted) in a visible and focused window, once on
+  open and then at most once per `ttlSeconds` (timer paused while hidden or
+  blurred; on return it touches only if the TTL has elapsed). The first touch
+  doubles as the list, so opening sends one request, not two. A reconnect swaps
+  the client and so the store; the TTL clock is carried across the swap, so the
+  re-list is one `cached` and the next touch still waits out the TTL.
+  An old daemon ("method not found") is asked once and never again.
+- **Deliberate deviations.** (1) Options open in a Popover on narrow screens too
+  (viewport-capped), not a sheet; it is visible and clean in the screenshots.
+  (2) Events for an account the UI does not know are ignored (PR-C note); a
+  touch/refresh list adds new accounts. (3) A daemon-reported `refreshBlocked`
+  lifts by itself at `nextRefreshAt` (rounded up to the second by the daemon),
+  except `rejected`, which stays until the account is reconnected. (4) Rows are
+  plain bars: pins, the pin glyph and the footer item are PR-D2.
+- **Found in review.** A `null` entry in `report.windows` crashed the card (AC39):
+  fixed in the card and in default-pin derivation, with tests. A reconnect with a
+  surface open would have sent an immediate `touch` (empty TTL clock on the new
+  store): fixed, with `a reconnect while a touching surface is open ...`.
+- **Verified.** `bunx tsc -b packages/ui`; web vitest (1990+ tests; the new ones
+  are `lib/account-usage/*.test.ts`, `hooks/use-account-usage.test.tsx`,
+  `components/account-usage/*.test.tsx`, `settings/usage-section.plan.test.tsx`,
+  two tests in `App.test.tsx`: `command_palette_opens_usage_modal`,
+  `modal_opens_above_settings_screen`); `go test ./...`; `task lint`.
+  On a loaded machine unrelated heavy tests in `App.test.tsx`/sidebar/composer
+  occasionally hit vitest's 5 s timeout (a different one each run); they pass
+  alone.
+- **Screenshots (AC41, D1 part).** Playwright against the built UI and a sandbox
+  daemon (temp `SMIND_HOME`, port 4761) with `account.usage` answered from the
+  browser by `routeWebSocket` (real fetchers are not overridable): Settings ->
+  Usage with one account, several, filter open and applied, Remaining, problem
+  states (expired, rejected, no_quota, error with retry), refresh blocked
+  (backoff/floor/budget/rejected, countdown tooltip), polling disabled, old
+  daemon; the modal over the shell, over Settings, with one account, a long list
+  (scrolled to the last card), problems, blocked, refresh in flight and options
+  open; light and dark at 1440x900 and 390x844. The real browser sent exactly
+  one `touch` per opened surface. Footer/pins/chat card screenshots belong to D2/E.
+- **Not covered here.** The full-screen Settings screen (`feat/settings-fullscreen`)
+  is exercised through container test doubles, plus the screen that is on develop.
+  Real-provider data is still the manual live check.
+

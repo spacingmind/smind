@@ -56,7 +56,9 @@ func cmdServe(args []string) int {
 		quota.WithEnabled(uc.Enabled),
 		quota.WithTTL(time.Duration(uc.TTLSeconds)*time.Second))
 	defer poller.Close()
-	router := routing.New(db, registry, poller)
+	router := routing.New(db, registry, poller,
+		routing.WithUsageRouting(uc.Routing),
+		routing.WithExhaustThresholdPct(uc.ExhaustThresholdPct))
 	wm := workspace.New(db)
 	wm.SetMaxDepth(cfg.Orchestration.MaxDepth)
 	wtSettings := workspace.WorktreesSettings{
@@ -97,6 +99,7 @@ func cmdServe(args []string) int {
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
+	srv.API().AttachUsage(poller, registry)
 	srv.API().Runs.SetMaxConcurrentRunsPerTree(cfg.Orchestration.MaxConcurrentRunsPerTree)
 	httpSrv := &http.Server{
 		Addr:              srv.Addr(),

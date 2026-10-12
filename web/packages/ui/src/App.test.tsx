@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
@@ -526,20 +527,21 @@ describe("App live events", () => {
     expect(screen.getByTestId("task-attention")).toBeInTheDocument();
   });
 
-  it("a task.status notification updates the sidebar row's status text live", async () => {
+  it("a task.status notification updates the status shown in the sidebar row's hover card live", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
 
+    // The lifecycle status moved off the row into its hover card (sidebar-polish S4).
     // TASK_A.Status is "active" from the fetch; the event says "done".
-    expect(screen.getByText("active")).toBeInTheDocument();
+    const card = await openHoverCard(TASK_A.ID);
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("active");
 
     pushNotification(socket, "task.status", { taskId: TASK_A.ID, status: "done" });
     await flush();
 
-    expect(screen.queryByText("active")).not.toBeInTheDocument();
-    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("done");
   });
 
   it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {
@@ -2534,5 +2536,104 @@ describe("App chat column (dogfood Item 2)", () => {
 
     const explorer = screen.getByTestId("file-explorer-pane");
     expect(explorer.className).not.toContain("max-w");
+  });
+});
+
+describe("App plan usage modal (ADR-0028 PR-D1)", () => {
+  const USAGE_RESULT = {
+    enabled: true,
+    ttlSeconds: 300,
+    reports: [
+      {
+        accountId: 1,
+        key: "anthropic-1",
+        provider: "anthropic",
+        displayName: "Claude",
+        credentialType: "oauth",
+        stale: false,
+        nextRefreshAt: null,
+        refreshBlocked: null,
+        inFlight: false,
+        lastError: null,
+        report: {
+          v: 2,
+          status: "available",
+          planLabel: "max",
+          windows: [{ id: "five_hour", label: "5-hour", shortLabel: "5h", usedPct: 31, remainingPct: 69, summary: true }],
+          fetchedAt: "2026-10-12T11:57:00Z",
+        },
+      },
+    ],
+  };
+
+  function usageRequests(socket: FakeSocket): { method?: string; params?: { mode?: string } }[] {
+    return socket.sent.filter((e) => e.method === "account.usage") as { method?: string; params?: { mode?: string } }[];
+  }
+
+  async function runUsageCommand(): Promise<void> {
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "usage: open" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+  }
+
+  it("command_palette_opens_usage_modal", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    const hashBefore = window.location.hash;
+    // Nothing asks for plan usage until a surface that shows it opens.
+    expect(usageRequests(socket)).toHaveLength(0);
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+
+    await runUsageCommand();
+    expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
+    respondAll(socket, "account.usage", USAGE_RESULT);
+    await flush();
+    expect(within(screen.getByTestId("usage-modal")).getByTestId("usage-report-1")).toBeInTheDocument();
+
+    // No route change, and no fetch beyond one list: never a refresh.
+    expect(window.location.hash).toBe(hashBefore);
+    expect(usageRequests(socket).length).toBeGreaterThanOrEqual(1);
+    expect(usageRequests(socket).every((e) => e.params?.mode !== "refresh")).toBe(true);
+
+    // Escape closes it and unmounts it.
+    fireEvent.keyDown(screen.getByTestId("usage-modal"), { key: "Escape" });
+    await flush();
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+  });
+
+  it("modal_opens_above_settings_screen", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await runUsageCommand();
+    const modal = screen.getByTestId("usage-modal");
+    expect(modal).toBeInTheDocument();
+    // Settings stays open underneath, and the modal is not inside it (a Radix portal, above its z-40).
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen").contains(modal)).toBe(false);
+
+    fireEvent.keyDown(modal, { key: "Escape" });
+    await flush();
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
   });
 });

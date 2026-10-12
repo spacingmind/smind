@@ -27,8 +27,8 @@ func (f neverFetcher) Fetch(ctx context.Context, account accounts.Account) (quot
 }
 
 // newShimPoller builds the disabled poller every routing test routes over:
-// enabled=false, so nothing is fetched, matching production until PR-B
-// (ADR-0028) wires plan-usage windows into isExhausted.
+// enabled=false, so nothing is fetched, so Peek reports "no data" and
+// nothing is exhausted.
 func newShimPoller(t *testing.T, s *store.Store, reg *accounts.Registry) *quota.Poller {
 	t.Helper()
 	return quota.New(s, reg, neverFetcher{t: t}, quota.WithEnabled(false))
@@ -68,14 +68,13 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 	tests := []struct {
 		name    string
 		policy  string
-		setup   func(t *testing.T, reg *accounts.Registry) (candidateIDs []int64, wantID int64)
+		setup   func(t *testing.T, reg *accounts.Registry, fr *fakeReader) (candidateIDs []int64, wantID int64)
 		wantErr bool
-		skip    string
 	}{
 		{
 			name:   "hard policy success",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				return []int64{a}, a
 			},
@@ -83,7 +82,7 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "hard policy zero candidates errors",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				return nil, 0
 			},
 			wantErr: true,
@@ -91,7 +90,7 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "hard policy multiple candidates errors",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
 				return []int64{a, b}, 0
@@ -101,16 +100,17 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "hard policy exhausted account errors with no failover",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
 				return []int64{a}, 0
 			},
-			skip: "PR-B (ADR-0028): exhaustion needs plan-usage windows; restored with route_* tests",
+			wantErr: true,
 		},
 		{
 			name:   "pool policy picks first non-exhausted candidate",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
 				return []int64{a, b}, a
@@ -119,28 +119,31 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "pool policy fails over past exhausted candidates",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
 				c := newAccount(t, reg, "c")
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
+				fr.set(b, exhaustedResult(testNow.Add(2*time.Hour)))
 				return []int64{a, b, c}, c
 			},
-			skip: "PR-B (ADR-0028): exhaustion needs plan-usage windows; restored with route_* tests",
 		},
 		{
 			name:   "pool policy all exhausted errors",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
+				fr.set(b, exhaustedResult(testNow.Add(2*time.Hour)))
 				return []int64{a, b}, 0
 			},
-			skip: "PR-B (ADR-0028): exhaustion needs plan-usage windows; restored with route_* tests",
+			wantErr: true,
 		},
 		{
 			name:   "pool policy empty candidates errors",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				return nil, 0
 			},
 			wantErr: true,
@@ -148,7 +151,7 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "unknown policy errors",
 			policy: "bogus",
-			setup: func(t *testing.T, reg *accounts.Registry) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				return []int64{a}, 0
 			},
@@ -160,11 +163,8 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r, s, reg := newTestRouter(t)
-			if tt.skip != "" {
-				t.Skip(tt.skip)
-			}
-			candidateIDs, wantID := tt.setup(t, reg)
+			r, s, reg, fr, _ := newFakeRouter(t)
+			candidateIDs, wantID := tt.setup(t, reg, fr)
 
 			got, err := r.Route(context.Background(), "session-"+tt.name, tt.policy, candidateIDs)
 
@@ -254,10 +254,6 @@ func TestRouter_Route_SessionAffinityExpires(t *testing.T) {
 	}
 }
 
-func TestRouter_Route_SessionAffinityBrokenByExhaustion(t *testing.T) {
-	t.Skip("PR-B (ADR-0028): exhaustion needs plan-usage windows; restored with route_* tests")
-}
-
 func TestRouter_Route_ConcurrentDifferentSessions(t *testing.T) {
 	t.Parallel()
 
@@ -284,9 +280,8 @@ func TestRouter_Route_ConcurrentDifferentSessions(t *testing.T) {
 	}
 }
 
-// TestRouter_Route_UnknownQuotaFailsOpen kept the shim honest: with no
-// report at all (the shim's steady state for every account until PR-B),
-// routing still succeeds. The quota_error counterpart is skipped below.
+// TestRouter_Route_UnknownQuotaFailsOpen: with no report at all (a disabled
+// poller), routing still succeeds.
 func TestRouter_Route_UnknownQuotaFailsOpen(t *testing.T) {
 	t.Parallel()
 
@@ -300,10 +295,6 @@ func TestRouter_Route_UnknownQuotaFailsOpen(t *testing.T) {
 	if got.ID != a {
 		t.Errorf("Route() account = %d, want %d", got.ID, a)
 	}
-}
-
-func TestRouter_Route_QuotaFetchErrorPropagates(t *testing.T) {
-	t.Skip("PR-B (ADR-0028): the shim never reads quota, so no fetch error can reach routing; restored with route_* tests")
 }
 
 func TestRouter_Route_ConcurrentSameSession(t *testing.T) {
@@ -338,27 +329,6 @@ func TestRouter_Route_ConcurrentSameSession(t *testing.T) {
 	for got := range results {
 		if got.ID != a {
 			t.Errorf("Route() account = %d, want %d (only candidate)", got.ID, a)
-		}
-	}
-}
-
-// TestRoute_ShimNeverErrorsOnUsagePath proves the shim's contract: Route
-// returns no error and makes zero fetches across repeated routed requests,
-// even though the Router's Reader is a real Poller whose fetcher fails the
-// test the moment it is invoked.
-func TestRoute_ShimNeverErrorsOnUsagePath(t *testing.T) {
-	t.Parallel()
-
-	r, _, reg := newTestRouter(t)
-	a := newAccount(t, reg, "a")
-
-	for i := 0; i < 3; i++ {
-		got, err := r.Route(context.Background(), fmt.Sprintf("sess-%d", i), PolicyHard, []int64{a})
-		if err != nil {
-			t.Fatalf("Route() #%d error = %v, want nil (usage can no longer 503 routing)", i, err)
-		}
-		if got.ID != a {
-			t.Errorf("Route() #%d account = %d, want %d", i, got.ID, a)
 		}
 	}
 }

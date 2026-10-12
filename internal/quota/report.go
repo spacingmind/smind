@@ -107,6 +107,11 @@ type Window struct {
 	ResetsAt        *time.Time `json:"resetsAt"`
 	DurationSeconds *int64     `json:"durationSeconds,omitempty"`
 	Tone            Tone       `json:"tone"`
+
+	// Source ("fetched" | "observed") and Status are reserved for ADR-0028
+	// PR-F (locally observed limits). Nothing sets them yet.
+	Source string `json:"source,omitempty"`
+	Status string `json:"status,omitempty"`
 }
 
 // AppliesTo reports whether the window limits requests for model. An

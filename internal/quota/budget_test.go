@@ -25,12 +25,25 @@ func Test_budget_reader_has_no_fetch_surface(t *testing.T) {
 	t.Parallel()
 	var r interface{ Peek(int64) Result } = (*Poller)(nil)
 	_ = r
-	if n := reflect.TypeOf((*Reader)(nil)).Elem().NumMethod(); n != 1 {
-		t.Fatalf("Reader has %d methods, want exactly 1 (Peek)", n)
+	// Reader may only hold cache reads: Peek plus plain accessors. A fetch
+	// path would need a context (every poller entry that can reach the
+	// network takes one), so none may appear.
+	rt := reflect.TypeOf((*Reader)(nil)).Elem()
+	allowed := map[string]bool{"Peek": true, "TTL": true}
+	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
+	for i := 0; i < rt.NumMethod(); i++ {
+		m := rt.Method(i)
+		if !allowed[m.Name] {
+			t.Errorf("Reader method %q is not on the read-only allowlist", m.Name)
+		}
+		for j := 0; j < m.Type.NumIn(); j++ {
+			if m.Type.In(j) == ctxType {
+				t.Errorf("Reader method %q takes a context.Context: a fetch path", m.Name)
+			}
+		}
 	}
-	m := reflect.TypeOf((*Reader)(nil)).Elem().Method(0)
-	if m.Name != "Peek" {
-		t.Fatalf("Reader method = %q, want Peek", m.Name)
+	if _, ok := rt.MethodByName("Peek"); !ok {
+		t.Fatal("Reader has no Peek")
 	}
 }
 

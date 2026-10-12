@@ -6,6 +6,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { revealWorkspaceActions } from "@/test/sidebar-helpers";
 import type { Connection, EditorInfo } from "@/lib/platform";
 import type { Task, Workspace } from "@/lib/types";
 
@@ -89,7 +90,7 @@ async function mountSidebar() {
   client.nth("space.list", 0).resolve([]);
   client.nth("task.list", 0).resolve([TASK]);
   await flush();
-  const trigger = await screen.findByTestId("sidebar-workspace-actions-trigger");
+  const trigger = await revealWorkspaceActions();
   fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
   await flush();
   await screen.findByText("Delete workspace");

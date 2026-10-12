@@ -65,4 +65,7 @@ if (!Element.prototype.scrollIntoView) {
 
 afterEach(() => {
   cleanup();
+  // Persisted UI state (sidebar expansion, pins, ...) must not leak from one
+  // test into the next file-mate.
+  window.localStorage.clear();
 });
