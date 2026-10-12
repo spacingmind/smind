@@ -2,6 +2,7 @@ import { act } from "react";
 import { fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
+import { assistantMarkdown } from "@/components/timeline/timeline-text";
 import { RunTimeline } from "@/components/timeline/run-timeline";
 import { TimelineRow } from "@/components/timeline/timeline-row";
 import { FOLLOW_THRESHOLD_PX, useAutoFollow } from "@/components/timeline/use-auto-follow";
@@ -208,7 +209,7 @@ describe("RunTimeline", () => {
 
     const footer = screen.getByTestId("run-footer");
     expect(within(footer).getByTestId("run-usage-pill")).toHaveTextContent("12.3k in · 1.2k out · $0.042");
-    // The pill sits between the stop reason and the Copy button.
+    // The pill sits between the stop reason and the action bar.
     const stop = within(footer).getByTestId("run-stop-reason");
     const pill = within(footer).getByTestId("run-usage-pill");
     const copy = within(footer).getByTestId("run-copy-button");
@@ -216,9 +217,21 @@ describe("RunTimeline", () => {
     expect(pill.compareDocumentPosition(copy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows the turn's elapsed time and copies the turn as plain text", async () => {
+  function stubClipboard() {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    return writeText;
+  }
+
+  async function openCopyMenu() {
+    const trigger = screen.getByTestId("run-copy-button");
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    return screen.findByTestId("run-copy-menu");
+  }
+
+  it("shows the turn's elapsed time and copies the turn as plain text", async () => {
+    const writeText = stubClipboard();
 
     render(
       <ul>
@@ -228,12 +241,124 @@ describe("RunTimeline", () => {
 
     expect(screen.getByTestId("run-elapsed")).toHaveTextContent("2.0s");
 
+    await openCopyMenu();
     await act(async () => {
-      fireEvent.click(screen.getByTestId("run-copy-button"));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy turn" }));
     });
 
     expect(writeText).toHaveBeenCalledWith("> do the thing\n\nthe answer\n");
-    expect(screen.getByTestId("run-copy-button")).toHaveTextContent("Copied");
+    expect(screen.getByTestId("run-copy-button")).toHaveAttribute("aria-label", "Copy");
+  });
+
+  it("Copy menu: answer as Markdown copies only the assistant text; full turn copies the plain-text turn", async () => {
+    const writeText = stubClipboard();
+    render(
+      <ul>
+        <RunTimeline
+          run={run([
+            { type: "thinking", text: "hmm" },
+            { type: "chunk", text: "# First" },
+            { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "ls", status: "success" },
+            { type: "chunk", text: "second" },
+          ])}
+        />
+      </ul>,
+    );
+
+    await openCopyMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("run-copy-answer"));
+    });
+    expect(writeText).toHaveBeenLastCalledWith("# First\n\nsecond");
+
+    await openCopyMenu();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("run-copy-turn"));
+    });
+    expect(writeText.mock.lastCall?.[0]).toMatch(/^> do the thing\n\n\[thinking\] hmm/);
+  });
+
+  it("omits Copy answer when the run has no assistant text", async () => {
+    stubClipboard();
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "thinking", text: "hmm" }])} />
+      </ul>,
+    );
+    await openCopyMenu();
+    expect(screen.queryByTestId("run-copy-answer")).toBeNull();
+    expect(screen.getByTestId("run-copy-turn")).toBeInTheDocument();
+  });
+
+  it("the user prompt bar offers Copy and Edit & resend; Edit calls onEditPrompt with the run", async () => {
+    const writeText = stubClipboard();
+    const onEditPrompt = vi.fn();
+    const r = run([{ type: "chunk", text: "x" }]);
+    const { rerender } = render(
+      <ul>
+        <RunTimeline run={r} onEditPrompt={onEditPrompt} />
+      </ul>,
+    );
+
+    const bar = screen.getByTestId("run-prompt-actions");
+    expect(bar.className).toContain("group-hover/prompt:opacity-100");
+    expect(within(bar).getByRole("button", { name: "Edit & resend" })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("run-prompt-copy"));
+    });
+    expect(writeText).toHaveBeenCalledWith("do the thing");
+
+    fireEvent.click(screen.getByTestId("run-prompt-edit"));
+    expect(onEditPrompt).toHaveBeenCalledWith(r);
+
+    rerender(
+      <ul>
+        <RunTimeline run={r} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-prompt-edit")).toBeNull();
+    expect(screen.getByTestId("run-prompt-copy")).toBeInTheDocument();
+  });
+
+  it("finished runs offer Re-run; a running run does not", () => {
+    const onRerun = vi.fn();
+    for (const status of ["done", "error", "stopped"] as const) {
+      const r = run([], { status });
+      const { unmount } = render(
+        <ul>
+          <RunTimeline run={r} onRerun={onRerun} />
+        </ul>,
+      );
+      fireEvent.click(screen.getByTestId("run-rerun"));
+      expect(onRerun).toHaveBeenLastCalledWith(r);
+      unmount();
+    }
+    const { unmount } = render(
+      <ul>
+        <RunTimeline run={run([], { status: "running" })} onRerun={onRerun} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-rerun")).toBeNull();
+    expect(screen.getByTestId("run-copy-button")).toBeInTheDocument();
+    unmount();
+    render(
+      <ul>
+        <RunTimeline run={run([])} />
+      </ul>,
+    );
+    expect(screen.queryByTestId("run-rerun")).toBeNull();
+  });
+
+  it("assistantMarkdown joins assistant text items with a blank line and ignores tools and thinking", () => {
+    const items = buildTimeline([
+      { type: "thinking", text: "hmm" },
+      { type: "chunk", text: "one" },
+      { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "ls", status: "success" },
+      { type: "chunk", text: "two\n" },
+      { type: "from_the_future" },
+    ]);
+    expect(assistantMarkdown(items)).toBe("one\n\ntwo");
+    expect(assistantMarkdown([])).toBe("");
   });
 });
 
@@ -249,7 +374,8 @@ describe("RunTimeline borderless chrome", () => {
     const offenders: string[] = [];
     for (const el of root.querySelectorAll("*")) {
       if (el.closest("[data-testid='run-usage-popover']")) continue;
-      if (el.closest("[data-slot='button']")) continue;
+      // Radix `asChild` triggers overwrite data-slot, so the action-bar buttons (the same Button primitive) read as these.
+      if (el.closest("[data-slot='button'], [data-slot='tooltip-trigger'], [data-slot='dropdown-menu-trigger']")) continue;
       if (el.closest(".markdown, [data-testid='timeline-assistant']")) continue;
       const tokens = (el.getAttribute("class") ?? "").split(/\s+/);
       if (tokens.some((t) => /^(border|divide)(-|$)/.test(t))) offenders.push(`${el.tagName} ${el.getAttribute("class")}`);
@@ -301,7 +427,7 @@ describe("RunTimeline borderless chrome", () => {
           <RunTimeline run={run([], { status })} />
         </ul>,
       );
-      const cls = screen.getByTestId("run-footer").className;
+      const cls = screen.getByTestId("run-meta").className;
       unmount();
       return cls.split(/\s+/);
     };
