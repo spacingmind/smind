@@ -1,4 +1,4 @@
-//! The app-managed local daemon (ADR-0013 part D2, ADR-0029): install,
+//! The app-managed local daemon (ADR-0013 part D2, ADR-0030): install,
 //! update and restart a daemon the app itself started, natively on
 //! Windows and macOS. See `docs/plans/active/desktop-managed-daemon.md`.
 //!

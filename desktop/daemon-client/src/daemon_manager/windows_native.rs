@@ -1,4 +1,4 @@
-//! Windows-native daemon management (ADR-0029): install a downloaded
+//! Windows-native daemon management (ADR-0030): install a downloaded
 //! `smind_<version>_windows_<arch>.zip` release, start `smind.exe serve`
 //! detached with no console window, find who owns a port, and stop the
 //! daemon via its API with a terminate fallback -- mirroring `native.rs`'s

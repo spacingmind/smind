@@ -1,4 +1,4 @@
-//! ADR-0013 part D2 / ADR-0029: install/update/restart the local daemon
+//! ADR-0013 part D2 / ADR-0030: install/update/restart the local daemon
 //! the app manages, natively on Windows and macOS. Orchestrates the pure
 //! logic in `smind_daemon_client::daemon_manager` with the OS calls it
 //! needs (spawning the daemon process, hitting the network) plus Tauri
@@ -87,7 +87,7 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
     let _ = app.emit(PROGRESS_EVENT, Progress { stage, message: message.into() });
 }
 
-/// detect_platform is a plain `target_os` mapping (ADR-0029): macOS and
+/// detect_platform is a plain `target_os` mapping (ADR-0030): macOS and
 /// Windows are native hosts, everything else is Unsupported. Nothing is
 /// probed at runtime, so there is no per-call process spawn left to
 /// cache.
@@ -353,7 +353,7 @@ pub async fn auto_start(app: AppHandle) {
 // Windows native
 // ---------------------------------------------------------------------------
 
-/// windows_base_dir resolves the managed layout root's parent (ADR-0029):
+/// windows_base_dir resolves the managed layout root's parent (ADR-0030):
 /// `%LOCALAPPDATA%`, falling back to `%USERPROFILE%\AppData\Local`. Pure
 /// over an injected env getter so the fallback is unit-testable.
 #[cfg(target_os = "windows")]
@@ -365,7 +365,7 @@ fn windows_base_dir(getenv: impl Fn(&str) -> Option<String>) -> PathBuf {
     Path::new(&profile).join("AppData").join("Local")
 }
 
-/// windows_layout is the Windows managed layout (ADR-0029):
+/// windows_layout is the Windows managed layout (ADR-0030):
 /// `%LOCALAPPDATA%\smind` -> `bin/smind.exe`, `smind.log`, `managed.json`.
 #[cfg(target_os = "windows")]
 fn windows_layout() -> Result<windows_native::Layout, String> {
@@ -841,7 +841,7 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
         Platform::Windows => {
             #[cfg(target_os = "windows")]
             {
-                // The graceful path (ADR-0029): POST /api/shutdown with
+                // The graceful path (ADR-0030): POST /api/shutdown with
                 // the daemon's token, then wait for /healthz to stop
                 // answering; windows_native::stop only ever terminates
                 // the recorded pid behind the same identity checks.
