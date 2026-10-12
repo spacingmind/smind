@@ -35,7 +35,11 @@ share/export (no feature), touching the chat timeline/message components
   keeps its dot.
 - D5 Task metadata: title in the header with a hover/focus card (branch, status, last activity, setup, port, worktree);
   the chat pane drops its duplicate title line (title + "· Chat" duplicated the header and the tab) and keeps one compact
-  secondary row: run-config pill, MCP, usage, setup badge, port chip, and the Detailed toggle. Branch + status move to the hover card.
+  secondary row: MCP, usage, setup badge, port chip, an agent chip and the Detailed toggle (right-aligned). Branch + status move to the hover card.
+  Review round 2: the run-config pill ("No agent · Claude Code · Accept File Edits · Standard") mirrored the composer toolbar right below it, so it is gone.
+  The composer does not show the saved agent profile, so the pill survives only as a compact chip naming it ("<Agent>", "<Agent> · edited" after
+  hand-edits; click still focuses the toolbar) and only when an agent is applied. The row stays because the Detailed toggle is chat-scoped (the header
+  cannot know the active tab is a chat; folding it into the ⋯ menu would need new cross-component plumbing) and it also hosts the usage/setup/port badges.
 - D6 Header ⋯ menu: Copy branch name, Copy worktree path, Reveal in <file manager> (desktop + local connection only),
   Archive task… (the existing `ArchiveTaskDialog`; the sidebar updates through lifecycle events). Pin / Mark unread / Move
   are sidebar-owned state and stay in the sidebar menu (a second `usePinnedTasks` instance would not see the same state).
@@ -58,7 +62,7 @@ share/export (no feature), touching the chat timeline/message components
 - AH-AC9: sidebar expanded (desktop layout) → toggle in the sidebar top strip; sidebar collapsed to the rail or compact layout → toggle at the header's left. Never both, never neither.
 - AH-AC10: desktop chrome intact: header keeps `data-tauri-drag-region="deep"` and the macOS traffic-light left inset when the header is at the window edge; Windows/Linux still end in the drawn caption buttons; interactive controls carry no drag attribute; browser build has none of it.
 - AH-AC11: update badge: desktop build with an update available (prompt open or dismissed with Later) → badge in the left zone showing the version in its title; click re-opens the prompt; none when idle; none in a browser build.
-- AH-AC12: chat pane no longer renders the `h2` "<task> · <chat>" line; the run-config pill, MCP indicator, usage total, setup badge, port chip and the Detailed toggle stay (same test ids) in one compact row.
+- AH-AC12: chat pane no longer renders the `h2` "<task> · <chat>" line; the MCP indicator, usage total, setup badge, port chip and the Detailed toggle stay (same test ids) in one compact row; the run-config pill appears only as an agent-name chip (no provider/model/mode/thinking, which the composer shows).
 - AH-AC13: at 390×844 the header fits without horizontal overflow: toggle, title (truncating), ⋯, terminal; editor pill and help hidden.
 - AH-AC14: light and dark: header, panel and sidebar read as two tones; no clipped corner or double border.
 
@@ -104,6 +108,7 @@ Screenshots (local, `/tmp/ahat-sbx/shots/{before,after}`; 1440x900 and 390x844, 
 - AH-AC11: `app-update.test.ts` (reducer + `pendingUpdate`), `update-badge.test.tsx`; forced-desktop screenshot shows the badge in the sidebar strip (expanded) and in the header (collapsed rail, macOS inset). Not verified against a real updater.
 - AH-AC12: `task-detail.test.tsx` "AH-AC12 ..."; screenshot shows only the compact meta row.
 - AH-AC13: `App.responsive.test.tsx`; 390px screenshots show toggle, title, menu, terminal, no overflow.
+- Round 2 (desktop strip): in the macOS desktop build the 4px sidebar/content split showed the bare transparent body as a bright stripe, because the old `#sidebar-resize-handle` rule never matched (the handle has no id). Now `[data-slot=sidebar-resize-handle]` and `[data-slot=sidebar-inset]` paint `var(--sidebar)`; re-shot macOS dark/light (and Windows) desktop renders show no strip.
 - AH-AC14: light and dark screenshots; no clipped corner. macOS vibrancy behind the rounded corner (`[data-slot=sidebar-inset]` made transparent in `desktop-chrome.css`) is unverified on a real macOS window.
 - TB-AC1..7: new `App.test.tsx` describe "App tab strip (app-header-and-tabs TB)" plus screenshots (hover, active pill, overflow scroll with the active tab in view, `>_` terminal icon).
 - On the branch merged with `origin/develop` (`0ecd4f13`): `bun run typecheck` clean; web vitest 170 files / 2126 tests pass; `task lint` clean; `task test` exit 0 (Go packages, desktop node tests). No Go, Rust or desktop file changed.

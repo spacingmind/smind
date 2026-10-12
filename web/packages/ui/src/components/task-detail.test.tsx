@@ -3,9 +3,9 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { runConfigPillLabel, TaskDetailPane } from "@/components/task-detail";
+import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { AgentProfile, Chat, ProviderInfo, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 // The run-config IA plan persists RunConfigToolbar's state per task id
 // (docs/design.md §9) -- most tests below share TASK_A.ID, so a leftover
@@ -976,13 +976,11 @@ describe("TaskDetailPane", () => {
 });
 
 describe("run-config pill (run-config IA)", () => {
-  it("summarizes the toolbar's current state and clicking it focuses the toolbar row", async () => {
+  it("does not mirror the composer toolbar: no pill without an agent, however the toolbar is configured", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
-    // Both task-detail.tsx (the pill's own label lookup) and composer.tsx
-    // fetch provider.list independently -- resolve both.
     const providersResult: ProviderListResult = {
       providers: [
         { id: "claude-native", label: "Claude Code" },
@@ -993,20 +991,16 @@ describe("run-config pill (run-config IA)", () => {
     client.nth("provider.list", 1).resolve(providersResult);
     await flush();
 
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Accept File Edits · Standard");
+    expect(screen.getByTestId("composer-model-picker")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
     fireEvent.click(await screen.findByTestId("model-provider-glm"));
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
-
-    // GLM has no thinking-level segment (mirrors the toolbar's own Thinking
-    // control being omitted for non-Claude providers).
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · GLM · Default");
-    expect(screen.getByTestId("task-run-config-pill")).not.toHaveTextContent("Standard");
-
-    fireEvent.click(screen.getByTestId("task-run-config-pill"));
-    expect(screen.getByTestId("composer-toolbar-row")).toHaveFocus();
+    expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
+    // The meta row itself stays (Detailed toggle).
+    expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
   });
 
   it("shows the agent's name once one is picked from the toolbar", async () => {
@@ -1035,50 +1029,29 @@ describe("run-config pill (run-config IA)", () => {
     fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("Quick Fixes ·");
+    // Only the agent: provider/model/mode/thinking are the composer toolbar's.
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent(/^Quick Fixes$/);
+
+    fireEvent.click(screen.getByTestId("task-run-config-pill"));
+    expect(screen.getByTestId("composer-toolbar-row")).toHaveFocus();
   });
 });
 
-describe("runConfigPillLabel", () => {
+describe("agentChipLabel", () => {
   const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
-  const providers: ProviderInfo[] = [
-    { id: "claude-native", label: "Claude Code" },
-    { id: "glm", label: "GLM" },
+  const profiles: AgentProfile[] = [
+    { ID: 1, Name: "Quick Fixes", Provider: "claude-native", PermissionMode: "", AutoAccept: false, ThinkingLevel: "", Notes: "", CreatedAt: "", UpdatedAt: "" },
   ];
 
-  it("names the agent when one is applied", () => {
-    const profiles: AgentProfile[] = [
-      {
-        ID: 1,
-        Name: "Quick Fixes",
-        Provider: "claude-native",
-        PermissionMode: "",
-        AutoAccept: false,
-        ThinkingLevel: "",
-        Notes: "",
-        CreatedAt: "",
-        UpdatedAt: "",
-      },
-    ];
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1" }, profiles, providers)).toBe(
-      "Quick Fixes · Claude Code · Accept File Edits · Standard",
-    );
+  it("names the agent when one is applied, and marks hand-edits", () => {
+    expect(agentChipLabel({ ...BASE, baseAgentId: "1" }, profiles)).toBe("Quick Fixes");
+    expect(agentChipLabel({ ...BASE, baseAgentId: "1", custom: true }, profiles)).toBe("Quick Fixes · edited");
   });
 
-  it('says "Custom" when hand-edited, and "No agent" when nothing was ever picked', () => {
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1", custom: true }, [], providers)).toBe(
-      "Custom · Claude Code · Accept File Edits · Standard",
-    );
-    expect(runConfigPillLabel(BASE, [], providers)).toBe("No agent · Claude Code · Accept File Edits · Standard");
-  });
-
-  it("omits the thinking segment for a non-Claude provider", () => {
-    expect(runConfigPillLabel({ ...BASE, provider: "glm" }, [], providers)).toBe("No agent · GLM · Default");
-  });
-
-  it("uses the provider's own mode label and notes auto-accept", () => {
-    expect(runConfigPillLabel({ ...BASE, permissionMode: "plan" }, [], providers)).toBe("No agent · Claude Code · Plan Mode · Standard");
-    expect(runConfigPillLabel({ ...BASE, provider: "glm", autoAccept: true }, [], providers)).toBe("No agent · GLM · Default · Auto-accept");
+  it("is null with no agent, or one that is not (yet) in the profile list", () => {
+    expect(agentChipLabel(BASE, profiles)).toBeNull();
+    expect(agentChipLabel({ ...BASE, custom: true }, profiles)).toBeNull();
+    expect(agentChipLabel({ ...BASE, baseAgentId: "9" }, profiles)).toBeNull();
   });
 });
 
@@ -1233,7 +1206,7 @@ describe("chat usage total", () => {
 });
 
 describe("chat meta row (app-header-and-tabs)", () => {
-  it("AH-AC12 no title heading; chips and Detailed toggle remain", async () => {
+  it("AH-AC12 no title heading; Detailed toggle remains (the run-config pill only names an agent)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
     client.nth("run.list", 0).resolve([]);
@@ -1243,7 +1216,6 @@ describe("chat meta row (app-header-and-tabs)", () => {
     expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: new RegExp(TASK_A.Title) })).not.toBeInTheDocument();
     expect(screen.queryByText(/·\s*Chat/)).not.toBeInTheDocument();
-    expect(screen.getByTestId("task-run-config-pill")).toBeInTheDocument();
     expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
   });
 });
