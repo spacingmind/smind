@@ -25,19 +25,19 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
 
   return (
     <li data-testid="timeline-tool-group" data-item-kind="tool-group" data-count={items.length}>
-      <div className="rounded-xl border bg-card">
+      <div className="rounded-md hover:bg-hover">
         <button
           type="button"
           aria-expanded={open}
           onClick={() => setOpen((prev) => !prev)}
           data-testid="tool-group-toggle"
-          className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-ui-sm outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="flex w-full items-center gap-2 px-2 py-1 text-left text-ui-sm text-foreground-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
-          <Layers className="size-3 shrink-0 text-foreground-muted" />
-          <span className="shrink-0 font-medium">{items.length} tool calls</span>
+          <Layers className="size-3 shrink-0" />
+          <span className="shrink-0 font-medium text-foreground">{items.length} tool calls</span>
           {names.length > 0 && (
-            <span className="min-w-0 flex-1 truncate text-foreground-muted">{names.join(", ")}</span>
+            <span className="min-w-0 flex-1 truncate">{names.join(", ")}</span>
           )}
           <span className="ml-auto shrink-0">
             <StatusDot status={groupStatus(items)} />
@@ -45,7 +45,7 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
         </button>
 
         {open && (
-          <div className="space-y-1.5 border-t px-2.5 py-2" data-testid="tool-group-detail">
+          <div className="space-y-1 py-1 pl-5" data-testid="tool-group-detail">
             {items.map((item) => (
               <ToolCall key={item.id} item={item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
             ))}
