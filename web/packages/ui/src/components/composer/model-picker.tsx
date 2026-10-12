@@ -456,7 +456,10 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           }}
           onFocus={() => {
             setInputFocused(true);
-            setActiveIndex(0);
+            // Only the sheet's list changes on focus; resetting on desktop would drop the highlight on the current selection.
+            if (isMobile) {
+              setActiveIndex(0);
+            }
           }}
           onBlur={() => setInputFocused(false)}
           onKeyDown={onKeyDown}
