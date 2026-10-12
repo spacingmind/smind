@@ -351,10 +351,12 @@ export function RunConfigToolbar({
   return <RunConfigContext.Provider value={value}>{children}</RunConfigContext.Provider>;
 }
 
-/** "<provider> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this. The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
+/** "<provider> · <model> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this (Paseo's profile summary order). The model is shown only when the profile pins one (ADR-0025). The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
 export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): string {
   const providerLabel = providers.find((candidate) => candidate.id === p.Provider)?.label ?? p.Provider;
-  const parts = [providerLabel, describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept)];
+  const parts = [providerLabel];
+  if (p.Model) parts.push(providers.find((candidate) => candidate.id === p.Provider)?.models?.find((m) => m.id === p.Model)?.label ?? p.Model);
+  parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
   if (p.Provider === "claude-native") parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }
