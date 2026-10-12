@@ -33,7 +33,8 @@ const (
 
 	// passiveMaxScoped bounds the model-keyed entries (cooldown rows and
 	// bare-429 back-offs) kept per account: the model comes from the client's
-	// request body, so it must not grow memory without limit.
+	// request body, so it must not grow memory without limit. The account-wide
+	// row does not count against it.
 	passiveMaxScoped = 64
 	// passiveMaxModelLen: a longer model is treated as unknown.
 	passiveMaxModelLen = 128
@@ -204,11 +205,18 @@ func (p *Passive) acct(id int64) *passiveAcct {
 }
 
 // normalizeModel is the cooldown key of a model: lower-cased and trimmed, ""
-// when unknown or absurdly long.
+// when unknown, absurdly long or not printable ASCII (0x20..0x7e). The model
+// comes from the client's request body and ends up in a store column and in
+// Cooldown.Model, so anything else counts as an unknown model.
 func normalizeModel(m string) string {
 	m = strings.ToLower(strings.TrimSpace(m))
 	if len(m) > passiveMaxModelLen {
 		return ""
+	}
+	for i := 0; i < len(m); i++ {
+		if m[i] < 0x20 || m[i] > 0x7e {
+			return ""
+		}
 	}
 	return m
 }
@@ -299,7 +307,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 	if active && !next.until.After(cur.until) {
 		return false // never shorten
 	}
-	if !have && len(a.rows) >= passiveMaxScoped && !a.pruneRowsLocked(at) {
+	if !have && !a.roomForLocked(scope, at) {
 		return false
 	}
 	next.observedAt = at
@@ -343,15 +351,29 @@ func (p *Passive) notRejected(id int64, a *passiveAcct, model string, at time.Ti
 	}
 }
 
-// pruneRowsLocked drops expired rows that carry no level and reports whether
-// there is room for one more. a.mu must be held.
-func (a *passiveAcct) pruneRowsLocked(now time.Time) bool {
-	for scope, row := range a.rows {
+// modelRowsLocked counts the model-scoped rows; the account-wide row does not
+// count against passiveMaxScoped. a.mu must be held.
+func (a *passiveAcct) modelRowsLocked() int {
+	n := len(a.rows)
+	if _, ok := a.rows[""]; ok {
+		n--
+	}
+	return n
+}
+
+// roomForLocked reports whether a row for scope (not yet in rows) fits,
+// dropping expired rows that carry no level when it does not at first. The
+// account-wide row always fits. a.mu must be held.
+func (a *passiveAcct) roomForLocked(scope string, now time.Time) bool {
+	if scope == "" || a.modelRowsLocked() < passiveMaxScoped {
+		return true
+	}
+	for s, row := range a.rows {
 		if row.level == 0 && !row.until.After(now) {
-			delete(a.rows, scope)
+			delete(a.rows, s)
 		}
 	}
-	return len(a.rows) < passiveMaxScoped
+	return a.modelRowsLocked() < passiveMaxScoped
 }
 
 func (a *passiveAcct) pruneBackoffLocked(now time.Time) {
@@ -461,7 +483,7 @@ func (p *Passive) mergeStoredLocked(id int64, a *passiveAcct, rows []store.Quota
 			p.markCooldownLocked(id, a, scope) // no row in memory: the writer deletes it
 			continue
 		}
-		if len(a.rows) >= passiveMaxScoped {
+		if scope != "" && a.modelRowsLocked() >= passiveMaxScoped {
 			continue
 		}
 		a.rows[scope] = row

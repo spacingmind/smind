@@ -2,6 +2,7 @@ package quota
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"reflect"
 	"strings"
@@ -955,5 +956,67 @@ func Test_passive_clear_does_not_lose_a_concurrent_new_rejection(t *testing.T) {
 	r, ok := fs.row(7, "")
 	if !ok || !r.Until.Equal(graceEnd(newReset)) {
 		t.Fatalf("stored row after the clear = %+v/%v, want the new rejection until %v (memory and store must agree)", r, ok, graceEnd(newReset))
+	}
+}
+
+func Test_passive_model_key_rejects_control_chars(t *testing.T) {
+	t.Parallel()
+	for _, m := range []string{"opus\x00x", "op\nus", "op\x7fus", "opüs", "opus‮", "a\tb"} {
+		if got := normalizeModel(m); got != "" {
+			t.Errorf("normalizeModel(%q) = %q, want unknown", m, got)
+		}
+	}
+	for m, want := range map[string]string{" Claude-Opus-4.1 ": "claude-opus-4.1", "a b/c:d_e@f": "a b/c:d_e@f", "": ""} {
+		if got := normalizeModel(m); got != want {
+			t.Errorf("normalizeModel(%q) = %q, want %q", m, got, want)
+		}
+	}
+
+	// Through Observe: it takes the unknown-model path, so nothing is recorded
+	// or stored under the odd key.
+	fs := newFakeStore()
+	p, clk := newFakePassive(t, fs)
+	now := clk.Now()
+	p.Observe(respAt(5, "op\x00us", 429, rejectOIOnly(600), now))
+	p.Observe(respAt(5, "op\nus", 429, hdr("Retry-After", "30"), now))
+	flush(t, p)
+	if n := p.unnamedModelOnly.Load(); n != 1 {
+		t.Errorf("unnamed model-only rejections = %d, want 1", n)
+	}
+	if n := fs.rowCount(); n != 0 {
+		t.Errorf("stored rows = %d, want none", n)
+	}
+	a := p.acct(5)
+	a.mu.Lock()
+	rows, backoffs := len(a.rows), len(a.backoff)
+	a.mu.Unlock()
+	if rows != 0 || backoffs != 0 {
+		t.Errorf("memory rows/backoffs = %d/%d, want none", rows, backoffs)
+	}
+}
+
+func Test_passive_account_wide_row_exempt_from_model_cap(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore()
+	p, clk := newFakePassive(t, fs)
+	now := clk.Now()
+	for i := range passiveMaxScoped {
+		p.Observe(respAt(6, fmt.Sprintf("model-%d", i), 429, rejectOIOnly(3600), now))
+	}
+	// The cap still holds for one more model...
+	p.Observe(respAt(6, "model-extra", 429, rejectOIOnly(3600), now))
+	wantNoCooldown(t, p, 6, "model-extra", now)
+
+	// ...but the account-wide row always fits.
+	reset := now.Add(2 * time.Hour)
+	p.Observe(respAt(6, "model-extra", 429, reject5h(reset), now))
+	got, ok := p.Cooldown(6, "model-extra", now)
+	wantCooldown(t, got, ok, graceEnd(reset), CooldownAccount, "", ReasonRejected)
+	flush(t, p)
+	if _, ok := fs.row(6, ""); !ok {
+		t.Errorf("account-wide row was not persisted")
+	}
+	if n := fs.rowCount(); n != passiveMaxScoped+1 {
+		t.Errorf("stored rows = %d, want %d model rows + the account-wide row", n, passiveMaxScoped)
 	}
 }
