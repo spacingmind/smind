@@ -265,3 +265,34 @@ func TestStore_QuotaCooldown_CredentialReplaceClearsButRefreshDoesNot(t *testing
 		t.Fatalf("other account cooldowns = %+v, %v, want 1", got, err)
 	}
 }
+
+// TestStore_QuotaCooldown_UpsertNeverShortensUntil: a later write with an earlier
+// until keeps the longer one but still replaces level, reason and observed_at
+// (the level-reset write), and a delete still removes the row.
+func TestStore_QuotaCooldown_UpsertNeverShortensUntil(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	a := newTestAccount(t, s, "anthropic", "a")
+	now := time.Now().UTC().Truncate(time.Second)
+	long := now.Add(72 * time.Hour)
+	if err := s.SaveQuotaCooldown(QuotaCooldown{AccountID: a.ID, Until: long, Reason: "fallback", Level: 3, ObservedAt: now}); err != nil {
+		t.Fatalf("SaveQuotaCooldown() error = %v", err)
+	}
+	if err := s.SaveQuotaCooldown(QuotaCooldown{AccountID: a.ID, Until: now.Add(15 * time.Second), Reason: "rejected", Level: 0, ObservedAt: now.Add(time.Second)}); err != nil {
+		t.Fatalf("SaveQuotaCooldown(shorter) error = %v", err)
+	}
+	got, err := s.ListQuotaCooldowns(a.ID)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListQuotaCooldowns() = %+v, %v", got, err)
+	}
+	if !got[0].Until.Equal(long) || got[0].Level != 0 || got[0].Reason != "rejected" || !got[0].ObservedAt.Equal(now.Add(time.Second)) {
+		t.Fatalf("row = %+v, want until %v kept, level 0, reason rejected, observed_at replaced", got[0], long)
+	}
+	if err := s.DeleteQuotaCooldown(a.ID, ""); err != nil {
+		t.Fatalf("DeleteQuotaCooldown() error = %v", err)
+	}
+	if got, _ := s.ListQuotaCooldowns(a.ID); len(got) != 0 {
+		t.Fatalf("after delete rows = %+v, want none", got)
+	}
+}

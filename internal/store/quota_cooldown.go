@@ -18,13 +18,16 @@ type QuotaCooldown struct {
 }
 
 // SaveQuotaCooldown upserts the cooldown row for (AccountID, ScopeModel).
-// Times are stored in UTC.
+// Times are stored in UTC. An existing row's until is never moved earlier (a
+// cooldown only shortens by expiring or by a delete), so a stale or racing
+// write cannot cut a longer persisted cooldown short; reason, level and
+// observed_at are always replaced.
 func (s *Store) SaveQuotaCooldown(c QuotaCooldown) error {
 	_, err := s.db.Exec(
 		`INSERT INTO quota_cooldown (account_id, scope_model, until, reason, level, observed_at)
 		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(account_id, scope_model) DO UPDATE SET
-		   until = excluded.until, reason = excluded.reason,
+		   until = CASE WHEN excluded.until > until THEN excluded.until ELSE until END, reason = excluded.reason,
 		   level = excluded.level, observed_at = excluded.observed_at`,
 		c.AccountID, c.ScopeModel, c.Until.UTC(), c.Reason, c.Level, c.ObservedAt.UTC(),
 	)
