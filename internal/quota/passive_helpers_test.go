@@ -151,12 +151,14 @@ type fakeStore struct {
 	rows  map[cooldownKey]store.QuotaCooldown
 	snaps map[int64]store.QuotaSnapshot
 
-	calls      map[string]int
-	saveGate   chan struct{} // when non-nil, Save and Replace park until it is closed
-	saveEnter  chan struct{} // receives one value per parked write
-	failWrites bool
-	failReads  bool
-	errText    string
+	calls       map[string]int
+	saveGate    chan struct{} // when non-nil, Save and Replace park until it is closed
+	saveEnter   chan struct{} // receives one value per parked write
+	deleteGate  chan struct{} // when non-nil, DeleteQuotaCooldowns parks before deleting until it is closed
+	deleteEnter chan struct{} // receives one value per parked DeleteQuotaCooldowns
+	failWrites  bool
+	failReads   bool
+	errText     string
 }
 
 var errFake = errors.New("fake store failure")
@@ -258,6 +260,18 @@ func (f *fakeStore) ListQuotaCooldowns(id int64) ([]store.QuotaCooldown, error) 
 }
 
 func (f *fakeStore) DeleteQuotaCooldowns(id int64) error {
+	f.mu.Lock()
+	gate, enter := f.deleteGate, f.deleteEnter
+	f.mu.Unlock()
+	if gate != nil {
+		if enter != nil {
+			select {
+			case enter <- struct{}{}:
+			default:
+			}
+		}
+		<-gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls["DeleteQuotaCooldowns"]++

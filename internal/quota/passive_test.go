@@ -924,3 +924,36 @@ func Test_passive_failing_store_read_is_rate_limited(t *testing.T) {
 		t.Fatalf("reads after the window = %d, want 2", n)
 	}
 }
+
+func Test_passive_clear_does_not_lose_a_concurrent_new_rejection(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore()
+	fs.deleteGate, fs.deleteEnter = make(chan struct{}), make(chan struct{}, 1)
+	p, clk := newFakePassive(t, fs)
+	now := clk.Now()
+	p.Observe(respAt(7, "m", 429, reject5h(now.Add(time.Hour)), now))
+	flush(t, p)
+
+	cleared := make(chan struct{})
+	go func() { p.ClearCooldown(7); close(cleared) }()
+	a3aWait(t, fs.deleteEnter, 1, "ClearCooldown to reach the store delete")
+
+	// Memory is already cleared; a genuine new rejection arrives and is written
+	// before the blocked delete runs.
+	newReset := now.Add(2 * time.Hour)
+	p.Observe(respAt(7, "m", 429, reject5h(newReset), now))
+	flush(t, p)
+	if _, ok := fs.row(7, ""); !ok {
+		t.Fatalf("the new rejection was not written while the delete was blocked")
+	}
+	close(fs.deleteGate)
+	<-cleared
+	flush(t, p)
+
+	got, ok := p.Cooldown(7, "m", now)
+	wantCooldown(t, got, ok, graceEnd(newReset), CooldownAccount, "", ReasonRejected)
+	r, ok := fs.row(7, "")
+	if !ok || !r.Until.Equal(graceEnd(newReset)) {
+		t.Fatalf("stored row after the clear = %+v/%v, want the new rejection until %v (memory and store must agree)", r, ok, graceEnd(newReset))
+	}
+}

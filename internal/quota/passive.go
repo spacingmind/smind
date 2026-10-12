@@ -508,6 +508,14 @@ func (p *Passive) ClearCooldown(accountID int64) {
 	if err := p.store.DeleteQuotaCooldowns(accountID); err != nil {
 		log.Printf("quota: account %d passive cooldown delete failed", accountID)
 	}
+	// A rejection recorded after the generation bump may have been written
+	// before this delete ran, and the delete wiped it from the store while memory
+	// keeps it. Queue every row memory holds again so the two agree.
+	a.mu.Lock()
+	for scope := range a.rows {
+		p.markCooldownLocked(accountID, a, scope)
+	}
+	a.mu.Unlock()
 	if had && p.onChange != nil {
 		p.onChange(accountID)
 	}
