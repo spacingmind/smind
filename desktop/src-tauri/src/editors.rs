@@ -687,6 +687,9 @@ mod tests {
         }
     }
 
+    // Windows path semantics (drive letters, `\` separators) only hold on a
+    // Windows host; the code under test only runs there.
+    #[cfg(windows)]
     #[test]
     fn windows_paths_pass_through_untranslated() {
         // Native Windows paths reach reveal/open argv exactly as given,

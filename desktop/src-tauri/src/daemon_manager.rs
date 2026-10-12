@@ -592,7 +592,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     // identifiable smind.exe is most likely the WSL relay forwarding a
     // daemon inside a distro -- flagged so the UI can explain it and
     // hide take-over.
-    let owner_image = match platform {
+    let owner_image: Option<String> = match platform {
         Platform::Windows => {
             #[cfg(target_os = "windows")]
             {
@@ -1286,6 +1286,9 @@ mod tests {
         assert_eq!(git_prerequisite_fields(None), (None, None));
     }
 
+    // Windows path semantics (drive letters, `\` separators) only hold on a
+    // Windows host; the code under test only runs there.
+    #[cfg(windows)]
     #[test]
     fn git_lookup_finds_program_files_cmd_git() {
         let installed = PathBuf::from(r"C:\Program Files\Git\cmd\git.exe");
