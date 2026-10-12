@@ -141,28 +141,6 @@ func (p *Poller) entry(id int64) *acct {
 	return a
 }
 
-// forget drops the in-memory ledger of a removed account, unless a fetch for
-// it is still running.
-func (p *Poller) forget(id int64) {
-	p.mu.Lock()
-	a := p.accts[id]
-	p.mu.Unlock()
-	if a == nil {
-		return
-	}
-	a.mu.Lock()
-	idle := a.inflight == nil
-	a.mu.Unlock()
-	if !idle {
-		return
-	}
-	p.mu.Lock()
-	if p.accts[id] == a {
-		delete(p.accts, id)
-	}
-	p.mu.Unlock()
-}
-
 // load reads the persisted state once. a.mu must be held. It reports false
 // when the read failed (the caller must not fetch on unknown state).
 func (p *Poller) load(id int64, a *acct) bool {
@@ -237,7 +215,9 @@ func (p *Poller) Peek(accountID int64) Result {
 	}
 	acc, err := p.src.Get(accountID)
 	if err != nil {
-		p.forget(accountID)
+		// Unknown (or just removed) account. Its ledger is not dropped: ids
+		// are never reused, the entry is tiny, and dropping it could let a
+		// racing request build a second ledger for the same account.
 		return Result{AccountID: accountID, Enabled: true}
 	}
 	now := p.clock()
@@ -290,7 +270,6 @@ func (p *Poller) request(ctx context.Context, id int64, forced bool) Result {
 	}
 	acc, err := p.src.Get(id)
 	if err != nil {
-		p.forget(id)
 		return Result{AccountID: id, Enabled: true}
 	}
 	fp := fingerprint(acc)
@@ -401,7 +380,7 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account) {
 		p.release(a, fl)
 		return
 	}
-	rep, err := p.fetcher.Fetch(p.ctx, acc)
+	rep, err := p.safeFetch(acc)
 	<-p.sem
 
 	if p.ctx.Err() != nil || errors.Is(err, context.Canceled) {
@@ -430,6 +409,18 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account) {
 	}
 }
 
+// safeFetch calls the fetcher and turns a panic into a transient failure, so
+// a bug in a fetcher cannot leave the flight open or the semaphore held.
+func (p *Poller) safeFetch(acc accounts.Account) (rep Report, err error) {
+	defer func() {
+		if recover() != nil {
+			log.Printf("quota: account %d fetch panicked", acc.ID)
+			rep, err = errorReport("error", p.clock()), &FetchError{msg: "error"}
+		}
+	}()
+	return p.fetcher.Fetch(p.ctx, acc)
+}
+
 func (p *Poller) release(a *acct, fl *flight) {
 	a.mu.Lock()
 	a.inflight = nil
@@ -440,12 +431,13 @@ func (p *Poller) release(a *acct, fl *flight) {
 // complete applies a finished fetch to the snapshot and ledger, persists the
 // ledger, releases the flight and returns the outcome kind for the log.
 func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, rep Report, fetchErr error, now time.Time) string {
-	// Re-read: the fetch may have refreshed the token, and the rejected
-	// fingerprint must be that of the credential that was actually refused.
-	cur, curErr := p.src.Get(id)
-	if curErr != nil {
-		log.Printf("quota: account %d removed during fetch", id)
-		cur = acc
+	// The rejected fingerprint is that of the credential the fetch actually
+	// sent (it may have refreshed the token itself), never a re-read of the
+	// account: a credential replaced while the request was in flight was not
+	// the one refused and must stay eligible.
+	usedFP := rep.usedFP
+	if usedFP == "" {
+		usedFP = fingerprint(acc)
 	}
 
 	a.mu.Lock()
@@ -476,9 +468,12 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 	case rep.Status == StatusUnavailable:
 		kind = "unavailable"
 		st.LastError = ""
+		// The endpoint answered: this is not a transient failure.
+		st.ConsecutiveFailures = 0
+		st.NextAllowedAt = time.Time{}
 		if rep.Problem != nil && (rep.Problem.Kind == ProblemRejected || rep.Problem.Kind == ProblemExpired) {
 			kind = "rejected"
-			st.RejectedFP = fingerprint(cur)
+			st.RejectedFP = usedFP
 		}
 	default:
 		st.ConsecutiveFailures = 0
@@ -494,8 +489,16 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 			})
 		}
 	}
-	if err := p.store.SaveQuotaPollState(cloneState(*st)); err != nil && curErr == nil {
-		log.Printf("quota: account %d state save failed", id)
+	// One retry: losing this row would lose a Retry-After across a restart.
+	// A failure for a removed account (foreign key) is expected and silent.
+	if err := p.store.SaveQuotaPollState(cloneState(*st)); err != nil {
+		if err := p.store.SaveQuotaPollState(cloneState(*st)); err != nil {
+			if _, gerr := p.src.Get(id); gerr == nil {
+				log.Printf("quota: account %d state save failed", id)
+			} else {
+				log.Printf("quota: account %d removed during fetch", id)
+			}
+		}
 	}
 	a.inflight = nil
 	a.mu.Unlock()

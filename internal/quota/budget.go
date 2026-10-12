@@ -39,6 +39,10 @@ func fingerprint(a accounts.Account) string {
 	default:
 		return ""
 	}
+	return secretFingerprint(secret)
+}
+
+func secretFingerprint(secret string) string {
 	sum := sha256.Sum256([]byte(secret))
 	return hex.EncodeToString(sum[:8])
 }

@@ -137,7 +137,9 @@ func (f *AccountFetcher) Fetch(ctx context.Context, account accounts.Account) (R
 			// The error text is not copied: it can carry provider response
 			// text. A terminal refusal is "login expired".
 			t := expiredAt.UTC()
-			return unavailableReport(Problem{Kind: ProblemExpired, ExpiresAt: &t, Detail: detailExpired}, now), nil
+			rep := unavailableReport(Problem{Kind: ProblemExpired, ExpiresAt: &t, Detail: detailExpired}, now)
+			rep.usedFP = secretFingerprint(cred.AccessToken)
+			return rep, nil
 		default:
 			// Network, timeout, 5xx, 429: transient. The poller backs off.
 			return errorReport(errRefresh, now), &FetchError{msg: errRefresh}
@@ -146,7 +148,9 @@ func (f *AccountFetcher) Fetch(ctx context.Context, account accounts.Account) (R
 	if cred.AccessToken == "" {
 		return unavailableReport(Problem{Kind: ProblemNoQuota, Detail: detailNoCredData}, now), nil
 	}
-	return spec.source.fetch(ctx, cred.AccessToken)
+	rep, err := spec.source.fetch(ctx, cred.AccessToken)
+	rep.usedFP = secretFingerprint(cred.AccessToken)
+	return rep, err
 }
 
 // terminalRefreshMarkers are substrings of a refresher's error text that mean
