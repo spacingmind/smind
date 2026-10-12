@@ -8,10 +8,11 @@ import (
 
 // CreateQuotaSnapshot inserts a new quota snapshot.
 func (s *Store) CreateQuotaSnapshot(q QuotaSnapshot) (QuotaSnapshot, error) {
+	q.Kind = normalizeQuotaKind(q.Kind)
 	res, err := s.db.Exec(
-		`INSERT INTO quota_snapshots (account_id, usage_data, polled_at, expires_at)
-		 VALUES (?, ?, ?, ?)`,
-		q.AccountID, q.UsageData, q.PolledAt, q.ExpiresAt,
+		`INSERT INTO quota_snapshots (account_id, usage_data, polled_at, expires_at, kind)
+		 VALUES (?, ?, ?, ?, ?)`,
+		q.AccountID, q.UsageData, q.PolledAt, q.ExpiresAt, q.Kind,
 	)
 	if err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("insert quota snapshot: %w", err)
@@ -28,38 +29,54 @@ func (s *Store) CreateQuotaSnapshot(q QuotaSnapshot) (QuotaSnapshot, error) {
 func (s *Store) GetQuotaSnapshot(id int64) (QuotaSnapshot, error) {
 	var q QuotaSnapshot
 	err := s.db.QueryRow(
-		`SELECT id, account_id, usage_data, polled_at, expires_at
+		`SELECT id, account_id, usage_data, polled_at, expires_at, kind
 		 FROM quota_snapshots WHERE id = ?`, id,
-	).Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt)
+	).Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt, &q.Kind)
 	if err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("get quota snapshot %d: %w", id, err)
 	}
 	return q, nil
 }
 
-// GetLatestQuotaSnapshot returns the most recent quota snapshot for the
-// account, by polled_at with id as tiebreaker. It reports false when the
-// account has no snapshot.
+// GetLatestQuotaSnapshot returns the most recent fetched quota snapshot for
+// the account, by polled_at with id as tiebreaker. Observed snapshots are
+// ignored (see GetLatestQuotaSnapshotKind). It reports false when the
+// account has no such snapshot.
 func (s *Store) GetLatestQuotaSnapshot(accountID int64) (QuotaSnapshot, bool, error) {
+	return s.GetLatestQuotaSnapshotKind(accountID, QuotaKindFetched)
+}
+
+// GetLatestQuotaSnapshotKind returns the most recent snapshot of the given
+// kind for the account, by polled_at with id as tiebreaker. It reports false
+// when there is none.
+func (s *Store) GetLatestQuotaSnapshotKind(accountID int64, kind string) (QuotaSnapshot, bool, error) {
 	var q QuotaSnapshot
 	err := s.db.QueryRow(
-		`SELECT id, account_id, usage_data, polled_at, expires_at
-		 FROM quota_snapshots WHERE account_id = ?
-		 ORDER BY polled_at DESC, id DESC LIMIT 1`, accountID,
-	).Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt)
+		`SELECT id, account_id, usage_data, polled_at, expires_at, kind
+		 FROM quota_snapshots WHERE account_id = ? AND kind = ?
+		 ORDER BY polled_at DESC, id DESC LIMIT 1`, accountID, normalizeQuotaKind(kind),
+	).Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt, &q.Kind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return QuotaSnapshot{}, false, nil
 	}
 	if err != nil {
-		return QuotaSnapshot{}, false, fmt.Errorf("get latest quota snapshot for account %d: %w", accountID, err)
+		return QuotaSnapshot{}, false, fmt.Errorf("get latest %s quota snapshot for account %d: %w", normalizeQuotaKind(kind), accountID, err)
 	}
 	return q, true, nil
+}
+
+// normalizeQuotaKind maps the zero Kind to QuotaKindFetched.
+func normalizeQuotaKind(kind string) string {
+	if kind == "" {
+		return QuotaKindFetched
+	}
+	return kind
 }
 
 // ListQuotaSnapshots returns all quota snapshots, ordered by id.
 func (s *Store) ListQuotaSnapshots() ([]QuotaSnapshot, error) {
 	rows, err := s.db.Query(
-		`SELECT id, account_id, usage_data, polled_at, expires_at
+		`SELECT id, account_id, usage_data, polled_at, expires_at, kind
 		 FROM quota_snapshots ORDER BY id`,
 	)
 	if err != nil {
@@ -70,7 +87,7 @@ func (s *Store) ListQuotaSnapshots() ([]QuotaSnapshot, error) {
 	var snapshots []QuotaSnapshot
 	for rows.Next() {
 		var q QuotaSnapshot
-		if err := rows.Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt); err != nil {
+		if err := rows.Scan(&q.ID, &q.AccountID, &q.UsageData, &q.PolledAt, &q.ExpiresAt, &q.Kind); err != nil {
 			return nil, fmt.Errorf("scan quota snapshot: %w", err)
 		}
 		snapshots = append(snapshots, q)
@@ -79,18 +96,20 @@ func (s *Store) ListQuotaSnapshots() ([]QuotaSnapshot, error) {
 }
 
 // ReplaceQuotaSnapshot inserts q and deletes every other quota snapshot for
-// q.AccountID in one transaction, keeping only the latest row per account
-// (ADR-0028). Snapshots of other accounts are untouched.
+// q.AccountID in one transaction, keeping only the latest row per account and
+// kind (ADR-0028): a fetched replace never prunes the observed row and vice
+// versa. Snapshots of other accounts are untouched.
 func (s *Store) ReplaceQuotaSnapshot(q QuotaSnapshot) (QuotaSnapshot, error) {
+	q.Kind = normalizeQuotaKind(q.Kind)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("replace quota snapshot: begin: %w", err)
 	}
 	defer tx.Rollback()
 	res, err := tx.Exec(
-		`INSERT INTO quota_snapshots (account_id, usage_data, polled_at, expires_at)
-		 VALUES (?, ?, ?, ?)`,
-		q.AccountID, q.UsageData, q.PolledAt, q.ExpiresAt,
+		`INSERT INTO quota_snapshots (account_id, usage_data, polled_at, expires_at, kind)
+		 VALUES (?, ?, ?, ?, ?)`,
+		q.AccountID, q.UsageData, q.PolledAt, q.ExpiresAt, q.Kind,
 	)
 	if err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("replace quota snapshot: insert: %w", err)
@@ -99,7 +118,7 @@ func (s *Store) ReplaceQuotaSnapshot(q QuotaSnapshot) (QuotaSnapshot, error) {
 	if err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("replace quota snapshot: id: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM quota_snapshots WHERE account_id = ? AND id != ?`, q.AccountID, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM quota_snapshots WHERE account_id = ? AND kind = ? AND id != ?`, q.AccountID, q.Kind, id); err != nil {
 		return QuotaSnapshot{}, fmt.Errorf("replace quota snapshot: prune: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

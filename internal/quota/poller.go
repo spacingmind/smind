@@ -65,11 +65,12 @@ type Poller struct {
 	src     AccountSource
 	fetcher ReportFetcher
 
-	enabled bool
-	ttl     time.Duration
-	clock   func() time.Time
-	jitter  func() float64
-	onFetch func(Result)
+	enabled   bool
+	ttl       time.Duration
+	clock     func() time.Time
+	jitter    func() float64
+	onFetch   func(Result)
+	cooldowns CooldownSource // passive cooldowns (WithCooldowns); nil = none
 
 	ctx    context.Context
 	cancel context.CancelFunc

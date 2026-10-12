@@ -128,7 +128,7 @@ export const RunTimeline = memo(function RunTimeline({
             {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
           </span>
         )}
-        <RunUsagePill usage={run.usage} />
+        <RunUsagePill usage={run.usage} provider={run.provider} />
         <CopyTurnButton run={run} />
       </div>
     </li>
