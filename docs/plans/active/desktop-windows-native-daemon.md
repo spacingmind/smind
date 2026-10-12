@@ -194,7 +194,16 @@ tests, web ui 1743 tests and `tsc -b` all green.
     against a local fixture), ARM64, the NSIS installer upgrade path.
   - Layout note: the NSIS installer's default dir is also
     `%LOCALAPPDATA%\smind`, so `bin\`, `managed.json` and `smind.log` sit
-    next to `smind-desktop.exe`. Not verified: whether the NSIS uninstaller
-    or an in-place update leaves them alone (it is expected to remove only
-    its own files). Check this before shipping, or move the daemon files to a
-    sibling directory.
+    next to `smind-desktop.exe`. Checked by reading the installer script
+    Tauri generates (`target/<profile>/nsis/x64/installer.nsi`, built with
+    `tauri build --bundles nsis`; the installer itself was NOT run, because
+    it would overwrite the real app's `HKCU` uninstall entry): install only
+    writes the main exe and `uninstall.exe` (and deletes a renamed old main
+    binary); uninstall and in-place update delete only those two files and
+    call a non-recursive `RMDir "$INSTDIR"`; the only recursive deletes are
+    `$APPDATA\dev.spacingmind.desktop` and `$LOCALAPPDATA\dev.spacingmind.desktop`,
+    behind the "delete app data" checkbox. So `bin\`, `managed.json` and
+    `smind.log` survive uninstall and update, and a running `smind.exe` does
+    not block an update (the installer only looks for the main exe). Not
+    checked: the MSI target (also built by the release workflow) and its
+    uninstall behaviour. Re-check this when Tauri is upgraded.
