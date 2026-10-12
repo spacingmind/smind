@@ -288,6 +288,21 @@ All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
   green on Linux via WSL).
 - **AC8** — suite green locally (above). **Not yet:** the PR-blocking CI
   job and a green `windows-full-suite.yml` run on GitHub.
-- **AC9** — not started.
+- **AC9** — branch `feat/release-windows-binaries` (slice E, off `develop`): the
+  release matrix gains `windows/amd64` and `windows/arm64` (pure Go,
+  cross-compiled on ubuntu), `smind_<version>_windows_<arch>.zip` with
+  `smind.exe` + `LICENSE` at the root, listed in `checksums.txt` and uploaded
+  with the other assets; `verify-windows-amd64` (windows-latest) and
+  `verify-windows-arm64` (windows-11-arm, `continue-on-error` with a job
+  summary line) run `smind.exe version` from the zip, and the ARM64 job also
+  runs `go test ./internal/terminal/...` natively. Checked locally: actionlint
+  clean; both targets build with the workflow ldflags; amd64 `smind.exe
+  version` prints `smind 0.0.0-test (3ffad8e)`; PE machine types 0x8664 and
+  0xAA64; zip layout. The coordinator found and fixed one defect the local
+  checks could not see: `zip ../<name>.zip` wrote under `dist/<name>/`, so
+  `upload-artifact`'s `dist/*.zip` would have matched nothing and failed both
+  Windows legs. **Not verifiable here:** a real workflow run (`zip` on the
+  ubuntu image, the `windows-11-arm` label in this org, the ARM64 terminal
+  tests) -- first evidence comes from the next release or a dry run.
 - **AC10** — `internal/realpath` + `internal/testutil.Link`; four junction
   escape tests failed before, pass now.
