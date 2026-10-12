@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Archive, Columns2, Copy, Pencil } from "lucide-react";
+import { Archive, Columns2, Copy, Pencil, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -18,13 +18,15 @@ import { ArchiveChatDialog } from "@/components/crud-dialogs";
 import { UsageModalRoot } from "@/components/account-usage/usage-modal";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
-import { DesktopUpdateDialog } from "@/components/desktop-update-dialog";
+import { DesktopUpdateDialogView } from "@/components/desktop-update-dialog";
 import { DesktopUnreachable } from "@/components/desktop-unreachable";
 import { SettingsScreen } from "@/components/settings/settings-screen";
 import { TaskDetailPane } from "@/components/task-detail";
 import { FileExplorerPane } from "@/components/file-explorer-pane";
 import { FileEditorPane } from "@/components/file-editor-pane";
 import { AppHeader } from "@/components/app-header";
+import { UpdateBadge } from "@/components/update-badge";
+import { useAppUpdate } from "@/lib/app-update";
 import { DiffViewerPane } from "@/components/diff-viewer-pane";
 import { TerminalPane } from "@/components/terminal-pane";
 import { QuickOpen } from "@/components/quick-open";
@@ -37,7 +39,7 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
-import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
+import { SidebarInset, SidebarProvider, SidebarTrigger, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TAB_KINDS,
@@ -282,6 +284,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // Ctrl+B and the palette flip it, and the sidebar panel just retargets
   // its width var so one CSS transition animates the change.
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  // One update controller, shared by the dialog and the header/sidebar badge (the launch check must run once).
+  const appUpdate = useAppUpdate();
   const sidebarPanelRef = useRef<HTMLDivElement>(null);
   const sidebarResize = useSidebarResize({
     panelRef: sidebarPanelRef,
@@ -410,6 +414,15 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     const state = tabsByTask.get(selectedTask.ID);
     const tabs = state ? collectAllTabs(state.root) : [];
     openTab(selectedTask.ID, nextTerminalTab(selectedTask.ID, tabs));
+  }
+
+  /** The header's terminal button: bring an existing terminal tab forward, else open the first one. (The "+" menu and the palette are what open further terminals.) */
+  function focusOrOpenTerminal() {
+    if (!selectedTask) return;
+    const state = tabsByTask.get(selectedTask.ID);
+    const existing = (state ? collectAllTabs(state.root) : []).find((t) => t.kind === "terminal");
+    if (existing) activate(selectedTask.ID, existing.key);
+    else openTerminalTab();
   }
 
   // --- Chats (ADR-0016 P3) -----------------------------------------------
@@ -870,6 +883,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // only one of them is ever mounted at a time (isMobile flips which),
   // which is the normal "element as a variable" React pattern, not two
   // live instances.
+  // ZCode's left zone: the toggle and update badge ride in the sidebar's top
+  // strip while it is expanded; collapsed to the rail or a compact sheet there
+  // is no room, so the main header hosts them instead (exactly one of the two).
+  const toggleInSidebar = !isMobile && sidebarOpen;
   const sidebarElement = (
     <AppSidebar
       client={client}
@@ -888,6 +905,14 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       onOpenSettings={openSettings}
       connectionStatus={connectionStatus}
       connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+      headerActions={
+        toggleInSidebar ? (
+          <>
+            <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
+            <SidebarTrigger className="text-foreground-muted hover:text-foreground" />
+          </>
+        ) : undefined
+      }
     />
   );
 
@@ -895,7 +920,15 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     <>
       <AppHeader
         statusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
+        connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
+        showSidebarToggle={!toggleInSidebar}
+        task={selectedTask}
+        client={client}
+        events={events}
+        onOpenTerminal={focusOrOpenTerminal}
+        updateState={appUpdate.state}
+        onOpenUpdate={appUpdate.reopen}
       />
       {isDesktop && (
         <DesktopDaemonBanner
@@ -903,12 +936,12 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           runningRuns={[...runningChatsByTask.values()].reduce((n, chats) => n + chats.size, 0)}
         />
       )}
-      {isDesktop && <DesktopUpdateDialog />}
+      {isDesktop && <DesktopUpdateDialogView update={appUpdate} />}
     </>
   );
 
   const emptyStateElement = (
-    <div data-testid="app-empty-state" className="flex h-full items-center justify-center bg-background text-ui-base text-muted-foreground">
+    <div data-testid="app-empty-state" className="flex h-full items-center justify-center bg-panel text-ui-base text-muted-foreground">
       Select a task to get started.
     </div>
   );
@@ -964,7 +997,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const mainContentElement = (
     // bg-background is explicit (not just inherited from SidebarInset): on macOS the
     // body is transparent over the window's vibrancy, and only the sidebar may show it.
-    <div data-testid="app-main-content" className="min-h-0 flex-1 bg-background">
+    <div data-testid="app-main-content" className="min-h-0 flex-1 bg-panel">
       {isDesktop && connectionStatus === "disconnected" ? (
         // AC6: replaces offline.html's job for the bundled flow -- shown
         // only for the "initial connect never succeeded" case (see
@@ -975,12 +1008,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           onSwitchConnection={() => openSettings("connections")}
         />
       ) : selectedTask && taskState ? (
-        // p-1 (4px) gives the frame(s) below the same gap against the
-        // header/sidebar/window edges that ResizableHandle's own 4px width
-        // already gives adjoining panes (zcode-visual-parity plan P2) --
-        // one consistent gap on every side of every frame, whether there's
-        // one pane or several.
-        <div className="h-full p-1">
+        // Several panes are inset frames: p-1 (4px) gives them the same gap
+        // against the panel edges that ResizableHandle's own 4px width
+        // already gives adjoining panes (zcode-visual-parity plan P2). A lone
+        // pane is frameless -- the content panel around it is its frame.
+        <div className={cn("h-full", paneCount > 1 && "p-1")}>
           {isMobile ? (
             compactPrimaryStrip
           ) : (
@@ -1047,6 +1079,22 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       ) : (
         emptyStateElement
       )}
+    </div>
+  );
+
+  // The inset content panel (ZCode): header + panes on the lighter panel
+  // surface with a rounded top-left corner, over the sidebar-coloured window.
+  // Compact has no sidebar beside it to inset from, so it stays square.
+  const contentPanelElement = (
+    <div
+      data-testid="app-content-panel"
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overflow-hidden bg-panel",
+        !isMobile && "rounded-tl-xl border-t border-l",
+      )}
+    >
+      {headerElement}
+      {mainContentElement}
     </div>
   );
 
@@ -1121,10 +1169,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         // instead of splitting it with an invisible panel.
         <div className="flex h-svh w-full flex-col">
           {sidebarElement}
-          <SidebarInset className="min-h-0 flex-1">
-            {headerElement}
-            {mainContentElement}
-          </SidebarInset>
+          <SidebarInset className="min-h-0 flex-1">{contentPanelElement}</SidebarInset>
         </div>
       ) : (
         <div className="flex h-svh w-full">
@@ -1153,10 +1198,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
               {...sidebarResize}
             />
           )}
-          <SidebarInset className="h-full min-w-0 flex-1">
-            {headerElement}
-            {mainContentElement}
-          </SidebarInset>
+          <SidebarInset className="h-full min-w-0 flex-1 bg-sidebar">{contentPanelElement}</SidebarInset>
         </div>
       )}
       <QuickOpen
@@ -1699,6 +1741,15 @@ function PaneTabStrip({
   // read back off `event.over`.
   const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
+  // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
+  // Keeps the active tab visible when the strip overflows (TB-AC5).
+  const tabScrollerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+    if (active && typeof active.scrollIntoView === "function") {
+      active.scrollIntoView({ inline: "nearest", block: "nearest" });
+    }
+  }, [activeKey]);
 
   return (
     <div
@@ -1711,7 +1762,9 @@ function PaneTabStrip({
       // pane's content by its width when focus moves, and only means
       // anything once there's more than one pane to tell apart.
       className={cn(
-        "relative flex h-full flex-col overflow-hidden rounded-lg border bg-panel",
+        "relative flex h-full flex-col overflow-hidden bg-panel",
+        // A lone pane is frameless: its parent is already the inset panel.
+        paneCount > 1 && "rounded-lg border",
         focused && paneCount > 1 && "ring-1 ring-inset ring-ring",
       )}
       data-testid={focused ? "pane-focused" : undefined}
@@ -1729,28 +1782,34 @@ function PaneTabStrip({
         onValueChange={onActivate}
         className="h-full gap-0"
       >
-        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
+        <div className="flex h-9 shrink-0 items-center gap-1 border-b px-1">
           {tabs.length > 0 && (
-            <TabsList className="w-fit">
-              {tabs.map((entry, index) => (
-                <DraggableTabTrigger
-                  key={entry.key}
-                  entry={entry}
-                  paneId={paneId}
-                  showMoveAffordance={showMoveAffordance}
-                  onSplit={onSplit}
-                  onClose={onClose}
-                  onCloseOthers={onCloseOthers}
-                  onCloseLeft={onCloseLeft}
-                  onCloseRight={onCloseRight}
-                  onRenameTab={onRenameTab}
-                  onArchiveChat={onArchiveChat}
-                  hasOtherClosableTabs={tabs.some((t) => t.key !== entry.key && t.closable)}
-                  hasClosableTabsToLeft={tabs.slice(0, index).some((t) => t.closable)}
-                  hasClosableTabsToRight={tabs.slice(index + 1).some((t) => t.closable)}
-                />
-              ))}
-            </TabsList>
+            <div
+              ref={tabScrollerRef}
+              data-testid="tab-scroller"
+              className="min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+              <TabsList variant="flat" className="w-max">
+                {tabs.map((entry, index) => (
+                  <DraggableTabTrigger
+                    key={entry.key}
+                    entry={entry}
+                    paneId={paneId}
+                    showMoveAffordance={showMoveAffordance}
+                    onSplit={onSplit}
+                    onClose={onClose}
+                    onCloseOthers={onCloseOthers}
+                    onCloseLeft={onCloseLeft}
+                    onCloseRight={onCloseRight}
+                    onRenameTab={onRenameTab}
+                    onArchiveChat={onArchiveChat}
+                    hasOtherClosableTabs={tabs.some((t) => t.key !== entry.key && t.closable)}
+                    hasClosableTabsToLeft={tabs.slice(0, index).some((t) => t.closable)}
+                    hasClosableTabsToRight={tabs.slice(index + 1).some((t) => t.closable)}
+                  />
+                ))}
+              </TabsList>
+            </div>
           )}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
@@ -1808,6 +1867,10 @@ function PaneTabStrip({
     </div>
   );
 }
+
+/** Split/close stay mounted and focusable but only show on hover, focus within, or the active tab (needs `group/tab` on the trigger). */
+const TAB_AFFORDANCE_REVEAL =
+  "pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100 group-aria-selected/tab:pointer-events-auto group-aria-selected/tab:opacity-100";
 
 /**
  * One tab strip entry: the tab trigger itself plus its "Split" and close
@@ -1892,10 +1955,25 @@ function DraggableTabTrigger({
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="max-w-48 gap-1.5"
+          className="group/tab max-w-48 gap-1.5"
           {...listeners}
         >
           <TabLabel entry={entry} />
+          {/*
+           * Split/close float over the tab's right edge (no reserved slot, so tabs
+           * sit tight) and appear on hover, keyboard focus within, or while active.
+           * Hidden they are inert (pointer-events-none) but stay mounted, and
+           * focusable for keyboard users. The active tab keeps an in-flow spacer
+           * for them so its title is never covered.
+           */}
+          <span
+            aria-hidden="true"
+            className={cn("hidden shrink-0 group-aria-selected/tab:block", isMovableKind(entry.kind) && showMoveAffordance ? "w-10" : "w-5")}
+          />
+          <span
+            data-testid="workspace-tab-affordances"
+            className={cn("absolute inset-y-0 right-1 flex items-center gap-0.5", TAB_AFFORDANCE_REVEAL)}
+          >
       {isMovableKind(entry.kind) && showMoveAffordance && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -1909,7 +1987,7 @@ function DraggableTabTrigger({
                 e.stopPropagation();
                 e.preventDefault();
               }}
-              className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+              className={cn("flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none")}
             >
               {/* aria-hidden: this span's own aria-label already names it; without
                   hiding the icon too, it would be announced a second time as
@@ -1958,11 +2036,12 @@ function DraggableTabTrigger({
             e.preventDefault();
             onClose(entry.key);
           }}
-          className="rounded px-1 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+          className={cn("flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none")}
         >
-          <span aria-hidden="true">×</span>
+          <X aria-hidden="true" className="size-3" />
         </span>
       )}
+          </span>
         </TabsTrigger>
       </ContextMenuTrigger>
       <ContextMenuContent

@@ -18,9 +18,18 @@ html[data-desktop-os="macos"] [data-slot="sidebar-inner"] {
   background: color-mix(in srgb, var(--sidebar) 72%, transparent);
 }
 
-/* The 4px sidebar/content split sits on the transparent body; keep it opaque. */
-html[data-desktop-os="macos"] #sidebar-resize-handle {
-  background: var(--background);
+/*
+ * The 4px sidebar/content split and the inset panel's rounded top-left corner
+ * both expose what is behind them. Paint them with the sidebar panel's own
+ * surface (the panel wrapper is an opaque `bg-sidebar`, the translucent
+ * `sidebar-inner` only tints on top of it) so the sidebar column reads as one
+ * continuous strip down to the panel's edge. The old rule here keyed on an
+ * id the handle never had, matched nothing, and the bare transparent body
+ * showed through as a bright stripe.
+ */
+html[data-desktop-os="macos"] [data-slot="sidebar-resize-handle"],
+html[data-desktop-os="macos"] [data-slot="sidebar-inset"] {
+  background: var(--sidebar);
 }
 
 /* The settings screen's sidebar is the same vibrancy surface as the app

@@ -28,21 +28,23 @@ import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
 import { useRunTimeline } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { describePermission, effectiveMode, providerModels, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
+import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, Chat, Provider, ProviderInfo, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
-/** The task header's run-config pill text ("<Agent> · <Provider> · <Mode> · <Model> · <Thinking>", the mode in the provider's own words -- ADR-0019) -- pure so it can be unit-tested without mounting the whole pane. */
-export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile[], providers: ProviderInfo[]): string {
+/**
+ * What the chat's meta row says about the run config. The composer toolbar
+ * right below already shows provider, model, mode and thinking, so repeating
+ * them is chrome; the one thing it does not show is the saved agent profile
+ * the config came from. Returns that name ("<Agent>", or "<Agent> · edited"
+ * once hand-edits drifted from it), or null when no agent applies. Pure so it
+ * can be unit-tested without mounting the pane.
+ */
+export function agentChipLabel(state: RunConfigState, profiles: AgentProfile[]): string | null {
   const agent = state.baseAgentId ? profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
-  const agentSegment = agent ? agent.Name : state.custom ? "Custom" : "No agent";
-  const providerLabel = providers.find((p) => p.id === state.provider)?.label ?? state.provider;
-  const parts = [agentSegment, providerLabel, describePermission(providers, state.provider, state.permissionMode, state.autoAccept)];
-  if (state.model) parts.push(providerModels(providers, state.provider).find((m) => m.id === state.model)?.label ?? state.model);
-  if (state.provider === "claude-native") parts.push(thinkingLevelLabel(state.thinkingLevel));
-  return parts.join(" · ");
+  if (!agent) return null;
+  return state.custom ? `${agent.Name} · edited` : agent.Name;
 }
 
 /**
@@ -226,24 +228,30 @@ export function TaskDetailPane({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const focusToolbar = useCallback(() => toolbarRef.current?.focus(), []);
 
+  const agentLabel = runConfigState ? agentChipLabel(runConfigState, profiles) : null;
+
   return (
     <div className="flex h-full flex-col">
+      {/*
+       * The task's title, branch and status live in the app header (and its
+       * hover card); this row keeps only what is specific to this chat.
+       */}
       <PaneHeader
-        title={`${task.Title} · ${chat.Title || "Chat"}`}
+        testId="task-chat-meta"
+        className="border-b-0"
         subtitle={
           <>
-            <span className="uppercase">{task.Status}</span>
-            {task.Branch && <span className="truncate">{task.Branch}</span>}
             <SetupBadge status={task.SetupStatus} />
             <PortChip port={task.Port} />
-            {runConfigState && (
+            {agentLabel && (
               <button
                 type="button"
                 data-testid="task-run-config-pill"
+                title="Agent profile -- click to edit the run config"
                 onClick={focusToolbar}
                 className="truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
               >
-                {runConfigPillLabel(runConfigState, profiles, providers)}
+                {agentLabel}
               </button>
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />

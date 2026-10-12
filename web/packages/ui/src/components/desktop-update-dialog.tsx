@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useAppUpdate } from "@/lib/app-update";
+import { useAppUpdate, type AppUpdateController } from "@/lib/app-update";
 import { isDesktop } from "@/lib/platform";
 
 /**
@@ -12,7 +12,12 @@ import { isDesktop } from "@/lib/platform";
  * (and calls nothing) outside a desktop build.
  */
 export function DesktopUpdateDialog() {
-  const { state, confirm, dismiss } = useAppUpdate();
+  return <DesktopUpdateDialogView update={useAppUpdate()} />;
+}
+
+/** The dialog over an update controller owned elsewhere (the app shell shares it with the header badge). */
+export function DesktopUpdateDialogView({ update }: { update: AppUpdateController }) {
+  const { state, confirm, dismiss } = update;
 
   if (!isDesktop || state.stage === "idle") return null;
   const { info } = state;

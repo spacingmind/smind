@@ -19,8 +19,8 @@ export function PaneHeader({
   className,
   testId,
 }: {
-  /** The pane's title -- usually a short string, but a ReactNode so a pane can compose in a dirty-marker or similar inline element (see file-editor-pane.tsx). */
-  title: ReactNode;
+  /** The pane's title -- usually a short string, but a ReactNode so a pane can compose in a dirty-marker or similar inline element (see file-editor-pane.tsx). Omit it for a metadata-only row (task-detail: the app header already names the task). */
+  title?: ReactNode;
   /** An optional line under the title (task-detail's status/branch row). */
   subtitle?: ReactNode;
   /** The right-aligned action slot -- buttons, toggles, status text. */
@@ -32,11 +32,13 @@ export function PaneHeader({
     <div
       data-testid={testId}
       data-slot="pane-header"
-      className={cn("flex items-center justify-between gap-2 border-b px-4 py-2.5", className)}
+      className={cn("flex items-center justify-between gap-2 border-b px-4", title ? "py-2.5" : "py-1.5", className)}
     >
       <div className="min-w-0">
-        <h2 className="truncate text-ui-base font-medium">{title}</h2>
-        {subtitle && <div className="mt-0.5 flex items-center gap-2 text-ui-sm text-foreground-muted">{subtitle}</div>}
+        {title && <h2 className="truncate text-ui-base font-medium">{title}</h2>}
+        {subtitle && (
+          <div className={cn("flex items-center gap-2 text-ui-sm text-foreground-muted", title && "mt-0.5")}>{subtitle}</div>
+        )}
       </div>
       {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
     </div>
