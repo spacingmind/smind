@@ -32,7 +32,7 @@ describe("useDaemonEvents", () => {
     expect(subs).toHaveLength(1);
     // ADR 0005's three, ADR 0009's eight lifecycle topics, ADR 0014's
     // three profile.* topics, ADR-0018's three mcpServer.* topics, and
-    // ADR-0016's three chat.* topics. Notably
+    // ADR-0016's three chat.* topics, and ADR-0028's two account.* topics. Notably
     // absent: "event.dropped", which the daemon synthesises rather than
     // publishes and whose name knownTopics rejects.
     expect(subs[0]!.params).toEqual({
@@ -58,6 +58,8 @@ describe("useDaemonEvents", () => {
         "chat.updated",
         "chat.archived",
         "chat.queueUpdated",
+        "account.usage",
+        "account.removed",
       ],
     });
 
