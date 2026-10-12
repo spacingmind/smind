@@ -1,12 +1,10 @@
-//! ADR-0013 part D2: install/update/restart the local daemon the app
-//! manages, on Windows+WSL2 and macOS native (Windows-native is blocked,
-//! see the ADR -- `Platform::Unsupported` covers it and every other host).
-//! Orchestrates the pure logic in `smind_daemon_client::daemon_manager`
-//! with the OS calls it needs (spawning `wsl.exe`, spawning the daemon
-//! process, hitting the network) plus Tauri glue (app data dir, event
-//! emission, app version). See `docs/plans/active/desktop-managed-daemon.md`.
+//! ADR-0013 part D2 / ADR-0029: install/update/restart the local daemon
+//! the app manages, natively on Windows and macOS. Orchestrates the pure
+//! logic in `smind_daemon_client::daemon_manager` with the OS calls it
+//! needs (spawning the daemon process, hitting the network) plus Tauri
+//! glue (app data dir, event emission, app version). See
+//! `docs/plans/active/desktop-managed-daemon.md`.
 
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
@@ -14,7 +12,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use smind_daemon_client::daemon_manager::managed::{self, ManagedRecord, ManagedState};
 use std::path::{Path, PathBuf};
-use smind_daemon_client::daemon_manager::{native, release, version, wsl};
+use smind_daemon_client::daemon_manager::{native, release, version};
+#[cfg(target_os = "windows")]
+use smind_daemon_client::daemon_manager::windows_native;
 
 use crate::state::DesktopState;
 
@@ -22,10 +22,12 @@ const PROGRESS_EVENT: &str = "daemon-progress";
 const DEFAULT_PORT: u16 = 4648;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum Platform {
-    Wsl2,
+    #[serde(rename = "macos")]
     Macos,
+    #[serde(rename = "windows")]
+    Windows,
+    #[serde(rename = "unsupported")]
     Unsupported,
 }
 
@@ -41,12 +43,23 @@ pub struct DaemonStatus {
     pub pid: Option<u32>,
     pub installed_path: Option<String>,
     pub log_path: Option<String>,
-    /// Whether the *managed* binary exists (and, on WSL2, is executable)
-    /// on disk right now -- distinct from `managed_state`, since a bare
-    /// take-over (no prior Install/Update) can be `Managed` with no
-    /// managed binary installed at all. Drives whether the UI's Restart
-    /// action is enabled (`managed::assert_restartable`'s precondition).
+    /// Whether the *managed* binary exists on disk right now --
+    /// distinct from `managed_state`, since a bare take-over (no prior
+    /// Install/Update) can be `Managed` with no managed binary installed
+    /// at all. Drives whether the UI's Restart action is enabled
+    /// (`managed::assert_restartable`'s precondition).
     pub binary_installed: bool,
+    /// Windows only (AC6): something the app did not start is answering
+    /// on the port and its owner is not an identifiable `smind.exe` --
+    /// typically the WSL relay forwarding a daemon inside a distro. The
+    /// UI explains what to do and hides take-over.
+    pub wsl_daemon_suspected: bool,
+    /// Windows only (AC8): whether Git for Windows was found (`null` on
+    /// other platforms). Install/start work without it; this only
+    /// surfaces the prerequisite.
+    pub git_found: Option<bool>,
+    /// Set when a prerequisite is missing (AC8), e.g. Git for Windows.
+    pub prerequisite_message: Option<String>,
 }
 
 /// ConnectionVersionInfo is the banner's data source for a connection that
@@ -74,47 +87,45 @@ fn emit_progress(app: &AppHandle, stage: &'static str, message: impl Into<String
     let _ = app.emit(PROGRESS_EVENT, Progress { stage, message: message.into() });
 }
 
-/// detect_platform is capability-detected, not a bare `target_os` match:
-/// macOS is always native-capable, and WSL2 support follows from whether
-/// `wsl.exe` is actually reachable (a real Windows host without WSL
-/// configured has none either) -- see the plan's Decisions for why this
-/// also happens to make the WSL2 path exercisable outside a literal
-/// Windows target.
-///
-/// Cached in `state.daemon_manager_platform` for the app's lifetime, same
-/// as `resolve_distro` caches the distro name: it's spawning `wsl.exe`
-/// (once per call, uncached) that made every `daemon_status` poll flash a
-/// console window on Windows.
-pub(crate) fn detect_platform(state: &DesktopState) -> Platform {
-    detect_platform_cached(&state.daemon_manager_platform)
+/// detect_platform is a plain `target_os` mapping (ADR-0029): macOS and
+/// Windows are native hosts, everything else is Unsupported. Nothing is
+/// probed at runtime, so there is no per-call process spawn left to
+/// cache.
+pub(crate) fn detect_platform() -> Platform {
+    platform_for(std::env::consts::OS)
 }
 
-/// platform_for is the pure decision: macOS is native-capable, and only a
-/// real Windows target can be Wsl2 (with `wsl.exe` reachable). Linux --
-/// including WSLg, where Windows interop exposes a `wsl.exe` -- is
-/// Unsupported: its daemon runs natively and there is no Windows host to
-/// translate paths for or spawn from.
-fn platform_for(target_os: &str, has_wsl: impl FnOnce() -> bool) -> Platform {
+/// platform_for is the pure decision: macOS and Windows are native hosts,
+/// every other OS -- Linux, WSLg included -- is Unsupported: its daemon
+/// runs natively and there is no Windows host to translate paths for or
+/// spawn from.
+fn platform_for(target_os: &str) -> Platform {
     match target_os {
         "macos" => Platform::Macos,
-        "windows" if has_wsl() => Platform::Wsl2,
+        "windows" => Platform::Windows,
         _ => Platform::Unsupported,
     }
 }
 
-pub(crate) fn detect_platform_cached(cache: &Mutex<Option<Platform>>) -> Platform {
-    if cfg!(target_os = "macos") {
-        return Platform::Macos;
-    }
-    let mut cache = cache.lock().unwrap();
-    if let Some(p) = *cache {
-        return p;
-    }
-    let platform = platform_for(std::env::consts::OS, || {
-        wsl::run(&wsl::list_verbose_argv()).map(|o| o.status.success()).unwrap_or(false)
-    });
-    *cache = Some(platform);
-    platform
+/// UnmanagedKind classifies who owns the daemon port when it isn't the
+/// process this app recorded (AC6): only a Windows process whose image
+/// file is a `smind.exe` is take-over eligible, exactly like macOS.
+/// Anything else -- the WSL relay that forwards a WSL daemon's port, an
+/// unresolvable owner (gone or access denied), an unrelated app -- is
+/// not, and is never signalled or adopted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnmanagedKind {
+    /// The port owner's image file name is `smind.exe`.
+    NativeSmind,
+    /// Not a `smind.exe` (or not resolvable at all).
+    ForeignOrWsl,
+}
+
+fn classify_unmanaged(owner_image: Option<&str>) -> UnmanagedKind {
+    let is_smind_exe = owner_image
+        .map(|img| img.rsplit(['\\', '/']).next().unwrap_or(img).eq_ignore_ascii_case("smind.exe"))
+        .unwrap_or(false);
+    if is_smind_exe { UnmanagedKind::NativeSmind } else { UnmanagedKind::ForeignOrWsl }
 }
 
 fn app_version_string(app: &AppHandle) -> String {
@@ -201,8 +212,8 @@ fn macos_layout(app: &AppHandle) -> Result<native::Layout, String> {
 
 /// Where install/update gets the daemon binary from. macOS takes it from
 /// inside the app bundle (desktop-macos-app M2: the release the app itself
-/// shipped with, so app and daemon versions always match); WSL2 keeps
-/// downloading the matching GitHub Release.
+/// shipped with, so app and daemon versions always match); Windows has
+/// nothing bundled and downloads the matching GitHub Release.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InstallSource {
     Bundled,
@@ -212,7 +223,7 @@ enum InstallSource {
 fn install_source(platform: Platform) -> InstallSource {
     match platform {
         Platform::Macos => InstallSource::Bundled,
-        Platform::Wsl2 | Platform::Unsupported => InstallSource::Release,
+        Platform::Windows | Platform::Unsupported => InstallSource::Release,
     }
 }
 
@@ -309,7 +320,7 @@ fn launch_decision(reachable: bool, managed_state: ManagedState, comparison: ver
 /// banner and Settings -> Daemon keep working for a manual retry.
 pub async fn auto_start(app: AppHandle) {
     let state = app.state::<DesktopState>();
-    if detect_platform(&state) != Platform::Macos {
+    if detect_platform() != Platform::Macos {
         return;
     }
     let local_selected = state.proxy.registry.lock().unwrap().current().id == smind_daemon_client::proxy::connections::LOCAL_ID;
@@ -339,189 +350,255 @@ pub async fn auto_start(app: AppHandle) {
 }
 
 // ---------------------------------------------------------------------------
-// WSL2
+// Windows native
 // ---------------------------------------------------------------------------
 
-/// resolve_distro detects the default WSL distro once per app run and
-/// caches it -- the default distro is not expected to change while the
-/// app is running.
-pub(crate) fn resolve_distro(state: &DesktopState) -> Result<String, String> {
-    resolve_distro_cached(&state.daemon_manager_distro)
-}
-
-pub(crate) fn resolve_distro_cached(cache: &Mutex<Option<String>>) -> Result<String, String> {
-    let mut cache = cache.lock().unwrap();
-    if let Some(d) = cache.as_ref() {
-        return Ok(d.clone());
+/// windows_base_dir resolves the managed layout root's parent (ADR-0029):
+/// `%LOCALAPPDATA%`, falling back to `%USERPROFILE%\AppData\Local`. Pure
+/// over an injected env getter so the fallback is unit-testable.
+#[cfg(target_os = "windows")]
+fn windows_base_dir(getenv: impl Fn(&str) -> Option<String>) -> PathBuf {
+    if let Some(local) = getenv("LOCALAPPDATA").filter(|s| !s.is_empty()) {
+        return PathBuf::from(local);
     }
-    let output = wsl::run(&wsl::list_verbose_argv()).map_err(|e| format!("wsl.exe not available: {e}"))?;
-    let distro = wsl::parse_default_distro(&output.stdout).ok_or_else(|| "no default WSL distro found".to_string())?;
-    *cache = Some(distro.clone());
-    Ok(distro)
+    let profile = getenv("USERPROFILE").unwrap_or_default();
+    Path::new(&profile).join("AppData").join("Local")
 }
 
-fn wsl_load_managed(distro: &str) -> Option<ManagedRecord> {
-    let out = wsl::run(&wsl::cat_argv(distro, wsl::STATE_SUBPATH)).ok()?;
-    if !out.status.success() {
-        return None;
+/// windows_layout is the Windows managed layout (ADR-0029):
+/// `%LOCALAPPDATA%\smind` -> `bin/smind.exe`, `smind.log`, `managed.json`.
+#[cfg(target_os = "windows")]
+fn windows_layout() -> Result<windows_native::Layout, String> {
+    Ok(windows_native::Layout::new(&windows_base_dir(|k| std::env::var(k).ok()).join("smind")))
+}
+
+/// windows_exe_matches resolves `pid`'s image (IP Helper +
+/// `QueryFullProcessImageName`) and compares it against `expected` -- the
+/// Windows counterpart of `macos_exe_matches`, serving the same
+/// pre-kill/post-start identity checks.
+#[cfg(target_os = "windows")]
+fn windows_exe_matches(pid: u32, expected: &Path) -> bool {
+    windows_native::exe_path_for_pid(pid).ok().flatten().map(|p| windows_native::exe_matches(&p, expected)).unwrap_or(false)
+}
+
+/// windows_take_over_refusal is the AC6 gate: take-over is only offered
+/// for a port owner whose image is a `smind.exe`; anything else gets
+/// this explanation instead.
+fn windows_take_over_refusal(owner_image: Option<&str>, port: u16) -> Option<String> {
+    (classify_unmanaged(owner_image) == UnmanagedKind::ForeignOrWsl).then(|| {
+        format!("a daemon not started by this app is answering on port {port} -- if it runs in WSL, stop it there; take over is only offered for a smind.exe")
+    })
+}
+
+/// windows_install_conflict_hint is the AC6 half of install's
+/// port-conflict refusal on Windows: the base refusal comes from
+/// `assert_safe_to_install`; this adds the WSL possibility and names the
+/// port the Windows daemon needs free.
+fn windows_install_conflict_hint(port: u16) -> String {
+    format!("If that daemon runs in WSL, stop it inside WSL first -- installing the Windows daemon needs port {port} free.")
+}
+
+/// windows_update_steps is the pure ordering of install/update on
+/// Windows: a running exe cannot be replaced, so a managed running
+/// daemon is stopped strictly before the binary is installed -- and a
+/// failed stop aborts before anything on disk is touched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowsUpdateStep {
+    StopRunningDaemon,
+    InstallBinary,
+    StartDaemon,
+}
+
+fn windows_update_plan(stop_result: Option<Result<(), String>>) -> Result<&'static [WindowsUpdateStep], String> {
+    const WITH_STOP: &[WindowsUpdateStep] = &[WindowsUpdateStep::StopRunningDaemon, WindowsUpdateStep::InstallBinary, WindowsUpdateStep::StartDaemon];
+    const NO_STOP: &[WindowsUpdateStep] = &[WindowsUpdateStep::InstallBinary, WindowsUpdateStep::StartDaemon];
+    match stop_result {
+        None => Ok(NO_STOP),
+        Some(Ok(())) => Ok(WITH_STOP),
+        Some(Err(e)) => Err(format!("could not stop the running daemon before replacing it (the binary was left untouched): {e}")),
     }
-    serde_json::from_slice(&out.stdout).ok()
 }
 
-fn wsl_save_managed(distro: &str, record: &ManagedRecord) -> Result<(), String> {
-    let json = serde_json::to_string(record).map_err(|e| e.to_string())?;
-    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, json.as_bytes());
-    let out = wsl::run(&wsl::write_file_base64_argv(distro, wsl::STATE_SUBPATH, &b64)).map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("failed to write managed state: {}", String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(())
-}
+/// The AC8 message shown when Git for Windows is missing: worktrees need
+/// git, and setup/teardown scripts need its `sh`.
+const GIT_MISSING_MESSAGE: &str =
+    "Git for Windows was not found. Worktrees need git, and setup scripts need its sh. Install Git for Windows and restart smind.";
 
-fn wsl_arch(distro: &str) -> Result<&'static str, String> {
-    let out = wsl::run(&wsl::uname_arch_argv(distro)).map_err(|e| e.to_string())?;
-    release::linux_target(&String::from_utf8_lossy(&out.stdout))
-}
-
-fn wsl_install(distro: &str, urls: &release::ReleaseUrls) -> Result<(), String> {
-    let run = |argv: Vec<String>, what: &str| -> Result<std::process::Output, String> {
-        let out = wsl::run(&argv).map_err(|e| format!("{what}: {e}"))?;
-        if !out.status.success() {
-            return Err(format!("{what} failed: {}", String::from_utf8_lossy(&out.stderr)));
+/// git_lookup finds `git.exe` (AC8): on PATH, then in the standard
+/// Git for Windows install dirs. Pure over injected env values and an
+/// `exists` closure so the search order is unit-testable.
+fn git_lookup(getenv: impl Fn(&str) -> Option<String>, exists: impl Fn(&Path) -> bool) -> Option<PathBuf> {
+    if let Some(path) = getenv("PATH") {
+        for dir in std::env::split_paths(&path) {
+            let candidate = dir.join("git.exe");
+            if exists(&candidate) {
+                return Some(candidate);
+            }
         }
-        Ok(out)
-    };
-
-    run(wsl::mkdir_argv(distro), "mkdir")?;
-    run(wsl::curl_download_argv(distro, &urls.checksums, "checksums.txt"), "download checksums.txt")?;
-    let checksums_out = run(wsl::cat_argv(distro, "checksums.txt"), "read checksums.txt")?;
-    let map = smind_daemon_client::daemon_manager::checksums::parse(&String::from_utf8_lossy(&checksums_out.stdout));
-    let expected_hex = map.get(&urls.asset_name).ok_or_else(|| format!("release has no asset {:?} for this platform", urls.asset_name))?;
-
-    run(wsl::curl_download_argv(distro, &urls.tarball, "download.tar.gz"), "download tarball")?;
-    let sha_out = run(wsl::sha256sum_argv(distro, "download.tar.gz"), "sha256sum")?;
-    let actual_hex = wsl::parse_sha256sum_output(&String::from_utf8_lossy(&sha_out.stdout))
-        .ok_or_else(|| "could not parse sha256sum output".to_string())?;
-    if !smind_daemon_client::daemon_manager::checksums::hex_eq(&actual_hex, expected_hex) {
-        return Err(format!("checksum mismatch for {:?} -- refusing to install a corrupted download", urls.asset_name));
     }
-
-    run(wsl::tar_extract_argv(distro, "download.tar.gz"), "extract")?;
-    run(wsl::chmod_x_argv(distro), "chmod")?;
-    Ok(())
+    for key in ["ProgramFiles", "ProgramFiles(x86)"] {
+        if let Some(program_files) = getenv(key).filter(|s| !s.is_empty()) {
+            let candidate = Path::new(&program_files).join("Git").join("cmd").join("git.exe");
+            if exists(&candidate) {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Some(local) = getenv("LOCALAPPDATA").filter(|s| !s.is_empty()) {
+        let candidate = Path::new(&local).join("Programs").join("Git").join("cmd").join("git.exe");
+        if exists(&candidate) {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
-/// wsl_start runs the start script, which only exits 0 once the daemon is
-/// listening on `port`. Blocking (up to ~15s): call via `wsl_start_blocking`
-/// from async code.
-fn wsl_start(distro: &str, port: u16) -> Result<(), String> {
-    let out = wsl::run(&wsl::start_detached_argv(distro, port)).map_err(|e| e.to_string())?;
-    wsl::start_outcome(out.status.success(), &crate::editors::decode_wsl_output(&out.stderr))
+/// git_prerequisite_fields maps "was git found" to the DTO's AC8 fields:
+/// found -> `(Some(true), None)`; missing -> the message; non-Windows
+/// (`None`) -> no fields at all.
+fn git_prerequisite_fields(found_git: Option<bool>) -> (Option<bool>, Option<String>) {
+    match found_git {
+        None => (None, None),
+        Some(true) => (Some(true), None),
+        Some(false) => (Some(false), Some(GIT_MISSING_MESSAGE.to_string())),
+    }
 }
 
-/// wsl_start_blocking moves `wsl_start` off the async runtime's threads.
-/// `retry` adds the single automatic retry restart uses.
-async fn wsl_start_blocking(distro: String, port: u16, retry: bool) -> Result<(), String> {
-    tauri::async_runtime::spawn_blocking(move || if retry { start_with_one_retry(|| wsl_start(&distro, port)) } else { wsl_start(&distro, port) })
-        .await
-        .map_err(|e| e.to_string())?
-}
-
-/// start_with_one_retry runs `start` once more if it fails, so a Restart
-/// that loses a race with the old process's shutdown doesn't leave the user
-/// without a daemon. The error of the last attempt is what's reported.
-fn start_with_one_retry<F: FnMut() -> Result<(), String>>(mut start: F) -> Result<(), String> {
-    start().or_else(|_| start()).map_err(|e| format!("daemon failed to start after retry: {e}"))
-}
-
-/// wsl_binary_installed answers `restart`'s precondition (and
-/// `compute_status`'s `binary_installed` field) for WSL2 -- `test -x`'s
-/// exit status alone, no output to parse.
-fn wsl_binary_installed(distro: &str) -> bool {
-    wsl::run(&wsl::test_executable_argv(distro)).map(|o| o.status.success()).unwrap_or(false)
+/// windows_git_prerequisites is compute_status's AC8 half on Windows.
+#[cfg(target_os = "windows")]
+fn windows_git_prerequisites() -> (Option<bool>, Option<String>) {
+    let found = git_lookup(|k| std::env::var(k).ok(), |p| p.exists()).is_some();
+    git_prerequisite_fields(Some(found))
 }
 
 // ---------------------------------------------------------------------------
 // Shared: port ownership, status, and the four commands
 // ---------------------------------------------------------------------------
 
-fn find_port_owner(platform: Platform, distro: Option<&str>, port: u16) -> Option<u32> {
+fn find_port_owner(platform: Platform, port: u16) -> Option<u32> {
     match platform {
         Platform::Macos => native::find_port_owner(port).ok().flatten(),
-        Platform::Wsl2 => {
-            let distro = distro?;
-            let out = wsl::run(&wsl::port_owner_argv(distro, port)).ok()?;
-            wsl::parse_ss_pid(&String::from_utf8_lossy(&out.stdout))
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_native::find_port_owner(port).ok().flatten()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
         }
         Platform::Unsupported => None,
     }
 }
 
-/// binary_installed answers "is the managed binary on disk (and, on
-/// WSL2, executable) right now" -- `restart`'s precondition
-/// (`managed::assert_restartable`) and `compute_status`'s
-/// `binary_installed` field share this one check.
-fn binary_installed(app: &AppHandle, platform: Platform, distro: Option<&str>) -> bool {
+/// binary_installed answers "is the managed binary on disk right now" --
+/// `restart`'s precondition (`managed::assert_restartable`) and
+/// `compute_status`'s `binary_installed` field share this one check.
+fn binary_installed(app: &AppHandle, platform: Platform) -> bool {
     match platform {
         Platform::Macos => macos_layout(app).ok().map(|l| l.bin_path.exists()).unwrap_or(false),
-        Platform::Wsl2 => distro.map(wsl_binary_installed).unwrap_or(false),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().map(|l| l.bin_path.exists()).unwrap_or(false)
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        }
         Platform::Unsupported => false,
     }
-}
-
-/// wsl_resolve_exe_path resolves the pid's real executable via
-/// `/proc/<pid>/exe` (through `wsl.exe`). `None` on any lookup failure --
-/// callers must never treat "couldn't confirm" as "confirmed" (Bug 1's
-/// exact failure mode).
-fn wsl_resolve_exe_path(distro: &str, pid: u32) -> Option<String> {
-    let out = wsl::run(&wsl::exe_path_argv(distro, pid)).ok()?;
-    wsl::parse_exe_path(&String::from_utf8_lossy(&out.stdout))
-}
-
-/// wsl_exe_matches_expected checks `pid`'s real executable against a
-/// specific previously-recorded path -- used before signalling a
-/// previously-managed (or previously-adopted, via take-over) pid, where
-/// `expected` is that record's own `exe_path`, not necessarily the bin
-/// this app would install.
-fn wsl_exe_matches_expected(distro: &str, pid: u32, expected: &str) -> bool {
-    wsl_resolve_exe_path(distro, pid).map(|p| wsl::exe_path_matches(&p, expected)).unwrap_or(false)
 }
 
 /// macos_exe_matches resolves `pid`'s real command via `ps` and compares
 /// it against `expected` -- either a previously-recorded `exe_path`
 /// (pre-kill checks) or the managed `Layout`'s own binary path (post-
 /// start checks); macOS always knows the managed path as a concrete
-/// literal, so unlike WSL2 this one function serves both purposes.
+/// literal, so one function serves both purposes.
 fn macos_exe_matches(pid: u32, expected: &Path) -> bool {
     native::exe_path_for_pid(pid).ok().flatten().map(|p| native::exe_matches(&p, expected)).unwrap_or(false)
 }
 
-fn log_path_display(app: &AppHandle, platform: Platform, distro: Option<&str>) -> Option<String> {
+fn log_path_display(app: &AppHandle, platform: Platform) -> Option<String> {
     match platform {
         Platform::Macos => macos_layout(app).ok().map(|l| l.log_path.display().to_string()),
-        Platform::Wsl2 => distro.map(|d| format!("~/{} (inside WSL distro {d:?})", wsl::LOG_SUBPATH)),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().ok().map(|l| l.log_path.display().to_string())
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        }
         Platform::Unsupported => None,
     }
 }
 
 async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
-    let platform = detect_platform(state);
+    let platform = detect_platform();
     let app_version = app_version_string(app);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
     let (reachable, daemon_version) = probe_healthz(&base_url).await;
 
-    let distro = if platform == Platform::Wsl2 { resolve_distro(state).ok() } else { None };
-
     let record = match platform {
         Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)),
-        Platform::Wsl2 => distro.as_deref().and_then(wsl_load_managed),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().ok().and_then(|l| managed::load(&l.state_path))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        }
         Platform::Unsupported => None,
     };
 
-    let port_owner = find_port_owner(platform, distro.as_deref(), port);
+    let port_owner = find_port_owner(platform, port);
     let managed_state = managed::classify(record.as_ref(), port_owner);
+
+    // AC6: on Windows, an unmanaged port owner whose image is not an
+    // identifiable smind.exe is most likely the WSL relay forwarding a
+    // daemon inside a distro -- flagged so the UI can explain it and
+    // hide take-over.
+    let owner_image = match platform {
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                port_owner.and_then(|pid| windows_native::exe_path_for_pid(pid).ok().flatten())
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        }
+        _ => None,
+    };
+    let wsl_daemon_suspected = platform == Platform::Windows
+        && reachable
+        && managed_state == ManagedState::Unmanaged
+        && classify_unmanaged(owner_image.as_deref()) == UnmanagedKind::ForeignOrWsl;
+
+    let (git_found, prerequisite_message) = match platform {
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_git_prerequisites()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                (None, None)
+            }
+        }
+        _ => (None, None),
+    };
 
     let comparison = daemon_version.as_deref().map(|d| version::compare(&app_version, d)).unwrap_or(version::Comparison::Unknown);
 
@@ -534,13 +611,16 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
         managed_state,
         pid: port_owner,
         installed_path: record.as_ref().map(|r| r.exe_path.clone()),
-        log_path: log_path_display(app, platform, distro.as_deref()),
-        binary_installed: binary_installed(app, platform, distro.as_deref()),
+        log_path: log_path_display(app, platform),
+        binary_installed: binary_installed(app, platform),
+        wsl_daemon_suspected,
+        git_found,
+        prerequisite_message,
     }
 }
 
 async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform(state);
+    let platform = detect_platform();
     let app_version = app_version_string(app);
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
@@ -600,60 +680,66 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
             let record = ManagedRecord { pid, version: app_version.clone(), installed_at: now_unix_seconds(), exe_path: layout.bin_path.display().to_string() };
             managed::save(&layout.state_path, &record).map_err(|e| e.to_string())?;
         }
-        Platform::Wsl2 => {
-            let distro = resolve_distro(state)?;
-            let existing_record = wsl_load_managed(&distro);
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                let layout = windows_layout()?;
+                let existing_record = managed::load(&layout.state_path);
 
-            // Bug 1, same guard as the macOS branch above.
-            let port_owner_before = find_port_owner(platform, Some(&distro), port);
-            managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port)?;
-
-            debug_assert_eq!(install_source(platform), InstallSource::Release);
-            emit_progress(app, "downloading", "Downloading the daemon release…");
-            let arch = wsl_arch(&distro)?;
-            let urls = release::release_urls(&app_version, "linux", arch);
-            wsl_install(&distro, &urls)?;
-
-            emit_progress(app, "starting", "Starting the daemon…");
-            // Bug 2, same guard as the macOS branch above.
-            if let Some(record) = &existing_record {
-                // Same reasoning as the macOS branch: compare against
-                // this record's own exe_path (the adopted path, for a
-                // take-over), not the managed bin's.
-                let exe_matches = wsl_exe_matches_expected(&distro, record.pid, &record.exe_path);
-                if managed::safe_to_kill(record, port_owner_before, exe_matches) {
-                    let _ = wsl::run(&wsl::kill_argv(&distro, record.pid));
-                } else if port_owner_before.is_some() {
-                    emit_progress(app, "starting", "The previously-managed process could not be verified; starting alongside it instead of stopping it.");
+                // Bug 1, same guard as the macOS branch above -- plus the
+                // AC6 hint, since on Windows the most likely squatter is
+                // the relay forwarding a WSL daemon's port.
+                let port_owner_before = windows_native::find_port_owner(port).ok().flatten();
+                if let Err(e) = managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port) {
+                    return Err(format!("{e}. {}", windows_install_conflict_hint(port)));
                 }
+
+                debug_assert_eq!(install_source(platform), InstallSource::Release);
+                // A running exe cannot be replaced on Windows: a managed
+                // daemon that is still running is stopped first, and a
+                // failed stop aborts before the binary is touched
+                // (`windows_update_plan`).
+                let stop_result = if let Some(record) = &existing_record {
+                    if port_owner_before == Some(record.pid) {
+                        emit_progress(app, "stopping", "Stopping the running daemon so it can be replaced…");
+                        let token = windows_native::read_token(&windows_native::token_path()).unwrap_or_default();
+                        Some(windows_native::stop(&reqwest::Client::new(), &layout, port, &token, std::time::Duration::from_secs(10)).await)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                windows_update_plan(stop_result)?;
+
+                emit_progress(app, "downloading", "Downloading the daemon release…");
+                let (os, arch) = windows_native::native_target_for_this_machine()?;
+                let urls = release::release_urls(&app_version, os, arch);
+                windows_native::install_from_release(&reqwest::Client::new(), &urls, &layout).await.map_err(|e| e.to_string())?;
+
+                emit_progress(app, "starting", "Starting the daemon…");
+                let child = windows_native::spawn_detached(&layout, &app_version).map_err(|e| e.to_string())?;
+                drop(child); // detached (its own process group); tracked by pid below, not by this handle.
+
+                // Bug 1's post-start half, same as the macOS branch:
+                // whoever now owns the port must really be the binary
+                // just installed (and, since /healthz answered, report
+                // its version) before a ManagedRecord is saved.
+                let daemon_version = wait_for_healthz(&base_url).await;
+                let port_owner_after = windows_native::find_port_owner(port).ok().flatten();
+                let exe_matches_after = port_owner_after.map(|pid| windows_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
+                let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
+
+                let record = ManagedRecord { pid, version: app_version.clone(), installed_at: now_unix_seconds(), exe_path: layout.bin_path.display().to_string() };
+                managed::save(&layout.state_path, &record).map_err(|e| e.to_string())?;
             }
-
-            wsl_start_blocking(distro.clone(), port, false).await?;
-
-            // Bug 1's post-start half: don't trust "whoever now owns the
-            // port" -- verify identity (and reported version) before
-            // saving a ManagedRecord, exactly as the macOS branch does.
-            // The start script only returns once the port is listening.
-            let (_, daemon_version) = probe_healthz(&base_url).await;
-            let port_owner_after = find_port_owner(platform, Some(&distro), port);
-            // Resolve (not just check) the new process's real path, so
-            // the saved record's exe_path is a real absolute path future
-            // pre-kill checks can compare against -- never the "~/..."
-            // literal, which `readlink -f` could never match exactly.
-            let resolved_exe_after = port_owner_after.and_then(|pid| wsl_resolve_exe_path(&distro, pid));
-            let exe_matches_after = resolved_exe_after.as_deref().map(wsl::exe_path_matches_managed_bin).unwrap_or(false);
-            let pid = managed::verify_fresh_start(port_owner_after, exe_matches_after, daemon_version.as_deref(), &app_version)?;
-
-            let record = ManagedRecord {
-                pid,
-                version: app_version.clone(),
-                installed_at: now_unix_seconds(),
-                exe_path: resolved_exe_after.expect("smind desktop: verify_fresh_start only succeeds when exe_matches_after is true, which requires Some"),
-            };
-            wsl_save_managed(&distro, &record)?;
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("this platform isn't supported for app-managed daemon install".to_string());
+            }
         }
         Platform::Unsupported => {
-            return Err("this platform isn't supported for app-managed daemon install (Windows without WSL2, or an unsupported host)".to_string());
+            return Err("this platform isn't supported for app-managed daemon install (an unsupported host)".to_string());
         }
     }
 
@@ -662,14 +748,22 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
 }
 
 async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform(state);
+    let platform = detect_platform();
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
-    let distro = if platform == Platform::Wsl2 { Some(resolve_distro(state)?) } else { None };
     let record = match platform {
         Platform::Macos => macos_layout(app).ok().and_then(|l| managed::load(&l.state_path)),
-        Platform::Wsl2 => distro.as_deref().and_then(wsl_load_managed),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_layout().ok().and_then(|l| managed::load(&l.state_path))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        }
         Platform::Unsupported => return Err("this platform isn't supported for app-managed daemon restart".to_string()),
     };
     let Some(record) = record else {
@@ -682,21 +776,30 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
     // this function's own start step (which only ever execs the managed
     // bin) to start in its place -- refuse rather than kill the adopted
     // daemon and leave nothing running.
-    managed::assert_restartable(binary_installed(app, platform, distro.as_deref()))?;
+    managed::assert_restartable(binary_installed(app, platform))?;
 
     // Re-check immediately before signalling: refuse unless the recorded
     // pid is still the real port owner (closes a PID-reuse race) *and*
     // really our binary (Bug 2's guard -- a bare port-ownership match
     // isn't enough on its own, since the pid could have been reused by an
     // unrelated process, including the user's own unmanaged daemon).
-    let live_owner = find_port_owner(platform, distro.as_deref(), port);
+    let live_owner = find_port_owner(platform, port);
     // Compare against this record's own exe_path -- for a normal managed
     // daemon that's already the managed bin's path, and for one reached
     // via take-over it's the adopted process's real path, so a take-over
     // followed directly by Restart still passes this check correctly.
     let exe_matches = match platform {
         Platform::Macos => macos_exe_matches(record.pid, Path::new(&record.exe_path)),
-        Platform::Wsl2 => distro.as_deref().map(|d| wsl_exe_matches_expected(d, record.pid, &record.exe_path)).unwrap_or(false),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_exe_matches(record.pid, Path::new(&record.exe_path))
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                false
+            }
+        }
         Platform::Unsupported => unreachable!(),
     };
     if !managed::safe_to_kill(&record, live_owner, exe_matches) {
@@ -708,9 +811,21 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
         Platform::Macos => {
             native::kill_process(record.pid).map_err(|e| e.to_string())?;
         }
-        Platform::Wsl2 => {
-            let distro = distro.as_deref().unwrap();
-            wsl::run(&wsl::kill_argv(distro, record.pid)).map_err(|e| e.to_string())?;
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                // The graceful path (ADR-0029): POST /api/shutdown with
+                // the daemon's token, then wait for /healthz to stop
+                // answering; windows_native::stop only ever terminates
+                // the recorded pid behind the same identity checks.
+                let layout = windows_layout()?;
+                let token = windows_native::read_token(&windows_native::token_path()).unwrap_or_default();
+                windows_native::stop(&reqwest::Client::new(), &layout, port, &token, std::time::Duration::from_secs(10)).await?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("this platform isn't supported for app-managed daemon restart".to_string());
+            }
         }
         Platform::Unsupported => unreachable!(),
     }
@@ -733,29 +848,28 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
             let new_record = ManagedRecord { pid, exe_path: layout.bin_path.display().to_string(), installed_at: now_unix_seconds(), ..record };
             managed::save(&layout.state_path, &new_record).map_err(|e| e.to_string())?;
         }
-        Platform::Wsl2 => {
-            let distro = distro.as_deref().unwrap();
-            // On failure this returns Err before any record is saved;
-            // compute_status then reads the live port, so a dead daemon is
-            // never reported as running.
-            wsl_start_blocking(distro.to_string(), port, true).await?;
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                let layout = windows_layout()?;
+                let child = windows_native::spawn_detached(&layout, &record.version).map_err(|e| e.to_string())?;
+                drop(child); // detached (its own process group); tracked by pid below, not by this handle.
 
-            let port_owner_after = find_port_owner(platform, Some(distro), port);
-            let resolved_exe_after = port_owner_after.and_then(|pid| wsl_resolve_exe_path(distro, pid));
-            let exe_matches_after = resolved_exe_after.as_deref().map(wsl::exe_path_matches_managed_bin).unwrap_or(false);
-            let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
+                let _ = wait_for_healthz(&base_url).await;
+                let port_owner_after = windows_native::find_port_owner(port).ok().flatten();
+                let exe_matches_after = port_owner_after.map(|pid| windows_exe_matches(pid, &layout.bin_path)).unwrap_or(false);
+                let pid = managed::verify_started_identity(port_owner_after, exe_matches_after)?;
 
-            // `start_detached_argv` always execs the managed bin -- refresh
-            // exe_path to the freshly-resolved path (never inherit the old
-            // record's, which for a take-over-then-restart would still be
-            // the adopted path).
-            let new_record = ManagedRecord {
-                pid,
-                exe_path: resolved_exe_after.expect("smind desktop: verify_started_identity only succeeds when exe_matches_after is true, which requires Some"),
-                installed_at: now_unix_seconds(),
-                ..record
-            };
-            wsl_save_managed(distro, &new_record)?;
+                // `spawn_detached` always execs `layout.bin_path` --
+                // refresh exe_path to that, same reasoning as the macOS
+                // branch.
+                let new_record = ManagedRecord { pid, exe_path: layout.bin_path.display().to_string(), installed_at: now_unix_seconds(), ..record };
+                managed::save(&layout.state_path, &new_record).map_err(|e| e.to_string())?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("this platform isn't supported for app-managed daemon restart".to_string());
+            }
         }
         Platform::Unsupported => unreachable!(),
     }
@@ -764,12 +878,11 @@ async fn restart(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, 
 }
 
 async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus, String> {
-    let platform = detect_platform(state);
+    let platform = detect_platform();
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
-    let distro = if platform == Platform::Wsl2 { Some(resolve_distro(state)?) } else { None };
 
-    let owner = find_port_owner(platform, distro.as_deref(), port)
+    let owner = find_port_owner(platform, port)
         .ok_or_else(|| "nothing is listening on the configured port -- there is no daemon to take over".to_string())?;
 
     // Resolve the adopted process's real executable path up front: this
@@ -780,7 +893,16 @@ async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus
     // -- which would make Update/Restart permanently refuse afterwards.
     let exe_path = match platform {
         Platform::Macos => native::exe_path_for_pid(owner).ok().flatten(),
-        Platform::Wsl2 => wsl_resolve_exe_path(distro.as_deref().unwrap(), owner),
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                windows_native::exe_path_for_pid(owner).ok().flatten()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                None
+            }
+        }
         Platform::Unsupported => None,
     };
     let Some(exe_path) = exe_path else {
@@ -789,14 +911,29 @@ async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus
         ));
     };
 
+    // AC6 (Windows): only a smind.exe owner is take-over eligible --
+    // anything else (typically the WSL relay) is refused with an
+    // explanation instead of being adopted.
+    if let Some(message) = windows_take_over_refusal(Some(&exe_path), port) {
+        return Err(message);
+    }
+
     let record = managed::take_over(owner, "unknown", &exe_path, &now_unix_seconds());
     match platform {
         Platform::Macos => {
             let layout = macos_layout(app)?;
             managed::save(&layout.state_path, &record).map_err(|e| e.to_string())?;
         }
-        Platform::Wsl2 => {
-            wsl_save_managed(distro.as_deref().unwrap(), &record)?;
+        Platform::Windows => {
+            #[cfg(target_os = "windows")]
+            {
+                let layout = windows_layout()?;
+                managed::save(&layout.state_path, &record).map_err(|e| e.to_string())?;
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                return Err("this platform isn't supported for app-managed daemon takeover".to_string());
+            }
         }
         Platform::Unsupported => return Err("this platform isn't supported for app-managed daemon takeover".to_string()),
     }
@@ -860,37 +997,11 @@ mod tests {
     use smind_daemon_client::daemon_manager::version::Comparison;
 
     #[test]
-    fn restart_start_failure_retries_once_then_reports_the_error() {
-        let mut calls = 0;
-        let r = start_with_one_retry(|| {
-            calls += 1;
-            Err(format!("boom {calls}"))
-        });
-        assert_eq!(calls, 2);
-        assert_eq!(r, Err("daemon failed to start after retry: boom 2".to_string()));
-
-        let mut calls = 0;
-        let r = start_with_one_retry(|| {
-            calls += 1;
-            if calls == 1 { Err("first".to_string()) } else { Ok(()) }
-        });
-        assert_eq!((calls, r), (2, Ok(())));
-
-        let mut calls = 0;
-        assert_eq!(start_with_one_retry(|| { calls += 1; Ok(()) }), Ok(()));
-        assert_eq!(calls, 1);
-    }
-
-    #[test]
     fn failed_restart_never_reports_managed_running() {
         // A failed start returns Err before the record-saving code runs
         // (`?` in restart), and status is computed from the live port: with
         // nothing listening, classify is NotRunning even if a stale record
         // still names the old pid.
-        let saved = std::cell::Cell::new(false);
-        let r = start_with_one_retry(|| Err("x".to_string())).inspect(|_| saved.set(true));
-        assert!(r.is_err());
-        assert!(!saved.get());
         let stale = ManagedRecord { pid: 4242, version: "0.1.0".into(), installed_at: "0".into(), exe_path: "/x".into() };
         assert_eq!(managed::classify(Some(&stale), None), ManagedState::NotRunning);
     }
@@ -1025,20 +1136,141 @@ mod tests {
     }
 
     #[test]
-    fn wsl2_only_on_a_windows_target() {
-        assert_eq!(platform_for("windows", || true), Platform::Wsl2);
-        assert_eq!(platform_for("windows", || false), Platform::Unsupported);
-        // WSLg: a Linux app with wsl.exe interop is not a Windows host, and
-        // never even probes for it.
-        assert_eq!(platform_for("linux", || panic!("must not probe wsl.exe")), Platform::Unsupported);
-        assert_eq!(platform_for("macos", || panic!("must not probe wsl.exe")), Platform::Macos);
+    fn platform_for_windows_is_native_and_never_probes_wsl() {
+        assert_eq!(platform_for("windows"), Platform::Windows);
+        assert_eq!(platform_for("macos"), Platform::Macos);
+        // Linux (WSLg included) is not a desktop-managed host; the mapping
+        // is pure over the OS name -- nothing is probed at runtime.
+        assert_eq!(platform_for("linux"), Platform::Unsupported);
     }
 
     #[test]
-    fn wsl_install_still_downloads() {
-        assert_eq!(install_source(Platform::Wsl2), InstallSource::Release);
-        let urls = release::release_urls("0.9.1", "linux", "amd64");
-        assert_eq!(urls.tarball, "https://github.com/spacingmind/smind/releases/download/v0.9.1/smind_0.9.1_linux_amd64.tar.gz");
+    fn classify_wsl_forwarded_port_is_not_takeover_eligible() {
+        use UnmanagedKind::*;
+        // The relay that forwards a WSL daemon's port.
+        assert_eq!(classify_unmanaged(Some(r"C:\Windows\system32\wslrelay.exe")), ForeignOrWsl);
+        // No owner visible (gone, or access denied).
+        assert_eq!(classify_unmanaged(None), ForeignOrWsl);
+        // An unrelated app.
+        assert_eq!(classify_unmanaged(Some(r"C:\Tools\other.exe")), ForeignOrWsl);
+        // A smind.exe anywhere is eligible, whatever the case.
+        assert_eq!(classify_unmanaged(Some(r"C:\Users\x\AppData\Local\smind\bin\SMIND.EXE")), NativeSmind);
+        assert_eq!(classify_unmanaged(Some(r"D:\dev\smind.exe")), NativeSmind);
+        // ...but a name that merely contains it is not.
+        assert_eq!(classify_unmanaged(Some(r"C:\Windows\smind.exe.bak")), ForeignOrWsl);
+    }
+
+    #[test]
+    fn windows_take_over_refused_for_foreign_owner() {
+        let err = windows_take_over_refusal(Some(r"C:\Windows\system32\wslrelay.exe"), 4648).unwrap();
+        assert!(err.contains("not started by this app"), "{err}");
+        assert!(err.contains("WSL"), "{err}");
+        assert!(err.contains("4648"), "{err}");
+        assert!(err.contains("smind.exe"), "{err}");
+        // An unresolvable owner is refused too.
+        assert!(windows_take_over_refusal(None, 4648).is_some());
+        // A real smind.exe owner is eligible: no refusal.
+        assert!(windows_take_over_refusal(Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), 4648).is_none());
+    }
+
+    #[test]
+    fn windows_update_stops_running_daemon_before_replacing_binary() {
+        use WindowsUpdateStep::*;
+        // A managed running daemon: stop strictly before the install.
+        let plan = windows_update_plan(Some(Ok(()))).unwrap();
+        assert_eq!(plan, [StopRunningDaemon, InstallBinary, StartDaemon]);
+        assert!(plan.iter().position(|s| *s == StopRunningDaemon).unwrap() < plan.iter().position(|s| *s == InstallBinary).unwrap());
+        // Nothing running: never stopped.
+        assert_eq!(windows_update_plan(None).unwrap(), [InstallBinary, StartDaemon]);
+        // A failed stop aborts before the binary is touched.
+        let err = windows_update_plan(Some(Err("timeout".to_string()))).unwrap_err();
+        assert!(err.contains("left untouched"), "{err}");
+    }
+
+    #[test]
+    fn install_refused_on_port_conflict_names_the_port() {
+        // The existing assert_safe_to_install refusal plus the AC6 hint:
+        // what the user sees must name the port conflict and the WSL
+        // possibility.
+        let base = managed::assert_safe_to_install(None, Some(999), 4648).unwrap_err();
+        let msg = format!("{base}. {}", windows_install_conflict_hint(4648));
+        assert!(msg.contains("port 4648"), "{msg}");
+        assert!(msg.contains("WSL"), "{msg}");
+    }
+
+    #[test]
+    fn daemon_status_reports_missing_git() {
+        // Nothing on PATH and none of the install dirs: git is reported
+        // missing, with the AC8 message -- but as a prerequisite, not an
+        // error (install/start still work without it).
+        let found = git_lookup(|_| None, |_| false);
+        assert_eq!(found, None);
+        let (git_found, message) = git_prerequisite_fields(Some(found.is_some()));
+        assert_eq!(git_found, Some(false));
+        let message = message.unwrap();
+        assert!(message.contains("Git for Windows was not found"), "{message}");
+        assert!(message.contains("sh"), "{message}");
+        // Found (or non-Windows): no message.
+        assert_eq!(git_prerequisite_fields(Some(true)), (Some(true), None));
+        assert_eq!(git_prerequisite_fields(None), (None, None));
+    }
+
+    #[test]
+    fn git_lookup_finds_program_files_cmd_git() {
+        let installed = PathBuf::from(r"C:\Program Files\Git\cmd\git.exe");
+        let found = git_lookup(
+            |k| match k {
+                "ProgramFiles" => Some(r"C:\Program Files".to_string()),
+                "PATH" => Some(r"C:\Windows\System32".to_string()),
+                _ => None,
+            },
+            |p| *p == installed,
+        );
+        assert_eq!(found, Some(installed));
+
+        // PATH wins over the install dirs when it carries git.
+        let on_path = PathBuf::from(r"C:\tools\git.exe");
+        let found = git_lookup(|k| (k == "PATH").then(|| r"C:\tools".to_string()), |p| *p == on_path);
+        assert_eq!(found, Some(on_path));
+    }
+
+    #[test]
+    fn windows_install_downloads_the_windows_release() {
+        assert_eq!(install_source(Platform::Windows), InstallSource::Release);
+        let urls = release::release_urls("0.9.1", "windows", "amd64");
+        assert_eq!(urls.tarball, "https://github.com/spacingmind/smind/releases/download/v0.9.1/smind_0.9.1_windows_amd64.zip");
         assert_eq!(urls.checksums, "https://github.com/spacingmind/smind/releases/download/v0.9.1/checksums.txt");
+    }
+
+    #[test]
+    fn no_wsl_exe_in_desktop_sources() {
+        // AC1's grep guard: no desktop crate may invoke the Windows
+        // subsystem for Linux. The needles are built with concat! so this
+        // test file itself never matches them.
+        let needles = [concat!("ws", "l.exe"), concat!("wsl", "path"), concat!("wsl", ".localhost")];
+        let desktop_dir = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
+        let mut offenders: Vec<String> = Vec::new();
+        fn walk(dir: &Path, needles: &[&str], offenders: &mut Vec<String>) {
+            for entry in fs::read_dir(dir).expect("smind desktop: readable source tree") {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                let name = entry.file_name().to_string_lossy().to_string();
+                if path.is_dir() {
+                    if name == "target" || name == "node_modules" {
+                        continue;
+                    }
+                    walk(&path, needles, offenders);
+                } else if name.ends_with(".rs") {
+                    let src = fs::read_to_string(&path).unwrap_or_default().to_lowercase();
+                    for needle in needles {
+                        if src.contains(needle) {
+                            offenders.push(format!("{} matches {:?}", path.display(), needle));
+                        }
+                    }
+                }
+            }
+        }
+        walk(&desktop_dir, &needles, &mut offenders);
+        assert!(offenders.is_empty(), "desktop Rust sources must not drive the Windows subsystem for Linux: {offenders:?}");
     }
 }

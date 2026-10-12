@@ -283,20 +283,6 @@ pub fn build_argv(os: &str, id: &str, path: &str, probe: &dyn EditorProbe) -> Re
     Ok(argv)
 }
 
-// Preserved for daemon_manager.rs; removed together with wsl.rs in slice R2.
-/// wsl.exe writes UTF-16LE output (with or without a BOM) on some
-/// locales and plain UTF-8 on others; accept both.
-pub(crate) fn decode_wsl_output(raw: &[u8]) -> String {
-    let (chunks, _) = raw.as_chunks::<2>();
-    let looks_utf16 = (raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
-        || chunks.iter().take(8).any(|c| c[1] == 0x00 && c[0] != 0);
-    if looks_utf16 && raw.len().is_multiple_of(2) {
-        let units: Vec<u16> = chunks.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-        return String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_string();
-    }
-    String::from_utf8_lossy(raw).trim_start_matches('\u{feff}').to_string()
-}
-
 /// The full decision pipeline behind `open_in_editor`, pure over the
 /// probe: returns the argv to spawn, or a human-readable error (the UI
 /// shows it in a toast). Order: local connection, allowlist, path
@@ -584,18 +570,6 @@ mod tests {
         );
         let argv = build_argv("windows", "vscode", r"C:\work", &both).unwrap();
         assert_eq!(argv[0], r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe");
-    }
-
-    #[test]
-    fn decode_wsl_output_strips_the_bom() {
-        let mut utf16: Vec<u8> = vec![0xFF, 0xFE];
-        utf16.extend("C:\\x\n".encode_utf16().flat_map(|u| u.to_le_bytes()));
-        assert_eq!(decode_wsl_output(&utf16), "C:\\x\n");
-        // BOM-less UTF-16LE and UTF-8 (with or without a BOM) too.
-        let bare: Vec<u8> = "Ubuntu".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-        assert_eq!(decode_wsl_output(&bare), "Ubuntu");
-        assert_eq!(decode_wsl_output(b"\xEF\xBB\xBFUbuntu"), "Ubuntu");
-        assert_eq!(decode_wsl_output(b"Ubuntu"), "Ubuntu");
     }
 
     #[cfg(unix)]
