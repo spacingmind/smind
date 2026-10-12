@@ -1,0 +1,7 @@
+# Shell scripts must stay LF even on Windows checkouts (core.autocrlf=true):
+# Git Bash on windows-latest CI and Windows dev machines run them directly.
+*.sh text eol=lf
+
+# Embedded into the binary (go:embed bundle): a Windows checkout with
+# core.autocrlf=true would otherwise ship SKILL.md files with CRLF endings.
+internal/skills/bundle/** text eol=lf

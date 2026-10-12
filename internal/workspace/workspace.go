@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -44,11 +43,14 @@ type Manager struct {
 	portMu sync.Mutex
 
 	// Setup-script runtime (setup_run.go): tracked goroutines so archive and
-	// shutdown can cancel them; goos is the OS seam for the Windows check.
+	// shutdown can cancel them; shLookup locates the POSIX shell the scripts
+	// run under (sh on Unix; PATH then Git for Windows on Windows,
+	// ADR-0029 D1) and is the seam tests use to simulate a machine without
+	// one.
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun
 	setupFinished func(taskID int64)
-	goos          string
+	shLookup      func() (string, error)
 }
 
 // WorktreesSettings is the Manager's view of config.WorktreesConfig with the
@@ -138,7 +140,7 @@ func New(s *store.Store) *Manager {
 			TeardownTimeout: time.Duration(d.TeardownTimeoutSeconds) * time.Second,
 		},
 		setupRuns: map[int64]*setupRun{},
-		goos:      runtime.GOOS,
+		shLookup:  defaultShLookup,
 	}
 	m.failInterruptedSetups()
 	return m

@@ -34,12 +34,12 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 
-	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	fakeCodexAgentPath = filepath.Join(dir, exeName("codex-fakeagent"))
 	if out, err := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent").CombinedOutput(); err != nil {
 		panic(err.Error() + ": " + string(out))
 	}
 
-	fakeACPAgentPath = filepath.Join(dir, "fakeagent")
+	fakeACPAgentPath = filepath.Join(dir, exeName("fakeagent"))
 	build := exec.Command("go", "build", "-o", fakeACPAgentPath, "../taskrunner/fakeagent")
 	build.Dir, err = os.Getwd()
 	if err != nil {
@@ -97,6 +97,7 @@ func newTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	runGitT(t, dir, "init")
+	runGitT(t, dir, "config", "core.autocrlf", "false")
 	runGitT(t, dir, "config", "user.email", "test@example.com")
 	runGitT(t, dir, "config", "user.name", "Test")
 

@@ -12,9 +12,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/spacingmind/smind/internal/claudecli"
 )
 
 func main() {
+	// Windows only: the daemon starts smind.exe itself as the Claude CLI's
+	// launcher (a Job Object around the real claude.exe, so killing the
+	// launcher kills the whole tree). Must run before anything parses args;
+	// a no-op everywhere else and whenever the launch env var is unset.
+	if code, handled := claudecli.MaybeRunLauncher(); handled {
+		os.Exit(code)
+	}
 	os.Exit(run(os.Args[1:]))
 }
 
@@ -31,6 +40,8 @@ func run(args []string) int {
 	switch args[0] {
 	case "serve":
 		return cmdServe(args[1:])
+	case "stop":
+		return cmdStop(args[1:])
 	case "relay":
 		return cmdRelay(args[1:])
 	case "workspace":
@@ -66,6 +77,8 @@ func printUsage(w io.Writer) {
 
 Usage:
   smind serve                                             start the daemon
+
+  smind stop                                              ask the running daemon to shut down gracefully
 
   smind relay [--listen <addr>] [--data-dir <dir>]        start the self-hostable E2EE relay
   smind relay workspace new <id>                          enroll a relay workspace (secret printed once)
