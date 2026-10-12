@@ -802,8 +802,15 @@ export function AppSidebar({
           />
         )}
       </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
+      {/*
+       * Only the tree scrolls: SidebarContent stops being the scroller
+       * (overflow-hidden) and the group/content chain is bounded
+       * (min-h-0 flex-1), so the ScrollArea below gets a real height and the
+       * "Workspaces" label row stays put above it. Left as the shadcn default
+       * the label scrolled away with the list (real-app finding, 2026-10-12).
+       */}
+      <SidebarContent className="overflow-hidden">
+        <SidebarGroup className="min-h-0 flex-1">
           <SidebarGroupLabel className="justify-between" ref={searchRef}>
             {searchOpen ? (
               <Input
@@ -864,7 +871,7 @@ export function AppSidebar({
               </>
             )}
           </SidebarGroupLabel>
-          <SidebarGroupContent>
+          <SidebarGroupContent className="min-h-0 flex-1">
             <ScrollArea className="h-full">
               <RowSignalContext.Provider value={rowSignal}>
                 <CollapsedNodesContext.Provider value={nodes}>
