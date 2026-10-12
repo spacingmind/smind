@@ -28,6 +28,8 @@ import type {
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
+/** How long the picker waits on provider.list before it falls back to the built-in catalog. */
+const PROVIDER_LIST_TIMEOUT_MS = 8000;
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
@@ -198,6 +200,10 @@ export function Composer({
     setProvidersSettled(false);
     if (!client) return;
     let cancelled = false;
+    // A daemon that never answers must not leave the picker on "Loading…" forever: the fallback catalog takes over.
+    const giveUp = setTimeout(() => {
+      if (!cancelled) setProvidersSettled(true);
+    }, PROVIDER_LIST_TIMEOUT_MS);
     client
       .call<ProviderListResult>("provider.list")
       .then((result) => {
@@ -209,6 +215,7 @@ export function Composer({
       });
     return () => {
       cancelled = true;
+      clearTimeout(giveUp);
     };
   }, [client]);
 

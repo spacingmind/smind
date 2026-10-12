@@ -401,7 +401,7 @@ function RunConfigToolbarModelPicker() {
         onSelect={(provider, model) => actions.setProviderModel(provider as Provider, model)}
         onApplyProfile={actions.applyProfile}
         onClearAgent={actions.clearAgent}
-        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: state.thinkingLevel }}
+        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: state.provider === "claude-native" ? state.thinkingLevel : "" }}
         onManageAgents={() => openSettings("agents")}
         onCreateProfile={(seed) => {
           setSettingsIntent({ kind: "newProfile", seed });
