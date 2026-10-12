@@ -149,7 +149,7 @@ type Passive struct {
 	dirtyObs map[int64]struct{}
 	started  bool
 	closed   bool
-	busy     bool // the writer holds a batch it has not finished (tests wait on it)
+	busy     bool          // the writer holds a batch it has not finished (tests wait on it)
 	wake     chan struct{} // cap 1
 	stop     chan struct{}
 	done     chan struct{}
