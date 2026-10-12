@@ -137,20 +137,44 @@ import {
 
 /**
  * Task rows indent by their own left padding, not by nesting margins on the
- * lists they live in (sidebar-polish S7): a row's hover/selected highlight
- * then spans the whole sidebar at every depth, and the title keeps its width.
- * A root row starts 8px in (the same inset every header row has); each level
- * of the task tree adds 12px. A parent's collapse chevron lives in the 12px
- * gutter just left of its own status slot -- the column its children's rows
- * are indented past -- so a root list that contains parents shifts right by
- * one gutter (ROW_GUTTER_PX) and nothing else ever has to reserve room.
+ * task-tree lists they live in (sidebar-polish S7): a row's hover/selected
+ * highlight then spans its container's content box at every depth, and the
+ * title keeps its width. Every root task row starts at the 8px inset plus the
+ * 12px chevron gutter (ROW_GUTTER_PX) -- reserved whether or not the list
+ * contains a parent, so depth-0 titles share one x in every view -- and each
+ * level of the task tree adds 12px (ROW_INDENT_PX).
+ *
+ * Container nesting is drawn differently (ZCode's workspace-grouped-tasks):
+ * the expanded content of a WORKSPACE, SPACE (or "Ungrouped"), Pinned or
+ * status-group header sits behind ONE subtle guide line under the parent
+ * header's icon centre (CONTAINER_GUIDE_CLASS via ContainerContent), so
+ * spaces read as nested under their workspace and tasks under their space;
+ * rows inside keep their own padding, so their highlight spans from the
+ * guide line to the sidebar's right edge. The task tree itself never
+ * carries guide lines -- only per-row padding.
  */
 const ROW_INSET_PX = 8;
 const ROW_INDENT_PX = 12;
 const ROW_GUTTER_PX = 12;
+/** Where every depth-0 task row's status slot starts: the inset plus the always-reserved chevron gutter. */
+const ROOT_PAD_PX = ROW_INSET_PX + ROW_GUTTER_PX;
 
-/** Applied to every nested SidebarMenuSub: the list itself adds no indent, margin or guide line -- rows carry their own. */
+/**
+ * Applied to every nested SidebarMenuSub: the list itself adds no indent,
+ * margin or guide line -- rows carry their own. Container content lists
+ * (ContainerContent) re-add exactly one guide line on top of this.
+ */
 const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
+
+/**
+ * The one guide line a container's expanded content carries (ZCode's
+ * TASK_GROUP_CONTENT_CLASS, narrowed from ml-4 + pl-2 = 25px so a 192px
+ * sidebar keeps its title width): the line sits under the parent header's
+ * icon centre (px-2 + half the 16px icon = 16px, hence ml-4) and content
+ * pads 4px past it. The border colour is SidebarMenuSub's own subtle
+ * border-sidebar-border -- only the width was zeroed by FLUSH_SUB.
+ */
+const CONTAINER_GUIDE_CLASS = "ml-4 border-l pl-1";
 
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
@@ -1165,7 +1189,7 @@ function PinnedSection({
         <RowChevron open={open} />
       </SidebarMenuButton>
       {open && (
-        <SidebarMenuSub className={FLUSH_SUB}>
+        <ContainerContent kind="pinned">
           <TaskRows
             tasks={tasks}
             selectedTaskId={selectedTaskId}
@@ -1173,7 +1197,7 @@ function PinnedSection({
             emptyText="No pinned tasks"
             onArchiveTask={onArchiveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1245,7 +1269,7 @@ function StatusGroupItem({
         </span>
       </SidebarMenuButton>
       {open && (
-        <SidebarMenuSub className={FLUSH_SUB}>
+        <ContainerContent kind="status">
           <TaskRows
             tasks={group.tasks}
             selectedTaskId={selectedTaskId}
@@ -1253,7 +1277,7 @@ function StatusGroupItem({
             emptyText="No tasks"
             onArchiveTask={onArchiveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1267,6 +1291,27 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
         <span>{text}</span>
       </div>
     </SidebarMenuItem>
+  );
+}
+
+/**
+ * The expanded content of a container header (workspace, space, "Ungrouped",
+ * Pinned, status group): the same flush list as the task tree, plus ONE
+ * subtle guide line under the parent header's icon (CONTAINER_GUIDE_CLASS)
+ * so the content reads as nested under that header. Workspace headers
+ * themselves still span the full sidebar width; only their content is
+ * inset. Carries a stable testid so tests can tell container content apart
+ * from the flush task-tree lists.
+ */
+function ContainerContent({ kind, children }: { kind: string; children: ReactNode }) {
+  return (
+    <SidebarMenuSub
+      data-testid="sidebar-container-content"
+      data-container-kind={kind}
+      className={cn(FLUSH_SUB, CONTAINER_GUIDE_CLASS)}
+    >
+      {children}
+    </SidebarMenuSub>
   );
 }
 
@@ -1448,7 +1493,7 @@ function WorkspaceItem({
         </ContextMenuContent>
       </ContextMenu>
       {expanded && (
-        <SidebarMenuSub className={FLUSH_SUB}>
+        <ContainerContent kind="workspace">
           {flat ? (
             <TaskRows
               tasks={workspace.ungroupedTasks}
@@ -1497,7 +1542,7 @@ function WorkspaceItem({
               )}
             </>
           )}
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1638,8 +1683,8 @@ function SpaceLikeItem({
         )}
       </div>
       {open && (
-        // Flush: rows (spaces included) carry their own indent, see FLUSH_SUB.
-        <SidebarMenuSub className={FLUSH_SUB}>
+        // One guide line under this header's icon; rows carry their own indent.
+        <ContainerContent kind={spaceId != null ? "space" : "ungrouped"}>
           <TaskRows
             tasks={tasks}
             nodes={nodes}
@@ -1652,7 +1697,7 @@ function SpaceLikeItem({
             spaces={spaces}
             onMoveTask={onMoveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuSubItem>
   );
@@ -2053,12 +2098,14 @@ const TaskRow = memo(function TaskRow({
 /**
  * Renders a bucket's task rows. In the tree view (`nodes` given, PR-U1)
  * rows come from the pre-nested forest: each parent row owns a chevron
- * and its children render in a nested list below it (one
- * ml-3/border-l/pl-1 step per level, via SidebarMenuSub -- plain ul/li
- * wrappers, so recursion handles any depth the daemon allows). Without
- * `nodes` -- SearchResults, PinnedSection, StatusGroupItem -- the list is
- * exactly today's flat rendering; those lists have no forest, so the tier
- * chip is skipped there rather than guessed.
+ * and its children render in a nested list below it -- a flush
+ * SidebarMenuSub (plain ul/li wrappers, so recursion handles any depth
+ * the daemon allows); each child row pads itself one ROW_INDENT_PX deeper
+ * than its parent. Without `nodes` -- SearchResults, PinnedSection,
+ * StatusGroupItem -- the list is exactly today's flat rendering; those
+ * lists have no forest, so the tier chip is skipped there rather than
+ * guessed. Root rows always sit at ROW_INSET_PX + ROW_GUTTER_PX so a
+ * task row starts at the same x in every view.
  */
 function TaskRows({
   tasks,
@@ -2112,7 +2159,7 @@ function TaskRows({
               task={task}
               tier={null}
               childCount={0}
-              padLeft={ROW_INSET_PX}
+              padLeft={ROOT_PAD_PX}
               isCollapsed={false}
               rollup={null}
               selectedTaskId={selectedTaskId}
@@ -2127,10 +2174,10 @@ function TaskRows({
     );
   }
 
-  // A root list that contains a parent shifts all its roots right by one
-  // gutter, so the parents' chevrons have a column and every root title shares
-  // one left edge; a list of childless roots keeps the plain inset.
-  const rootPad = ROW_INSET_PX + (nodes.some((n) => n.children.length > 0) ? ROW_GUTTER_PX : 0);
+  // Every root row reserves the chevron gutter whether or not the list
+  // contains a parent, so depth-0 titles share one left edge across lists
+  // and views (search, pinned, status groups render roots at the same x).
+  const rootPad = ROOT_PAD_PX;
 
   const renderNode = (node: TaskNode, padLeft: number): ReactNode => {
     const { task, tier, children } = node;

@@ -55,6 +55,8 @@ const SPACE_A: Space = {
   UpdatedAt: "2024-01-01T00:00:00Z",
 };
 
+const IN_SPACE = makeTask(5, "Spaced task", { SpaceID: SPACE_A.ID });
+
 async function flush(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
@@ -425,7 +427,6 @@ describe("task row, single line (S4)", () => {
 });
 
 describe("container rows (S5)", () => {
-  const IN_SPACE = makeTask(5, "Spaced task", { SpaceID: SPACE_A.ID });
 
   it("workspace and space actions are not mounted at idle and mount on hover", async () => {
     await mountSidebar([IN_SPACE], {}, [SPACE_A]);
@@ -508,7 +509,7 @@ describe("container rows (S5)", () => {
 });
 
 describe("task context menu (S6)", () => {
-  const IN_A = makeTask(5, "In A", { SpaceID: SPACE_A.ID });
+  const IN_A = IN_SPACE;
   const SPACE_B: Space = { ...SPACE_A, ID: 11, Title: "Space B" };
 
   async function menuLabels(menu: HTMLElement): Promise<string[]> {
@@ -615,11 +616,11 @@ describe("title overflow and indentation (S7)", () => {
     }
   });
 
-  it("indentation is per-row padding by depth: 12px per level, one gutter more where the root list has parents", async () => {
+  it("indentation is per-row padding by depth: the gutter is always reserved, 12px per level below", async () => {
     await mountSidebar(TREE);
 
-    // The root list contains a parent, so roots start 12px past the 8px inset
-    // (the gutter for the chevron); each level below adds 12px.
+    // Every depth-0 row sits at the 8px inset plus the always-reserved 12px
+    // chevron gutter; each level below adds 12px.
     expect(taskItem(ROOT.ID).style.paddingLeft).toBe("20px");
     expect(taskItem(LEADER.ID).style.paddingLeft).toBe("32px");
     expect(taskItem(CODER.ID).style.paddingLeft).toBe("44px");
@@ -627,11 +628,30 @@ describe("title overflow and indentation (S7)", () => {
     expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("32px");
   });
 
-  it("a root list without parents keeps the plain 8px inset", async () => {
-    await mountSidebar([makeTask(1, "A"), makeTask(2, "B")]);
+  it("depth-0 rows have identical padding with and without a parent sibling", async () => {
+    await mountSidebar(TREE);
+    await mountSidebar([makeTask(11, "A"), makeTask(12, "B")]);
 
-    expect(taskItem(1).style.paddingLeft).toBe("8px");
-    expect(taskItem(2).style.paddingLeft).toBe("8px");
+    // The root list's shape (contains a parent or not) no longer shifts the
+    // column: a depth-0 title starts at the same x in both mounts -- and in
+    // the flat views, which render roots at the same padding.
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("20px");
+    expect(taskItem(11).style.paddingLeft).toBe("20px");
+    expect(taskItem(12).style.paddingLeft).toBe("20px");
+  });
+
+  it("flat lists render root rows at the same padding as the tree", async () => {
+    window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([ROOT.ID]));
+    await mountSidebar(TREE);
+    const treePad = taskItem(ROOT.ID).style.paddingLeft;
+
+    const pinnedRow = within(screen.getByTestId("sidebar-pinned-section")).getAllByTestId("sidebar-task-item")[0]!;
+    expect(pinnedRow.style.paddingLeft).toBe(treePad);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "Root" } });
+    const searchRow = (await screen.findAllByTestId("sidebar-task-item"))[0]!;
+    expect(searchRow.style.paddingLeft).toBe(treePad);
   });
 
   it("a parent's chevron sits in the gutter directly left of its own status slot", async () => {
@@ -643,16 +663,40 @@ describe("title overflow and indentation (S7)", () => {
     }
   });
 
-  it("nested lists add no margin, padding or guide line, so every highlight spans the sidebar", async () => {
+  it("task-tree nested lists add no indent; container content wrappers carry the guide", async () => {
     await mountSidebar(TREE, {}, [SPACE_A]);
 
     const lists = Array.from(document.querySelectorAll<HTMLElement>('ul[data-sidebar="menu-sub"]'));
     expect(lists.length).toBeGreaterThan(1);
-    for (const list of lists) {
-      expect(list.className, "a nested list must not indent its rows").toContain("mx-0");
+    const treeLists = lists.filter((l) => l.getAttribute("data-testid") !== "sidebar-container-content");
+    expect(treeLists.length).toBeGreaterThan(0);
+    for (const list of treeLists) {
+      expect(list.className, "a task-tree list must not indent its rows").toContain("mx-0");
       expect(list.className).toContain("px-0");
       expect(list.className).toContain("border-l-0");
     }
+    for (const list of lists.filter((l) => l.getAttribute("data-testid") === "sidebar-container-content")) {
+      expect(list.className, "container content carries one guide line under its header's icon").toContain("ml-4");
+      expect(list.className).toContain("border-l");
+      expect(list.className).toContain("pl-1");
+    }
+  });
+
+  it("workspace content and space content each carry one guide-line wrapper", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+
+    const workspaceContent = screen.getByTestId("sidebar-workspace-row")!.closest("li")!.querySelector('[data-testid="sidebar-container-content"]')!;
+    expect(workspaceContent).toHaveAttribute("data-container-kind", "workspace");
+    expect(workspaceContent.contains(screen.getByTestId("sidebar-space-row"))).toBe(true);
+
+    const spaceContent = screen.getByTestId("sidebar-space-row").closest("li")!.querySelector(':scope > [data-testid="sidebar-container-content"]')!;
+    expect(spaceContent).toHaveAttribute("data-container-kind", "space");
+    expect(spaceContent.contains(taskItem(IN_SPACE.ID))).toBe(true);
+
+    // Exactly one wrapper per container level, and the pinned/status content
+    // is guided the same way.
+    const guided = screen.getAllByTestId("sidebar-container-content");
+    expect(guided).toHaveLength(2);
   });
 
   it("a row's own highlight is the whole line: the wrapper carries the selected background", async () => {

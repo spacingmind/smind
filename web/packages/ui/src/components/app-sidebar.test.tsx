@@ -1599,13 +1599,13 @@ describe("AppSidebar task tree (PR-U1)", () => {
     expect(itemOf(PARENT.ID).style.paddingLeft).toBe("20px");
   });
 
-  it("lists without parents keep the plain inset, with no gutter", async () => {
+  it("lists without parents reserve the gutter too, so depth-0 titles align across lists", async () => {
     const LONE_A: Task = { ...TASK, ID: 20, Title: "Lone A" };
     const LONE_B: Task = { ...TASK, ID: 21, Title: "Lone B" };
     await mountTree({}, [LONE_A, LONE_B]);
 
     for (const row of screen.getAllByTestId("sidebar-task-row")) {
-      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("8px");
+      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("20px");
     }
   });
 
