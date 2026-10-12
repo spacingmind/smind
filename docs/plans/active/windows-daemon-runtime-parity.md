@@ -242,8 +242,15 @@ Settled for this plan:
 - 2026-10-12: **full `go test ./...` on native Windows: 34 packages ok, 0
   failing tests, 214 s** (baseline: 15 packages / 192 tests failing,
   >5 min).
-- Open: claude-native agent trees (AC2) and AC8's PR-blocking job, AC9
-  release binaries, ADR-0024 wording, README.
+- 2026-10-12: slice H (claude-native, AC1 + AC2) merged into
+  `fix/windows-test-agent-exe`: launcher decision taken with the user (resolve
+  the real `claude.exe`, run it through `smind.exe` in launcher mode inside a
+  kill-on-close Job; no upstream SDK change). `internal/claudecli`,
+  `taskrunner.claudeLaunch`; full `go test ./...` 35 packages ok. Found and
+  fixed on the way: `claudecode.WithEnv` replaces the env list per call, so a
+  decider's dialog-timeout variable dropped the task's `SMIND_PORT`.
+- Open: AC8's PR-blocking job, AC9 release binaries, ADR-0024 wording,
+  README.
 
 ## Validation
 
@@ -258,15 +265,29 @@ All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
   refuses an .exe or an unresolvable command) used by acp and codex
   (`TestSpawnShim_*` in internal/acp and internal/codex),
   `TestProviderTest_ReportsShim_Windows` and the `npx.cmd` fixtures.
-  **Not covered:** claude-native (see AC2).
+  claude-native: `claudecli.Resolve` never returns a `.cmd`/`.bat` (it parses
+  the npm shim for the real `claude.exe`, probes the npm layout and the native
+  installer location) and the launcher runs only an absolute `claude.exe`;
+  `TestResolve_*`, `TestValidateTarget`, and
+  `TestLauncher_PassesArgsStdinAndExitCodeAndStripsTheEnvVar` (args with
+  spaces, JSON, `& | < > ^`, `%PATH%`, a quote arrive intact; the launch env
+  var does not leak to the CLI or anything it starts).
 - **AC2** — `internal/winjob` (suspended start, assign, `NtResumeProcess`
   with status check, once-guarded close): its own tests (resumed child runs,
   Close kills child + grandchild, idempotent/nil-safe) plus
   `TestAgentStop_KillsDescendants_Windows` and
   `TestAgentJob_DaemonCrashKillsTree_Windows` for acp and codex (`-count=5`
-  stable). **Open:** `claude-agent-sdk-go@v0.3.2` spawns `claude` itself with
-  no hook, so claude-native trees can still orphan; needs a decision
-  (launcher wrapper vs upstream SDK change).
+  stable). claude-native: `claude-agent-sdk-go@v0.3.2` spawns `claude` itself
+  with no hook and stops it with `Process.Kill`, so smind starts the CLI
+  through itself: `WithCLIPath(smind.exe)` + `SMIND_CLAUDE_LAUNCH=<claude.exe>`
+  makes `main()` run a launcher that owns the Job (`internal/claudecli`).
+  `TestLauncher_KillingTheLauncherKillsTheWholeTree` (verified to FAIL when the
+  Job is removed) and `TestRunner_RunPrompt_ClaudeNative_ThroughTheWindowsLauncher`
+  (a whole turn SDK -> launcher -> fake CLI); `claude -v` through the built
+  `smind.exe` launcher on this machine returns 2.1.287 with exit 0, and a
+  non-`claude.exe` target is refused. **Not covered:** a real logged-in
+  `claude` turn (no credentials on this machine); the launcher is
+  Windows-only, other platforms are untouched.
 - **AC3** — `POST /api/shutdown` (token-guarded like `/v1/*`, 202, one
   `sync.Once` channel shared with the signal path) and `smind stop`:
   `TestShutdown_*` (401 / GET / POST once / twice), `TestServe_GracefulShutdown`
