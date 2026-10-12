@@ -15,6 +15,7 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
+import { UsageModalRoot } from "@/components/account-usage/usage-modal";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUpdateDialog } from "@/components/desktop-update-dialog";
@@ -56,6 +57,7 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
@@ -157,6 +159,7 @@ const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
   "palette.open",
   "shortcuts.help",
   "settings.open",
+  "usage.open",
   "theme.cycle",
   "app.quit",
 ];
@@ -830,6 +833,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     if (activeView !== "settings") openSettings();
   });
 
+  // Plan usage opens as a modal over whatever is showing, Settings included
+  // (AC32/AC67/AC68); the footer item and chat hover card claim the same
+  // action later, so they never need to know about the modal.
+  useActionHandler("usage.open", openUsageModal);
+
   useActionHandler(
     "sidebar.task-jump",
     (payload) => {
@@ -1180,6 +1188,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // outside this wrapper and still render on top.
   return (
     <div className="relative h-svh w-full">
+      <UsageModalRoot client={client} events={events} />
       <div
         data-testid="app-shell"
         className={cn("h-full w-full", settingsOpen && "invisible")}
@@ -1342,6 +1351,15 @@ function ShellCommands({
 
   const actionCommands = useMemo<Command[]>(
     () => [
+      {
+        id: "open-usage",
+        group: "Actions",
+        title: "Usage: open plan usage",
+        subtitle: "Plan windows for each account",
+        keywords: ["quota", "limits", "plan", "5h", "weekly", "rate limit"],
+        action: "usage.open",
+        run: openUsageModal,
+      },
       {
         id: "cycle-theme",
         group: "Actions",

@@ -24,6 +24,9 @@ const MCP_TOPICS = ["mcpServer.created", "mcpServer.updated", "mcpServer.deleted
 /** ADR-0016's three chat lifecycle topics (P3: chat tabs, rename, archive all react to these). */
 const CHAT_TOPICS = ["chat.created", "chat.updated", "chat.archived", "chat.queueUpdated"];
 
+/** ADR-0028's plan-usage topics: a fetched report (`account.usage`) and an account removal. */
+const ACCOUNT_USAGE_TOPICS = ["account.usage", "account.removed"];
+
 const TOPICS = [
   "task.status",
   "run.status",
@@ -32,6 +35,7 @@ const TOPICS = [
   ...PROFILE_TOPICS,
   ...MCP_TOPICS,
   ...CHAT_TOPICS,
+  ...ACCOUNT_USAGE_TOPICS,
 ];
 
 /** Registration surface returned by useDaemonEvents -- topic-filtered, with per-listener try/catch isolation. */
