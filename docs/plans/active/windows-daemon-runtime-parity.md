@@ -83,8 +83,11 @@ per-package timeout and writes a failure summary.
    - Every test that cannot apply on Windows is skipped with a reason. A
      test whose behavior does matter on Windows gets a Windows-equivalent
      assertion instead.
-   - Once green, the suite runs on every PR as a blocking check, kept under
-     12 min wall time.
+   - The suite runs nightly on `develop` and on demand (`workflow_dispatch`,
+     any branch). **Decided by the user 2026-10-12: it is NOT a blocking PR
+     check** (about 4 min, and one test is known to flake under load);
+     the coordinator triggers it by hand when a change needs Windows
+     evidence.
 9. **AC9 — Release binaries.**
    - Every release attaches `smind_<version>_windows_amd64.zip` and
      `smind_<version>_windows_arm64.zip`, each containing `smind.exe`, and
@@ -152,8 +155,8 @@ Named scenarios:
 - `TestTokenFile_OwnerOnlyACL_Windows` and
   `TestKeypairFile_OwnerOnlyACL_Windows`: the DACL grants only the current
   user (plus SYSTEM, if D3 allows it). (AC7)
-- `windows-full-suite.yml` passes on `develop`, and then the PR-blocking job
-  passes under 12 min. (AC8)
+- `windows-full-suite.yml` passes on `develop` (nightly) and on demand for
+  a branch. (AC8)
 - A release dry run (`release-please.yml` with `workflow_dispatch` or a
   test tag) lists the two zips and their checksums. `smind.exe version` is
   checked inside the workflow. The arm64 terminal tests run on
@@ -249,8 +252,9 @@ Settled for this plan:
   `taskrunner.claudeLaunch`; full `go test ./...` 35 packages ok. Found and
   fixed on the way: `claudecode.WithEnv` replaces the env list per call, so a
   decider's dialog-timeout variable dropped the task's `SMIND_PORT`.
-- Open: AC8's PR-blocking job, AC9 release binaries, ADR-0024 wording,
-  README.
+- 2026-10-12: AC8 decision: nightly + on-demand only, no blocking PR check.
+- Open: a green `windows-full-suite.yml` run on GitHub, the first release
+  carrying the Windows zips (AC9), ADR-0024 wording, README.
 
 ## Validation
 
@@ -307,8 +311,11 @@ All on Windows 11 25H2 build 26200, amd64, Go 1.27.0, branch
 - **AC7** — `internal/securefile`; `icacls` shows only the user and SYSTEM, no
   inherited ACEs; auth/e2ee/taskrunner permission tests assert it (also
   green on Linux via WSL).
-- **AC8** — suite green locally (above). **Not yet:** the PR-blocking CI
-  job and a green `windows-full-suite.yml` run on GitHub.
+- **AC8** — suite green locally (above; 35 packages after merging develop on
+  2026-10-12). Nightly + `workflow_dispatch` is the agreed scope (no blocking
+  PR job, user decision 2026-10-12). **Not yet:** a green
+  `windows-full-suite.yml` run on GitHub (needs the workflow on `develop`, or
+  a manual dispatch against the branch).
 - **AC9** — branch `feat/release-windows-binaries` (slice E, off `develop`): the
   release matrix gains `windows/amd64` and `windows/arm64` (pure Go,
   cross-compiled on ubuntu), `smind_<version>_windows_<arch>.zip` with
