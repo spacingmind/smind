@@ -36,6 +36,17 @@ export function formatResetLabel(resetsAt: string | null | undefined, now: numbe
   return `resets ${diffMinutes}m`;
 }
 
+/**
+ * When a cooldown ends, in the viewer's locale and zone: "2:05 PM" today, "Oct 13, 2:05 PM" on
+ * another day.
+ */
+export function formatCooldownUntil(untilMs: number, now: number = Date.now(), locale?: string): string {
+  const until = new Date(untilMs);
+  const today = until.toDateString() === new Date(now).toDateString();
+  const time: Intl.DateTimeFormatOptions = { hour: "numeric", minute: "2-digit" };
+  return new Intl.DateTimeFormat(locale, today ? time : { month: "short", day: "numeric", ...time }).format(until);
+}
+
 /** A balance amount as the app's language writes it: "$1,234.50", "12,345". */
 export function formatAmount(value: number, unit: string, locale?: string): string {
   const tag = locale ?? undefined;
