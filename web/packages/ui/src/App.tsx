@@ -1708,7 +1708,7 @@ function PaneTabStrip({
         onValueChange={onActivate}
         className="h-full gap-0"
       >
-        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
+        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
           {tabs.length > 0 && (
             <TabsList className="w-fit">
               {tabs.map((entry, index) => (
