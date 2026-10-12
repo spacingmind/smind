@@ -475,6 +475,21 @@ describe("model picker", () => {
     }
   });
 
+  it("a narrow window with a fine pointer keeps the provider list while the search is focused", () => {
+    mobile.value = true;
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia;
+    try {
+      renderPicker({ selectedProvider: "none", profileRows: PROFILES });
+      open();
+      expect(searchInput()).toHaveFocus();
+      expect(screen.getByText("Providers")).toBeInTheDocument();
+      expect(screen.getByTestId("model-provider-glm")).toBeInTheDocument();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
   it("settings buttons are tab stops, row actions are not, and the action reveal is fine-pointer only", () => {
     renderPicker();
     open();

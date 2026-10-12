@@ -117,6 +117,10 @@ function modelEntries(rows: ModelRow[], qualified: boolean): PickerEntry[] {
   return rows.map((row) => ({ kind: "model", key: `model-${row.key}`, row, qualified }));
 }
 
+function hasFinePointer(): boolean {
+  return window.matchMedia?.("(pointer: fine)").matches ?? false;
+}
+
 export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const {
     providers,
@@ -156,7 +160,8 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const canGoBack = view.kind === "provider" && visibleProviders.length > 1;
   const normalizedQuery = query.trim().toLowerCase();
   // On the sheet the keyboard covers the list, so focusing an empty search shows every model (Paseo searchAllOnFocus).
-  const searchFocused = isMobile && inputFocused;
+  // A fine pointer (a narrow desktop window) has no on-screen keyboard and autofocuses the input, so it keeps the browse layout.
+  const searchFocused = isMobile && inputFocused && !hasFinePointer();
   const profilesByModel = useMemo(
     () => groupProfilesByProviderModel(profileRows.map((p) => ({ ...p, modelId: p.model }))),
     [profileRows],
@@ -308,7 +313,10 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     setView({ kind: "all" });
     setQuery("");
     setActiveIndex(0);
-    inputRef.current?.focus();
+    // Keep keyboard flow on desktop; on touch this would raise the keyboard over the list.
+    if (!isMobile || hasFinePointer()) {
+      inputRef.current?.focus();
+    }
   };
 
   const manageAgents = () => {
@@ -530,7 +538,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const focusInput = (e: Event) => {
     e.preventDefault();
     // Touch keeps it unfocused; a fine pointer (desktop-class sheet) can type straight away.
-    if (!isMobile || window.matchMedia?.("(pointer: fine)").matches) {
+    if (!isMobile || hasFinePointer()) {
       inputRef.current?.focus();
     }
   };
