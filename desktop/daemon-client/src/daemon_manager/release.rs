@@ -44,8 +44,6 @@ pub fn windows_target_from_os_arch(process_machine: u16, native_machine: u16) ->
 
 /// native_target maps the current process's `std::env::consts::{OS,ARCH}`
 /// to the release's `(os, arch)` vocabulary, for the macOS native path.
-/// The WSL2 path does not use this -- it asks the distro itself (`wsl`
-/// module), since the Windows host's own arch is irrelevant.
 pub fn native_target(os: &str, arch: &str) -> Result<(&'static str, &'static str), String> {
     let release_os = match os {
         "macos" => "darwin",
@@ -57,16 +55,6 @@ pub fn native_target(os: &str, arch: &str) -> Result<(&'static str, &'static str
         other => return Err(format!("unsupported native arch {other:?}")),
     };
     Ok((release_os, release_arch))
-}
-
-/// linux_target maps a WSL2 distro's own `uname -m` output to the
-/// release's arch vocabulary. The OS side is always `linux` for WSL2.
-pub fn linux_target(uname_m: &str) -> Result<&'static str, String> {
-    match uname_m.trim() {
-        "x86_64" => Ok("amd64"),
-        "aarch64" | "arm64" => Ok("arm64"),
-        other => Err(format!("unsupported WSL distro arch {other:?}")),
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -134,13 +122,6 @@ mod tests {
         assert_eq!(native_target("macos", "aarch64").unwrap(), ("darwin", "arm64"));
         assert!(native_target("windows", "x86_64").is_err());
         assert!(native_target("macos", "riscv64").is_err());
-    }
-
-    #[test]
-    fn linux_target_maps_wsl_arch() {
-        assert_eq!(linux_target("x86_64").unwrap(), "amd64");
-        assert_eq!(linux_target("aarch64\n").unwrap(), "arm64");
-        assert!(linux_target("mips").is_err());
     }
 
     #[test]
