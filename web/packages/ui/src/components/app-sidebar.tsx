@@ -66,7 +66,7 @@ import {
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
-import { formatRelativeTime } from "@/lib/relative-time";
+import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
@@ -252,6 +252,8 @@ interface RowSignal {
   onMarkUnread: (taskId: number) => void;
   /** Task ids pinned to the sidebar's Pinned section (AC4). */
   pinned: ReadonlySet<number>;
+  /** Wall clock (ms), refreshed once a minute, so the rows' relative times age without every row owning a timer. */
+  now: number;
   /** The task context menu's Pin/Unpin action. */
   onTogglePin: (taskId: number) => void;
 }
@@ -263,6 +265,7 @@ const EMPTY_SIGNAL: RowSignal = {
   unread: new Set(),
   onMarkUnread: () => {},
   pinned: new Set(),
+  now: 0,
   onTogglePin: () => {},
 };
 
@@ -428,8 +431,14 @@ export function AppSidebar({
     const hidden = chain.filter((id) => collapsed.has(id));
     if (hidden.length > 0) expandCollapsed(hidden);
   }, [selectedTaskId, taskForest, collapsed, expandCollapsed]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
   const rowSignal = useMemo<RowSignal>(
     () => ({
+      now,
       attention,
       statusOverrides,
       runStatus: runStatus ?? EMPTY_RUN_STATUS,
@@ -439,7 +448,7 @@ export function AppSidebar({
       pinned,
       onTogglePin: togglePin,
     }),
-    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
+    [now, attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
   );
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
@@ -803,7 +812,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             <ScrollArea className="h-full">
               <RowSignalContext.Provider value={rowSignal}>
-                <SidebarMenu>
+                <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
                   {!error && workspaces === null && (
                     <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
@@ -1554,80 +1563,42 @@ function AggregateSlot({ status, label }: { status: StatusDotStatus | null; labe
 }
 
 /**
- * The task row's second line: its branch and the size of its diff, the two
- * things `audit-paseo.md` §5's sidebar meta row leads with.
- *
- * Always rendered, even with nothing to say, so the row's height is the
- * same for every task at every moment -- Item 2's layout-stability rule
- * applied to the one thing a reserved-width slot cannot fix. A task with
- * no stat (never run, no worktree, or a stat the daemon could not compute)
- * shows its coarse lifecycle status instead of a fabricated "0 files",
- * which would read as "no changes" and be a different, wrong claim.
- */
-function TaskMetaRow({ stat, status, tierLabel }: { stat?: TaskStat; status: string; tierLabel?: string | null }) {
-  return (
-    <span
-      data-testid="sidebar-task-meta"
-      // pl-8 lines this row's icon up under the title text above, not the
-      // row's own left edge -- the title row reserves a 32px run-status +
-      // unread-dot lead-in (w-2.5 + gap-2 + w-1.5 + gap-2) so a status
-      // change never shifts the title sideways; this row has no such
-      // slots of its own, so without the matching offset it visually
-      // hangs off to the left of the title it belongs to.
-      className="flex h-4 w-full items-center gap-1.5 overflow-hidden pl-8 text-ui-xs text-muted-foreground"
-    >
-      {/*
-       * The tier label (PR-U1) lives on this second line, not next to the
-       * title: a shrink-0 chip beside the title ate the title's width on a
-       * 255px sidebar ("Shi…"), while the branch name down here can
-       * truncate harmlessly. Untiered roots render no label.
-       */}
-      {tierLabel && (
-        <span data-testid="task-tier" className="shrink-0">
-          {tierLabel}
-        </span>
-      )}
-      {stat ? (
-        <>
-          <GitBranch className="size-2.5 shrink-0" />
-          <span data-testid="sidebar-task-branch" className="min-w-0 truncate" title={stat.branch}>
-            {stat.branch}
-          </span>
-          {stat.filesChanged > 0 && (
-            <span
-              data-testid="sidebar-task-diffstat"
-              className="ml-auto shrink-0 tabular-nums"
-              title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
-            >
-              {stat.filesChanged}f <span className="text-success">+{stat.insertions}</span>{" "}
-              <span className="text-destructive">-{stat.deletions}</span>
-            </span>
-          )}
-        </>
-      ) : (
-        <span data-testid="sidebar-task-status" className="uppercase">
-          {status}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
  * The task row's hover card (AC5): branch, diff stat and last activity --
  * the same fields TaskMetaRow already shows plus task.UpdatedAt, no more.
  * Deliberately no PR state: smind's wire types (lib/types.ts's Task) carry
  * no PR field at all yet, and the plan's Decisions are explicit that this
  * card shows "only data the web UI already has; don't invent data."
  */
-function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat; status: string }) {
+function TaskHoverCardBody({
+  task,
+  stat,
+  status,
+  tier,
+  childCount,
+  now,
+}: {
+  task: Task;
+  stat?: TaskStat;
+  status: string;
+  tier: string | null;
+  childCount: number;
+  now: number;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       <p className="truncate text-ui-base font-medium text-foreground">{task.Title}</p>
+      {tier && (
+        <p data-testid="task-tier" className="text-ui-sm text-muted-foreground">
+          {tier}
+          {childCount > 0 && ` · ${childCount} sub-task${childCount === 1 ? "" : "s"}`}
+        </p>
+      )}
       {(stat?.branch ?? task.Branch) && (
         <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
           <GitBranch className="size-3 shrink-0" />
-          <span className="min-w-0 truncate">{stat?.branch ?? task.Branch}</span>
+          <span data-testid="sidebar-task-branch" className="min-w-0 truncate">
+            {stat?.branch ?? task.Branch}
+          </span>
         </div>
       )}
       {stat && stat.filesChanged > 0 && (
@@ -1638,9 +1609,11 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
         </p>
       )}
       <p className="text-ui-sm text-muted-foreground">
-        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt)}</span>
+        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt, now)}</span>
       </p>
-      <p className="text-ui-sm uppercase text-muted-foreground">{status}</p>
+      <p data-testid="sidebar-task-status" className="text-ui-sm uppercase text-muted-foreground">
+        {status}
+      </p>
     </div>
   );
 }
@@ -1708,8 +1681,8 @@ function handleTaskRowArrowKey(
  */
 const TaskRow = memo(function TaskRow({
   task,
-  tierLabel,
-  hasChildren,
+  tier,
+  childCount,
   reserveChevron,
   isCollapsed,
   onToggleCollapse,
@@ -1721,9 +1694,10 @@ const TaskRow = memo(function TaskRow({
   onMoveTask,
 }: {
   task: Task;
-  /** "<tier>" or "<tier> · <childCount>"; absent for an untiered root. Rendered on the meta row, not the title row. */
-  tierLabel: string | null;
-  hasChildren: boolean;
+  /** "supervisor" | "leader" | "coder"; absent for an untiered root. Shown in the hover card and the row's aria-label, not on the row. */
+  tier: string | null;
+  /** Direct children; > 0 makes this row a parent (chevron + child-count chip). */
+  childCount: number;
   /** Whether childless rows in this sibling list still render the empty w-3 chevron slot so titles align (see TaskRows). */
   reserveChevron: boolean;
   isCollapsed: boolean;
@@ -1736,7 +1710,8 @@ const TaskRow = memo(function TaskRow({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
+  const hasChildren = childCount > 0;
   const reason = primaryAttentionReason(attention?.get(task.ID));
   const runState = runStatus.get(task.ID);
   const runDot = runDotStatus(runState);
@@ -1744,7 +1719,9 @@ const TaskRow = memo(function TaskRow({
   const isUnread = unread.has(task.ID);
   const slotSignal = taskSlotSignal(reason, runState, isUnread);
   const isTaskPinned = pinned.has(task.ID);
+  const isSelected = task.ID === selectedTaskId;
   const status = statusOverrides.get(task.ID) ?? task.Status;
+  const branch = stat?.branch ?? task.Branch;
   // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
   // caller's li also contains this task's nested children list, so a CSS
   // group on the li would reveal every descendant's actions on one hover
@@ -1756,11 +1733,23 @@ const TaskRow = memo(function TaskRow({
       e.preventDefault();
     }
   };
+  // The row shows only title + status + time, so everything it no longer
+  // prints (tier, branch, what the dot means) is spoken here instead.
+  const rowLabel = [
+    task.Title,
+    tier && (hasChildren ? `${tier} with ${childCount} sub-task${childCount === 1 ? "" : "s"}` : tier),
+    branch && `branch ${branch}`,
+    slotSignal.kind === "attention" && `needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`,
+    slotSignal.kind === "run" && `latest run ${slotSignal.status}`,
+    slotSignal.kind === "unread" && "unread",
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <div
       data-testid="sidebar-task-item"
       data-task-id={task.ID}
-      className="relative flex min-w-0 items-start gap-1"
+      className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg", isSelected ? "bg-selected" : active && "bg-hover")}
       {...rowProps}
     >
       {/*
@@ -1779,37 +1768,32 @@ const TaskRow = memo(function TaskRow({
           aria-expanded={!isCollapsed}
           data-testid="task-collapse-toggle"
           onClick={() => onToggleCollapse?.(task.ID)}
-          className="mt-2 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
+          className="ml-1 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
         >
           <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
         </button>
       ) : reserveChevron ? (
-        <span className="w-3 shrink-0" />
+        <span className="ml-1 w-3 shrink-0" />
       ) : null}
       <HoverCard openDelay={400} closeDelay={100}>
         <HoverCardTrigger asChild>
           <SidebarMenuSubButton
             asChild
-            className="h-auto min-w-0 flex-1 flex-col items-stretch gap-0.5 py-1"
-            isActive={task.ID === selectedTaskId}
+            // The highlight lives on the wrapper (so the ⋯ overlay can inherit
+            // it and the chevron sits inside it), not on the select button.
+            className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-2 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+            isActive={isSelected}
           >
             <button
               type="button"
-              aria-current={task.ID === selectedTaskId ? "true" : undefined}
+              aria-label={rowLabel}
+              aria-current={isSelected ? "true" : undefined}
               onClick={() => onSelectTask?.(task)}
               onKeyDown={onRowKeyDown}
               data-testid="sidebar-task-row"
               data-task-id={task.ID}
               data-parent-task-id={task.ParentTaskID ?? undefined}
             >
-              {/*
-               * min-w-0 on the row itself, not just on the title span
-               * inside it: a truncating label only clips if *every* box
-               * between it and the scrolling viewport can shrink below its
-               * content's width (see components/ui/scroll-area.tsx for the
-               * ancestor that used to break this chain).
-               */}
-              <span className="flex w-full min-w-0 items-center gap-2">
               {/*
                * The ONE leading status slot (sidebar-polish S3): always in the
                * DOM at a constant width -- a signal arriving or clearing must
@@ -1852,19 +1836,22 @@ const TaskRow = memo(function TaskRow({
                   />
                 )}
               </span>
-              {/*
-               * flex-1 so the title always takes the row's leftover width:
-               * it and only it may shrink (via min-w-0 truncate) when the
-               * rollup or the slots need room on a narrow sidebar.
-               */}
+              {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
               <span className="min-w-0 flex-1 truncate">{task.Title}</span>
+              {hasChildren && (
+                <span
+                  data-testid="task-child-count"
+                  aria-label={`${childCount} sub-task${childCount === 1 ? "" : "s"}`}
+                  className="shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle"
+                >
+                  {childCount}
+                </span>
+              )}
               {/*
                * Collapsed-parent attention rollup (PR-U1): the loudest
                * reason among the hidden descendants plus how many need
-               * attention, rendered right before the row's own attention
-               * slot so both dots read as "this row's signal" without
-               * moving any reserved slot. Expanded parents show nothing
-               * here -- their children carry their own dots.
+               * attention. Expanded parents show nothing here -- their
+               * children carry their own dots.
                */}
               {rollup && (
                 <span
@@ -1877,46 +1864,70 @@ const TaskRow = memo(function TaskRow({
                   <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
                 </span>
               )}
-              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
+              <SetupBadge status={task.SetupStatus} compact />
+              {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
+              {stat && stat.filesChanged > 0 && (
+                <span
+                  data-testid="sidebar-task-diffstat"
+                  className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                  title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
+                >
+                  <span className="text-success">+{stat.insertions}</span>{" "}
+                  <span className="text-destructive">-{stat.deletions}</span>
+                </span>
+              )}
+              {/*
+               * Compact relative time. Its slot is a fixed width and is only
+               * made invisible (not removed) while the row's ⋯ is showing, so
+               * hovering never reflows the title; the ⋯ is overlaid on this
+               * same spot (ZCode TaskListItem's time -> actions swap).
+               */}
+              <span
+                data-testid="task-row-time"
+                className={cn(
+                  "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtle @max-[14rem]/sb:hidden",
+                  active && "invisible",
+                )}
+              >
+                {formatRelativeTimeShort(task.UpdatedAt, now)}
               </span>
-              <TaskMetaRow stat={stat} status={status} tierLabel={tierLabel} />
             </button>
           </SidebarMenuSubButton>
         </HoverCardTrigger>
-            <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-              <TaskHoverCardBody task={task} stat={stat} status={status} />
-            </HoverCardContent>
-          </HoverCard>
-          {active && (
-          <span className="absolute top-0.5 right-0">
-            <DropdownMenu onOpenChange={setMenuOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Actions for ${task.Title}`}
-                  data-testid="sidebar-task-actions-trigger"
-                  data-task-id={task.ID}
-                  className="size-5 p-0"
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
-                <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
-                  {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
-                  <Circle /> Mark unread
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
-                  <Archive /> Archive task
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-          )}
+        <HoverCardContent data-testid="task-hover-card" side="right" align="start">
+          <TaskHoverCardBody task={task} stat={stat} status={status} tier={tier} childCount={childCount} now={now} />
+        </HoverCardContent>
+      </HoverCard>
+      {active && (
+        <span className="absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit">
+          <DropdownMenu onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={`Actions for ${task.Title}`}
+                data-testid="sidebar-task-actions-trigger"
+                data-task-id={task.ID}
+                className="size-5 p-0"
+              >
+                <MoreHorizontal />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
+              <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
+                {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
+                <Circle /> Mark unread
+              </DropdownMenuItem>
+              <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
+                <Archive /> Archive task
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </span>
+      )}
     </div>
   );
 });
@@ -1981,8 +1992,8 @@ function TaskRows({
           <SidebarMenuSubItem key={task.ID}>
             <TaskRow
               task={task}
-              tierLabel={null}
-              hasChildren={false}
+              tier={null}
+              childCount={0}
               reserveChevron={false}
               isCollapsed={false}
               rollup={null}
@@ -2016,8 +2027,8 @@ function TaskRows({
       <SidebarMenuSubItem key={task.ID}>
         <TaskRow
           task={task}
-          tierLabel={tier ? (children.length > 0 ? `${tier} · ${children.length}` : tier) : null}
-          hasChildren={children.length > 0}
+          tier={tier}
+          childCount={children.length}
           reserveChevron={reserveChevron}
           isCollapsed={isCollapsed}
           onToggleCollapse={onToggleCollapse}

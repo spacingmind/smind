@@ -1,5 +1,6 @@
 import { act } from "react";
 import { fireEvent, screen, within } from "@testing-library/react";
+import { vi } from "vitest";
 
 /** The per-row wrapper that owns a task row's hover/focus/menu state (see hooks/use-row-active.ts). */
 export function taskItem(taskId: number): HTMLElement {
@@ -33,4 +34,19 @@ export function taskTrigger(taskId: number): HTMLElement {
   const item = taskItem(taskId);
   fireEvent.mouseEnter(item);
   return within(item).getByTestId("sidebar-task-actions-trigger");
+}
+
+/** Opens a task row's hover card (Radix opens it after a 400ms hover delay) and returns it. */
+export async function openHoverCard(taskId: number): Promise<HTMLElement> {
+  const row = within(taskItem(taskId)).getByTestId("sidebar-task-row");
+  vi.useFakeTimers();
+  try {
+    fireEvent.pointerEnter(row, { pointerId: 1, pointerType: "mouse" });
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+  } finally {
+    vi.useRealTimers();
+  }
+  return screen.findByTestId("task-hover-card");
 }

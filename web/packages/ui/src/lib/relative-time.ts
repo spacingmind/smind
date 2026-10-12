@@ -24,3 +24,20 @@ export function formatRelativeTime(iso: string, now: number = Date.now()): strin
   }
   return "just now";
 }
+
+/**
+ * The terser sibling of formatRelativeTime for a row's trailing time label
+ * ("now", "49m", "3h", "2d", "1mo", "1y"): the sidebar task row has ~24px
+ * for it, so no "ago" and no "just". Same largest-unit-at-least-1 buckets.
+ */
+export function formatRelativeTimeShort(iso: string, now: number = Date.now()): string {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return "";
+  const diffMs = now - then;
+  if (diffMs < 60_000) return "now";
+  for (const unit of UNITS) {
+    const value = Math.floor(diffMs / unit.ms);
+    if (value >= 1) return `${value}${unit.label}`;
+  }
+  return "now";
+}

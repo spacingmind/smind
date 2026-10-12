@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { hoverTask, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
+import { hoverTask, openHoverCard, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
 
@@ -325,5 +325,90 @@ describe("task row status slot (S3)", () => {
     expect(slot).not.toHaveAttribute("data-attention-reason");
     expect(slot).not.toHaveAttribute("data-run-status");
     expect(slot).not.toHaveAttribute("data-unread");
+  });
+});
+
+describe("task row, single line (S4)", () => {
+  const NOW = new Date("2024-06-01T12:00:00Z").getTime();
+
+  it("is one 32px line: no meta row, no second line of text", async () => {
+    await mountSidebar([makeTask(1, "Solo", { Branch: "smind/task-solo-abc" })]);
+
+    expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
+    const item = taskItem(1);
+    expect(item.className).toContain("h-8");
+    // Title, then the right cluster -- the branch is not rendered on the row.
+    expect(item.textContent).not.toContain("smind/task-solo-abc");
+  });
+
+  it("shows a compact relative time from UpdatedAt in the right cluster", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    try {
+      await mountSidebar([
+        makeTask(1, "Recent", { UpdatedAt: "2024-06-01T11:11:00Z" }),
+        makeTask(2, "Older", { UpdatedAt: "2024-05-29T12:00:00Z" }),
+      ]);
+
+      expect(within(taskItem(1)).getByTestId("task-row-time")).toHaveTextContent("49m");
+      expect(within(taskItem(2)).getByTestId("task-row-time")).toHaveTextContent("3d");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows +n -n only when files changed", async () => {
+    const { client } = await mountSidebar([makeTask(1, "Dirty"), makeTask(2, "Clean")]);
+    client.nth("task.stats", 0).resolve({
+      stats: [
+        { taskId: 1, branch: "b1", filesChanged: 2, insertions: 7, deletions: 3 },
+        { taskId: 2, branch: "b2", filesChanged: 0, insertions: 0, deletions: 0 },
+      ],
+    });
+    await flush();
+
+    expect(within(taskItem(1)).getByTestId("sidebar-task-diffstat")).toHaveTextContent("+7 -3");
+    expect(within(taskItem(2)).queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+  });
+
+  it("the actions replace the time in the same slot on hover, without reflowing the row", async () => {
+    await mountSidebar([makeTask(1, "Hover me")]);
+    const time = within(taskItem(1)).getByTestId("task-row-time");
+    const widthClass = time.className.replace("invisible", "").replace(/\s+/g, " ").trim();
+    expect(time.className).not.toContain("invisible");
+
+    hoverTask(1);
+
+    // The time keeps its box (invisible, not removed) and the trigger is overlaid.
+    const after = within(taskItem(1)).getByTestId("task-row-time");
+    expect(after.className).toContain("invisible");
+    expect(after.className.replace("invisible", "").replace(/\s+/g, " ").trim()).toBe(widthClass);
+    expect(within(taskItem(1)).getByTestId("sidebar-task-actions-trigger")).toBeInTheDocument();
+  });
+
+  it("keeps the branch and tier in the hover card and the accessible name, not on the row", async () => {
+    await mountSidebar(TREE.map((t) => ({ ...t, Branch: `br-${t.ID}` })));
+
+    const leader = rowButton(LEADER.ID);
+    expect(leader).toHaveAccessibleName("Leader task, leader with 1 sub-task, branch br-2");
+    expect(leader.textContent).not.toContain("br-2");
+    const card = await openHoverCard(LEADER.ID);
+    expect(within(card).getByTestId("sidebar-task-branch")).toHaveTextContent("br-2");
+    expect(within(card).getByTestId("task-tier")).toHaveTextContent("leader · 1 sub-task");
+  });
+
+  it("parents keep the child-count chip and the collapsed rollup", async () => {
+    const attention: TaskAttention = new Map([[CODER.ID, new Set<AttentionReason>(["permission"])]]);
+    await mountSidebar(TREE, { attention });
+
+    expect(within(taskItem(ROOT.ID)).getByTestId("task-child-count")).toHaveTextContent("2");
+    expect(within(taskItem(CODER.ID)).queryByTestId("task-child-count")).not.toBeInTheDocument();
+    expect(within(taskItem(LEADER.ID)).queryByTestId("task-rollup")).not.toBeInTheDocument();
+
+    fireEvent.click(toggleOf(LEADER.ID));
+
+    const rollup = within(taskItem(LEADER.ID)).getByTestId("task-rollup");
+    expect(rollup).toHaveAttribute("data-rollup-reason", "permission");
+    expect(within(taskItem(LEADER.ID)).getByTestId("task-child-count")).toHaveTextContent("1");
   });
 });

@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { taskTrigger } from "@/test/sidebar-helpers";
+import { openHoverCard, taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
@@ -760,7 +760,8 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     stub.fire("task.status", { taskId: TASK.ID, status: "overridden" });
-    expect(await screen.findByTestId("sidebar-task-status")).toHaveTextContent("overridden");
+    // The lifecycle status lives in the row's hover card (sidebar-polish S4).
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-status")).toHaveTextContent("overridden");
 
     // event.dropped also re-triggers useWorkspaceTree's own refetch
     // (a separate, already-covered concern), which briefly unmounts every
@@ -775,7 +776,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     client.nth("task.list", 1).resolve([TASK]);
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 });
 
@@ -858,7 +859,7 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
   });
 
-  it("a task row shows its branch and diff stat once task.stats reports them", async () => {
+  it("a task row shows its diff stat on the row and its branch in the hover card once task.stats reports them", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -868,14 +869,17 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug");
     const diffstat = screen.getByTestId("sidebar-task-diffstat");
-    expect(diffstat).toHaveTextContent("3f");
     expect(diffstat).toHaveTextContent("+12");
     expect(diffstat).toHaveTextContent("-4");
+    // The branch is no longer printed on the row...
+    expect(screen.getByTestId("sidebar-task-row").textContent).not.toContain("feat/fix-bug");
+    // ...it is in the hover card and the row's accessible name.
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug");
+    expect(screen.getByTestId("sidebar-task-row")).toHaveAccessibleName(/branch feat\/fix-bug/);
   });
 
-  it("a task the daemon reports no stat for falls back to its lifecycle status, never a fabricated zero", async () => {
+  it("a task the daemon reports no stat for shows no diff stat, and its lifecycle status is in the hover card, never a fabricated zero", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -884,11 +888,11 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     await flush();
 
     expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("sidebar-task-branch")).not.toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
+    const card = await openHoverCard(TASK.ID);
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 
-  it("a clean task shows its branch but no diff stat -- zero changed files is not a count worth printing", async () => {
+  it("a clean task shows no diff stat -- zero changed files is not a count worth printing", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -898,25 +902,27 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/clean");
     expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/clean");
   });
 
-  it("the meta line is present at a fixed height whether or not a stat has arrived", async () => {
+  it("the row is one fixed-height line whether or not a stat has arrived: no second meta line", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-    const metaBefore = await screen.findByTestId("sidebar-task-meta");
-    const classNameBefore = metaBefore.className;
+    const itemBefore = (await screen.findByTestId("sidebar-task-item")).className;
+    expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
 
     client.nth("task.stats", 0).resolve({
       stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
     });
     await flush();
 
-    // Same reserved line, same height class -- only its contents changed,
-    // so no row below it moves when a stat lands.
-    expect(screen.getByTestId("sidebar-task-meta").className).toBe(classNameBefore);
+    // Same height class before and after -- only the right cluster's content
+    // changed, so no row below it moves when a stat lands.
+    expect(screen.getByTestId("sidebar-task-item").className).toBe(itemBefore);
+    expect(itemBefore).toContain("h-8");
+    expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
   });
 
   it("selecting a task still invokes onSelectTask with the whole Task, dots or no dots", async () => {
@@ -1522,7 +1528,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const grandchild = await waitFor(() => rowOf(GRANDCHILD.ID));
     expect(rowOf(CHILD.ID).closest("li")!.contains(grandchild)).toBe(true);
     // The new grandchild promoted its parent to leader.
-    expect(rowOf(CHILD.ID).querySelector('[data-testid="task-tier"]')).toHaveTextContent("leader · 1");
+    expect(rowOf(CHILD.ID)).toHaveAccessibleName("Child task, leader with 1 sub-task, branch fix-bug");
   });
 
   it("task.archived of a parent leaves its live child as a root row", async () => {
@@ -1561,19 +1567,18 @@ describe("AppSidebar task tree (PR-U1)", () => {
     expect(rowOf(GRANDCHILD.ID).getAttribute("data-active")).not.toBeNull();
   });
 
-  it("tier label renders in the meta row, not the title row", async () => {
+  it("the tier is not printed on the row; it is in the hover card and the accessible name, and parents keep their child-count chip", async () => {
     await mountTree();
 
     const parentRow = rowOf(PARENT.ID);
-    // The label lives on the meta (second) line...
-    const tier = parentRow.querySelector('[data-testid="task-tier"]');
-    expect(tier).toBeInTheDocument();
-    expect(tier).toHaveTextContent("supervisor · 2");
-    expect(tier!.closest('[data-testid="sidebar-task-meta"]')).toBeInTheDocument();
-    // ...and the title line is [slots][title flex-1][attention] only.
-    const title = within(parentRow).getByText("Parent task");
-    expect(title.className).toContain("flex-1");
-    expect(title.parentElement!.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+    expect(parentRow.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+    expect(parentRow.textContent).not.toMatch(/supervisor/);
+    expect(parentRow).toHaveAccessibleName("Parent task, supervisor with 2 sub-tasks, branch fix-bug");
+    // The chip stays: it is the one hierarchy cue visible while collapsed.
+    expect(within(parentRow).getByTestId("task-child-count")).toHaveTextContent("2");
+
+    const card = await openHoverCard(PARENT.ID);
+    expect(within(card).getByTestId("task-tier")).toHaveTextContent("supervisor · 2 sub-tasks");
   });
 
   it("siblings of a parent reserve the chevron slot so titles align", async () => {
