@@ -442,3 +442,28 @@ func TestAccountUsageCLIJSONPassthroughIncludesCooldown(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountUsageCLIMalformedCooldownUntilDoesNotFailCommand(t *testing.T) {
+	raw := `{"enabled":true,"ttlSeconds":300,"reports":[` +
+		`{"accountId":1,"key":"a","provider":"anthropic","displayName":"Bad","cooldown":{"until":"not a time","scope":"account","reason":"rejected","window":"five_hour"}},` +
+		`{"accountId":2,"key":"b","provider":"anthropic","displayName":"NumUntil","cooldown":{"until":12345,"scope":"account","reason":"rejected"}},` +
+		`{"accountId":3,"key":"c","provider":"anthropic","displayName":"Good","cooldown":{"until":"2026-10-12T13:30:00Z","scope":"account","reason":"rejected","window":"weekly"}}]}`
+	dial := func(context.Context) (wsCaller, error) {
+		return func(_ context.Context, _ string, _ any, out any) error {
+			return json.Unmarshal([]byte(raw), out)
+		}, nil
+	}
+	var out, errOut bytes.Buffer
+	if code := runAccountUsage(context.Background(), dial, false, false, usageNow, &out, &errOut); code != 0 {
+		t.Fatalf("code = %d, stderr = %q", code, errOut.String())
+	}
+	got := out.String()
+	for _, name := range []string{"Bad (anthropic)", "NumUntil (anthropic)", "Good (anthropic)"} {
+		if !strings.Contains(got, name) {
+			t.Errorf("row %q missing from:\n%s", name, got)
+		}
+	}
+	if n := strings.Count(got, "cooling down until"); n != 1 || !strings.Contains(got, "(weekly window rejected)") {
+		t.Errorf("want only the valid cooldown line, got %d in:\n%s", n, got)
+	}
+}

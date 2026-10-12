@@ -52,6 +52,28 @@ type accountUsageCooldown struct {
 	Window string    `json:"window,omitempty"`
 }
 
+// UnmarshalJSON reads until as a string and parses it here, so a malformed or
+// mistyped value (or key) leaves this one cooldown without an end, which the
+// renderer skips, instead of failing the decode of the whole result.
+func (c *accountUsageCooldown) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Until  string `json:"until"`
+		Scope  string `json:"scope"`
+		Model  string `json:"model"`
+		Reason string `json:"reason"`
+		Window string `json:"window"`
+	}
+	*c = accountUsageCooldown{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	c.Scope, c.Model, c.Reason, c.Window = raw.Scope, raw.Model, raw.Reason, raw.Window
+	if until, err := time.Parse(time.RFC3339, raw.Until); err == nil {
+		c.Until = until
+	}
+	return nil
+}
+
 type accountUsageResponse struct {
 	Enabled    bool                `json:"enabled"`
 	TTLSeconds int                 `json:"ttlSeconds"`
