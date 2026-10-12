@@ -292,3 +292,18 @@ func TestFormatCountdown(t *testing.T) {
 		}
 	}
 }
+
+// A refused refresh marks every account stale, but "showing the last good
+// report" is only true for an account that has one.
+func TestAccountUsageStaleHintOnlyForAvailableReports(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	res := &accountUsageResponse{Enabled: true, Reports: []accountUsageEntry{{
+		DisplayName: "Claude", Provider: "anthropic", Stale: true, RefreshBlocked: ptrString("rejected"),
+		Report: &quota.Report{Status: quota.StatusUnavailable, Problem: &quota.Problem{Kind: quota.ProblemExpired}},
+	}}}
+	var buf bytes.Buffer
+	renderAccountUsage(&buf, res, true, now)
+	if strings.Contains(buf.String(), "last good report") {
+		t.Fatalf("stale hint printed for an unavailable report:\n%s", buf.String())
+	}
+}

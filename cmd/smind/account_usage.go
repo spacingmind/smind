@@ -190,7 +190,7 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 		}
 	}
 
-	if e.Stale {
+	if e.Stale && e.Report != nil && e.Report.Status == quota.StatusAvailable {
 		fmt.Fprintln(w, "  (stale: showing the last good report)")
 	}
 	if refresh && e.RefreshBlocked != nil {
