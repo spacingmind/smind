@@ -161,4 +161,40 @@ tests, web ui 1743 tests and `tsc -b` all green.
 - AC8: `daemon_status_reports_missing_git`,
   `git_lookup_finds_program_files_cmd_git`; UI prerequisite notice test.
 - AC9: web tests for unsupported text, Windows paths, WSL notice.
-- AC10: NOT yet verified (needs the real app on a real machine).
+- AC10 (2026-10-12, debug app `tauri build --debug --no-bundle` driven over
+  WebView2 CDP, isolated `SMIND_HOME`/`LOCALAPPDATA`/`APPDATA`, a freshly
+  built `smind.exe` placed at `%LOCALAPPDATA%\smind\bin\` as the stand-in):
+  - Status on a clean machine: platform `windows`, Windows log path, git
+    found, binary installed, not running.
+  - A native `smind.exe` started outside the app: Unmanaged and take-over
+    eligible; Take over -> Managed; Restart -> pid 25508 -> 31372, the old
+    daemon's log ends `smind stopped` (graceful `POST /api/shutdown`, not a
+    kill); `managed.json` and `smind.log` under `%LOCALAPPDATA%\smind`.
+  - App quit: daemon stayed up. Relaunch: still Managed with the same pid;
+    a second Restart worked. Daemon later stopped with `smind stop`.
+  - WSL-held port (a listener inside Ubuntu answering `/healthz`): found a
+    real defect (below), fixed; afterwards Unmanaged + `wslDaemonSuspected`,
+    take-over and install both refused with the WSL/port message, restart
+    refused, nothing signalled, Settings -> Daemon shows the explanation
+    and no Take over (screenshot `ac10-wsl-notice.png`).
+  - Defect 1: WSL forwards localhost in the kernel, so the port answered with
+    no Windows owner at all; the app said NotRunning and would have offered
+    Install onto it. Fixed (`effective_managed_state`,
+    `answering_with_no_visible_owner_is_unmanaged_on_windows_only`). While
+    the Ubuntu VM was still alive after `wsl --terminate`, `smind.exe` could
+    not bind the port either, so this case is real.
+  - Defect 2: `DETACHED_PROCESS` overrides `CREATE_NO_WINDOW`, leaving the
+    daemon with no console so each git/agent child allocated its own
+    (`conhost.exe` per call). Now `CREATE_NO_WINDOW` alone; the daemon owns a
+    hidden console (`AttachConsole` False -> True). A flashing window cannot
+    be observed from this non-interactive session, so that part is verified
+    structurally only.
+  - NOT covered: Install from a real GitHub release (no release carries a
+    Windows zip until the release workflow ships; the path is unit-tested
+    against a local fixture), ARM64, the NSIS installer upgrade path.
+  - Layout note: the NSIS installer's default dir is also
+    `%LOCALAPPDATA%\smind`, so `bin\`, `managed.json` and `smind.log` sit
+    next to `smind-desktop.exe`. Not verified: whether the NSIS uninstaller
+    or an in-place update leaves them alone (it is expected to remove only
+    its own files). Check this before shipping, or move the daemon files to a
+    sibling directory.
