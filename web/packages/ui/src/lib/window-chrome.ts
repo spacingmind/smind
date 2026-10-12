@@ -7,6 +7,7 @@
  * UI out from under them. Windows/Linux draw their own caption buttons inside
  * the header row instead (`DesktopWindowControls`), so they need no inset.
  */
+import { SIDEBAR_ICON_WIDTH } from "@/hooks/use-sidebar-width";
 import type { DesktopOS } from "@/lib/platform";
 
 /** Right edge of the traffic-light cluster plus a clear 8px: lights start at x=16 (`TRAFFIC_LIGHT_POSITION` in `window_chrome.rs`) and, measured on macOS, end at x=76. */
@@ -38,6 +39,7 @@ export function hasCaptionButtons(os: DesktopOS | null): boolean {
  */
 export function headerLeftInsetPx(os: DesktopOS | null, fullscreen: boolean, sidebarPx: number): number {
   if (!hasTrafficLights(os, fullscreen)) return 0;
-  const handle = sidebarPx > 0 ? SIDEBAR_HANDLE_PX : 0;
+  // The resize handle only exists beside an expanded sidebar, not beside the icon rail.
+  const handle = sidebarPx > SIDEBAR_ICON_WIDTH ? SIDEBAR_HANDLE_PX : 0;
   return Math.max(0, TRAFFIC_LIGHT_CLUSTER_PX - sidebarPx - handle);
 }
