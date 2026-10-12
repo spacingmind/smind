@@ -149,6 +149,8 @@ export function Composer({
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  // False until provider.list settles (result or failure): the combined picker shows its loading states meanwhile.
+  const [providersSettled, setProvidersSettled] = useState(false);
   // ADR-0014's Profiles picker: a named provider/permissionMode/
   // thinkingLevel bundle a user applies in one click. Empty when the
   // daemon has none (a fresh install, or client.call failing) -- the
@@ -193,6 +195,7 @@ export function Composer({
 
   useEffect(() => {
     setProviders(FALLBACK_PROVIDERS);
+    setProvidersSettled(false);
     if (!client) return;
     let cancelled = false;
     client
@@ -200,7 +203,10 @@ export function Composer({
       .then((result) => {
         if (!cancelled && result.providers.length > 0) setProviders(result.providers);
       })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
+      .catch((err) => console.error("provider.list failed, using fallback provider list", err))
+      .finally(() => {
+        if (!cancelled) setProvidersSettled(true);
+      });
     return () => {
       cancelled = true;
     };
@@ -401,6 +407,7 @@ export function Composer({
           boundProvider={boundProvider}
           profiles={profiles}
           providers={providers}
+          providersLoading={!!client && !providersSettled}
           disabled={inactive}
           liveRun={liveRun}
           providerHealth={providerHealth.health}
