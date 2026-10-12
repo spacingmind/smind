@@ -302,7 +302,7 @@ export function resolveTriggerTitle({
   if (!provider) {
     return label;
   }
-  if (label === provider.label || label.startsWith(`${provider.label} `)) {
+  if (label === provider.label) {
     return provider.label;
   }
   return `${provider.label} · ${label}`;

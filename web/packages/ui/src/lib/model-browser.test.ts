@@ -395,4 +395,10 @@ describe("trigger label", () => {
       resolveTriggerTitle({ providers: bare, selectedProvider: "kimi", selectedModel: "" }),
     ).toBe("Kimi");
   });
+
+  it("the title keeps the model when its label starts with the provider name", () => {
+    const glm = buildBrowserProviders([info("glm", "GLM", [model("glm-5.3", "GLM 5.3")])], {});
+    expect(resolveTriggerLabel({ providers: glm, selectedProvider: "glm", selectedModel: "glm-5.3" })).toBe("GLM 5.3");
+    expect(resolveTriggerTitle({ providers: glm, selectedProvider: "glm", selectedModel: "glm-5.3" })).toBe("GLM · GLM 5.3");
+  });
 });
