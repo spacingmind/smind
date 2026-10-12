@@ -243,7 +243,7 @@ const ChatOutlineTick = memo(function ChatOutlineTick({
         <div
           aria-hidden
           data-testid="chat-outline-preview"
-          className="pointer-events-none absolute top-1/2 left-[40px] z-10 flex min-h-12 w-[260px] -translate-y-1/2 items-center rounded-lg bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md ring-1 ring-border"
+          className="pointer-events-none absolute top-1/2 left-[40px] z-10 flex min-h-12 w-[260px] -translate-y-1/2 items-center rounded-lg bg-popover px-3 py-2 text-ui-sm text-popover-foreground shadow-md ring-1 ring-border"
         >
           <span className="line-clamp-2 break-words">{preview}</span>
         </div>
