@@ -972,7 +972,7 @@ scratch).
 - [x] PR-B routing integration — PR open (2026-10-12), awaiting review (see Progress / Validation notes below)
 - [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
 - [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
-- [ ] PR-E chat hover card (required)
+- [x] PR-E chat hover card (required) — PR open (2026-10-12), awaiting review (see "PR-E record")
 - [ ] PR-D2 web footer item (default off) and pins
 - [ ] PR-F rejection cooldown + observed headers (right after PR-B)
 - [ ] Manual live check against one real account per provider
@@ -1228,4 +1228,55 @@ Unverified at spec time (the implementing PRs must confirm and record):
 - **Not covered here.** The full-screen Settings screen (`feat/settings-fullscreen`)
   is exercised through container test doubles, plus the screen that is on develop.
   Real-provider data is still the manual live check.
+
+### PR-E record (web: plan usage in each chat's usage hover card; 2026-10-12)
+
+- **Built.** `ChatUsageTotal` (chat header) and `RunUsagePill` (run footer) open a
+  card whose token rows are unchanged and whose new **Plan usage** section
+  (`components/account-usage/chat-plan-usage.tsx`, compact accounts in
+  `plan-usage-compact.tsx`) lists every OAuth account of the chat's provider
+  (`lib/account-usage/chat-provider.ts`: `claude-native` → `anthropic`,
+  `codex-native` → `openai`, anything else none), the filter-selected one first,
+  one meter line per summary window with percent / reset / tone, the problem in one
+  line, the age ("Updated 3m ago"), and the "This chat's login isn't tracked;
+  showing all Claude accounts" note when there are several. "Open Usage" opens the
+  modal. The shell provides its client and events through
+  `PlanUsageSourceProvider` (`hooks/use-chat-plan-usage.tsx`); a pill rendered
+  without it (the old unit tests) has no section.
+- **Call discipline.** The pill's hook attaches to the shared store with
+  `touch:false`: it sends at most one `account.usage` `mode:"cached"` (only when
+  the store is empty; at pill **mount**, not on hover, because the trigger of a
+  chat with no tokens depends on the data) and never `touch` or `refresh`.
+  Verified in vitest (`hover_sends_at_most_one_cached_list...`: 20 real open/close
+  cycles) and in the real browser: hover-only runs sent exactly `["cached"]`, a GLM
+  chat sent nothing, and the only `touch` after "Open Usage" is the modal's own.
+- **Deliberate deviations.** (1) **One controlled Popover with hover intent**
+  instead of a Radix HoverCard: a HoverCard's content cannot be reached by Tab
+  (Radix strips it from the tab order), which would have regressed keyboard access
+  to the token rows that the old click Popover gave. Hover/focus open after 200 ms
+  without taking focus and close 150 ms after leaving (the card keeps itself open
+  while the pointer is over it); a click or tap (and Enter/Space) opens it with
+  focus inside and it stays until dismissed; `(hover: none)` devices get the tap
+  only. One primitive also means a pointer-capability change never remounts an
+  open card. (2) A chat with no reported tokens shows the pill only when an account
+  has a summary window to draw (not for a lone expired login); a **run** pill still
+  requires the run's own usage. (3) A ready, empty store reads "No plan data yet"
+  (the cache is empty), while a store holding only API-key / other-provider
+  accounts shows no section (AC55).
+- **Found in review (Peer).** HoverCard keyboard reachability and primitive swap
+  on a media-query flip → deviation (1); click could only open → now toggles;
+  `addListener` fallback for old Safari; re-indentation of the provider wrap in
+  `App.tsx`; added tests for another provider's filter, reshaped reports,
+  error phase, click-opened focus + toggle, hover not stealing focus. Found in
+  screenshots: a stray divider on the plan-only card → `standalone`.
+- **Verified.** `tsc -b`, web vitest (`chat-plan-usage.test.tsx` 26 tests,
+  `chat-provider.test.ts`; the existing `chat-usage-total` / `run-usage-pill`
+  tests pass untouched), `task test`, `task lint`.
+- **Screenshots (AC41, E part).** Playwright against the built UI and a sandbox
+  daemon (temp `SMIND_HOME`, port 4771; seeded task/chat/run rows) with
+  `account.usage` answered by `routeWebSocket`; light and dark at 1440×900 (hover)
+  and 390×844 (touch, tap): one account, several with the note, empty cache, stale
+  (41 m), problem (expired login), danger tones, GLM chat (no section), plan-only
+  chat (no tokens), the run pill (one, several), and "Open Usage" opening the modal.
+  Viewed; the divider bug above was fixed from them.
 
