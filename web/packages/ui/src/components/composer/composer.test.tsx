@@ -104,8 +104,23 @@ function openPicker(): void {
   fireEvent.click(screen.getByTestId("composer-model-picker"));
 }
 
+/** Lets a just-closed Radix Select finish returning focus to its trigger: that late focus move would otherwise dismiss a popover opened in the same tick. */
+async function settleSelect(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+}
+
+/** Opens the picker and goes Back to the root (it opens on the current provider's view): providers + every profile. */
+async function openPickerRoot(): Promise<void> {
+  await settleSelect();
+  openPicker();
+  fireEvent.click(await screen.findByTestId("model-picker-back"));
+}
+
 /** Picks `modelId` ("" = the provider's default row) under `providerId`: opens the picker, drills into the provider if the root is showing, clicks the row. */
 async function pickModel(providerId: string, modelId = ""): Promise<void> {
+  await settleSelect();
   openPicker();
   // The popover opens inside the selected provider's view when a model is selected: go back to the root first if that is another provider's view.
   const back = screen.queryByTestId("model-picker-back");
@@ -366,8 +381,8 @@ describe("Composer", () => {
     expect(trigger).toHaveAttribute("aria-label", "Model: Claude Code");
     expect(trigger).toHaveTextContent("Claude Code");
 
-    // No model is selected, so the popover opens at the root: both providers.
-    openPicker();
+    // The popover opens on the current provider's view; Back reaches the root with both providers.
+    await openPickerRoot();
     expect(await screen.findByTestId("model-provider-claude-native")).toHaveTextContent("Claude Code");
     expect(screen.getByTestId("model-provider-glm")).toHaveTextContent("GLM");
 
@@ -472,7 +487,6 @@ describe("Composer", () => {
     expect(screen.queryByTestId("composer-auto-accept")).not.toBeInTheDocument();
 
     await pickModel("glm");
-
     expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Default");
     fireEvent.click(screen.getByLabelText("Permission mode"));
     const options = await screen.findAllByRole("option");
@@ -555,9 +569,9 @@ describe("Composer", () => {
       const { models } = renderWithModels();
       await flush();
 
+      // The popover opens straight on the selected provider's view.
       openPicker();
-      // Selected model is the default, so the popover opens at the root.
-      fireEvent.click(await screen.findByTestId("model-provider-claude-native"));
+      await screen.findByTestId("model-row-claude-native:");
       const rows = screen.getAllByRole("option").filter((o) => o.dataset.testid?.startsWith("model-row-"));
       expect(rows.map((o) => o.dataset.testid)).toEqual(["model-row-claude-native:", "model-row-claude-native:sonnet", "model-row-claude-native:opus"]);
       expect(rows[0]).toHaveTextContent("Default model");
@@ -590,7 +604,7 @@ describe("Composer", () => {
       await flush();
       expect(screen.getByTestId("composer-model-picker")).toBeInTheDocument();
 
-      openPicker();
+      await openPickerRoot();
       fireEvent.click(await screen.findByTestId("model-provider-glm"));
       const rows = screen.getAllByRole("option").filter((o) => o.dataset.testid?.startsWith("model-row-"));
       expect(rows.map((o) => o.dataset.testid)).toEqual(["model-row-glm:"]);
@@ -620,13 +634,13 @@ describe("Composer", () => {
       // Never on render: only the first open tests the providers.
       expect(tests()).toHaveLength(0);
 
-      openPicker();
+      await openPickerRoot();
       await screen.findByTestId("model-provider-glm");
       expect(tests()).toHaveLength(2);
 
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
-      openPicker();
+      await openPickerRoot();
       await screen.findByTestId("model-provider-glm");
       expect(tests()).toHaveLength(2);
 
@@ -645,7 +659,7 @@ describe("Composer", () => {
       const { client, models } = renderWithModels();
       await flush();
 
-      openPicker();
+      await openPickerRoot();
       await screen.findByTestId("model-provider-glm");
       const glmTest = client.calls.find((c) => c.method === "provider.test" && (c.params as { provider: string }).provider === "glm");
       expect(glmTest).toBeTruthy();
@@ -1028,9 +1042,9 @@ describe("Composer diff-stat pill (Item 5)", () => {
     expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
 
-  /** Applies profile `id` through the picker's pinned Profiles section (the popover opens at the root when profiles exist). */
+  /** Applies profile `id` through the picker's pinned Profiles section (Back from the current provider's view reaches every profile). */
   async function applyProfileRow(id: number): Promise<void> {
-    openPicker();
+    await openPickerRoot();
     fireEvent.click(await screen.findByTestId(`model-profile-row-${id}`));
     await flush();
   }
@@ -1046,10 +1060,12 @@ describe("Composer diff-stat pill (Item 5)", () => {
       client.nth("profile.list", 0).resolve([]);
       await flush();
 
-      openPicker();
+      await openPickerRoot();
       await screen.findByTestId("model-provider-glm");
-      expect(screen.queryByTestId("model-manage-agents")).not.toBeInTheDocument();
-      expect(screen.queryByText("Profiles")).not.toBeInTheDocument();
+      // No profile rows (and no No-agent row): only the empty-state Create profile row remains.
+      expect(screen.queryByTestId(/^model-profile-row-/)).not.toBeInTheDocument();
+      expect(screen.queryByTestId("model-no-agent")).not.toBeInTheDocument();
+      expect(screen.getByTestId("model-profiles-empty")).toBeInTheDocument();
     });
 
     it("offers no profile rows while profile.list is still pending, and every other control works as before", async () => {
@@ -1058,9 +1074,10 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       // profile.list is left unresolved -- mirrors a daemon predating this
       // feature just as well as one that's merely slow to answer.
-      openPicker();
+      await openPickerRoot();
       await screen.findByTestId("model-provider-glm");
-      expect(screen.queryByTestId("model-manage-agents")).not.toBeInTheDocument();
+      expect(screen.queryByTestId(/^model-profile-row-/)).not.toBeInTheDocument();
+      expect(screen.getByTestId("model-profiles-empty")).toBeInTheDocument();
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
 
@@ -1108,7 +1125,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
       // The picker's profile row is now the checked one (run-config IA: the
       // toolbar tracks which agent is active, not just a one-time seed).
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
@@ -1141,7 +1158,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await applyProfileRow(1);
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
       expect(screen.getByTestId("model-profile-row-1")).not.toHaveTextContent("custom");
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
@@ -1154,7 +1171,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       // Hand-editing flips the applied profile's row to a "custom" badge
       // -- the change is a per-run override, not written back to the
       // stored profile (nothing here calls profile.update).
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveTextContent("custom");
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
@@ -1172,11 +1189,11 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).not.toHaveTextContent("custom");
     });
 
-    it('the picker offers "No agent" and "Manage agents…", the latter opening Settings -> Agents', async () => {
+    it('the picker offers "No agent" and the Edit-profiles pencil, the latter opening Settings -> Agents', async () => {
       const client = new FakeWsClient();
       renderComposer({ client });
 
@@ -1196,15 +1213,15 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
 
       await applyProfileRow(1);
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
       fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
 
-      openPicker();
+      await openPickerRoot();
       fireEvent.click(await screen.findByTestId("model-no-agent"));
       await flush();
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "false");
       // "No agent" only shows while an agent is applied.
       expect(screen.queryByTestId("model-no-agent")).not.toBeInTheDocument();
@@ -1213,8 +1230,8 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       const onOpenSettings = vi.fn();
       window.addEventListener("smind:open-settings", onOpenSettings);
-      openPicker();
-      fireEvent.click(await screen.findByTestId("model-manage-agents"));
+      await openPickerRoot();
+      fireEvent.click(await screen.findByTestId("model-profiles-edit"));
       window.removeEventListener("smind:open-settings", onOpenSettings);
 
       expect(onOpenSettings).toHaveBeenCalledTimes(1);
@@ -1280,7 +1297,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
       expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
       expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
     });
 
@@ -1303,7 +1320,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
 
       expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("Claude Code");
-      openPicker();
+      await openPickerRoot();
       expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "false");
       expect(screen.queryByTestId("model-no-agent")).not.toBeInTheDocument();
     });
