@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -492,4 +493,213 @@ func TestUsage_TenClientsBurstOneCall(t *testing.T) {
 	if got := h.fetcher.Calls(); got != 1 {
 		t.Fatalf("burst calls = %d, want 1", got)
 	}
+}
+
+// ---- account.usage events ----
+
+func usageEventConn(t *testing.T, h *usageHarness, topics ...string) *eventConn {
+	t.Helper()
+	c := newEventConn(t, dialWS(t, h.srv, "tok"))
+	c.subscribe("sub", topics...)
+	return c
+}
+
+func decodeUsageEvent(t *testing.T, e eventNotification) AccountUsage {
+	t.Helper()
+	if e.Topic != TopicAccountUsage {
+		t.Fatalf("event topic = %q, want %q", e.Topic, TopicAccountUsage)
+	}
+	b, _ := json.Marshal(e.Payload)
+	var p accountUsagePayload
+	if err := json.Unmarshal(b, &p); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	return p.Usage
+}
+
+func TestUsage_EventAfterEveryFetchNotOnCacheHit(t *testing.T) {
+	h := newUsageHarness(t, 1)
+	c := usageEventConn(t, h, TopicAccountUsage)
+
+	h.mustDirect(usageParams("touch")) // fetch #1: success
+	u := decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	if u.AccountID != h.ids[0] || u.Report == nil || u.Report.PlanLabel != "pro" {
+		t.Fatalf("event usage = %+v", u)
+	}
+
+	h.mustDirect(usageParams("touch"))   // cache hit
+	h.mustDirect(usageParams("cached"))  // peek
+	h.mustDirect(usageParams("refresh")) // refused: under the floor
+	// (a read deadline breaks the ws, so absence is proven by ordering: the
+	// next event must be the next real fetch's, below.)
+	if h.fetcher.Calls() != 1 {
+		t.Fatalf("calls = %d, want 1", h.fetcher.Calls())
+	}
+
+	// error and unavailable outcomes also emit
+	h.clk.Advance(time.Minute)
+	h.fetcher.fn = func(context.Context, accounts.Account) (quota.Report, error) {
+		return quota.Report{Status: quota.StatusError, Error: "timeout"}, errors.New("x")
+	}
+	h.mustDirect(usageParams("refresh"))
+	if u := decodeUsageEvent(t, c.nextEvent(5*time.Second)); u.LastError == nil {
+		t.Fatalf("error fetch event = %+v, want lastError", u)
+	}
+	h.clk.Advance(2 * time.Minute)
+	h.fetcher.fn = func(context.Context, accounts.Account) (quota.Report, error) {
+		return quota.Report{Status: quota.StatusUnavailable, Problem: &quota.Problem{Kind: quota.ProblemNoQuota}}, nil
+	}
+	h.mustDirect(usageParams("refresh"))
+	if u := decodeUsageEvent(t, c.nextEvent(5*time.Second)); u.Report == nil || u.Report.Status != quota.StatusUnavailable {
+		t.Fatalf("unavailable fetch event = %+v", u)
+	}
+}
+
+func TestUsage_RefreshAllEmitsOneEventPerAccountAsEachSettles(t *testing.T) {
+	h := newUsageHarness(t, 3)
+	slow := h.ids[0]
+	release := make(chan struct{})
+	h.fetcher.fn = func(ctx context.Context, a accounts.Account) (quota.Report, error) {
+		if a.ID == slow {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return quota.Report{}, ctx.Err()
+			}
+		}
+		return usageFetcherDefault(), nil
+	}
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
+	c := usageEventConn(t, h, TopicAccountUsage)
+
+	sendRequest(t, c.ws, "all", "account.usage", usageParams("refresh"))
+	seen := map[int64]bool{}
+	for i := 0; i < 2; i++ {
+		u := decodeUsageEvent(t, c.nextEvent(5*time.Second))
+		if u.AccountID == slow || seen[u.AccountID] {
+			t.Fatalf("unexpected event for account %d (seen %v)", u.AccountID, seen)
+		}
+		seen[u.AccountID] = true
+	}
+	if len(c.responses) != 0 {
+		t.Fatal("the RPC answered before the slow account settled")
+	}
+	close(release)
+	if u := decodeUsageEvent(t, c.nextEvent(5*time.Second)); u.AccountID != slow {
+		t.Fatalf("third event account = %d, want %d", u.AccountID, slow)
+	}
+	resp := c.nextResponse("all", 5*time.Second)
+	var res accountUsageResult
+	mustDecode(t, resp.Result, &res)
+	if len(res.Reports) != 3 {
+		t.Fatalf("reports = %d, want 3", len(res.Reports))
+	}
+	c.expectNoEvent(200 * time.Millisecond)
+}
+
+func TestUsage_TopicSubscribable(t *testing.T) {
+	h := newUsageHarness(t, 0)
+	c := newEventConn(t, dialWS(t, h.srv, "tok"))
+	c.subscribe("s1", TopicAccountUsage)
+	c.unsubscribe("u1", TopicAccountUsage)
+	if !knownTopics["account.usage"] {
+		t.Fatal("account.usage is not a known topic")
+	}
+}
+
+func TestUsage_AccountRemovedEventFlow(t *testing.T) {
+	h := newUsageHarness(t, 2)
+	gate := make(chan struct{})
+	h.fetcher.fn = func(ctx context.Context, a accounts.Account) (quota.Report, error) {
+		if a.ID == h.ids[0] {
+			select {
+			case <-gate:
+			case <-ctx.Done():
+				return quota.Report{}, ctx.Err()
+			}
+		}
+		return usageFetcherDefault(), nil
+	}
+	t.Cleanup(func() {
+		select {
+		case <-gate:
+		default:
+			close(gate)
+		}
+	})
+	c := usageEventConn(t, h, TopicAccountUsage, TopicAccountRemoved)
+
+	// account 2 fetches normally, account 1's fetch is held open
+	h.mustDirect(usageParams("touch", h.ids[1]))
+	if u := decodeUsageEvent(t, c.nextEvent(5*time.Second)); u.AccountID != h.ids[1] {
+		t.Fatalf("usage event account = %d", u.AccountID)
+	}
+	sendRequest(t, c.ws, "t", "account.usage", usageParams("touch", h.ids[0]))
+	time.Sleep(100 * time.Millisecond) // let the fetch start
+	if err := h.reg.Delete(h.ids[0]); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	e := c.nextEvent(5 * time.Second)
+	if e.Topic != TopicAccountRemoved {
+		t.Fatalf("event = %q, want %q", e.Topic, TopicAccountRemoved)
+	}
+	close(gate)
+	// the removed account's fetch settles: no usage event for it
+	c.expectNoEvent(400 * time.Millisecond)
+}
+
+func TestUsage_NoSecretInWSAPIPayload(t *testing.T) {
+	const (
+		access  = "SENTINEL_ACCESS_TOKEN_9f3a"
+		refresh = "SENTINEL_REFRESH_TOKEN_77c1"
+		apiKey  = "sk-ant-SENTINEL_KEY_55d0"
+		body    = "SENTINEL_PROVIDER_BODY_e12"
+	)
+	h := newUsageHarness(t, 0)
+	oauth, err := h.reg.AddOAuth("anthropic", "oauth", accounts.OAuthCredential{
+		AccessToken: access, RefreshToken: refresh, ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyed, err := h.reg.AddAPIKey("openai", "keyed", apiKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.fetcher.fn = func(_ context.Context, a accounts.Account) (quota.Report, error) {
+		if a.ID == keyed.ID {
+			return quota.Report{Status: quota.StatusError, Error: "timeout"}, errors.New(body)
+		}
+		return usageFetcherDefault(), nil
+	}
+	c := usageEventConn(t, h, TopicAccountUsage)
+	sendRequest(t, c.ws, "r", "account.usage", usageParams("refresh"))
+	var raw [][]byte
+	for i := 0; i < 2; i++ {
+		e := c.nextEvent(5 * time.Second)
+		b, _ := json.Marshal(e)
+		raw = append(raw, b)
+	}
+	resp := c.nextResponse("r", 5*time.Second)
+	raw = append(raw, resp.Result)
+	// also a cached re-read
+	sendRequest(t, c.ws, "c", "account.usage", usageParams("cached"))
+	raw = append(raw, c.nextResponse("c", 5*time.Second).Result)
+
+	banned := []string{access, refresh, apiKey, body, "credential_data", "credentialData", "access_token",
+		"accessToken", "refresh_token", "refreshToken", "apiKey", "fingerprint"}
+	for _, b := range raw {
+		for _, s := range banned {
+			if strings.Contains(string(b), s) {
+				t.Fatalf("payload leaks %q: %s", s, b)
+			}
+		}
+	}
+	_ = oauth
 }
