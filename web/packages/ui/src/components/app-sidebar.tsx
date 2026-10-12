@@ -64,7 +64,7 @@ import {
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
-import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
 import { formatRelativeTime } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
@@ -1742,6 +1742,7 @@ const TaskRow = memo(function TaskRow({
   const runDot = runDotStatus(runState);
   const stat = stats.get(task.ID);
   const isUnread = unread.has(task.ID);
+  const slotSignal = taskSlotSignal(reason, runState, isUnread);
   const isTaskPinned = pinned.has(task.ID);
   const status = statusOverrides.get(task.ID) ?? task.Status;
   // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
@@ -1810,16 +1811,32 @@ const TaskRow = memo(function TaskRow({
                */}
               <span className="flex w-full min-w-0 items-center gap-2">
               {/*
-               * Leading run-status dot -- the task's latest run, live off
-               * run.status (Item 12). In its own reserved slot for the
-               * same reason the attention slot below is reserved: a task's
-               * first run must not shove the title sideways. Task.Status
-               * is not the source: internal/workspace moves a task
-               * created -> running on its first run and never back, so it
-               * means "has ever run", not "is running now".
+               * The ONE leading status slot (sidebar-polish S3): always in the
+               * DOM at a constant width -- a signal arriving or clearing must
+               * not move the title (refs/paseo/docs/design.md §11) -- and it
+               * draws a single signal by priority (see taskSlotSignal). The
+               * attention reason, latest run status and unread state stay
+               * queryable on the slot itself even when a higher-priority
+               * signal is the one drawn. The reason is in the accessible name
+               * as well as the colour.
                */}
-              <span data-testid="task-run-status-slot" className="flex w-2.5 shrink-0 items-center justify-center">
-                {runDot && (
+              <span
+                data-testid="task-status-slot"
+                data-slot-signal={slotSignal.kind}
+                data-attention-reason={reason ?? undefined}
+                data-run-status={runState}
+                data-unread={isUnread ? "true" : undefined}
+                className="flex w-3 shrink-0 items-center justify-center"
+              >
+                {slotSignal.kind === "attention" && (
+                  <StatusDot
+                    status={attentionDotStatus(slotSignal.reason)}
+                    data-testid="task-attention"
+                    data-attention-reason={slotSignal.reason}
+                    aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`}
+                  />
+                )}
+                {slotSignal.kind === "run" && runDot && (
                   <StatusDot
                     status={runDot}
                     data-testid="task-run-status"
@@ -1827,18 +1844,7 @@ const TaskRow = memo(function TaskRow({
                     aria-label={`latest run ${runState}`}
                   />
                 )}
-              </span>
-              {/*
-               * The unread marker (AC2): a plain filled dot in its own
-               * reserved slot, same layout-stability rule as the run-status
-               * and attention slots either side of it. Deliberately not a
-               * StatusDot variant -- "unread" isn't a status the task is
-               * in, it's whether the *user* has looked at it yet, so it
-               * uses the neutral `primary` accent token rather than one of
-               * the success/danger/warning/running hues.
-               */}
-              <span data-testid="task-unread-slot" className="flex w-1.5 shrink-0 items-center justify-center">
-                {isUnread && (
+                {slotSignal.kind === "unread" && (
                   <span
                     data-testid="task-unread-marker"
                     aria-label="unread"
@@ -1871,35 +1877,7 @@ const TaskRow = memo(function TaskRow({
                   <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
                 </span>
               )}
-              {/*
-               * The attention-dot slot is always in the DOM at a fixed
-               * width, whether or not there's anything to show -- only
-               * the dot *inside* it is conditional (queried by testid
-               * elsewhere, so it must stay absent-when-none). Without the
-               * reserved slot, the status text below shifts left/right by
-               * the dot's width whenever attention arrives or clears --
-               * exactly the "changing state must not move the layout"
-               * rule from refs/paseo/docs/design.md §11 that Item 2 calls
-               * out for this row specifically.
-               *
-               * The dot's variant now names *why* the task wants
-               * attention (Item 12): error, permission and finished each
-               * get their own, where all three used to render the same
-               * warning dot. The reason is on data-attention-reason and
-               * in the accessible name, so neither a test nor a screen
-               * reader has to tell them apart by colour.
-               */}
               <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
-              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
-                {reason && (
-                  <StatusDot
-                    status={attentionDotStatus(reason)}
-                    data-testid="task-attention"
-                    data-attention-reason={reason}
-                    aria-label={`task needs attention: ${ATTENTION_LABEL[reason]}`}
-                  />
-                )}
-              </span>
               </span>
               <TaskMetaRow stat={stat} status={status} tierLabel={tierLabel} />
             </button>

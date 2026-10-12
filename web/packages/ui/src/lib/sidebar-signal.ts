@@ -61,6 +61,42 @@ export function runDotStatus(status: string | undefined): StatusDotStatus | null
   }
 }
 
+/** Which signal a task row's single leading status slot is showing. */
+export type TaskSlotSignal =
+  | { kind: "attention"; reason: AttentionReason }
+  | { kind: "run"; status: "running" | "error" }
+  | { kind: "unread" }
+  | { kind: "none" };
+
+/**
+ * What the task row's one leading status slot shows (sidebar-polish S3),
+ * replacing the three parallel dots (run status, unread, attention) the row
+ * used to carry. Highest priority wins; exactly one signal is ever drawn:
+ *
+ *   1. attention: a failed run or a waiting permission -- the user is blocked
+ *   2. a latest run that errored (stays after the attention is acknowledged)
+ *   3. a run in progress
+ *   4. attention "finished" -- a result nobody has looked at yet
+ *   5. unread -- opened-since marker, incl. a manual "Mark unread"
+ *   6. nothing
+ *
+ * A latest run that is merely `done` or `stopped` is not a signal -- ZCode's
+ * idle row is empty too -- so it falls through to unread/none. (Container
+ * rows still aggregate over runStatus; see aggregateStatus.)
+ */
+export function taskSlotSignal(
+  reason: AttentionReason | null,
+  runState: string | undefined,
+  unread: boolean,
+): TaskSlotSignal {
+  if (reason === "error" || reason === "permission") return { kind: "attention", reason };
+  if (runState === "error") return { kind: "run", status: "error" };
+  if (runState === "running") return { kind: "run", status: "running" };
+  if (reason === "finished") return { kind: "attention", reason };
+  if (unread) return { kind: "unread" };
+  return { kind: "none" };
+}
+
 /**
  * The aggregate marker a workspace or space row carries for the tasks
  * beneath it (`audit-paseo.md` §5's workspace status bucket): the single

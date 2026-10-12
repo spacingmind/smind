@@ -11,6 +11,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 import { hoverTask, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
+import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -250,5 +251,79 @@ describe("task row keyboard (S2)", () => {
     expect(childList).toBeTruthy();
     expect(childList!.contains(taskItem(LEADER.ID))).toBe(true);
     expect(toggleOf(ROOT.ID)).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
+describe("task row status slot (S3)", () => {
+  const SIGNAL_TASK = makeTask(7, "Signal task");
+
+  function slotOf(taskId: number): HTMLElement {
+    return within(taskItem(taskId)).getByTestId("task-status-slot");
+  }
+
+  function signals(opts: { reasons?: AttentionReason[]; run?: string; unread?: boolean }) {
+    const attention: TaskAttention = new Map(
+      opts.reasons ? [[SIGNAL_TASK.ID, new Set<AttentionReason>(opts.reasons)]] : [],
+    );
+    const runStatus: TaskRunStatus = new Map(opts.run ? [[SIGNAL_TASK.ID, opts.run as never]] : []);
+    return { attention, runStatus, unread: new Set(opts.unread ? [SIGNAL_TASK.ID] : []) };
+  }
+
+  it("renders exactly one status slot per row, at the same width with or without a signal", async () => {
+    const { rerender, client } = await mountSidebar([SIGNAL_TASK], signals({}));
+    expect(within(taskItem(SIGNAL_TASK.ID)).getAllByTestId("task-status-slot")).toHaveLength(1);
+    const idleClass = slotOf(SIGNAL_TASK.ID).className;
+    expect(slotOf(SIGNAL_TASK.ID).children).toHaveLength(0);
+
+    rerender(
+      <SidebarProvider>
+        <AppSidebar client={client as never} {...signals({ reasons: ["error"] })} />
+      </SidebarProvider>,
+    );
+
+    expect(slotOf(SIGNAL_TASK.ID).className).toBe(idleClass);
+    expect(slotOf(SIGNAL_TASK.ID).children).toHaveLength(1);
+  });
+
+  it.each([
+    // [name, signals, expected winning kind, expected inner testid]
+    ["permission beats everything", { reasons: ["permission", "finished"], run: "running", unread: true }, "attention", "task-attention"],
+    ["error beats a running run and unread", { reasons: ["error"], run: "running", unread: true }, "attention", "task-attention"],
+    ["a run that errored beats running and unread", { run: "error", unread: true }, "run", "task-run-status"],
+    ["running beats finished and unread", { reasons: ["finished"], run: "running", unread: true }, "run", "task-run-status"],
+    ["finished beats unread", { reasons: ["finished"], unread: true }, "attention", "task-attention"],
+    ["unread alone", { unread: true }, "unread", "task-unread-marker"],
+    ["a run that is merely done is not a signal", { run: "done" }, "none", null],
+    ["no signal", {}, "none", null],
+  ] as const)("priority: %s", async (_name, sig, kind, testId) => {
+    await mountSidebar([SIGNAL_TASK], signals(sig as never));
+
+    const slot = slotOf(SIGNAL_TASK.ID);
+    expect(slot).toHaveAttribute("data-slot-signal", kind);
+    // Exactly one indicator is drawn, and it is the winner.
+    if (testId === null) {
+      expect(slot.children).toHaveLength(0);
+    } else {
+      expect(slot.children).toHaveLength(1);
+      expect(within(slot).getByTestId(testId)).toBeInTheDocument();
+    }
+  });
+
+  it("exposes data-attention-reason, data-run-status and data-unread on the slot", async () => {
+    await mountSidebar([SIGNAL_TASK], signals({ reasons: ["permission"], run: "running", unread: true }));
+
+    const slot = slotOf(SIGNAL_TASK.ID);
+    expect(slot).toHaveAttribute("data-attention-reason", "permission");
+    expect(slot).toHaveAttribute("data-run-status", "running");
+    expect(slot).toHaveAttribute("data-unread", "true");
+  });
+
+  it("an idle row's slot carries no signal attributes", async () => {
+    await mountSidebar([SIGNAL_TASK], signals({}));
+
+    const slot = slotOf(SIGNAL_TASK.ID);
+    expect(slot).not.toHaveAttribute("data-attention-reason");
+    expect(slot).not.toHaveAttribute("data-run-status");
+    expect(slot).not.toHaveAttribute("data-unread");
   });
 });

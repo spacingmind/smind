@@ -273,7 +273,7 @@ describe("AppSidebar", () => {
   });
 
   describe("task row layout stability (ui-redesign-parity Item 2)", () => {
-    it("the attention-dot slot is present at the same fixed width whether or not the task has attention", async () => {
+    it("the status slot is present at the same fixed width whether or not the task has attention", async () => {
       const client = new FakeWsClient();
       const attention: TaskAttention = new Map([[TASK.ID, new Set<AttentionReason>(["error"])]]);
 
@@ -285,7 +285,7 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
       const row = await screen.findByTestId("sidebar-task-row");
-      const slotWithoutAttention = row.querySelector('[data-testid="task-attention-slot"]');
+      const slotWithoutAttention = row.querySelector('[data-testid="task-status-slot"]');
       expect(slotWithoutAttention).toBeInTheDocument();
       expect(slotWithoutAttention?.querySelector('[data-testid="task-attention"]')).not.toBeInTheDocument();
       const classNameWithoutAttention = slotWithoutAttention?.className;
@@ -296,10 +296,10 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
 
-      const slotWithAttention = screen.getByTestId("task-attention-slot");
+      const slotWithAttention = screen.getByTestId("task-status-slot");
       // Same reserved-space wrapper, same width classes -- only the dot
       // *inside* it (queried separately, and absent above) is what
-      // changes, so the sidebar-task-status label after it never shifts.
+      // changes, so the title after it never shifts.
       expect(slotWithAttention.className).toBe(classNameWithoutAttention);
       expect(slotWithAttention.querySelector('[data-testid="task-attention"]')).toBeInTheDocument();
     });
@@ -314,7 +314,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK_IN_SPACE_A]);
 
-      const runSlotBefore = (await screen.findByTestId("task-run-status-slot")).className;
+      const runSlotBefore = (await screen.findByTestId("task-status-slot")).className;
       const aggregateSlotBefore = screen.getAllByTestId("row-aggregate-slot")[0]!.className;
       expect(screen.queryByTestId("task-run-status")).not.toBeInTheDocument();
       expect(screen.queryByTestId("row-aggregate")).not.toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("AppSidebar", () => {
       );
 
       // The dots arrive; the slots holding them do not change width.
-      expect(screen.getByTestId("task-run-status-slot").className).toBe(runSlotBefore);
+      expect(screen.getByTestId("task-status-slot").className).toBe(runSlotBefore);
       expect(screen.getAllByTestId("row-aggregate-slot")[0]!.className).toBe(aggregateSlotBefore);
       expect(screen.getByTestId("task-run-status")).toBeInTheDocument();
       expect(screen.getAllByTestId("row-aggregate").length).toBeGreaterThan(0);
@@ -362,7 +362,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      const slotBefore = (await screen.findByTestId("task-unread-slot")).className;
+      const slotBefore = (await screen.findByTestId("task-status-slot")).className;
       expect(screen.queryByTestId("task-unread-marker")).not.toBeInTheDocument();
 
       rerender(
@@ -371,7 +371,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
 
-      expect(screen.getByTestId("task-unread-slot").className).toBe(slotBefore);
+      expect(screen.getByTestId("task-status-slot").className).toBe(slotBefore);
       expect(screen.getByTestId("task-unread-marker")).toBeInTheDocument();
     });
 
