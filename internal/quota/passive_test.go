@@ -872,3 +872,24 @@ func Test_passive_concurrent_observe_and_cooldown_race(t *testing.T) {
 	wg.Wait()
 	p.Close()
 }
+
+func Test_passive_never_shortens_persisted_cooldown_after_restart(t *testing.T) {
+	t.Parallel()
+	fs := newFakeStore()
+	p, clk := newFakePassive(t, fs)
+	now := clk.Now()
+	long := now.Add(72 * time.Hour)
+	fs.rows[cooldownKey{9, ""}] = store.QuotaCooldown{AccountID: 9, Until: long, Reason: string(ReasonRejected), ObservedAt: now}
+
+	// A fresh Passive on the same store: nothing loaded yet, and the first thing
+	// it sees is a 429 that declares a 10 s reset.
+	p.Observe(respAt(9, "m", 429, reject5h(now.Add(10*time.Second)), now))
+	flush(t, p)
+	if r, ok := fs.row(9, ""); !ok || r.Until.Before(long) {
+		t.Fatalf("stored row = %+v/%v, want it not shortened below %v", r, ok, long)
+	}
+	got, ok := p.Cooldown(9, "m", now)
+	if !ok || got.Until.Before(long) {
+		t.Fatalf("Cooldown() = %+v/%v, want until >= %v", got, ok, long)
+	}
+}

@@ -209,8 +209,9 @@ func normalizeModel(m string) string {
 // Observe implements Observer. It parses the header synchronously, updates
 // memory so the very next Cooldown sees a new cooldown, queues persistence and
 // returns; it never waits for the store. The one exception is a declared
-// rejection with no valid reset on an account whose persisted rows were not
-// read yet: it reads them once to continue the fallback level.
+// rejection on an account whose persisted rows were not read yet: it reads them
+// once, to continue the fallback level and to never shorten a persisted
+// cooldown. See reject.
 func (p *Passive) Observe(r Response) {
 	if !p.enabled || r.Provider != passiveProvider {
 		return
@@ -259,9 +260,15 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 	var grace time.Duration
 	if hasDeadline {
 		grace = p.grace()
-	} else {
-		p.ensureLoaded(r.AccountID, a)
 	}
+	// Merge the persisted rows first, on both branches, so a rejection right
+	// after a restart neither restarts the fallback level nor shortens a
+	// persisted cooldown. This is the one place Observe can wait for the store,
+	// and only on the first rejection of an account whose rows were never loaded
+	// (the router's Cooldown() normally loads them before any request is sent,
+	// so this is a no-op there; it bites when accountUsage.routing is off or an
+	// earlier load failed). It is bounded by the store's busy timeout.
+	p.ensureLoaded(r.AccountID, a)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
