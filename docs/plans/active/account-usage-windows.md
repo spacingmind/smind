@@ -1402,5 +1402,14 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
 | AC41 (footer) | Screenshots, light + dark, `/tmp/usage-d2-shots/out/` (see PR description): off, on with one/several accounts, pinned, empty pins, Remaining, filtered, danger, plain, polling disabled, 192/256/384px, collapsed rail, modal and Settings with pins, 390px sheet. Viewed and fixed (clipped line fade) before the PR. |
 | AC54 (footer) | fake-timer tests with exact RPC counts (`call budget (AC54)` in the item test, AppSidebar tests) and the real-browser counts above |
 
+- **Found in review** (independent read-only reviewer, Sonnet 5.5; ACCEPTED, all fixed with tests):
+  the first pin toggle snapshotted the defaults of the *filtered* account only,
+  silently dropping other providers' default pins (`filtered to one account, the
+  first toggle keeps every other provider's default pins`, fails without the fix);
+  a permanently mounted footer re-armed a 1 s no-op timer when polling is off or the
+  daemon is old (now once per TTL); weak tests (hidden-window, shared TTL clock
+  with the modal, polling disabled). Left as is: a window with no percent can be
+  pinned but never shows in the footer; Enter also toggles a pin (native button).
+
 Not verified here: real-provider data (still the manual live check) and the
 desktop (Tauri) shell.
