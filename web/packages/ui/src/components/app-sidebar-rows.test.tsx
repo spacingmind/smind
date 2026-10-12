@@ -619,13 +619,13 @@ describe("title overflow and indentation (S7)", () => {
   it("indentation is per-row padding by depth: the gutter is always reserved, 12px per level below", async () => {
     await mountSidebar(TREE);
 
-    // Every depth-0 row sits at the 8px inset plus the always-reserved 12px
+    // Every depth-0 row sits at the 4px inset plus the always-reserved 12px
     // chevron gutter; each level below adds 12px.
-    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("20px");
-    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("32px");
-    expect(taskItem(CODER.ID).style.paddingLeft).toBe("44px");
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("16px");
+    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("28px");
+    expect(taskItem(CODER.ID).style.paddingLeft).toBe("40px");
     // Siblings at one depth share one left edge.
-    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("32px");
+    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("28px");
   });
 
   it("depth-0 rows have identical padding with and without a parent sibling", async () => {
@@ -635,9 +635,9 @@ describe("title overflow and indentation (S7)", () => {
     // The root list's shape (contains a parent or not) no longer shifts the
     // column: a depth-0 title starts at the same x in both mounts -- and in
     // the flat views, which render roots at the same padding.
-    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("20px");
-    expect(taskItem(11).style.paddingLeft).toBe("20px");
-    expect(taskItem(12).style.paddingLeft).toBe("20px");
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("16px");
+    expect(taskItem(11).style.paddingLeft).toBe("16px");
+    expect(taskItem(12).style.paddingLeft).toBe("16px");
   });
 
   it("flat lists render root rows at the same padding as the tree", async () => {
@@ -676,9 +676,13 @@ describe("title overflow and indentation (S7)", () => {
       expect(list.className).toContain("border-l-0");
     }
     for (const list of lists.filter((l) => l.getAttribute("data-testid") === "sidebar-container-content")) {
-      expect(list.className, "container content carries one guide line under its header's icon").toContain("ml-4");
-      expect(list.className).toContain("border-l");
-      expect(list.className).toContain("pl-1");
+      // Workspace/pinned/status content always carries the guide line under its
+      // header's icon; a space's only on a wide sidebar (container query).
+      const wide = ["space", "ungrouped"].includes(list.getAttribute("data-container-kind") ?? "");
+      const pre = wide ? "@min-[14rem]/sb:" : "";
+      expect(list.className).toContain(`${pre}ml-4`);
+      expect(list.className).toContain(`${pre}border-l`);
+      expect(list.className).toContain(`${pre}pl-1`);
     }
   });
 

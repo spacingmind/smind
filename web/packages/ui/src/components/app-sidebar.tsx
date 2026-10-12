@@ -139,7 +139,7 @@ import {
  * Task rows indent by their own left padding, not by nesting margins on the
  * task-tree lists they live in (sidebar-polish S7): a row's hover/selected
  * highlight then spans its container's content box at every depth, and the
- * title keeps its width. Every root task row starts at the 8px inset plus the
+ * title keeps its width. Every root task row starts at the 4px inset plus the
  * 12px chevron gutter (ROW_GUTTER_PX) -- reserved whether or not the list
  * contains a parent, so depth-0 titles share one x in every view -- and each
  * level of the task tree adds 12px (ROW_INDENT_PX).
@@ -153,7 +153,7 @@ import {
  * guide line to the sidebar's right edge. The task tree itself never
  * carries guide lines -- only per-row padding.
  */
-const ROW_INSET_PX = 8;
+const ROW_INSET_PX = 4;
 const ROW_INDENT_PX = 12;
 const ROW_GUTTER_PX = 12;
 /** Where every depth-0 task row's status slot starts: the inset plus the always-reserved chevron gutter. */
@@ -175,6 +175,15 @@ const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
  * border-sidebar-border -- only the width was zeroed by FLUSH_SUB.
  */
 const CONTAINER_GUIDE_CLASS = "ml-4 border-l pl-1";
+
+/**
+ * A space's (or "Ungrouped") content carries the same guide only while the
+ * sidebar is wide: on a narrow one (<14rem, the container query the rows
+ * already use) the second level would cost ~21px of a ~190px title column, so
+ * tasks stay flush and rely on the header's own weight/size to read as nested
+ * (their titles line up with the space's label either way).
+ */
+const SPACE_GUIDE_CLASS = "@min-[14rem]/sb:ml-4 @min-[14rem]/sb:border-l @min-[14rem]/sb:pl-1";
 
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
@@ -1308,7 +1317,7 @@ function ContainerContent({ kind, children }: { kind: string; children: ReactNod
     <SidebarMenuSub
       data-testid="sidebar-container-content"
       data-container-kind={kind}
-      className={cn(FLUSH_SUB, CONTAINER_GUIDE_CLASS)}
+      className={cn(FLUSH_SUB, kind === "space" || kind === "ungrouped" ? SPACE_GUIDE_CLASS : CONTAINER_GUIDE_CLASS)}
     >
       {children}
     </SidebarMenuSub>
