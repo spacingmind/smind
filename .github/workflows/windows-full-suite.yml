@@ -1,0 +1,62 @@
+name: Windows full suite
+
+# What still fails when the daemon runs natively on Windows -- the input for
+# the daemon runtime-parity plan. Too slow and too red to sit on every PR
+# (it used to be a non-blocking step in ci.yml's windows-terminal job that
+# timed out at 15 min on every run and so never produced a list), so it runs
+# nightly on develop and on demand (Actions > Windows full suite > Run
+# workflow, any branch). The job goes red while anything fails; the summary
+# lists failing packages, failing tests and tests killed by the per-package
+# timeout, and the full log is attached as an artifact.
+on:
+  schedule:
+    - cron: "17 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-suite:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Mark repo safe for git
+        run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+
+      # Per-package timeout, not per-step: one slow or hung package panics
+      # with its running tests listed instead of the whole step being killed
+      # with no output. cmd/smind alone takes ~5 min on Windows today.
+      - name: go test ./...
+        id: test
+        shell: bash
+        run: |
+          set +e
+          go test -timeout 10m ./... > go-test.log 2>&1
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+          tail -40 go-test.log
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: bash scripts/go-test-summary.sh go-test.log >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: windows-go-test-log
+          path: go-test.log
+          retention-days: 14
+
+      - name: Fail if any package failed
+        if: steps.test.outputs.exit != '0'
+        shell: bash
+        run: |
+          echo "go test exited ${{ steps.test.outputs.exit }} -- see the job summary"
+          exit 1

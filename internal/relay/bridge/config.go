@@ -17,6 +17,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 const (
@@ -77,7 +79,7 @@ func SaveConfig(dir string, cfg Config) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("bridge: create %s: %w", dir, err)
 	}
-	if err := os.WriteFile(ConfigPath(dir), data, 0o600); err != nil {
+	if err := securefile.WriteFile(ConfigPath(dir), data); err != nil {
 		return fmt.Errorf("bridge: write config: %w", err)
 	}
 	return nil

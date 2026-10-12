@@ -60,3 +60,9 @@ func runScript(ctx context.Context, worktree, script string, env []string, timeo
 		return out.String(), fmt.Errorf("script cancelled: %w", ctx.Err())
 	}
 }
+
+// defaultShLookup is the Unix flavor of the shell seam: scripts run under
+// sh, assumed present on every supported Unix.
+func defaultShLookup() (string, error) {
+	return "sh", nil
+}

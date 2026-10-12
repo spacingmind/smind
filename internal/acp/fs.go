@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/realpath"
 )
 
 type readTextFileParams struct {
@@ -101,18 +103,18 @@ func resolveScopedPath(root, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve root %q: %w", root, err)
 	}
-	resolvedRoot, err := filepath.EvalSymlinks(absRoot)
+	resolvedRoot, err := realpath.Resolve(absRoot)
 	if err != nil {
 		return "", fmt.Errorf("resolve root %q: %w", root, err)
 	}
 
 	clean := filepath.Clean(path)
-	resolved, err := filepath.EvalSymlinks(clean)
+	resolved, err := realpath.Resolve(clean)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return "", fmt.Errorf("resolve path %q: %w", path, err)
 		}
-		parent, err := filepath.EvalSymlinks(filepath.Dir(clean))
+		parent, err := realpath.Resolve(filepath.Dir(clean))
 		if err != nil {
 			return "", fmt.Errorf("resolve parent of %q: %w", path, err)
 		}

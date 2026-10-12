@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 const (
@@ -43,7 +45,7 @@ func LoadOrCreateToken(dir string) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, []byte(token), 0o600); err != nil {
+	if err := securefile.WriteFile(path, []byte(token)); err != nil {
 		return "", fmt.Errorf("write token: %w", err)
 	}
 	return token, nil

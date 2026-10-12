@@ -48,7 +48,7 @@ func TestMCPServe_ExitsWhenDaemonConnectionDies(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	bin := filepath.Join(t.TempDir(), "smind-test")
+	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build smind: %v: %s", err, out)

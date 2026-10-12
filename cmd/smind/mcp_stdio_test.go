@@ -26,7 +26,7 @@ func TestMCPServe_StdioRoundTrip(t *testing.T) {
 	client := dialTestClient(t, srvURL)
 	wsID := createTestWorkspace(t, client)
 
-	bin := filepath.Join(t.TempDir(), "smind-test")
+	bin := filepath.Join(t.TempDir(), exeName("smind-test"))
 	build := exec.Command("go", "build", "-o", bin, ".")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build smind: %v: %s", err, out)

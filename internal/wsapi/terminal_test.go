@@ -3,6 +3,7 @@ package wsapi
 import (
 	"encoding/base64"
 	"encoding/json"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -204,6 +205,9 @@ func TestServer_TerminalAttach_SecondConnectionSeesBackfill(t *testing.T) {
 // queries the terminal driver directly) rather than trusting a
 // no-op/fixed-default implementation.
 func TestServer_TerminalResize_ReachesPTY(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses stty size (Unix-only); internal/terminal TestWindows_Resize covers ConPTY resize")
+	}
 	t.Parallel()
 	wm, db := newTestWorkspaceManager(t)
 	task := newTestTask(t, wm, "")
