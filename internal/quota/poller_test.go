@@ -12,7 +12,7 @@ import (
 
 func fakeEnv(t *testing.T, f *fakeReportFetcher, opts ...Option) *env {
 	t.Helper()
-	return newEnv(t, func(*accounts.Registry) ReportFetcher { return f }, opts...)
+	return newEnv(t, func(*accounts.Registry, *fakeClock) ReportFetcher { return f }, opts...)
 }
 
 func failing(status int) func(context.Context, accounts.Account) (Report, error) {

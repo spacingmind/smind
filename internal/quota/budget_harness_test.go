@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -56,6 +57,7 @@ type usageServer struct {
 
 	mu      sync.Mutex
 	perPath map[string]int
+	perTok  map[string]int
 	total   int
 	cur     int
 	max     int
@@ -64,11 +66,12 @@ type usageServer struct {
 
 func newUsageServer(t *testing.T) *usageServer {
 	t.Helper()
-	u := &usageServer{perPath: map[string]int{}, handler: map[string]http.HandlerFunc{}}
+	u := &usageServer{perPath: map[string]int{}, perTok: map[string]int{}, handler: map[string]http.HandlerFunc{}}
 	u.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u.mu.Lock()
 		u.perPath[r.URL.Path]++
 		u.total++
+		u.perTok[strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")]++
 		u.cur++
 		if u.cur > u.max {
 			u.max = u.cur
@@ -122,6 +125,13 @@ func (u *usageServer) PathCalls(path string) int {
 	return u.perPath[path]
 }
 
+// TokenCalls counts requests that carried the given bearer token.
+func (u *usageServer) TokenCalls(token string) int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.perTok[token]
+}
+
 func (u *usageServer) MaxConcurrent() int {
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -155,7 +165,7 @@ type env struct {
 	t    *testing.T
 	path string
 	clk  *fakeClock
-	mk   func(reg *accounts.Registry) ReportFetcher
+	mk   func(reg *accounts.Registry, clk *fakeClock) ReportFetcher
 	opts []Option
 
 	st  *store.Store
@@ -163,7 +173,7 @@ type env struct {
 	p   *Poller
 }
 
-func newEnv(t *testing.T, mk func(reg *accounts.Registry) ReportFetcher, opts ...Option) *env {
+func newEnv(t *testing.T, mk func(reg *accounts.Registry, clk *fakeClock) ReportFetcher, opts ...Option) *env {
 	t.Helper()
 	e := &env{t: t, path: filepath.Join(t.TempDir(), "smind.db"), clk: newFakeClock(), mk: mk}
 	e.opts = append([]Option{WithClock(e.clk.Now), WithJitter(func() float64 { return 0 })}, opts...)
@@ -183,7 +193,7 @@ func (e *env) open() {
 	}
 	e.st = st
 	e.reg = accounts.New(st)
-	e.p = New(st, e.reg, e.mk(e.reg), e.opts...)
+	e.p = New(st, e.reg, e.mk(e.reg, e.clk), e.opts...)
 }
 
 // restart closes the poller and the store and reopens both at the same path.
