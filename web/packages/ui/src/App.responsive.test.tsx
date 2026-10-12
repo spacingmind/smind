@@ -7,7 +7,7 @@
 // keeping that mutation local to its own file rules out any chance of it
 // leaking into App.test.tsx's already-passing (desktop-width) assertions.
 import { act } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "@/App";
@@ -258,5 +258,55 @@ describe("App compact layout (Item 21)", () => {
     await flush();
 
     expect(splitHandle()).toBeInTheDocument();
+  });
+});
+
+describe("App compact header (app-header-and-tabs)", () => {
+  async function mountCompactWithTask(): Promise<void> {
+    // The compact sidebar is a closed sheet, so select the task at desktop
+    // width first and then shrink to the phone width.
+    const viewport = stubViewportWidth(1024);
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+    clickTaskRow(TASK);
+    await flush();
+    respondChatList(socket, TASK);
+    await flush();
+    act(() => viewport.resize(390));
+    await flush();
+  }
+
+  it("AH-AC9 compact: the header hosts the sidebar toggle", async () => {
+    stubViewportWidth(390);
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const header = screen.getByTestId("app-header");
+    expect(within(header).getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+  });
+
+  it("AH-AC13 compact header shows toggle, title, task menu and terminal; editor pill and help are container-hidden", async () => {
+    await mountCompactWithTask();
+    const header = screen.getByTestId("app-header");
+    expect(header.className).toContain("@container/app-header");
+    expect(within(header).getByRole("button", { name: "Toggle Sidebar" })).toBeInTheDocument();
+    expect(within(header).getByTestId("app-header-title")).toHaveTextContent("Fix the bug");
+    expect(within(header).getByTestId("app-header-title").querySelector("span.truncate")).not.toBeNull();
+    expect(within(header).getByTestId("app-header-task-menu")).toBeInTheDocument();
+    expect(within(header).getByTestId("app-header-terminal")).toBeInTheDocument();
+
+    // jsdom has no layout, so assert the container-query classes that hide them narrow.
+    const helpClasses = within(header).getByTestId("app-header-help").className.split(/\s+/);
+    expect(helpClasses).toContain("hidden");
+    expect(helpClasses).toContain("@min-[40rem]/app-header:inline-flex");
+    // Never rendered at all in a browser build (no local editors).
+    expect(within(header).queryByTestId("open-in-editor")).not.toBeInTheDocument();
+    // The terminal button is not behind the container query.
+    expect(within(header).getByTestId("app-header-terminal").className).not.toContain("hidden");
   });
 });
