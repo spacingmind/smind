@@ -9,6 +9,7 @@ import type { ChatQueueItem, RunSummary, Task } from "@/lib/types";
 import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import type { Provider, ThinkingLevel } from "@/lib/types";
 
 interface Submission {
@@ -96,6 +97,23 @@ function renderComposer(
     rerender: (next) => view.rerender(<Composer {...props} {...next} />),
     unmount: view.unmount,
   };
+}
+
+/** Opens the combined model picker. */
+function openPicker(): void {
+  fireEvent.click(screen.getByTestId("composer-model-picker"));
+}
+
+/** Picks `modelId` ("" = the provider's default row) under `providerId`: opens the picker, drills into the provider if the root is showing, clicks the row. */
+async function pickModel(providerId: string, modelId = ""): Promise<void> {
+  openPicker();
+  // The popover opens inside the selected provider's view when a model is selected: go back to the root first if that is another provider's view.
+  const back = screen.queryByTestId("model-picker-back");
+  if (back && !screen.queryByTestId(`model-row-${providerId}:${modelId}`)) fireEvent.click(back);
+  const drill = screen.queryByTestId(`model-provider-${providerId}`);
+  if (drill) fireEvent.click(drill);
+  fireEvent.click(await screen.findByTestId(`model-row-${providerId}:${modelId}`));
+  await flush();
 }
 
 function textarea(): HTMLTextAreaElement {
@@ -330,7 +348,7 @@ describe("Composer", () => {
     expect(textarea()).toHaveValue("do the thing");
   });
 
-  it("renders the provider dropdown from provider.list behind a visible label", async () => {
+  it("the picker lists the providers from provider.list behind a labelled trigger", async () => {
     const client = new FakeWsClient();
     renderComposer({ client });
 
@@ -342,29 +360,23 @@ describe("Composer", () => {
     });
     await flush();
 
-    // The dropdown is the shadcn/Radix Select, not a native <select>: the
-    // trigger is a combobox button and the options live in a portal that
-    // only exists while it is open, so they are read after opening it
-    // rather than out of a closed element's subtree.
-    const trigger = screen.getByLabelText("Provider");
-    expect(trigger).toHaveAttribute("role", "combobox");
-    expect(trigger.tagName).toBe("BUTTON");
-
-    fireEvent.click(trigger);
-    const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM"]);
-    // The trigger shows the current selection, so the closed state still
+    // The trigger names the current selection, so the closed state still
     // says which provider a prompt would go to.
+    const trigger = screen.getByTestId("composer-model-picker");
+    expect(trigger).toHaveAttribute("aria-label", "Model: Claude Code");
     expect(trigger).toHaveTextContent("Claude Code");
 
-    // Item 5: the visible <label> text moved out of the card's toolbar --
-    // the accessible name now comes from aria-label on the label-less
-    // trigger, which is still what getByLabelText resolved through.
+    // No model is selected, so the popover opens at the root: both providers.
+    openPicker();
+    expect(await screen.findByTestId("model-provider-claude-native")).toHaveTextContent("Claude Code");
+    expect(screen.getByTestId("model-provider-glm")).toHaveTextContent("GLM");
+
+    // Item 5: no visible <label> text in the card's toolbar.
     expect(screen.queryByText("Provider")).not.toBeInTheDocument();
     expect(screen.queryByText("Permission mode")).not.toBeInTheDocument();
   });
 
-  it("selecting a provider from the open dropdown is what the next prompt is sent with", async () => {
+  it("picking a model under another provider is what the next prompt is sent with", async () => {
     const client = new FakeWsClient();
     const { submissions } = renderComposer({ client });
 
@@ -376,9 +388,7 @@ describe("Composer", () => {
     });
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-    await flush();
+    await pickModel("glm");
 
     fireEvent.change(textarea(), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -461,9 +471,7 @@ describe("Composer", () => {
     await flush();
     expect(screen.queryByTestId("composer-auto-accept")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-    await flush();
+    await pickModel("glm");
 
     expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Default");
     fireEvent.click(screen.getByLabelText("Permission mode"));
@@ -482,6 +490,30 @@ describe("Composer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await flush();
     expect(submissions).toEqual([{ provider: "glm", prompt: "unattended", permissionMode: "", autoAccept: true }]);
+  });
+
+  it("picking a model under the current provider keeps the permission mode", async () => {
+    const client = new FakeWsClient();
+    const { submissions } = renderComposer({ client });
+    client.nth("provider.list", 0).resolve({
+      providers: [
+        { ...SERVED_PROVIDERS.providers[0], models: [{ id: "opus", label: "Opus" }] },
+        SERVED_PROVIDERS.providers[1],
+      ],
+    });
+    await flush();
+
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
+    await flush();
+
+    await pickModel("claude-native", "opus");
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
+
+    fireEvent.change(textarea(), { target: { value: "still planning" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await flush();
+    expect(submissions).toEqual([{ provider: "claude-native", prompt: "still planning", permissionMode: "plan", autoAccept: false }]);
   });
 
   describe("model picker (ADR-0025)", () => {
@@ -523,10 +555,15 @@ describe("Composer", () => {
       const { models } = renderWithModels();
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Model"));
-      const options = await screen.findAllByRole("option");
-      expect(options.map((o) => o.textContent)).toEqual(["Default", "Sonnet", "Opus"]);
-      fireEvent.click(options[2]);
+      openPicker();
+      // Selected model is the default, so the popover opens at the root.
+      fireEvent.click(await screen.findByTestId("model-provider-claude-native"));
+      const rows = screen.getAllByRole("option").filter((o) => o.dataset.testid?.startsWith("model-row-"));
+      expect(rows.map((o) => o.dataset.testid)).toEqual(["model-row-claude-native:", "model-row-claude-native:sonnet", "model-row-claude-native:opus"]);
+      expect(rows[0]).toHaveTextContent("Default model");
+      expect(rows[1]).toHaveTextContent(/^SonnetBalanced$/);
+      expect(rows[2]).toHaveTextContent(/^Opus/);
+      fireEvent.click(rows[2]);
       await flush();
 
       await send("hello");
@@ -537,51 +574,95 @@ describe("Composer", () => {
       const { models } = renderWithModels();
       await flush();
 
-      expect(screen.getByLabelText("Model")).toHaveTextContent("Default");
+      expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", "Model: Claude Code");
       await send("hello");
       expect(models).toEqual([undefined]);
 
       // Picking a model and then going back to Default omits it again.
-      fireEvent.click(screen.getByLabelText("Model"));
-      fireEvent.click((await screen.findAllByRole("option"))[1]);
-      await flush();
-      fireEvent.click(screen.getByLabelText("Model"));
-      fireEvent.click((await screen.findAllByRole("option"))[0]);
-      await flush();
+      await pickModel("claude-native", "sonnet");
+      await pickModel("claude-native");
       await send("again");
       expect(models).toEqual([undefined, undefined]);
     });
 
-    it("composer hides the model picker when the provider lists no models", async () => {
+    it("a provider with no catalog offers only the default model row", async () => {
       renderWithModels();
       await flush();
-      expect(screen.getByLabelText("Model")).toBeInTheDocument();
+      expect(screen.getByTestId("composer-model-picker")).toBeInTheDocument();
 
-      fireEvent.click(screen.getByLabelText("Provider"));
-      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-      await flush();
-      expect(screen.queryByLabelText("Model")).not.toBeInTheDocument();
+      openPicker();
+      fireEvent.click(await screen.findByTestId("model-provider-glm"));
+      const rows = screen.getAllByRole("option").filter((o) => o.dataset.testid?.startsWith("model-row-"));
+      expect(rows.map((o) => o.dataset.testid)).toEqual(["model-row-glm:"]);
     });
 
     it("switching provider resets an unavailable model", async () => {
       const { models } = renderWithModels();
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Model"));
-      fireEvent.click((await screen.findAllByRole("option"))[1]);
-      await flush();
+      await pickModel("claude-native", "opus");
+      expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", "Model: Claude Code · Opus");
 
-      fireEvent.click(screen.getByLabelText("Provider"));
-      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-      await flush();
+      // Picking another provider's default row clears the model.
+      await pickModel("glm");
       await send("on glm");
       expect(models).toEqual([undefined]);
 
       // Back on Claude the model starts from Default, not the stale pick.
-      fireEvent.click(screen.getByLabelText("Provider"));
-      fireEvent.click(await screen.findByRole("option", { name: "Claude Code" }));
+      await pickModel("claude-native");
+      expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", "Model: Claude Code");
+    });
+
+    it("health is fetched once per client on first open", async () => {
+      const { client } = renderWithModels();
       await flush();
-      expect(screen.getByLabelText("Model")).toHaveTextContent("Default");
+      const tests = () => client.calls.filter((c) => c.method === "provider.test");
+      // Never on render: only the first open tests the providers.
+      expect(tests()).toHaveLength(0);
+
+      openPicker();
+      await screen.findByTestId("model-provider-glm");
+      expect(tests()).toHaveLength(2);
+
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
+      openPicker();
+      await screen.findByTestId("model-provider-glm");
+      expect(tests()).toHaveLength(2);
+
+      tests()[0].resolve({ ok: true, detail: "" });
+      tests()[1].resolve({ ok: false, detail: '"glm" not found on PATH' });
+      await flush();
+
+      const row = screen.getByTestId("model-provider-glm");
+      expect(row).toHaveAttribute("aria-disabled", "true");
+      expect(row).toHaveTextContent('"glm" not found on PATH');
+      expect(screen.getByTestId("model-provider-claude-native")).not.toHaveAttribute("aria-disabled");
+      expect(tests()).toHaveLength(2);
+    });
+
+    it("an unhealthy provider cannot be selected from the composer", async () => {
+      const { client, models } = renderWithModels();
+      await flush();
+
+      openPicker();
+      await screen.findByTestId("model-provider-glm");
+      const glmTest = client.calls.find((c) => c.method === "provider.test" && (c.params as { provider: string }).provider === "glm");
+      expect(glmTest).toBeTruthy();
+      glmTest!.resolve({ ok: false, detail: '"glm" not found on PATH' });
+      await flush();
+
+      fireEvent.click(screen.getByTestId("model-provider-glm"));
+      await flush();
+      // Still at the root: the disabled row did not drill in, and nothing switched.
+      expect(screen.queryByTestId("model-row-glm:")).not.toBeInTheDocument();
+      expect(screen.getByTestId("model-provider-claude-native")).toBeInTheDocument();
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
+      expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", "Model: Claude Code");
+
+      await send("still on claude");
+      expect(models).toEqual([undefined]);
     });
   });
 
@@ -599,9 +680,7 @@ describe("Composer", () => {
     // Default provider is claude-native -- the control is present.
     expect(screen.getByLabelText("Thinking level")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-    await flush();
+    await pickModel("glm");
 
     // GLM has no pre-run thinking-level control at all (its own lives in
     // the live chat view, once a session exists) -- not merely disabled.
@@ -644,7 +723,7 @@ describe("Composer", () => {
     ]);
   });
 
-  it("keeps the permission-mode help tooltip and disables both selects while the composer is inactive", () => {
+  it("keeps the permission-mode help tooltip and disables the picker and the mode select while the composer is inactive", () => {
     const { rerender } = renderComposer();
 
     // acceptEdits is Claude's default, so the trigger's tooltip is that
@@ -652,10 +731,10 @@ describe("Composer", () => {
     const policy = screen.getByLabelText("Permission mode");
     expect(policy).toHaveAttribute("title", expect.stringContaining("edit"));
     expect(policy).not.toBeDisabled();
-    expect(screen.getByLabelText("Provider")).not.toBeDisabled();
+    expect(screen.getByTestId("composer-model-picker")).not.toBeDisabled();
 
     rerender({ connected: false });
-    expect(screen.getByLabelText("Provider")).toBeDisabled();
+    expect(screen.getByTestId("composer-model-picker")).toBeDisabled();
     expect(screen.getByLabelText("Permission mode")).toBeDisabled();
   });
 
@@ -663,20 +742,21 @@ describe("Composer", () => {
   // breakpoint -- jsdom has no layout, so this asserts the class list
   // carries both the 44px compact rule and the `md:`-scoped revert to the
   // original dense size, rather than a computed pixel height.
-  it("Send and the provider/policy selects carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
+  it("Send, the model picker and the policy select carry the compact 44px touch-target class, reverting to the dense size at md:", () => {
     renderComposer();
 
     const send = screen.getByTestId("chat-send-button");
-    expect(send.className).toContain("h-11");
-    expect(send.className).toContain("md:h-7");
+    expect(send.className).toContain("size-11");
+    expect(send.className).toContain("md:size-8");
 
     // The trigger element is what the finger lands on, so the rule has to
     // survive on it and not be merged away by SelectTrigger's own h-8.
-    for (const label of ["Provider", "Permission mode"]) {
-      const trigger = screen.getByLabelText(label);
-      expect(trigger.className).toContain("h-11");
-      expect(trigger.className).toContain("md:h-7");
-    }
+    const picker = screen.getByTestId("composer-model-picker");
+    expect(picker.className).toContain("size-11");
+    expect(picker.className).toContain("md:h-7");
+    const policy = screen.getByLabelText("Permission mode");
+    expect(policy.className).toContain("h-11");
+    expect(policy.className).toContain("md:h-7");
   });
 
   // visual-identity-console Item 4: the Run/Stop control is the "execute"
@@ -778,12 +858,16 @@ describe("Composer server queue (ADR-0021 §9)", () => {
     expect(whenBusy).toEqual(["interrupt"]);
   });
 
-  it("Send now button is absent when idle", () => {
+  it("Send now button is absent when idle, and while running needs text", () => {
     const { rerender } = renderComposer({ runningRunId: null });
+    fireEvent.change(textarea(), { target: { value: "hurry" } });
     expect(screen.queryByTestId("chat-send-now-button")).not.toBeInTheDocument();
 
     rerender({ runningRunId: "run-1" });
     expect(screen.getByTestId("chat-send-now-button")).toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "" } });
+    expect(screen.queryByTestId("chat-send-now-button")).not.toBeInTheDocument();
   });
 
   it("cancel button calls chat.queueCancel with the item id", async () => {
@@ -936,7 +1020,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
     const card = screen.getByTestId("composer-card");
     expect(card).toContainElement(screen.getByLabelText("Prompt"));
-    expect(card).toContainElement(screen.getByLabelText("Provider"));
+    expect(card).toContainElement(screen.getByTestId("composer-model-picker"));
     expect(card).toContainElement(screen.getByTestId("chat-send-button"));
     // No dead affordances: Stop only exists while a run is live, and
     // there is no attachment "+" until attachments exist.
@@ -944,27 +1028,41 @@ describe("Composer diff-stat pill (Item 5)", () => {
     expect(card.querySelector("[aria-label~=attachment]")).not.toBeInTheDocument();
   });
 
+  /** Applies profile `id` through the picker's pinned Profiles section (the popover opens at the root when profiles exist). */
+  async function applyProfileRow(id: number): Promise<void> {
+    openPicker();
+    fireEvent.click(await screen.findByTestId(`model-profile-row-${id}`));
+    await flush();
+  }
+
   // ADR-0014's Profiles picker: client-side seed of provider/permissionMode/
   // thinkingLevel from a saved profile, per the ADR's "How a profile is
   // applied" section.
   describe("Profiles picker (ADR-0014)", () => {
-    it("does not render when profile.list resolves empty (AC15 regression)", async () => {
+    it("offers no profile rows when profile.list resolves empty (AC15 regression)", async () => {
       const client = new FakeWsClient();
       renderComposer({ client });
 
       client.nth("profile.list", 0).resolve([]);
       await flush();
 
-      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
+      openPicker();
+      await screen.findByTestId("model-provider-glm");
+      expect(screen.queryByTestId("model-manage-agents")).not.toBeInTheDocument();
+      expect(screen.queryByText("Profiles")).not.toBeInTheDocument();
     });
 
-    it("does not render while profile.list is still pending, and every other control works as before", async () => {
+    it("offers no profile rows while profile.list is still pending, and every other control works as before", async () => {
       const client = new FakeWsClient();
       const { submissions } = renderComposer({ client });
 
       // profile.list is left unresolved -- mirrors a daemon predating this
       // feature just as well as one that's merely slow to answer.
-      expect(screen.queryByLabelText("Agents")).not.toBeInTheDocument();
+      openPicker();
+      await screen.findByTestId("model-provider-glm");
+      expect(screen.queryByTestId("model-manage-agents")).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
 
       fireEvent.change(textarea(), { target: { value: "still works" } });
       fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -975,9 +1073,18 @@ describe("Composer diff-stat pill (Item 5)", () => {
 
     it("selecting a profile seeds provider/permissionMode/autoAccept/thinkingLevel in one click", async () => {
       const client = new FakeWsClient();
-      renderComposer({ client });
+      const sent: { provider: string; model?: string }[] = [];
+      renderComposer({
+        client,
+        onSubmit: async (provider, _prompt, _perm, _t, _w, model) => {
+          sent.push({ provider, model });
+          return { kind: "started", runId: "run-test" };
+        },
+      });
 
-      client.nth("provider.list", 0).resolve(SERVED_PROVIDERS);
+      client.nth("provider.list", 0).resolve({
+        providers: [SERVED_PROVIDERS.providers[0], { ...SERVED_PROVIDERS.providers[1], models: [{ id: "glm-5.3", label: "GLM 5.3" }] }],
+      });
       client.nth("profile.list", 0).resolve([
         {
           ID: 1,
@@ -986,6 +1093,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
           PermissionMode: "accept_edits",
           AutoAccept: true,
           ThinkingLevel: "",
+          Model: "glm-5.3",
           Notes: "",
           CreatedAt: "2026-09-25T00:00:00Z",
           UpdatedAt: "2026-09-25T00:00:00Z",
@@ -993,19 +1101,25 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
-      await flush();
+      await applyProfileRow(1);
 
-      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+      expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", "Model: GLM · GLM 5.3");
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept Edits");
       expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
-      // The trigger now shows the applied agent's own name (run-config IA:
-      // the toolbar tracks which agent is active, not just a one-time seed).
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+      // The picker's profile row is now the checked one (run-config IA: the
+      // toolbar tracks which agent is active, not just a one-time seed).
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
+
+      fireEvent.change(textarea(), { target: { value: "go" } });
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
+      await flush();
+      expect(sent).toEqual([{ provider: "glm", model: "glm-5.3" }]);
     });
 
-    it("hand-editing a field after applying a profile flips the trigger to Custom · from <name>, and ↺ restores the agent's values", async () => {
+    it("hand-editing a field after applying a profile marks the profile row custom, and ↺ restores the agent's values", async () => {
       const client = new FakeWsClient();
       const { submissions } = renderComposer({ client });
 
@@ -1024,21 +1138,26 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
-      await flush();
+      await applyProfileRow(1);
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("model-profile-row-1")).not.toHaveTextContent("custom");
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
 
       fireEvent.click(screen.getByLabelText("Permission mode"));
       fireEvent.click(await screen.findByRole("option", { name: "Accept File Edits" }));
       await flush();
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Accept File Edits");
-      // Hand-editing flips the Agent trigger to a "Custom · from <name>"
-      // hint -- the change is a per-run override, not written back to the
+      // Hand-editing flips the applied profile's row to a "custom" badge
+      // -- the change is a per-run override, not written back to the
       // stored profile (nothing here calls profile.update).
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("Custom · from UI work");
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveTextContent("custom");
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
       expect(client.calls.some((c) => c.method === "profile.update")).toBe(false);
 
       // Sending still submits the hand-edited value -- the toolbar never
@@ -1052,11 +1171,12 @@ describe("Composer diff-stat pill (Item 5)", () => {
       fireEvent.click(screen.getByTestId("composer-agent-reset"));
       await flush();
       expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
       expect(screen.queryByTestId("composer-agent-reset")).not.toBeInTheDocument();
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).not.toHaveTextContent("custom");
     });
 
-    it('the agent menu offers "No agent" and "Manage agents…", the latter opening Settings -> Agents', async () => {
+    it('the picker offers "No agent" and "Manage agents…", the latter opening Settings -> Agents', async () => {
       const client = new FakeWsClient();
       renderComposer({ client });
 
@@ -1075,20 +1195,26 @@ describe("Composer diff-stat pill (Item 5)", () => {
       ]);
       await flush();
 
-      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-      fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
+      await applyProfileRow(1);
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
       await flush();
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
 
-      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-      fireEvent.click(await screen.findByTestId("agent-menu-no-agent"));
+      openPicker();
+      fireEvent.click(await screen.findByTestId("model-no-agent"));
       await flush();
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "false");
+      // "No agent" only shows while an agent is applied.
+      expect(screen.queryByTestId("model-no-agent")).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByTestId("model-search-input"), { key: "Escape" });
+      await flush();
 
       const onOpenSettings = vi.fn();
       window.addEventListener("smind:open-settings", onOpenSettings);
-      fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-      fireEvent.click(await screen.findByTestId("agent-menu-manage"));
+      openPicker();
+      fireEvent.click(await screen.findByTestId("model-manage-agents"));
       window.removeEventListener("smind:open-settings", onOpenSettings);
 
       expect(onOpenSettings).toHaveBeenCalledTimes(1);
@@ -1123,21 +1249,19 @@ describe("Composer diff-stat pill (Item 5)", () => {
       });
       await flush();
 
-      fireEvent.click(screen.getByLabelText("Provider"));
-      fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
-      await flush();
+      await pickModel("glm");
       expect(window.localStorage.getItem("smind:run-config:1:10")).toContain('"provider":"glm"');
 
       // Task 2 has never had a run-config persisted -- starts from the
       // plain EMPTY_STATE default, not task 1's GLM pick.
       rerender({ taskId: 2 });
       await flush();
-      expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("Claude Code");
 
       // Switching back to task 1 reads its own persisted config back.
       rerender({ taskId: 1 });
       await flush();
-      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
     });
 
     it("a task with no persisted run-config starts from the ★ default agent", async () => {
@@ -1154,9 +1278,10 @@ describe("Composer diff-stat pill (Item 5)", () => {
       client.nth("profile.list", 0).resolve([PROFILE]);
       await flush();
 
-      expect(screen.getByLabelText("Provider")).toHaveTextContent("GLM");
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("GLM");
       expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("UI work");
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "true");
     });
 
     it("a task that already has a persisted run-config is not overridden by the ★ default agent", async () => {
@@ -1177,8 +1302,10 @@ describe("Composer diff-stat pill (Item 5)", () => {
       client.nth("profile.list", 0).resolve([PROFILE]);
       await flush();
 
-      expect(screen.getByLabelText("Provider")).toHaveTextContent("Claude Code");
-      expect(screen.getByLabelText("Agents")).toHaveTextContent("No agent");
+      expect(screen.getByTestId("composer-model-picker")).toHaveTextContent("Claude Code");
+      openPicker();
+      expect(await screen.findByTestId("model-profile-row-1")).toHaveAttribute("aria-selected", "false");
+      expect(screen.queryByTestId("model-no-agent")).not.toBeInTheDocument();
     });
 
     it("a pre-ADR-0019 persisted run-config loads with the provider's default mode, never a mapped legacy policy (W2)", async () => {
@@ -1200,7 +1327,7 @@ describe("Composer diff-stat pill (Item 5)", () => {
   });
 
   describe("bound provider (ADR-0016 P3: a chat's provider is immutable after its first run)", () => {
-    it("forces the Provider selector to the chat's bound provider, read-only, and keeps it there", async () => {
+    it("forces the picker to the chat's bound provider, with no provider switching, and keeps it there", async () => {
       const client = new FakeWsClient();
       renderComposer({ client, boundProvider: "glm" });
 
@@ -1212,17 +1339,153 @@ describe("Composer diff-stat pill (Item 5)", () => {
       });
       await flush();
 
-      const select = screen.getByLabelText("Provider");
-      expect(select).toHaveTextContent("GLM");
-      expect(select).toHaveAttribute("data-disabled");
-      expect(select).toHaveAttribute("title", expect.stringContaining("bound to GLM"));
+      const trigger = screen.getByTestId("composer-model-picker");
+      expect(trigger).toHaveTextContent("GLM");
 
-      // Radix's Select fires a spurious onValueChange("") of its own once
-      // a disabled select's value settles (not from any user click) --
-      // regression coverage for the real bug that surfaced this: it must
-      // never blank out the selector.
+      openPicker();
+      // Straight into the bound provider's view: no back button, no other provider.
+      expect(await screen.findByTestId("model-row-glm:")).toBeInTheDocument();
+      expect(screen.queryByTestId("model-picker-back")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("model-provider-claude-native")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("model-provider-glm")).not.toBeInTheDocument();
+      expect(screen.getByText(/Bound to GLM/)).toHaveTextContent("start a new chat");
+
       await flush();
-      expect(select).toHaveTextContent("GLM");
+      expect(trigger).toHaveTextContent("GLM");
     });
+  });
+});
+
+describe("Composer redesign (composer-redesign plan)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("composer card has no divider and the textarea is two rows", () => {
+    renderComposer();
+    expect(textarea()).toHaveAttribute("rows", "2");
+    const card = screen.getByTestId("composer-card");
+    expect(card.className).toContain("rounded-2xl");
+    expect(screen.getByTestId("composer-toolbar-row").className).not.toMatch(/border-t|border-b/);
+  });
+
+  it("send is icon-only, labelled Send, disabled while empty", () => {
+    renderComposer();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveTextContent("");
+    expect(send.querySelector("svg")).not.toBeNull();
+
+    fireEvent.change(textarea(), { target: { value: "go" } });
+    expect(send).toBeEnabled();
+  });
+
+  it("running shows Stop always, Queue and Send now only with text", () => {
+    renderComposer({ runningRunId: "run-1" });
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Queue" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send now" })).not.toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "next" } });
+    expect(screen.getByRole("button", { name: "Queue" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send now" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  });
+
+  it("Working chip shows while a run is live and hides when idle", () => {
+    const { rerender } = renderComposer({ runningRunId: null });
+    expect(screen.queryByTestId("composer-working-chip")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-status-chips")).not.toBeInTheDocument();
+
+    rerender({ runningRunId: "run-1" });
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+  });
+
+  it("diff-stat chip compact-formats thousands and opens the diff", () => {
+    const onOpenDiff = vi.fn();
+    renderComposer({ diffStat: { files: 40, additions: 33500, deletions: 940 }, onOpenDiff });
+    const chip = screen.getByTestId("composer-diff-stat");
+    expect(chip).toHaveTextContent("+33.5k");
+    expect(chip).toHaveTextContent("\u2212940");
+    expect(chip).toHaveAttribute("aria-label", "Open diff: 33500 additions, 940 deletions");
+    fireEvent.click(chip);
+    expect(onOpenDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("composer.focus action focuses the textarea", () => {
+    render(
+      <KeyboardProvider>
+        <Composer
+          client={new FakeWsClient()}
+          taskId={1}
+          chatId={10}
+          isDefaultChat
+          boundProvider={null}
+          connected
+          runningRunId={null}
+          queuedItems={[]}
+          onCancelQueued={async () => {}}
+          onSubmit={async () => ({ kind: "started", runId: "r" })}
+          onStop={async () => {}}
+        />
+      </KeyboardProvider>,
+    );
+    expect(textarea()).not.toHaveFocus();
+    // Ctrl+L: jsdom is not a mac, so Mod resolves to Ctrl.
+    fireEvent.keyDown(document, { key: "l", code: "KeyL", ctrlKey: true });
+    expect(textarea()).toHaveFocus();
+  });
+
+  it("focus hint shows the effective combo when empty and unfocused, hides on focus or text", () => {
+    renderComposer();
+    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+L to focus");
+
+    fireEvent.focus(textarea());
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+
+    fireEvent.blur(textarea());
+    expect(screen.getByTestId("composer-focus-hint")).toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "typing" } });
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+  });
+
+  it("focus hint follows a rebound shortcut and hides when unbound", () => {
+    const props = {
+      client: new FakeWsClient(),
+      taskId: 1,
+      chatId: 10,
+      isDefaultChat: true,
+      boundProvider: null,
+      connected: true,
+      runningRunId: null,
+      queuedItems: [],
+      onCancelQueued: async () => {},
+      onSubmit: async () => ({ kind: "started" as const, runId: "r" }),
+      onStop: async () => {},
+    };
+    const { unmount } = render(
+      <KeyboardProvider readOverrides={() => ({ "composer-focus": "Mod+J" })}>
+        <Composer {...props} />
+      </KeyboardProvider>,
+    );
+    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+J to focus");
+    unmount();
+
+    render(
+      <KeyboardProvider readOverrides={() => ({ "composer-focus": "" })}>
+        <Composer {...props} />
+      </KeyboardProvider>,
+    );
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+  });
+
+  it("placeholder does not advertise unsupported features", () => {
+    const { rerender } = renderComposer();
+    for (const running of [null, "run-1"]) {
+      rerender({ runningRunId: running });
+      const placeholder = textarea().getAttribute("placeholder") ?? "";
+      expect(placeholder).not.toMatch(/@|\/command|\/skill|file/i);
+    }
   });
 });

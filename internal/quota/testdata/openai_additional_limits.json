@@ -1,0 +1,41 @@
+{
+  "rate_limit": {
+    "primary_window": {
+      "used_percent": 20,
+      "reset_at": 1760000100,
+      "limit_window_seconds": 18000
+    }
+  },
+  "additional_rate_limits": [
+    {
+      "limit_name": "Cloud mode",
+      "rate_limit": {
+        "primary_window": {
+          "used_percent": 60,
+          "reset_at": 1760000100,
+          "limit_window_seconds": 18000
+        }
+      }
+    },
+    {
+      "rate_limit": {
+        "primary_window": {
+          "used_percent": 99,
+          "reset_at": 1760000100,
+          "limit_window_seconds": 18000
+        }
+      }
+    },
+    {
+      "metered_feature": "image gen/advanced",
+      "limit_name": "Images",
+      "rate_limit": {
+        "primary_window": {
+          "used_percent": 3,
+          "reset_at": 1760000100,
+          "limit_window_seconds": 18000
+        }
+      }
+    }
+  ]
+}

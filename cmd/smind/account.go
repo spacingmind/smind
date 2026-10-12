@@ -29,7 +29,7 @@ type accountResult struct {
 
 func cmdAccount(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login|rm|test> ...")
+		fmt.Fprintln(os.Stderr, "usage: smind account <add|ls|login|rm|test|usage> ...")
 		return 2
 	}
 	switch args[0] {
@@ -43,6 +43,8 @@ func cmdAccount(args []string) int {
 		return cmdAccountRemove(args[1:])
 	case "test":
 		return cmdAccountTest(args[1:])
+	case "usage":
+		return cmdAccountUsage(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "smind account: unknown subcommand %q\n", args[0])
 		return 2

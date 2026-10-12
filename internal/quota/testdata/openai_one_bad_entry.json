@@ -1,0 +1,26 @@
+{
+  "rate_limit": {
+    "primary_window": {
+      "used_percent": 31.5,
+      "reset_at": 1760000100,
+      "limit_window_seconds": 18000
+    },
+    "secondary_window": "not-a-window"
+  },
+  "additional_rate_limits": [
+    {
+      "limit_name": "Broken",
+      "rate_limit": { "primary_window": { "used_percent": ["no"] } }
+    },
+    {
+      "limit_name": "Whole",
+      "rate_limit": {
+        "primary_window": {
+          "used_percent": 8,
+          "reset_at": 1760000100,
+          "limit_window_seconds": 18000
+        }
+      }
+    }
+  ]
+}

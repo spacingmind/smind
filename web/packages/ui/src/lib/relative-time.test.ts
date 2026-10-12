@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRelativeTime } from "@/lib/relative-time";
+import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 
 const NOW = new Date("2024-06-01T12:00:00Z").getTime();
 
@@ -31,5 +31,22 @@ describe("formatRelativeTime", () => {
 
   it("falls back to the raw string for an unparseable timestamp", () => {
     expect(formatRelativeTime("not-a-date", NOW)).toBe("not-a-date");
+  });
+});
+
+describe("formatRelativeTimeShort", () => {
+  it.each([
+    ["2024-06-01T11:59:30Z", "now"],
+    ["2024-06-01T11:11:00Z", "49m"],
+    ["2024-06-01T09:00:00Z", "3h"],
+    ["2024-05-29T12:00:00Z", "3d"],
+    ["2024-03-01T12:00:00Z", "3mo"],
+    ["2022-06-01T12:00:00Z", "2y"],
+  ])("%s -> %s", (iso, expected) => {
+    expect(formatRelativeTimeShort(iso, NOW)).toBe(expected);
+  });
+
+  it("is empty for an unparseable timestamp rather than echoing it into a 24px slot", () => {
+    expect(formatRelativeTimeShort("garbage", NOW)).toBe("");
   });
 });

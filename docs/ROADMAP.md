@@ -151,7 +151,8 @@ Status as of v0.10.0 (2026-10-11):
 - [ ] GitHub integration: PR status / checkout PR as a task
 - [ ] Per-workspace audit log
 - [ ] Quota prediction. Per-run and proxy usage are now recorded, but the
-      per-provider quota `Fetcher` is still a stub.
+      per-provider quota `Fetcher` is still a stub. Design (Accepted):
+      [ADR-0028](decisions/0028-account-usage-windows.md).
 
 ## Guiding principles
 

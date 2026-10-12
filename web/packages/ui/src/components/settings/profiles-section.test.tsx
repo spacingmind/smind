@@ -157,14 +157,25 @@ describe("profiles-section", () => {
     expect(within(screen.getByTestId("profile-row-1")).getByTestId("profile-edit-form-1-name")).toBeInTheDocument();
   });
 
-  it("empty state shows a sentence and its own + New agent button", async () => {
+  it("keeps its own title when rendered outside the settings screen", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([]);
+    await flush();
+
+    expect(screen.getByRole("heading", { level: 3, name: "Agents" })).toBeInTheDocument();
+  });
+
+  it("empty state shows a sentence and the one + New agent button (no second CTA in the body)", async () => {
     const client = new FakeWsClient();
     renderSection(client);
     client.nth("profile.list").resolve([]);
     await flush();
 
     expect(screen.getByTestId("profiles-empty-state")).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId("profiles-empty-new-button"));
+    expect(screen.queryByTestId("profiles-empty-new-button")).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /New agent/ })).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("profile-new-button"));
     await flush();
 
     expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();

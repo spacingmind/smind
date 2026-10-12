@@ -552,7 +552,7 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("more output");
   });
 
-  it("renders the provider dropdown from provider.list (3 providers, labels over ids)", async () => {
+  it("the combined picker lists the providers from provider.list (3 providers, labels over ids)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
@@ -567,9 +567,14 @@ describe("TaskDetailPane", () => {
     } satisfies ProviderListResult);
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["Claude Code", "GLM", "Codex"]);
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    const rows = await screen.findAllByTestId(/^model-provider-/);
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      "model-provider-claude-native",
+      "model-provider-glm",
+      "model-provider-codex-native",
+    ]);
+    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
   it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
@@ -580,10 +585,12 @@ describe("TaskDetailPane", () => {
     client.nth("provider.list", 0).reject(new Error("boom"));
     await flush();
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    const options = await screen.findAllByRole("option");
-    expect(options.map((o) => o.textContent)).toEqual(["claude-native", "glm"]);
-    fireEvent.click(options[0]);
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    const rows = await screen.findAllByTestId(/^model-provider-/);
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm"]);
+    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["claude-native", "glm"]);
+    fireEvent.click(rows[0]);
+    fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "do the thing" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -988,8 +995,9 @@ describe("run-config pill (run-config IA)", () => {
 
     expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Accept File Edits · Standard");
 
-    fireEvent.click(screen.getByLabelText("Provider"));
-    fireEvent.click(await screen.findByRole("option", { name: "GLM" }));
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-provider-glm"));
+    fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
 
     // GLM has no thinking-level segment (mirrors the toolbar's own Thinking
@@ -1023,8 +1031,8 @@ describe("run-config pill (run-config IA)", () => {
     client.nth("profile.list", 1).resolve([profile]);
     await flush();
 
-    fireEvent.pointerDown(screen.getByLabelText("Agents"), { button: 0 });
-    fireEvent.click(await screen.findByTestId("agent-menu-item-1"));
+    fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 
     expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("Quick Fixes ·");

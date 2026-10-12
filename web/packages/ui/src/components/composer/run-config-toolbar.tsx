@@ -1,8 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { Check, RotateCcw } from "lucide-react";
+import { Brain, CheckCheck, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
 
+import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
+import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
+import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
 import { cn } from "@/lib/utils";
 import {
@@ -10,19 +13,11 @@ import {
   AUTO_ACCEPT_LABEL,
   describePermission,
   effectiveMode,
-  providerModels,
   providerModes,
   supportsAutoAccept,
 } from "@/lib/permission-modes";
 import { THINKING_LEVELS, thinkingLevelLabel } from "@/lib/thinking-levels";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -30,23 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { AgentProfile, ModeInfo, ModelInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
-
-// Item 21: 44px (WCAG 2.5.5 AAA / Apple HIG) below the compact breakpoint,
-// the original dense sizing at `md:` and above -- plain responsive Tailwind
-// rather than a threaded `isMobile` prop (see composer.tsx's
-// COMPACT_TOUCH_BUTTON_CLASS for the same call).
-//
-// Label-less, per web-ui-dogfood-polish Item 5: the selects sit inside the
-// input card's bottom toolbar, so their visible chrome is nothing -- the
-// card is the border, and cn()'s tailwind-merge strips SelectTrigger's own
-// border/background halves in favour of these.
-const SELECT_TRIGGER_CLASS =
-  "h-11 shrink-0 border-0 bg-transparent px-2 text-ui-base hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
-
-/** The Agent trigger button matches SELECT_TRIGGER_CLASS's sizing/touch-target rules, but Button's own variant system needs its background/border zeroed the same way SelectTrigger's are (see that class's own doc comment). */
-const AGENT_TRIGGER_CLASS =
-  "h-11 shrink-0 gap-1 rounded-lg border-0 bg-transparent px-2 text-ui-base font-normal hover:bg-hover md:h-7 md:px-1.5 md:text-ui-sm";
+import type { AgentProfile, ModeInfo, Provider, ProviderInfo, ThinkingLevel } from "@/lib/types";
 
 /**
  * The per-run configuration the composer submits with (run-config IA
@@ -78,11 +57,11 @@ export interface RunConfigState {
 export interface RunConfigContextValue {
   state: RunConfigState;
   actions: {
-    setProvider: (provider: Provider) => void;
+    /** The combined picker's one action: picking a model under another provider switches provider and model together (mode/autoAccept reset to the new provider's defaults, ADR-0019); under the current provider only the model changes. "" = the provider's default model (ADR-0025). */
+    setProviderModel: (provider: Provider, model: string) => void;
     setPermissionMode: (mode: string) => void;
     setAutoAccept: (autoAccept: boolean) => void;
     setThinkingLevel: (level: ThinkingLevel) => void;
-    setModel: (model: string) => void;
     /** Applies a profile's stored config to the three fields (ADR-0014's client-side seed) and marks it as the base agent. */
     applyProfile: (profileId: string) => void;
     /** The agent menu's "No agent" entry: detaches from baseAgentId without touching the current field values. */
@@ -95,14 +74,16 @@ export interface RunConfigContextValue {
     providers: ProviderInfo[];
     /** The selected provider's own permission modes (provider.list's catalog). */
     modes: ModeInfo[];
-    /** The selected provider's model catalog (provider.list); empty when none is known, in which case the model picker is hidden. */
-    models: ModelInfo[];
+    /** provider.test results by provider id (lazy, see use-provider-health.ts) -- an unhealthy provider is shown disabled with its reason in the combined picker. */
+    health: Record<string, ProviderHealth | undefined>;
+    /** Fired each time the combined picker opens (the owner fetches provider health lazily). */
+    onPickerOpen: (() => void) | undefined;
     /** state.permissionMode resolved against the provider default -- what the run will actually use. */
     effectiveMode: string;
     /** Whether the selected provider takes autoAccept (ACP). */
     supportsAutoAccept: boolean;
     disabled: boolean;
-    /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the Provider select read-only, since a stored agent session is provider-native. */
+    /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the combined picker offer only that provider, since a stored agent session is provider-native. */
     boundProvider: Provider | null;
   };
 }
@@ -115,6 +96,8 @@ export function useRunConfig(): RunConfigContextValue {
   if (!ctx) throw new Error("useRunConfig must be used inside <RunConfigToolbar>");
   return ctx;
 }
+
+const EMPTY_HEALTH: Record<string, ProviderHealth | undefined> = {};
 
 const EMPTY_STATE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
 
@@ -163,6 +146,8 @@ export function RunConfigToolbar({
   profiles,
   providers,
   disabled = false,
+  providerHealth = EMPTY_HEALTH,
+  onPickerOpen,
   onChange,
   children,
 }: {
@@ -177,6 +162,10 @@ export function RunConfigToolbar({
   profiles: AgentProfile[];
   providers: ProviderInfo[];
   disabled?: boolean;
+  /** provider.test results by provider id; absent/untested providers are enabled. */
+  providerHealth?: Record<string, ProviderHealth | undefined>;
+  /** Fired each time the combined model picker opens. */
+  onPickerOpen?: () => void;
   /**
    * Fires whenever the shared state changes, with the full context value
    * (state + actions) -- the composer submits a run from `state` and lets
@@ -266,16 +255,19 @@ export function RunConfigToolbar({
     [],
   );
   // Modes (W1) and models (ADR-0025) are provider-scoped: switching provider
-  // resets to the new provider's own default mode and model and turns
-  // autoAccept off, so a model id never leaks into a provider that lacks it.
-  const setProvider = useCallback(
-    (provider: Provider) => setField({ provider, permissionMode: "", autoAccept: false, model: "" }),
-    [setField],
-  );
+  // resets to the new provider's own default mode and turns autoAccept off,
+  // and the model is the one picked alongside it, so a model id never leaks
+  // into a provider that lacks it. Same-provider picks keep the mode.
+  const setProviderModel = useCallback((provider: Provider, model: string) => {
+    setState((prev) => {
+      const patch =
+        provider === prev.provider ? { model } : { provider, permissionMode: "", autoAccept: false, model };
+      return { ...prev, ...patch, custom: prev.baseAgentId !== null ? true : prev.custom };
+    });
+  }, []);
   const setPermissionMode = useCallback((permissionMode: string) => setField({ permissionMode }), [setField]);
   const setAutoAccept = useCallback((autoAccept: boolean) => setField({ autoAccept }), [setField]);
   const setThinkingLevel = useCallback((thinkingLevel: ThinkingLevel) => setField({ thinkingLevel }), [setField]);
-  const setModel = useCallback((model: string) => setField({ model }), [setField]);
 
   // The command palette's "Use agent: <name>" entry lands here (the
   // sidebar owns the palette entry; this toolbar owns the state). The
@@ -298,19 +290,20 @@ export function RunConfigToolbar({
   const value = useMemo<RunConfigContextValue>(() => {
     return {
       state,
-      actions: { setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, setModel, applyProfile, clearAgent, resetToAgent },
+      actions: { setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent },
       meta: {
         profiles,
         providers,
         modes: providerModes(providers, state.provider),
-        models: providerModels(providers, state.provider),
+        health: providerHealth,
+        onPickerOpen,
         effectiveMode: effectiveMode(providers, state.provider, state.permissionMode),
         supportsAutoAccept: supportsAutoAccept(providers, state.provider),
         disabled,
         boundProvider,
       },
     };
-  }, [state, setProvider, setPermissionMode, setAutoAccept, setThinkingLevel, setModel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider]);
+  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider, providerHealth, onPickerOpen]);
 
   useEffect(() => {
     onChange?.(value);
@@ -336,67 +329,46 @@ export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): str
 }
 
 /**
- * shadcn/Radix DropdownMenu rather than Select: the AC's menu shape --
- * each profile's row carrying its own provider/approval/thinking
- * metadata, a "No agent" entry, a separator, and a "Manage agents…"
- * entry -- is a richer list than Select's single-line SelectItem/
- * SelectValue pairing supports cleanly. The trigger's own accessible name
- * stays the static "Agents" (aria-label) regardless of what it displays,
- * matching every other label-less toolbar control here.
+ * The one combined provider + model selector (Paseo's combined-model-selector;
+ * docs/plans/active/composer-combined-model-picker.md) -- it replaced the
+ * separate Agent, Provider and Model controls. Profiles ("agents") are the
+ * pinned root section of its popover, so applying, detaching and managing them
+ * works as before; the reset-to-agent button stays beside the trigger while
+ * the run config has drifted from the applied profile.
  */
-function RunConfigToolbarAgent() {
+function RunConfigToolbarModelPicker() {
   const { state, actions, meta } = useRunConfig();
-  if (meta.profiles.length === 0) return null;
-
+  const browserProviders = useMemo(() => buildBrowserProviders(meta.providers, meta.health), [meta.providers, meta.health]);
+  const profileRows = useMemo<PickerProfileRow[]>(
+    () =>
+      meta.profiles.map((p) => ({
+        id: String(p.ID),
+        name: p.Name,
+        summary: describeProfile(p, meta.providers),
+        provider: p.Provider,
+        notes: p.Notes || undefined,
+      })),
+    [meta.profiles, meta.providers],
+  );
   const baseAgent = state.baseAgentId ? meta.profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
-  const noAgent = !state.baseAgentId;
-  // "No agent" (muted) matches the header pill's and the menu's own "No
-  // agent" wording -- it used to just say "Agents" here, reading like a
-  // placeholder rather than a real state.
-  const triggerLabel = noAgent ? "No agent" : state.custom ? `Custom · from ${baseAgent?.Name ?? "agent"}` : (baseAgent?.Name ?? "No agent");
 
   return (
     <div className="flex shrink-0 items-center">
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild disabled={meta.disabled}>
-          <Button
-            type="button"
-            variant="ghost"
-            aria-label="Agents"
-            data-testid="composer-agent-select"
-            disabled={meta.disabled}
-            className={cn(AGENT_TRIGGER_CLASS, noAgent && "text-foreground-muted")}
-          >
-            {triggerLabel}
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="max-w-sm">
-          <DropdownMenuItem data-testid="agent-menu-no-agent" onSelect={() => actions.clearAgent()}>
-            No agent
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          {meta.profiles.map((p) => (
-            <DropdownMenuItem
-              key={p.ID}
-              data-testid={`agent-menu-item-${p.ID}`}
-              title={p.Notes || undefined}
-              onSelect={() => actions.applyProfile(String(p.ID))}
-            >
-              <span className="min-w-0 truncate">
-                {p.Name} <span className="text-foreground-muted">({describeProfile(p, meta.providers)})</span>
-              </span>
-            </DropdownMenuItem>
-          ))}
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            data-testid="agent-menu-manage"
-            onSelect={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
-          >
-            Manage agents…
-            <span className="ml-auto text-foreground-subtlest">⌘,</span>
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ModelPicker
+        providers={browserProviders}
+        selectedProvider={state.provider}
+        selectedModel={state.model}
+        boundProvider={meta.boundProvider}
+        disabled={meta.disabled}
+        profileRows={profileRows}
+        baseAgentId={state.baseAgentId}
+        custom={state.custom}
+        onSelect={(provider, model) => actions.setProviderModel(provider as Provider, model)}
+        onApplyProfile={actions.applyProfile}
+        onClearAgent={actions.clearAgent}
+        onManageAgents={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
+        onOpen={meta.onPickerOpen}
+      />
       {state.custom && (
         <Button
           type="button"
@@ -415,48 +387,6 @@ function RunConfigToolbarAgent() {
   );
 }
 
-function RunConfigToolbarProvider() {
-  const { state, actions, meta } = useRunConfig();
-  // Once a chat's provider is bound (its first run), the selector goes
-  // read-only (ADR-0016 P3: switching providers mid-chat would silently
-  // drop the stored agent session, which is provider-native) -- a tooltip
-  // on the trigger explains why, the same "disabled says why" convention
-  // composerPlaceholder already follows for the composer itself.
-  const boundLabel = meta.boundProvider ? (meta.providers.find((p) => p.id === meta.boundProvider)?.label ?? meta.boundProvider) : null;
-  return (
-    <Select
-      value={state.provider}
-      // Radix's Select fires a spurious onValueChange("") of its own --
-      // not from any user interaction -- the moment a `disabled` select's
-      // value settles (observed right after a chat's provider gets bound
-      // and this select flips to read-only). Ignoring the empty string is
-      // what stops that from corrupting `state.provider` to "" -- a real
-      // pick from the list is never itself an empty id.
-      onValueChange={(v) => {
-        if (v) actions.setProvider(v as Provider);
-      }}
-      disabled={meta.disabled || Boolean(meta.boundProvider)}
-    >
-      <SelectTrigger
-        aria-label="Provider"
-        title={boundLabel ? `This chat is bound to ${boundLabel}; start a new chat to switch` : undefined}
-        data-testid="composer-provider-bound"
-        data-bound={boundLabel ? "true" : undefined}
-        className={SELECT_TRIGGER_CLASS}
-      >
-        <SelectValue placeholder="Select provider" />
-      </SelectTrigger>
-      <SelectContent>
-        {meta.providers.map((p) => (
-          <SelectItem key={p.id} value={p.id}>
-            {p.label ?? p.id}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 /**
  * The provider's own permission modes (ADR-0019), straight from
  * provider.list -- labels and help text are the provider's words. For an
@@ -466,15 +396,24 @@ function RunConfigToolbarProvider() {
 function RunConfigToolbarMode() {
   const { state, actions, meta } = useRunConfig();
   const current = meta.modes.find((m) => m.id === meta.effectiveMode);
+  // The mode auto-approves (or ACP Auto-accept is on) -- the pill warns
+  // (ShieldAlert + warning colour) without changing any mode semantics.
+  const dangerous = current?.autoApproves === true || state.autoAccept;
   return (
     <>
       <Select value={meta.effectiveMode} onValueChange={(v) => v && actions.setPermissionMode(v)} disabled={meta.disabled}>
-        <SelectTrigger aria-label="Permission mode" title={current?.description} className={SELECT_TRIGGER_CLASS}>
+        <SelectTrigger
+          aria-label="Permission mode"
+          title={current?.description}
+          data-danger={dangerous ? "true" : undefined}
+          className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
+        >
+          {dangerous ? <ShieldAlert aria-hidden className="shrink-0" /> : <ShieldCheck aria-hidden className="shrink-0" />}
           <SelectValue placeholder="Select mode" />
         </SelectTrigger>
         <SelectContent>
           {meta.modes.map((m) => (
-            <SelectItem key={m.id} value={m.id} title={m.description}>
+            <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
               {m.label}
             </SelectItem>
           ))}
@@ -489,10 +428,11 @@ function RunConfigToolbarMode() {
           data-testid="composer-auto-accept"
           disabled={meta.disabled}
           onClick={() => actions.setAutoAccept(!state.autoAccept)}
-          className={cn(AGENT_TRIGGER_CLASS, state.autoAccept ? "text-foreground" : "text-foreground-muted")}
+          aria-label="Auto-accept"
+          className={cn(PILL_TRIGGER_CLASS, state.autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
         >
-          {state.autoAccept && <Check aria-hidden />}
-          {AUTO_ACCEPT_LABEL}
+          <CheckCheck aria-hidden className="shrink-0" />
+          <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
         </Button>
       )}
     </>
@@ -518,8 +458,9 @@ function RunConfigToolbarThinking() {
       <SelectTrigger
         aria-label="Thinking level"
         title={THINKING_LEVELS.find((t) => t.id === (state.thinkingLevel || "standard"))?.help}
-        className={SELECT_TRIGGER_CLASS}
+        className={PILL_TRIGGER_CLASS}
       >
+        <Brain aria-hidden className="shrink-0" />
         <SelectValue placeholder="Select thinking level" />
       </SelectTrigger>
       <SelectContent>
@@ -533,58 +474,7 @@ function RunConfigToolbarThinking() {
   );
 }
 
-RunConfigToolbar.Agent = RunConfigToolbarAgent;
-RunConfigToolbar.Provider = RunConfigToolbarProvider;
+RunConfigToolbar.ModelPicker = RunConfigToolbarModelPicker;
 RunConfigToolbar.Mode = RunConfigToolbarMode;
 
-/** Radix Select rejects an empty-string item value, so "Default" travels under this sentinel and maps back to "" (nothing sent). */
-const DEFAULT_MODEL_VALUE = "__default__";
-
-/**
- * ADR-0025's model picker: the selected provider's catalog (provider.list's
- * `models`), "Default" first. Hidden -- not rendered as an empty select --
- * when the provider lists no models (e.g. an ACP agent that has not been
- * probed yet): there is nothing valid to choose, and the daemon already
- * falls back to the provider's own default. A model carried in by a profile
- * that the catalog does not list (the Claude catalog is a convenience, not
- * an allowlist) still shows, as its raw id, instead of a blank trigger.
- */
-function RunConfigToolbarModel() {
-  const { state, actions, meta } = useRunConfig();
-  if (meta.models.length === 0) return null;
-  const known = meta.models.find((m) => m.id === state.model);
-  // "Default model", not a bare "Default": the toolbar already has other selects whose own default reads "Default"/"Standard".
-  const current = state.model ? (known?.label ?? state.model) : "Default model";
-  return (
-    <Select
-      value={state.model || DEFAULT_MODEL_VALUE}
-      onValueChange={(v) => {
-        if (v) actions.setModel(v === DEFAULT_MODEL_VALUE ? "" : v);
-      }}
-      disabled={meta.disabled}
-    >
-      <SelectTrigger
-        aria-label="Model"
-        title={known?.description ?? (state.model ? undefined : "The provider's own default model")}
-        data-testid="composer-model-select"
-        className={SELECT_TRIGGER_CLASS}
-      >
-        <SelectValue placeholder="Select model">{current}</SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={DEFAULT_MODEL_VALUE} title="The provider's own default model">
-          Default
-        </SelectItem>
-        {state.model && !known && <SelectItem value={state.model}>{state.model}</SelectItem>}
-        {meta.models.map((m) => (
-          <SelectItem key={m.id} value={m.id} title={m.description}>
-            {m.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
 RunConfigToolbar.Thinking = RunConfigToolbarThinking;
-RunConfigToolbar.Model = RunConfigToolbarModel;

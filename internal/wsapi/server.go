@@ -69,6 +69,7 @@ type API struct {
 // browser tab's would.
 func (a *API) ServeTransport(ctx context.Context, tr Transport) {
 	c := newConn(tr, a.hs)
+	c.runScoped = false // no run-scoped identity exists yet (ADR-0027)
 	c.eventsSub = newSubscriber()
 	c.eventsBus = a.bus
 	c.serve(ctx)

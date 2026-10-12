@@ -34,6 +34,9 @@ type handlerFunc func(ctx context.Context, rc *requestContext, params json.RawMe
 type requestContext struct {
 	conn *conn
 	id   string
+	// runScoped is true when the caller is an agent run rather than a
+	// user surface; see conn.runScoped.
+	runScoped bool
 }
 
 // Emit sends a server -> client event carrying params, correlated to this
@@ -84,6 +87,13 @@ type conn struct {
 	// connection closes.
 	eventsSub *subscriber
 	eventsBus *eventBus
+
+	// runScoped marks a connection authenticated as an agent run (ADR-0027
+	// run tokens), whose forced usage refreshes are downgraded to touches.
+	// No run-scoped identity exists yet, so nothing sets it: every
+	// connection today holds the daemon token and ServeTransport leaves it
+	// false.
+	runScoped bool
 }
 
 func newConn(tr Transport, handlers map[string]handlerFunc) *conn {
@@ -169,7 +179,7 @@ func (c *conn) dispatch(connCtx context.Context, env envelope) {
 	c.inflight[env.ID] = &inflightRequest{cancel: cancel}
 	c.mu.Unlock()
 
-	rc := &requestContext{conn: c, id: env.ID}
+	rc := &requestContext{conn: c, id: env.ID, runScoped: c.runScoped}
 	result, err := h(reqCtx, rc, env.Params)
 	if err != nil {
 		c.sendError(env.ID, err)

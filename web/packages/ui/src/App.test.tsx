@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
@@ -526,20 +527,21 @@ describe("App live events", () => {
     expect(screen.getByTestId("task-attention")).toBeInTheDocument();
   });
 
-  it("a task.status notification updates the sidebar row's status text live", async () => {
+  it("a task.status notification updates the status shown in the sidebar row's hover card live", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
 
+    // The lifecycle status moved off the row into its hover card (sidebar-polish S4).
     // TASK_A.Status is "active" from the fetch; the event says "done".
-    expect(screen.getByText("active")).toBeInTheDocument();
+    const card = await openHoverCard(TASK_A.ID);
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("active");
 
     pushNotification(socket, "task.status", { taskId: TASK_A.ID, status: "done" });
     await flush();
 
-    expect(screen.queryByText("active")).not.toBeInTheDocument();
-    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("done");
   });
 
   it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {
@@ -2321,7 +2323,7 @@ describe("App drag-to-split (Item 8)", { timeout: 20_000 }, () => {
 });
 
 describe("App settings view (dogfood Item 4)", () => {
-  it("the sidebar's settings button swaps the main area to the settings screen, and Back returns to the previous view", async () => {
+  it("opening settings hides the shell (inert, aria-hidden) but keeps the task pane mounted", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
@@ -2333,18 +2335,153 @@ describe("App settings view (dogfood Item 4)", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    const paneBefore = screen.getByTestId("primary-pane");
+    const shell = screen.getByTestId("app-shell");
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(shell).not.toHaveAttribute("inert");
 
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     await flush();
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
-    expect(screen.queryByTestId("primary-pane")).not.toBeInTheDocument();
+    // Same DOM node: the task pane (and any live chat stream in it) was not
+    // unmounted, only hidden and made unreachable.
+    expect(paneBefore.isConnected).toBe(true);
+    expect(shell).toHaveAttribute("inert");
+    expect(shell).toHaveAttribute("aria-hidden", "true");
+    expect(shell).toHaveClass("invisible");
+    // The shell is a sibling of the screen, not its ancestor.
+    expect(shell.contains(screen.getByTestId("settings-screen"))).toBe(false);
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     await flush();
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
-    expect(screen.getByTestId("primary-pane")).toBeInTheDocument();
+    expect(screen.getByTestId("primary-pane")).toBe(paneBefore);
+    expect(shell).not.toHaveAttribute("inert");
+    expect(shell).not.toHaveAttribute("aria-hidden");
+    expect(shell).not.toHaveClass("invisible");
+  });
+
+  it("Back restores the previous task/tab and sidebar state", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    clickTaskRow(TASK_B);
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    await openBaseTab("Files");
+    const sidebar = document.querySelector("[data-slot='sidebar']")!;
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button-collapsed"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    // The sidebar toggle shortcut does not reach the hidden shell.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
+    });
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(sidebar).toHaveAttribute("data-state", "collapsed");
+    expect(screen.getByRole("tab", { name: "Files", selected: true })).toBeInTheDocument();
+  });
+
+  it("shell shortcuts are inert while settings is open: task.next does not change the selection", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    const chatListsBefore = socket.sent.filter((e) => e.method === "chat.list").length;
+
+    // Mod+] (task.next) and Alt+Shift+] (tab.next) would both act on the hidden shell.
+    const keyEvent = new KeyboardEvent("keydown", { key: "]", code: "BracketRight", ctrlKey: true, bubbles: true, cancelable: true });
+    await act(async () => {
+      document.dispatchEvent(keyEvent);
+      fireEvent.keyDown(document, { key: "]", code: "BracketRight", altKey: true, shiftKey: true });
+    });
+    await flush();
+    expect(keyEvent.defaultPrevented).toBe(false);
+    expect(socket.sent.filter((e) => e.method === "chat.list").length).toBe(chatListsBefore);
+
+    fireEvent.click(screen.getByTestId("settings-back-button"));
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: chatHeadingName(TASK_B) })).not.toBeInTheDocument();
+
+    // Back in the workspace the same shortcut works again.
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "]", code: "BracketRight", ctrlKey: true });
+    });
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+  });
+
+  it("settings-safe shortcuts still work over settings: Shift+? deep-links to Shortcuts", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-section-general")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "?", code: "Slash", shiftKey: true });
+    });
+    await flush();
+    expect(screen.getByTestId("settings-section-shortcuts")).toBeInTheDocument();
+  });
+
+  it("a command-palette task pick while in settings leaves settings", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A, TASK_B]);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: TASK_B.Title } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+    respondChatList(socket, TASK_B);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+
+    expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
   });
 
   it("Escape from the settings screen returns to the task view", async () => {
@@ -2399,5 +2536,104 @@ describe("App chat column (dogfood Item 2)", () => {
 
     const explorer = screen.getByTestId("file-explorer-pane");
     expect(explorer.className).not.toContain("max-w");
+  });
+});
+
+describe("App plan usage modal (ADR-0028 PR-D1)", () => {
+  const USAGE_RESULT = {
+    enabled: true,
+    ttlSeconds: 300,
+    reports: [
+      {
+        accountId: 1,
+        key: "anthropic-1",
+        provider: "anthropic",
+        displayName: "Claude",
+        credentialType: "oauth",
+        stale: false,
+        nextRefreshAt: null,
+        refreshBlocked: null,
+        inFlight: false,
+        lastError: null,
+        report: {
+          v: 2,
+          status: "available",
+          planLabel: "max",
+          windows: [{ id: "five_hour", label: "5-hour", shortLabel: "5h", usedPct: 31, remainingPct: 69, summary: true }],
+          fetchedAt: "2026-10-12T11:57:00Z",
+        },
+      },
+    ],
+  };
+
+  function usageRequests(socket: FakeSocket): { method?: string; params?: { mode?: string } }[] {
+    return socket.sent.filter((e) => e.method === "account.usage") as { method?: string; params?: { mode?: string } }[];
+  }
+
+  async function runUsageCommand(): Promise<void> {
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "k", code: "KeyK", ctrlKey: true });
+    });
+    await flush();
+    const input = screen.getByTestId("command-palette-input");
+    fireEvent.change(input, { target: { value: "usage: open" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    await flush();
+  }
+
+  it("command_palette_opens_usage_modal", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    const hashBefore = window.location.hash;
+    // Nothing asks for plan usage until a surface that shows it opens.
+    expect(usageRequests(socket)).toHaveLength(0);
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+
+    await runUsageCommand();
+    expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
+    respondAll(socket, "account.usage", USAGE_RESULT);
+    await flush();
+    expect(within(screen.getByTestId("usage-modal")).getByTestId("usage-report-1")).toBeInTheDocument();
+
+    // No route change, and no fetch beyond one list: never a refresh.
+    expect(window.location.hash).toBe(hashBefore);
+    expect(usageRequests(socket).length).toBeGreaterThanOrEqual(1);
+    expect(usageRequests(socket).every((e) => e.params?.mode !== "refresh")).toBe(true);
+
+    // Escape closes it and unmounts it.
+    fireEvent.keyDown(screen.getByTestId("usage-modal"), { key: "Escape" });
+    await flush();
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+  });
+
+  it("modal_opens_above_settings_screen", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
+    await flush();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+
+    await runUsageCommand();
+    const modal = screen.getByTestId("usage-modal");
+    expect(modal).toBeInTheDocument();
+    // Settings stays open underneath, and the modal is not inside it (a Radix portal, above its z-40).
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen").contains(modal)).toBe(false);
+
+    fireEvent.keyDown(modal, { key: "Escape" });
+    await flush();
+    expect(screen.queryByTestId("usage-modal")).not.toBeInTheDocument();
+    expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
   });
 });

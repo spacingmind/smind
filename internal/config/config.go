@@ -14,7 +14,28 @@ type Config struct {
 	Orchestration OrchestrationConfig `yaml:"orchestration"`
 	Worktrees     WorktreesConfig     `yaml:"worktrees"`
 	Agents        AgentsConfig        `yaml:"agents"`
+	AccountUsage  AccountUsageConfig  `yaml:"accountUsage"`
 }
+
+// AccountUsageConfig is the user-facing surface of ADR-0028's usage
+// windows. Only these four knobs are configurable; the call-budget
+// constants (30 s floor, 6/hour, 2 in flight, 5 min Retry-After default,
+// 6 h cap, 1->30 min backoff) are fixed.
+type AccountUsageConfig struct {
+	// Enabled is the kill switch for ALL outbound usage calls. Default true.
+	Enabled bool `yaml:"enabled"`
+	// TTLSeconds is how long a usage snapshot stays fresh; default 300,
+	// minimum 300 (may only raise).
+	TTLSeconds int `yaml:"ttlSeconds"`
+	// Routing toggles exhaustion-aware routing on the windows. Default true.
+	Routing bool `yaml:"routing"`
+	// ExhaustThresholdPct is the usage percent at/above which an account
+	// counts as exhausted; default 100, valid 1..100.
+	ExhaustThresholdPct int `yaml:"exhaustThresholdPct"`
+}
+
+// MinAccountUsageTTLSeconds is the lowest accepted accountUsage.ttlSeconds.
+const MinAccountUsageTTLSeconds = 300
 
 // WorktreesConfig holds daemon-wide knobs for task worktree setup/teardown
 // scripts and per-task ports (ADR-0024).
@@ -91,6 +112,12 @@ func Default() Config {
 			SetupTimeoutSeconds:    600,
 			TeardownTimeoutSeconds: 120,
 		},
+		AccountUsage: AccountUsageConfig{
+			Enabled:             true,
+			TTLSeconds:          MinAccountUsageTTLSeconds,
+			Routing:             true,
+			ExhaustThresholdPct: 100,
+		},
 	}
 }
 
@@ -119,6 +146,12 @@ func Load() (Config, error) {
 	}
 	if n := cfg.Orchestration.MaxConcurrentRunsPerTree; n < 1 {
 		return cfg, fmt.Errorf("config %s: orchestration.maxConcurrentRunsPerTree must be >= 1, got %d", Path(), n)
+	}
+	if ttl := cfg.AccountUsage.TTLSeconds; ttl < MinAccountUsageTTLSeconds {
+		return cfg, fmt.Errorf("config %s: accountUsage.ttlSeconds must be >= %d, got %d", Path(), MinAccountUsageTTLSeconds, ttl)
+	}
+	if p := cfg.AccountUsage.ExhaustThresholdPct; p < 1 || p > 100 {
+		return cfg, fmt.Errorf("config %s: accountUsage.exhaustThresholdPct must be between 1 and 100, got %d", Path(), p)
 	}
 	if mt := cfg.Agents.GLM.MaxTurns; mt != nil && (*mt < 1 || *mt > MaxGLMTurns) {
 		return cfg, fmt.Errorf("config %s: agents.glm.maxTurns must be between 1 and %d, got %d", Path(), MaxGLMTurns, *mt)

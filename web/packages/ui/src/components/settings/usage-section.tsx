@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 
+import { UsageBody } from "@/components/account-usage/usage-body";
+import { UsageControls } from "@/components/account-usage/usage-controls";
+import { useUsageSurface } from "@/components/account-usage/use-usage-surface";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -46,6 +49,56 @@ const TOKEN_COLUMNS: { field: TokenField; label: string }[] = [
 ];
 
 /**
+ * A block heading inside the Usage section. Not SettingsSectionTitle: under
+ * the full-screen Settings screen that drops its title because the header
+ * already names the section ("Usage"), which would leave "Plan usage" and
+ * "Token usage" as two unlabeled blocks.
+ */
+function BlockTitle({ title, description, actions }: { title: string; description: string; actions?: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <div className="min-w-0">
+        <h3 className="text-ui-base font-medium text-foreground">{title}</h3>
+        <p className="text-ui-sm text-muted-foreground">{description}</p>
+      </div>
+      {actions}
+    </div>
+  );
+}
+
+/**
+ * Settings -> Usage's "Plan usage" block (ADR-0028 PR-D1): each account's plan
+ * windows, ported from Paseo's Usage settings section. It keeps its controls
+ * (account filter, Refresh all, a visible Settings button) in its own body
+ * rather than the Settings screen's header, and assumes nothing about the
+ * container -- it renders the same in the in-shell Settings, the full-screen
+ * Settings screen's framed view and its narrow detail page (AC67). While it
+ * is mounted it is a touching surface (one `touch` on open, then at most one
+ * per TTL while the window is visible and focused); see useAccountUsage.
+ */
+function PlanUsageBlock({ client, events }: SettingsSectionContext) {
+  const surface = useUsageSurface(client, events, { touch: true });
+  return (
+    <section className="flex flex-col gap-3" data-testid="settings-plan-usage">
+      <BlockTitle
+        title="Plan usage"
+        description="Plan windows and reset times for each account"
+        actions={<UsageControls surface={surface} labelledSettings />}
+      />
+      <UsageBody
+        view={surface.view}
+        displayAs={surface.displayAs}
+        refreshing={surface.snapshot.refreshing}
+        failed={surface.snapshot.failed}
+        pressedAt={surface.snapshot.pressedAt}
+        onRefreshOne={surface.refreshOne}
+        onRetry={surface.retry}
+      />
+    </section>
+  );
+}
+
+/**
  * Settings -> Usage (ADR-0020's UI follow-up, U5): the `usage.summary`
  * table over runs/proxy requests, grouped and ranged client-side. The
  * data contract's one rule -- null/unreported NEVER means 0 -- drives the
@@ -53,7 +106,7 @@ const TOKEN_COLUMNS: { field: TokenField; label: string }[] = [
  * an em dash, and cost is an em dash when null or the row came from the
  * proxy (which reports no cost).
  */
-function UsageSection({ client }: SettingsSectionContext) {
+function UsageSection({ client, events }: SettingsSectionContext) {
   const [scope, setScope] = useState<UsageScope>("runs");
   const [groupBy, setGroupBy] = useState<UsageGroupBy>("task");
   const [range, setRange] = useState<UsageRange>("7d");
@@ -144,23 +197,24 @@ function UsageSection({ client }: SettingsSectionContext) {
   }
 
   return (
-    <div className="flex flex-col gap-6" data-testid="settings-section-usage">
-      <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <h3 className="text-ui-base font-medium text-foreground">Usage</h3>
-            <p className="text-ui-sm text-muted-foreground">Tokens and cost per run and proxy request</p>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-testid="usage-refresh"
-            onClick={() => setRefreshTick((n) => n + 1)}
-          >
-            <RefreshCw aria-hidden className="size-3.5" /> Refresh
-          </Button>
-        </div>
+    <div className="flex flex-col gap-8" data-testid="settings-section-usage">
+      <PlanUsageBlock client={client} events={events} />
+      <section className="flex flex-col gap-3" data-testid="settings-token-usage">
+        <BlockTitle
+          title="Token usage"
+          description="Tokens and cost per run and proxy request"
+          actions={
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              data-testid="usage-refresh"
+              onClick={() => setRefreshTick((n) => n + 1)}
+            >
+              <RefreshCw aria-hidden className="size-3.5" /> Refresh
+            </Button>
+          }
+        />
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex flex-col gap-1">
             <span className="text-ui-sm text-muted-foreground">Scope</span>
