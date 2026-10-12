@@ -44,6 +44,9 @@ type Reader interface {
 	// Peek returns what the cache holds. It never makes a request and never
 	// starts a fetch.
 	Peek(accountID int64) Result
+	// TTL is the cache TTL the poller enforces (never under 5 minutes).
+	// Routing uses it to age out an exhausted window that has no reset time.
+	TTL() time.Duration
 }
 
 var _ Reader = (*Poller)(nil)
