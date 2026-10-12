@@ -90,6 +90,7 @@ export function Composer({
   onSubmit,
   onStop,
   textareaRef,
+  prefill,
   toolbarRef,
   onRunConfigChange,
   configOptions,
@@ -127,6 +128,8 @@ export function Composer({
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /** "Edit & resend": each new `nonce` loads `text` into the draft (appended after a blank line when the draft is non-empty), then focuses the textarea with the caret at the end. */
+  prefill?: { text: string; nonce: number };
   /** Exposes the run-config toolbar row's DOM node -- what the task header's run-config pill (task-detail.tsx) focuses when clicked. */
   toolbarRef?: Ref<HTMLDivElement>;
   /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
@@ -173,6 +176,24 @@ export function Composer({
     },
     [textareaRef],
   );
+
+  // Applies each new prefill nonce once. The ref starts at the mount-time
+  // nonce so a remount does not re-apply an old prefill.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const appliedPrefill = useRef(prefill?.nonce);
+  useEffect(() => {
+    if (!prefill || prefill.nonce === appliedPrefill.current) return;
+    appliedPrefill.current = prefill.nonce;
+    const current = draftRef.current.value;
+    const next = current.trim() === "" ? prefill.text : `${current}\n\n${prefill.text}`;
+    draftRef.current.setValue(next);
+    const node = textareaNode.current;
+    if (!node) return;
+    node.focus();
+    // The controlled value lands on the next render; defer the caret move.
+    requestAnimationFrame(() => node.setSelectionRange(next.length, next.length));
+  }, [prefill]);
 
   // `composer.focus` is in the shortcut registry but nothing claimed it
   // until now. The hint shows the *effective* combo (a user rebinding is

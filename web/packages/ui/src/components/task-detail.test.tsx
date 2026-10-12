@@ -1245,3 +1245,75 @@ describe("chat meta row (app-header-and-tabs)", () => {
     expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
   });
 });
+
+describe("TaskDetailPane message hover actions", () => {
+  async function renderWithDoneRun(overrides: Partial<RunSummary> = {}) {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([doneRun(overrides)]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-1",
+      status: "done",
+      stopReason: "end_turn",
+      events: [{ type: "chunk", text: "answer" }, { type: "done", stopReason: "end_turn" }],
+    } satisfies RunLogsResult);
+    await flush();
+    return client;
+  }
+
+  it("Re-run submits the same prompt, provider, model and permission with whenBusy queue", async () => {
+    const client = await renderWithDoneRun({
+      Provider: "glm",
+      Model: "glm-5.3",
+      PermissionMode: "accept_edits",
+      AutoAccept: true,
+      ThinkingLevel: "extended",
+    });
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    expect(client.nth("run.start", 0).params).toEqual({
+      taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
+      provider: "glm",
+      prompt: "do the thing",
+      whenBusy: "queue",
+      permissionMode: "accept_edits",
+      autoAccept: true,
+      thinkingLevel: "extended",
+      model: "glm-5.3",
+    });
+    expect(screen.queryByTestId("rerun-error")).not.toBeInTheDocument();
+  });
+
+  it("Re-run failure shows an inline alert", async () => {
+    const client = await renderWithDoneRun();
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+    client.nth("run.start", 0).reject(new Error("daemon says no"));
+    await flush();
+
+    expect(screen.getByTestId("rerun-error")).toHaveTextContent("daemon says no");
+    expect(screen.getByTestId("run-entry")).toBeInTheDocument();
+  });
+
+  it("Edit & resend prefills the composer draft: empty is replaced, non-empty is appended after a blank line, and the textarea is focused", async () => {
+    await renderWithDoneRun();
+    const input = screen.getByLabelText("Prompt") as HTMLTextAreaElement;
+
+    fireEvent.click(screen.getByTestId("run-prompt-edit"));
+    await flush();
+    expect(input.value).toBe("do the thing");
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, { target: { value: "my notes" } });
+    input.blur();
+    fireEvent.click(screen.getByTestId("run-prompt-edit"));
+    await flush();
+    expect(input.value).toBe("my notes\n\ndo the thing");
+    expect(input).toHaveFocus();
+  });
+});

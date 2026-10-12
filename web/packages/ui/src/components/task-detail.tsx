@@ -26,7 +26,7 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
-import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -219,6 +219,30 @@ export function TaskDetailPane({
   openFileRef.current = onOpenFile;
   const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
 
+  // Message hover actions. Pinned behind refs so RunTimeline's memo keeps
+  // bailing out while these always call the latest submitPrompt.
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const submitPromptRef = useRef(submitPrompt);
+  submitPromptRef.current = submitPrompt;
+  const rerun = useCallback((run: RunEntry) => {
+    setActionError(null);
+    submitPromptRef
+      .current(
+        run.provider,
+        run.prompt,
+        { permissionMode: run.permissionMode, autoAccept: run.autoAccept },
+        run.thinkingLevel,
+        "queue",
+        run.model || undefined,
+      )
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)));
+  }, []);
+  const editPrompt = useCallback((run: RunEntry) => {
+    setActionError(null);
+    setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
@@ -306,6 +330,7 @@ export function TaskDetailPane({
            */}
           <div data-testid="run-log-column" className="mx-auto max-w-3xl">
             {error && <Alert variant="error" description={error} />}
+            {actionError && <Alert variant="error" description={actionError} testId="rerun-error" />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
               <EmptyState title="No runs yet" description="Send a prompt to start one" />
@@ -320,6 +345,8 @@ export function TaskDetailPane({
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={retryWithHigherEffort}
+                    onRerun={rerun}
+                    onEditPrompt={editPrompt}
                     providerLabels={providerLabels}
                   />
                 ))}
@@ -436,6 +463,7 @@ export function TaskDetailPane({
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}
+        prefill={prefill}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
