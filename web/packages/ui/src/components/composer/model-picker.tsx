@@ -308,7 +308,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           aria-activedescendant={activeKey ? rowDomId(activeKey) : undefined}
           autoComplete="off"
           spellCheck={false}
-          className="h-8 w-full rounded-lg border border-input-border bg-transparent px-2.5 text-ui-sm text-foreground outline-none transition-colors placeholder:text-foreground-muted focus-visible:border-input-border-focused max-md:text-base"
+          className="h-8 w-full rounded-lg border border-input-border bg-transparent px-2.5 text-ui-sm text-foreground outline-none transition-colors placeholder:text-foreground-muted focus-visible:border-input-border-focused max-md:text-ui-lg"
         />
       </div>
       <div id={listId} role="listbox" aria-label="Models" className="min-h-0 flex-1 overflow-y-auto p-1">
