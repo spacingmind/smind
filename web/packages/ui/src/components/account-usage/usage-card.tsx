@@ -116,6 +116,8 @@ export function UsageCard({
               <Clock aria-hidden className="size-3 shrink-0" />
               {cooldownCopy.label}
             </StatusBadge>
+            {/* Flex drops this space from the layout; it keeps "Rate limited until …" one sentence for text readers. */}
+            {" "}
             <span className="min-w-0 break-words text-foreground" data-testid="usage-cooldown-until">
               {cooldownCopy.until}
               {cooldownCopy.rejected ? (
