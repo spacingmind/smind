@@ -43,6 +43,10 @@ const (
 	// passiveObsMinInterval is the minimum time between two observation
 	// writes for one account, unless the verdict changes.
 	passiveObsMinInterval = 60 * time.Second
+	// passiveLoadRetry is how long a failed read of an account's persisted
+	// cooldowns is not retried, so an unhealthy store costs one read and one log
+	// line per window instead of one per Cooldown call.
+	passiveLoadRetry = 5 * time.Second
 )
 
 // PassiveStore is the narrow store view Passive needs, so tests can inject a
@@ -103,8 +107,11 @@ type passiveAcct struct {
 	// generation is skipped or undone.
 	gen uint64
 	// loaded: the persisted rows were merged into rows (or the account was
-	// cleared). A failed read leaves it false so the next Cooldown retries.
+	// cleared). A failed read leaves it false; see loadRetryAt.
 	loaded bool
+	// loadRetryAt: a failed read is not retried before this time (zero = no
+	// failure pending).
+	loadRetryAt time.Time
 	// resetPending: a non-rejected response arrived before the persisted rows
 	// were loaded, so their fallback level must be reset when they are.
 	resetPending bool
@@ -399,17 +406,21 @@ func (p *Passive) Cooldown(accountID int64, model string, now time.Time) (Cooldo
 }
 
 // ensureLoaded merges the account's persisted rows into memory, once. A read
-// error is not cached (the next call retries) and the answer comes from memory
-// only. The store read happens without any lock held.
+// error is negative-cached for passiveLoadRetry (the answer comes from memory
+// only meanwhile), then retried. The store read happens without any lock held.
 func (p *Passive) ensureLoaded(id int64, a *passiveAcct) {
+	now := p.clock()
 	a.mu.Lock()
-	loaded := a.loaded
+	skip := a.loaded || now.Before(a.loadRetryAt)
 	a.mu.Unlock()
-	if loaded {
+	if skip {
 		return
 	}
 	rows, err := p.store.ListQuotaCooldowns(id)
 	if err != nil {
+		a.mu.Lock()
+		a.loadRetryAt = now.Add(passiveLoadRetry)
+		a.mu.Unlock()
 		log.Printf("quota: account %d passive cooldown read failed", id)
 		return
 	}
@@ -419,7 +430,7 @@ func (p *Passive) ensureLoaded(id int64, a *passiveAcct) {
 		return
 	}
 	p.mergeStoredLocked(id, a, rows)
-	a.loaded = true
+	a.loaded, a.loadRetryAt = true, time.Time{}
 }
 
 // mergeStoredLocked folds persisted rows into memory. Memory is newer than the

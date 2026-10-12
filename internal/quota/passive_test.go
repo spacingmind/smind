@@ -683,12 +683,13 @@ func Test_passive_cooldown_read_error_not_cached(t *testing.T) {
 	now := newFakeClock().Now()
 	fs.rows[cooldownKey{1, ""}] = store.QuotaCooldown{AccountID: 1, Until: now.Add(time.Hour), Reason: string(ReasonRejected), ObservedAt: now}
 	fs.setFail(false, true)
-	p, _ := newFakePassive(t, fs)
+	p, clk := newFakePassive(t, fs)
 
 	if c, ok := p.Cooldown(1, "m", now); ok {
 		t.Fatalf("Cooldown() with a failing store = %+v, want none from memory", c)
 	}
 	fs.setFail(false, false)
+	clk.Advance(passiveLoadRetry) // the negative cache has run out
 	if _, ok := p.Cooldown(1, "m", now); !ok {
 		t.Fatalf("Cooldown() after the store recovered = none, want the persisted row (read error must not be cached)")
 	}
@@ -891,5 +892,35 @@ func Test_passive_never_shortens_persisted_cooldown_after_restart(t *testing.T) 
 	got, ok := p.Cooldown(9, "m", now)
 	if !ok || got.Until.Before(long) {
 		t.Fatalf("Cooldown() = %+v/%v, want until >= %v", got, ok, long)
+	}
+}
+
+func Test_passive_failing_store_read_is_rate_limited(t *testing.T) {
+	fs := newFakeStore()
+	fs.setFail(false, true)
+	logs, restore := captureLog()
+	defer restore()
+	p, clk := newFakePassive(t, fs)
+	now := clk.Now()
+
+	for range 5 {
+		p.Cooldown(1, "m", now)
+	}
+	if n := fs.count("ListQuotaCooldowns"); n != 1 {
+		t.Fatalf("reads in one window = %d, want 1", n)
+	}
+	if n := strings.Count(logs.String(), "passive cooldown read failed"); n != 1 {
+		t.Fatalf("log lines in one window = %d, want 1; log = %q", n, logs.String())
+	}
+	// A rejection inside the window does not read either.
+	p.Observe(respAt(1, "m", 429, reject5h(now.Add(time.Hour)), now))
+	if n := fs.count("ListQuotaCooldowns"); n != 1 {
+		t.Fatalf("reads after a rejection in the window = %d, want 1", n)
+	}
+
+	clk.Advance(passiveLoadRetry)
+	p.Cooldown(1, "m", clk.Now())
+	if n := fs.count("ListQuotaCooldowns"); n != 2 {
+		t.Fatalf("reads after the window = %d, want 2", n)
 	}
 }
