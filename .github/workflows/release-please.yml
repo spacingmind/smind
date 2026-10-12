@@ -149,7 +149,7 @@ jobs:
           # tar.gz layout (smind + LICENSE) is kept as-is for linux/darwin.
           if [ "$GOOS" = "windows" ]; then
             mv "$archive_dir/smind" "$archive_dir/smind.exe"
-            (cd "$archive_dir" && zip -X "../${name}.zip" smind.exe LICENSE)
+            (cd "$archive_dir" && zip -X "../../${name}.zip" smind.exe LICENSE)
           else
             tar -C "$archive_dir" -czf "dist/${name}.tar.gz" smind LICENSE
           fi
