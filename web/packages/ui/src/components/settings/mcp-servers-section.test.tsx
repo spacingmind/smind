@@ -102,6 +102,7 @@ describe("mcp-servers-section", () => {
     await flush();
 
     expect(screen.getByTestId("mcp-empty-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("mcp-empty-new-button")).not.toBeInTheDocument();
     expect(screen.getByText(/Give agents tools like a browser/)).toBeInTheDocument();
   });
 

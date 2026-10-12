@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { Keyboard } from "lucide-react";
+
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { ShortcutRows } from "@/components/shortcuts-dialog";
 import { Input } from "@/components/ui/input";
@@ -34,6 +36,7 @@ export function ShortcutsSection() {
 registerSettingsSection({
   id: "shortcuts",
   label: "Shortcuts",
-  order: 300,
+  order: 120,
+  icon: <Keyboard aria-hidden className="size-3.5" />,
   render: () => <ShortcutsSection />,
 });

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Server } from "lucide-react";
+
+import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { desktop, isDesktop, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
@@ -66,7 +69,7 @@ function DaemonSection() {
   if (status.platform === "unsupported") {
     return (
       <div className="flex flex-col gap-2" data-testid="settings-section-daemon">
-        <h3 className="text-ui-base font-medium text-foreground">Daemon</h3>
+        <SettingsSectionTitle title="Daemon" />
         <p data-testid="daemon-unsupported" className="text-ui-base text-muted-foreground">
           This platform isn&apos;t supported for app-managed daemon install. On native Windows, use{" "}
           <code>smind serve</code> directly, or run it inside WSL2.
@@ -154,6 +157,7 @@ if (isDesktop) {
     label: "Daemon",
     groupLabel: "Connection",
     order: 160,
+    icon: <Server aria-hidden className="size-3.5" />,
     render: () => <DaemonSection />,
   });
 }

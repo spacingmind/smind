@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
+import { Network } from "lucide-react";
+
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -159,6 +161,7 @@ if (isDesktop) {
     label: "Daemon server",
     groupLabel: "Connection",
     order: 150,
+    icon: <Network aria-hidden className="size-3.5" />,
     render: () => <ConnectionsSection />,
   });
 }
