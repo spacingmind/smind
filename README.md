@@ -104,7 +104,9 @@ built into the app — the corresponding private key is a repository secret
 
 Each [GitHub Release](https://github.com/spacingmind/smind/releases) ships
 prebuilt `smind` daemon binaries for linux/amd64, linux/arm64, darwin/amd64
-and darwin/arm64, plus a `checksums.txt`. To install one:
+and darwin/arm64 as `.tar.gz`, plus `smind_<version>_windows_amd64.zip` and
+`smind_<version>_windows_arm64.zip` (each containing `smind.exe`), and a
+`checksums.txt`. To install one:
 
 ```sh
 version=0.8.0   # match the release you're installing

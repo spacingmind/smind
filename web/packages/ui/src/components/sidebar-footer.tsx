@@ -248,9 +248,9 @@ function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) 
  * icon-collapsed rail the same buttons stack vertically (CSS only, via
  * `group-data-[collapsible=icon]`).
  *
- * `rows` is the slot ADR-0028 PR-D2's footer Usage summary will fill
- * (default off, ADR-0028 D5); nothing passes it today, and the wrapper is
- * not rendered without children.
+ * `rows` is the slot for the plan-usage summary (ADR-0028 PR-D2, off by
+ * default): AppSidebar passes it only while "Show summary in sidebar" is on,
+ * and the wrapper hides itself while its content renders nothing.
  */
 export function SidebarFooterActions({
   rows,
@@ -273,7 +273,7 @@ export function SidebarFooterActions({
     <TooltipProvider>
       <div data-testid="sidebar-footer" className="flex flex-col border-t">
         {rows ? (
-          <div data-testid="sidebar-footer-rows" className="flex flex-col gap-1 px-2 pt-2 group-data-[collapsible=icon]:hidden">
+          <div data-testid="sidebar-footer-rows" className="flex flex-col gap-1 px-2 pt-2 empty:hidden group-data-[collapsible=icon]:hidden">
             {rows}
           </div>
         ) : null}

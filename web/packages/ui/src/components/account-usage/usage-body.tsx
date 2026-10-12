@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { UsageList, type UsageRefreshProps } from "@/components/account-usage/usage-list";
+import type { UsagePinning } from "@/components/account-usage/use-usage-surface";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
@@ -29,7 +30,8 @@ export function UsageBody({
   pressedAt,
   onRefreshOne,
   onRetry,
-}: { view: UsageView; displayAs: UsageDisplayAs; onRetry: () => void } & UsageRefreshProps) {
+  pinning = null,
+}: { view: UsageView; displayAs: UsageDisplayAs; onRetry: () => void; pinning?: UsagePinning | null } & UsageRefreshProps) {
   switch (view.kind) {
     case "unavailable":
     case "disabled":
@@ -58,6 +60,7 @@ export function UsageBody({
           failed={failed}
           pressedAt={pressedAt}
           onRefreshOne={onRefreshOne}
+          pinning={pinning}
         />
       );
   }
