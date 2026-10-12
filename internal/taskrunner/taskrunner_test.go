@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/claudecli"
 	"github.com/spacingmind/smind/internal/securefile"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
@@ -37,6 +38,12 @@ var fakeCodexAgentPath string
 // worktree-relative "scenario" file convention from fakeagent above serves
 // the same purpose here without needing it.
 func TestMain(m *testing.M) {
+	// The Windows launcher test starts this binary as smind.exe in launcher
+	// mode; that role is recognised by claudecli.LaunchEnv and must win over
+	// the fake-CLI switch, which this process also inherits.
+	if code, handled := claudecli.MaybeRunLauncher(); handled {
+		os.Exit(code)
+	}
 	if os.Getenv("TASKRUNNER_FAKE_CLAUDE_CLI") == "1" {
 		runFakeClaudeCLI()
 		return

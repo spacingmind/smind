@@ -12,9 +12,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+
+	"github.com/spacingmind/smind/internal/claudecli"
 )
 
 func main() {
+	// Windows only: the daemon starts smind.exe itself as the Claude CLI's
+	// launcher (a Job Object around the real claude.exe, so killing the
+	// launcher kills the whole tree). Must run before anything parses args;
+	// a no-op everywhere else and whenever the launch env var is unset.
+	if code, handled := claudecli.MaybeRunLauncher(); handled {
+		os.Exit(code)
+	}
 	os.Exit(run(os.Args[1:]))
 }
 
