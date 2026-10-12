@@ -1231,3 +1231,19 @@ describe("chat usage total", () => {
     expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
   });
 });
+
+describe("chat meta row (app-header-and-tabs)", () => {
+  it("AH-AC12 no title heading; chips and Detailed toggle remain", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+
+    // The "<task> · <chat>" h2 moved to the app header.
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: new RegExp(TASK_A.Title) })).not.toBeInTheDocument();
+    expect(screen.queryByText(/·\s*Chat/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("task-run-config-pill")).toBeInTheDocument();
+    expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
+  });
+});
