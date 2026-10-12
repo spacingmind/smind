@@ -413,8 +413,11 @@ export function AppSidebar({
   onOpenSettings,
   connectionStatus = "connected",
   connectionStatusText,
+  headerActions,
 }: {
   client: WsClient | null;
+  /** Right end of the expanded top strip: the shell's sidebar toggle and update badge (ZCode's left zone). Absent while the sidebar is a rail or a sheet -- the main header hosts them then. */
+  headerActions?: ReactNode;
   /** The currently-selected task's id, if any, so its row can render as active. */
   selectedTaskId?: number | null;
   /** Invoked with the full Task when a task row is clicked. */
@@ -765,17 +768,15 @@ export function AppSidebar({
        * under the rail. Rendering the buttons (rather than removing the
        * header) keeps every affordance reachable in collapsed mode.
        */}
-      <SidebarHeader className={lights ? "gap-0 p-0" : undefined}>
+      <SidebarHeader className="gap-0 p-0">
         <div
           data-testid="sidebar-expanded-header"
-          // macOS: this row is the window's title bar over the sidebar --
-          // the same 48px and bottom border as the main header, left-padded
-          // past the native traffic lights, draggable around its buttons.
+          // The sidebar's top strip is ZCode's "left zone": the same 48px as the
+          // main header beside it, so logo and title share one centre line.
+          // macOS: it is also the window's title bar over the sidebar --
+          // left-padded past the native traffic lights, draggable around its buttons.
           data-tauri-drag-region={lights ? "deep" : undefined}
-          className={cn(
-            "flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden",
-            lights && "h-12 border-b py-0",
-          )}
+          className="flex h-12 items-center gap-2 px-2 group-data-[collapsible=icon]:hidden"
           style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
         >
           <span
@@ -784,7 +785,8 @@ export function AppSidebar({
           >
             <img src="/logo.png" alt="" className="size-4 dark:size-5" />
           </span>
-          <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          <span className="min-w-0 flex-1 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          {headerActions && <div className="flex shrink-0 items-center gap-1">{headerActions}</div>}
         </div>
         {lights && (
           // Collapsed rail: the lights overhang the 48px rail, so keep the

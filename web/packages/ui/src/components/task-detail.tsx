@@ -225,12 +225,14 @@ export function TaskDetailPane({
 
   return (
     <div className="flex h-full flex-col">
+      {/*
+       * The task's title, branch and status live in the app header (and its
+       * hover card); this row keeps only what is specific to this chat.
+       */}
       <PaneHeader
-        title={`${task.Title} · ${chat.Title || "Chat"}`}
+        testId="task-chat-meta"
         subtitle={
           <>
-            <span className="uppercase">{task.Status}</span>
-            {task.Branch && <span className="truncate">{task.Branch}</span>}
             <SetupBadge status={task.SetupStatus} />
             <PortChip port={task.Port} />
             {runConfigState && (
