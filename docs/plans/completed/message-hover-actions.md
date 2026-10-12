@@ -68,12 +68,23 @@ Fork into a new chat/task with conversation context; like/dislike feedback; rewi
 
 ## Progress
 
-- [ ] Spec
-- [ ] Step 1 `message-actions.tsx` + tests
-- [ ] Step 2 run-timeline wiring (user bar, footer bar, `assistantMarkdown`) + tests
-- [ ] Step 3 pane wiring (re-run, edit & resend, composer prefill) + tests
-- [ ] Step 4 screenshots, review, `task test`, `task lint`, PR
+- [x] Spec — `420766cb`
+- [x] Step 1 `message-actions.tsx` + tests — `bfa79506` (peer-sonnet)
+- [x] Step 2 run-timeline wiring (user bar, footer bar, `assistantMarkdown`) + tests — `5b94eae5` (peer-sonnet)
+- [x] Step 3 pane wiring (re-run, edit & resend, composer prefill) + tests — `b22c7735` (peer-sonnet)
+- [x] Step 4 Lead: per-side hover groups; adversarial review (sonnet, read-only) → fixes (menu-open visibility via `aria-expanded`, `:focus-visible` reveal, no false "Copied", re-run guards + composer permissions + queue refresh + alert after the list, lazy answer markdown, label-in-name); screenshots; `task test`, `task lint`; PR
 
 ## Validation
 
-(filled in as criteria are confirmed)
+`task test` (Go + web: 175 files / 2176 tests), `task lint`, `tsc -b` green.
+
+Sandbox daemon (isolated `SMIND_HOME`, own port, fake-LLM harness for the live run). Before (develop `37abdf69`): `/private/tmp/ctr-shots/before3/`; after: `/private/tmp/ctr-shots/final-actions/` — `{light,dark}-{desktop,mobile}-{20-actions-idle,21-hover-user-prompt,22-hover-footer,23-copy-menu,25-touch-top,26-live-run}.png` plus `dark-desktop-24b-keyboard-focus.png`; probes in `report3.json`.
+
+- **M-AC1** idle bar opacity `0`, hovering the prompt `1` (desktop, both themes); under touch emulation `(hover: none)` matches and the bar is `1` while idle (mobile, both themes).
+- **M-AC2** 4 Re-run buttons on the 4 finished runs of the mixed chat; on the live running run: 0 Re-run, 1 Copy.
+- **M-AC3** unit tests: answer Markdown = assistant text only, full turn = existing plain text, check after copy, no confirmation without a clipboard / on rejection.
+- **M-AC4/M-AC5** `task-detail.test.tsx`: re-run payload (provider, model, thinking, `whenBusy:"queue"`), composer permissions on the same provider, double click = one `run.start`, failure alert; Edit & resend prefill (empty replaced, non-empty appended after a blank line, textarea focused).
+- **M-AC6** keyboard probe (real `Tab`): focus lands on Copy then Edit & resend and the bar reaches opacity `1`; a mouse click on Copy followed by moving away hides the bar again (`0`); with the Copy menu open the bar stays visible (`23-copy-menu`); border sweep green.
+- **M-AC7** screenshots above, all viewed.
+
+Deferred / follow-ups (not backed by smind today): Fork into a new chat/task with conversation context; like/dislike feedback; rewind files to a turn; actions on ACP `user` rows and individual tool calls; footer duration↔timestamp swap. Minor: with a disabled composer (disconnected) Edit & resend appends the text but cannot focus the textarea; the per-bar `TooltipProvider` duplicates the app-level one (cheap, keeps tests self-contained).
