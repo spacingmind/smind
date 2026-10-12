@@ -127,7 +127,7 @@ export const RunTimeline = memo(function RunTimeline({
             className={cn(
               "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
               run.status === "done" &&
-                "opacity-70 group-focus-within/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
+                "opacity-70 group-has-[:focus-visible]/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
             )}
             data-testid="run-meta"
           >
@@ -184,7 +184,7 @@ export const RunTimeline = memo(function RunTimeline({
 function RunCopyMenu({ run }: { run: RunEntry }) {
   const { copied, copy } = useCopyFeedback();
   const { tooltip, onMenuOpenChange } = useMenuTooltip();
-  const answer = assistantMarkdown(run.items);
+  const hasAnswer = run.items.some((item) => item.kind === "assistant" && item.text.trim() !== "");
 
   return (
     <DropdownMenu onOpenChange={onMenuOpenChange}>
@@ -205,15 +205,18 @@ function RunCopyMenu({ run }: { run: RunEntry }) {
         </TooltipTrigger>
         <TooltipContent side="bottom">{copied ? "Copied" : "Copy"}</TooltipContent>
       </Tooltip>
+      {/* The check on the trigger is silent for assistive tech; this announces it. */}
+      <span role="status" className="sr-only">
+        {copied ? "Copied" : ""}
+      </span>
       <DropdownMenuContent align="end" data-testid="run-copy-menu">
-        {answer && (
-          <DropdownMenuItem data-testid="run-copy-answer" onSelect={() => void copy(answer)}>
+        {hasAnswer && (
+          <DropdownMenuItem data-testid="run-copy-answer" onSelect={() => void copy(assistantMarkdown(run.items))}>
             Copy answer (Markdown)
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
           data-testid="run-copy-turn"
-          aria-label="Copy turn"
           onSelect={() => void copy(timelineToText(run.prompt, run.items))}
         >
           Copy full turn (plain text)

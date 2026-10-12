@@ -230,6 +230,17 @@ describe("RunTimeline", () => {
     return screen.findByTestId("run-copy-menu");
   }
 
+  it("the open Copy menu exposes aria-expanded on its trigger, which keeps the bar visible", async () => {
+    render(
+      <ul>
+        <RunTimeline run={run([{ type: "chunk", text: "the answer" }])} onRerun={() => {}} />
+      </ul>,
+    );
+    await openCopyMenu();
+    expect(screen.getByTestId("run-copy-button")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("run-actions").className).toContain("has-[[aria-expanded=true]]:opacity-100");
+  });
+
   it("shows the turn's elapsed time and copies the turn as plain text", async () => {
     const writeText = stubClipboard();
 
@@ -243,7 +254,7 @@ describe("RunTimeline", () => {
 
     await openCopyMenu();
     await act(async () => {
-      fireEvent.click(screen.getByRole("menuitem", { name: "Copy turn" }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Copy full turn (plain text)" }));
     });
 
     expect(writeText).toHaveBeenCalledWith("> do the thing\n\nthe answer\n");
@@ -434,7 +445,7 @@ describe("RunTimeline borderless chrome", () => {
     const done = dimmed("done");
     expect(done).toContain("opacity-70");
     expect(done).toContain("group-hover/answer:opacity-100");
-    expect(done).toContain("group-focus-within/answer:opacity-100");
+    expect(done).toContain("group-has-[:focus-visible]/answer:opacity-100");
     for (const status of ["running", "error", "stopped"] as const) {
       expect(dimmed(status)).not.toContain("opacity-70");
     }

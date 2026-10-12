@@ -30,7 +30,7 @@ export function MessageActions({
     <TooltipProvider>
       <div
         className={cn(
-          "flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100",
+          "flex items-center gap-0.5 opacity-0 transition-opacity has-[:focus-visible]:opacity-100 has-[[aria-expanded=true]]:opacity-100 [@media(hover:none)]:opacity-100",
           REVEAL_BY_GROUP[group],
           className,
         )}
@@ -81,8 +81,11 @@ export function useCopyFeedback(): { copied: boolean; copy: (text: string) => Pr
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   async function copy(text: string) {
+    // No clipboard (a non-secure origin such as plain http on a LAN address) means nothing was
+    // copied, so no confirmation either.
+    if (!navigator.clipboard?.writeText) return;
     try {
-      await navigator.clipboard?.writeText(text);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => setCopied(false), 1500);

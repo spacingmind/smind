@@ -11,16 +11,17 @@ afterEach(() => {
 });
 
 describe("MessageActions", () => {
-  it("the bar is hidden until hover or focus-within and always visible on touch", () => {
+  it("the bar is hidden until hover or keyboard focus and always visible on touch", () => {
     render(<MessageActions group="prompt" data-testid="bar" />);
     const cls = screen.getByTestId("bar").className.split(/\s+/);
     expect(cls).toContain("opacity-0");
     expect(cls).toContain("group-hover/prompt:opacity-100");
-    expect(cls).toContain("focus-within:opacity-100");
+    expect(cls).toContain("has-[:focus-visible]:opacity-100");
+    expect(cls).toContain("has-[[aria-expanded=true]]:opacity-100");
     expect(cls).toContain("[@media(hover:none)]:opacity-100");
   });
 
-  it("Copy writes the text, shows the check, and stays silent when the clipboard is unavailable", async () => {
+  it("Copy writes the text, shows the check, and shows no confirmation when the clipboard is unavailable or rejects", async () => {
     vi.useFakeTimers();
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
@@ -50,7 +51,8 @@ describe("MessageActions", () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId("copy"));
     });
-    expect(screen.getByTestId("copy")).toHaveAccessibleName("Copied");
+    // No confirmation when nothing was copied (non-secure origin, no clipboard).
+    expect(screen.getByTestId("copy")).toHaveAccessibleName("Copy");
   });
 
   it("actions are focusable buttons with accessible names", () => {

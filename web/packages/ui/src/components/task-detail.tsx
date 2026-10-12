@@ -225,18 +225,32 @@ export function TaskDetailPane({
   const [actionError, setActionError] = useState<string | null>(null);
   const submitPromptRef = useRef(submitPrompt);
   submitPromptRef.current = submitPrompt;
+  const runConfigRef = useRef(runConfigState);
+  runConfigRef.current = runConfigState;
+  const queueRefreshRef = useRef(queue.refresh);
+  queueRefreshRef.current = queue.refresh;
+  const rerunsInFlight = useRef(new Set<string>());
   const rerun = useCallback((run: RunEntry) => {
+    // One re-submit per run at a time: a double click must not start (or queue) the prompt twice.
+    if (rerunsInFlight.current.has(run.id)) return;
+    rerunsInFlight.current.add(run.id);
     setActionError(null);
+    // Provider, model and thinking come from the run; the permission settings come from what the
+    // composer shows NOW (when it is on the same provider), so a re-run never silently replays a
+    // looser mode the old run was live-switched to.
+    const composer = runConfigRef.current;
+    const permission =
+      composer && composer.provider === run.provider
+        ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
+        : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
     submitPromptRef
-      .current(
-        run.provider,
-        run.prompt,
-        { permissionMode: run.permissionMode, autoAccept: run.autoAccept },
-        run.thinkingLevel,
-        "queue",
-        run.model || undefined,
-      )
-      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)));
+      .current(run.provider, run.prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .then((result) => {
+        // A queued prompt shows up in the composer's queue list straight away.
+        if (result.kind === "queued") queueRefreshRef.current();
+      })
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => rerunsInFlight.current.delete(run.id));
   }, []);
   const editPrompt = useCallback((run: RunEntry) => {
     setActionError(null);
@@ -330,7 +344,6 @@ export function TaskDetailPane({
            */}
           <div data-testid="run-log-column" className="mx-auto max-w-3xl">
             {error && <Alert variant="error" description={error} />}
-            {actionError && <Alert variant="error" description={actionError} testId="rerun-error" />}
             {!error && runs === null && <InlineSpinner label="Loading runs…" />}
             {!error && runs !== null && runs.length === 0 && (
               <EmptyState title="No runs yet" description="Send a prompt to start one" />
@@ -352,6 +365,8 @@ export function TaskDetailPane({
                 ))}
               </ul>
             )}
+            {/* After the list, where the log follows the tail: a failed Re-run is visible where the user just clicked. */}
+            {actionError && <Alert variant="error" description={actionError} testId="rerun-error" className="mt-3" />}
           </div>
         </div>
 

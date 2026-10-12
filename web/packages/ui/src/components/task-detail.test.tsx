@@ -1288,6 +1288,28 @@ describe("TaskDetailPane message hover actions", () => {
     expect(screen.queryByTestId("rerun-error")).not.toBeInTheDocument();
   });
 
+  it("Re-run uses the composer's current permission mode on the same provider, not the old run's", async () => {
+    const client = await renderWithDoneRun({ Provider: "claude-native", PermissionMode: "bypassPermissions", AutoAccept: true });
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    const params = client.nth("run.start", 0).params as Record<string, unknown>;
+    expect(params.provider).toBe("claude-native");
+    expect(params.permissionMode).not.toBe("bypassPermissions");
+    expect(params.autoAccept).toBeUndefined();
+  });
+
+  it("a double click on Re-run submits once", async () => {
+    const client = await renderWithDoneRun();
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "run.start")).toHaveLength(1);
+  });
+
   it("Re-run failure shows an inline alert", async () => {
     const client = await renderWithDoneRun();
 
