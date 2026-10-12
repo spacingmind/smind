@@ -120,6 +120,20 @@ const TEXT_EVENT_KINDS: Record<string, TimelineTextItem["kind"]> = {
 };
 
 /**
+ * ACP session-update kinds that arrive as `raw` events (ADR-0010 keeps them in the persisted
+ * log) but are session housekeeping, not transcript: the agent's slash-command list, its
+ * session title, mode/config echoes and usage ticks. They produce no row; `plan` and any
+ * kind this build has never heard of still render (Detailed view only).
+ */
+const BENIGN_RAW_KINDS = new Set([
+  "available_commands_update",
+  "session_info_update",
+  "current_mode_update",
+  "config_option_update",
+  "usage_update",
+]);
+
+/**
  * Event names that are not transcript rows at all. "done" only drives run
  * status, and "permission_request" only drives the pending-permission
  * dock (RunEntry.pendingPermission) -- neither ever becomes an item.
@@ -212,6 +226,7 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
   if (type === "usage") return items;
 
   if (type === "raw") {
+    if (event.kind && BENIGN_RAW_KINDS.has(event.kind)) return items;
     return [
       ...items,
       { kind: "unknown", id: `unknown-${items.length}`, eventType: type, rawKind: event.kind, rawPayload: event.payload },

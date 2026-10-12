@@ -111,6 +111,25 @@ describe("appendTimelineEvent", () => {
     ]);
   });
 
+  it("benign ACP session updates produce no timeline item", () => {
+    const kinds = ["available_commands_update", "session_info_update", "current_mode_update", "config_option_update", "usage_update"];
+    const items = buildTimeline([
+      { type: "chunk", text: "hi" } as RunLogEvent,
+      ...kinds.map((kind) => ({ type: "raw", kind, payload: { sessionUpdate: kind } }) as RunLogEvent),
+    ]);
+    expect(items.map((i) => i.kind)).toEqual(["assistant"]);
+  });
+
+  it("a plan raw event still produces an unknown row", () => {
+    const items = buildTimeline([
+      { type: "raw", kind: "available_commands_update", payload: {} } as RunLogEvent,
+      { type: "raw", kind: "plan", payload: { sessionUpdate: "plan" } } as RunLogEvent,
+    ]);
+    expect(items).toEqual([
+      { kind: "unknown", id: "unknown-0", eventType: "raw", rawKind: "plan", rawPayload: { sessionUpdate: "plan" } },
+    ]);
+  });
+
   describe("permission_resolved", () => {
     it.each(["human", "auto_accept", "auto_safe", "timeout"] as const)("records reason %s as its own permission item", (reason) => {
       const items = buildTimeline([{ type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason }]);
