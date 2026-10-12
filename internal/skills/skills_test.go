@@ -2,9 +2,9 @@ package skills
 
 import (
 	"os"
-	"runtime"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
