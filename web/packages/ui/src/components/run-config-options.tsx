@@ -1,5 +1,9 @@
 import { useState, type FormEvent } from "react";
 
+import { Brain, Cpu, SlidersHorizontal } from "lucide-react";
+
+import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,7 +24,10 @@ function currentValueText(value: unknown): string {
  * row (run-config IA plan: these used to be a separate full-width bar
  * above the composer; the AC now wants them "in the same row, not a
  * separate control elsewhere"), so this renders no outer width/padding of
- * its own -- the toolbar row already provides that. Renders nothing when
+ * its own -- the toolbar row already provides that. Selects and toggles use
+ * the toolbar's pill trigger look (D2 of live-run-composer-and-noise).
+ * `omitMode` drops the agent's own `mode`-category option while the
+ * toolbar's live Mode pill already drives that same session mode. Renders nothing when
  * there's nothing to show and no error to report, so an idle/non-ACP run
  * leaves no trace in the layout.
  */
@@ -28,16 +35,20 @@ export function RunConfigOptions({
   options,
   error,
   onSetOption,
+  omitMode = false,
 }: {
   options: ConfigOptionParams[];
   error: string | null;
   onSetOption: (configId: string, value: string) => Promise<void>;
+  /** True while the toolbar's live Mode pill is active: the `mode`-category option is that same control. */
+  omitMode?: boolean;
 }) {
-  if (options.length === 0 && !error) return null;
+  const shown = omitMode ? options.filter((option) => option.category !== "mode") : options;
+  if (shown.length === 0 && !error) return null;
 
   return (
-    <div data-testid="run-config-options" className="flex flex-wrap items-center gap-2">
-      {options.map((option) => (
+    <div data-testid="run-config-options" className="flex flex-wrap items-center">
+      {shown.map((option) => (
         <ConfigOptionControl key={option.configId} option={option} onSetOption={onSetOption} />
       ))}
       {error && (
@@ -79,16 +90,19 @@ function ConfigOptionControl({
     return (
       <Button
         type="button"
-        variant="outline"
-        size="xs"
+        variant="ghost"
         disabled={pending}
         aria-label={option.name}
         aria-pressed={on}
         title={option.description}
         data-testid="run-config-option-toggle"
+        className={cn(PILL_TRIGGER_CLASS, on && "text-foreground")}
         onClick={() => change(on ? "false" : "true")}
       >
-        {option.name}: {on ? "On" : "Off"}
+        <SlidersHorizontal aria-hidden className="shrink-0" />
+        <span className="max-sm:hidden">
+          {option.name}: {on ? "On" : "Off"}
+        </span>
       </Button>
     );
   }
@@ -108,8 +122,9 @@ function ConfigOptionControl({
           aria-label={isModel ? `${option.name} (this session)` : option.name}
           title={isModel ? (option.description ?? "Switch the model for this running session") : option.description}
           data-testid={isModel ? "run-config-option-model" : undefined}
-          className="h-7 w-auto gap-1 border-0 bg-transparent px-2 text-ui-sm hover:bg-hover"
+          className={PILL_TRIGGER_CLASS}
         >
+          {isModel ? <Cpu aria-hidden className="shrink-0" /> : <Brain aria-hidden className="shrink-0" />}
           {isModel ? (
             // Prefixed so it reads apart from the composer's next-run Model picker sitting beside it.
             <SelectValue placeholder={option.name}>

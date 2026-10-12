@@ -424,6 +424,7 @@ export function Composer({
                 options={configOptions.options}
                 error={configOptions.error}
                 onSetOption={configOptions.onSetOption}
+                omitMode={liveRun != null}
               />
             )}
             <div className="ml-auto flex items-center gap-1">
