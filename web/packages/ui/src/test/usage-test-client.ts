@@ -1,5 +1,5 @@
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import type { AccountUsage, AccountUsageParams, AccountUsageResult } from "@/lib/account-usage/types";
+import type { AccountUsage, AccountUsageParams } from "@/lib/account-usage/types";
 import { RpcError, type WsClient } from "@/lib/ws-client";
 import { usageResult } from "@/test/account-usage-fixtures";
 
