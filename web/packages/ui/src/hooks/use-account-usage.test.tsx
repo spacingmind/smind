@@ -160,6 +160,28 @@ describe("call discipline (AC54)", () => {
     expect(second.modes()).toEqual(["cached"]);
   });
 
+  it("a reconnect while a touching surface is open re-lists as cached and keeps counting the TTL", async () => {
+    const first = new FakeUsageDaemon([claudeAccount()]);
+    const second = new FakeUsageDaemon([claudeAccount()]);
+    const { rerender } = renderHook(
+      ({ d }) => useAccountUsage(d.client, d.events, { touch: true }),
+      { initialProps: { d: first } },
+    );
+    await flush();
+    expect(first.modes()).toEqual(["touch"]);
+
+    await advance(60_000);
+    rerender({ d: second });
+    await flush();
+    expect(second.modes()).toEqual(["cached"]);
+
+    // The TTL runs from the first touch (240 s left), not from the reconnect.
+    await advance(TTL_MS - 60_000 - 1_000);
+    expect(second.modes()).toEqual(["cached"]);
+    await advance(1_000);
+    expect(second.modes()).toEqual(["cached", "touch"]);
+  });
+
   it("tells_the_user_to_update_a_daemon_without_account_usage (and never asks again)", async () => {
     const daemon = new FakeUsageDaemon([]);
     daemon.makeOld();

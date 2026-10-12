@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { settleReports, upsertReport } from "@/lib/account-usage/model";
@@ -172,6 +172,16 @@ export class UsageStore {
     return true;
   }
 
+  /** When the last touch went out, so a reconnect's fresh store can keep counting the TTL from it. */
+  get lastTouch(): number | null {
+    return this.lastTouchAt;
+  }
+
+  /** Carries the TTL clock over from the store this one replaces (a reconnect swaps the client, not the user's last touch). */
+  inheritTouch(at: number | null): void {
+    if (at !== null && (this.lastTouchAt === null || at > this.lastTouchAt)) this.lastTouchAt = at;
+  }
+
   /** Milliseconds until the next touch is allowed (0 = now). */
   msUntilTouch(): number {
     if (this.lastTouchAt === null) return 0;
@@ -313,12 +323,20 @@ export function useAccountUsage(
     store ? store.getSnapshot : () => NO_STORE_SNAPSHOT,
   );
 
+  // A reconnect hands this surface a fresh store; the TTL clock must survive the swap, or the
+  // new store's first touch would go out at once instead of the one `cached` list a reconnect gets.
+  const carriedTouch = useRef<number | null>(null);
   useEffect(() => {
     if (!store) return;
+    store.inheritTouch(carriedTouch.current);
     const detach = store.attach(events);
-    // A touching surface in an active window lists through its first touch.
-    if (!(touch && windowIsActive())) store.ensureListed();
-    return detach;
+    // A touching surface in an active window lists through its first touch; every other case
+    // (hidden window, TTL not yet elapsed) lists as `cached`.
+    if (!(touch && windowIsActive() && store.msUntilTouch() === 0)) store.ensureListed();
+    return () => {
+      carriedTouch.current = store.lastTouch;
+      detach();
+    };
   }, [store, events, touch]);
 
   useEffect(() => {
