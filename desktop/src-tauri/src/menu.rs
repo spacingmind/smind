@@ -2,8 +2,7 @@
 //!
 //! Custom `MenuItem`s (not `PredefinedMenuItem`) drive Quit, Minimize and
 //! Fullscreen: `tauri::menu::PredefinedMenuItem`'s own docs list
-//! `quit`/`close_window`/`minimize`/`fullscreen` as "Linux: Unsupported",
-//! 
+//! `quit`/`close_window`/`minimize`/`fullscreen` as "Linux: Unsupported", so a
 //! custom item calling the window/app API directly behaves the same on
 //! every platform this ships for. Edit's Cut/Copy/Paste/Select All have
 //! no such caveat, so those stay predefined (needed for macOS clipboard

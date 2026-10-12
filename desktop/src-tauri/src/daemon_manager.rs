@@ -381,10 +381,15 @@ fn windows_exe_matches(pid: u32, expected: &Path) -> bool {
     windows_native::exe_path_for_pid(pid).ok().flatten().map(|p| windows_native::exe_matches(&p, expected)).unwrap_or(false)
 }
 
-/// windows_take_over_refusal is the AC6 gate: take-over is only offered
-/// for a port owner whose image is a `smind.exe`; anything else gets
-/// this explanation instead.
-fn windows_take_over_refusal(owner_image: Option<&str>, port: u16) -> Option<String> {
+/// take_over_refusal is the AC6 gate: on Windows, take-over is only offered
+/// for a port owner whose image is a `smind.exe`; anything else gets this
+/// explanation instead. Other platforms are never refused here (their
+/// daemon binary is not called `smind.exe`, so classifying it would refuse
+/// every macOS take-over).
+fn take_over_refusal(platform: Platform, owner_image: Option<&str>, port: u16) -> Option<String> {
+    if platform != Platform::Windows {
+        return None;
+    }
     (classify_unmanaged(owner_image) == UnmanagedKind::ForeignOrWsl).then(|| {
         format!("a daemon not started by this app is answering on port {port} -- if it runs in WSL, stop it there; take over is only offered for a smind.exe")
     })
@@ -914,7 +919,7 @@ async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus
     // AC6 (Windows): only a smind.exe owner is take-over eligible --
     // anything else (typically the WSL relay) is refused with an
     // explanation instead of being adopted.
-    if let Some(message) = windows_take_over_refusal(Some(&exe_path), port) {
+    if let Some(message) = take_over_refusal(platform, Some(&exe_path), port) {
         return Err(message);
     }
 
@@ -1162,15 +1167,25 @@ mod tests {
 
     #[test]
     fn windows_take_over_refused_for_foreign_owner() {
-        let err = windows_take_over_refusal(Some(r"C:\Windows\system32\wslrelay.exe"), 4648).unwrap();
+        let err = take_over_refusal(Platform::Windows, Some(r"C:\Windows\system32\wslrelay.exe"), 4648).unwrap();
         assert!(err.contains("not started by this app"), "{err}");
         assert!(err.contains("WSL"), "{err}");
         assert!(err.contains("4648"), "{err}");
         assert!(err.contains("smind.exe"), "{err}");
         // An unresolvable owner is refused too.
-        assert!(windows_take_over_refusal(None, 4648).is_some());
+        assert!(take_over_refusal(Platform::Windows, None, 4648).is_some());
         // A real smind.exe owner is eligible: no refusal.
-        assert!(windows_take_over_refusal(Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), 4648).is_none());
+        assert!(take_over_refusal(Platform::Windows, Some(r"C:\Users\x\AppData\Local\smind\bin\smind.exe"), 4648).is_none());
+    }
+
+    /// Regression: the AC6 gate classifies by the `smind.exe` file name, so
+    /// applying it off Windows would refuse every macOS take-over (the
+    /// macOS daemon binary is plain `smind`).
+    #[test]
+    fn take_over_refusal_never_applies_off_windows() {
+        assert!(take_over_refusal(Platform::Macos, Some("/Applications/smind.app/Contents/MacOS/smind"), 4648).is_none());
+        assert!(take_over_refusal(Platform::Macos, None, 4648).is_none());
+        assert!(take_over_refusal(Platform::Unsupported, Some("/usr/bin/other"), 4648).is_none());
     }
 
     #[test]
