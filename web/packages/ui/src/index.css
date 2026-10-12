@@ -840,3 +840,14 @@ html[data-desktop-os] body {
     scrollbar-color: color-mix(in srgb, var(--color-foreground) 28%, transparent) transparent;
   }
 }
+
+/*
+ * Tab strip (app-header-and-tabs): an inactive tab being hovered shows its
+ * split/close affordances floating over its right edge, so the title fades
+ * out underneath them instead of reserving a slot on every tab. The active
+ * tab keeps an in-flow spacer for them and never needs the fade.
+ */
+[role="tab"][aria-selected="false"]:hover [data-tab-title],
+[role="tab"][aria-selected="false"]:focus-within [data-tab-title] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 1.25rem), transparent);
+}

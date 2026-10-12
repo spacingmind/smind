@@ -64,25 +64,28 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="rounded-xl border bg-card"
+      className="-mx-2"
     >
-      <div className="flex items-center gap-2 px-2.5 py-1.5 text-ui-sm">
+      <div className="flex items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted hover:bg-hover">
         <button
           type="button"
           aria-expanded={open}
           aria-label={`${open ? "Collapse" : "Expand"} ${name} detail`}
           onClick={() => setOpen((prev) => !prev)}
           data-testid="tool-call-toggle"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className={cn(
+            "flex min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+            onOpenPath ? "shrink-0" : "flex-1",
+          )}
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
-          <Icon className="size-3 shrink-0 text-foreground-muted" />
-          <span className="shrink-0 font-medium" data-chat-find-text="true">
+          <Icon className="size-3 shrink-0" />
+          <span className="shrink-0 font-medium text-foreground" data-chat-find-text="true">
             {name}
           </span>
           {line && !onOpenPath && (
             <span
-              className="min-w-0 flex-1 truncate font-mono text-foreground-muted"
+              className="min-w-0 flex-1 truncate font-mono"
               data-testid="tool-call-summary"
               data-chat-find-text="true"
             >
@@ -98,7 +101,7 @@ export function ToolCallCard({
             type="button"
             onClick={onOpenPath}
             data-testid="tool-call-open-path"
-            className="min-w-0 flex-1 truncate text-left font-mono text-foreground-muted underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="min-w-0 flex-1 truncate text-left font-mono underline-offset-2 outline-none hover:underline focus-visible:ring-3 focus-visible:ring-ring/50"
           >
             <span data-testid="tool-call-summary" data-chat-find-text="true">
               {line}
@@ -108,12 +111,14 @@ export function ToolCallCard({
 
         <span className="flex shrink-0 items-center gap-1 text-foreground-muted">
           <StatusDot status={STATUS_DOT[item.status]} />
-          <span data-testid="tool-call-status">{item.status}</span>
+          <span data-testid="tool-call-status" className={cn(item.status === "success" && "sr-only")}>
+            {item.status}
+          </span>
         </span>
       </div>
 
       {open && (
-        <div className="border-t px-2.5 py-2 text-ui-sm" data-testid="tool-call-detail">
+        <div className="py-1 pr-2 pb-2 pl-7 text-ui-sm" data-testid="tool-call-detail">
           {children}
         </div>
       )}

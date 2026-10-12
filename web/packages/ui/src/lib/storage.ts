@@ -35,6 +35,8 @@ export const STORAGE_KEYS = {
   notificationSound: "smind:notification-sound",
   /** Plan-usage display preferences (ADR-0028); see lib/account-usage/preferences.ts. */
   usage: "smind:usage-preferences",
+  /** The editor the header's open-in-editor pill opens with (an `editors_list` id). */
+  preferredEditor: "smind:preferred-editor",
 } as const;
 
 /**

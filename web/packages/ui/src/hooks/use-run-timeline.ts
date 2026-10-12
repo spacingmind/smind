@@ -120,6 +120,23 @@ const TEXT_EVENT_KINDS: Record<string, TimelineTextItem["kind"]> = {
 };
 
 /**
+ * ACP session-update kinds that arrive as `raw` events (ADR-0010 keeps them in the persisted
+ * log) but are session housekeeping, not transcript: the agent's slash-command list, its
+ * session title, mode/config echoes and usage ticks. They produce no row; `plan` and any
+ * kind this build has never heard of still render (Detailed view only).
+ */
+const BENIGN_RAW_KINDS = new Set([
+  "available_commands_update",
+  "session_info_update",
+  "current_mode_update",
+  "config_option_update",
+  "usage_update",
+]);
+
+/** The benign raw kinds after which the live ACP option list (model, thinking, mode) may have changed. */
+const CONFIG_REFRESH_RAW_KINDS = new Set(["available_commands_update", "config_option_update"]);
+
+/**
  * Event names that are not transcript rows at all. "done" only drives run
  * status, and "permission_request" only drives the pending-permission
  * dock (RunEntry.pendingPermission) -- neither ever becomes an item.
@@ -212,6 +229,7 @@ export function appendTimelineEvent(items: TimelineItem[], event: RunLogEvent): 
   if (type === "usage") return items;
 
   if (type === "raw") {
+    if (event.kind && BENIGN_RAW_KINDS.has(event.kind)) return items;
     return [
       ...items,
       { kind: "unknown", id: `unknown-${items.length}`, eventType: type, rawKind: event.kind, rawPayload: event.payload },
@@ -278,6 +296,11 @@ export interface RunEntry {
    * Undefined when the run has no usage row (not an empty object).
    */
   usage?: RunUsage;
+  /**
+   * Bumped by dropped (non-row) ACP updates that signal the live config options may have
+   * changed, so the option refetch (use-run-config-options) still fires for them.
+   */
+  configRevision?: number;
 }
 
 /** The latest mcp_servers event's list in events, or undefined when no event carried one -- multiple events per run are possible, latest wins. */
@@ -401,7 +424,14 @@ function appendEvent(setRuns: Dispatch<SetStateAction<RunEntry[] | null>>, id: s
           // Identical array means the event changed nothing (an empty
           // chunk, a "done") -- returning the same run object keeps the
           // whole list's identity stable and skips the re-render.
-          return items === r.items ? r : { ...r, items };
+          if (items === r.items) {
+            // The one exception: a dropped session-housekeeping update that says the live
+            // option list may have changed -- bump the revision the config-option refetch keys on.
+            return event.type === "raw" && event.kind && CONFIG_REFRESH_RAW_KINDS.has(event.kind)
+              ? { ...r, configRevision: (r.configRevision ?? 0) + 1 }
+              : r;
+          }
+          return { ...r, items };
         })
       : prev,
   );

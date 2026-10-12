@@ -9,7 +9,7 @@ import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
-import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, type LiveRunControls, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -28,6 +28,8 @@ import type {
 import type { WsClientLike } from "@/lib/ws-client";
 
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
+/** How long the picker waits on provider.list before it falls back to the built-in catalog. */
+const PROVIDER_LIST_TIMEOUT_MS = 8000;
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
 /** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
@@ -90,9 +92,13 @@ export function Composer({
   onSubmit,
   onStop,
   textareaRef,
+  prefill,
   toolbarRef,
   onRunConfigChange,
   configOptions,
+  otherRunningChat,
+  onJumpToChat,
+  liveRun,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -127,10 +133,18 @@ export function Composer({
   onStop: (runId: string) => Promise<void>;
   /** Exposes the prompt textarea's DOM node -- what lets a plan review's "Chat about it" (Item 11) move focus into the composer without resolving the pending request. */
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /** "Edit & resend": each new `nonce` loads `text` into the draft (appended after a blank line when the draft is non-empty), then focuses the textarea with the caret at the end. */
+  prefill?: { text: string; nonce: number };
   /** Exposes the run-config toolbar row's DOM node -- what the task header's run-config pill (task-detail.tsx) focuses when clicked. */
   toolbarRef?: Ref<HTMLDivElement>;
   /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
   onRunConfigChange?: (state: RunConfigState) => void;
+  /** Another chat of this task with a live run in the shared worktree (ADR-0016 P3) -- a chip in the status row. */
+  otherRunningChat?: { id: number; title: string } | null;
+  /** Jumps to otherRunningChat's tab. */
+  onJumpToChat?: (chatId: number) => void;
+  /** The running run's mode controls (D1): while set, the toolbar's Mode/Auto-accept pills drive that run via run.setPermissionMode instead of the next run's config. Omit when there is no live-switch-capable run. */
+  liveRun?: LiveRunControls | null;
   /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
   configOptions?: {
     options: ConfigOptionParams[];
@@ -140,6 +154,8 @@ export function Composer({
 }) {
   const draft = useComposerDraft(taskId);
   const [providers, setProviders] = useState<ProviderInfo[]>(FALLBACK_PROVIDERS);
+  // False until provider.list settles (result or failure): the combined picker shows its loading states meanwhile.
+  const [providersSettled, setProvidersSettled] = useState(false);
   // ADR-0014's Profiles picker: a named provider/permissionMode/
   // thinkingLevel bundle a user applies in one click. Empty when the
   // daemon has none (a fresh install, or client.call failing) -- the
@@ -174,6 +190,24 @@ export function Composer({
     [textareaRef],
   );
 
+  // Applies each new prefill nonce once. The ref starts at the mount-time
+  // nonce so a remount does not re-apply an old prefill.
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
+  const appliedPrefill = useRef(prefill?.nonce);
+  useEffect(() => {
+    if (!prefill || prefill.nonce === appliedPrefill.current) return;
+    appliedPrefill.current = prefill.nonce;
+    const current = draftRef.current.value;
+    const next = current.trim() === "" ? prefill.text : `${current}\n\n${prefill.text}`;
+    draftRef.current.setValue(next);
+    const node = textareaNode.current;
+    if (!node) return;
+    node.focus();
+    // The controlled value lands on the next render; defer the caret move.
+    requestAnimationFrame(() => node.setSelectionRange(next.length, next.length));
+  }, [prefill]);
+
   // `composer.focus` is in the shortcut registry but nothing claimed it
   // until now. The hint shows the *effective* combo (a user rebinding is
   // honoured; an unbound action shows nothing), Paseo-style: only while the
@@ -184,16 +218,25 @@ export function Composer({
 
   useEffect(() => {
     setProviders(FALLBACK_PROVIDERS);
+    setProvidersSettled(false);
     if (!client) return;
     let cancelled = false;
+    // A daemon that never answers must not leave the picker on "Loading…" forever: the fallback catalog takes over.
+    const giveUp = setTimeout(() => {
+      if (!cancelled) setProvidersSettled(true);
+    }, PROVIDER_LIST_TIMEOUT_MS);
     client
       .call<ProviderListResult>("provider.list")
       .then((result) => {
         if (!cancelled && result.providers.length > 0) setProviders(result.providers);
       })
-      .catch((err) => console.error("provider.list failed, using fallback provider list", err));
+      .catch((err) => console.error("provider.list failed, using fallback provider list", err))
+      .finally(() => {
+        if (!cancelled) setProvidersSettled(true);
+      });
     return () => {
       cancelled = true;
+      clearTimeout(giveUp);
     };
   }, [client]);
 
@@ -298,10 +341,13 @@ export function Composer({
     // Select re-rendering with the new value *is* the visible feedback --
     // no separate indicator to keep in sync.
     if (e.key === "Tab" && e.shiftKey && !inactive) {
-      const next = resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
+      const next = liveRun
+        ? resolveNextPermissionMode(liveRun.modes, liveRun.mode)
+        : resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
       if (next) {
         e.preventDefault();
-        runConfig?.actions.setPermissionMode(next);
+        if (liveRun) liveRun.onChange({ modeId: next }).catch(() => {});
+        else runConfig?.actions.setPermissionMode(next);
       }
     }
   }
@@ -321,7 +367,13 @@ export function Composer({
 
       {/* Paseo's chip row above the card: the live-run chip and the diff
           stat -- real data only, nothing when neither applies. */}
-      <ComposerStatusChips running={running} diffStat={diffStat} onOpenDiff={onOpenDiff} />
+      <ComposerStatusChips
+        running={running}
+        diffStat={diffStat}
+        onOpenDiff={onOpenDiff}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
+      />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
@@ -383,7 +435,9 @@ export function Composer({
           boundProvider={boundProvider}
           profiles={profiles}
           providers={providers}
+          providersLoading={!!client && !providersSettled}
           disabled={inactive}
+          liveRun={liveRun}
           providerHealth={providerHealth.health}
           onPickerOpen={providerHealth.ensure}
           onChange={(value) => {
@@ -405,6 +459,7 @@ export function Composer({
                 options={configOptions.options}
                 error={configOptions.error}
                 onSetOption={configOptions.onSetOption}
+                omitMode={liveRun != null && liveRun.modes.length > 1}
               />
             )}
             <div className="ml-auto flex items-center gap-1">

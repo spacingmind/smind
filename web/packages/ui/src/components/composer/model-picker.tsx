@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent } from "react";
 
-import { ArrowLeft, Check, ChevronDown, ChevronRight, SquareTerminal } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 
+import {
+  CreateProfileRow,
+  EmptyState,
+  ModelRowItem,
+  NoAgentRow,
+  PickerHeader,
+  ProfileRow,
+  ProfilesHeading,
+  ProviderNotice,
+  ProviderRow,
+  SectionHeading,
+  UnavailableNotice,
+  type ModelRowAction,
+  type PickerProfileRow,
+  type RowShellProps,
+} from "@/components/composer/model-picker-rows";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
+import { ProviderGlyph } from "@/components/composer/provider-glyph";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -10,27 +27,24 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import {
   filterAndRankModelRows,
   getProviderModelRows,
+  groupProfilesByProviderModel,
+  resolveDesktopFixedHeight,
   resolveInitialModelBrowserView,
   resolveModelBrowserAllView,
   resolveTriggerLabel,
+  resolveTriggerTitle,
   type BrowserProvider,
   type ModelBrowserView,
   type ModelRow,
 } from "@/lib/model-browser";
-import { cn } from "@/lib/utils";
+import type { ProfileSeed } from "@/lib/settings-intent";
 
-// Combined provider + model picker (docs/plans/active/composer-combined-model-picker.md),
-// a port of Paseo's combined-model-selector / model-browser interaction:
-// root = pinned Profiles + Providers drill-down, provider view = model rows,
-// search at both levels. Popover on desktop, bottom Sheet below md.
+// Combined provider + model picker (docs/plans/active/model-picker-paseo-parity.md),
+// a port of Paseo's combined-model-selector / model-browser: opens on the
+// current provider's view, root = Profiles band + Providers drill-down, search
+// at both levels. Popover on desktop, bottom Sheet below md.
 
-export interface PickerProfileRow {
-  id: string;
-  name: string;
-  summary: string;
-  provider: string;
-  notes?: string;
-}
+export type { PickerProfileRow };
 
 export interface ModelPickerProps {
   providers: BrowserProvider[];
@@ -44,11 +58,16 @@ export interface ModelPickerProps {
   baseAgentId: string | null;
   /** Fields hand-edited away from the applied profile. */
   custom: boolean;
+  /** Live run config; seeds "create profile" from the selected model row. */
+  currentConfig?: { permissionMode: string; autoAccept: boolean; thinkingLevel: string };
   onSelect: (provider: string, modelId: string) => void;
   onApplyProfile: (profileId: string) => void;
   onClearAgent: () => void;
   /** Opens Settings -> Agents. */
   onManageAgents: () => void;
+  onCreateProfile?: (seed: ProfileSeed) => void;
+  onEditProfile?: (profileId: string) => void;
+  onOpenProviderSettings?: (providerId: string) => void;
   /** Fired each time the picker opens (the owner lazily fetches provider health). */
   onOpen?: () => void;
 }
@@ -57,34 +76,49 @@ export interface ModelPickerProps {
 type PickerRow =
   | { kind: "noAgent"; key: string }
   | { kind: "profile"; key: string; profile: PickerProfileRow }
-  | { kind: "manage"; key: string }
+  | { kind: "createProfile"; key: string }
   | { kind: "provider"; key: string; provider: BrowserProvider }
   | { kind: "model"; key: string; row: ModelRow; qualified: boolean };
 
-type PickerEntry = { kind: "heading"; key: string; label: string } | PickerRow;
+type PickerEntry =
+  | { kind: "heading"; key: string; label: string }
+  | { kind: "profilesHeading"; key: string }
+  | PickerRow;
 
 type BodyState =
-  | { kind: "entries"; entries: PickerEntry[] }
+  | {
+      kind: "entries";
+      /** Tinted Profiles band, above the list. */
+      band: PickerEntry[];
+      entries: PickerEntry[];
+      notice?: { kind: "loading" } | { kind: "error"; message: string };
+    }
   | { kind: "empty"; query: string };
 
 function isDisabledRow(row: PickerRow): boolean {
   return row.kind === "provider" && !!row.provider.unavailableReason;
 }
 
-function profileEntries(profiles: PickerProfileRow[], baseAgentId: string | null): PickerEntry[] {
-  const entries: PickerEntry[] = [{ kind: "heading", key: "h-profiles", label: "Profiles" }];
+function bandEntries(profiles: PickerProfileRow[], baseAgentId: string | null): PickerEntry[] {
+  const entries: PickerEntry[] = [{ kind: "profilesHeading", key: "h-profiles" }];
   if (baseAgentId !== null) {
     entries.push({ kind: "noAgent", key: "no-agent" });
   }
   for (const profile of profiles) {
     entries.push({ kind: "profile", key: `profile-${profile.id}`, profile });
   }
-  entries.push({ kind: "manage", key: "manage" });
+  if (profiles.length === 0) {
+    entries.push({ kind: "createProfile", key: "create-profile" });
+  }
   return entries;
 }
 
 function modelEntries(rows: ModelRow[], qualified: boolean): PickerEntry[] {
   return rows.map((row) => ({ kind: "model", key: `model-${row.key}`, row, qualified }));
+}
+
+function hasFinePointer(): boolean {
+  return window.matchMedia?.("(pointer: fine)").matches ?? false;
 }
 
 export function ModelPicker(props: ModelPickerProps): JSX.Element {
@@ -97,10 +131,14 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     profileRows,
     baseAgentId,
     custom,
+    currentConfig,
     onSelect,
     onApplyProfile,
     onClearAgent,
     onManageAgents,
+    onCreateProfile,
+    onEditProfile,
+    onOpenProviderSettings,
     onOpen,
   } = props;
   const isMobile = useIsMobile();
@@ -109,83 +147,107 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [view, setView] = useState<ModelBrowserView>({ kind: "all" });
+  const [inputFocused, setInputFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const visibleProviders = useMemo(
     () => (boundProvider ? providers.filter((p) => p.id === boundProvider) : providers),
     [providers, boundProvider],
   );
-  const label = resolveTriggerLabel({ providers, selectedProvider, selectedModel });
+  const triggerArgs = { providers, selectedProvider, selectedModel };
+  const label = resolveTriggerLabel(triggerArgs);
+  const title = resolveTriggerTitle(triggerArgs);
   const canGoBack = view.kind === "provider" && visibleProviders.length > 1;
   const normalizedQuery = query.trim().toLowerCase();
+  // On the sheet the keyboard covers the list, so focusing an empty search shows every model (Paseo searchAllOnFocus).
+  // A fine pointer (a narrow desktop window) has no on-screen keyboard and autofocuses the input, so it keeps the browse layout.
+  const searchFocused = isMobile && inputFocused && !hasFinePointer();
+  const profilesByModel = useMemo(
+    () => groupProfilesByProviderModel(profileRows.map((p) => ({ ...p, modelId: p.model }))),
+    [profileRows],
+  );
 
   const changeOpen = useCallback(
     (next: boolean) => {
       setOpen(next);
+      setInputFocused(false);
       if (!next) {
         return;
       }
       setQuery("");
       setActiveIndex(0);
-      setView(
-        resolveInitialModelBrowserView({
-          providers: visibleProviders,
-          selectedProvider,
-          selectedModel,
-          hasProfiles: profileRows.length > 0,
-        }),
-      );
+      setView(resolveInitialModelBrowserView({ providers: visibleProviders, selectedProvider }));
       onOpen?.();
     },
-    [visibleProviders, selectedProvider, selectedModel, profileRows.length, onOpen],
+    [visibleProviders, selectedProvider, onOpen],
   );
 
   const body = useMemo<BodyState>(() => {
     if (view.kind === "provider") {
       const provider = visibleProviders.find((p) => p.id === view.providerId);
+      const selection = provider?.modelSelection;
+      if (selection?.kind === "loading" || selection?.kind === "error") {
+        return {
+          kind: "entries",
+          band: [],
+          entries: [],
+          notice: selection.kind === "loading" ? { kind: "loading" } : { kind: "error", message: selection.message },
+        };
+      }
       const rows = provider ? getProviderModelRows(provider) : [];
       if (normalizedQuery) {
         const matches = filterAndRankModelRows(rows, normalizedQuery);
         return matches.length === 0
           ? { kind: "empty", query: query.trim() }
-          : { kind: "entries", entries: modelEntries(matches, false) };
+          : { kind: "entries", band: [], entries: modelEntries(matches, false) };
       }
       const profiles = profileRows.filter((p) => p.provider === view.providerId);
-      const entries: PickerEntry[] =
-        profiles.length > 0 || baseAgentId !== null ? profileEntries(profiles, baseAgentId) : [];
-      if (entries.length > 0) {
-        entries.push({ kind: "heading", key: "h-models", label: "Models" });
-      }
-      return { kind: "entries", entries: [...entries, ...modelEntries(rows, false)] };
+      return {
+        kind: "entries",
+        band: bandEntries(profiles, baseAgentId),
+        entries: [{ kind: "heading", key: "h-models", label: "Models" }, ...modelEntries(rows, false)],
+      };
     }
 
     const all = resolveModelBrowserAllView({
       providers: visibleProviders,
       normalizedQuery,
-      isSearchFocused: false,
+      isSearchFocused: searchFocused,
     });
     if (all.kind === "noSearchMatches") {
-      return { kind: "empty", query: query.trim() };
+      // A loading provider may still contribute rows, so an empty result is not final yet.
+      return visibleProviders.some((p) => p.modelSelection.kind === "loading")
+        ? { kind: "entries", band: [], entries: [], notice: { kind: "loading" } }
+        : { kind: "empty", query: query.trim() };
     }
     if (all.kind === "searchResults") {
-      return { kind: "entries", entries: modelEntries(all.rows, true) };
+      return { kind: "entries", band: [], entries: modelEntries(all.rows, true) };
     }
-    const entries: PickerEntry[] =
-      profileRows.length > 0 ? profileEntries(profileRows, baseAgentId) : [];
+    const entries: PickerEntry[] = [];
     if (visibleProviders.length > 0) {
       entries.push({ kind: "heading", key: "h-providers", label: "Providers" });
     }
     for (const provider of visibleProviders) {
       entries.push({ kind: "provider", key: `provider-${provider.id}`, provider });
     }
-    return { kind: "entries", entries };
-  }, [view, visibleProviders, normalizedQuery, query, profileRows, baseAgentId]);
+    return { kind: "entries", band: bandEntries(profileRows, baseAgentId), entries };
+  }, [view, visibleProviders, normalizedQuery, query, searchFocused, profileRows, baseAgentId]);
 
-  // Arrow keys walk only the rows that can be activated; disabled providers are skipped.
+  // Popover height follows the browse layout of the view, not the search results, so typing doesn't resize it.
+  const extraRows = useMemo(() => {
+    const profiles = view.kind === "provider" ? profileRows.filter((p) => p.provider === view.providerId) : profileRows;
+    // Heading + No agent + (profiles | Create row) + the Models/Providers heading.
+    return 1 + (baseAgentId !== null ? 1 : 0) + Math.max(profiles.length, 1) + 1 + (boundProvider ? 1 : 0);
+  }, [view, profileRows, baseAgentId, boundProvider]);
+  const popoverHeight = resolveDesktopFixedHeight(view, visibleProviders, extraRows);
+
+  // Arrow keys walk only the rows that can be activated; headings, disabled providers and row action buttons are skipped.
   const actionable = useMemo<PickerRow[]>(
     () =>
       body.kind === "entries"
-        ? body.entries.filter((e): e is PickerRow => e.kind !== "heading" && !isDisabledRow(e))
+        ? [...body.band, ...body.entries].filter(
+            (e): e is PickerRow => e.kind !== "heading" && e.kind !== "profilesHeading" && !isDisabledRow(e),
+          )
         : [],
     [body],
   );
@@ -236,9 +298,13 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
         changeOpen(false);
         onClearAgent();
         return;
-      case "manage":
+      case "createProfile":
         changeOpen(false);
-        onManageAgents();
+        if (view.kind === "provider" && onCreateProfile) {
+          onCreateProfile({ name: "", provider: view.providerId, model: "" });
+        } else {
+          onManageAgents();
+        }
         return;
     }
   };
@@ -247,6 +313,52 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     setView({ kind: "all" });
     setQuery("");
     setActiveIndex(0);
+    // Keep keyboard flow on desktop; on touch this would raise the keyboard over the list.
+    if (!isMobile || hasFinePointer()) {
+      inputRef.current?.focus();
+    }
+  };
+
+  const manageAgents = () => {
+    changeOpen(false);
+    onManageAgents();
+  };
+
+  const modelAction = (row: ModelRow): { action?: ModelRowAction; run: () => void } => {
+    // The synthetic default row (id "") names no model, so nothing to build a profile from.
+    if (row.modelId === "") {
+      return { run: () => {} };
+    }
+    const existing = profilesByModel.get(`${row.provider}:${row.modelId}`) ?? [];
+    if (existing.length === 0) {
+      if (!onCreateProfile) {
+        return { run: () => {} };
+      }
+      const isSelected = row.provider === selectedProvider && row.modelId === selectedModel;
+      return {
+        action: { kind: "create" },
+        run: () => {
+          changeOpen(false);
+          onCreateProfile({
+            name: row.modelLabel,
+            provider: row.provider,
+            model: row.modelId,
+            ...(isSelected ? currentConfig : {}),
+          });
+        },
+      };
+    }
+    if (existing.length === 1 && onEditProfile) {
+      const only = existing[0]!;
+      return {
+        action: { kind: "edit", profile: only },
+        run: () => {
+          changeOpen(false);
+          onEditProfile(only.id);
+        },
+      };
+    }
+    return { action: { kind: "list", count: existing.length }, run: manageAgents };
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -273,13 +385,75 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   };
 
   const inProviderView = view.kind === "provider";
+  const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
   const boundLabel = boundProvider ? (providers.find((p) => p.id === boundProvider)?.label ?? boundProvider) : null;
+
+  const shellFor = (entry: PickerRow): RowShellProps => ({
+    id: rowDomId(entry.key),
+    active: entry.key === activeKey,
+    disabled: isDisabledRow(entry),
+    onActivate: () => activate(entry),
+    onHover: () => {
+      const idx = actionable.findIndex((r) => r.key === entry.key);
+      if (idx >= 0) {
+        setActiveIndex(idx);
+      }
+    },
+  });
+
+  const renderEntry = (entry: PickerEntry, index: number) => {
+    switch (entry.kind) {
+      case "heading":
+        return <SectionHeading key={entry.key} label={entry.label} />;
+      case "profilesHeading":
+        return <ProfilesHeading key={entry.key} onEdit={manageAgents} />;
+      case "noAgent":
+        return <NoAgentRow key={entry.key} {...shellFor(entry)} />;
+      case "createProfile":
+        return <CreateProfileRow key={entry.key} {...shellFor(entry)} />;
+      case "profile":
+        return (
+          <ProfileRow
+            key={entry.key}
+            {...shellFor(entry)}
+            profile={entry.profile}
+            checked={String(entry.profile.id) === baseAgentId}
+            custom={custom}
+          />
+        );
+      case "provider":
+        return <ProviderRow key={entry.key} {...shellFor(entry)} provider={entry.provider} separator={index > 1} />;
+      case "model": {
+        const { action, run } = modelAction(entry.row);
+        return (
+          <ModelRowItem
+            key={entry.key}
+            {...shellFor(entry)}
+            row={entry.row}
+            qualified={entry.qualified}
+            selected={entry.row.provider === selectedProvider && entry.row.modelId === selectedModel}
+            action={action}
+            onAction={run}
+          />
+        );
+      }
+    }
+  };
 
   const content = (
     <>
       <PickerHeader
         title={view.kind === "provider" ? view.providerLabel : "Select model"}
+        providerId={view.kind === "provider" ? view.providerId : undefined}
         onBack={canGoBack ? goBack : undefined}
+        onProviderSettings={
+          view.kind === "provider" && onOpenProviderSettings
+            ? () => {
+                changeOpen(false);
+                onOpenProviderSettings(view.providerId);
+              }
+            : undefined
+        }
         inSheet={isMobile}
       />
       {boundLabel && (
@@ -288,16 +462,25 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           Bound to {boundLabel} — start a new chat to switch providers
         </p>
       )}
+      {viewProvider?.unavailableReason && <UnavailableNotice reason={viewProvider.unavailableReason} />}
       <div className="border-b px-3 pb-2">
         <input
           ref={inputRef}
-          autoFocus
+          autoFocus={!isMobile}
           type="text"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setActiveIndex(0);
           }}
+          onFocus={() => {
+            setInputFocused(true);
+            // Only the sheet's list changes on focus; resetting on desktop would drop the highlight on the current selection.
+            if (isMobile) {
+              setActiveIndex(0);
+            }
+          }}
+          onBlur={() => setInputFocused(false)}
           onKeyDown={onKeyDown}
           aria-label="Search models"
           placeholder={inProviderView ? "Search models…" : "Search all models…"}
@@ -311,72 +494,22 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           className="h-8 w-full rounded-lg border border-input-border bg-transparent px-2.5 text-ui-sm text-foreground outline-none transition-colors placeholder:text-foreground-muted focus-visible:border-input-border-focused max-md:text-ui-lg"
         />
       </div>
-      <div id={listId} role="listbox" aria-label="Models" className="min-h-0 flex-1 overflow-y-auto p-1">
+      <div id={listId} role="listbox" aria-label="Models" className="min-h-0 flex-1 overflow-y-auto">
         {body.kind === "empty" ? (
           <EmptyState query={body.query} />
         ) : (
-          body.entries.map((entry) => {
-            if (entry.kind === "heading") {
-              return (
-                <div
-                  key={entry.key}
-                  role="presentation"
-                  className="px-2 pt-2 pb-1 text-ui-sm font-medium text-foreground-muted"
-                >
-                  {entry.label}
-                </div>
-              );
-            }
-            const active = entry.key === activeKey;
-            const rowProps: RowShellProps = {
-              id: rowDomId(entry.key),
-              active,
-              disabled: isDisabledRow(entry),
-              onActivate: () => activate(entry),
-              onHover: () => {
-                const idx = actionable.findIndex((r) => r.key === entry.key);
-                if (idx >= 0) {
-                  setActiveIndex(idx);
-                }
-              },
-            };
-            switch (entry.kind) {
-              case "noAgent":
-                return (
-                  <RowShell key={entry.key} {...rowProps} testId="model-no-agent">
-                    <span className="text-ui-base text-foreground">No agent</span>
-                  </RowShell>
-                );
-              case "manage":
-                return (
-                  <RowShell key={entry.key} {...rowProps} testId="model-manage-agents">
-                    <span className="text-ui-base text-foreground-muted">Manage agents…</span>
-                  </RowShell>
-                );
-              case "profile":
-                return (
-                  <ProfileRow
-                    key={entry.key}
-                    {...rowProps}
-                    profile={entry.profile}
-                    checked={String(entry.profile.id) === baseAgentId}
-                    custom={custom}
-                  />
-                );
-              case "provider":
-                return <ProviderRow key={entry.key} {...rowProps} provider={entry.provider} />;
-              case "model":
-                return (
-                  <ModelRowItem
-                    key={entry.key}
-                    {...rowProps}
-                    row={entry.row}
-                    qualified={entry.qualified}
-                    selected={entry.row.provider === selectedProvider && entry.row.modelId === selectedModel}
-                  />
-                );
-            }
-          })
+          <>
+            {body.band.length > 0 && (
+              <div data-testid="model-profiles-band" className="border-b border-border bg-surface p-1">
+                {body.band.map(renderEntry)}
+              </div>
+            )}
+            {body.notice ? (
+              <ProviderNotice kind={body.notice.kind} message={body.notice.kind === "error" ? body.notice.message : undefined} />
+            ) : (
+              <div className="p-1">{body.entries.map(renderEntry)}</div>
+            )}
+          </>
         )}
       </div>
     </>
@@ -387,23 +520,27 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
       type="button"
       variant="ghost"
       data-testid="composer-model-picker"
-      aria-label={`Model: ${label}`}
-      title={label}
+      aria-label={`Model: ${title}`}
+      title={title}
       disabled={disabled}
       className={PILL_TRIGGER_CLASS}
       onClick={isMobile ? () => changeOpen(!open) : undefined}
     >
-      <SquareTerminal aria-hidden className="shrink-0" />
-      <span className="max-sm:hidden">{label}</span>
+      <ProviderGlyph provider={selectedProvider} className="shrink-0" />
+      <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
       <ChevronDown aria-hidden className="shrink-0" />
     </Button>
   );
 
-  // The search input owns focus (it keeps it while arrowing), so Radix's own
-  // focus-the-container-on-open is redirected to it.
+  // On desktop the search input owns focus (it keeps it while arrowing), so
+  // Radix's own focus-the-container-on-open is redirected to it. The sheet
+  // leaves focus alone: a focused input would pop the keyboard over the list.
   const focusInput = (e: Event) => {
     e.preventDefault();
-    inputRef.current?.focus();
+    // Touch keeps it unfocused; a fine pointer (desktop-class sheet) can type straight away.
+    if (!isMobile || hasFinePointer()) {
+      inputRef.current?.focus();
+    }
   };
 
   if (isMobile) {
@@ -413,7 +550,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
         <Sheet open={open} onOpenChange={changeOpen}>
           <SheetContent
             side="bottom"
-            className="h-[75vh] gap-0 p-0"
+            className="gap-0 p-0 data-[side=bottom]:h-[80dvh]"
             data-testid="model-picker-sheet"
             onOpenAutoFocus={focusInput}
           >
@@ -432,153 +569,13 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
       <PopoverContent
         side="top"
         align="start"
-        className="flex h-[min(26rem,var(--radix-popover-content-available-height))] w-[22rem] flex-col p-0"
+        className="flex w-[22rem] flex-col p-0"
+        style={{ height: `min(${popoverHeight}px, var(--radix-popover-content-available-height))` }}
         data-testid="model-picker-popover"
         onOpenAutoFocus={focusInput}
       >
         {content}
       </PopoverContent>
     </Popover>
-  );
-}
-
-function PickerHeader({ title, onBack, inSheet }: { title: string; onBack?: () => void; inSheet: boolean }) {
-  return (
-    <div className={cn("flex h-10 shrink-0 items-center gap-1 px-2", inSheet && "pr-12")}>
-      {onBack && (
-        <Button
-          type="button"
-          variant="quiet"
-          size="icon-sm"
-          aria-label="Back"
-          data-testid="model-picker-back"
-          onClick={onBack}
-        >
-          <ArrowLeft aria-hidden />
-        </Button>
-      )}
-      <span className={cn("truncate text-ui-sm font-medium text-foreground", !onBack && "px-1")}>{title}</span>
-    </div>
-  );
-}
-
-interface RowShellProps {
-  id: string;
-  active: boolean;
-  disabled: boolean;
-  onActivate: () => void;
-  onHover: () => void;
-}
-
-/** Shared option chrome: id for aria-activedescendant, active highlight, hover-to-activate. */
-function RowShell({
-  id,
-  active,
-  disabled,
-  onActivate,
-  onHover,
-  testId,
-  selected,
-  children,
-}: RowShellProps & { testId: string; selected?: boolean; children: ReactNode }) {
-  return (
-    <div
-      id={id}
-      role="option"
-      aria-selected={selected ?? false}
-      aria-disabled={disabled || undefined}
-      data-testid={testId}
-      data-active={active ? "true" : undefined}
-      onClick={disabled ? undefined : onActivate}
-      onMouseMove={disabled || active ? undefined : onHover}
-      className={cn(
-        "flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5",
-        active && "bg-hover",
-        disabled && "cursor-not-allowed opacity-50",
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-function SelectedCheck({ show }: { show: boolean }) {
-  return show ? <Check aria-hidden className="size-4 shrink-0 text-foreground" /> : null;
-}
-
-function ProfileRow({
-  profile,
-  checked,
-  custom,
-  ...shell
-}: RowShellProps & { profile: PickerProfileRow; checked: boolean; custom: boolean }) {
-  return (
-    <RowShell {...shell} testId={`model-profile-row-${profile.id}`} selected={checked}>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <span className="truncate text-ui-base text-foreground">{profile.name}</span>
-          {checked && custom && (
-            <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
-          )}
-        </div>
-        <div className="truncate text-ui-sm text-foreground-muted">{profile.summary}</div>
-      </div>
-      <SelectedCheck show={checked} />
-    </RowShell>
-  );
-}
-
-function ProviderRow({ provider, ...shell }: RowShellProps & { provider: BrowserProvider }) {
-  const selection = provider.modelSelection;
-  const count = getProviderModelRows(provider).length;
-  let detail: string;
-  if (provider.unavailableReason) {
-    detail = provider.unavailableReason;
-  } else if (selection.kind === "error") {
-    detail = selection.message;
-  } else if (selection.kind === "loading") {
-    detail = "Loading…";
-  } else {
-    detail = count === 1 ? "1 model" : `${count} models`;
-  }
-  return (
-    <RowShell {...shell} testId={`model-provider-${provider.id}`}>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-ui-base text-foreground">{provider.label}</div>
-        <div className="truncate text-ui-sm text-foreground-muted">{detail}</div>
-      </div>
-      {!shell.disabled && <ChevronRight aria-hidden className="size-4 shrink-0 text-foreground-muted" />}
-    </RowShell>
-  );
-}
-
-function ModelRowItem({
-  row,
-  qualified,
-  selected,
-  ...shell
-}: RowShellProps & { row: ModelRow; qualified: boolean; selected: boolean }) {
-  // ADR-0025: the "Default model" row (id "") sends no model; it has no description of its own.
-  const description = qualified
-    ? row.description
-      ? `${row.providerLabel} · ${row.description}`
-      : row.providerLabel
-    : row.description;
-  return (
-    <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-ui-base text-foreground">{row.modelLabel}</div>
-        {description && <div className="truncate text-ui-sm text-foreground-muted">{description}</div>}
-      </div>
-      <SelectedCheck show={selected} />
-    </RowShell>
-  );
-}
-
-function EmptyState({ query }: { query: string }) {
-  return (
-    <div data-testid="model-search-empty" className="px-3 py-6 text-center text-ui-sm text-foreground-muted">
-      No models match “{query}”
-    </div>
   );
 }

@@ -36,6 +36,14 @@ export function timelineToText(prompt: string, items: TimelineItem[]): string {
   return lines.join("\n").trimEnd() + "\n";
 }
 
+/** The turn's assistant text (Markdown as streamed), blocks joined by a blank line; tools and reasoning are left out. */
+export function assistantMarkdown(items: TimelineItem[]): string {
+  return items
+    .flatMap((item) => (item.kind === "assistant" ? [item.text] : []))
+    .join("\n\n")
+    .trim();
+}
+
 /**
  * A turn's wall-clock duration, rendered short (`1.4s`, `2m 07s`).
  * `finishedAt` is optional so a still-running turn's footer counts up for

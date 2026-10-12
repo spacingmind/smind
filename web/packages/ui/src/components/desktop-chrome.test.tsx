@@ -221,7 +221,8 @@ describe("AppSidebar window chrome", () => {
 
     const row = screen.getByTestId("sidebar-expanded-header");
     expect(row).toHaveAttribute("data-tauri-drag-region", "deep");
-    expect(row).toHaveClass("h-12", "border-b");
+    expect(row).toHaveClass("h-12");
+    expect(row.className).not.toMatch(/border/);
     expect(row.style.paddingLeft).toBe(`${TRAFFIC_LIGHT_CLUSTER_PX}px`);
     // Logo, theme and settings all live in that one row ...
     expect(row.querySelector("img")).not.toBeNull();
@@ -251,7 +252,6 @@ describe("AppSidebar window chrome", () => {
     act(() => win.emit({ maximized: false, fullscreen: true }));
     const row = screen.getByTestId("sidebar-expanded-header");
     expect(row).not.toHaveAttribute("data-tauri-drag-region");
-    expect(row).not.toHaveClass("h-12");
     expect(row.style.paddingLeft).toBe("");
     expect(screen.queryByTestId("sidebar-rail-inset")).not.toBeInTheDocument();
   });
@@ -260,12 +260,12 @@ describe("AppSidebar window chrome", () => {
     ["windows", true],
     ["linux", true],
     [null, false],
-  ] as const)("%s: the sidebar header is untouched", async (os, desktop) => {
+  ] as const)("%s: the sidebar's top strip is the plain 48px left zone, no title-bar behaviour", async (os, desktop) => {
     mockPlatform({ desktop, os });
     await renderSidebar();
     const row = screen.getByTestId("sidebar-expanded-header");
     expect(row).not.toHaveAttribute("data-tauri-drag-region");
-    expect(row).not.toHaveClass("h-12");
+    expect(row).toHaveClass("h-12");
     expect(row.style.paddingLeft).toBe("");
     expect(screen.queryByTestId("sidebar-rail-inset")).not.toBeInTheDocument();
   });
@@ -278,9 +278,11 @@ describe("opaque surfaces on macOS (the body is transparent over vibrancy)", () 
     render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
 
     const main = await screen.findByTestId("app-main-content");
-    expect(main).toHaveClass("bg-background");
+    expect(main).toHaveClass("bg-panel");
     expect(await screen.findByTestId("desktop-unreachable")).toHaveClass("bg-background");
-    expect(screen.getByTestId("app-header")).toHaveClass("bg-background");
+    expect(screen.getByTestId("app-header")).toHaveClass("bg-panel");
+    // The inset panel carries the opaque surface; the window colour around its rounded corner is the sidebar's.
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("bg-panel");
   });
 
   it("the empty state and the settings screen carry an opaque bg token too", async () => {
@@ -288,7 +290,7 @@ describe("opaque surfaces on macOS (the body is transparent over vibrancy)", () 
     const { App } = await import("@/App");
     // Connected-but-no-task: connection never settles, so the shell shows its empty state.
     render(<App connect={() => new Promise(() => {})} />);
-    expect(await screen.findByTestId("app-empty-state")).toHaveClass("bg-background");
+    expect(await screen.findByTestId("app-empty-state")).toHaveClass("bg-panel");
 
     const { SettingsScreen } = await import("@/components/settings/settings-screen");
     const { FakeWsClient } = await import("@/test/fake-ws-client");

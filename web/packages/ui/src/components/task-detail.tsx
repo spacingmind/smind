@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { PermissionModeControl } from "@/components/permission-mode-control";
-import { TaskLineageHeader } from "@/components/task-lineage";
+import { TaskLineageChips } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
@@ -12,7 +11,9 @@ import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
+import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
+import { useChatOutline } from "@/components/timeline/use-chat-outline";
 import { useChatFind } from "@/components/timeline/use-chat-find";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,23 +25,25 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
-import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
-import { describePermission, effectiveMode, providerModels, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
+import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
-import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, Chat, Provider, ProviderInfo, Task, ProviderListResult } from "@/lib/types";
 import type { WsClientLike } from "@/lib/ws-client";
 
-/** The task header's run-config pill text ("<Agent> · <Provider> · <Mode> · <Model> · <Thinking>", the mode in the provider's own words -- ADR-0019) -- pure so it can be unit-tested without mounting the whole pane. */
-export function runConfigPillLabel(state: RunConfigState, profiles: AgentProfile[], providers: ProviderInfo[]): string {
+/**
+ * What the chat's meta row says about the run config. The composer toolbar
+ * right below already shows provider, model, mode and thinking, so repeating
+ * them is chrome; the one thing it does not show is the saved agent profile
+ * the config came from. Returns that name ("<Agent>", or "<Agent> · edited"
+ * once hand-edits drifted from it), or null when no agent applies. Pure so it
+ * can be unit-tested without mounting the pane.
+ */
+export function agentChipLabel(state: RunConfigState, profiles: AgentProfile[]): string | null {
   const agent = state.baseAgentId ? profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
-  const agentSegment = agent ? agent.Name : state.custom ? "Custom" : "No agent";
-  const providerLabel = providers.find((p) => p.id === state.provider)?.label ?? state.provider;
-  const parts = [agentSegment, providerLabel, describePermission(providers, state.provider, state.permissionMode, state.autoAccept)];
-  if (state.model) parts.push(providerModels(providers, state.provider).find((m) => m.id === state.model)?.label ?? state.model);
-  if (state.provider === "claude-native") parts.push(thinkingLevelLabel(state.thinkingLevel));
-  return parts.join(" · ");
+  if (!agent) return null;
+  return state.custom ? `${agent.Name} · edited` : agent.Name;
 }
 
 /**
@@ -70,9 +73,9 @@ export function TaskDetailPane({
   chat: Chat;
   /** Whether chat is task's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
   isDefaultChat: boolean;
-  /** Another of this task's chats currently running a run, if any -- drives the concurrency banner ("Another chat is running in this worktree"). */
+  /** Another of this task's chats currently running a run, if any -- drives the composer's "Also running" chip (another chat is running in this worktree). */
   otherRunningChat?: { id: number; title: string } | null;
-  /** Jumps to otherRunningChat's own tab -- the banner's click target. */
+  /** Jumps to otherRunningChat's own tab -- the concurrency chip's click target. */
   onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
@@ -179,13 +182,45 @@ export function TaskDetailPane({
   // session progresses (see the hook's own doc comment for why there's no
   // dedicated push notification for this instead).
   const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
-  const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
+  // D1: while a live-switch-capable run is active the composer's Mode/Auto-accept pills drive it.
+  const liveRunId = runningRun?.id;
+  const liveProvider = runningRun?.provider;
+  const liveMode = runningRun?.permissionMode;
+  const liveAutoAccept = runningRun?.autoAccept;
+  const liveInFlight = useRef(false);
+  const liveRun = useMemo(
+    () =>
+      liveRunId && liveProvider && supportsLiveModeSwitch(providers, liveProvider)
+        ? {
+            provider: liveProvider,
+            runId: liveRunId,
+            modes: providerModes(providers, liveProvider),
+            mode: effectiveMode(providers, liveProvider, liveMode ?? ""),
+            autoAccept: liveAutoAccept ?? false,
+            showAutoAccept: supportsAutoAccept(providers, liveProvider),
+            // One switch at a time: a second change (a rapid Shift+Tab, a click during the
+            // RPC) would be computed from the not-yet-updated mode and double-fire.
+            onChange: async (change: { modeId?: string; autoAccept?: boolean }) => {
+              if (liveInFlight.current) return;
+              liveInFlight.current = true;
+              try {
+                await setPermissionMode(liveRunId, change);
+              } finally {
+                liveInFlight.current = false;
+              }
+            },
+          }
+        : null,
+    [liveRunId, liveProvider, liveMode, liveAutoAccept, providers, setPermissionMode],
+  );
+  const configOptions = useRunConfigOptions(client, configOptionsRunId, (runningRun?.items.length ?? 0) + (runningRun?.configRevision ?? 0));
 
   // Auto-follow keys off the total item count across every run: that is
   // the one number that changes whenever anything is appended anywhere in
   // the transcript, and it's O(runs) rather than O(items) to compute.
   const itemCount = runs?.reduce((total, run) => total + run.items.length, 0) ?? 0;
   const follow = useAutoFollow<HTMLDivElement>(itemCount);
+  const outline = useChatOutline(follow.ref, runs);
 
   // Chat Find's revision signal: item count alone misses a streamed chunk
   // appended to the *last* item (no new item, just more text), so this
@@ -214,6 +249,44 @@ export function TaskDetailPane({
   openFileRef.current = onOpenFile;
   const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
 
+  // Message hover actions. Pinned behind refs so RunTimeline's memo keeps
+  // bailing out while these always call the latest submitPrompt.
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const submitPromptRef = useRef(submitPrompt);
+  submitPromptRef.current = submitPrompt;
+  const runConfigRef = useRef(runConfigState);
+  runConfigRef.current = runConfigState;
+  const queueRefreshRef = useRef(queue.refresh);
+  queueRefreshRef.current = queue.refresh;
+  const rerunsInFlight = useRef(new Set<string>());
+  const rerun = useCallback((run: RunEntry) => {
+    // One re-submit per run at a time: a double click must not start (or queue) the prompt twice.
+    if (rerunsInFlight.current.has(run.id)) return;
+    rerunsInFlight.current.add(run.id);
+    setActionError(null);
+    // Provider, model and thinking come from the run; the permission settings come from what the
+    // composer shows NOW (when it is on the same provider), so a re-run never silently replays a
+    // looser mode the old run was live-switched to.
+    const composer = runConfigRef.current;
+    const permission =
+      composer && composer.provider === run.provider
+        ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
+        : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
+    submitPromptRef
+      .current(run.provider, run.prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .then((result) => {
+        // A queued prompt shows up in the composer's queue list straight away.
+        if (result.kind === "queued") queueRefreshRef.current();
+      })
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => rerunsInFlight.current.delete(run.id));
+  }, []);
+  const editPrompt = useCallback((run: RunEntry) => {
+    setActionError(null);
+    setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
@@ -223,28 +296,35 @@ export function TaskDetailPane({
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const focusToolbar = useCallback(() => toolbarRef.current?.focus(), []);
 
+  const agentLabel = runConfigState ? agentChipLabel(runConfigState, profiles) : null;
+
   return (
     <div className="flex h-full flex-col">
+      {/*
+       * The task's title, branch and status live in the app header (and its
+       * hover card); this row keeps only what is specific to this chat.
+       */}
       <PaneHeader
-        title={`${task.Title} · ${chat.Title || "Chat"}`}
+        testId="task-chat-meta"
+        className="items-start border-b-0"
         subtitle={
           <>
-            <span className="uppercase">{task.Status}</span>
-            {task.Branch && <span className="truncate">{task.Branch}</span>}
             <SetupBadge status={task.SetupStatus} />
             <PortChip port={task.Port} />
-            {runConfigState && (
+            {agentLabel && (
               <button
                 type="button"
                 data-testid="task-run-config-pill"
+                title="Agent profile -- click to edit the run config"
                 onClick={focusToolbar}
                 className="truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
               >
-                {runConfigPillLabel(runConfigState, profiles, providers)}
+                {agentLabel}
               </button>
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
             <ChatUsageTotal runs={runs} provider={chat.Provider ?? latestRun?.provider} />
+            <TaskLineageChips lineage={lineage} onJumpToTask={onJumpToTask} />
           </>
         }
         actions={
@@ -260,8 +340,6 @@ export function TaskDetailPane({
           </Button>
         }
       />
-
-      <TaskLineageHeader lineage={lineage} onJumpToTask={onJumpToTask} />
 
       <SetupDetails client={client} task={task} onTask={applyTask} />
 
@@ -309,13 +387,26 @@ export function TaskDetailPane({
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={retryWithHigherEffort}
+                    onRerun={rerun}
+                    onEditPrompt={editPrompt}
                     providerLabels={providerLabels}
                   />
                 ))}
               </ul>
             )}
+            {/* After the list, where the log follows the tail: a failed Re-run is visible where the user just clicked. */}
+            {actionError && <Alert variant="error" description={actionError} testId="rerun-error" className="mt-3" />}
           </div>
         </div>
+
+        {outline.visible && (
+          <ChatOutlineRail
+            prompts={outline.prompts}
+            activePrompt={outline.activePrompt}
+            onJump={outline.jump}
+            onScrub={outline.scrub}
+          />
+        )}
 
         {!follow.following && (
           <Button
@@ -358,7 +449,7 @@ export function TaskDetailPane({
        * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 border-t bg-background px-4 py-2">
+        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 space-y-2 px-4 py-2">
           {pendingRuns.map((run) => (
             <PermissionCard
               key={run.id}
@@ -369,35 +460,6 @@ export function TaskDetailPane({
             />
           ))}
         </div>
-      )}
-
-      {runningRun && supportsLiveModeSwitch(providers, runningRun.provider) && (
-        <PermissionModeControl
-          modes={providerModes(providers, runningRun.provider)}
-          mode={effectiveMode(providers, runningRun.provider, runningRun.permissionMode)}
-          autoAccept={runningRun.autoAccept}
-          showAutoAccept={supportsAutoAccept(providers, runningRun.provider)}
-          onChange={(change) => setPermissionMode(runningRun.id, change)}
-        />
-      )}
-
-      {/*
-       * ADR-0016 P3's concurrency banner: two chats of the same task share
-       * one worktree, so a run in another chat can touch the same files
-       * this one is looking at -- surfaced, not blocked (ADR-0016 §4).
-       * Sits above the composer, same "pinned, not scrolled away" dock
-       * placement as the pending-permission dock above.
-       */}
-      {otherRunningChat && (
-        <button
-          type="button"
-          data-testid="concurrency-banner"
-          onClick={() => onJumpToChat?.(otherRunningChat.id)}
-          className="mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 py-1.5 text-left text-ui-sm text-foreground-muted transition-colors hover:text-foreground"
-        >
-          <span className="size-1.5 shrink-0 rounded-full bg-warning" />
-          Another chat is running in this worktree — <span className="underline">{otherRunningChat.title}</span>
-        </button>
       )}
 
       <Composer
@@ -416,8 +478,12 @@ export function TaskDetailPane({
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}
+        prefill={prefill}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
+        liveRun={liveRun}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
       />
     </div>

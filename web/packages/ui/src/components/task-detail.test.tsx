@@ -3,9 +3,9 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { runConfigPillLabel, TaskDetailPane } from "@/components/task-detail";
+import { agentChipLabel, TaskDetailPane } from "@/components/task-detail";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
-import type { AgentProfile, Chat, ProviderInfo, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
+import type { AgentProfile, Chat, ProviderListResult, RunLogsResult, RunSummary, Task } from "@/lib/types";
 
 // The run-config IA plan persists RunConfigToolbar's state per task id
 // (docs/design.md §9) -- most tests below share TASK_A.ID, so a leftover
@@ -137,6 +137,32 @@ describe("TaskDetailPane", () => {
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "end_turn" });
     await flush();
     expect(screen.getByTestId("run-status")).toHaveTextContent("done");
+  });
+
+  it("shows the chat timeline rail once two runs overflow a wide pane", async () => {
+    const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
+    for (const [key, value] of Object.entries(sizes)) {
+      Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get: () => value });
+    }
+    try {
+      const client = new FakeWsClient();
+      render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+      client.nth("run.list", 0).resolve([
+        doneRun({ ID: "run-1", Prompt: "first ask" }),
+        doneRun({ ID: "run-2", Prompt: "second ask" }),
+      ]);
+      await flush();
+      for (const n of [0, 1]) {
+        client.nth("run.logs", n).resolve({ runId: `run-${n + 1}`, status: "done", stopReason: "end_turn", events: [] });
+      }
+      await flush();
+      expect(screen.getByTestId("chat-outline-rail")).toBeInTheDocument();
+      expect(screen.getByTestId("chat-outline-tick-run-2")).toHaveAttribute("aria-label", "2 of 2: second ask");
+    } finally {
+      for (const key of Object.keys(sizes)) {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
   });
 
   it("switching to a different task and back doesn't duplicate entries or leak the live subscription", async () => {
@@ -456,6 +482,8 @@ describe("TaskDetailPane", () => {
     const dock = screen.getByTestId("pending-permission-dock");
     expect(scrollRegion.contains(dock)).toBe(false);
     expect(within(dock).getByTestId("pending-permission")).toBeInTheDocument();
+    // L-AC6: borderless like the timeline: the card alone, no border or background block behind it.
+    expect(dock.className).not.toMatch(/(^|\s)(border|bg-)/);
 
     // A long/streaming log keeps growing inside the scroll region...
     for (let i = 0; i < 50; i++) {
@@ -568,13 +596,15 @@ describe("TaskDetailPane", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    // Opens on the current provider's view; Back lists the providers.
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "model-provider-claude-native",
       "model-provider-glm",
       "model-provider-codex-native",
     ]);
-    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
+    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
   it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
@@ -586,9 +616,11 @@ describe("TaskDetailPane", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    // Opens on the current provider's view; Back lists the providers.
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm"]);
-    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["claude-native", "glm"]);
+    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["claude-native", "glm"]);
     fireEvent.click(rows[0]);
     fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 
@@ -818,40 +850,44 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("run-config-options-error")).toHaveTextContent("no such config option");
   });
 
-  it("shows the live permission-mode control for a running run and switches it via run.setPermissionMode (W5)", async () => {
+  it("the Mode: row is gone and the toolbar mode pill drives the live run", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ PermissionMode: "acceptEdits" })]);
     await flush();
 
-    const control = screen.getByTestId("permission-mode-control");
-    expect(within(control).getByTestId("permission-mode-option-acceptEdits")).toHaveAttribute("aria-pressed", "true");
-    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mode:")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Permission mode")).toHaveLength(1);
+    const pill = screen.getByLabelText("Permission mode");
+    expect(pill).toHaveTextContent("Accept File Edits");
     // Claude takes no auto-accept toggle.
-    expect(within(control).queryByTestId("permission-mode-auto-accept")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-auto-accept")).not.toBeInTheDocument();
 
-    fireEvent.click(within(control).getByTestId("permission-mode-option-plan"));
+    fireEvent.click(pill);
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     await flush();
 
     const setCall = client.nth("run.setPermissionMode", 0);
     expect(setCall.params).toEqual({ runId: "run-1", modeId: "plan" });
-
     await act(async () => {
       setCall.resolve({ permissionMode: "plan", autoAccept: false });
     });
-
-    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
   });
 
-  it("offers the Auto-accept toggle for a running ACP run and flips it via run.setPermissionMode", async () => {
+  it("the Auto-accept pill flips a running ACP run via run.setPermissionMode", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "glm", PermissionMode: "default" })]);
+    client.nth("provider.list", 0).resolve({
+      providers: [{ id: "glm", label: "GLM", defaultMode: "default", supportsAutoAccept: true, liveModeSwitch: true, modes: [{ id: "default", label: "Default" }] }],
+    });
     await flush();
 
-    const toggle = screen.getByTestId("permission-mode-auto-accept");
+    const toggle = screen.getByTestId("composer-auto-accept");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     await flush();
@@ -861,7 +897,7 @@ describe("TaskDetailPane", () => {
     await act(async () => {
       setCall.resolve({ permissionMode: "default", autoAccept: true });
     });
-    expect(screen.getByTestId("permission-mode-auto-accept")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("surfaces a failed run.setPermissionMode as an error instead of silently no-op'ing", async () => {
@@ -871,7 +907,8 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    fireEvent.click(screen.getByTestId("permission-mode-option-plan"));
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     await flush();
 
     await act(async () => {
@@ -881,17 +918,21 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("permission-mode-error")).toHaveTextContent("run already finished");
   });
 
-  it("hides the permission-mode control for a running Codex run (no mid-run switch)", async () => {
+  it("a running Codex run keeps next-run semantics on the mode pill (no mid-run switch)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "codex-native", PermissionMode: "auto" })]);
     await flush();
 
-    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    const options = await screen.findAllByRole("option");
+    fireEvent.click(options[0]);
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.setPermissionMode")).toHaveLength(0);
   });
 
-  it("hides the permission-mode control once the run has finished", async () => {
+  it("once the run has finished the mode pill edits the next run again (no RPC)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
@@ -900,7 +941,11 @@ describe("TaskDetailPane", () => {
     client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", events: [] });
     await flush();
 
-    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.setPermissionMode")).toHaveLength(0);
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
   });
 
   it("shows Retry with higher effort for a failed Claude run below extended and resubmits at the next tier", async () => {
@@ -976,13 +1021,11 @@ describe("TaskDetailPane", () => {
 });
 
 describe("run-config pill (run-config IA)", () => {
-  it("summarizes the toolbar's current state and clicking it focuses the toolbar row", async () => {
+  it("does not mirror the composer toolbar: no pill without an agent, however the toolbar is configured", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([]);
-    // Both task-detail.tsx (the pill's own label lookup) and composer.tsx
-    // fetch provider.list independently -- resolve both.
     const providersResult: ProviderListResult = {
       providers: [
         { id: "claude-native", label: "Claude Code" },
@@ -993,20 +1036,17 @@ describe("run-config pill (run-config IA)", () => {
     client.nth("provider.list", 1).resolve(providersResult);
     await flush();
 
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · Claude Code · Accept File Edits · Standard");
+    expect(screen.getByTestId("composer-model-picker")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     fireEvent.click(await screen.findByTestId("model-provider-glm"));
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
-
-    // GLM has no thinking-level segment (mirrors the toolbar's own Thinking
-    // control being omitted for non-Claude providers).
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("No agent · GLM · Default");
-    expect(screen.getByTestId("task-run-config-pill")).not.toHaveTextContent("Standard");
-
-    fireEvent.click(screen.getByTestId("task-run-config-pill"));
-    expect(screen.getByTestId("composer-toolbar-row")).toHaveFocus();
+    expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
+    // The meta row itself stays (Detailed toggle).
+    expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
   });
 
   it("shows the agent's name once one is picked from the toolbar", async () => {
@@ -1032,53 +1072,33 @@ describe("run-config pill (run-config IA)", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 
-    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent("Quick Fixes ·");
+    // Only the agent: provider/model/mode/thinking are the composer toolbar's.
+    expect(screen.getByTestId("task-run-config-pill")).toHaveTextContent(/^Quick Fixes$/);
+
+    fireEvent.click(screen.getByTestId("task-run-config-pill"));
+    expect(screen.getByTestId("composer-toolbar-row")).toHaveFocus();
   });
 });
 
-describe("runConfigPillLabel", () => {
+describe("agentChipLabel", () => {
   const BASE: RunConfigState = { baseAgentId: null, custom: false, provider: "claude-native", permissionMode: "", autoAccept: false, thinkingLevel: "", model: "" };
-  const providers: ProviderInfo[] = [
-    { id: "claude-native", label: "Claude Code" },
-    { id: "glm", label: "GLM" },
+  const profiles: AgentProfile[] = [
+    { ID: 1, Name: "Quick Fixes", Provider: "claude-native", PermissionMode: "", AutoAccept: false, ThinkingLevel: "", Notes: "", CreatedAt: "", UpdatedAt: "" },
   ];
 
-  it("names the agent when one is applied", () => {
-    const profiles: AgentProfile[] = [
-      {
-        ID: 1,
-        Name: "Quick Fixes",
-        Provider: "claude-native",
-        PermissionMode: "",
-        AutoAccept: false,
-        ThinkingLevel: "",
-        Notes: "",
-        CreatedAt: "",
-        UpdatedAt: "",
-      },
-    ];
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1" }, profiles, providers)).toBe(
-      "Quick Fixes · Claude Code · Accept File Edits · Standard",
-    );
+  it("names the agent when one is applied, and marks hand-edits", () => {
+    expect(agentChipLabel({ ...BASE, baseAgentId: "1" }, profiles)).toBe("Quick Fixes");
+    expect(agentChipLabel({ ...BASE, baseAgentId: "1", custom: true }, profiles)).toBe("Quick Fixes · edited");
   });
 
-  it('says "Custom" when hand-edited, and "No agent" when nothing was ever picked', () => {
-    expect(runConfigPillLabel({ ...BASE, baseAgentId: "1", custom: true }, [], providers)).toBe(
-      "Custom · Claude Code · Accept File Edits · Standard",
-    );
-    expect(runConfigPillLabel(BASE, [], providers)).toBe("No agent · Claude Code · Accept File Edits · Standard");
-  });
-
-  it("omits the thinking segment for a non-Claude provider", () => {
-    expect(runConfigPillLabel({ ...BASE, provider: "glm" }, [], providers)).toBe("No agent · GLM · Default");
-  });
-
-  it("uses the provider's own mode label and notes auto-accept", () => {
-    expect(runConfigPillLabel({ ...BASE, permissionMode: "plan" }, [], providers)).toBe("No agent · Claude Code · Plan Mode · Standard");
-    expect(runConfigPillLabel({ ...BASE, provider: "glm", autoAccept: true }, [], providers)).toBe("No agent · GLM · Default · Auto-accept");
+  it("is null with no agent, or one that is not (yet) in the profile list", () => {
+    expect(agentChipLabel(BASE, profiles)).toBeNull();
+    expect(agentChipLabel({ ...BASE, custom: true }, profiles)).toBeNull();
+    expect(agentChipLabel({ ...BASE, baseAgentId: "9" }, profiles)).toBeNull();
   });
 });
 
@@ -1229,5 +1249,114 @@ describe("chat usage total", () => {
     await flush();
 
     expect(screen.queryByTestId("chat-usage-total")).not.toBeInTheDocument();
+  });
+});
+
+describe("chat meta row (app-header-and-tabs)", () => {
+  it("AH-AC12 no title heading; Detailed toggle remains (the run-config pill only names an agent)", async () => {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([]);
+    await flush();
+
+    // The "<task> · <chat>" h2 moved to the app header.
+    expect(screen.queryByRole("heading", { level: 2 })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: new RegExp(TASK_A.Title) })).not.toBeInTheDocument();
+    expect(screen.queryByText(/·\s*Chat/)).not.toBeInTheDocument();
+    expect(screen.getByTestId("detail-level-toggle")).toBeInTheDocument();
+  });
+});
+
+describe("TaskDetailPane message hover actions", () => {
+  async function renderWithDoneRun(overrides: Partial<RunSummary> = {}) {
+    const client = new FakeWsClient();
+    render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+    client.nth("run.list", 0).resolve([doneRun(overrides)]);
+    await flush();
+    client.nth("run.logs", 0).resolve({
+      runId: "run-1",
+      status: "done",
+      stopReason: "end_turn",
+      events: [{ type: "chunk", text: "answer" }, { type: "done", stopReason: "end_turn" }],
+    } satisfies RunLogsResult);
+    await flush();
+    return client;
+  }
+
+  it("Re-run submits the same prompt, provider, model and permission with whenBusy queue", async () => {
+    const client = await renderWithDoneRun({
+      Provider: "glm",
+      Model: "glm-5.3",
+      PermissionMode: "accept_edits",
+      AutoAccept: true,
+      ThinkingLevel: "extended",
+    });
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    expect(client.nth("run.start", 0).params).toEqual({
+      taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
+      provider: "glm",
+      prompt: "do the thing",
+      whenBusy: "queue",
+      permissionMode: "accept_edits",
+      autoAccept: true,
+      thinkingLevel: "extended",
+      model: "glm-5.3",
+    });
+    expect(screen.queryByTestId("rerun-error")).not.toBeInTheDocument();
+  });
+
+  it("Re-run uses the composer's current permission mode on the same provider, not the old run's", async () => {
+    const client = await renderWithDoneRun({ Provider: "claude-native", PermissionMode: "bypassPermissions", AutoAccept: true });
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    const params = client.nth("run.start", 0).params as Record<string, unknown>;
+    expect(params.provider).toBe("claude-native");
+    expect(params.permissionMode).not.toBe("bypassPermissions");
+    expect(params.autoAccept).toBeUndefined();
+  });
+
+  it("a double click on Re-run submits once", async () => {
+    const client = await renderWithDoneRun();
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+
+    expect(client.calls.filter((c) => c.method === "run.start")).toHaveLength(1);
+  });
+
+  it("Re-run failure shows an inline alert", async () => {
+    const client = await renderWithDoneRun();
+
+    fireEvent.click(screen.getByTestId("run-rerun"));
+    await flush();
+    client.nth("run.start", 0).reject(new Error("daemon says no"));
+    await flush();
+
+    expect(screen.getByTestId("rerun-error")).toHaveTextContent("daemon says no");
+    expect(screen.getByTestId("run-entry")).toBeInTheDocument();
+  });
+
+  it("Edit & resend prefills the composer draft: empty is replaced, non-empty is appended after a blank line, and the textarea is focused", async () => {
+    await renderWithDoneRun();
+    const input = screen.getByLabelText("Prompt") as HTMLTextAreaElement;
+
+    fireEvent.click(screen.getByTestId("run-prompt-edit"));
+    await flush();
+    expect(input.value).toBe("do the thing");
+    expect(input).toHaveFocus();
+
+    fireEvent.change(input, { target: { value: "my notes" } });
+    input.blur();
+    fireEvent.click(screen.getByTestId("run-prompt-edit"));
+    await flush();
+    expect(input.value).toBe("my notes\n\ndo the thing");
+    expect(input).toHaveFocus();
   });
 });
