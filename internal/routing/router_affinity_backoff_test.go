@@ -162,3 +162,44 @@ func TestRoute_affinity_no_decision_session_picks_second_candidate_and_persists_
 		t.Fatalf("decisions = %+v; want one decision for %d", ds, b)
 	}
 }
+
+func TestRoute_affinity_transient_backoff_single_account_pool_keeps_pinned_account(t *testing.T) {
+	t.Parallel()
+	r, s, reg, fr, clk := newFakeRouter(t)
+	a := newAccount(t, reg, "a")
+	c := newAccount(t, reg, "c")
+	d := newAccount(t, reg, "d")
+	ctx := context.Background()
+
+	// A single-account pool: nowhere to route around to.
+	if got, err := r.Route(ctx, "single", PolicyPool, []int64{a}); err != nil || got.ID != a {
+		t.Fatalf("first Route() = %d, %v; want %d", got.ID, err, a)
+	}
+	pinned := decisionsFor(t, s, "single")
+	fr.setCooldown(a, "", backoff(testNow.Add(30*time.Second), ""))
+	if got, err := r.Route(ctx, "single", PolicyPool, []int64{a}); err != nil || got.ID != a {
+		t.Fatalf("during back-off Route() = %d, %v; want the pinned %d, not an error", got.ID, err, a)
+	}
+	if after := decisionsFor(t, s, "single"); len(after) != 1 || !after[0].ExpiresAt.Equal(pinned[0].ExpiresAt) {
+		t.Fatalf("decisions = %+v; want the original pin untouched", after)
+	}
+
+	// Several candidates, but every other one is in a real cooldown.
+	if got, err := r.Route(ctx, "multi", PolicyPool, []int64{c, d}); err != nil || got.ID != c {
+		t.Fatalf("first multi Route() = %d, %v; want %d", got.ID, err, c)
+	}
+	fr.setCooldown(c, "", backoff(testNow.Add(30*time.Second), ""))
+	fr.setCooldown(d, "", rejected(testNow.Add(time.Hour)))
+	if got, err := r.Route(ctx, "multi", PolicyPool, []int64{c, d}); err != nil || got.ID != c {
+		t.Fatalf("pool with d exhausted Route() = %d, %v; want the pinned %d", got.ID, err, c)
+	}
+	if n := len(decisionsFor(t, s, "multi")); n != 1 {
+		t.Errorf("decisions = %d; want still 1", n)
+	}
+
+	// The back-off ends: still the pinned account, still one decision.
+	clk.Advance(31 * time.Second)
+	if got, err := r.Route(ctx, "single", PolicyPool, []int64{a}); err != nil || got.ID != a {
+		t.Fatalf("after back-off Route() = %d, %v; want %d", got.ID, err, a)
+	}
+}

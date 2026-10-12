@@ -111,8 +111,10 @@ func New(s *store.Store, reg *accounts.Registry, reader quota.Reader, opts ...Op
 // If a routing decision for sessionKey exists, hasn't expired, and its
 // account isn't currently exhausted, that account is reused (session
 // affinity). A pinned account that is only in a transient back-off is routed
-// around for this request without rewriting the decision. Otherwise a new account is selected from candidateAccountIDs
-// per policy, persisted as the new decision, and returned.
+// around for this request without rewriting the decision; when no other
+// candidate can serve it (a single-account pool, or all the others exhausted)
+// the pinned account is used anyway. Otherwise a new account is selected from
+// candidateAccountIDs per policy, persisted as the new decision, and returned.
 //
 // Exhaustion is judged from the cached usage windows only; Route never
 // fetches and never fails because usage data is missing or stale.
@@ -139,9 +141,13 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 			// account for this request only and leave the stored decision
 			// alone, so the session returns to its account (and its prompt
 			// cache) once the back-off ends instead of moving for the full TTL.
+			// With nowhere else to go (selectAccount fails: a single-account pool
+			// or every candidate exhausted), keep the pinned account: the
+			// upstream answers its own 429, which beats a smind-side 503 for up
+			// to 60 s.
 			accountID, err := r.selectAccount(policy, candidateAccountIDs, rc.model)
 			if err != nil {
-				return accounts.Account{}, err
+				accountID = decision.AccountID
 			}
 			return r.registry.Get(accountID)
 		}
