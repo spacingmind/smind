@@ -275,3 +275,33 @@ func TestProxy_passive_zero_http_calls_proxy_path(t *testing.T) {
 		t.Errorf("quota_poll_state changed: %+v (%v) -> %+v (%v)", before, hadBefore, after, hadAfter)
 	}
 }
+
+func TestProxy_count_tokens_not_observed(t *testing.T) {
+	t.Parallel()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "30")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer upstream.Close()
+
+	obs := &recordingObserver{}
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)), withObserver(obs))
+	addOAuthAccount(t, reg, providerAnthropic, "oauth1", oauthCred())
+
+	w := httptest.NewRecorder()
+	p.handleAnthropicCountTokens(w, httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", strings.NewReader(`{"model":"claude-opus-4-1"}`)))
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want the upstream 429 passed through", w.Code)
+	}
+	if got := obs.responses(); len(got) != 0 {
+		t.Fatalf("Observe calls for count_tokens = %d, want 0: %+v", len(got), got)
+	}
+
+	// The same 429 on /v1/messages is still observed.
+	if w := doMessages(p, `{"model":"claude-opus-4-1"}`); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("messages status = %d", w.Code)
+	}
+	if got := obs.responses(); len(got) != 1 {
+		t.Fatalf("Observe calls after /v1/messages = %d, want 1", len(got))
+	}
+}

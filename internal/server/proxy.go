@@ -309,8 +309,11 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	defer resp.Body.Close()
 
 	// Before copyResponse, so a concurrent next request already sees any
-	// cooldown this response starts.
-	if provider == providerAnthropic && account.CredentialType == accounts.CredentialTypeOAuth {
+	// cooldown this response starts. count_tokens is not observed: it is
+	// unmetered and has its own, separate rate limit, so a 429 with Retry-After
+	// there would otherwise start a bare-429 back-off that keeps real
+	// /v1/messages calls off the account.
+	if !countTokens && provider == providerAnthropic && account.CredentialType == accounts.CredentialTypeOAuth {
 		p.observe(quota.Response{
 			AccountID: account.ID,
 			Provider:  providerAnthropic,
