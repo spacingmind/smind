@@ -132,7 +132,26 @@ chip row above the card). Paseo is React Native, so this is a port of the
 
 ## Validation
 
-_(filled in when every AC is confirmed)_
+Verified 2026-10-12 on branch `feat/composer-zcode-paseo` (develop merged,
+incl. #297 -- `composer.focus` is not in `SETTINGS_SAFE_ACTIONS`, so it is
+inert while Settings is open).
+
+- AC1-AC8: the named tests in `composer.test.tsx` ("Composer redesign"
+  describe) and `run-config-toolbar.test.tsx`; all pass.
+- AC9: web `tsc -b` clean; full web suite 1704/1704; `go test ./...` and the
+  desktop node tests pass; `task lint` clean. (The machine was at load 15-20
+  during the run, so the default 5 s test timeout flaked on a different
+  App/composer test each time; the whole suite passes with
+  `--testTimeout=90000`. Not related to this change.)
+- AC10: light+dark screenshots at 1440x900 and 390x844 of empty, typed
+  multi-line, model + permission pickers, running (Stop + chips), queued
+  prompt, bypass tint and GLM auto-accept, rendered from the real `<Composer>`
+  against a fake client (local harness, `tmp/`, not committed), compared
+  against the ZCode/Paseo references. The pills collapse to icon-only at
+  390px with no wrapping. Not run against a live daemon.
+- Residual: with split panes, `composer.focus` goes to the most recently
+  registered composer (the keyboard layer's stacking rule), not necessarily the
+  focused pane.
 
 ## Follow-ups (not in this PR — no backing feature)
 
