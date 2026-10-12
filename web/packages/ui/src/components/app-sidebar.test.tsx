@@ -1367,8 +1367,11 @@ describe("AppSidebar long-title truncation", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [LONG_TITLE_TASK]);
 
     const title = await screen.findByText(LONG_TITLE);
-    expect(title.className).toContain("truncate");
+    // Fade-out overflow (sidebar-polish S7), not a hard ellipsis: it clips
+    // (overflow-hidden) and may shrink (min-w-0) like the old truncate did.
+    expect(title.className).toContain("overflow-hidden");
     expect(title.className).toContain("min-w-0");
+    expect(title.className).not.toContain("truncate");
 
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
     expect(viewport).not.toBeNull();

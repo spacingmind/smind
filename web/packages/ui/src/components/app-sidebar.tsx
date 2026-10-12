@@ -109,6 +109,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FadeText } from "@/components/ui/fade-text";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -132,6 +133,19 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+
+/**
+ * Task rows indent by their own left padding, not by nesting margins on the
+ * lists they live in (sidebar-polish S7): a row's hover/selected highlight
+ * then spans the whole sidebar at every depth, and the title keeps its width.
+ * Depth 0 starts 8px in (the same inset every header row has); each level of
+ * the task tree adds 12px.
+ */
+const ROW_INSET_PX = 8;
+const ROW_INDENT_PX = 12;
+
+/** Applied to every nested SidebarMenuSub: the list itself adds no indent, margin or guide line -- rows carry their own. */
+const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
 
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
@@ -1089,7 +1103,7 @@ function SearchResults({
 
   return (
     <SidebarMenuItem data-testid="sidebar-search-results">
-      <SidebarMenuSub>
+      <SidebarMenuSub className={FLUSH_SUB}>
         <TaskRows
           tasks={results.map((r) => r.task)}
           selectedTaskId={selectedTaskId}
@@ -1137,7 +1151,7 @@ function PinnedSection({
         <RowChevron open={!collapsed} />
       </SidebarMenuButton>
       {!collapsed && (
-        <SidebarMenuSub>
+        <SidebarMenuSub className={FLUSH_SUB}>
           <TaskRows
             tasks={tasks}
             selectedTaskId={selectedTaskId}
@@ -1217,7 +1231,7 @@ function StatusGroupItem({
         </span>
       </SidebarMenuButton>
       {open && (
-        <SidebarMenuSub>
+        <SidebarMenuSub className={FLUSH_SUB}>
           <TaskRows
             tasks={group.tasks}
             selectedTaskId={selectedTaskId}
@@ -1420,7 +1434,7 @@ function WorkspaceItem({
         </ContextMenuContent>
       </ContextMenu>
       {expanded && (
-        <SidebarMenuSub>
+        <SidebarMenuSub className={FLUSH_SUB}>
           {flat ? (
             <TaskRows
               tasks={workspace.ungroupedTasks}
@@ -1605,15 +1619,8 @@ function SpaceLikeItem({
         )}
       </div>
       {open && (
-        // Flush, not another full mx-3.5/border-l/px-2.5 indent step: this
-        // list is already the *second* SidebarMenuSub nesting level (a
-        // space/ungrouped bucket inside a workspace's own SidebarMenuSub),
-        // and compounding the default indent+guide-line at both levels
-        // pushed task rows far deeper than their own group (space) header
-        // -- a known P2 visual bug (zcode-visual-parity plan). The space
-        // row's own icon+indent already conveys the hierarchy; task rows
-        // here align close under it instead of adding a second full step.
-        <SidebarMenuSub className="mx-0 border-l-0 px-1">
+        // Flush: rows (spaces included) carry their own indent, see FLUSH_SUB.
+        <SidebarMenuSub className={FLUSH_SUB}>
           <TaskRows
             tasks={tasks}
             nodes={nodes}
@@ -1770,6 +1777,7 @@ const TaskRow = memo(function TaskRow({
   task,
   tier,
   childCount,
+  depth,
   reserveChevron,
   isCollapsed,
   onToggleCollapse,
@@ -1785,6 +1793,8 @@ const TaskRow = memo(function TaskRow({
   tier: string | null;
   /** Direct children; > 0 makes this row a parent (chevron + child-count chip). */
   childCount: number;
+  /** Depth in the task tree (0 = root); drives the row's own left padding. */
+  depth: number;
   /** Whether childless rows in this sibling list still render the empty w-3 chevron slot so titles align (see TaskRows). */
   reserveChevron: boolean;
   isCollapsed: boolean;
@@ -1839,7 +1849,8 @@ const TaskRow = memo(function TaskRow({
         <div
           data-testid="sidebar-task-item"
           data-task-id={task.ID}
-          className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg", isSelected ? "bg-selected" : active && "bg-hover")}
+          className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1", isSelected ? "bg-selected" : active && "bg-hover")}
+          style={{ paddingLeft: ROW_INSET_PX + ROW_INDENT_PX * depth }}
           {...rowProps}
         >
           {/*
@@ -1858,12 +1869,12 @@ const TaskRow = memo(function TaskRow({
               aria-expanded={!isCollapsed}
               data-testid="task-collapse-toggle"
               onClick={() => onToggleCollapse?.(task.ID)}
-              className="ml-1 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
+              className="flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
             >
               <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           ) : reserveChevron ? (
-            <span className="ml-1 w-3 shrink-0" />
+            <span className="w-3 shrink-0" />
           ) : null}
           <HoverCard openDelay={400} closeDelay={100}>
             <HoverCardTrigger asChild>
@@ -1871,7 +1882,7 @@ const TaskRow = memo(function TaskRow({
                 asChild
                 // The highlight lives on the wrapper (so the ⋯ overlay can inherit
                 // it and the chevron sits inside it), not on the select button.
-                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-2 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
                 isActive={isSelected}
               >
                 <button
@@ -1927,7 +1938,7 @@ const TaskRow = memo(function TaskRow({
                     )}
                   </span>
                   {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
-                  <span className="min-w-0 flex-1 truncate">{task.Title}</span>
+                  <FadeText data-testid="task-title">{task.Title}</FadeText>
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"
@@ -2080,6 +2091,7 @@ function TaskRows({
               task={task}
               tier={null}
               childCount={0}
+              depth={0}
               reserveChevron={false}
               isCollapsed={false}
               rollup={null}
@@ -2101,7 +2113,7 @@ function TaskRows({
   // -- those keep exactly the pre-tree geometry, roots and all.
   const rootsReserveChevron = nodes.some((n) => n.children.length > 0);
 
-  const renderNode = (node: TaskNode, reserveChevron: boolean): ReactNode => {
+  const renderNode = (node: TaskNode, reserveChevron: boolean, depth: number): ReactNode => {
     const { task, tier, children } = node;
     const isCollapsed = collapsed?.has(task.ID) ?? false;
     // Rollups only exist where children are hidden -- an expanded parent's
@@ -2115,6 +2127,7 @@ function TaskRows({
           task={task}
           tier={tier}
           childCount={children.length}
+          depth={depth}
           reserveChevron={reserveChevron}
           isCollapsed={isCollapsed}
           onToggleCollapse={onToggleCollapse}
@@ -2126,23 +2139,21 @@ function TaskRows({
           onMoveTask={onMoveTask}
         />
         {children.length > 0 && !isCollapsed && (
-          // One indent+guide-line step per level. Deliberately NOT the
-          // default SidebarMenuSub mx-3.5/px-2.5 compound: this list sits
-          // at the same second nesting level SpaceLikeItem already fixed
-          // (see its own comment about not compounding indents), and the
-          // per-level step below is what visually encodes depth. The
-          // chevron reservation applies one level down too, against this
-          // parent's own children (a lone grandchild under a parent of
-          // parents aligns with its nieces/nephews, not with the roots).
-          <SidebarMenuSub className="ml-3 mr-0 border-l border-sidebar-border pl-1 pr-0">
-            {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0)))}
+          // A real nested list (ul > li > ul, so the tree's structure is in
+          // the DOM) that adds no indent of its own: each child row pads
+          // itself by depth. The chevron reservation applies one level down
+          // too, against this parent's own children (a lone grandchild under
+          // a parent of parents aligns with its nieces/nephews, not with the
+          // roots).
+          <SidebarMenuSub className={FLUSH_SUB}>
+            {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0), depth + 1))}
           </SidebarMenuSub>
         )}
       </SidebarMenuSubItem>
     );
   };
 
-  return <>{nodes.map((node) => renderNode(node, rootsReserveChevron))}</>;
+  return <>{nodes.map((node) => renderNode(node, rootsReserveChevron, 0))}</>;
 }
 
 /**

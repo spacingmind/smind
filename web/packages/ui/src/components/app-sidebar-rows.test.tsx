@@ -573,3 +573,82 @@ describe("task context menu (S6)", () => {
     expect(screen.getByTestId("sidebar-task-actions-trigger")).toHaveAttribute("data-task-id", String(LEADER.ID));
   });
 });
+
+describe("title overflow and indentation (S7)", () => {
+  function title(taskId: number): HTMLElement {
+    return within(taskItem(taskId)).getByTestId("task-title");
+  }
+
+  function stubOverflow(scrollWidth: number, clientWidth: number) {
+    const sw = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
+    const cw = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
+    return () => {
+      sw.mockRestore();
+      cw.mockRestore();
+    };
+  }
+
+  it("the title fade mask applies only when the title overflows", async () => {
+    const restore = stubOverflow(300, 120);
+    try {
+      await mountSidebar([makeTask(1, "An extremely long task title that cannot possibly fit")]);
+      expect(title(1)).toHaveAttribute("data-overflowing", "true");
+      expect(title(1).className).toContain("mask-image");
+      // A fade, not a hard ellipsis.
+      expect(title(1).className).not.toContain("truncate");
+      expect(title(1).className).not.toContain("text-ellipsis");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a title that fits has no mask", async () => {
+    const restore = stubOverflow(80, 120);
+    try {
+      await mountSidebar([makeTask(1, "Short")]);
+      expect(title(1)).not.toHaveAttribute("data-overflowing");
+      expect(title(1).className).not.toContain("mask-image");
+    } finally {
+      restore();
+    }
+  });
+
+  it("indentation is per-row padding by depth: 8px at the root plus 12px per level", async () => {
+    await mountSidebar(TREE);
+
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("8px");
+    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("20px");
+    expect(taskItem(CODER.ID).style.paddingLeft).toBe("32px");
+    // Siblings at one depth share one left edge.
+    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("20px");
+  });
+
+  it("nested lists add no margin, padding or guide line, so every highlight spans the sidebar", async () => {
+    await mountSidebar(TREE, {}, [SPACE_A]);
+
+    const lists = Array.from(document.querySelectorAll<HTMLElement>('ul[data-sidebar="menu-sub"]'));
+    expect(lists.length).toBeGreaterThan(1);
+    for (const list of lists) {
+      expect(list.className, "a nested list must not indent its rows").toContain("mx-0");
+      expect(list.className).toContain("px-0");
+      expect(list.className).toContain("border-l-0");
+    }
+  });
+
+  it("a row's own highlight is the whole line: the wrapper carries the selected background", async () => {
+    await mountSidebar(TREE, { selectedTaskId: CODER.ID });
+
+    expect(taskItem(CODER.ID).className).toContain("bg-selected");
+    expect(taskItem(LEADER.ID).className).not.toContain("bg-selected");
+  });
+
+  it("the nested ul/li structure is intact: a child's li is inside its parent's li", async () => {
+    await mountSidebar(TREE);
+
+    const leaderLi = taskItem(LEADER.ID).closest("li")!;
+    const rootLi = taskItem(ROOT.ID).closest("li")!;
+    expect(rootLi.contains(leaderLi)).toBe(true);
+    expect(leaderLi.contains(taskItem(CODER.ID))).toBe(true);
+    expect(leaderLi.contains(taskItem(LEADER_B.ID))).toBe(false);
+  });
+});
