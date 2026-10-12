@@ -244,6 +244,9 @@ export function resolveTriggerLabel({
   if (!provider) {
     return "Select model";
   }
+  if (!selectedModel) {
+    return provider.label;
+  }
   const rows = getProviderModelRows(provider);
   const row = rows.find((entry) => entry.modelId === selectedModel);
   if (row) {
