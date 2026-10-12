@@ -1422,9 +1422,13 @@ function WorkspaceItem({
         {/*
           * The hover/focus scope is this wrapper -- the header line only --
           * not the li, which also contains the workspace's whole subtree.
+          * It is also sticky (ZCode's grouped tasks): while the workspace's
+          * tasks scroll the header stays pinned, until the next workspace's
+          * header pushes it out (the li is its containing block). Space
+          * headers pin just beneath it (top-8 = this header's h-8).
           */}
         <ContextMenuTrigger asChild>
-          <div className="relative" {...rowProps}>
+          <div className="sticky top-0 z-20 bg-sidebar" {...rowProps}>
             <SidebarMenuButton
               onClick={onToggleExpanded}
               data-testid="sidebar-workspace-row"
@@ -1630,7 +1634,7 @@ function SpaceLikeItem({
   return (
     <SidebarMenuSubItem>
       {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
-      <div className="relative" {...rowProps}>
+      <div className="sticky top-8 z-10 bg-sidebar" {...rowProps}>
         <SidebarMenuSubButton
           asChild
           className={cn("h-8 w-full translate-x-0 gap-2 rounded-lg", active && "pr-7")}
