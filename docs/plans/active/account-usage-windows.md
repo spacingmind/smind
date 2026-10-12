@@ -966,8 +966,8 @@ scratch).
   `passive_cooldown_persists_restart`, `passive_zero_http_calls`.
 - [x] D1–D13 answered by the user
 - [x] D14 accepted by the Human (2026-10-12, cliproxyapi model); ADR §7 rewritten; PR-F rescoped
-- [ ] PR-A1 types, fetchers, snapshot store (fixtures only)
-- [ ] PR-A2 poller with the call budget, persisted state, config, wiring
+- [x] PR-A1 types, fetchers, snapshot store (fixtures only) — merged #298
+- [x] PR-A2 poller with the call budget, persisted state, config, wiring — PR open (2026-10-12), awaiting review
 - [ ] Human go-ahead for the manual live probe (see Validation)
 - [ ] PR-B routing integration
 - [ ] PR-C wsapi, CLI, MCP
@@ -1004,6 +1004,64 @@ reads the account from the user's own smind store, makes one request per
 provider, and prints only the HTTP status, top-level JSON key names, window
 ids, and the booleans above. No headers, no values, no argv secrets. Redacted
 responses then refresh the fixtures.
+
+**PR-A2 (poller, call budget, config, wiring), 2026-10-12.** Fixtures and
+`httptest` only; no real endpoint was called. Confirmed:
+
+- AC12, AC14, AC15: `poller_*` tests (TTL hit / expiry, `Peek` without I/O,
+  error keeps the last good report, prune to one row, disabled makes 0 calls,
+  deleted account), `TestConfig_AccountUsageDefaultsAndValidation`
+  (`ttlSeconds < 300` and threshold outside 1–100 rejected; the config struct
+  has exactly four keys, so no budget constant is configurable);
+  `poller_ttl_floor_clamped` (a `WithTTL` below 5 min is raised, covering a
+  partially loaded invalid config).
+- AC13, AC49–AC52: `budget_failures_test.go` (`Retry-After` seconds / HTTP-date /
+  absent / 6 h cap, jitter never shortens, 1→30 min exponential, malformed /
+  HTML / empty / timeout / network share the backoff, an expired-token refresh
+  obeys the backoff, 401 / 403 / terminal `invalid_grant` stop until the
+  credential fingerprint changes, fingerprint absent from logs and wire,
+  backoff / rejected / failure count survive a restart).
+- AC44–AC48: `budget_test.go` (`Reader` has the single method `Peek`; 1000
+  `Peek` = 0 requests; 50-caller burst = 1 request; per-account single-flight;
+  30 s floor; 6/hour cap with `nextRefreshAt` = oldest + 1 h; refused refresh
+  never queued; adversarial Touch/Refresh client = 18 requests per hour
+  exactly; refresh-all `MaxConcurrent() <= 2`; startup, account events, 24 h of
+  fake time and a closed or disabled poller = 0 requests, with no
+  `quota_poll_state` read before the first request about an account).
+- AC52: attempt row written before the request (crash mid-fetch → 0 requests
+  on reopen), TTL and forced budget persist, clock skew clamped, row deleted
+  with the account, table created on an existing database.
+  `go test -race -count=20 -run budget_ ./internal/quota/` passes.
+- Deviations: `quota_poll_state` has one extra column, `last_error` (fixed
+  vocabulary, so a restart keeps `stale` + `lastError` for a failed refresh).
+  `ReportFetcher` (A1) is the name of the fetch interface; the legacy
+  `Fetcher` / `Usage` / `noopQuotaFetcher` are gone (AC1). `Reader` is `Peek`
+  only; `Cooldown` arrives with PR-F. Routing is a shim: `routing.New` takes a
+  `quota.Reader` and `isExhausted` always returns false (as with the noop
+  fetcher, but it can no longer turn a usage failure into a routing 503). The
+  exhaustion tests that need windows are skipped with a PR-B reason (listed
+  in the PR).
+- Terminal vs transient refresh failure (the hook A1 left): only
+  `invalid_grant`-class refresh errors are `unavailable/expired` and stop
+  retries; any other refresh error is a transient `error` with backoff.
+
+- Independent review (read-only reviewer, 2026-10-12) found no way to exceed
+  the budget; four should-fix items were fixed with regression tests
+  (`budget_review_test.go`, mutation-checked): the rejected fingerprint is
+  that of the token the fetch actually sent (not a post-fetch re-read), a
+  credential replaced mid-flight stays eligible, `forget()` was removed (it
+  could build two ledgers for one account), and an absurd `Retry-After` is
+  capped at 6 h instead of falling to the 5 min default. Also: a panicking
+  fetcher is a transient failure, one retry of the completion save, an
+  explainable `unavailable` answer ends the failure streak.
+  Known residuals (not fixed here): the attempt is stamped before the
+  in-flight semaphore wait, so under refresh-all with 3+ slow accounts two
+  sends for one account can be under 30 s apart (hourly counts unaffected,
+  the 18/hour ceiling holds); a Cloudflare/WAF 403 is treated like a 401
+  (rejected until the credential changes, per the ADR); an unrecognised 4xx
+  from a token endpoint is transient (backoff ≤ 30 min, demand-driven);
+  `Peek` does a DB read + JSON decode per call, which PR-B should keep in
+  mind for the routing hot path.
 
 Mapping for the implementation PRs (fill in as each lands):
 

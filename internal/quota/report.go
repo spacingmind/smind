@@ -176,6 +176,13 @@ type Report struct {
 	Problem        *Problem  `json:"problem,omitempty"`
 	Error          string    `json:"error,omitempty"` // fixed vocabulary: "timeout", "http 503", "malformed response"
 	FetchedAt      time.Time `json:"fetchedAt"`
+
+	// usedFP is the fingerprint of the credential a fetch actually sent (set
+	// by AccountFetcher, in process only: never encoded, stored or sent). The
+	// poller records it as the rejected fingerprint, so a token replaced while
+	// the request was in flight is never mistaken for the one the provider
+	// refused.
+	usedFP string
 }
 
 // EncodeReport marshals r for quota_snapshots.usage_data, stamping

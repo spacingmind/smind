@@ -246,3 +246,16 @@ CREATE TABLE IF NOT EXISTS run_usage (
     updated_at TIMESTAMP NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_run_usage_task_id ON run_usage(task_id);
+
+-- quota_poll_state: the call-budget ledger for the usage poller, one row per
+-- account (ADR-0028 §3 "Call budget"). Additive: CREATE TABLE IF NOT EXISTS
+-- applies it to existing databases on the next Open, so no migrate.go entry.
+CREATE TABLE IF NOT EXISTS quota_poll_state (
+    account_id INTEGER PRIMARY KEY REFERENCES accounts(id),
+    last_attempt_at TIMESTAMP,
+    next_allowed_at TIMESTAMP,
+    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+    forced_at TEXT NOT NULL DEFAULT '[]',
+    rejected_fp TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT ''
+);

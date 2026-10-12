@@ -24,20 +24,16 @@ const (
 	PolicyPool = "pool"
 )
 
-const (
-	defaultRoutingTTL = 24 * time.Hour
-	defaultQuotaTTL   = 5 * time.Minute
-)
+const defaultRoutingTTL = 24 * time.Hour
 
 // Router selects an account for a session, honoring session affinity and the
 // given routing policy.
 type Router struct {
 	store    *store.Store
 	registry *accounts.Registry
-	poller   *quota.Poller
+	reader   quota.Reader
 
 	routingTTL time.Duration
-	quotaTTL   time.Duration
 }
 
 // Option configures a Router constructed via New.
@@ -49,20 +45,15 @@ func WithRoutingTTL(ttl time.Duration) Option {
 	return func(r *Router) { r.routingTTL = ttl }
 }
 
-// WithQuotaTTL overrides the TTL used when checking account quota via
-// quota.Poller.Get. Defaults to 5m.
-func WithQuotaTTL(ttl time.Duration) Option {
-	return func(r *Router) { r.quotaTTL = ttl }
-}
-
-// New returns a Router backed by s, reg, and poller.
-func New(s *store.Store, reg *accounts.Registry, poller *quota.Poller, opts ...Option) *Router {
+// New returns a Router backed by s and reg. reader is the quota read view;
+// it is accepted for ADR-0028 PR-B (plan-usage windows) and is not consulted
+// yet.
+func New(s *store.Store, reg *accounts.Registry, reader quota.Reader, opts ...Option) *Router {
 	r := &Router{
 		store:      s,
 		registry:   reg,
-		poller:     poller,
+		reader:     reader,
 		routingTTL: defaultRoutingTTL,
-		quotaTTL:   defaultQuotaTTL,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -86,11 +77,7 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 	// a pin to an account outside that set (e.g. a glm-* account for a
 	// claude-* request) must not override it.
 	if found && time.Now().UTC().Before(decision.ExpiresAt) && slices.Contains(candidateAccountIDs, decision.AccountID) {
-		exhausted, err := r.isExhausted(ctx, decision.AccountID)
-		if err != nil {
-			return accounts.Account{}, err
-		}
-		if !exhausted {
+		if !r.isExhausted(decision.AccountID) {
 			return r.registry.Get(decision.AccountID)
 		}
 	}
@@ -123,22 +110,14 @@ func (r *Router) selectAccount(ctx context.Context, policy string, candidateAcco
 			return 0, fmt.Errorf("routing: hard policy requires exactly one candidate account, got %d", len(candidateAccountIDs))
 		}
 		accountID := candidateAccountIDs[0]
-		exhausted, err := r.isExhausted(ctx, accountID)
-		if err != nil {
-			return 0, err
-		}
-		if exhausted {
+		if r.isExhausted(accountID) {
 			return 0, fmt.Errorf("routing: account %d is exhausted; hard policy has no failover", accountID)
 		}
 		return accountID, nil
 
 	case PolicyPool:
 		for _, accountID := range candidateAccountIDs {
-			exhausted, err := r.isExhausted(ctx, accountID)
-			if err != nil {
-				return 0, err
-			}
-			if !exhausted {
+			if !r.isExhausted(accountID) {
 				return accountID, nil
 			}
 		}
@@ -149,16 +128,12 @@ func (r *Router) selectAccount(ctx context.Context, policy string, candidateAcco
 	}
 }
 
-// isExhausted reports whether accountID has used up its known quota. An
-// account with no known limit (TokensLimit == 0) is treated as available,
-// since the absence of data shouldn't block routing.
-func (r *Router) isExhausted(ctx context.Context, accountID int64) (bool, error) {
-	usage, err := r.poller.Get(ctx, accountID, r.quotaTTL)
-	if err != nil {
-		return false, fmt.Errorf("check quota for account %d: %w", accountID, err)
-	}
-	return usage.TokensLimit > 0 && usage.TokensUsed >= usage.TokensLimit, nil
-}
+// isExhausted reports whether accountID has used up its known quota.
+// Plan-usage windows are not consulted yet (ADR-0028 PR-B); until then no
+// account is ever exhausted, which is exactly what the noop fetcher gave in
+// production. It never errors, so a usage failure can no longer turn into a
+// routing 503.
+func (r *Router) isExhausted(accountID int64) bool { return false }
 
 // latestDecision returns the most recent routing decision for sessionKey.
 // store only exposes ListRoutingDecisions (all sessions, ordered by id), so
