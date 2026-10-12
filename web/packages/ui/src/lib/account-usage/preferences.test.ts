@@ -149,4 +149,9 @@ describe("usage preferences", () => {
     const noWindows = account("anthropic", 3, []);
     expect(effectiveUsagePins(DEFAULT_USAGE_PREFERENCES, [broken, noWindows])).toEqual([]);
   });
+
+  it("skips null window entries in a reshaped report when deriving default pins", () => {
+    const reshaped = account("anthropic", 7, [null as unknown as UsageWindow]);
+    expect(effectiveUsagePins(DEFAULT_USAGE_PREFERENCES, [reshaped])).toEqual([]);
+  });
 });

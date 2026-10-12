@@ -62,8 +62,8 @@ function samePin(a: PinnedWindow, b: PinnedWindow): boolean {
 }
 
 /** A window with a percent to show; the same under Used and Remaining, since each derives from the other. */
-function hasPercent(window: { usedPct?: number | null; remainingPct?: number | null }): boolean {
-  return window.usedPct != null || window.remainingPct != null;
+function hasPercent(window: { usedPct?: number | null; remainingPct?: number | null } | null): boolean {
+  return window != null && typeof window === "object" && (window.usedPct != null || window.remainingPct != null);
 }
 
 /** The only owner of default and customized pin selection, shared by every usage surface. */

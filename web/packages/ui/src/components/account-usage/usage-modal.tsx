@@ -32,7 +32,7 @@ function UsageModal({ client, events }: { client: WsClient | null; events: Daemo
     </div>
   );
   const header = (
-    <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4 pr-12">
+    <div className="flex min-h-8 flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pt-4 pr-12">
       <TitleFor isMobile={isMobile} />
       <UsageControls surface={surface} />
     </div>
@@ -64,7 +64,7 @@ function UsageModal({ client, events }: { client: WsClient | null; events: Daemo
       <DialogContent
         data-testid="usage-modal"
         aria-describedby="usage-modal-description"
-        className="flex max-h-[85vh] flex-col gap-3 p-0 sm:max-w-[640px]"
+        className="flex max-h-[85vh] flex-col gap-3 p-0 sm:max-w-[640px] [&>[data-slot=dialog-close]]:top-[22px]"
       >
         {header}
         <DialogDescription id="usage-modal-description" className="sr-only">

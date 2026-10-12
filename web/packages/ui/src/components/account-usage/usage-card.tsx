@@ -30,8 +30,9 @@ function repeatsProvider(displayName: string, provider: string): boolean {
   return name === id || (PROVIDER_OWN_NAMES[id] ?? []).includes(name);
 }
 
+/** The entries of a list field that are objects; a reshaped payload (null, a number) is skipped, never thrown on (AC39). */
 function list<T>(value: T[] | undefined | null): T[] {
-  return Array.isArray(value) ? value : [];
+  return Array.isArray(value) ? value.filter((entry) => entry !== null && typeof entry === "object") : [];
 }
 
 /**
@@ -108,19 +109,19 @@ export function UsageCard({
 
       {windows.length > 0 || balances.length > 0 ? (
         <div className="flex flex-col gap-1">
-          {windows.map((window) => (
-            <UsageWindowBar key={window.id} window={window} displayAs={displayAs} />
+          {windows.map((window, i) => (
+            <UsageWindowBar key={window.id ?? i} window={window} displayAs={displayAs} />
           ))}
-          {balances.map((balance) => (
-            <UsageBalanceBar key={balance.id} balance={balance} />
+          {balances.map((balance, i) => (
+            <UsageBalanceBar key={balance.id ?? i} balance={balance} />
           ))}
         </div>
       ) : null}
 
       {details.length > 0 ? (
         <div className="flex flex-col gap-1">
-          {details.map((detail) => (
-            <div key={detail.id} className="flex justify-between gap-2 text-ui-sm" data-testid={`usage-detail-${detail.id}`}>
+          {details.map((detail, i) => (
+            <div key={detail.id ?? i} className="flex justify-between gap-2 text-ui-sm" data-testid={`usage-detail-${detail.id}`}>
               <span className="min-w-0 truncate text-muted-foreground">{detail.label}</span>
               <span className="shrink-0 text-foreground">{detail.value}</span>
             </div>

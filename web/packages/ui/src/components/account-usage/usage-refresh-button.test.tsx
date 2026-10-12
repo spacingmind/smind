@@ -88,4 +88,22 @@ describe("UsageRefreshButton", () => {
     fireEvent.focus(screen.getByTestId("usage-refresh-hint"));
     expect(screen.getByRole("tooltip")).toHaveTextContent(text);
   });
+
+  it("a daemon refusal lifts by itself at nextRefreshAt, except a rejected login", () => {
+    const backoff = claudeAccount({ refreshBlocked: "backoff", nextRefreshAt: new Date(NOW + 5_000).toISOString() }, NOW);
+    const { rerender } = render(<UsageRefreshButton usage={backoff} state="idle" onRefresh={vi.fn()} />);
+    expect(screen.getByTestId("usage-refresh")).toBeDisabled();
+    act(() => {
+      vi.advanceTimersByTime(4_999);
+    });
+    expect(screen.getByTestId("usage-refresh")).toBeDisabled();
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.getByTestId("usage-refresh")).toBeEnabled();
+
+    const rejected = claudeAccount({ refreshBlocked: "rejected", nextRefreshAt: new Date(NOW - 60_000).toISOString() }, NOW);
+    rerender(<UsageRefreshButton usage={rejected} state="idle" onRefresh={vi.fn()} />);
+    expect(screen.getByTestId("usage-refresh")).toBeDisabled();
+  });
 });

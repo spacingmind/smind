@@ -46,24 +46,34 @@ export function UsageRefreshButton({
   onRefresh: () => void;
   now?: number;
 }) {
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const clock = now ?? Date.now();
   const cooldownEndsAt = pressedAt != null ? pressedAt + REFRESH_COOLDOWN_MS : null;
   const coolingDown = cooldownEndsAt != null && cooldownEndsAt > clock;
 
-  // Re-enable by itself when the cooldown runs out.
+  // The daemon's own refusal (`refreshBlocked`) lifts at `nextRefreshAt`, which it rounds up to the
+  // second so re-enabling exactly then never lands inside its floor. A rejected login stays blocked
+  // until the account is reconnected, whatever the clock says.
+  const blocked = usageCopy.refreshState(usage, clock);
+  const blockedUntil = usage.nextRefreshAt ? Date.parse(usage.nextRefreshAt) : Number.NaN;
+  const blockLifted =
+    usage.refreshBlocked !== "rejected" && Number.isFinite(blockedUntil) && blockedUntil <= clock;
+  const blockedNow = blocked.disabled && !blockLifted;
+
+  // Re-enable by itself at the next boundary (cooldown end or block lift).
   useEffect(() => {
-    if (cooldownEndsAt == null) return;
-    const wait = cooldownEndsAt - Date.now();
-    if (wait <= 0) return;
-    const timer = setTimeout(() => setTick((n) => n + 1), wait);
+    const boundaries = [cooldownEndsAt, blocked.disabled && usage.refreshBlocked !== "rejected" ? blockedUntil : null];
+    const upcoming = boundaries.filter((t): t is number => t != null && Number.isFinite(t) && t > Date.now());
+    if (upcoming.length === 0) return;
+    const timer = setTimeout(() => setTick((n) => n + 1), Math.min(...upcoming) - Date.now());
     return () => clearTimeout(timer);
-  }, [cooldownEndsAt]);
+    // `tick` re-arms the timer for the next boundary after each wake-up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cooldownEndsAt, blockedUntil, blocked.disabled, usage.refreshBlocked, tick]);
 
   const pending = state === "pending";
-  const blocked = usageCopy.refreshState(usage, clock);
-  const disabled = pending || blocked.disabled || coolingDown;
-  const tooltip = blocked.disabled ? blocked.label : formatUsageFreshness(usage.report?.fetchedAt, clock);
+  const disabled = pending || blockedNow || coolingDown;
+  const tooltip = blockedNow ? blocked.label : formatUsageFreshness(usage.report?.fetchedAt, clock);
 
   return (
     <TooltipProvider>
