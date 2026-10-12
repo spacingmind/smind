@@ -1,14 +1,8 @@
 import { UsageMeter } from "@/components/account-usage/usage-meter";
 import { formatDisplayPct, formatResetLabel, type UsageDisplayAs } from "@/lib/account-usage/format";
+import { displayPercent } from "@/lib/account-usage/model";
 import { windowTone } from "@/lib/account-usage/tone";
 import type { UsageWindow } from "@/lib/account-usage/types";
-
-/** The percent the meter fills to under the used/remaining preference; null when the window has none. */
-function meterPercent(window: UsageWindow, displayAs: UsageDisplayAs): number | null {
-  const used = window.usedPct ?? (window.remainingPct != null ? 100 - window.remainingPct : null);
-  if (displayAs === "used") return used;
-  return window.remainingPct ?? (used != null ? 100 - used : null);
-}
 
 /**
  * One window as a row: label left, value and reset label right, the meter
@@ -16,7 +10,7 @@ function meterPercent(window: UsageWindow, displayAs: UsageDisplayAs): number | 
  * (AC39): a window without a percent reads "—" over an empty meter.
  */
 export function UsageWindowBar({ window, displayAs }: { window: UsageWindow; displayAs: UsageDisplayAs }) {
-  const percent = meterPercent(window, displayAs);
+  const percent = displayPercent(window, displayAs);
   const reset = formatResetLabel(window.resetsAt);
   const label = window.label || window.id;
   return (
