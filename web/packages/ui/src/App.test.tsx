@@ -150,11 +150,6 @@ function respondChatList(socket: FakeSocket, task: Task): void {
   respondAll(socket, "chat.list", [defaultChatFor(task)]);
 }
 
-/** TaskDetailPane's h2 heading text once task's default chat tab is active -- `"${task.Title} · ${chat.Title}"` (task-detail.tsx), not the bare task title (ADR-0016 P3: the heading now disambiguates which of a task's several chats is open). */
-function chatHeadingName(task: Task): string {
-  return `${task.Title} · ${defaultChatFor(task).Title}`;
-}
-
 /** Drives AppSidebar's workspace.list -> {space.list, task.list} sequence for a single workspace, plus useTaskAttention's initial run.list (empty). */
 async function resolveSidebar(socket: FakeSocket, tasks: Task[] = [TASK]): Promise<void> {
   await flush();
@@ -169,7 +164,7 @@ async function resolveSidebar(socket: FakeSocket, tasks: Task[] = [TASK]): Promi
   await flush();
 }
 
-/** Clicks task's sidebar row specifically. TaskDetailPane's own h2 heading no longer matches task.Title exactly (ADR-0016 P3 appends "· <chat title>" -- see chatHeadingName), so plain getByText/getAllByText calls now only ever match the sidebar row. */
+/** Clicks task's sidebar row specifically. The app header's title (`app-header-title`) also carries the selected task's title, so plain getByText calls can match it too -- this helper goes through the row. */
 function clickTaskRow(task: Task): void {
   fireEvent.click(screen.getAllByText(task.Title)[0]!);
 }
@@ -326,7 +321,7 @@ describe("App", () => {
     // run.list against the pre-disconnect client.
     respond(socket1, "run.list", [], 1);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK.Title);
 
     socket1.emitClose();
     await flush();
@@ -344,7 +339,7 @@ describe("App", () => {
 
     // The task is still selected/rendered after reconnect, and its pane
     // re-fetched fresh against the new client rather than being unmounted.
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK.Title);
     expect(socket2.sent.some((e) => e.method === "run.list")).toBe(true);
   });
 
@@ -677,15 +672,15 @@ describe("App keyboard shortcuts", () => {
     }
 
     await step("]", "BracketRight", TASK_B);
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
 
     // Past the end wraps back to the first task.
     await step("]", "BracketRight", TASK_A);
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
 
     // ...and backwards wraps the other way.
     await step("[", "BracketLeft", TASK_B);
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
   it("Ctrl+B toggles the sidebar through the registry (it moved out of the shadcn primitive's own listener)", async () => {
@@ -818,7 +813,7 @@ describe("App command palette", () => {
     await flush();
 
     expect(screen.queryByTestId("command-palette")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
   it("with a task selected, an Open <tab> entry activates that tab", async () => {
@@ -1009,7 +1004,7 @@ describe("App routing", () => {
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
 
     await act(async () => {
       navigateHash(taskAHash);
@@ -1020,7 +1015,7 @@ describe("App routing", () => {
     respondAll(socket, "run.list", []);
     await flush();
 
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
   });
 
   it("a URL naming a task task.list doesn't return lands on the empty state without throwing", async () => {
@@ -1910,7 +1905,7 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
 
     await pressAlt("3", "Digit3");
     await flush();
@@ -1918,7 +1913,7 @@ describe("App pane focus and pane/tab keyboard actions (Item 6)", () => {
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_C) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_C.Title);
   });
 });
 
@@ -2436,7 +2431,7 @@ describe("App settings view (dogfood Item 4)", () => {
     await flush();
     respondAll(socket, "run.list", []);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
 
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     await flush();
@@ -2454,8 +2449,8 @@ describe("App settings view (dogfood Item 4)", () => {
 
     fireEvent.click(screen.getByTestId("settings-back-button"));
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_A) })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: chatHeadingName(TASK_B) })).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_A.Title);
+    expect(screen.getByTestId("app-header-title")).not.toHaveTextContent(TASK_B.Title);
 
     // Back in the workspace the same shortcut works again.
     await act(async () => {
@@ -2464,7 +2459,7 @@ describe("App settings view (dogfood Item 4)", () => {
     await flush();
     respondChatList(socket, TASK_B);
     await flush();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
   it("settings-safe shortcuts still work over settings: Shift+? deep-links to Shortcuts", async () => {
@@ -2510,7 +2505,7 @@ describe("App settings view (dogfood Item 4)", () => {
     await flush();
 
     expect(screen.queryByTestId("settings-screen")).not.toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: chatHeadingName(TASK_B) })).toBeInTheDocument();
+    expect(screen.getByTestId("app-header-title")).toHaveTextContent(TASK_B.Title);
   });
 
   it("Escape from the settings screen returns to the task view", async () => {
@@ -2710,11 +2705,18 @@ describe("App tab strip (app-header-and-tabs TB)", () => {
     expect(closes).toHaveLength(tabs.length);
     for (const tab of tabs) expect(tab.className.split(/\s+/)).toContain("group/tab");
     for (const close of closes) {
-      const cls = close.className.split(/\s+/);
+      // The reveal rule lives on the floating wrapper the split/close share: hidden it is
+      // transparent AND inert (a tap on the invisible x must not close the tab), and the
+      // same three conditions that show it make it clickable again.
+      const wrapper = close.closest('[data-testid="workspace-tab-affordances"]')!;
+      const cls = wrapper.className.split(/\s+/);
       expect(cls).toContain("opacity-0");
-      expect(cls).toContain("group-hover/tab:opacity-100");
-      expect(cls).toContain("group-focus-within/tab:opacity-100");
-      expect(cls).toContain("group-aria-selected/tab:opacity-100");
+      expect(cls).toContain("pointer-events-none");
+      for (const condition of ["group-hover/tab", "group-focus-within/tab", "group-aria-selected/tab"]) {
+        expect(cls).toContain(`${condition}:opacity-100`);
+        expect(cls).toContain(`${condition}:pointer-events-auto`);
+      }
+      expect(wrapper.className).toContain("absolute");
     }
 
     const before = within(pane).getAllByRole("tab").length;

@@ -193,7 +193,7 @@ export function TabLabel({ entry }: { entry: TabEntry }) {
       ) : (
         <KindIcon aria-hidden data-testid="tab-icon" data-icon={entry.kind} className="size-3.5 shrink-0 opacity-70" />
       )}
-      <span className="min-w-0 truncate">{entry.title}</span>
+      <span data-tab-title className="min-w-0 truncate">{entry.title}</span>
       {dirty && (
         <span
           data-testid="tab-dirty-marker"

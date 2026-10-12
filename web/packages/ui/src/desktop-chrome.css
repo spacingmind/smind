@@ -28,3 +28,11 @@ html[data-desktop-os="macos"] #sidebar-resize-handle {
 html[data-desktop-os="macos"] [data-settings-sidebar] {
   background: color-mix(in srgb, var(--sidebar) 72%, transparent);
 }
+
+/*
+ * The content panel's rounded top-left corner exposes whatever is behind it;
+ * keep that the same vibrancy as the sidebar instead of an opaque patch.
+ */
+html[data-desktop-os="macos"] [data-slot="sidebar-inset"] {
+  background: transparent;
+}

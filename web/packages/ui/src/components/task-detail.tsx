@@ -231,6 +231,7 @@ export function TaskDetailPane({
        */}
       <PaneHeader
         testId="task-chat-meta"
+        className="border-b-0"
         subtitle={
           <>
             <SetupBadge status={task.SetupStatus} />

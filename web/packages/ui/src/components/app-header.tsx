@@ -7,7 +7,7 @@ import { DesktopWindowControls } from "@/components/desktop-window-controls";
 import { OpenInEditorButton } from "@/components/open-in-editor-button";
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { UpdateBadge } from "@/components/update-badge";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import { useLiveTask } from "@/hooks/use-live-task";
@@ -128,63 +128,69 @@ export function AppHeader({
   const connected = connectionStatus === "connected";
 
   return (
-    // h-12/border-b/p-2 matches ZCode's WorkspaceHeader.tsx (zcode-visual-parity plan P2).
-    // `deep`: every non-interactive descendant drags too; Tauri's drag script
-    // already refuses to start a drag from buttons, inputs, links and
-    // role=tab/menuitem elements, so none of those carry the attribute.
-    // `@container`: the right cluster drops its secondary controls on narrow widths.
-    <header
-      data-testid="app-header"
-      data-tauri-drag-region={isDesktop ? "deep" : undefined}
-      className="@container/app-header flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-panel p-2"
-      style={leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined}
-    >
-      {showSidebarToggle && (
-        <>
-          <SidebarTrigger className={ICON_BUTTON} />
-          {onOpenUpdate && <UpdateBadge state={updateState} onOpen={onOpenUpdate} />}
-        </>
-      )}
-      {task && <HeaderTask task={task} client={client} events={events} localPathActions={localPathActions} />}
-      {/* Quiet while connected (sr-only keeps the live status for assistive tech); a pill only when something is wrong. */}
-      <span
-        role="status"
-        data-testid="app-connection-status"
-        data-connection={connectionStatus}
-        className={cn(
-          connected
-            ? "sr-only"
-            : cn(
-                "shrink-0 rounded-full px-2 py-0.5 text-ui-sm",
-                connectionStatus === "disconnected" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
-              ),
-        )}
+    // Own provider: the header is mounted by tests (and the shell's own unit
+    // mounts) without main.tsx's app-level one.
+    <TooltipProvider>
+      {/*
+       * h-12/border-b/p-2 matches ZCode's WorkspaceHeader.tsx (zcode-visual-parity plan P2).
+       * `deep`: every non-interactive descendant drags too; Tauri's drag script
+       * already refuses to start a drag from buttons, inputs, links and
+       * role=tab/menuitem elements, so none of those carry the attribute.
+       * `@container`: the right cluster drops its secondary controls on narrow widths.
+       */}
+      <header
+        data-testid="app-header"
+        data-tauri-drag-region={isDesktop ? "deep" : undefined}
+        className="@container/app-header flex h-12 shrink-0 items-center gap-2 border-b border-border/50 bg-panel p-2"
+        style={leftInset > 0 ? { paddingLeft: BASE_PADDING_PX + leftInset } : undefined}
       >
-        {statusText}
-      </span>
-      <div className="min-w-0 flex-1" />
-      <div className="flex shrink-0 items-center gap-1">
-        {task?.WorktreePath && localPathActions && (
-          <span className="hidden @min-[40rem]/app-header:inline-flex">
-            <OpenInEditorButton path={task.WorktreePath} actions={localPathActions} />
-          </span>
+        {showSidebarToggle && (
+          <>
+            <SidebarTrigger className={ICON_BUTTON} />
+            {onOpenUpdate && <UpdateBadge state={updateState} onOpen={onOpenUpdate} />}
+          </>
         )}
-        <HeaderIconButton
-          label="Keyboard shortcuts"
-          testId="app-header-help"
-          className="hidden @min-[40rem]/app-header:inline-flex"
-          onClick={() => runAction("shortcuts.help", null, { source: "menu" })}
+        {task && <HeaderTask task={task} client={client} events={events} localPathActions={localPathActions} />}
+        {/* Quiet while connected (sr-only keeps the live status for assistive tech); a pill only when something is wrong. */}
+        <span
+          role="status"
+          data-testid="app-connection-status"
+          data-connection={connectionStatus}
+          className={cn(
+            connected
+              ? "sr-only"
+              : cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-ui-sm",
+                  connectionStatus === "disconnected" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning",
+                ),
+          )}
         >
-          <CircleHelp aria-hidden />
-        </HeaderIconButton>
-        {task && onOpenTerminal && (
-          <HeaderIconButton label="Open terminal" testId="app-header-terminal" onClick={onOpenTerminal}>
-            <Terminal aria-hidden />
+          {statusText}
+        </span>
+        <div className="min-w-0 flex-1" />
+        <div className="flex shrink-0 items-center gap-1">
+          {task?.WorktreePath && localPathActions && (
+            <span className="hidden @min-[40rem]/app-header:inline-flex">
+              <OpenInEditorButton path={task.WorktreePath} actions={localPathActions} />
+            </span>
+          )}
+          <HeaderIconButton
+            label="Keyboard shortcuts"
+            testId="app-header-help"
+            className="hidden @min-[40rem]/app-header:inline-flex"
+            onClick={() => runAction("shortcuts.help", null, { source: "menu" })}
+          >
+            <CircleHelp aria-hidden />
           </HeaderIconButton>
-        )}
-        <AppMenu />
-      </div>
-      <DesktopWindowControls />
-    </header>
+          {task && onOpenTerminal && (
+            <HeaderIconButton label="Open terminal" testId="app-header-terminal" onClick={onOpenTerminal}>
+              <Terminal aria-hidden />
+            </HeaderIconButton>
+          )}
+          <AppMenu />
+        </div>
+        <DesktopWindowControls />
+      </header>
+    </TooltipProvider>
   );
 }
