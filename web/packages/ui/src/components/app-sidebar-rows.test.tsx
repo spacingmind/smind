@@ -4,7 +4,7 @@
 // menu (S6), title fade + per-row indentation (S7) and persisted expansion
 // (S8). The older app-sidebar*.test.tsx files keep the pre-existing contracts.
 import { act } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -502,5 +502,74 @@ describe("container rows (S5)", () => {
     const pill = (await screen.findAllByTestId("status-group-count"))[0]!;
     expect(pill.className).toContain("rounded-full");
     expect(pill).toHaveTextContent("2");
+  });
+});
+
+describe("task context menu (S6)", () => {
+  const IN_A = makeTask(5, "In A", { SpaceID: SPACE_A.ID });
+  const SPACE_B: Space = { ...SPACE_A, ID: 11, Title: "Space B" };
+
+  async function menuLabels(menu: HTMLElement): Promise<string[]> {
+    return within(menu)
+      .getAllByRole("menuitem")
+      .map((el) => el.textContent?.trim() ?? "");
+  }
+
+  it("right-click offers the same items as the ⋯ menu", async () => {
+    await mountSidebar([IN_A], {}, [SPACE_A, SPACE_B]);
+
+    fireEvent.pointerDown(taskTrigger(IN_A.ID), { button: 0, ctrlKey: false });
+    const dropdown = await menuLabels(await screen.findByRole("menu"));
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await flush();
+
+    fireEvent.contextMenu(rowButton(IN_A.ID));
+    const context = await menuLabels(await screen.findByTestId("sidebar-task-context-menu"));
+
+    expect(context).toEqual(dropdown);
+    expect(context).toEqual(["Move to space", "Pin", "Mark unread", "Archive task"]);
+  });
+
+  it("context menu Pin, Mark unread and Archive call the same handlers as the ⋯ menu", async () => {
+    const onMarkUnread = vi.fn();
+    await mountSidebar([IN_A], { onMarkUnread }, [SPACE_A]);
+
+    fireEvent.contextMenu(rowButton(IN_A.ID));
+    fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
+    expect(onMarkUnread).toHaveBeenCalledWith(IN_A.ID);
+
+    fireEvent.contextMenu(rowButton(IN_A.ID));
+    fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
+    expect(await screen.findByTestId("sidebar-pinned-section")).toBeInTheDocument();
+
+    fireEvent.contextMenu(rowButton(IN_A.ID));
+    fireEvent.click(await screen.findByTestId("sidebar-task-archive-action"));
+    // The archive confirm dialog is the ⋯ menu's too.
+    expect(await screen.findByText("Archive task?")).toBeInTheDocument();
+  });
+
+  it("context menu Move to space lists the other spaces and moves with task.move", async () => {
+    const { client } = await mountSidebar([IN_A], {}, [SPACE_A, SPACE_B]);
+
+    fireEvent.contextMenu(rowButton(IN_A.ID));
+    const trigger = await screen.findByTestId("sidebar-task-move-action");
+    fireEvent.pointerMove(trigger, { pointerType: "mouse" });
+    fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    await flush();
+    const targets = await screen.findAllByTestId("sidebar-task-move-target");
+    expect(targets.map((t) => t.textContent)).toEqual(["Ungrouped", "Space B"]);
+
+    fireEvent.click(targets[1]!);
+    const move = await waitFor(() => client.nth("task.move"));
+    expect(move.params).toEqual({ id: IN_A.ID, spaceId: SPACE_B.ID });
+  });
+
+  it("an open context menu keeps its row's actions mounted", async () => {
+    await mountSidebar(TREE);
+
+    fireEvent.contextMenu(rowButton(LEADER.ID));
+    await screen.findByTestId("sidebar-task-context-menu");
+
+    expect(screen.getByTestId("sidebar-task-actions-trigger")).toHaveAttribute("data-task-id", String(LEADER.ID));
   });
 });

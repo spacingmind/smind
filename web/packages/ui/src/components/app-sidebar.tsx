@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -89,7 +90,15 @@ import {
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1805,6 +1814,7 @@ const TaskRow = memo(function TaskRow({
   // group on the li would reveal every descendant's actions on one hover
   // (see use-row-active.ts).
   const { active, rowProps, setMenuOpen } = useRowActive();
+  const menuEntries = taskMenuEntries(task, { spaces, onMoveTask, isPinned: isTaskPinned, onTogglePin, onMarkUnread, onArchiveTask });
   const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     if (handleTaskRowArrowKey(e.key, e.currentTarget, { hasChildren, isCollapsed, onToggle: () => onToggleCollapse?.(task.ID) })) {
@@ -1824,189 +1834,187 @@ const TaskRow = memo(function TaskRow({
     .filter(Boolean)
     .join(", ");
   return (
-    <div
-      data-testid="sidebar-task-item"
-      data-task-id={task.ID}
-      className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg", isSelected ? "bg-selected" : active && "bg-hover")}
-      {...rowProps}
-    >
-      {/*
-       * Collapse chevron (PR-U1), on rows that have children. A sibling of
-       * the row's select button, not a child: a button inside a button is
-       * invalid HTML and breaks keyboard focus order. The slot is always w-3
-       * on parent rows so toggling never shifts anything; childless siblings
-       * of a parent render the *empty* reserved slot instead, so every title
-       * in that sibling list shares one left edge; a list where nothing has
-       * children reserves nothing and keeps today's geometry exactly.
-       */}
-      {hasChildren ? (
-        <button
-          type="button"
-          aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
-          aria-expanded={!isCollapsed}
-          data-testid="task-collapse-toggle"
-          onClick={() => onToggleCollapse?.(task.ID)}
-          className="ml-1 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
+    <ContextMenu onOpenChange={setMenuOpen}>
+      <ContextMenuTrigger asChild>
+        <div
+          data-testid="sidebar-task-item"
+          data-task-id={task.ID}
+          className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg", isSelected ? "bg-selected" : active && "bg-hover")}
+          {...rowProps}
         >
-          <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
-        </button>
-      ) : reserveChevron ? (
-        <span className="ml-1 w-3 shrink-0" />
-      ) : null}
-      <HoverCard openDelay={400} closeDelay={100}>
-        <HoverCardTrigger asChild>
-          <SidebarMenuSubButton
-            asChild
-            // The highlight lives on the wrapper (so the ⋯ overlay can inherit
-            // it and the chevron sits inside it), not on the select button.
-            className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-2 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
-            isActive={isSelected}
-          >
+          {/*
+           * Collapse chevron (PR-U1), on rows that have children. A sibling of
+           * the row's select button, not a child: a button inside a button is
+           * invalid HTML and breaks keyboard focus order. The slot is always w-3
+           * on parent rows so toggling never shifts anything; childless siblings
+           * of a parent render the *empty* reserved slot instead, so every title
+           * in that sibling list shares one left edge; a list where nothing has
+           * children reserves nothing and keeps today's geometry exactly.
+           */}
+          {hasChildren ? (
             <button
               type="button"
-              aria-label={rowLabel}
-              aria-current={isSelected ? "true" : undefined}
-              onClick={() => onSelectTask?.(task)}
-              onKeyDown={onRowKeyDown}
-              data-testid="sidebar-task-row"
-              data-task-id={task.ID}
-              data-parent-task-id={task.ParentTaskID ?? undefined}
+              aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
+              aria-expanded={!isCollapsed}
+              data-testid="task-collapse-toggle"
+              onClick={() => onToggleCollapse?.(task.ID)}
+              className="ml-1 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
             >
-              {/*
-               * The ONE leading status slot (sidebar-polish S3): always in the
-               * DOM at a constant width -- a signal arriving or clearing must
-               * not move the title (refs/paseo/docs/design.md §11) -- and it
-               * draws a single signal by priority (see taskSlotSignal). The
-               * attention reason, latest run status and unread state stay
-               * queryable on the slot itself even when a higher-priority
-               * signal is the one drawn. The reason is in the accessible name
-               * as well as the colour.
-               */}
-              <span
-                data-testid="task-status-slot"
-                data-slot-signal={slotSignal.kind}
-                data-attention-reason={reason ?? undefined}
-                data-run-status={runState}
-                data-unread={isUnread ? "true" : undefined}
-                className="flex w-3 shrink-0 items-center justify-center"
-              >
-                {slotSignal.kind === "attention" && (
-                  <StatusDot
-                    status={attentionDotStatus(slotSignal.reason)}
-                    data-testid="task-attention"
-                    data-attention-reason={slotSignal.reason}
-                    aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`}
-                  />
-                )}
-                {slotSignal.kind === "run" && runDot && (
-                  <StatusDot
-                    status={runDot}
-                    data-testid="task-run-status"
-                    data-run-status={runState}
-                    aria-label={`latest run ${runState}`}
-                  />
-                )}
-                {slotSignal.kind === "unread" && (
-                  <span
-                    data-testid="task-unread-marker"
-                    aria-label="unread"
-                    className="size-1.5 shrink-0 rounded-full bg-primary"
-                  />
-                )}
-              </span>
-              {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
-              <span className="min-w-0 flex-1 truncate">{task.Title}</span>
-              {hasChildren && (
-                <span
-                  data-testid="task-child-count"
-                  aria-label={`${childCount} sub-task${childCount === 1 ? "" : "s"}`}
-                  className="shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle"
-                >
-                  {childCount}
-                </span>
-              )}
-              {/*
-               * Collapsed-parent attention rollup (PR-U1): the loudest
-               * reason among the hidden descendants plus how many need
-               * attention. Expanded parents show nothing here -- their
-               * children carry their own dots.
-               */}
-              {rollup && (
-                <span
-                  data-testid="task-rollup"
-                  data-rollup-reason={rollup.reason}
-                  aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
-                  className="flex shrink-0 items-center gap-1"
-                >
-                  <StatusDot status={attentionDotStatus(rollup.reason)} />
-                  <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
-                </span>
-              )}
-              <SetupBadge status={task.SetupStatus} compact />
-              {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
-              {stat && stat.filesChanged > 0 && (
-                <span
-                  data-testid="sidebar-task-diffstat"
-                  className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
-                  title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
-                >
-                  <span className="text-success">+{stat.insertions}</span>{" "}
-                  <span className="text-destructive">-{stat.deletions}</span>
-                </span>
-              )}
-              {/*
-               * Compact relative time. Its slot is a fixed width and is only
-               * made invisible (not removed) while the row's ⋯ is showing, so
-               * hovering never reflows the title; the ⋯ is overlaid on this
-               * same spot (ZCode TaskListItem's time -> actions swap).
-               */}
-              <span
-                data-testid="task-row-time"
-                className={cn(
-                  "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtle @max-[14rem]/sb:hidden",
-                  active && "invisible",
-                )}
-              >
-                {formatRelativeTimeShort(task.UpdatedAt, now)}
-              </span>
+              <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
-          </SidebarMenuSubButton>
-        </HoverCardTrigger>
-        <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-          <TaskHoverCardBody task={task} stat={stat} status={status} tier={tier} childCount={childCount} now={now} />
-        </HoverCardContent>
-      </HoverCard>
-      {active && (
-        <span className="absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit">
-          <DropdownMenu onOpenChange={setMenuOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Actions for ${task.Title}`}
-                data-testid="sidebar-task-actions-trigger"
-                data-task-id={task.ID}
-                className="size-5 p-0"
+          ) : reserveChevron ? (
+            <span className="ml-1 w-3 shrink-0" />
+          ) : null}
+          <HoverCard openDelay={400} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <SidebarMenuSubButton
+                asChild
+                // The highlight lives on the wrapper (so the ⋯ overlay can inherit
+                // it and the chevron sits inside it), not on the select button.
+                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-2 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+                isActive={isSelected}
               >
-                <MoreHorizontal />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
-              <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
-                {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
-              </DropdownMenuItem>
-              <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
-                <Circle /> Mark unread
-              </DropdownMenuItem>
-              <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
-                <Archive /> Archive task
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </span>
-      )}
-    </div>
+                <button
+                  type="button"
+                  aria-label={rowLabel}
+                  aria-current={isSelected ? "true" : undefined}
+                  onClick={() => onSelectTask?.(task)}
+                  onKeyDown={onRowKeyDown}
+                  data-testid="sidebar-task-row"
+                  data-task-id={task.ID}
+                  data-parent-task-id={task.ParentTaskID ?? undefined}
+                >
+                  {/*
+                   * The ONE leading status slot (sidebar-polish S3): always in the
+                   * DOM at a constant width -- a signal arriving or clearing must
+                   * not move the title (refs/paseo/docs/design.md §11) -- and it
+                   * draws a single signal by priority (see taskSlotSignal). The
+                   * attention reason, latest run status and unread state stay
+                   * queryable on the slot itself even when a higher-priority
+                   * signal is the one drawn. The reason is in the accessible name
+                   * as well as the colour.
+                   */}
+                  <span
+                    data-testid="task-status-slot"
+                    data-slot-signal={slotSignal.kind}
+                    data-attention-reason={reason ?? undefined}
+                    data-run-status={runState}
+                    data-unread={isUnread ? "true" : undefined}
+                    className="flex w-3 shrink-0 items-center justify-center"
+                  >
+                    {slotSignal.kind === "attention" && (
+                      <StatusDot
+                        status={attentionDotStatus(slotSignal.reason)}
+                        data-testid="task-attention"
+                        data-attention-reason={slotSignal.reason}
+                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`}
+                      />
+                    )}
+                    {slotSignal.kind === "run" && runDot && (
+                      <StatusDot
+                        status={runDot}
+                        data-testid="task-run-status"
+                        data-run-status={runState}
+                        aria-label={`latest run ${runState}`}
+                      />
+                    )}
+                    {slotSignal.kind === "unread" && (
+                      <span
+                        data-testid="task-unread-marker"
+                        aria-label="unread"
+                        className="size-1.5 shrink-0 rounded-full bg-primary"
+                      />
+                    )}
+                  </span>
+                  {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
+                  <span className="min-w-0 flex-1 truncate">{task.Title}</span>
+                  {hasChildren && (
+                    <span
+                      data-testid="task-child-count"
+                      aria-label={`${childCount} sub-task${childCount === 1 ? "" : "s"}`}
+                      className="shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle"
+                    >
+                      {childCount}
+                    </span>
+                  )}
+                  {/*
+                   * Collapsed-parent attention rollup (PR-U1): the loudest
+                   * reason among the hidden descendants plus how many need
+                   * attention. Expanded parents show nothing here -- their
+                   * children carry their own dots.
+                   */}
+                  {rollup && (
+                    <span
+                      data-testid="task-rollup"
+                      data-rollup-reason={rollup.reason}
+                      aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
+                      className="flex shrink-0 items-center gap-1"
+                    >
+                      <StatusDot status={attentionDotStatus(rollup.reason)} />
+                      <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
+                    </span>
+                  )}
+                  <SetupBadge status={task.SetupStatus} compact />
+                  {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
+                  {stat && stat.filesChanged > 0 && (
+                    <span
+                      data-testid="sidebar-task-diffstat"
+                      className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                      title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
+                    >
+                      <span className="text-success">+{stat.insertions}</span>{" "}
+                      <span className="text-destructive">-{stat.deletions}</span>
+                    </span>
+                  )}
+                  {/*
+                   * Compact relative time. Its slot is a fixed width and is only
+                   * made invisible (not removed) while the row's ⋯ is showing, so
+                   * hovering never reflows the title; the ⋯ is overlaid on this
+                   * same spot (ZCode TaskListItem's time -> actions swap).
+                   */}
+                  <span
+                    data-testid="task-row-time"
+                    className={cn(
+                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtle @max-[14rem]/sb:hidden",
+                      active && "invisible",
+                    )}
+                  >
+                    {formatRelativeTimeShort(task.UpdatedAt, now)}
+                  </span>
+                </button>
+              </SidebarMenuSubButton>
+            </HoverCardTrigger>
+            <HoverCardContent data-testid="task-hover-card" side="right" align="start">
+              <TaskHoverCardBody task={task} stat={stat} status={status} tier={tier} childCount={childCount} now={now} />
+            </HoverCardContent>
+          </HoverCard>
+          {active && (
+            <span className="absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit">
+              <DropdownMenu onOpenChange={setMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Actions for ${task.Title}`}
+                    data-testid="sidebar-task-actions-trigger"
+                    data-task-id={task.ID}
+                    className="size-5 p-0"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="sidebar-task-context-menu">
+        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 
@@ -2138,47 +2146,119 @@ function TaskRows({
 }
 
 /**
- * The task row action menu's "Move to space" submenu -- every other space
- * in the task's workspace, plus "Ungrouped" unless the task is already
- * there (no self-move option). Renders nothing if there's no `spaces`/
- * `onMoveTask` pair (SearchResults) or nowhere to move to (an already-
- * ungrouped task in a workspace with zero spaces).
+ * One task's menu, defined once and rendered by BOTH the ⋯ dropdown and the
+ * right-click context menu (sidebar-polish S6) so the two can never offer
+ * different items or call different handlers -- the same approach
+ * WorkspaceItem already takes with its `items`.
  */
-function MoveTaskSubmenu({
-  task,
-  spaces,
-  onMoveTask,
-}: {
-  task: Task;
-  spaces?: SpaceWithTasks[];
-  onMoveTask?: (task: Task, spaceId: number | null) => void;
-}) {
-  if (!spaces || !onMoveTask) return null;
+type TaskMenuEntry =
+  | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
+  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void };
 
-  const targets: { id: number | null; label: string }[] = [];
-  if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
-  for (const space of spaces) {
-    if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+/**
+ * "Move to space" lists every other space in the task's workspace plus
+ * "Ungrouped" unless the task is already there (no self-move). It is omitted
+ * with no `spaces`/`onMoveTask` pair (SearchResults' flat list spans workspaces
+ * and doesn't offer the move) or nowhere to move to.
+ */
+function taskMenuEntries(
+  task: Task,
+  o: {
+    spaces?: SpaceWithTasks[];
+    onMoveTask?: (task: Task, spaceId: number | null) => void;
+    isPinned: boolean;
+    onTogglePin: (taskId: number) => void;
+    onMarkUnread: (taskId: number) => void;
+    onArchiveTask: (task: Task) => void;
+  },
+): TaskMenuEntry[] {
+  const entries: TaskMenuEntry[] = [];
+  if (o.spaces && o.onMoveTask) {
+    const targets: { id: number | null; label: string }[] = [];
+    if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
+    for (const space of o.spaces) {
+      if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+    }
+    const onMoveTask = o.onMoveTask;
+    if (targets.length > 0) entries.push({ kind: "move", targets, onMove: (spaceId) => onMoveTask(task, spaceId) });
   }
-  if (targets.length === 0) return null;
+  entries.push(
+    {
+      kind: "item",
+      testId: "sidebar-task-pin-action",
+      label: o.isPinned ? "Unpin" : "Pin",
+      icon: o.isPinned ? <PinOff /> : <Pin />,
+      onSelect: () => o.onTogglePin(task.ID),
+    },
+    {
+      kind: "item",
+      testId: "sidebar-task-mark-unread-action",
+      label: "Mark unread",
+      icon: <Circle />,
+      onSelect: () => o.onMarkUnread(task.ID),
+    },
+    {
+      kind: "item",
+      testId: "sidebar-task-archive-action",
+      label: "Archive task",
+      icon: <Archive />,
+      onSelect: () => o.onArchiveTask(task),
+    },
+  );
+  return entries;
+}
 
+/** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
+interface MenuParts {
+  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; "data-testid"?: string; "data-space-id"?: string | number }>;
+  Sub: ComponentType<{ children?: ReactNode }>;
+  SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
+  SubContent: ComponentType<{ children?: ReactNode }>;
+}
+
+const DROPDOWN_PARTS: MenuParts = {
+  Item: DropdownMenuItem,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+};
+
+const CONTEXT_PARTS: MenuParts = {
+  Item: ContextMenuItem,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+};
+
+function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: MenuParts }) {
+  const { Item, Sub, SubTrigger, SubContent } = parts;
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger data-testid="sidebar-task-move-action">
-        <Layers /> Move to space
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        {targets.map((target) => (
-          <DropdownMenuItem
-            key={target.id ?? "ungrouped"}
-            data-testid="sidebar-task-move-target"
-            data-space-id={target.id ?? "ungrouped"}
-            onSelect={() => onMoveTask(task, target.id)}
-          >
-            {target.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+    <>
+      {entries.map((entry) =>
+        entry.kind === "move" ? (
+          <Sub key="move">
+            <SubTrigger data-testid="sidebar-task-move-action">
+              <Layers /> Move to space
+            </SubTrigger>
+            <SubContent>
+              {entry.targets.map((target) => (
+                <Item
+                  key={target.id ?? "ungrouped"}
+                  data-testid="sidebar-task-move-target"
+                  data-space-id={target.id ?? "ungrouped"}
+                  onSelect={() => entry.onMove(target.id)}
+                >
+                  {target.label}
+                </Item>
+              ))}
+            </SubContent>
+          </Sub>
+        ) : (
+          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect}>
+            {entry.icon} {entry.label}
+          </Item>
+        ),
+      )}
+    </>
   );
 }
