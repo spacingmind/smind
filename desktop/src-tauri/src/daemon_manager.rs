@@ -395,6 +395,25 @@ fn take_over_refusal(platform: Platform, owner_image: Option<&str>, port: u16) -
     })
 }
 
+/// answering_without_owner is true when something answers on the daemon
+/// port but no process this app can see owns it. That is what a daemon
+/// inside WSL looks like when WSL forwards localhost at the kernel level
+/// (no `wslrelay.exe`, no Windows listener at all), found by running the
+/// real flow: the IP Helper table has no row, yet /healthz answers.
+fn answering_without_owner(reachable: bool, port_owner: Option<u32>) -> bool {
+    reachable && port_owner.is_none()
+}
+
+/// effective_managed_state is `managed::classify` plus the Windows case
+/// above: a port that answers with no visible owner is `Unmanaged` (never
+/// `NotRunning`, which would invite Install onto an occupied port).
+fn effective_managed_state(platform: Platform, reachable: bool, record: Option<&ManagedRecord>, port_owner: Option<u32>) -> ManagedState {
+    if platform == Platform::Windows && answering_without_owner(reachable, port_owner) {
+        return ManagedState::Unmanaged;
+    }
+    managed::classify(record, port_owner)
+}
+
 /// windows_install_conflict_hint is the AC6 half of install's
 /// port-conflict refusal on Windows: the base refusal comes from
 /// `assert_safe_to_install`; this adds the WSL possibility and names the
@@ -567,7 +586,7 @@ async fn compute_status(app: &AppHandle, state: &DesktopState) -> DaemonStatus {
     };
 
     let port_owner = find_port_owner(platform, port);
-    let managed_state = managed::classify(record.as_ref(), port_owner);
+    let managed_state = effective_managed_state(platform, reachable, record.as_ref(), port_owner);
 
     // AC6: on Windows, an unmanaged port owner whose image is not an
     // identifiable smind.exe is most likely the WSL relay forwarding a
@@ -695,6 +714,9 @@ async fn install_or_update(app: &AppHandle, state: &DesktopState) -> Result<Daem
                 // AC6 hint, since on Windows the most likely squatter is
                 // the relay forwarding a WSL daemon's port.
                 let port_owner_before = windows_native::find_port_owner(port).ok().flatten();
+                if answering_without_owner(probe_healthz(&base_url).await.0, port_owner_before) {
+                    return Err(format!("a daemon is already answering on port {port}, but no Windows process owns it. {}", windows_install_conflict_hint(port)));
+                }
                 if let Err(e) = managed::assert_safe_to_install(existing_record.as_ref(), port_owner_before, port) {
                     return Err(format!("{e}. {}", windows_install_conflict_hint(port)));
                 }
@@ -887,8 +909,16 @@ async fn take_over(app: &AppHandle, state: &DesktopState) -> Result<DaemonStatus
     let base_url = local_base_url(state);
     let port = base_url.port_or_known_default().unwrap_or(DEFAULT_PORT);
 
-    let owner = find_port_owner(platform, port)
-        .ok_or_else(|| "nothing is listening on the configured port -- there is no daemon to take over".to_string())?;
+    let Some(owner) = find_port_owner(platform, port) else {
+        // A daemon forwarded from WSL answers with no visible owner: say
+        // that, not "nothing is listening".
+        if answering_without_owner(probe_healthz(&base_url).await.0, None) {
+            if let Some(message) = take_over_refusal(platform, None, port) {
+                return Err(message);
+            }
+        }
+        return Err("nothing is listening on the configured port -- there is no daemon to take over".to_string());
+    };
 
     // Resolve the adopted process's real executable path up front: this
     // becomes the record's own identity check from now on
@@ -1186,6 +1216,32 @@ mod tests {
         assert!(take_over_refusal(Platform::Macos, Some("/Applications/smind.app/Contents/MacOS/smind"), 4648).is_none());
         assert!(take_over_refusal(Platform::Macos, None, 4648).is_none());
         assert!(take_over_refusal(Platform::Unsupported, Some("/usr/bin/other"), 4648).is_none());
+    }
+
+    /// Found in the AC10 run on a real machine: a daemon inside WSL answers
+    /// on the port with no Windows owner at all. It must read as Unmanaged
+    /// (never NotRunning, which offers Install onto an occupied port), and
+    /// only on Windows.
+    #[test]
+    fn answering_with_no_visible_owner_is_unmanaged_on_windows_only() {
+        assert!(answering_without_owner(true, None));
+        assert!(!answering_without_owner(false, None));
+        assert!(!answering_without_owner(true, Some(7)));
+
+        assert_eq!(effective_managed_state(Platform::Windows, true, None, None), ManagedState::Unmanaged);
+        // Nothing answering: still plain NotRunning.
+        assert_eq!(effective_managed_state(Platform::Windows, false, None, None), ManagedState::NotRunning);
+        // A visible owner keeps the normal decision table.
+        let record = ManagedRecord { pid: 7, version: "0.10.0".into(), installed_at: "0".into(), exe_path: r"C:\x\smind.exe".into() };
+        assert_eq!(effective_managed_state(Platform::Windows, true, Some(&record), Some(7)), ManagedState::Managed);
+        // Other platforms never use the Windows rule.
+        assert_eq!(effective_managed_state(Platform::Macos, true, None, None), ManagedState::NotRunning);
+    }
+
+    #[test]
+    fn take_over_refusal_covers_an_unowned_answering_port() {
+        let err = take_over_refusal(Platform::Windows, None, 4648).expect("an ownerless daemon must be refused");
+        assert!(err.contains("WSL"), "{err}");
     }
 
     #[test]

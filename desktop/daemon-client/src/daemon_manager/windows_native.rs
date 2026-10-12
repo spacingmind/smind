@@ -23,7 +23,7 @@ use windows_sys::Win32::NetworkManagement::IpHelper::{
     GetExtendedTcpTable, MIB_TCP6ROW_OWNER_PID, MIB_TCP6TABLE_OWNER_PID, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID, TCP_TABLE_OWNER_PID_ALL,
 };
 use windows_sys::Win32::System::Threading::{
-    CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, DETACHED_PROCESS, GetExitCodeProcess, GetCurrentProcess, IsWow64Process2, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
+    CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, CREATE_NO_WINDOW, GetExitCodeProcess, GetCurrentProcess, IsWow64Process2, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE, QueryFullProcessImageNameW, TerminateProcess,
 };
 
 use super::managed::{self, ManagedRecord};
@@ -173,7 +173,15 @@ pub fn spawn_detached(layout: &Layout, version: &str) -> io::Result<Child> {
         .stdin(Stdio::null());
     {
         use std::os::windows::process::CommandExt;
-        let base = CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+        // CREATE_NO_WINDOW without DETACHED_PROCESS: the daemon gets a
+        // *hidden* console that every console program it starts (git,
+        // agent CLIs) inherits. With DETACHED_PROCESS (which also overrides
+        // CREATE_NO_WINDOW) the daemon has no console and each of those
+        // children allocates a fresh one -- a conhost.exe and, on a real
+        // desktop, a flashing window per git call (seen in the AC10 run:
+        // new conhost.exe processes for every task created). The daemon
+        // still outlives the app: nothing ties it to the app's lifetime.
+        let base = CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP;
         // Breaking away from the app's job object lets the daemon survive
         // the app being killed by a job-terminating launcher; jobs that
         // disallow breakaway reject the spawn with access denied, so retry
