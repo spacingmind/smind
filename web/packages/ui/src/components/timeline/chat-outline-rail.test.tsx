@@ -21,6 +21,14 @@ function setup(overrides: Partial<Parameters<typeof ChatOutlineRail>[0]> = {}) {
   return { activePrompt, onJump, ...utils };
 }
 
+function stubSlots(rail: HTMLElement, top: number, slotHeight: number) {
+  Array.from(rail.children).forEach((slot, i) => {
+    const y = top + i * slotHeight;
+    slot.getBoundingClientRect = () =>
+      ({ top: y, height: slotHeight, bottom: y + slotHeight, left: 0, right: 36, width: 36, x: 0, y }) as DOMRect;
+  });
+}
+
 describe("ChatOutlineRail", () => {
   it('renders one tab per prompt with an "N of M: preview" label', () => {
     setup();
@@ -87,8 +95,7 @@ describe("ChatOutlineRail", () => {
   it("pointer drag across the rail jumps to each run it crosses", () => {
     const { onJump } = setup();
     const rail = screen.getByTestId("chat-outline-rail");
-    rail.getBoundingClientRect = () =>
-      ({ top: 100, height: 400, left: 0, width: 36, right: 36, bottom: 500, x: 0, y: 100 }) as DOMRect;
+    stubSlots(rail, 100, 100);
     // 4 slots of 100px each.
     fireEvent.pointerDown(rail, { clientY: 120, button: 0 });
     fireEvent.pointerMove(rail, { clientY: 130 });
@@ -97,6 +104,17 @@ describe("ChatOutlineRail", () => {
     fireEvent.pointerUp(rail, { clientY: 480 });
     fireEvent.pointerMove(rail, { clientY: 130 });
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["r1", "r2", "r4"]);
+  });
+
+  it("pointer jumps map over the slots' extent, not the rail's height", () => {
+    const { onJump } = setup();
+    const rail = screen.getByTestId("chat-outline-rail");
+    // The rail is 400px tall but its 4 centred slots only span 150..250 (25px each).
+    rail.getBoundingClientRect = () =>
+      ({ top: 100, height: 400, left: 0, width: 36, right: 36, bottom: 500, x: 0, y: 100 }) as DOMRect;
+    stubSlots(rail, 150, 25);
+    fireEvent.pointerDown(rail, { clientY: 212, button: 0 });
+    expect(onJump.mock.calls.map((c) => c[0])).toEqual(["r3"]);
   });
 
   it("does not re-render ticks when only the active prompt of a sibling changes", () => {

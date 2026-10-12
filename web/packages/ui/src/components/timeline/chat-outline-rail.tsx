@@ -70,11 +70,16 @@ export const ChatOutlineRail = memo(function ChatOutlineRail({
     setFocusedIndex((current) => (focused ? index : current === index ? null : current));
   }, []);
 
+  // Slots are equal-height and centred, so together they can be shorter than the rail; map the
+  // pointer over the slots' own extent, not the rail's.
   const indexAtPointer = useCallback((clientY: number): number | null => {
-    const rect = railRef.current?.getBoundingClientRect();
+    const slots = railRef.current?.children;
     const count = promptsRef.current.length;
-    if (!rect || rect.height <= 0 || count === 0) return null;
-    const raw = Math.floor(((clientY - rect.top) / rect.height) * count);
+    if (!slots || slots.length === 0 || count === 0) return null;
+    const top = slots[0].getBoundingClientRect().top;
+    const height = slots[slots.length - 1].getBoundingClientRect().bottom - top;
+    if (height <= 0) return null;
+    const raw = Math.floor(((clientY - top) / height) * count);
     return Math.min(count - 1, Math.max(0, raw));
   }, []);
 
