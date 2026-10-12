@@ -296,3 +296,30 @@ func TestStore_QuotaCooldown_UpsertNeverShortensUntil(t *testing.T) {
 		t.Fatalf("after delete rows = %+v, want none", got)
 	}
 }
+
+// TestStore_QuotaCooldown_CredentialReplaceIsAtomic: when the cooldown delete
+// fails, the credential update is rolled back.
+func TestStore_QuotaCooldown_CredentialReplaceIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	s := newTestStore(t)
+	a := newTestAccount(t, s, "anthropic", "a")
+	before, err := s.GetAccount(a.ID)
+	if err != nil {
+		t.Fatalf("GetAccount() error = %v", err)
+	}
+	if _, err := s.db.Exec(`DROP TABLE quota_cooldown`); err != nil {
+		t.Fatalf("drop quota_cooldown: %v", err)
+	}
+
+	if _, err := s.ReplaceAccountCredential(a.ID, "oauth", `{"access_token":"new"}`); err == nil {
+		t.Fatal("ReplaceAccountCredential() error = nil, want the failed cooldown delete reported")
+	}
+	after, err := s.GetAccount(a.ID)
+	if err != nil {
+		t.Fatalf("GetAccount() error = %v", err)
+	}
+	if after.CredentialType != before.CredentialType || after.CredentialData != before.CredentialData || !after.UpdatedAt.Equal(before.UpdatedAt) {
+		t.Fatalf("account after a failed replace = %+v, want unchanged %+v", after, before)
+	}
+}

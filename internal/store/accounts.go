@@ -86,13 +86,23 @@ func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialDat
 	if _, err := s.GetAccount(id); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
-	if _, err := s.db.Exec(
+	// One transaction: a failed cooldown delete must not leave the new credential
+	// in place with the old credential's cooldowns still alive.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`UPDATE accounts SET credential_type = ?, credential_data = ?, updated_at = ? WHERE id = ?`,
 		credentialType, credentialData, time.Now().UTC(), id,
 	); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
-	if err := s.DeleteQuotaCooldowns(id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
 	return s.GetAccount(id)
