@@ -123,9 +123,42 @@ quit/relaunch, stop; and an unmanaged WSL daemon on the port.
   daemon takes no port argument, so `spawn_detached(layout, version)`; the
   TCP table is read with `TCP_TABLE_OWNER_PID_ALL` and filtered to LISTEN
   because the LISTENER class did not list the loopback listener.
-- 2026-10-12: R2 (wiring, WSL deletion, UI text) started as
-  `feat/desktop-windows-native-manager`.
+- 2026-10-12: R2 merged (wiring, `wsl.rs` and every WSL branch deleted,
+  DTO + UI text). Review found one regression the agent missed: the AC6
+  take-over gate classified by the `smind.exe` file name on every platform,
+  which would have refused every macOS take-over; fixed by taking the
+  platform into `take_over_refusal`, with a regression test
+  (`take_over_refusal_never_applies_off_windows`). Also repaired a doc
+  comment in `menu.rs`. macOS code still cannot be compiled or run on this
+  machine; the macOS arms are verified by reading and by their unchanged
+  tests.
+- Open: `auto_start` stays macOS-only (no bundled Windows daemon); AC10 needs
+  a real release asset or a local stand-in (see Validation).
 
 ## Validation
 
-_(fill per AC)_
+State at `integration/desktop-windows-native` (769d32f8), run on the Windows
+11 dev machine: daemon-client 187 lib + 2 integration tests, src-tauri 56
+tests, web ui 1743 tests and `tsc -b` all green.
+
+- AC1: `platform_for_windows_is_native_and_never_probes_wsl`,
+  `no_wsl_exe_in_desktop_sources`; `wsl.rs` deleted. Covered by tests.
+- AC2: `windows_install_*` (checksum, mismatch keeps old binary, no root
+  exe, zip-slip), `asset_name_windows_amd64_and_arm64`,
+  `windows_target_from_os_arch`. Unit-covered; not yet exercised against a
+  real GitHub release (none carries a Windows zip until slice E ships).
+- AC3: `windows_spawn_detached_has_no_console_and_survives_parent`.
+- AC4: `windows_stop_*` (API shutdown then healthz wait; terminate only on
+  identity match; refuse unidentified).
+- AC5: `port_owner_via_iphelper_finds_listening_pid`,
+  `exe_path_for_pid_returns_image_path`.
+- AC6: `classify_wsl_forwarded_port_is_not_takeover_eligible`,
+  `windows_take_over_refused_for_foreign_owner`,
+  `install_refused_on_port_conflict_names_the_port`,
+  `take_over_refusal_never_applies_off_windows`; UI test hides Take over.
+- AC7: `windows_paths_pass_through_untranslated`, existing reveal/open argv
+  tests.
+- AC8: `daemon_status_reports_missing_git`,
+  `git_lookup_finds_program_files_cmd_git`; UI prerequisite notice test.
+- AC9: web tests for unsupported text, Windows paths, WSL notice.
+- AC10: NOT yet verified (needs the real app on a real machine).
