@@ -213,12 +213,13 @@ function countModelsInView(view: ModelBrowserView, providers: BrowserProvider[])
   return provider?.modelSelection.kind === "models" ? getProviderModelRows(provider).length : 0;
 }
 
-/** Desktop popover height follows the view's row count, clamped (Paseo G7). */
+/** Desktop popover height follows the view's row count, clamped (Paseo G7); `extraRows` counts non-model rows (profiles, headings). */
 export function resolveDesktopFixedHeight(
   view: ModelBrowserView,
   providers: BrowserProvider[],
+  extraRows = 0,
 ): number {
-  const modelCount = countModelsInView(view, providers);
+  const modelCount = countModelsInView(view, providers) + extraRows;
   return Math.min(
     Math.max(
       DESKTOP_PROVIDER_VIEW_MIN_HEIGHT,

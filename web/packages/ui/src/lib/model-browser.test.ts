@@ -122,6 +122,13 @@ describe("desktop fixed height", () => {
     // A loading provider contributes no rows.
     expect(resolveDesktopFixedHeight({ kind: "provider", providerId: "lazy", providerLabel: "Lazy" }, loading)).toBe(220);
   });
+
+  it("extra rows are added to the row count", () => {
+    // All view: 5 rows + 2 extra -> 80 + 7*40 = 360.
+    expect(resolveDesktopFixedHeight({ kind: "all" }, providers, 2)).toBe(360);
+    expect(resolveDesktopFixedHeight({ kind: "all" }, providers, 0)).toBe(280);
+    expect(resolveDesktopFixedHeight({ kind: "all" }, providers, 20)).toBe(400);
+  });
 });
 
 describe("groupProfilesByProviderModel", () => {
