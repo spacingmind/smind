@@ -687,42 +687,40 @@ describe("title overflow and indentation (S7)", () => {
     }
   });
 
-  it("indentation is per-row padding by depth: the gutter is always reserved, 12px per level below", async () => {
+  it("indentation is per-row padding by depth: the gutter is reserved only where a root has children, 10px per level below", async () => {
     await mountSidebar(TREE);
 
-    // Every depth-0 row sits at the 4px inset plus the always-reserved 12px
-    // chevron gutter; each level below adds 12px.
-    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("16px");
-    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("28px");
-    expect(taskItem(CODER.ID).style.paddingLeft).toBe("40px");
+    // A list with a parent: depth-0 rows sit at the 12px chevron gutter; each
+    // level below adds 10px.
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("12px");
+    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("22px");
+    expect(taskItem(CODER.ID).style.paddingLeft).toBe("32px");
     // Siblings at one depth share one left edge.
-    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("28px");
+    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("22px");
   });
 
-  it("depth-0 rows have identical padding with and without a parent sibling", async () => {
+  it("a flat list reserves no chevron gutter; a list with a parent does", async () => {
     await mountSidebar(TREE);
     await mountSidebar([makeTask(11, "A"), makeTask(12, "B")]);
 
-    // The root list's shape (contains a parent or not) no longer shifts the
-    // column: a depth-0 title starts at the same x in both mounts -- and in
-    // the flat views, which render roots at the same padding.
-    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("16px");
-    expect(taskItem(11).style.paddingLeft).toBe("16px");
-    expect(taskItem(12).style.paddingLeft).toBe("16px");
+    // No root in the flat mount has children, so its titles take the gutter's
+    // 12px back (the parent-bearing mount keeps it for its chevron).
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("12px");
+    expect(taskItem(11).style.paddingLeft).toBe("0px");
+    expect(taskItem(12).style.paddingLeft).toBe("0px");
   });
 
-  it("flat lists render root rows at the same padding as the tree", async () => {
+  it("flat views (pinned, search) render root rows with no gutter", async () => {
     window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([ROOT.ID]));
     await mountSidebar(TREE);
-    const treePad = taskItem(ROOT.ID).style.paddingLeft;
 
     const pinnedRow = within(screen.getByTestId("sidebar-pinned-section")).getAllByTestId("sidebar-task-item")[0]!;
-    expect(pinnedRow.style.paddingLeft).toBe(treePad);
+    expect(pinnedRow.style.paddingLeft).toBe("0px");
 
     fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
     fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "Root" } });
     const searchRow = (await screen.findAllByTestId("sidebar-task-item"))[0]!;
-    expect(searchRow.style.paddingLeft).toBe(treePad);
+    expect(searchRow.style.paddingLeft).toBe("0px");
   });
 
   it("a parent's chevron sits in the gutter directly left of its own status slot", async () => {
@@ -747,13 +745,18 @@ describe("title overflow and indentation (S7)", () => {
       expect(list.className).toContain("border-l-0");
     }
     for (const list of lists.filter((l) => l.getAttribute("data-testid") === "sidebar-container-content")) {
-      // Workspace/pinned/status content always carries the guide line under its
-      // header's icon; a space's only on a wide sidebar (container query).
-      const wide = ["space", "ungrouped"].includes(list.getAttribute("data-container-kind") ?? "");
-      const pre = wide ? "@min-[14rem]/sb:" : "";
-      expect(list.className).toContain(`${pre}ml-4`);
-      expect(list.className).toContain(`${pre}border-l`);
-      expect(list.className).toContain(`${pre}pl-1`);
+      // Workspace/pinned/status content carries the guide line under its
+      // header's icon; a space's (or "Ungrouped") content carries none -- the
+      // workspace's guide already frames it, and a second level ate the titles.
+      const spaceLike = ["space", "ungrouped"].includes(list.getAttribute("data-container-kind") ?? "");
+      if (spaceLike) {
+        expect(list.className).not.toContain("ml-4");
+        expect(list.className).toContain("border-l-0");
+      } else {
+        expect(list.className).toContain("ml-4");
+        expect(list.className).toContain("border-l");
+        expect(list.className).toContain("pl-1");
+      }
     }
   });
 
