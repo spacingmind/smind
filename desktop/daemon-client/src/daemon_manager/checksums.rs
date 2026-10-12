@@ -46,11 +46,8 @@ pub fn verify(data: &[u8], expected_hex: &str) -> bool {
 }
 
 /// hex_eq compares two hex digests case-insensitively, trimming
-/// whitespace -- used both by `verify` above (hash computed in-process,
-/// e.g. the macOS/native path) and by the WSL2 path, which computes the
-/// hash *inside* the distro (`sha256sum`) and only ever brings the
-/// resulting hex string back across the `wsl.exe` boundary, never the
-/// tarball's raw bytes.
+/// whitespace -- used by `verify` above and by callers that compute the
+/// hash out of process and bring back only the resulting hex string.
 pub fn hex_eq(a: &str, b: &str) -> bool {
     a.trim().eq_ignore_ascii_case(b.trim())
 }
