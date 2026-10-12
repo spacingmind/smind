@@ -3,6 +3,7 @@
 // ProviderInfo/ModelInfo wire types for the combined provider+model picker.
 
 import type { ProviderInfo } from "@/lib/types";
+import { compareMatchScores, scoreTextFields } from "./text-match";
 
 export interface ModelRow {
   /** Row identity — `${provider}:${modelId}`. Empty modelId is the provider's synthetic default row. */
@@ -43,6 +44,13 @@ export interface ModelProfileRef {
 
 export const DEFAULT_MODEL_LABEL = "Default model";
 
+// Desktop popover sizing, Paseo model-browser.tsx: the height follows the row
+// count in the current view, clamped.
+export const DESKTOP_PROVIDER_VIEW_MIN_HEIGHT = 220;
+export const DESKTOP_PROVIDER_VIEW_MAX_HEIGHT = 400;
+export const DESKTOP_PROVIDER_VIEW_BASE_HEIGHT = 80;
+export const DESKTOP_MODEL_ROW_HEIGHT = 40;
+
 function buildModelRowKey(provider: string, modelId: string): string {
   return `${provider}:${modelId}`;
 }
@@ -61,9 +69,16 @@ function buildSyntheticDefaultRow(provider: string, providerLabel: string): Mode
 export function buildBrowserProviders(
   providers: ProviderInfo[],
   health: Record<string, ProviderHealth | undefined>,
+  options?: { loading?: boolean },
 ): BrowserProvider[] {
   return providers.map((info) => {
     const label = info.label ?? info.id;
+    if (options?.loading) {
+      const h = health[info.id];
+      return h && h.ok === false
+        ? { id: info.id, label, modelSelection: { kind: "loading" as const }, unavailableReason: h.detail || "Unavailable" }
+        : { id: info.id, label, modelSelection: { kind: "loading" as const } };
+    }
     const rows: ModelRow[] = [buildSyntheticDefaultRow(info.id, label)];
     for (const model of info.models ?? []) {
       rows.push({
@@ -93,44 +108,17 @@ export function getAllModelRows(providers: BrowserProvider[]): ModelRow[] {
     .flatMap((p) => getProviderModelRows(p));
 }
 
-function isWordBoundaryChar(ch: string): boolean {
-  return !/[a-z0-9]/.test(ch);
-}
-
-function scoreField(field: string, normalizedQuery: string): number {
-  const idx = field.toLowerCase().indexOf(normalizedQuery);
-  if (idx === 0) {
-    return 300;
-  }
-  if (idx > 0) {
-    return isWordBoundaryChar(field.toLowerCase()[idx - 1] ?? "") ? 200 : 100;
-  }
-  // In-order subsequence.
-  let pos = 0;
-  for (const ch of field.toLowerCase()) {
-    if (ch === normalizedQuery[pos]) {
-      pos += 1;
-      if (pos === normalizedQuery.length) {
-        return 10;
-      }
-    }
-  }
-  return 0;
+/** Rows a provider actually offers — the synthetic default row does not count (G15). */
+export function getProviderModelCount(provider: BrowserProvider): number {
+  return getProviderModelRows(provider).filter((row) => row.modelId !== "").length;
 }
 
 function getModelRowSearchFields(row: ModelRow): string[] {
   return [row.modelLabel, row.modelId, row.providerLabel, row.description ?? ""];
 }
 
-function scoreModelRow(row: ModelRow, normalizedQuery: string): number {
-  let best = 0;
-  for (const field of getModelRowSearchFields(row)) {
-    const score = scoreField(field, normalizedQuery);
-    if (score > best) {
-      best = score;
-    }
-  }
-  return best;
+function scoreModelRow(row: ModelRow, normalizedQuery: string) {
+  return scoreTextFields(normalizedQuery, getModelRowSearchFields(row));
 }
 
 export function filterAndRankModelRows(
@@ -141,9 +129,17 @@ export function filterAndRankModelRows(
     return rows;
   }
   const scored = rows
-    .map((row, index) => ({ row, index, score: scoreModelRow(row, normalizedQuery) }))
-    .filter((entry) => entry.score > 0);
-  scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    .map((row) => ({ row, score: scoreModelRow(row, normalizedQuery) }))
+    .filter((entry): entry is { row: ModelRow; score: NonNullable<typeof entry.score> } =>
+      Boolean(entry.score),
+    );
+
+  scored.sort((a, b) => {
+    const cmp = compareMatchScores(a.score, b.score);
+    if (cmp !== 0) return cmp;
+    return a.row.modelLabel.localeCompare(b.row.modelLabel);
+  });
+
   return scored.map((entry) => entry.row);
 }
 
@@ -173,17 +169,22 @@ export function resolveModelBrowserAllView({
   return { kind: "searchResults", rows };
 }
 
-/** Where the picker lands when it opens. A sole provider skips the redundant root view. */
+/**
+ * Where the picker lands when it opens. A sole provider skips the redundant
+ * root view; otherwise the selected provider's view wins — even for the
+ * default model ("", ADR-0025) and when profiles exist (deviation from Paseo's
+ * hasProfiles rule, see the plan's G1). `selectedModel` and `hasProfiles` are
+ * accepted (and ignored) so existing callers compile.
+ */
 export function resolveInitialModelBrowserView({
   providers,
   selectedProvider,
-  selectedModel,
-  hasProfiles,
 }: {
   providers: BrowserProvider[];
   selectedProvider: string;
-  selectedModel: string;
-  hasProfiles: boolean;
+  /** Accepted (and ignored) so existing callers compile; see the doc comment. */
+  selectedModel?: string;
+  hasProfiles?: boolean;
 }): ModelBrowserView {
   const singleProvider = providers.length === 1 ? providers[0] : undefined;
   if (singleProvider) {
@@ -194,11 +195,7 @@ export function resolveInitialModelBrowserView({
     };
   }
 
-  if (hasProfiles) {
-    return { kind: "all" };
-  }
-
-  if (selectedProvider.length > 0 && selectedModel.length > 0) {
+  if (selectedProvider.length > 0) {
     const provider = providers.find((entry) => entry.id === selectedProvider);
     if (provider) {
       return { kind: "provider", providerId: provider.id, providerLabel: provider.label };
@@ -206,6 +203,29 @@ export function resolveInitialModelBrowserView({
   }
 
   return { kind: "all" };
+}
+
+function countModelsInView(view: ModelBrowserView, providers: BrowserProvider[]): number {
+  if (view.kind === "all") {
+    return getAllModelRows(providers).length;
+  }
+  const provider = providers.find((entry) => entry.id === view.providerId);
+  return provider?.modelSelection.kind === "models" ? getProviderModelRows(provider).length : 0;
+}
+
+/** Desktop popover height follows the view's row count, clamped (Paseo G7). */
+export function resolveDesktopFixedHeight(
+  view: ModelBrowserView,
+  providers: BrowserProvider[],
+): number {
+  const modelCount = countModelsInView(view, providers);
+  return Math.min(
+    Math.max(
+      DESKTOP_PROVIDER_VIEW_MIN_HEIGHT,
+      DESKTOP_PROVIDER_VIEW_BASE_HEIGHT + modelCount * DESKTOP_MODEL_ROW_HEIGHT,
+    ),
+    DESKTOP_PROVIDER_VIEW_MAX_HEIGHT,
+  );
 }
 
 /**
@@ -231,6 +251,10 @@ export function groupProfilesByProviderModel<T extends ModelProfileRef>(
   return lookup;
 }
 
+/**
+ * Trigger label is the model label only (Paseo buildSelectedTriggerLabel + G11)
+ * — the UI shows a provider glyph beside it.
+ */
 export function resolveTriggerLabel({
   providers,
   selectedProvider,
@@ -244,16 +268,41 @@ export function resolveTriggerLabel({
   if (!provider) {
     return "Select model";
   }
-  if (!selectedModel) {
-    return provider.label;
+  if (provider.modelSelection.kind === "loading") {
+    return "Loading…";
+  }
+  if (provider.modelSelection.kind === "error") {
+    return "Error";
   }
   const rows = getProviderModelRows(provider);
+  if (!selectedModel) {
+    const defaultRow = rows.find((row) => row.isDefault && row.modelId !== "");
+    return defaultRow?.modelLabel ?? provider.label;
+  }
   const row = rows.find((entry) => entry.modelId === selectedModel);
-  if (row) {
-    return `${provider.label} · ${row.modelLabel}`;
+  return row?.modelLabel ?? selectedModel;
+}
+
+/** Trigger tooltip/aria text: provider and model, de-duplicated when they coincide. */
+export function resolveTriggerTitle({
+  providers,
+  selectedProvider,
+  selectedModel,
+}: {
+  providers: BrowserProvider[];
+  selectedProvider: string;
+  selectedModel: string;
+}): string {
+  const label = resolveTriggerLabel({ providers, selectedProvider, selectedModel });
+  if (label === "Select model" || label === "Loading…" || label === "Error") {
+    return label;
   }
-  if (selectedModel) {
-    return `${provider.label} · ${selectedModel}`;
+  const provider = providers.find((entry) => entry.id === selectedProvider);
+  if (!provider) {
+    return label;
   }
-  return provider.label;
+  if (label === provider.label || label.startsWith(`${provider.label} `)) {
+    return provider.label;
+  }
+  return `${provider.label} · ${label}`;
 }

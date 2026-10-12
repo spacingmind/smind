@@ -3,11 +3,14 @@ import type { ModelInfo, ProviderInfo } from "@/lib/types";
 import {
   buildBrowserProviders,
   getAllModelRows,
+  getProviderModelCount,
   getProviderModelRows,
   groupProfilesByProviderModel,
+  resolveDesktopFixedHeight,
   resolveInitialModelBrowserView,
   resolveModelBrowserAllView,
   resolveTriggerLabel,
+  resolveTriggerTitle,
   type BrowserProvider,
 } from "./model-browser";
 
@@ -15,8 +18,8 @@ function info(id: string, label: string | undefined, models?: ModelInfo[]): Prov
   return { id: id as ProviderInfo["id"], label, models };
 }
 
-function model(id: string, label: string): ModelInfo {
-  return { id, label };
+function model(id: string, label: string, extra?: Partial<ModelInfo>): ModelInfo {
+  return { id, label, ...extra };
 }
 
 describe("model browser initial view", () => {
@@ -45,13 +48,35 @@ describe("model browser initial view", () => {
     ).toEqual({ kind: "provider", providerId: "pi", providerLabel: "Pi" });
   });
 
-  it("opens the root so pinned profiles are reachable", () => {
+  it("opens the selected provider even for the default model", () => {
+    expect(
+      resolveInitialModelBrowserView({
+        providers: [codex, pi],
+        selectedProvider: "pi",
+        selectedModel: "",
+        hasProfiles: false,
+      }),
+    ).toEqual({ kind: "provider", providerId: "pi", providerLabel: "Pi" });
+  });
+
+  it("opens the selected provider when profiles exist", () => {
     expect(
       resolveInitialModelBrowserView({
         providers: [codex, pi],
         selectedProvider: "pi",
         selectedModel: "pi-pro",
         hasProfiles: true,
+      }),
+    ).toEqual({ kind: "provider", providerId: "pi", providerLabel: "Pi" });
+  });
+
+  it("falls back to the root when the provider is gone", () => {
+    expect(
+      resolveInitialModelBrowserView({
+        providers: [codex, pi],
+        selectedProvider: "gemini",
+        selectedModel: "gemini-3",
+        hasProfiles: false,
       }),
     ).toEqual({ kind: "all" });
   });
@@ -66,16 +91,36 @@ describe("model browser initial view", () => {
       }),
     ).toEqual({ kind: "provider", providerId: "pi", providerLabel: "Pi" });
   });
+});
 
-  it("falls back to the root when the selected provider is gone", () => {
-    expect(
-      resolveInitialModelBrowserView({
-        providers: [codex, pi],
-        selectedProvider: "gemini",
-        selectedModel: "gemini-3",
-        hasProfiles: false,
-      }),
-    ).toEqual({ kind: "all" });
+describe("desktop fixed height", () => {
+  const providers = buildBrowserProviders(
+    [
+      info("claude", "Claude Code", [model("opus-5", "Opus 5"), model("sonnet-4.6", "Sonnet 4.6")]),
+      info("codex", "Codex", [model("gpt-5.4", "GPT-5.4")]),
+    ],
+    {},
+  );
+
+  it("desktop height grows with rows and clamps at 220 and 400", () => {
+    // Provider view: claude has 3 rows (default + 2 models) -> 80 + 3*40 = 200 -> clamped to 220.
+    expect(resolveDesktopFixedHeight({ kind: "provider", providerId: "claude", providerLabel: "Claude Code" }, providers)).toBe(220);
+    // Provider view: codex has 2 rows -> 80 + 2*40 = 160 -> clamped to 220.
+    expect(resolveDesktopFixedHeight({ kind: "provider", providerId: "codex", providerLabel: "Codex" }, providers)).toBe(220);
+    // All view: 3 + 2 = 5 rows -> 80 + 5*40 = 280.
+    expect(resolveDesktopFixedHeight({ kind: "all" }, providers)).toBe(280);
+
+    const many = buildBrowserProviders(
+      [info("big", "Big", Array.from({ length: 10 }, (_, i) => model(`m${i}`, `M${i}`)))],
+      {},
+    );
+    // 11 rows -> 80 + 440 = 520 -> clamped to 400.
+    expect(resolveDesktopFixedHeight({ kind: "provider", providerId: "big", providerLabel: "Big" }, many)).toBe(400);
+    expect(resolveDesktopFixedHeight({ kind: "all" }, many)).toBe(400);
+
+    const loading = buildBrowserProviders([info("lazy", "Lazy")], {}, { loading: true });
+    // A loading provider contributes no rows.
+    expect(resolveDesktopFixedHeight({ kind: "provider", providerId: "lazy", providerLabel: "Lazy" }, loading)).toBe(220);
   });
 });
 
@@ -247,29 +292,100 @@ describe("browser providers", () => {
     expect(providers[1]!.unavailableReason).toBe("Unavailable");
     expect(getAllModelRows(providers)).toEqual([]);
   });
+
+  it("provider count excludes the synthetic default row", () => {
+    const [claude, kimi] = buildBrowserProviders(
+      [info("claude", "Claude Code", [model("opus-5", "Opus 5")]), info("kimi", undefined)],
+      {},
+    );
+
+    expect(getProviderModelCount(claude!)).toBe(1);
+    expect(getProviderModelCount(kimi!)).toBe(0);
+  });
+
+  it("a loading provider has no model rows and a Loading label", () => {
+    const providers = buildBrowserProviders(
+      [info("claude", "Claude Code", [model("opus-5", "Opus 5")])],
+      {},
+      { loading: true },
+    );
+
+    expect(getProviderModelRows(providers[0]!)).toEqual([]);
+    expect(
+      resolveTriggerLabel({ providers, selectedProvider: "claude", selectedModel: "opus-5" }),
+    ).toBe("Loading…");
+  });
+});
+
+describe("search ranking", () => {
+  it("ranking breaks ties by model label", () => {
+    const providers = buildBrowserProviders(
+      [
+        info("a", "A", [model("opus-zeta", "opus zeta"), model("opus-alpha", "opus alpha")]),
+        info("b", "B", [model("opus-mid", "opus mid")]),
+      ],
+      {},
+    );
+    // Every row hits "opus" as a whole word at the same offset — the tie is
+    // broken by model label, not input order.
+    const view = resolveModelBrowserAllView({
+      providers,
+      normalizedQuery: "opus",
+      isSearchFocused: true,
+    });
+
+    expect(view.kind === "searchResults" ? view.rows.map((row) => row.key) : []).toEqual([
+      "a:opus-alpha",
+      "b:opus-mid",
+      "a:opus-zeta",
+    ]);
+  });
 });
 
 describe("trigger label", () => {
   const providers = buildBrowserProviders(
-    [info("claude", "Claude Code", [model("opus-5", "Opus 5")])],
+    [info("claude", "Claude Code", [model("opus-5", "Opus 5"), model("sonnet-4.6", "Sonnet 4.6", { default: true })])],
     {},
   );
 
-  it("trigger label is provider and model, provider alone for the default model", () => {
+  it("trigger label is the model label, the catalog default for \"\", the raw id when unlisted", () => {
     expect(
       resolveTriggerLabel({ providers, selectedProvider: "claude", selectedModel: "opus-5" }),
-    ).toBe("Claude Code · Opus 5");
+    ).toBe("Opus 5");
+    // "" -> the catalog's default model, not the synthetic row's label.
     expect(
       resolveTriggerLabel({ providers, selectedProvider: "claude", selectedModel: "" }),
-    ).toBe("Claude Code");
+    ).toBe("Sonnet 4.6");
+    expect(
+      resolveTriggerLabel({ providers, selectedProvider: "claude", selectedModel: "haiku" }),
+    ).toBe("haiku");
     expect(
       resolveTriggerLabel({ providers, selectedProvider: "gemini", selectedModel: "gemini-3" }),
     ).toBe("Select model");
   });
 
-  it("an unlisted model id shows as its raw id", () => {
+  it("falls back to the provider label when the catalog has no default model", () => {
+    const bare = buildBrowserProviders([info("kimi", "Kimi", [model("k2", "K2")])], {});
+
     expect(
-      resolveTriggerLabel({ providers, selectedProvider: "claude", selectedModel: "sonnet-4.6" }),
-    ).toBe("Claude Code · sonnet-4.6");
+      resolveTriggerLabel({ providers: bare, selectedProvider: "kimi", selectedModel: "" }),
+    ).toBe("Kimi");
+  });
+
+  it("trigger title carries provider and model", () => {
+    expect(
+      resolveTriggerTitle({ providers, selectedProvider: "claude", selectedModel: "opus-5" }),
+    ).toBe("Claude Code · Opus 5");
+    expect(
+      resolveTriggerTitle({ providers, selectedProvider: "claude", selectedModel: "" }),
+    ).toBe("Claude Code · Sonnet 4.6");
+    expect(
+      resolveTriggerTitle({ providers, selectedProvider: "gemini", selectedModel: "gemini-3" }),
+    ).toBe("Select model");
+    // The provider-label fallback does not duplicate itself.
+    const bare = buildBrowserProviders([info("kimi", "Kimi", [model("k2", "K2")])], {});
+    expect(
+      resolveTriggerTitle({ providers: bare, selectedProvider: "kimi", selectedModel: "" }),
+    ).toBe("Kimi");
   });
 });
