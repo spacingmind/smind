@@ -68,7 +68,7 @@ export const RunTimeline = memo(function RunTimeline({
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
-    <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-2">
+    <li data-testid="run-entry" data-run-id={run.id} className="flex flex-col gap-2">
       <div className="group/prompt flex flex-col items-end gap-0.5">
         <p
           className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
@@ -89,86 +89,89 @@ export const RunTimeline = memo(function RunTimeline({
         </MessageActions>
       </div>
 
-      {run.items.length > 0 && (
-        <ol className="space-y-1.5" data-testid="run-timeline">
-          {groups.map((group) =>
-            group.kind === "tool-group" ? (
-              <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-            ) : (
-              <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-            ),
-          )}
-        </ol>
-      )}
+      {/* The answer side (items, error, footer) is its own hover group, so hovering the prompt reveals only the prompt bar. */}
+      <div className="group/answer flex flex-col gap-2">
+        {run.items.length > 0 && (
+          <ol className="space-y-1.5" data-testid="run-timeline">
+            {groups.map((group) =>
+              group.kind === "tool-group" ? (
+                <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ) : (
+                <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ),
+            )}
+          </ol>
+        )}
 
-      {run.err && (
-        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
-          <p className="text-ui-sm text-destructive" data-testid="run-error">
-            {run.err}
-          </p>
-          {onRetry && canRetryWithHigherEffort(run) && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              data-testid="run-retry-higher-effort"
-              onClick={() => onRetry(run)}
-            >
-              Retry with higher effort
-            </Button>
-          )}
-        </div>
-      )}
+        {run.err && (
+          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+            <p className="text-ui-sm text-destructive" data-testid="run-error">
+              {run.err}
+            </p>
+            {onRetry && canRetryWithHigherEffort(run) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="run-retry-higher-effort"
+                onClick={() => onRetry(run)}
+              >
+                Retry with higher effort
+              </Button>
+            )}
+          </div>
+        )}
 
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
-        <div
-          className={cn(
-            "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
-            run.status === "done" &&
-              "opacity-70 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
-          )}
-          data-testid="run-meta"
-        >
-          <span className="flex items-center gap-1.5">
-            <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
-            <span data-testid="run-status">{run.status}</span>
-          </span>
-          <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
-          {run.model && (
-            // ADR-0025: only a *requested* model is shown -- a default run has no chip.
-            <span
-              data-testid="run-model-chip"
-              title={`Requested model: ${run.model}`}
-              className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
-            >
-              {run.model}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
+          <div
+            className={cn(
+              "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
+              run.status === "done" &&
+                "opacity-70 group-focus-within/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
+            )}
+            data-testid="run-meta"
+          >
+            <span className="flex items-center gap-1.5">
+              <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
+              <span data-testid="run-status">{run.status}</span>
             </span>
-          )}
-          {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
-          {stop && (
-            <span
-              data-testid="run-stop-reason"
-              data-tone={stop.tone}
-              title={stop.hint}
-              className={stop.tone === "warning" ? "text-warning" : undefined}
-            >
-              {stop.label}
-              {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
-            </span>
-          )}
-          <RunUsagePill usage={run.usage} provider={run.provider} />
+            <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+            {run.model && (
+              // ADR-0025: only a *requested* model is shown -- a default run has no chip.
+              <span
+                data-testid="run-model-chip"
+                title={`Requested model: ${run.model}`}
+                className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
+              >
+                {run.model}
+              </span>
+            )}
+            {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
+            {stop && (
+              <span
+                data-testid="run-stop-reason"
+                data-tone={stop.tone}
+                title={stop.hint}
+                className={stop.tone === "warning" ? "text-warning" : undefined}
+              >
+                {stop.label}
+                {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
+              </span>
+            )}
+            <RunUsagePill usage={run.usage} provider={run.provider} />
+          </div>
+          <MessageActions group="run" className="ml-auto" data-testid="run-actions">
+            <RunCopyMenu run={run} />
+            {onRerun && run.status !== "running" && (
+              <MessageAction
+                label="Re-run this prompt"
+                icon={<RotateCcw aria-hidden />}
+                data-testid="run-rerun"
+                onClick={() => onRerun(run)}
+              />
+            )}
+          </MessageActions>
         </div>
-        <MessageActions group="run" className="ml-auto" data-testid="run-actions">
-          <RunCopyMenu run={run} />
-          {onRerun && run.status !== "running" && (
-            <MessageAction
-              label="Re-run this prompt"
-              icon={<RotateCcw aria-hidden />}
-              data-testid="run-rerun"
-              onClick={() => onRerun(run)}
-            />
-          )}
-        </MessageActions>
       </div>
     </li>
   );

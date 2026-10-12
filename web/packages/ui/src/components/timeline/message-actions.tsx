@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
  */
 const REVEAL_BY_GROUP = {
   prompt: "group-hover/prompt:opacity-100",
-  run: "group-hover:opacity-100",
+  run: "group-hover/answer:opacity-100",
 } as const;
 
 /**
@@ -30,7 +30,7 @@ export function MessageActions({
     <TooltipProvider>
       <div
         className={cn(
-          "flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 [@media(hover:none)]:opacity-100",
+          "flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100",
           REVEAL_BY_GROUP[group],
           className,
         )}
