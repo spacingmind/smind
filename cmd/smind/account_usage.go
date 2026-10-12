@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -86,20 +87,27 @@ func runAccountUsage(ctx context.Context, dial func(context.Context) (wsCaller, 
 	if refresh {
 		mode = "refresh"
 	}
-	var result accountUsageResponse
-	if err := call(ctx, "account.usage", map[string]any{"mode": mode}, &result); err != nil {
+	var raw json.RawMessage
+	if err := call(ctx, "account.usage", map[string]any{"mode": mode}, &raw); err != nil {
 		fmt.Fprintf(stderr, "account usage: %v\n", err)
 		return 1
 	}
 
 	if jsonOut {
-		b, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
+		// The daemon's result verbatim, so keys this CLI does not model
+		// (e.g. a later cooldown) are not dropped.
+		var buf bytes.Buffer
+		if err := json.Indent(&buf, raw, "", "  "); err != nil {
 			fmt.Fprintf(stderr, "account usage: %v\n", err)
 			return 1
 		}
-		fmt.Fprintln(stdout, string(b))
+		fmt.Fprintln(stdout, buf.String())
 		return 0
+	}
+	var result accountUsageResponse
+	if err := json.Unmarshal(raw, &result); err != nil {
+		fmt.Fprintf(stderr, "account usage: %v\n", err)
+		return 1
 	}
 	renderAccountUsage(stdout, &result, refresh, now)
 	return 0
