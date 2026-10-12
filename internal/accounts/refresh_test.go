@@ -534,3 +534,55 @@ func TestRegistry_EnsureFresh_RefresherErrorReleasesLock(t *testing.T) {
 		t.Fatal("lock not released after refresher error; retry deadlocked")
 	}
 }
+
+// TestRegistry_CredentialReplacedHookFiresOnlyOnReplace is plan scenario
+// registry_credential_replaced_hook_fires_only_on_replace.
+func TestRegistry_CredentialReplacedHookFiresOnlyOnReplace(t *testing.T) {
+	t.Parallel()
+
+	r := newTestRegistry(t)
+	created, err := r.AddOAuth("anthropic", "personal", OAuthCredential{
+		AccessToken:  "access-old",
+		RefreshToken: "refresh-old",
+		ExpiresAt:    time.Now().Add(-time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("AddOAuth() error = %v", err)
+	}
+	var fired []int64
+	r.SetCredentialReplacedHook(func(id int64) { fired = append(fired, id) })
+
+	refresher := &fakeRefresher{result: OAuthCredential{
+		AccessToken: "access-new", RefreshToken: "refresh-new", ExpiresAt: time.Now().Add(time.Hour),
+	}}
+	if _, err := r.EnsureFresh(context.Background(), created.ID, refresher); err != nil {
+		t.Fatalf("EnsureFresh() error = %v", err)
+	}
+	if !refresher.called || len(fired) != 0 {
+		t.Fatalf("after refresh: refreshed = %v, hook calls = %v, want refreshed and no hook", refresher.called, fired)
+	}
+
+	if _, err := r.ReplaceCredential(created.ID, "", ""); err == nil {
+		t.Fatal("ReplaceCredential(empty) error = nil")
+	}
+	if len(fired) != 0 {
+		t.Fatalf("hook fired on failed replace: %v", fired)
+	}
+
+	if _, err := r.ReplaceCredential(created.ID, "sk-new", ""); err != nil {
+		t.Fatalf("ReplaceCredential() error = %v", err)
+	}
+	if len(fired) != 1 || fired[0] != created.ID {
+		t.Fatalf("hook calls after replace = %v, want [%d]", fired, created.ID)
+	}
+
+	r.SetCredentialReplacedHook(nil) // nil hook and nil registry are safe
+	if _, err := r.ReplaceCredential(created.ID, "sk-newer", ""); err != nil {
+		t.Fatalf("ReplaceCredential() with nil hook error = %v", err)
+	}
+	var nilReg *Registry
+	nilReg.SetCredentialReplacedHook(func(int64) {})
+	if len(fired) != 1 {
+		t.Fatalf("hook calls = %v, want still 1", fired)
+	}
+}

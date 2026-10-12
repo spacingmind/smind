@@ -46,6 +46,11 @@ type Registry struct {
 	notifierMu sync.Mutex
 	notifier   Notifier
 
+	// credReplacedHook, if set via SetCredentialReplacedHook, is invoked
+	// after a successful ReplaceCredential (never on the refresh path).
+	credHookMu       sync.Mutex
+	credReplacedHook func(accountID int64)
+
 	// refreshMu guards refreshLocks. Entries are kept for the Registry's
 	// lifetime rather than dropped when unused: account counts are small
 	// and pinning avoids lock-reuse races.
@@ -77,6 +82,32 @@ func (r *Registry) getNotifier() Notifier {
 	n := r.notifier
 	r.notifierMu.Unlock()
 	return n
+}
+
+// SetCredentialReplacedHook registers fn, called with the account id after a
+// successful ReplaceCredential (ADR-0028 §7: a credential change clears the
+// passive cooldown, so the daemon drops its in-memory cache). It fires after
+// the store call (which already deleted the persisted cooldown rows) and
+// before NotifyAccountUpdated, so a subscriber reacting to the update event
+// never sees a stale cooldown. The refresh path (EnsureFresh) does not call
+// it. Nil-safe; a nil fn clears the hook.
+func (r *Registry) SetCredentialReplacedHook(fn func(accountID int64)) {
+	if r == nil {
+		return
+	}
+	r.credHookMu.Lock()
+	r.credReplacedHook = fn
+	r.credHookMu.Unlock()
+}
+
+func (r *Registry) getCredentialReplacedHook() func(accountID int64) {
+	if r == nil {
+		return nil
+	}
+	r.credHookMu.Lock()
+	fn := r.credReplacedHook
+	r.credHookMu.Unlock()
+	return fn
 }
 
 // AddAPIKey creates a new api_key account.
@@ -207,7 +238,8 @@ func (r *Registry) Rename(id int64, label string) (store.Account, error) {
 }
 
 // ReplaceCredential swaps the account's credential (and possibly its type)
-// with the parsed credential, firing NotifyAccountUpdated on success. It is
+// with the parsed credential, firing the credential-replaced hook and then
+// NotifyAccountUpdated on success. It is
 // account.updateCredential's registry call: parsing mirrors account.add
 // exactly (see ParseCredential).
 func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (store.Account, error) {
@@ -221,6 +253,9 @@ func (r *Registry) ReplaceCredential(id int64, credential, baseURL string) (stor
 	updated, err := r.store.ReplaceAccountCredential(id, credentialType, credentialData)
 	if err != nil {
 		return store.Account{}, err
+	}
+	if fn := r.getCredentialReplacedHook(); fn != nil {
+		fn(id)
 	}
 	if n := r.getNotifier(); n != nil {
 		n.NotifyAccountUpdated(updated)
