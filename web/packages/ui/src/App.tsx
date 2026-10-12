@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { Archive, Columns2, Copy, Pencil } from "lucide-react";
+import { Archive, Columns2, Copy, Pencil, X } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -1696,6 +1696,14 @@ function PaneTabStrip({
   // read back off `event.over`.
   const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
+  // Keeps the active tab visible when the strip overflows (TB-AC5).
+  const tabScrollerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+    if (active && typeof active.scrollIntoView === "function") {
+      active.scrollIntoView({ inline: "nearest", block: "nearest" });
+    }
+  }, [activeKey]);
 
   return (
     <div
@@ -1708,7 +1716,9 @@ function PaneTabStrip({
       // pane's content by its width when focus moves, and only means
       // anything once there's more than one pane to tell apart.
       className={cn(
-        "relative flex h-full flex-col overflow-hidden rounded-lg border bg-panel",
+        "relative flex h-full flex-col overflow-hidden bg-panel",
+        // A lone pane is frameless: its parent is already the inset panel.
+        paneCount > 1 && "rounded-lg border",
         focused && paneCount > 1 && "ring-1 ring-inset ring-ring",
       )}
       data-testid={focused ? "pane-focused" : undefined}
@@ -1726,9 +1736,14 @@ function PaneTabStrip({
         onValueChange={onActivate}
         className="h-full gap-0"
       >
-        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
+        <div className="flex h-9 shrink-0 items-center gap-1 border-b px-1">
           {tabs.length > 0 && (
-            <TabsList className="w-fit">
+            <div
+              ref={tabScrollerRef}
+              data-testid="tab-scroller"
+              className="min-w-0 flex-initial overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            >
+            <TabsList variant="flat" className="w-max">
               {tabs.map((entry, index) => (
                 <DraggableTabTrigger
                   key={entry.key}
@@ -1748,6 +1763,7 @@ function PaneTabStrip({
                 />
               ))}
             </TabsList>
+            </div>
           )}
           <NewTabButton
             onOpen={(kind) => onOpenBase(kind, { pane: paneId })}
@@ -1805,6 +1821,10 @@ function PaneTabStrip({
     </div>
   );
 }
+
+/** Split/close stay mounted and focusable but only show on hover, focus within, or the active tab (needs `group/tab` on the trigger). */
+const TAB_AFFORDANCE_REVEAL =
+  "opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 group-data-[state=active]/tab:opacity-100";
 
 /**
  * One tab strip entry: the tab trigger itself plus its "Split" and close
@@ -1889,7 +1909,7 @@ function DraggableTabTrigger({
           ref={setNodeRef}
           value={entry.key}
           data-testid={`workspace-tab-${entry.kind}`}
-          className="max-w-48 gap-1.5"
+          className="group/tab max-w-48 gap-1.5"
           {...listeners}
         >
           <TabLabel entry={entry} />
@@ -1906,7 +1926,7 @@ function DraggableTabTrigger({
                 e.stopPropagation();
                 e.preventDefault();
               }}
-              className="flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+              className={cn("flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none", TAB_AFFORDANCE_REVEAL)}
             >
               {/* aria-hidden: this span's own aria-label already names it; without
                   hiding the icon too, it would be announced a second time as
@@ -1955,9 +1975,9 @@ function DraggableTabTrigger({
             e.preventDefault();
             onClose(entry.key);
           }}
-          className="rounded px-1 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none"
+          className={cn("flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:bg-hover hover:text-foreground focus-visible:ring-ring/50 focus-visible:ring-2 focus-visible:outline-none", TAB_AFFORDANCE_REVEAL)}
         >
-          <span aria-hidden="true">×</span>
+          <X aria-hidden="true" className="size-3" />
         </span>
       )}
         </TabsTrigger>
