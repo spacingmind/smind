@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import * as ResizablePrimitive from "react-resizable-panels"
 
 import { cn } from "@/lib/utils"
@@ -108,5 +108,71 @@ function ResizableHandle({
   )
 }
 
-export { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef }
+/**
+ * The sidebar split's handle (App.tsx): same look as ResizableHandle
+ * (4px hit area, 2px indicator after the hover delay / on focus / while
+ * dragging) but a plain `role="separator"` div -- the sidebar drag is
+ * hand-rolled (hooks/use-sidebar-resize.ts), not react-resizable-panels.
+ */
+function SidebarResizeHandle({
+  className,
+  onPointerEnter,
+  onPointerLeave,
+  onPointerDown,
+  onPointerUp,
+  onPointerCancel,
+  ...props
+}: React.ComponentProps<"div">) {
+  const [highlighted, setHighlighted] = useState(false)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearHoverTimer = () => {
+    if (hoverTimerRef.current !== null) {
+      clearTimeout(hoverTimerRef.current)
+      hoverTimerRef.current = null
+    }
+  }
+  useEffect(() => clearHoverTimer, [])
+
+  return (
+    <div
+      role="separator"
+      tabIndex={0}
+      aria-orientation="vertical"
+      data-slot="sidebar-resize-handle"
+      data-highlighted={highlighted ? "" : undefined}
+      onPointerEnter={(event) => {
+        clearHoverTimer()
+        hoverTimerRef.current = setTimeout(() => setHighlighted(true), HANDLE_HOVER_DELAY_MS)
+        onPointerEnter?.(event)
+      }}
+      onPointerLeave={(event) => {
+        clearHoverTimer()
+        // While a drag has the pointer captured, leave events don't fire; this only runs for a plain hover.
+        setHighlighted(false)
+        onPointerLeave?.(event)
+      }}
+      onPointerDown={(event) => {
+        clearHoverTimer()
+        setHighlighted(true)
+        onPointerDown?.(event)
+      }}
+      onPointerUp={(event) => {
+        setHighlighted(false)
+        onPointerUp?.(event)
+      }}
+      onPointerCancel={(event) => {
+        setHighlighted(false)
+        onPointerCancel?.(event)
+      }}
+      className={cn(
+        "relative z-20 flex h-full w-1 flex-none touch-none cursor-col-resize items-center justify-center bg-transparent ring-offset-background after:absolute after:inset-y-1 after:left-1/2 after:w-0.5 after:-translate-x-1/2 after:rounded-full after:bg-transparent after:transition-colors focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-hidden focus-visible:after:bg-foreground-subtlest/50 data-[highlighted]:after:bg-foreground-subtlest/50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
+export { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle, usePanelRef }
 export type { PanelImperativeHandle } from "react-resizable-panels"
