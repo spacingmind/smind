@@ -18,7 +18,7 @@ type Config struct {
 }
 
 // AccountUsageConfig is the user-facing surface of ADR-0028's usage
-// windows. Only these four knobs are configurable; the call-budget
+// windows. Only these five knobs are configurable; the call-budget
 // constants (30 s floor, 6/hour, 2 in flight, 5 min Retry-After default,
 // 6 h cap, 1->30 min backoff) are fixed.
 type AccountUsageConfig struct {
@@ -32,6 +32,9 @@ type AccountUsageConfig struct {
 	// ExhaustThresholdPct is the usage percent at/above which an account
 	// counts as exhausted; default 100, valid 1..100.
 	ExhaustThresholdPct int `yaml:"exhaustThresholdPct"`
+	// Passive switches the passive observer/cooldown (ADR-0028 §7) on.
+	// Default true; enabled:false also disables it.
+	Passive bool `yaml:"passive"`
 }
 
 // MinAccountUsageTTLSeconds is the lowest accepted accountUsage.ttlSeconds.
@@ -117,6 +120,7 @@ func Default() Config {
 			TTLSeconds:          MinAccountUsageTTLSeconds,
 			Routing:             true,
 			ExhaustThresholdPct: 100,
+			Passive:             true,
 		},
 	}
 }
