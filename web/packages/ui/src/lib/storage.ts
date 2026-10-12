@@ -30,6 +30,8 @@ export const STORAGE_KEYS = {
   unreadTasks: "smind:unread-tasks",
   sidebarGroupMode: "smind:sidebar-group-mode",
   collapsedTasks: "smind.sidebar.collapsedTasks",
+  /** Collapsed workspace/space/Pinned/status-group ids (sidebar-polish S8); see lib/sidebar-preferences.ts. */
+  collapsedSidebarNodes: "smind:sidebar-collapsed-nodes",
   notificationSound: "smind:notification-sound",
 } as const;
 

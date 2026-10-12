@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  readCollapsedNodes,
   readNotificationSoundEnabled,
   readPinnedTasks,
   readSidebarGroupMode,
   readUnreadTasks,
+  writeCollapsedNodes,
   writeNotificationSoundEnabled,
   writePinnedTasks,
   writeSidebarGroupMode,
@@ -66,5 +68,31 @@ describe("notification sound", () => {
   it("round-trips across a write", () => {
     writeNotificationSoundEnabled(true);
     expect(readNotificationSoundEnabled()).toBe(true);
+  });
+});
+
+describe("collapsed sidebar nodes", () => {
+  it("defaults to nothing collapsed", () => {
+    expect(readCollapsedNodes()).toEqual(new Set());
+  });
+
+  it("round-trips string ids", () => {
+    writeCollapsedNodes(new Set(["ws:1", "space:10", "pinned", "status:running"]));
+    expect(readCollapsedNodes()).toEqual(new Set(["ws:1", "space:10", "pinned", "status:running"]));
+  });
+
+  it("removes the key when nothing is collapsed", () => {
+    writeCollapsedNodes(new Set(["ws:1"]));
+    writeCollapsedNodes(new Set());
+    expect(window.localStorage.getItem("smind:sidebar-collapsed-nodes")).toBeNull();
+  });
+
+  it("falls back to nothing collapsed for corrupt or wrongly shaped storage", () => {
+    window.localStorage.setItem("smind:sidebar-collapsed-nodes", "{not json");
+    expect(readCollapsedNodes()).toEqual(new Set());
+    window.localStorage.setItem("smind:sidebar-collapsed-nodes", JSON.stringify([1, 2]));
+    expect(readCollapsedNodes()).toEqual(new Set());
+    window.localStorage.setItem("smind:sidebar-collapsed-nodes", JSON.stringify({ ws: 1 }));
+    expect(readCollapsedNodes()).toEqual(new Set());
   });
 });
