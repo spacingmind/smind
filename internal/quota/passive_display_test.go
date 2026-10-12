@@ -469,3 +469,43 @@ func Test_observed_status_only_window_keeps_fetched_numbers(t *testing.T) {
 		t.Errorf("observation mutated: %+v", obs.Windows[0])
 	}
 }
+
+func Test_observed_failing_store_read_is_rate_limited(t *testing.T) {
+	logs, restore := captureLog()
+	defer restore()
+	fs := newFakeStore()
+	fs.setFail(false, true)
+	p, clk := newFakePassive(t, fs)
+
+	for i := 0; i < 20; i++ {
+		if _, ok := p.Observed(1); ok {
+			t.Fatal("Observed with a failing store = ok")
+		}
+	}
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 1 {
+		t.Fatalf("store reads inside the retry window = %d, want 1", n)
+	}
+	if n := strings.Count(logs.String(), "\n"); n != 1 {
+		t.Errorf("log lines inside the retry window = %d, want 1", n)
+	}
+
+	clk.Advance(passiveLoadRetry - time.Millisecond)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 1 {
+		t.Fatalf("store reads just before the window ends = %d, want 1", n)
+	}
+	clk.Advance(time.Millisecond)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 2 {
+		t.Fatalf("store reads once the window ended = %d, want 2", n)
+	}
+
+	// The store recovers: the next read after the window succeeds and is cached.
+	fs.setFail(false, false)
+	clk.Advance(passiveLoadRetry)
+	p.Observed(1)
+	p.Observed(1)
+	if n := fs.count("GetLatestQuotaSnapshotKind"); n != 3 {
+		t.Fatalf("store reads after recovery = %d, want 3 (the successful one is cached)", n)
+	}
+}

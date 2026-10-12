@@ -142,6 +142,7 @@ type passiveAcct struct {
 	// Observation (display only).
 	obs                 *Observation
 	obsLoaded           bool
+	obsLoadRetryAt      time.Time    // a failed snapshot read is not retried before this time
 	obsPending          *Observation // handed to the writer, not yet written
 	obsPersisted        *Observation // last observation queued for writing; nil = unknown
 	obsPersistedVerdict string
@@ -922,22 +923,31 @@ func (p *Passive) fireObsNotify(id int64, a *passiveAcct) {
 }
 
 // Observed returns the account's latest observation for display: the one in
-// memory, else the stored observed snapshot (read once; an error is not
-// cached). Routing never calls it, and Reader has no such method.
+// memory, else the stored observed snapshot (read once; an error is
+// negative-cached for passiveLoadRetry, like ensureLoaded's). Routing never calls
+// it, and Reader has no such method.
 func (p *Passive) Observed(accountID int64) (Observation, bool) {
 	if !p.enabled {
 		return Observation{}, false
 	}
 	a := p.acct(accountID)
+	now := p.clock()
 	a.mu.Lock()
 	if a.obs != nil || a.obsLoaded {
 		defer a.mu.Unlock()
 		return a.observedLocked()
 	}
+	if now.Before(a.obsLoadRetryAt) {
+		a.mu.Unlock()
+		return Observation{}, false
+	}
 	a.mu.Unlock()
 
 	snap, ok, err := p.store.GetLatestQuotaSnapshotKind(accountID, store.QuotaKindObserved)
 	if err != nil {
+		a.mu.Lock()
+		a.obsLoadRetryAt = now.Add(passiveLoadRetry)
+		a.mu.Unlock()
 		log.Printf("quota: account %d passive observation read failed", accountID)
 		return Observation{}, false
 	}
@@ -952,7 +962,7 @@ func (p *Passive) Observed(accountID int64) (Observation, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.obs == nil && !a.obsLoaded {
-		a.obs, a.obsLoaded = stored, true
+		a.obs, a.obsLoaded, a.obsLoadRetryAt = stored, true, time.Time{}
 	}
 	return a.observedLocked()
 }
