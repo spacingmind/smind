@@ -114,6 +114,8 @@ export const usageCopy = {
     return null;
   },
   observedWindow: "from recent traffic",
+  pin: "Pin to sidebar",
+  unpin: "Unpin from sidebar",
   disabled: "Plan usage is turned off. Set accountUsage.enabled to true in config to see it.",
   daemonTooOld: "Update the daemon to see plan usage",
   refreshFailed: "Unable to refresh usage",

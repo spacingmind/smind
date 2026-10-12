@@ -973,7 +973,7 @@ scratch).
 - [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
 - [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
 - [x] PR-E chat hover card (required) — PR open (2026-10-12), awaiting review (see "PR-E record")
-- [ ] PR-D2 web footer item (default off) and pins
+- [x] PR-D2 web footer item (default off) and pins — PR open (2026-10-12), awaiting review (see "PR-D2 record")
 - [x] PR-F rejection cooldown + observed headers: core merged (#308); surfaces (AC66) in the cooldown-surface PR, see "PR-F surfaces notes"
 - [ ] Manual live check against one real account per provider
 - [ ] Close-out docs; plan moved to `completed/`
@@ -1392,3 +1392,65 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
   dark (screenshots in the PR description). Independent review (no blockers): 8
   findings fixed here, the rest listed above.
 
+
+### PR-D2 record (web: footer summary + pins; 2026-10-12)
+
+- **Built.** `lib/account-usage/pinned.ts` (`resolvePinnedUsage`,
+  `choosePinnedUsageLayout`, same rules as Paseo's `pinned.ts`, `AccountUsage`
+  in place of `UsageReportEntry`); `components/account-usage/usage-sidebar-item.tsx`
+  (`UsageSidebarItem`: the touching surface, the one-line summary with hidden
+  measuring copies read through `ResizeObserver`, the plain "Usage" row); pinnable
+  rows in `usage-window-bar.tsx` (checkbox, pin glyph + tooltip, pinned surface,
+  half-strength hover) fed by `pinning` on `useUsageSurface`, threaded through
+  body/list/card so the modal and Settings share them; `togglePin` on the
+  preferences store; `app-sidebar.tsx` passes the footer `rows` slot only while the
+  switch is on.
+- **Decisions inside the spec.**
+  1. *Collapsed rail:* the summary renders **nothing** (the rail keeps its footer
+     Usage icon, which opens the modal). A row of percents cannot fit 48px, and an
+     unseen row must not keep touching the daemon, so the row is not mounted at
+     all (no request). Paseo hides its row when there is no data and the icon
+     stays; same outcome.
+  2. *`UsageSidebarRoot` is not needed:* smind already mounts the modal once at
+     shell level (`UsageModalRoot` + `openUsageModal()`), so the footer row calls
+     that. The file-map row for `usage-sidebar-root.tsx` is therefore dropped.
+  3. *Tone:* a healthy meter is neutral (`quiet`), a `warning`/`danger` meter is
+     coloured, and the percent text turns warning/destructive. Paseo's meter is
+     always neutral in the footer, which would never show danger.
+  4. *Plain "Usage" row* (AC28) renders while the first answer is pending, on a
+     failed list and when no account has a pinned window with a percent; it is
+     absent when polling is disabled or the daemon lacks `account.usage`.
+  5. *Clipping:* when even percents-only is wider than the row (several accounts at
+     the 192px minimum) the line is clipped with an edge fade; the tooltip and the
+     accessible name still list every window.
+- **Call discipline as built (AC54, footer).** The row is a touching surface
+  (`useAccountUsage(..., {touch: true})`): one `touch` on mount in an active
+  window, then at most one per `ttlSeconds` through the store's shared TTL clock
+  (so the footer, an open modal and Settings together still send one per TTL);
+  hidden or blurred window = one `cached` list and no timer. With the switch off
+  AppSidebar mounts nothing: zero `account.usage` requests. A real browser (below)
+  sent: off = 0; on = exactly one `touch`; collapsed after load = no further call;
+  polling disabled = one `touch` then none.
+
+### PR-D2 validation
+
+| AC | Evidence |
+|---|---|
+| AC28 | `usage-sidebar-item.test.tsx` (`pinned_windows_show_in_footer…`, plain row, unavailable/error left out, filter, disabled/old daemon, collapsed rail renders nothing and sends nothing), `app-sidebar-usage-summary.test.tsx` (off = no DOM and no request; on = row above the icon line, one `touch`), `usage-pins.test.tsx` (`summary_in_sidebar_switch…`) |
+| AC29 | `choosePinnedUsageLayout` tests (`pinned.test.ts`) and the layout test in `usage-sidebar-item.test.tsx` (labels until measured, meters, labels, percents; empty short label; measuring copies hidden) |
+| AC30 | `usage-pins.test.tsx`: checkbox name/state, glyph, pinned/hover surfaces, first toggle snapshots defaults, pins match every account of a provider, explicit empty persists, switch off = plain bars |
+| AC31 | `usage-pins.test.tsx` (Remaining keeps pins) + `remaining mode` in the item test |
+| AC41 (footer) | Screenshots, light + dark, `/tmp/usage-d2-shots/out/` (see PR description): off, on with one/several accounts, pinned, empty pins, Remaining, filtered, danger, plain, polling disabled, 192/256/384px, collapsed rail, modal and Settings with pins, 390px sheet. Viewed and fixed (clipped line fade) before the PR. |
+| AC54 (footer) | fake-timer tests with exact RPC counts (`call budget (AC54)` in the item test, AppSidebar tests) and the real-browser counts above |
+
+- **Found in review** (independent read-only reviewer, Sonnet 5.5; ACCEPTED, all fixed with tests):
+  the first pin toggle snapshotted the defaults of the *filtered* account only,
+  silently dropping other providers' default pins (`filtered to one account, the
+  first toggle keeps every other provider's default pins`, fails without the fix);
+  a permanently mounted footer re-armed a 1 s no-op timer when polling is off or the
+  daemon is old (now once per TTL); weak tests (hidden-window, shared TTL clock
+  with the modal, polling disabled). Left as is: a window with no percent can be
+  pinned but never shows in the footer; Enter also toggles a pin (native button).
+
+Not verified here: real-provider data (still the manual live check) and the
+desktop (Tauri) shell.
