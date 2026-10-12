@@ -214,6 +214,18 @@ describe("useTaskAttention finished recency window", () => {
     expect(result.current.runStatus.get(1)).toBe("done");
   });
 
+  it("task-attention-finished-unrecorded-finish-ages-from-start: a terminal run with no FinishedAt ages from StartedAt", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useTaskAttention(client, null, null));
+    const old = { ...run("r1", 1, "done", isoFromNow(29 * 24 * 60 * 60 * 1000)), FinishedAt: null };
+    const fresh = { ...run("r2", 2, "done", isoFromNow(60 * 1000)), FinishedAt: null };
+    client.nth("run.list").resolve([old, fresh]);
+    await flush();
+
+    expect(result.current.attention.get(1)).toBeUndefined();
+    expect(result.current.attention.get(2)).toEqual(new Set(["finished"]));
+  });
+
   it("task-attention-error-old-run-still-attention: an error run finished 29 days ago still gets the error dot", async () => {
     const client = new FakeWsClient();
     const { result } = renderHook(() => useTaskAttention(client, null, null));

@@ -173,7 +173,9 @@ export function useTaskAttention(
           // Newest-first from the daemon, so index 0 is the most recent:
           // order 0, -1, -2... leaves every later live event above it.
           const runs: RunLike[] = (rawRuns ?? []).map((r, index) => {
-            const parsed = r.FinishedAt === null ? NaN : Date.parse(r.FinishedAt);
+            // A terminal run the daemon recorded no finish time for (e.g. one
+            // swept after a crash) ages from when it started instead.
+            const parsed = Date.parse(r.FinishedAt ?? r.StartedAt);
             return {
               ID: r.ID,
               TaskID: r.TaskID,
