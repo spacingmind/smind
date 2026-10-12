@@ -149,6 +149,7 @@ type Passive struct {
 	dirtyObs map[int64]struct{}
 	started  bool
 	closed   bool
+	busy     bool // the writer holds a batch it has not finished (tests wait on it)
 	wake     chan struct{} // cap 1
 	stop     chan struct{}
 	done     chan struct{}
@@ -585,6 +586,7 @@ func (p *Passive) run() {
 			continue
 		}
 		p.dirtyCD, p.dirtyObs = map[cooldownKey]struct{}{}, map[int64]struct{}{}
+		p.busy = true
 		p.wmu.Unlock()
 
 		for k := range cds {
@@ -593,6 +595,9 @@ func (p *Passive) run() {
 		for id := range obs {
 			p.writeObservation(id)
 		}
+		p.wmu.Lock()
+		p.busy = false
+		p.wmu.Unlock()
 	}
 }
 
