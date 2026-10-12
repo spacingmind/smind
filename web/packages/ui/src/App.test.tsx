@@ -2666,3 +2666,115 @@ describe("App plan usage modal (ADR-0028 PR-D1)", () => {
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
   });
 });
+
+describe("App tab strip (app-header-and-tabs TB)", () => {
+  async function setup(): Promise<FakeSocket> {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    render(<App connect={connect} />);
+    await resolveSidebar(socket, [TASK_A]);
+    clickTaskRow(TASK_A);
+    await flush();
+    respondChatList(socket, TASK_A);
+    await flush();
+    respondAll(socket, "run.list", []);
+    await flush();
+    return socket;
+  }
+
+  it("TB-AC1 tab list carries no box classes and active tab has the pill", async () => {
+    await setup();
+    await openBaseTab("Diff");
+
+    const list = within(screen.getByTestId("primary-pane")).getByRole("tablist");
+    expect(list).toHaveAttribute("data-variant", "flat");
+    const classes = list.className.split(/\s+/);
+    expect(classes).not.toContain("bg-muted");
+    expect(classes).not.toContain("p-[3px]");
+    expect(classes).not.toContain("border");
+    expect(classes).toContain("bg-transparent");
+    expect(classes).toContain("p-0");
+
+    const active = within(list).getByRole("tab", { selected: true });
+    expect(active.className).toContain("aria-selected:bg-selected");
+    expect(active.className).toContain("hover:bg-hover");
+  });
+
+  it("TB-AC2 close is in the DOM for every closable tab and only revealed on hover/focus/active", async () => {
+    await setup();
+    await openBaseTab("Diff");
+
+    const pane = screen.getByTestId("primary-pane");
+    const tabs = within(pane).getAllByRole("tab");
+    const closes = within(pane).getAllByTestId("workspace-tab-close");
+    expect(closes).toHaveLength(tabs.length);
+    for (const tab of tabs) expect(tab.className.split(/\s+/)).toContain("group/tab");
+    for (const close of closes) {
+      const cls = close.className.split(/\s+/);
+      expect(cls).toContain("opacity-0");
+      expect(cls).toContain("group-hover/tab:opacity-100");
+      expect(cls).toContain("group-focus-within/tab:opacity-100");
+      expect(cls).toContain("group-aria-selected/tab:opacity-100");
+    }
+
+    const before = within(pane).getAllByRole("tab").length;
+    fireEvent.keyDown(within(pane).getByRole("button", { name: "Close Diff" }), { key: "Enter" });
+    await flush();
+    expect(within(pane).getAllByRole("tab")).toHaveLength(before - 1);
+    fireEvent.click(within(pane).getAllByTestId("workspace-tab-close")[0]);
+    await flush();
+    expect(within(pane).queryAllByRole("tab")).toHaveLength(before - 2);
+  });
+
+  it("TB-AC3 plus button is the next sibling after the tab scroller in the same row", async () => {
+    await setup();
+    const scroller = screen.getByTestId("tab-scroller");
+    expect(scroller.nextElementSibling).toBe(screen.getByTestId("tabs-new-tab"));
+    expect(scroller.parentElement).toBe(screen.getByTestId("tabs-new-tab").parentElement);
+    expect(scroller.className).toContain("flex-initial");
+    expect(scroller.className).toContain("min-w-0");
+    expect(screen.getByTestId("tabs-new-tab").className).toContain("shrink-0");
+  });
+
+  it("TB-AC4 terminal tab icon is Terminal (data-icon=terminal)", async () => {
+    await setup();
+    await openBaseTab("Terminal");
+    const tab = within(screen.getByTestId("primary-pane")).getByTestId("workspace-tab-terminal");
+    const icon = within(tab).getByTestId("tab-icon");
+    expect(icon).toHaveAttribute("data-icon", "terminal");
+    expect(icon.getAttribute("class")).toContain("lucide-terminal");
+    expect(icon.getAttribute("class")).not.toContain("square-terminal");
+  });
+
+  it("TB-AC5 active tab scrolled into view on activeKey change", async () => {
+    await setup();
+    const scrollIntoView = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      await openBaseTab("Diff");
+      expect(scrollIntoView).toHaveBeenCalledWith({ inline: "nearest", block: "nearest" });
+      const target = scrollIntoView.mock.contexts.at(-1) as HTMLElement;
+      expect(target).toHaveAttribute("role", "tab");
+      expect(target).toHaveAttribute("aria-selected", "true");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it("TB-AC7 single pane frame has no border/rounded; two panes keep rounded-lg border", async () => {
+    await setup();
+    await openBaseTab("Diff");
+
+    const frame = (): HTMLElement => screen.getByTestId("primary-pane").parentElement as HTMLElement;
+    expect(frame().className).not.toContain("rounded-lg");
+    expect(frame().className.split(/\s+/)).not.toContain("border");
+    expect(frame().className).toContain("bg-panel");
+
+    await splitTabRight("Diff");
+    expect(frame().className).toContain("rounded-lg");
+    expect(frame().className.split(/\s+/)).toContain("border");
+    const side = screen.getByTestId("side-pane").parentElement as HTMLElement;
+    expect(side.className).toContain("rounded-lg");
+  });
+});

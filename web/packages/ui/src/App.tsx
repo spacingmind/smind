@@ -1696,10 +1696,11 @@ function PaneTabStrip({
   // read back off `event.over`.
   const { setNodeRef: setDroppableRef } = useDroppable({ id: paneId, data: { paneId } });
   const showDropPreview = isDragActive && dragOverPaneId === paneId && dropPosition !== null;
+  // (aria-selected, not data-state: ContextMenuTrigger asChild overwrites the trigger's data-state.)
   // Keeps the active tab visible when the strip overflows (TB-AC5).
   const tabScrollerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][data-state="active"]');
+    const active = tabScrollerRef.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
     if (active && typeof active.scrollIntoView === "function") {
       active.scrollIntoView({ inline: "nearest", block: "nearest" });
     }
@@ -1824,7 +1825,7 @@ function PaneTabStrip({
 
 /** Split/close stay mounted and focusable but only show on hover, focus within, or the active tab (needs `group/tab` on the trigger). */
 const TAB_AFFORDANCE_REVEAL =
-  "opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 group-data-[state=active]/tab:opacity-100";
+  "opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100 group-aria-selected/tab:opacity-100";
 
 /**
  * One tab strip entry: the tab trigger itself plus its "Split" and close
