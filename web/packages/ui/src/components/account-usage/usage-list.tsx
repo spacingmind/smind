@@ -1,3 +1,4 @@
+import type { UsagePinning } from "@/components/account-usage/use-usage-surface";
 import { UsageCard } from "@/components/account-usage/usage-card";
 import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import type { UsageRefresh } from "@/lib/account-usage/model";
@@ -26,7 +27,8 @@ export function UsageList({
   failed,
   pressedAt,
   onRefreshOne,
-}: { reports: readonly AccountUsage[]; displayAs: UsageDisplayAs } & UsageRefreshProps) {
+  pinning = null,
+}: { reports: readonly AccountUsage[]; displayAs: UsageDisplayAs; pinning?: UsagePinning | null } & UsageRefreshProps) {
   return (
     <div className="flex flex-col gap-3" data-testid="usage-list">
       {reports.map((usage) => (
@@ -34,6 +36,7 @@ export function UsageList({
           <UsageCard
             usage={usage}
             displayAs={displayAs}
+            pinning={pinning}
             refresh={{
               state: refreshStateOf(usage.accountId, refreshing, failed),
               pressedAt: pressedAt[usage.accountId],
