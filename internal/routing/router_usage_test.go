@@ -46,6 +46,10 @@ func (f *fakeReader) Peek(id int64) quota.Result {
 
 func (f *fakeReader) TTL() time.Duration { return testTTL }
 
+func (f *fakeReader) Cooldown(int64, string, time.Time) (quota.Cooldown, bool) {
+	return quota.Cooldown{}, false
+}
+
 type fakeClock struct {
 	mu sync.Mutex
 	t  time.Time
