@@ -274,6 +274,34 @@ describe("task lineage header (in the pane)", () => {
     expect(screen.getByTestId("task-tree-summary").textContent).toBe("2 running · 1 needs you · 3 done");
   });
 
+  it("one meta row: the task total, lineage chips and the Detailed toggle share the chat meta row, with no separate bordered strip", async () => {
+    const client = new FakeWsClient();
+    await renderPane(client);
+    act(() => {
+      client.nth("task.tree").resolve({
+        nodes: [
+          node({
+            id: 2,
+            counts: { running: 1, waitingPermission: 0, failed: 0, done: 0, idle: 0 },
+            usage: { own: usage(1, { costUsd: 0.5, inputTokens: 100, outputTokens: 20 }), subtree: usage(2, { costUsd: 1.12, inputTokens: 500_000, outputTokens: 57_000 }), archivedDescendants: 0 },
+          }),
+          node({ id: 3, parentId: 2, title: "Coder one" }),
+        ],
+        truncated: false,
+      } satisfies TaskTreeResult);
+    });
+    await flush();
+
+    const row = screen.getByTestId("task-chat-meta");
+    expect(row).toContainElement(screen.getByTestId("task-tree-usage"));
+    expect(row).toContainElement(screen.getByTestId("task-tree-summary"));
+    expect(row).toContainElement(screen.getByTestId("task-child-pill"));
+    expect(row).toContainElement(screen.getByTestId("detail-level-toggle"));
+    expect(screen.getByTestId("task-tree-usage").textContent).toMatch(/^Task \$1\.12 · /);
+    expect(screen.queryByTestId("task-lineage-header")).toBeNull();
+    expect(row.className).not.toMatch(/(^|\s)border(-b)?(\s|$)/);
+  });
+
   it("usage rollup is omitted when nothing is reported and never shows 0", async () => {
     const client = new FakeWsClient();
     await renderPane(client);

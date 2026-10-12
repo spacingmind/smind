@@ -1,12 +1,21 @@
-import { memo, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { memo } from "react";
+import { Check, Copy, Pencil, RotateCcw } from "lucide-react";
 
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
 import { ToolGroupRow } from "@/components/timeline/tool-group-row";
-import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
+import { assistantMarkdown, formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
+import {
+  CopyAction,
+  MESSAGE_ACTION_CLASS,
+  MessageAction,
+  MessageActions,
+  useCopyFeedback,
+} from "@/components/timeline/message-actions";
 import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import { describeStopReason } from "@/components/timeline/stop-reason";
@@ -40,11 +49,17 @@ export const RunTimeline = memo(function RunTimeline({
   worktreePath,
   onOpenFile,
   onRetry,
+  onRerun,
+  onEditPrompt,
   providerLabels,
 }: {
   run: RunEntry;
   detailLevel?: DetailLevel;
   onRetry?: (run: RunEntry) => void;
+  /** Re-submits this run's prompt with its own provider/model/permission; omitted hides the action. */
+  onRerun?: (run: RunEntry) => void;
+  /** Loads this run's prompt into the composer; omitted hides the action. */
+  onEditPrompt?: (run: RunEntry) => void;
   /** provider.list's id→label map ("label ?? id", run-config IA); omitted leaves raw ids. */
   providerLabels?: Record<string, string>;
 } & TimelineRowContext) {
@@ -53,122 +68,160 @@ export const RunTimeline = memo(function RunTimeline({
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
-    <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-2">
-      <div className="flex justify-end">
+    <li data-testid="run-entry" data-run-id={run.id} className="flex flex-col gap-2">
+      <div className="group/prompt flex flex-col items-end gap-0.5">
         <p
           className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
           data-testid="run-prompt"
         >
           {run.prompt}
         </p>
+        <MessageActions group="prompt" data-testid="run-prompt-actions">
+          <CopyAction getText={() => run.prompt} data-testid="run-prompt-copy" />
+          {onEditPrompt && (
+            <MessageAction
+              label="Edit & resend"
+              icon={<Pencil aria-hidden />}
+              data-testid="run-prompt-edit"
+              onClick={() => onEditPrompt(run)}
+            />
+          )}
+        </MessageActions>
       </div>
 
-      {run.items.length > 0 && (
-        <ol className="space-y-1.5" data-testid="run-timeline">
-          {groups.map((group) =>
-            group.kind === "tool-group" ? (
-              <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-            ) : (
-              <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-            ),
-          )}
-        </ol>
-      )}
+      {/* The answer side (items, error, footer) is its own hover group, so hovering the prompt reveals only the prompt bar. */}
+      <div className="group/answer flex flex-col gap-2">
+        {run.items.length > 0 && (
+          <ol className="space-y-1.5" data-testid="run-timeline">
+            {groups.map((group) =>
+              group.kind === "tool-group" ? (
+                <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ) : (
+                <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+              ),
+            )}
+          </ol>
+        )}
 
-      {run.err && (
-        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
-          <p className="text-ui-sm text-destructive" data-testid="run-error">
-            {run.err}
-          </p>
-          {onRetry && canRetryWithHigherEffort(run) && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xs"
-              data-testid="run-retry-higher-effort"
-              onClick={() => onRetry(run)}
-            >
-              Retry with higher effort
-            </Button>
-          )}
+        {run.err && (
+          <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+            <p className="text-ui-sm text-destructive" data-testid="run-error">
+              {run.err}
+            </p>
+            {onRetry && canRetryWithHigherEffort(run) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                data-testid="run-retry-higher-effort"
+                onClick={() => onRetry(run)}
+              >
+                Retry with higher effort
+              </Button>
+            )}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
+          <div
+            className={cn(
+              "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
+              run.status === "done" &&
+                "opacity-70 group-has-[:focus-visible]/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
+            )}
+            data-testid="run-meta"
+          >
+            <span className="flex items-center gap-1.5">
+              <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
+              <span data-testid="run-status">{run.status}</span>
+            </span>
+            <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+            {run.model && (
+              // ADR-0025: only a *requested* model is shown -- a default run has no chip.
+              <span
+                data-testid="run-model-chip"
+                title={`Requested model: ${run.model}`}
+                className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
+              >
+                {run.model}
+              </span>
+            )}
+            {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
+            {stop && (
+              <span
+                data-testid="run-stop-reason"
+                data-tone={stop.tone}
+                title={stop.hint}
+                className={stop.tone === "warning" ? "text-warning" : undefined}
+              >
+                {stop.label}
+                {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
+              </span>
+            )}
+            <RunUsagePill usage={run.usage} provider={run.provider} />
+          </div>
+          <MessageActions group="run" className="ml-auto" data-testid="run-actions">
+            <RunCopyMenu run={run} />
+            {onRerun && run.status !== "running" && (
+              <MessageAction
+                label="Re-run this prompt"
+                icon={<RotateCcw aria-hidden />}
+                data-testid="run-rerun"
+                onClick={() => onRerun(run)}
+              />
+            )}
+          </MessageActions>
         </div>
-      )}
-
-      <div
-        className={cn(
-          "flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted transition-opacity",
-          run.status === "done" &&
-            "opacity-70 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
-        )}
-        data-testid="run-footer"
-      >
-        <span className="flex items-center gap-1.5">
-          <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
-          <span data-testid="run-status">{run.status}</span>
-        </span>
-        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
-        {run.model && (
-          // ADR-0025: only a *requested* model is shown -- a default run has no chip.
-          <span
-            data-testid="run-model-chip"
-            title={`Requested model: ${run.model}`}
-            className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
-          >
-            {run.model}
-          </span>
-        )}
-        {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
-        {stop && (
-          <span
-            data-testid="run-stop-reason"
-            data-tone={stop.tone}
-            title={stop.hint}
-            className={stop.tone === "warning" ? "text-warning" : undefined}
-          >
-            {stop.label}
-            {stop.hint && <span className="ml-1 text-foreground-muted">· {stop.hint}</span>}
-          </span>
-        )}
-        <RunUsagePill usage={run.usage} provider={run.provider} />
-        <CopyTurnButton run={run} />
       </div>
     </li>
   );
 });
 
 /**
- * Copies the whole turn as plain text. Clipboard access can be absent
- * (no secure context, jsdom) or rejected (permission denied) -- either
- * way the button reports nothing rather than throwing into the
- * transcript.
+ * Copy menu for the turn: the answer as Markdown, or the whole turn as plain
+ * text. Clipboard failures are silent (see `useCopyFeedback`).
  */
-function CopyTurnButton({ run }: { run: RunEntry }) {
-  const [copied, setCopied] = useState(false);
-
-  async function handleCopy() {
-    const text = timelineToText(run.prompt, run.items);
-    try {
-      await navigator.clipboard?.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // Nothing useful to say to the user here; the transcript is still
-      // selectable by hand.
-    }
-  }
+function RunCopyMenu({ run }: { run: RunEntry }) {
+  const { copied, copy } = useCopyFeedback();
+  const { tooltip, onMenuOpenChange } = useMenuTooltip();
+  const hasAnswer = run.items.some((item) => item.kind === "assistant" && item.text.trim() !== "");
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="xs"
-      className="ml-auto"
-      data-testid="run-copy-button"
-      aria-label="Copy turn"
-      onClick={handleCopy}
-    >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
-      {copied ? "Copied" : "Copy"}
-    </Button>
+    <DropdownMenu onOpenChange={onMenuOpenChange}>
+      <Tooltip {...tooltip}>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className={MESSAGE_ACTION_CLASS}
+              data-testid="run-copy-button"
+              aria-label="Copy"
+            >
+              {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+            </Button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{copied ? "Copied" : "Copy"}</TooltipContent>
+      </Tooltip>
+      {/* The check on the trigger is silent for assistive tech; this announces it. */}
+      <span role="status" className="sr-only">
+        {copied ? "Copied" : ""}
+      </span>
+      <DropdownMenuContent align="end" data-testid="run-copy-menu">
+        {hasAnswer && (
+          <DropdownMenuItem data-testid="run-copy-answer" onSelect={() => void copy(assistantMarkdown(run.items))}>
+            Copy answer (Markdown)
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          data-testid="run-copy-turn"
+          onSelect={() => void copy(timelineToText(run.prompt, run.items))}
+        >
+          Copy full turn (plain text)
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

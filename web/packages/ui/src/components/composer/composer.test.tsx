@@ -1506,3 +1506,35 @@ describe("Composer redesign (composer-redesign plan)", () => {
     }
   });
 });
+
+describe("Composer prefill (Edit & resend)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("a prefill with a new nonce sets the draft once and re-applies on the same text with a new nonce", async () => {
+    const view = renderComposer({ prefill: { text: "first", nonce: 1 } });
+    // A prefill present at mount is not applied.
+    expect(textarea().value).toBe("");
+
+    view.rerender({ prefill: { text: "first", nonce: 2 } });
+    await flush();
+    expect(textarea().value).toBe("first");
+    expect(textarea()).toHaveFocus();
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(textarea().selectionStart).toBe("first".length);
+
+    // Same nonce again (a re-render) does nothing, even after the user edits.
+    fireEvent.change(textarea(), { target: { value: "edited" } });
+    view.rerender({ prefill: { text: "first", nonce: 2 } });
+    await flush();
+    expect(textarea().value).toBe("edited");
+
+    // Same text, new nonce: re-applied (appended after a blank line).
+    view.rerender({ prefill: { text: "first", nonce: 3 } });
+    await flush();
+    expect(textarea().value).toBe("edited\n\nfirst");
+  });
+});

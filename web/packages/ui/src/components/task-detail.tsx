@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { TaskLineageHeader } from "@/components/task-lineage";
+import { TaskLineageChips } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
@@ -25,7 +25,7 @@ import { useLiveTask } from "@/hooks/use-live-task";
 import { useTaskLineage } from "@/hooks/use-task-lineage";
 import { useChatQueue } from "@/hooks/use-chat-queue";
 import { useRunConfigOptions } from "@/hooks/use-run-config-options";
-import { useRunTimeline } from "@/hooks/use-run-timeline";
+import { useRunTimeline, type RunEntry } from "@/hooks/use-run-timeline";
 import { useTaskDiff } from "@/hooks/use-task-diff";
 import { effectiveMode, providerModes, supportsAutoAccept, supportsLiveModeSwitch } from "@/lib/permission-modes";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -249,6 +249,44 @@ export function TaskDetailPane({
   openFileRef.current = onOpenFile;
   const openFile = useCallback((path: string) => openFileRef.current?.(path), []);
 
+  // Message hover actions. Pinned behind refs so RunTimeline's memo keeps
+  // bailing out while these always call the latest submitPrompt.
+  const [prefill, setPrefill] = useState<{ text: string; nonce: number } | undefined>();
+  const [actionError, setActionError] = useState<string | null>(null);
+  const submitPromptRef = useRef(submitPrompt);
+  submitPromptRef.current = submitPrompt;
+  const runConfigRef = useRef(runConfigState);
+  runConfigRef.current = runConfigState;
+  const queueRefreshRef = useRef(queue.refresh);
+  queueRefreshRef.current = queue.refresh;
+  const rerunsInFlight = useRef(new Set<string>());
+  const rerun = useCallback((run: RunEntry) => {
+    // One re-submit per run at a time: a double click must not start (or queue) the prompt twice.
+    if (rerunsInFlight.current.has(run.id)) return;
+    rerunsInFlight.current.add(run.id);
+    setActionError(null);
+    // Provider, model and thinking come from the run; the permission settings come from what the
+    // composer shows NOW (when it is on the same provider), so a re-run never silently replays a
+    // looser mode the old run was live-switched to.
+    const composer = runConfigRef.current;
+    const permission =
+      composer && composer.provider === run.provider
+        ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
+        : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
+    submitPromptRef
+      .current(run.provider, run.prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .then((result) => {
+        // A queued prompt shows up in the composer's queue list straight away.
+        if (result.kind === "queued") queueRefreshRef.current();
+      })
+      .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
+      .finally(() => rerunsInFlight.current.delete(run.id));
+  }, []);
+  const editPrompt = useCallback((run: RunEntry) => {
+    setActionError(null);
+    setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
+  }, []);
+
   const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const focusComposer = useCallback(() => composerTextareaRef.current?.focus(), []);
 
@@ -268,7 +306,7 @@ export function TaskDetailPane({
        */}
       <PaneHeader
         testId="task-chat-meta"
-        className="border-b-0"
+        className="items-start border-b-0"
         subtitle={
           <>
             <SetupBadge status={task.SetupStatus} />
@@ -286,6 +324,7 @@ export function TaskDetailPane({
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
             <ChatUsageTotal runs={runs} provider={chat.Provider ?? latestRun?.provider} />
+            <TaskLineageChips lineage={lineage} onJumpToTask={onJumpToTask} />
           </>
         }
         actions={
@@ -301,8 +340,6 @@ export function TaskDetailPane({
           </Button>
         }
       />
-
-      <TaskLineageHeader lineage={lineage} onJumpToTask={onJumpToTask} />
 
       <SetupDetails client={client} task={task} onTask={applyTask} />
 
@@ -350,11 +387,15 @@ export function TaskDetailPane({
                     worktreePath={task.WorktreePath ?? undefined}
                     onOpenFile={openFile}
                     onRetry={retryWithHigherEffort}
+                    onRerun={rerun}
+                    onEditPrompt={editPrompt}
                     providerLabels={providerLabels}
                   />
                 ))}
               </ul>
             )}
+            {/* After the list, where the log follows the tail: a failed Re-run is visible where the user just clicked. */}
+            {actionError && <Alert variant="error" description={actionError} testId="rerun-error" className="mt-3" />}
           </div>
         </div>
 
@@ -437,6 +478,7 @@ export function TaskDetailPane({
         onSubmit={submitPrompt}
         onStop={stopRun}
         textareaRef={composerTextareaRef}
+        prefill={prefill}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
         liveRun={liveRun}
