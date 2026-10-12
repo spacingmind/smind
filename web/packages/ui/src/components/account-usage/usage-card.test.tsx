@@ -52,8 +52,9 @@ describe("UsageCard", () => {
     card(problemAccount("rejected"));
     expect(screen.getByTestId("usage-problem")).toHaveTextContent("Login rejected (HTTP 401). Reconnect it in Providers.");
     cleanup();
-    card(problemAccount("no_quota"));
-    expect(screen.getByTestId("usage-problem")).toHaveTextContent("No plan usage for this account.");
+    card(problemAccount("error"));
+    expect(screen.getByTestId("usage-problem")).toHaveAttribute("data-tone", "problem");
+    expect(screen.getByTestId("usage-problem")).toHaveClass("text-destructive");
     cleanup();
     card(problemAccount("error"));
     expect(screen.getByTestId("usage-problem")).toHaveTextContent("Couldn't read usage: timeout, retry in 2 min");
@@ -63,6 +64,19 @@ describe("UsageCard", () => {
     expect(root()).toHaveTextContent("Claude");
     expect(screen.getByTestId("usage-empty")).toHaveTextContent("—");
     expect(screen.queryByTestId("usage-problem")).toBeNull();
+  });
+
+  it("no_quota_is_information_not_a_failure (muted, no status, nothing to refresh)", () => {
+    card(problemAccount("no_quota"));
+    const problem = screen.getByTestId("usage-problem");
+    expect(problem).toHaveTextContent("No plan usage for this account.");
+    expect(problem).toHaveAttribute("data-tone", "info");
+    expect(problem).toHaveClass("text-muted-foreground");
+    expect(problem).not.toHaveClass("text-destructive");
+    expect(root()).not.toHaveTextContent("Unavailable");
+    expect(root()).not.toHaveTextContent("Error");
+    expect(screen.queryByTestId("usage-refresh")).toBeNull();
+    expect(screen.queryByTestId("usage-freshness")).toBeNull();
   });
 
   it("an_account_that_recovers_shows_only_its_windows", () => {

@@ -59,11 +59,14 @@ export function UsageCard({
   const balances: UsageBalance[] = available ? list(report.balances) : [];
   const details: UsageDetail[] = available ? list(report.details) : [];
   const message = usageCopy.problem(usage);
+  // "No plan windows" (an API-key account, an unsupported provider) is information, not a failure:
+  // muted text, no status, and nothing to refresh since the daemon never fetches for it.
+  const informational = report?.status === "unavailable" && report.problem?.kind === "no_quota";
   const statusLabel =
-    report && !available ? (report.status === "error" ? usageCopy.errorLabel : usageCopy.unavailableLabel) : null;
+    report && !available && !informational ? (report.status === "error" ? usageCopy.errorLabel : usageCopy.unavailableLabel) : null;
   const hasBody = windows.length > 0 || balances.length > 0 || details.length > 0;
   // Where there is no hover the freshness is printed on the card; elsewhere the Refresh tooltip says it.
-  const showsFreshnessInline = refresh === null || isMobile;
+  const showsFreshnessInline = !informational && (refresh === null || isMobile);
   const provider = typeof usage.provider === "string" ? usage.provider : "";
   const displayName = (typeof usage.displayName === "string" && usage.displayName) || provider;
 
@@ -89,7 +92,7 @@ export function UsageCard({
             {statusLabel}
           </span>
         ) : null}
-        {refresh ? (
+        {refresh && !informational ? (
           <div className="-my-1 -mr-1.5 shrink-0">
             <UsageRefreshButton
               usage={usage}
@@ -102,7 +105,11 @@ export function UsageCard({
       </div>
 
       {message ? (
-        <p className="text-ui-sm leading-snug text-destructive" data-testid="usage-problem">
+        <p
+          className={cn("text-ui-sm leading-snug", informational ? "text-muted-foreground" : "text-destructive")}
+          data-testid="usage-problem"
+          data-tone={informational ? "info" : "problem"}
+        >
           {message}
         </p>
       ) : null}
