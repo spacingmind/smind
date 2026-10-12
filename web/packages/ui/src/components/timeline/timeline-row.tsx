@@ -58,7 +58,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-thinking" data-item-kind="thinking">
           {/* Collapsed by default (Item 8): reasoning is available, not in the way. */}
           <details className="group/details">
-            <summary className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
+            <summary className="-mx-2 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
               <ChevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
               <Brain className="size-3 shrink-0" />
               Thinking
@@ -102,7 +102,7 @@ export const TimelineRow = memo(function TimelineRow({
         <li data-testid="timeline-unknown" data-item-kind="unknown">
           {item.rawKind ? (
             <details className="group/details">
-              <summary className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
+              <summary className="-mx-2 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
                 <ChevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
                 <CircleHelp className="size-3 shrink-0" />
                 Unrecognised event: {item.rawKind}
@@ -112,7 +112,7 @@ export const TimelineRow = memo(function TimelineRow({
               </pre>
             </details>
           ) : (
-            <p className="flex items-center gap-2 px-2 py-1 text-ui-sm text-foreground-muted">
+            <p className="flex items-center gap-2 py-1 text-ui-sm text-foreground-muted">
               <CircleHelp className="size-3 shrink-0" />
               Unrecognised event: {item.eventType}
             </p>
@@ -134,7 +134,7 @@ export const TimelineRow = memo(function TimelineRow({
 function PermissionRow({ item }: { item: TimelinePermissionItem }) {
   const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
   return (
-    <p className="flex items-center gap-2 px-2 text-ui-sm text-foreground-muted">
+    <p className="flex items-center gap-2 text-ui-sm text-foreground-muted">
       <ShieldCheck className="size-3 shrink-0" />
       Permission resolved
       {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}

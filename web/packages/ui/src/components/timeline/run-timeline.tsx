@@ -53,7 +53,7 @@ export const RunTimeline = memo(function RunTimeline({
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
-    <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-3">
+    <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-2">
       <div className="flex justify-end">
         <p
           className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base whitespace-pre-wrap"
@@ -64,7 +64,7 @@ export const RunTimeline = memo(function RunTimeline({
       </div>
 
       {run.items.length > 0 && (
-        <ol className="space-y-2" data-testid="run-timeline">
+        <ol className="space-y-1.5" data-testid="run-timeline">
           {groups.map((group) =>
             group.kind === "tool-group" ? (
               <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
@@ -96,16 +96,16 @@ export const RunTimeline = memo(function RunTimeline({
 
       <div
         className={cn(
-          "flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-foreground-muted transition-opacity",
+          "flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted transition-opacity",
           run.status === "done" && "opacity-60 group-focus-within:opacity-100 group-hover:opacity-100",
         )}
         data-testid="run-footer"
       >
         <span className="flex items-center gap-1.5">
-          <StatusDot status={RUN_STATUS_DOT[run.status]} />
+          <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
           <span data-testid="run-status">{run.status}</span>
         </span>
-        <span className="truncate">· {providerLabels?.[run.provider] ?? run.provider}</span>
+        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
         {run.model && (
           // ADR-0025: only a *requested* model is shown -- a default run has no chip.
           <span
@@ -116,7 +116,7 @@ export const RunTimeline = memo(function RunTimeline({
             {run.model}
           </span>
         )}
-        {elapsed && <span data-testid="run-elapsed">· {elapsed}</span>}
+        {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
         {stop && (
           <span
             data-testid="run-stop-reason"

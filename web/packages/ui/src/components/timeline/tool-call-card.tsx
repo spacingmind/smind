@@ -64,7 +64,7 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="rounded-md hover:bg-hover"
+      className="-mx-2 rounded-md hover:bg-hover"
     >
       <div className="flex items-center gap-2 px-2 py-1 text-ui-sm text-foreground-muted">
         <button
@@ -73,7 +73,10 @@ export function ToolCallCard({
           aria-label={`${open ? "Collapse" : "Expand"} ${name} detail`}
           onClick={() => setOpen((prev) => !prev)}
           data-testid="tool-call-toggle"
-          className="flex min-w-0 flex-1 items-center gap-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+          className={cn(
+            "flex min-w-0 items-center gap-2 text-left outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+            onOpenPath ? "shrink-0" : "flex-1",
+          )}
         >
           <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Icon className="size-3 shrink-0" />

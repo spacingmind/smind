@@ -25,7 +25,7 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
 
   return (
     <li data-testid="timeline-tool-group" data-item-kind="tool-group" data-count={items.length}>
-      <div className="rounded-md hover:bg-hover">
+      <div className="-mx-2 rounded-md hover:bg-hover">
         <button
           type="button"
           aria-expanded={open}
