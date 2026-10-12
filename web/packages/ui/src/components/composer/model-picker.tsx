@@ -193,6 +193,20 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const activeKey = safeIndex >= 0 ? actionable[safeIndex]!.key : null;
   const rowDomId = (key: string) => `${listId}-${key}`;
 
+  // Start the highlight on the current selection (Paseo scrolls to it) rather
+  // than the first row, each time the picker opens or changes view.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const at = actionable.findIndex(
+      (r) => r.kind === "model" && r.row.provider === selectedProvider && r.row.modelId === selectedModel,
+    );
+    setActiveIndex(at >= 0 ? at : 0);
+    // Deliberately keyed on open/view only: typing resets the index itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, view]);
+
   useEffect(() => {
     if (!open || !activeKey) {
       return;
@@ -294,7 +308,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           aria-activedescendant={activeKey ? rowDomId(activeKey) : undefined}
           autoComplete="off"
           spellCheck={false}
-          className="h-8 w-full rounded-lg border border-input-border bg-transparent px-2.5 text-ui-sm text-foreground outline-none placeholder:text-foreground-muted focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+          className="h-8 w-full rounded-lg border border-input-border bg-transparent px-2.5 text-ui-sm text-foreground outline-none transition-colors placeholder:text-foreground-muted focus-visible:border-input-border-focused max-md:text-base"
         />
       </div>
       <div id={listId} role="listbox" aria-label="Models" className="min-h-0 flex-1 overflow-y-auto p-1">

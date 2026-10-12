@@ -182,14 +182,14 @@ describe("model picker", () => {
     const { onSelect } = renderPicker();
     open();
     expect(searchInput()).toHaveFocus();
-    // Provider view: Default (0), Opus (1), Sonnet (2).
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    // Provider view: Default (0), Opus (1), Sonnet (2). The highlight starts on the current selection.
     expect(screen.getByTestId("model-row-claude-native:opus-5-5")).toHaveAttribute("data-active", "true");
+    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
+    expect(screen.getByTestId("model-row-claude-native:sonnet-5-5")).toHaveAttribute("data-active", "true");
     expect(searchInput()).toHaveAttribute(
       "aria-activedescendant",
-      screen.getByTestId("model-row-claude-native:opus-5-5").id,
+      screen.getByTestId("model-row-claude-native:sonnet-5-5").id,
     );
-    fireEvent.keyDown(searchInput(), { key: "ArrowDown" });
     fireEvent.keyDown(searchInput(), { key: "ArrowDown" }); // wraps to Default
     expect(screen.getByTestId("model-row-claude-native:")).toHaveAttribute("data-active", "true");
     fireEvent.keyDown(searchInput(), { key: "ArrowUp" }); // wraps to Sonnet
