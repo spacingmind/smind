@@ -494,10 +494,195 @@ func (p *Passive) ClearCooldown(accountID int64) {
 	}
 }
 
-// Persistence and observation are added in the following steps.
+// --- async persistence -----------------------------------------------------
+//
+// One writer goroutine, started lazily, drains a coalescing dirty set: the key
+// of a cooldown row (or of an account's observation) is queued, and the writer
+// reads the CURRENT in-memory value when it gets to it, so a burst becomes one
+// write and a cooldown write is never dropped. Observe only touches the dirty
+// set (a mutex and a cap-1 channel), so a slow store never delays the proxy.
+//
+// After Close, new writes are skipped (memory is still updated): Close runs at
+// shutdown, and blocking a late response on the store is worse than losing the
+// write of a response that arrives after the drain.
 
-func (p *Passive) markCooldownLocked(int64, *passiveAcct, string) {}
+// markCooldownLocked queues the row at scope (and any row whose last write
+// failed) for writing. A scope with no row in memory is a delete. a.mu must be
+// held.
+func (p *Passive) markCooldownLocked(id int64, a *passiveAcct, scope string) {
+	p.wmu.Lock()
+	if p.closed {
+		p.wmu.Unlock()
+		return
+	}
+	for s := range a.failed {
+		p.dirtyCD[cooldownKey{id, s}] = struct{}{}
+	}
+	clear(a.failed)
+	p.dirtyCD[cooldownKey{id, scope}] = struct{}{}
+	p.startLocked()
+	p.wmu.Unlock()
+	p.signal()
+}
 
-func (p *Passive) dropPending(int64) {}
+// markObservationLocked queues the account's pending observation. a.mu must be
+// held.
+func (p *Passive) markObservationLocked(id int64) {
+	p.wmu.Lock()
+	if p.closed {
+		p.wmu.Unlock()
+		return
+	}
+	p.dirtyObs[id] = struct{}{}
+	p.startLocked()
+	p.wmu.Unlock()
+	p.signal()
+}
+
+// dropPending forgets the queued cooldown writes of an account. a.mu is held by
+// the caller.
+func (p *Passive) dropPending(id int64) {
+	p.wmu.Lock()
+	for k := range p.dirtyCD {
+		if k.account == id {
+			delete(p.dirtyCD, k)
+		}
+	}
+	p.wmu.Unlock()
+}
+
+func (p *Passive) startLocked() {
+	if !p.started {
+		p.started = true
+		go p.run()
+	}
+}
+
+func (p *Passive) signal() {
+	select {
+	case p.wake <- struct{}{}:
+	default:
+	}
+}
+
+// run is the writer goroutine. After Close it still drains what was queued
+// before Close, then exits.
+func (p *Passive) run() {
+	defer close(p.done)
+	for {
+		p.wmu.Lock()
+		cds, obs := p.dirtyCD, p.dirtyObs
+		if len(cds) == 0 && len(obs) == 0 {
+			closed := p.closed
+			p.wmu.Unlock()
+			if closed {
+				return
+			}
+			select {
+			case <-p.wake:
+			case <-p.stop:
+			}
+			continue
+		}
+		p.dirtyCD, p.dirtyObs = map[cooldownKey]struct{}{}, map[int64]struct{}{}
+		p.wmu.Unlock()
+
+		for k := range cds {
+			p.writeCooldown(k)
+		}
+		for id := range obs {
+			p.writeObservation(id)
+		}
+	}
+}
+
+// writeCooldown persists the current in-memory state of one row (a missing row
+// is deleted). If ClearCooldown ran while the write was in flight, the write is
+// undone so it cannot resurrect the cleared cooldown.
+func (p *Passive) writeCooldown(k cooldownKey) {
+	a := p.acct(k.account)
+	a.mu.Lock()
+	gen := a.gen
+	row, have := a.rows[k.scope]
+	a.mu.Unlock()
+
+	var err error
+	if have {
+		err = p.store.SaveQuotaCooldown(store.QuotaCooldown{
+			AccountID:  k.account,
+			ScopeModel: k.scope,
+			Until:      row.until,
+			Reason:     string(row.reason),
+			Level:      row.level,
+			ObservedAt: row.observedAt,
+		})
+	} else {
+		err = p.store.DeleteQuotaCooldown(k.account, k.scope)
+	}
+
+	a.mu.Lock()
+	stale := a.gen != gen
+	if err != nil && !stale {
+		a.failed[k.scope] = struct{}{}
+	}
+	a.mu.Unlock()
+
+	if err != nil {
+		log.Printf("quota: account %d passive cooldown write failed", k.account)
+		return
+	}
+	if stale && have {
+		if err := p.store.DeleteQuotaCooldown(k.account, k.scope); err != nil {
+			log.Printf("quota: account %d passive cooldown undo failed", k.account)
+		}
+	}
+}
+
+// writeObservation persists the account's pending observation as its observed
+// snapshot row. On failure the "persisted" baseline is forgotten so the next
+// response with a signal retries.
+func (p *Passive) writeObservation(id int64) {
+	a := p.acct(id)
+	a.mu.Lock()
+	o := a.obsPending
+	a.obsPending = nil
+	a.mu.Unlock()
+	if o == nil {
+		return
+	}
+	data, err := EncodeReport(o.Report())
+	if err == nil {
+		_, err = p.store.ReplaceQuotaSnapshot(store.QuotaSnapshot{
+			AccountID: id,
+			UsageData: data,
+			PolledAt:  o.At,
+			ExpiresAt: o.At,
+			Kind:      store.QuotaKindObserved,
+		})
+	}
+	if err != nil {
+		a.mu.Lock()
+		a.obsPersisted = nil
+		a.mu.Unlock()
+		log.Printf("quota: account %d passive observation write failed", id)
+	}
+}
+
+// Close flushes everything queued so far, then stops the writer. It blocks
+// until the store accepted (or refused) those writes, and is idempotent.
+func (p *Passive) Close() {
+	p.wmu.Lock()
+	if !p.closed {
+		p.closed = true
+		close(p.stop)
+	}
+	started := p.started
+	p.wmu.Unlock()
+	if started {
+		<-p.done
+	}
+}
+
+// --- observation ------------------------------------------------------------
 
 func (p *Passive) observe(int64, *passiveAcct, Observation, time.Time) bool { return false }
