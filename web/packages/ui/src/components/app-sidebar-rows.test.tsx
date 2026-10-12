@@ -10,7 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { hoverTask, openHoverCard, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
+import { hoverTask, keyboardFocus, openHoverCard, revealSpaceActions, revealWorkspaceActions, taskItem, taskTrigger, unhoverTask } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
 import type { Space, Task, Workspace } from "@/lib/types";
 
@@ -45,6 +45,15 @@ const LEADER = makeTask(2, "Leader task", { ParentTaskID: 1 });
 const CODER = makeTask(3, "Coder task", { ParentTaskID: 2 });
 const LEADER_B = makeTask(4, "Leader B", { ParentTaskID: 1 });
 const TREE = [ROOT, LEADER, CODER, LEADER_B];
+
+const SPACE_A: Space = {
+  ID: 10,
+  WorkspaceID: 1,
+  Title: "Space A",
+  EnvData: "",
+  CreatedAt: "2024-01-01T00:00:00Z",
+  UpdatedAt: "2024-01-01T00:00:00Z",
+};
 
 async function flush(): Promise<void> {
   await act(async () => {
@@ -93,7 +102,7 @@ describe("task row actions (S1)", () => {
   it("keyboard focus within a row mounts its actions, and blur unmounts them", async () => {
     await mountSidebar(TREE);
 
-    act(() => rowButton(LEADER.ID).focus());
+    keyboardFocus(rowButton(LEADER.ID));
     expect(screen.getAllByTestId("sidebar-task-actions-trigger").map((t) => t.getAttribute("data-task-id"))).toEqual([
       String(LEADER.ID),
     ]);
@@ -410,5 +419,88 @@ describe("task row, single line (S4)", () => {
     const rollup = within(taskItem(LEADER.ID)).getByTestId("task-rollup");
     expect(rollup).toHaveAttribute("data-rollup-reason", "permission");
     expect(within(taskItem(LEADER.ID)).getByTestId("task-child-count")).toHaveTextContent("1");
+  });
+});
+
+describe("container rows (S5)", () => {
+  const IN_SPACE = makeTask(5, "Spaced task", { SpaceID: SPACE_A.ID });
+
+  it("workspace and space actions are not mounted at idle and mount on hover", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+    expect(screen.queryByTestId("sidebar-workspace-actions-trigger")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-space-actions-trigger")).not.toBeInTheDocument();
+
+    await revealSpaceActions();
+    // Hovering the space header mounts the space's trigger only -- not the workspace's.
+    expect(screen.getByTestId("sidebar-space-actions-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-workspace-actions-trigger")).not.toBeInTheDocument();
+
+    fireEvent.mouseLeave(screen.getByTestId("sidebar-space-row").parentElement!);
+    await revealWorkspaceActions();
+    expect(screen.getByTestId("sidebar-workspace-actions-trigger")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-space-actions-trigger")).not.toBeInTheDocument();
+  });
+
+  it("keyboard focus within a workspace or space header mounts its actions", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+
+    keyboardFocus(screen.getByTestId("sidebar-space-row"));
+    expect(screen.getByTestId("sidebar-space-actions-trigger")).toBeInTheDocument();
+    act(() => screen.getByTestId("sidebar-space-row").blur());
+    expect(screen.queryByTestId("sidebar-space-actions-trigger")).not.toBeInTheDocument();
+
+    keyboardFocus(screen.getByTestId("sidebar-workspace-row"));
+    expect(screen.getByTestId("sidebar-workspace-actions-trigger")).toBeInTheDocument();
+  });
+
+  it("an open space menu keeps its trigger mounted after the pointer leaves", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+    fireEvent.pointerDown(await revealSpaceActions(), { button: 0, ctrlKey: false });
+    await screen.findByText("Delete space");
+
+    fireEvent.mouseLeave(screen.getByTestId("sidebar-space-row").parentElement!);
+
+    expect(screen.getByTestId("sidebar-space-actions-trigger")).toBeInTheDocument();
+  });
+
+  it("the space ⋯ is outside the header button, which reserves its own right padding, so it can never sit on the chevron", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+    const trigger = await revealSpaceActions();
+    const header = screen.getByTestId("sidebar-space-row");
+
+    expect(header.contains(trigger)).toBe(false);
+    expect(header.className).toContain("pr-8");
+    // The chevron sits right after the title inside the button, not at the far right.
+    const chevron = within(header).getByTestId("row-chevron");
+    expect(chevron.previousElementSibling).toBe(within(header).getByText("Space A"));
+    expect(chevron.className).not.toContain("ml-auto");
+  });
+
+  it("workspace, space, Pinned and status-group headers all use the same chevron", async () => {
+    window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([IN_SPACE.ID]));
+    await mountSidebar([IN_SPACE], {}, [SPACE_A]);
+
+    const chevronClass = (header: HTMLElement) =>
+      within(header).getByTestId("row-chevron").getAttribute("class")!.replace("rotate-90", "").replace(/\s+/g, " ").trim();
+    const workspace = chevronClass(screen.getByTestId("sidebar-workspace-row"));
+    expect(chevronClass(screen.getByTestId("sidebar-space-row"))).toBe(workspace);
+    expect(chevronClass(screen.getByTestId("sidebar-pinned-section-header"))).toBe(workspace);
+
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+    const groupHeader = (await screen.findAllByTestId("sidebar-status-group-header"))[0]!;
+    expect(chevronClass(groupHeader)).toBe(workspace);
+    // Muted, small, token-only.
+    expect(workspace).toContain("size-3.5");
+    expect(workspace).toContain("text-foreground-subtlest");
+  });
+
+  it("a status group's count is a pill", async () => {
+    await mountSidebar([makeTask(5, "A"), makeTask(6, "B")]);
+
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+
+    const pill = (await screen.findAllByTestId("status-group-count"))[0]!;
+    expect(pill.className).toContain("rounded-full");
+    expect(pill).toHaveTextContent("2");
   });
 });

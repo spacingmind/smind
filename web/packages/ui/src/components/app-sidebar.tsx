@@ -117,7 +117,6 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -1118,10 +1117,15 @@ function PinnedSection({
 
   return (
     <SidebarMenuItem data-testid="sidebar-pinned-section">
-      <SidebarMenuButton onClick={() => setCollapsed((c) => !c)} data-testid="sidebar-pinned-section-header">
+      <SidebarMenuButton
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+        data-testid="sidebar-pinned-section-header"
+        className="rounded-lg"
+      >
         <Pin className="size-3.5" />
         <span className="min-w-0 truncate">Pinned</span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", !collapsed && "rotate-90")} />
+        <RowChevron open={!collapsed} />
       </SidebarMenuButton>
       {!collapsed && (
         <SidebarMenuSub>
@@ -1187,11 +1191,21 @@ function StatusGroupItem({
 
   return (
     <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
-      <SidebarMenuButton onClick={() => setOpen((o) => !o)} data-testid="sidebar-status-group-header">
-        <span className="min-w-0 truncate">
-          {group.label} <span className="text-muted-foreground">({group.tasks.length})</span>
+      <SidebarMenuButton
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        data-testid="sidebar-status-group-header"
+        className="rounded-lg"
+      >
+        <span className="min-w-0 truncate">{group.label}</span>
+        <RowChevron open={open} />
+        {/* A pill, as in ZCode's group headers (TASK_GROUP_COUNT_BADGE_CLASS). */}
+        <span
+          data-testid="status-group-count"
+          className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-tag/50 px-1.5 py-0.5 text-ui-sm font-medium leading-none text-foreground-subtle"
+        >
+          {group.tasks.length}
         </span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-90")} />
       </SidebarMenuButton>
       {open && (
         <SidebarMenuSub>
@@ -1219,17 +1233,40 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
   );
 }
 
-/** The "⋯" hover/context menu shared by workspace and space rows. */
+/**
+ * The one chevron every container header (workspace, space, Pinned, status
+ * group) uses, so they cannot drift apart (sidebar-polish S5): same size, the
+ * same muted colour, and always directly after the title -- where ZCode's
+ * group headers put it (workspace-grouped-tasks/types.ts) -- never pushed to
+ * the far edge where the row's own actions live.
+ */
+function RowChevron({ open }: { open: boolean }) {
+  return (
+    <ChevronRight
+      data-testid="row-chevron"
+      aria-hidden="true"
+      className={cn("size-3.5 shrink-0 text-foreground-subtlest transition-transform", open && "rotate-90")}
+    />
+  );
+}
+
+/**
+ * The "⋯" menu shared by workspace and space rows. Mounted by the caller only
+ * while its row is hovered/focused/menu-open (use-row-active.ts); `onOpenChange`
+ * is how the row learns its menu is open so it stays mounted.
+ */
 function RowMenu({
   items,
   triggerProps,
+  onOpenChange,
 }: {
   items: { label: string; icon: ReactNode; onSelect: () => void }[];
   /** Extra DOM attributes (data-testid, data-*-id) so callers can disambiguate this shared trigger's otherwise-identical "Row actions" label between workspace and space rows. */
   triggerProps?: Record<string, string | number>;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0" {...triggerProps}>
           <MoreHorizontal />
@@ -1244,6 +1281,20 @@ function RowMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * A container header's trailing action area: absolutely positioned on the
+ * row's right edge, a fixed 20px box that is empty until the row is active, so
+ * the ⋯ appearing never moves anything (and the button reserves the same space
+ * with its own right padding, so the aggregate dot and chevron never sit under it).
+ */
+function RowActions({ children }: { children: ReactNode }) {
+  return (
+    <span className="absolute inset-y-0 right-1 flex w-5 items-center justify-center group-data-[collapsible=icon]:hidden">
+      {children}
+    </span>
   );
 }
 
@@ -1313,20 +1364,42 @@ function WorkspaceItem({
     { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
   ];
 
+  const { active, rowProps, setMenuOpen } = useRowActive();
+
   return (
     <SidebarMenuItem>
       <ContextMenu>
+        {/*
+          * The hover/focus scope is this wrapper -- the header line only --
+          * not the li, which also contains the workspace's whole subtree.
+          */}
         <ContextMenuTrigger asChild>
-          <SidebarMenuButton
-            onClick={onToggleExpanded}
-            data-testid="sidebar-workspace-row"
-            data-workspace-id={workspace.ID}
-          >
-            <FolderGit2 />
-            <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-            <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
-            <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
-          </SidebarMenuButton>
+          <div className="relative" {...rowProps}>
+            <SidebarMenuButton
+              onClick={onToggleExpanded}
+              data-testid="sidebar-workspace-row"
+              data-workspace-id={workspace.ID}
+              aria-expanded={expanded}
+              className="rounded-lg pr-8"
+            >
+              <FolderGit2 />
+              <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
+              <RowChevron open={expanded} />
+              <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+            </SidebarMenuButton>
+            <RowActions>
+              {active && (
+                <RowMenu
+                  items={items}
+                  onOpenChange={setMenuOpen}
+                  triggerProps={{
+                    "data-testid": "sidebar-workspace-actions-trigger",
+                    "data-workspace-id": workspace.ID,
+                  }}
+                />
+              )}
+            </RowActions>
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent data-testid="sidebar-workspace-context-menu">
           {items.map((item) => (
@@ -1337,15 +1410,6 @@ function WorkspaceItem({
           ))}
         </ContextMenuContent>
       </ContextMenu>
-      <SidebarMenuAction>
-        <RowMenu
-          items={items}
-          triggerProps={{
-            "data-testid": "sidebar-workspace-actions-trigger",
-            "data-workspace-id": workspace.ID,
-          }}
-        />
-      </SidebarMenuAction>
       {expanded && (
         <SidebarMenuSub>
           {flat ? (
@@ -1442,20 +1506,11 @@ function SpaceItem({
       onMoveTask={onMoveTask}
       testId="sidebar-space-row"
       spaceId={space.ID}
-    >
-      <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
-        <RowMenu
-          items={[
-            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
-            { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
-          ]}
-          triggerProps={{
-            "data-testid": "sidebar-space-actions-trigger",
-            "data-space-id": space.ID,
-          }}
-        />
-      </SidebarMenuSubItem>
-    </SpaceLikeItem>
+      menuItems={[
+        { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
+        { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
+      ]}
+    />
   );
 }
 
@@ -1478,7 +1533,7 @@ function SpaceLikeItem({
   onArchiveTask,
   spaces,
   onMoveTask,
-  children,
+  menuItems,
   testId,
   spaceId,
 }: {
@@ -1495,7 +1550,8 @@ function SpaceLikeItem({
   /** Every space in the workspace, so each task row's "Move to space" submenu can list the others. */
   spaces: SpaceWithTasks[];
   onMoveTask: (task: Task, spaceId: number | null) => void;
-  children?: ReactNode;
+  /** The ⋯ menu's items; absent for the synthetic "Ungrouped" bucket, which has nothing to add to or delete. */
+  menuItems?: { label: string; icon: ReactNode; onSelect: () => void }[];
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
   testId?: string;
   spaceId?: number;
@@ -1504,19 +1560,41 @@ function SpaceLikeItem({
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(tasks, attention, runStatus);
 
+  const { active, rowProps, setMenuOpen } = useRowActive();
+
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton
-        onClick={() => setOpen((o) => !o)}
-        data-testid={testId}
-        data-space-id={spaceId}
-      >
-        <Layers className="size-3.5" />
-        <span className="min-w-0 truncate">{title}</span>
-        <AggregateSlot status={aggregate} label={`${title} activity`} />
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-      </SidebarMenuSubButton>
-      {children}
+      {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
+      <div className="relative" {...rowProps}>
+        <SidebarMenuSubButton asChild className="h-8 translate-x-0 gap-2 rounded-lg pr-8">
+          <button
+            type="button"
+            onClick={() => setOpen((o) => !o)}
+            aria-expanded={open}
+            data-testid={testId}
+            data-space-id={spaceId}
+          >
+            <Layers className="size-3.5" />
+            <span className="min-w-0 truncate">{title}</span>
+            <RowChevron open={open} />
+            <AggregateSlot status={aggregate} label={`${title} activity`} />
+          </button>
+        </SidebarMenuSubButton>
+        {menuItems && (
+          <RowActions>
+            {active && (
+              <RowMenu
+                items={menuItems}
+                onOpenChange={setMenuOpen}
+                triggerProps={{
+                  "data-testid": "sidebar-space-actions-trigger",
+                  "data-space-id": spaceId ?? "",
+                }}
+              />
+            )}
+          </RowActions>
+        )}
+      </div>
       {open && (
         // Flush, not another full mx-3.5/border-l/px-2.5 indent step: this
         // list is already the *second* SidebarMenuSub nesting level (a

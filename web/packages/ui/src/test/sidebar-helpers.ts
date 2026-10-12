@@ -50,3 +50,31 @@ export async function openHoverCard(taskId: number): Promise<HTMLElement> {
   }
   return screen.findByTestId("task-hover-card");
 }
+
+/** Hovers a container header (workspace/space) -- its wrapper is the row button's parent -- so its ⋯ mounts. */
+function hoverHeader(header: HTMLElement): void {
+  fireEvent.mouseEnter(header.parentElement!);
+}
+
+/** Hovers the workspace header row and returns its ⋯ trigger. */
+export async function revealWorkspaceActions(): Promise<HTMLElement> {
+  hoverHeader(await screen.findByTestId("sidebar-workspace-row"));
+  return screen.findByTestId("sidebar-workspace-actions-trigger");
+}
+
+/** Hovers a space header row and returns its ⋯ trigger. */
+export async function revealSpaceActions(): Promise<HTMLElement> {
+  hoverHeader(await screen.findByTestId("sidebar-space-row"));
+  return screen.findByTestId("sidebar-space-actions-trigger");
+}
+
+/**
+ * Moves focus the way Tab does. jsdom only reports `:focus-visible` after the
+ * last input was a key press, so a bare `.focus()` after an earlier pointer
+ * event in the same file reads as mouse focus and would not mount the row's
+ * keyboard-revealed actions.
+ */
+export function keyboardFocus(el: HTMLElement): void {
+  fireEvent.keyDown(document.body, { key: "Tab" });
+  act(() => el.focus());
+}

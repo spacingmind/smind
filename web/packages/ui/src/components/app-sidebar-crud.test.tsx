@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { revealTaskActions } from "@/test/sidebar-helpers";
+import { revealSpaceActions, revealTaskActions, revealWorkspaceActions } from "@/test/sidebar-helpers";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -206,7 +206,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE);
 
-    const menu = await screen.findByRole("button", { name: "Row actions" });
+    const menu = await revealWorkspaceActions();
     fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Add space"));
@@ -230,7 +230,7 @@ describe("AppSidebar CRUD", () => {
     const onSelectTask = mount(client, vi.fn());
     await resolveWorkspaceTree(client, WORKSPACE);
 
-    const menu = await screen.findByRole("button", { name: "Row actions" });
+    const menu = await revealWorkspaceActions();
     fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Add task"));
@@ -366,9 +366,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
 
-    // The workspace's own row menu is the first "Row actions" trigger;
-    // Space A's is the second.
-    const menu = (await screen.findAllByRole("button", { name: "Row actions" }))[0];
+    const menu = await revealWorkspaceActions();
     fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Delete workspace"));
@@ -396,7 +394,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE);
 
-    const menu = await screen.findByRole("button", { name: "Row actions" });
+    const menu = await revealWorkspaceActions();
     fireEvent.pointerDown(menu, { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Delete workspace"));
@@ -414,10 +412,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
 
-    // Space A's own row menu (distinct from the workspace's) is the second
-    // "Row actions" trigger, since Space A renders alongside the workspace.
-    const rowMenus = await screen.findAllByRole("button", { name: "Row actions" });
-    fireEvent.pointerDown(rowMenus[rowMenus.length - 1], { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(await revealSpaceActions(), { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Delete space"));
 
@@ -441,8 +436,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
 
-    const rowMenus = await screen.findAllByRole("button", { name: "Row actions" });
-    fireEvent.pointerDown(rowMenus[rowMenus.length - 1], { button: 0, ctrlKey: false });
+    fireEvent.pointerDown(await revealSpaceActions(), { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Delete space"));
 

@@ -6,7 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
-import { openHoverCard, taskTrigger } from "@/test/sidebar-helpers";
+import { openHoverCard, revealWorkspaceActions, taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
@@ -135,7 +135,7 @@ describe("AppSidebar", () => {
       const client = new FakeWsClient();
       const row = await mountTree(client);
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-workspace-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(await revealWorkspaceActions(), { button: 0, ctrlKey: false });
       const dropdownLabels = await labels(await screen.findByRole("menu"));
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
       await flush();
