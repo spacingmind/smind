@@ -169,8 +169,32 @@ Write scopes: step 2 = `components/app-sidebar*.tsx`, `components/sidebar-footer
 
 ## Progress
 
-- [ ] 1 spec  - [ ] 2 footer  - [ ] 3 resize  - [ ] 4 scrollbars  - [ ] 5 verify + PR
+- [x] 1 spec  - [x] 2 footer (Peer · Sonnet)  - [x] 3 resize (Peer · Sonnet)  - [x] 4 scrollbars (Peer · GLM)  - [x] 5 verify + adversarial review (Reviewer · Sonnet, read-only) + PR
+
+Steps 2-4 ran in parallel in one worktree (disjoint write scopes, path-limited commits). Lead integration commits: SidebarContent lost `no-scrollbar` (the sidebar list's real scroller was hiding its bar; the Radix ScrollArea inside never overflows) and the tab strip got `overflow-y-hidden` (1px vertical overflow the new bar exposed). Review round: drag state leak on lost capture, no responsive cap on a persisted width, tooltips reopening after menu close, 4px macOS rail inset, blank strip while collapsing, thumb min-width, dead `usePanelRef` -- all fixed (see git log).
+
+Known, left as-is: native bar appearing in the sidebar list shifts rows by 8px (no `scrollbar-gutter`); on macOS WebKit the global styled bar is a classic (non-overlay) 8px bar, so other scrollers with accidental overflow would now show one -- the tab strip was the only one found in the screenshot pass (task chat, Settings, sidebar list).
 
 ## Validation
 
-(filled at the end: AC → evidence, screenshot paths, frame notes)
+Web: `npx tsc -b` clean; full web suite 1841-1842/1842 on three runs -- the single failure differs every run (a different `App.test.tsx` test, 5s timeout under full-suite load, passes alone 71/71 x3; the same happens on pristine origin/develop). Go `task test` Go part + `node --test desktop/scripts` 13/13 + `task lint` pass. (`task test`'s `bun run` web step failed for a while because bun re-linked esbuild with an invalid signature -- environment only; re-signed locally.)
+
+| AC | Evidence |
+|---|---|
+| F-AC1..3,7 | `app-sidebar-footer.test.tsx` (header has no theme/settings; order + names; settings/usage/add-workspace; theme options) |
+| F-AC4,5 | tests: host popover rows/deep-links, status dot tones, desktop-only daemon rows; screenshots `footer-d-*-host.png` |
+| F-AC6 | test: help menu items + external links; `footer-d-*-help.png` |
+| F-AC8 | test + `footer-d-*-collapsed.png` (6 icons, 48px rail, no overflow) |
+| F-AC9 | test: rows slot renders nothing when empty |
+| F-AC10 | `footer-m-*-default/host/help.png` (390x844 Sheet) |
+| R-AC1..2 | `use-sidebar-resize.test.tsx` (data-resizing, CSS var, no React commit mid-drag, commit on release); browser probe: mid-drag `data-resizing=true`, body classes set then removed, localStorage written on release only |
+| R-AC3 | `App.test.tsx` toggle test; frame samples below; reduced-motion headless run: collapse is 1 frame (no transition) |
+| R-AC4 | hook tests (clamp, snap, keyboard); browser: drag-left release collapses to 48px and keeps the persisted 376 |
+| R-AC5,6 | App-level drag test + browser localStorage; lost-capture/cancel/unmount tests |
+| R-AC7 | `App.responsive.test.tsx`; `footer-m-*` |
+| S-AC1..5 | `test/scrollbar-css.test.ts`, `desktop-webview-css.test.ts`; `scroll-*-{sidebar,chat}-hover.png` light + dark |
+
+Frame samples (headless Chrome, rAF sampler, `[sidebar-inset].x` = content left edge, `[sidebar-inner].width` = visible sidebar; 1440x900):
+- **Before (origin/develop)** collapse: inset jumps 260 -> 52 in one frame while the sidebar slides 255 -> 47 over ~200ms *linearly* (content and sidebar disagree for 200ms). Drag: inset is at the pointer immediately, sidebar inner trails and keeps converging for ~200ms after the pointer stops (73 distinct states).
+- **After** collapse: inset eases 260 -> 48 over ~200ms ease-out (`256, 201, 164, 136, 114, 96, 81, 70, 62, 56, 51, 49, 48`) and the visible sidebar edge is the panel edge (inset - inner is constant 5px = handle + border during drag, zero trailing; 31 distinct states). Expand mirrors it.
+Artifacts (local, not committed): `/tmp/sfrs/shots/*.png`, `/tmp/sfrs/frames-before.json`, `/tmp/sfrs/frames-after.json`.
