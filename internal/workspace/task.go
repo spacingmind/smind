@@ -8,11 +8,33 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/spacingmind/smind/internal/config"
 	"github.com/spacingmind/smind/internal/store"
 )
+
+// lastTaskStamp is the most recent value taskStamp handed out.
+var lastTaskStamp atomic.Int64
+
+// taskStamp returns the UnixNano-based suffix of a task's worktree and
+// branch name, strictly increasing within the process. The wall clock alone
+// isn't enough: on Windows it advances in ~0.5-15.6 ms steps, so tasks with
+// the same title created in one tick (parallel tests, an orchestrator
+// fanning out) got the same name and collided on `git worktree add`.
+func taskStamp() int64 {
+	for {
+		last := lastTaskStamp.Load()
+		next := time.Now().UTC().UnixNano()
+		if next <= last {
+			next = last + 1
+		}
+		if lastTaskStamp.CompareAndSwap(last, next) {
+			return next
+		}
+	}
+}
 
 // CreateTaskOption customizes CreateTask; see WithParentTask.
 type CreateTaskOption func(*createTaskParams)
@@ -107,7 +129,7 @@ func (m *Manager) CreateTask(workspaceID int64, spaceID *int64, title string, op
 		return store.Task{}, fmt.Errorf("create task: %w", err)
 	}
 
-	name := slugify(title) + "-" + strconv.FormatInt(time.Now().UTC().UnixNano(), 36)
+	name := slugify(title) + "-" + strconv.FormatInt(taskStamp(), 36)
 	worktreePath := filepath.Join(config.Dir(), "worktrees", strconv.FormatInt(workspaceID, 10), name)
 	branch := "smind/task-" + name
 

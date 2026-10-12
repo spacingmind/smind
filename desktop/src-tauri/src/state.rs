@@ -25,16 +25,6 @@ pub struct DesktopState {
     /// The daemon-client watcher task following the selected connection
     /// (AC7). Replaced (old one aborted) on every `connections_select`.
     pub client_task: Mutex<Option<JoinHandle<()>>>,
-    /// The default WSL distro name, detected once and cached (ADR-0013
-    /// part D2) -- see `daemon_manager::resolve_distro`.
-    pub daemon_manager_distro: Arc<Mutex<Option<String>>>,
-    /// The detected platform (WSL2/macOS/unsupported), cached once per app
-    /// run for the same reason as `daemon_manager_distro`: it doesn't
-    /// change while the app is running, and re-detecting it (a `wsl.exe`
-    /// spawn on Windows) on every `daemon_status` poll is exactly the
-    /// flashing-console-window bug this cache exists to avoid -- see
-    /// `daemon_manager::detect_platform`.
-    pub daemon_manager_platform: Arc<Mutex<Option<crate::daemon_manager::Platform>>>,
     /// The relay transport's own background reconnect-loop task (see
     /// `smind_daemon_client::relay::client::spawn`), when the selected
     /// connection is `relay`-kind. Distinct from `client_task`: this one

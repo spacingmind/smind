@@ -772,41 +772,71 @@ html[data-desktop-os] body {
 }
 
 /*
- * D2.7 + W4, thin themed scrollbars without arrow buttons, Windows only
- * (WebView2's classic wide grey ones, with their ▲▼ end buttons, otherwise).
- * Gated on html[data-desktop-os="windows"] (main.tsx, from lib/platform.ts's
- * desktopOS) so macOS keeps its overlay scrollbars and Linux its desktop
- * theme. This is done with the ::-webkit-scrollbar pseudo-elements and NOT
- * the standard scrollbar-width/scrollbar-color pair: Chromium ignores every
+ * One themed scrollbar everywhere (sidebar-footer-resize-scrollbar plan,
+ * D8/S-AC1), replacing the earlier Windows-only D2.7 block: every native
+ * scroller in the app -- the sidebar list's Radix ScrollArea siblings, the
+ * chat timeline, Settings, popovers and dialogs -- gets the same thin
+ * 8px bar, transparent track and rounded foreground-alpha thumb, so the
+ * app has one scrollbar style in light and dark, desktop and web
+ * (macOS WebKit in Tauri supports these pseudo-elements; Radix
+ * ScrollArea's own bar is styled in scroll-area.tsx to match).
+ *
+ * Still done with the ::-webkit-scrollbar pseudo-elements and NOT the
+ * standard scrollbar-width/scrollbar-color pair: Chromium ignores every
  * ::-webkit-scrollbar* rule on an element whose scrollbar-width or
- * scrollbar-color is non-auto, and its standard thin scrollbar still draws the
- * arrow buttons -- so the standard properties had to go for the arrows to be
- * removable. No scrollbar-width/scrollbar-color may be set on a Windows
- * element (index.css test); the xterm viewport rule above is the one
- * exception, and it hides the bar outright. The thumb uses the existing border
- * token, so it themes in light and dark. xterm's own
- * `.xterm-viewport::-webkit-scrollbar` rule (display: none) is more specific
- * and still wins.
+ * scrollbar-color is non-auto, and its standard thin scrollbar still
+ * draws the arrow buttons -- so the standard properties must stay off
+ * for the arrows to be removable. No scrollbar-width/scrollbar-color
+ * may be set anywhere else in index.css; the two exceptions are the
+ * xterm viewport rule above (it hides the bar outright) and the Firefox
+ * @supports fallback at the end of this block (browsers that never
+ * match ::-webkit-scrollbar anyway). The thumb derives from the
+ * --color-foreground token, so it themes in light and dark, and sits
+ * brighter while the scroller is hovered, brightest on the thumb
+ * itself. A transparent 2px border + background-clip: content-box
+ * makes the visible thumb 4px wide inside the 8px track, inset from
+ * the content. xterm's own `.xterm-viewport::-webkit-scrollbar` rule
+ * (display: none) is more specific and still wins, and the
+ * `.no-scrollbar` utility (@utility in shadcn/tailwind.css) also still
+ * wins -- a class selector beats these bare pseudo-element rules.
  */
-html[data-desktop-os="windows"] ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
-html[data-desktop-os="windows"] ::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
-/* A transparent 2px frame makes the visible thumb 6px wide inside the 10px track. */
-html[data-desktop-os="windows"] ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
-  border-radius: 9999px;
+::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--color-foreground) 18%, transparent);
   border: 2px solid transparent;
   background-clip: content-box;
+  border-radius: 9999px;
+  min-height: 32px;
+  min-width: 32px;
 }
-html[data-desktop-os="windows"] ::-webkit-scrollbar-corner {
+:hover::-webkit-scrollbar-thumb {
+  background-color: color-mix(in srgb, var(--color-foreground) 32%, transparent);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--color-foreground) 50%, transparent);
+}
+::-webkit-scrollbar-corner {
   background: transparent;
 }
-html[data-desktop-os="windows"] ::-webkit-scrollbar-button {
+::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
+}
+/*
+ * Firefox only: it has no ::-webkit-scrollbar pseudo-elements, so the
+ * @supports guard excludes every WebKit/Blink browser and the standard
+ * properties land there alone (they cannot disable the webkit rules).
+ */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-foreground) 28%, transparent) transparent;
+  }
 }

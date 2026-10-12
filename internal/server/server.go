@@ -7,10 +7,12 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -30,25 +32,47 @@ type Server struct {
 	runs      *runs.Registry
 	terminals *terminal.Registry
 	token     string
+
+	shutdownCh   chan struct{}
+	shutdownOnce sync.Once
+}
+
+// Option configures New.
+type Option func(*options)
+
+type options struct {
+	observer quota.Observer
+}
+
+// WithQuotaObserver reports every Anthropic OAuth upstream response the proxy
+// receives to o (ADR-0028 §7). Nil is a no-op.
+func WithQuotaObserver(o quota.Observer) Option {
+	return func(opts *options) { opts.observer = o }
 }
 
 // New builds a Server from config, backed by reg/router for the proxy
 // endpoints and wm/runner/db for the /ws workspace/space/task/run/terminal
 // API (db backs runs.Registry's persistence -- see wsapi.New). token gates
 // the proxy endpoints and the /ws upgrade; see Handler.
-func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*Server, error) {
+func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string, opts ...Option) (*Server, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	api, err := wsapi.New(wm, reg, runner, db, token)
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
 	return &Server{
 		cfg:       cfg,
-		proxy:     newProxy(reg, router, db),
+		proxy:     newProxy(reg, router, db, withObserver(o.observer)),
 		ws:        api.Handler,
 		api:       api,
 		runs:      api.Runs,
 		terminals: api.Terminals,
 		token:     token,
+
+		shutdownCh: make(chan struct{}),
 	}, nil
 }
 
@@ -58,6 +82,14 @@ func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *
 // -- see wsapi.API.ServeTransport.
 func (s *Server) API() *wsapi.API {
 	return s.api
+}
+
+// ShutdownSignal returns a channel that is closed exactly once, when
+// POST /api/shutdown accepts a shutdown request (see handleShutdown).
+// cmdServe selects on it next to its signal context, so the API and
+// SIGINT/SIGTERM drive one shared shutdown code path (ADR-0029 D2).
+func (s *Server) ShutdownSignal() <-chan struct{} {
+	return s.shutdownCh
 }
 
 // Close releases daemon-owned resources that live outside the
@@ -86,6 +118,9 @@ func (s *Server) Close() {
 // a query parameter rather than through auth.RequireToken's Authorization
 // header check -- a browser WebSocket client can't set request headers on
 // the upgrade -- so it isn't wrapped in that middleware; see wsapi.Handler.
+// POST /api/shutdown is token-gated exactly like the proxy routes
+// (ADR-0029 D2): shutting the daemon down is as destructive as anything
+// the token already authorizes.
 // GET /api/token is unauthenticated for the same reason /ws's own check
 // isn't an Authorization header: see handleToken's doc comment.
 func (s *Server) Handler() http.Handler {
@@ -95,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /v1/messages", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropic)))
 	mux.Handle("POST /v1/messages/count_tokens", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleAnthropicCountTokens)))
 	mux.Handle("POST /v1/chat/completions", auth.RequireToken(s.token, http.HandlerFunc(s.proxy.handleOpenAI)))
+	mux.Handle("POST /api/shutdown", auth.RequireToken(s.token, http.HandlerFunc(s.handleShutdown)))
 	mux.Handle("GET /ws", s.ws)
 	mux.Handle("/", webUI())
 	return mux
@@ -135,6 +171,18 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"token": s.token,
 	})
+}
+
+// handleShutdown serves POST /api/shutdown (ADR-0029 D2): 202 Accepted,
+// then the shutdown signal cmdServe selects on -- the same path SIGINT/
+// SIGTERM take. The sync.Once makes repeat calls during shutdown
+// idempotent: they still get their 202, and closing the channel twice
+// (which would panic) is impossible. Only POST reaches this handler; the
+// mux pattern routes every other method away from it, and
+// auth.RequireToken has already rejected unauthenticated callers.
+func (s *Server) handleShutdown(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutting-down"})
+	s.shutdownOnce.Do(func() { close(s.shutdownCh) })
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {

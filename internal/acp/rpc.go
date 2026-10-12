@@ -12,6 +12,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/spacingmind/smind/internal/shimguard"
 )
 
 // RPCError is a JSON-RPC 2.0 error object, returned by a peer in response to
@@ -83,6 +85,11 @@ type conn struct {
 
 	closeOnce sync.Once
 	readDone  chan struct{}
+
+	// pg (set right after a successful Start) owns the whole-tree kill
+	// switch: a kill-on-close Job Object handle on Windows, the
+	// process-group id on Unix. See procgroup_*.go.
+	pg *processGroup
 }
 
 // newConn spawns command[0] with command[1:] as arguments, wiring its
@@ -90,6 +97,9 @@ type conn struct {
 func newConn(command []string, logWriter io.Writer) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("acp: empty command")
+	}
+	if err := shimguard.Validate("acp", command); err != nil {
+		return nil, err
 	}
 
 	cmd := exec.Command(command[0], command[1:]...)
@@ -109,6 +119,13 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 		return nil, fmt.Errorf("acp: start %q: %w", command[0], err)
 	}
 
+	pg, err := attachProcessGroup(cmd)
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, err
+	}
+
 	c := &conn{
 		cmd:           cmd,
 		stdin:         stdin,
@@ -117,6 +134,7 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 		reqHandlers:   make(map[string]RequestHandler),
 		notifHandlers: make(map[string]NotificationHandler),
 		readDone:      make(chan struct{}),
+		pg:            pg,
 	}
 
 	go c.readLoop()
@@ -325,11 +343,12 @@ func (c *conn) close(timeout time.Duration) error {
 
 	select {
 	case err := <-waitDone:
+		c.pg.release()
 		return err
 	case <-time.After(timeout):
 		// Kill the whole process group, not just the agent, so MCP server
 		// grandchildren (npx -> node -> chromium) don't outlive it.
-		killProcessGroup(c.cmd)
+		c.pg.kill()
 		return <-waitDone
 	}
 }

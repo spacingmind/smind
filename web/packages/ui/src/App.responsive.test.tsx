@@ -180,9 +180,9 @@ describe("App compact layout (Item 21)", () => {
     await resolveSidebar(socket);
 
     expect(screen.queryByTestId("sidebar-resize-handle")).not.toBeInTheDocument();
-    // No resizable-panel-group at all above the breakpoint's threshold --
-    // the compact branch renders a plain flex column instead of handing
-    // the sidebar-vs-content split to react-resizable-panels.
+    // The compact branch renders a plain flex column: no sidebar panel at
+    // all (the sidebar is a Sheet), and no react-resizable-panels group.
+    expect(container.querySelector('[data-slot="sidebar-panel"]')).toBeNull();
     expect(container.querySelector('[data-slot="resizable-panel-group"]')).toBeNull();
   });
 
@@ -236,11 +236,10 @@ describe("App compact layout (Item 21)", () => {
     await openDiffTab();
     await splitDiffTabRight();
 
-    // A resizable-handle exists beyond the sidebar's own (which always
-    // carries the fixed "sidebar-resize-handle" id) -- that's the new
-    // pane split's own handle.
-    const splitHandle = () =>
-      container.querySelector('[data-slot="resizable-handle"]:not(#sidebar-resize-handle)');
+    // The sidebar's own handle is a plain separator (data-slot
+    // "sidebar-resize-handle"), so any react-resizable-panels handle is the
+    // task-pane split's.
+    const splitHandle = () => container.querySelector('[data-slot="resizable-handle"]');
     expect(splitHandle()).toBeInTheDocument();
 
     // Resize down: the split stops rendering, and so does the "split"

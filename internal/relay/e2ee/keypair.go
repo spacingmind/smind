@@ -17,6 +17,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 const (
@@ -166,22 +168,24 @@ func writeKeyPair(dir, path string, kp *KeyPair) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := securefile.WriteFile(path, data); err != nil {
 		return fmt.Errorf("write keypair %s: %w", path, err)
 	}
 	return nil
 }
 
+// tightenKeyPairPerms restricts an existing keypair file to its owner (0600
+// on Unix, an owner-only DACL on Windows -- see internal/securefile).
 func tightenKeyPairPerms(path string) error {
-	info, err := os.Stat(path)
+	private, err := securefile.IsPrivate(path)
 	if err != nil {
-		return fmt.Errorf("stat keypair %s: %w", path, err)
+		return fmt.Errorf("check keypair %s permissions: %w", path, err)
 	}
-	if info.Mode().Perm()&^fs.FileMode(0o600) == 0 {
+	if private {
 		return nil
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
-		return fmt.Errorf("chmod keypair %s: %w", path, err)
+	if err := securefile.Restrict(path); err != nil {
+		return fmt.Errorf("restrict keypair %s: %w", path, err)
 	}
 	return nil
 }

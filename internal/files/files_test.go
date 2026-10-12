@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 // newTestRoot creates a real temp directory to use as a sandbox root, with
@@ -230,9 +232,7 @@ func TestSandbox_SymlinkToOutsideFile_Rejected(t *testing.T) {
 	}
 
 	linkPath := filepath.Join(root, "evil-link")
-	if err := os.Symlink(secretPath, linkPath); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	testutil.Link(t, secretPath, linkPath)
 
 	if content, _, err := Read(root, "evil-link"); err == nil {
 		t.Fatalf("Read(evil-link) = %q, err = nil, want a rejection (symlink escapes root)", content)
@@ -252,9 +252,7 @@ func TestSandbox_SymlinkToOutsideDirectory_Rejected(t *testing.T) {
 	}
 
 	linkDir := filepath.Join(root, "evil-dir")
-	if err := os.Symlink(outsideDir, linkDir); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
+	testutil.Link(t, outsideDir, linkDir)
 
 	if _, err := List(root, "evil-dir"); err == nil {
 		t.Fatal("List(evil-dir) error = nil, want a rejection (symlinked directory escapes root)")

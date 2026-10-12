@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 func TestLoadOrCreateKeyPairPersistsAcrossRestarts(t *testing.T) {
@@ -41,12 +43,19 @@ func TestLoadOrCreateKeyPairFileIs0600(t *testing.T) {
 		t.Fatalf("LoadOrCreateKeyPair: %v", err)
 	}
 
-	info, err := os.Stat(KeyPairPath(dir))
+	assertPrivate(t, KeyPairPath(dir))
+}
+
+// assertPrivate: owner-only -- 0600 on Unix, a protected owner+SYSTEM DACL
+// on Windows (ADR-0029 D3).
+func assertPrivate(t *testing.T, path string) {
+	t.Helper()
+	private, err := securefile.IsPrivate(path)
 	if err != nil {
-		t.Fatalf("stat keypair: %v", err)
+		t.Fatalf("IsPrivate(%s): %v", path, err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Errorf("keypair file mode = %o, want 600", got)
+	if !private {
+		t.Errorf("keypair file %s is readable by others, want owner-only", path)
 	}
 }
 
@@ -56,20 +65,26 @@ func TestLoadOrCreateKeyPairTightensLoosePermissions(t *testing.T) {
 	if _, err := LoadOrCreateKeyPair(dir); err != nil {
 		t.Fatalf("LoadOrCreateKeyPair: %v", err)
 	}
-	if err := os.Chmod(KeyPairPath(dir), 0o644); err != nil {
-		t.Fatalf("chmod: %v", err)
+	// Loosen it portably: re-create the file the ordinary way (0644 on Unix,
+	// the directory's inherited ACL on Windows, where chmod can't loosen).
+	data, err := os.ReadFile(KeyPairPath(dir))
+	if err != nil {
+		t.Fatalf("read keypair: %v", err)
+	}
+	if err := os.Remove(KeyPairPath(dir)); err != nil {
+		t.Fatalf("remove keypair: %v", err)
+	}
+	if err := os.WriteFile(KeyPairPath(dir), data, 0o644); err != nil {
+		t.Fatalf("rewrite keypair: %v", err)
+	}
+	if private, _ := securefile.IsPrivate(KeyPairPath(dir)); private {
+		t.Fatal("re-created keypair is already private; the test can't prove tightening")
 	}
 	if _, err := LoadOrCreateKeyPair(dir); err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 
-	info, err := os.Stat(KeyPairPath(dir))
-	if err != nil {
-		t.Fatalf("stat keypair: %v", err)
-	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Errorf("keypair file mode = %o, want 600 after reload", got)
-	}
+	assertPrivate(t, KeyPairPath(dir))
 }
 
 func TestLoadOrCreateKeyPairRoundTripsStoredEncoding(t *testing.T) {

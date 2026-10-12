@@ -52,9 +52,17 @@ func cmdServe(args []string) int {
 	// The poller makes no request until a user surface asks (ADR-0028 §3):
 	// no fetch at startup, on account events, or on a timer.
 	uc := cfg.AccountUsage
+	// Passive rejection cooldown (ADR-0028 §7): learns only from responses
+	// the proxy already receives, so it adds no usage call. Off with either
+	// accountUsage.enabled or accountUsage.passive false. A credential change
+	// drops the account's cooldown.
+	passive := quota.NewPassive(db, quota.WithPassiveEnabled(uc.Enabled && uc.Passive))
+	defer passive.Close()
+	registry.SetCredentialReplacedHook(passive.ClearCooldown)
 	poller := quota.New(db, registry, quota.NewAccountFetcher(registry),
 		quota.WithEnabled(uc.Enabled),
-		quota.WithTTL(time.Duration(uc.TTLSeconds)*time.Second))
+		quota.WithTTL(time.Duration(uc.TTLSeconds)*time.Second),
+		quota.WithCooldowns(passive))
 	defer poller.Close()
 	router := routing.New(db, registry, poller,
 		routing.WithUsageRouting(uc.Routing),
@@ -95,7 +103,7 @@ func cmdServe(args []string) int {
 	}
 	log.Printf("auth token: %s", auth.TokenPath(config.Dir()))
 
-	srv, err := server.New(cfg, registry, router, wm, runner, db, token)
+	srv, err := server.New(cfg, registry, router, wm, runner, db, token, server.WithQuotaObserver(passive))
 	if err != nil {
 		log.Fatalf("server: %v", err)
 	}
@@ -119,7 +127,14 @@ func cmdServe(args []string) int {
 
 	startRelayBridge(ctx, srv)
 
-	<-ctx.Done()
+	// One shutdown path for both triggers: the signal context (SIGINT/
+	// SIGTERM) and the authenticated POST /api/shutdown, whose channel
+	// the server closes (see Server.ShutdownSignal). Whichever fires first,
+	// the identical graceful-shutdown sequence below runs.
+	select {
+	case <-ctx.Done():
+	case <-srv.ShutdownSignal():
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

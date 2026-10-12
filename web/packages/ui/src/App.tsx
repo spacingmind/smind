@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Archive, Columns2, Copy, Pencil } from "lucide-react";
 import {
   DndContext,
@@ -36,7 +36,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup, usePanelRef } from "@/components/ui/resizable";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle } from "@/components/ui/resizable";
 import { SidebarInset, SidebarProvider, useSidebar } from "@/components/ui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -56,6 +56,7 @@ import {
   type TabEntry,
   type TabKind,
 } from "@/components/tab-registry";
+import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
@@ -69,6 +70,7 @@ import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
+import { useSidebarResize } from "@/hooks/use-sidebar-resize";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
 import { desktop, isDesktop } from "@/lib/platform";
@@ -271,38 +273,22 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     if (typeof document !== "undefined") document.title = formatTabTitle("smind", unread.size);
   }, [unread]);
 
-  // The sidebar's user-resized width (px), persisted across reloads -- see
-  // the plan's Item 6. react-resizable-panels' Panel API takes numeric
-  // defaultSize/minSize/maxSize as *pixels* directly (only unitless
-  // strings are treated as percentages), so these pixel values pass
-  // straight through with no percentage conversion needed.
+  // The sidebar's user-resized width (px), persisted across reloads. It
+  // only changes on commit (drag release / keyboard) -- the live drag is
+  // written straight to the CSS var by `useSidebarResize`, never through
+  // React state.
   const [sidebarWidth, setSidebarWidth] = useSidebarWidth();
-  // `sidebarWidth` updates on every drag frame (via `onResize` below) so
-  // the live value can drive the sidebar's CSS var and get persisted --
-  // but react-resizable-panels' `defaultSize` is documented as the
-  // panel's *initial* size only, and re-registers the panel (fighting the
-  // in-progress drag) whenever that prop's value changes. Freezing it
-  // here breaks that feedback loop.
-  const initialSidebarWidth = useInitialValue(sidebarWidth, "sidebar");
-
-  // Icon-collapsed dead space: shadcn's Sidebar shrinks its own *visual*
-  // content to the icon rail via CSS (`--sidebar-width-icon`), but that's
-  // independent of the ResizablePanel wrapping it -- toggling collapse
-  // used to leave the panel at its last dragged/default width, an empty
-  // gap between the icon rail and the resize handle. Lifting `open` here
-  // (as SidebarProvider's controlled prop, rather than its own internal
-  // state) lets this same effect drive the panel's actual width via its
-  // imperative handle whenever collapse state changes, in either
-  // direction (Ctrl+B, the sidebar trigger button, or a future caller).
+  // Lifted `open` (SidebarProvider's controlled prop): the toggle button,
+  // Ctrl+B and the palette flip it, and the sidebar panel just retargets
+  // its width var so one CSS transition animates the change.
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const sidebarPanelRef = usePanelRef();
-  useEffect(() => {
-    if (sidebarOpen) {
-      sidebarPanelRef.current?.expand();
-    } else {
-      sidebarPanelRef.current?.collapse();
-    }
-  }, [sidebarOpen, sidebarPanelRef]);
+  const sidebarPanelRef = useRef<HTMLDivElement>(null);
+  const sidebarResize = useSidebarResize({
+    panelRef: sidebarPanelRef,
+    width: sidebarWidth,
+    onCommit: setSidebarWidth,
+    onCollapse: () => setSidebarOpen(false),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -900,6 +886,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setTreeLoaded(true);
       }}
       onOpenSettings={openSettings}
+      connectionStatus={connectionStatus}
+      connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
     />
   );
 
@@ -1139,63 +1127,37 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           </SidebarInset>
         </div>
       ) : (
-        <ResizablePanelGroup orientation="horizontal" className="h-svh w-full">
+        <div className="flex h-svh w-full">
           {/*
-           * The sidebar-vs-content split itself -- the whole point of Item 6.
-           * defaultSize/minSize/maxSize take plain numbers as pixels
-           * directly (react-resizable-panels only treats unitless *strings*
-           * as percentages), so SIDEBAR_MIN_WIDTH/SIDEBAR_MAX_WIDTH (12rem/
-           * 32rem) apply as-is -- dragging past either bound still can't
-           * collapse the sidebar to 0 or push it off-screen.
+           * The sidebar-vs-content split: a plain flex row (ZCode's model),
+           * not react-resizable-panels. The panel clips the shadcn Sidebar
+           * (static width inside) and animates its own width between
+           * `--sidebar-width` and `--sidebar-width-icon`; `data-resizing`
+           * (set by useSidebarResize during a drag) turns that transition off.
            */}
-          <ResizablePanel
-            panelRef={sidebarPanelRef}
-            defaultSize={initialSidebarWidth}
-            minSize={SIDEBAR_MIN_WIDTH}
-            maxSize={SIDEBAR_MAX_WIDTH}
-            collapsible
-            collapsedSize={SIDEBAR_ICON_WIDTH}
-            onResize={(size) => {
-              // Dragging the handle below minSize snaps a collapsible
-              // panel straight to collapsedSize (react-resizable-panels'
-              // own behavior) without going through the `sidebarOpen`
-              // effect above -- reflect that back into shadcn's Sidebar
-              // context so its icon-rail CSS actually kicks in, instead of
-              // squeezing the full expanded layout into 48px.
-              if (sidebarPanelRef.current?.isCollapsed()) {
-                setSidebarOpen(false);
-                return;
-              }
-              setSidebarOpen(true);
-              setSidebarWidth(size.inPixels);
-            }}
-            className="min-w-0"
+          <div
+            ref={sidebarPanelRef}
+            data-slot="sidebar-panel"
+            data-collapsed={sidebarOpen ? undefined : ""}
+            className="h-full min-w-0 flex-none overflow-hidden bg-sidebar w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
           >
             {sidebarElement}
-          </ResizablePanel>
-          {/*
-           * react-resizable-panels' Separator always sets its own
-           * `data-testid` (and `id`) to its resolved `id` prop, clobbering
-           * any `data-testid` passed directly -- so the only way to control
-           * the rendered data-testid here is via `id`, not `data-testid`.
-           */}
-          <ResizableHandle id="sidebar-resize-handle" />
-          <ResizablePanel minSize={30} className="min-w-0">
-            {/*
-             * Panel's own box gets its height from the group's flex-stretch,
-             * not from content -- SidebarInset's <main> needs an explicit
-             * h-full to actually fill it (it's a plain block child of Panel
-             * now, not a flex sibling of the sidebar the way it was before
-             * Item 6's restructuring), which is what every pane under it
-             * (TaskDetailPane's own "flex h-full flex-col" root, etc.) relies
-             * on to size its scrollable region correctly.
-             */}
-            <SidebarInset className="h-full">
-              {headerElement}
-              {mainContentElement}
-            </SidebarInset>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+          </div>
+          {sidebarOpen && (
+            <SidebarResizeHandle
+              data-testid="sidebar-resize-handle"
+              aria-label="Resize sidebar"
+              aria-valuenow={sidebarWidth}
+              aria-valuemin={SIDEBAR_MIN_WIDTH}
+              aria-valuemax={SIDEBAR_MAX_WIDTH}
+              {...sidebarResize}
+            />
+          )}
+          <SidebarInset className="h-full min-w-0 flex-1">
+            {headerElement}
+            {mainContentElement}
+          </SidebarInset>
+        </div>
       )}
       <QuickOpen
         client={client}
@@ -1226,30 +1188,32 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // focus order and pointer events. Radix portals (palette, dialogs) are
   // outside this wrapper and still render on top.
   return (
-    <div className="relative h-svh w-full">
-      <UsageModalRoot client={client} events={events} />
-      <div
-        data-testid="app-shell"
-        className={cn("h-full w-full", settingsOpen && "invisible")}
-        inert={settingsOpen}
-        aria-hidden={settingsOpen || undefined}
-      >
-        {shellElement}
-      </div>
-      {settingsOpen && (
-        // No background here: on macOS the settings sidebar is a vibrancy
-        // surface and the screen paints its own opaque panes.
-        <div className="absolute inset-0 z-40">
-          <SettingsScreen
-            key={settingsOpenNonce}
-            client={client}
-            events={events}
-            onNavigateBack={closeSettings}
-            initialSectionId={settingsInitialSectionId ?? undefined}
-          />
+    <PlanUsageSourceProvider client={client} events={events}>
+      <div className="relative h-svh w-full">
+        <UsageModalRoot client={client} events={events} />
+        <div
+          data-testid="app-shell"
+          className={cn("h-full w-full", settingsOpen && "invisible")}
+          inert={settingsOpen}
+          aria-hidden={settingsOpen || undefined}
+        >
+          {shellElement}
         </div>
-      )}
-    </div>
+        {settingsOpen && (
+          // No background here: on macOS the settings sidebar is a vibrancy
+          // surface and the screen paints its own opaque panes.
+          <div className="absolute inset-0 z-40">
+            <SettingsScreen
+              key={settingsOpenNonce}
+              client={client}
+              events={events}
+              onNavigateBack={closeSettings}
+              initialSectionId={settingsInitialSectionId ?? undefined}
+            />
+          </div>
+        )}
+      </div>
+    </PlanUsageSourceProvider>
   );
 }
 
@@ -1765,7 +1729,7 @@ function PaneTabStrip({
         onValueChange={onActivate}
         className="h-full gap-0"
       >
-        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto">
+        <div className="mx-3 mt-2 flex items-center gap-1 overflow-x-auto overflow-y-hidden">
           {tabs.length > 0 && (
             <TabsList className="w-fit">
               {tabs.map((entry, index) => (

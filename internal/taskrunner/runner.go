@@ -12,6 +12,7 @@ import (
 
 	claudecode "github.com/spacingmind/claude-agent-sdk-go"
 	"github.com/spacingmind/smind/internal/acp"
+	"github.com/spacingmind/smind/internal/claudecli"
 	"github.com/spacingmind/smind/internal/codex"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -209,6 +210,15 @@ type Runner struct {
 	newACPClient    func(command []string, opts ...acp.Option) (acpBackend, error)
 	newClaudeClient func(worktreePath string, opts ...claudecode.Option) (claudeBackend, error)
 	newCodexClient  func(command []string, opts ...codex.Option) (codexBackend, error)
+
+	// claudeLaunch reports how to start the Claude CLI: a CLI path to hand
+	// claudecode.WithCLIPath and env entries for the CLI. Defaults to
+	// claudecli.LaunchSpec, which is a no-op off Windows and, on Windows,
+	// resolves the real claude.exe (never a .cmd shim) and routes the
+	// start through a smind.exe launcher that puts the CLI in a kill-on-
+	// close Job Object. Nil means "the SDK's own defaults" (tests that
+	// point newClaudeClient at a fake CLI).
+	claudeLaunch func() (cliPath string, env []string, err error)
 }
 
 // New returns a Runner backed by wm.
@@ -226,6 +236,7 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		},
 		codexCommand: codex.DefaultCommand(),
 		lookPath:     exec.LookPath,
+		claudeLaunch: claudecli.LaunchSpec,
 		newACPClient: func(command []string, opts ...acp.Option) (acpBackend, error) {
 			return acp.New(command, opts...)
 		},
@@ -240,6 +251,15 @@ func New(wm *workspace.Manager, opts ...Option) *Runner {
 		opt(r)
 	}
 	return r
+}
+
+// claudeLaunchSpec returns the CLI path and env entries to start the Claude
+// CLI with, or "" when the SDK's own discovery and process handling apply.
+func (r *Runner) claudeLaunchSpec() (cliPath string, env []string, err error) {
+	if r.claudeLaunch == nil {
+		return "", nil, nil
+	}
+	return r.claudeLaunch()
 }
 
 // lookPathFunc returns the Runner's command resolver, defaulting to
@@ -673,9 +693,21 @@ const claudeDialogTimeoutMS = "3600000"
 
 func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64, worktreePath string, taskEnv []string, prompt string, decider PermissionDecider, perm PermissionSettings, thinkingLevel ThinkingLevel, model string, events chan<- Event) error {
 	var opts []claudecode.Option
+	// Everything that must reach the CLI's environment is collected here and
+	// handed over in ONE claudecode.WithEnv at the end: the SDK's WithEnv
+	// replaces the list on every call, so separate calls silently drop each
+	// other's variables (the task's SMIND_PORT used to be lost whenever a
+	// decider added the dialog-timeout variable).
+	//
 	// ADR-0024: the task's SMIND_PORT (when a port range is configured).
-	if len(taskEnv) > 0 {
-		opts = append(opts, claudecode.WithEnv(taskEnv...))
+	env := append([]string(nil), taskEnv...)
+	cliPath, launchEnv, err := r.claudeLaunchSpec()
+	if err != nil {
+		return fmt.Errorf("taskrunner: claude code cli: %w", err)
+	}
+	if cliPath != "" {
+		opts = append(opts, claudecode.WithCLIPath(cliPath))
+		env = append(env, launchEnv...)
 	}
 
 	rows, err := r.mcpServersForWorkspace(workspaceID)
@@ -747,12 +779,15 @@ func (r *Runner) runClaudeNative(ctx context.Context, chatID, workspaceID int64,
 		// already in the environment is forwarded as-is instead -- a
 		// deployment-wide escape hatch.
 		if v := os.Getenv(claudeDialogTimeoutEnv); v != "" {
-			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+v))
+			env = append(env, claudeDialogTimeoutEnv+"="+v)
 		} else {
-			opts = append(opts, claudecode.WithEnv(claudeDialogTimeoutEnv+"="+claudeDialogTimeoutMS))
+			env = append(env, claudeDialogTimeoutEnv+"="+claudeDialogTimeoutMS)
 		}
 	case r.claudePermissionPolicy != nil:
 		opts = append(opts, claudecode.WithPermissionPolicy(r.claudePermissionPolicy))
+	}
+	if len(env) > 0 {
+		opts = append(opts, claudecode.WithEnv(env...))
 	}
 
 	client, err := r.newClaudeClientWithResume(ctx, chatID, worktreePath, opts, events)

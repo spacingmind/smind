@@ -80,11 +80,16 @@ func TaskEnv(t store.Task) []string {
 	return []string{"SMIND_PORT=" + strconv.FormatInt(*t.Port, 10)}
 }
 
+// checkSetupSupported reports whether this daemon can run ws's scripts:
+// a POSIX shell must be findable (ADR-0029 D1). Unix assumes sh; on
+// Windows the lookup covers PATH and Git for Windows. A missing shell
+// fails task creation fast instead of silently skipping the script.
 func (m *Manager) checkSetupSupported(script string) error {
-	if script != "" && m.goos == "windows" {
-		return ErrSetupUnsupported
+	if script == "" {
+		return nil
 	}
-	return nil
+	_, err := m.shLookup()
+	return err
 }
 
 // setupChanged publishes a task row change caused by setup/teardown.

@@ -244,7 +244,7 @@ export function TaskDetailPane({
               </button>
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
-            <ChatUsageTotal runs={runs} />
+            <ChatUsageTotal runs={runs} provider={chat.Provider ?? latestRun?.provider} />
           </>
         }
         actions={

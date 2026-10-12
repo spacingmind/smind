@@ -972,9 +972,9 @@ scratch).
 - [x] PR-B routing integration — PR open (2026-10-12), awaiting review (see Progress / Validation notes below)
 - [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
 - [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
-- [ ] PR-E chat hover card (required)
+- [x] PR-E chat hover card (required) — PR open (2026-10-12), awaiting review (see "PR-E record")
 - [ ] PR-D2 web footer item (default off) and pins
-- [ ] PR-F rejection cooldown + observed headers (right after PR-B)
+- [~] PR-F rejection cooldown + observed headers: PR open (2026-10-12); core (AC59-AC65) built, AC66 surfaces (wire `cooldown`/`Window.source`, `account.usage` event, UI text) wait for PR-C, see "PR-F notes"
 - [ ] Manual live check against one real account per provider
 - [ ] Close-out docs; plan moved to `completed/`
 
@@ -1174,6 +1174,78 @@ Unverified at spec time (the implementing PRs must confirm and record):
   one). Mutation-checked: a router that calls `Poller.Touch` on each Peek
   fails both.
 
+### PR-F notes (2026-10-12)
+
+- **Shape.** `quota.Passive` (`internal/quota/passive.go`) implements the
+  write-only `quota.Observer` (held by the proxy via `server.WithQuotaObserver`)
+  and the read-only `quota.CooldownSource` behind `Reader.Cooldown` (attached
+  with `quota.WithCooldowns`). Pure parsers: `passive_detect.go`
+  (`ClassifyRejection`, `RejectionDeadline`, `CooldownEnd`, grace, fallback,
+  bare-429 back-off), `passive_observe.go` (typed Anthropic observation),
+  `passive_codex.go` (fixtures-only, not called by the proxy). Persistence:
+  `quota_cooldown` table, `quota_snapshots.kind`, an async coalescing writer.
+  Routing: `Router.exhaustion` asks `Reader.Cooldown` first, independent of the
+  fetched report and of D9 overage; `routing:false` never consults the Reader.
+  Daemon: `serve.go` builds one `Passive` (off when `accountUsage.enabled` or
+  `accountUsage.passive` is false), clears it on `Registry.ReplaceCredential`
+  (hook) and the store call deletes the persisted rows; token refresh does not.
+- **Decisions taken inside the ADR text.** A `7d_oi`-only shape is a rejection
+  only when the unified status is `rejected` (as the ref); then it is
+  model-scoped, and a model-scoped rejection with no known model is not
+  recorded (fail open). Only API-less OAuth Anthropic accounts are observed;
+  `/v1/messages/count_tokens` is not observed (a bare 429 there must not back off
+  real traffic). A fallback rejection never shortens or escalates a running
+  cooldown. Bare-429 back-off is memory-only.
+- **Not in this PR (needs PR-C's wire fields).** AC66's `cooldown` object,
+  `Window.source`/`status` on the wire, the `account.usage` event on cooldown
+  start/observation change (`WithPassiveOnChange` exists, unwired), and the UI
+  text. `Passive.Observed` and `quota.DisplayReport` are ready for PR-C to call.
+  A cooldown's end fires no event (time-based).
+- **Known residuals / for the Human.** (1) A transient bare-429 back-off makes
+  `Route` persist a new 24 h affinity decision for the session (spec-compliant,
+  costs prompt-cache locality). (2) The fallback level resets on any non-rejected
+  response, including a bare 429 or 5xx (ADR wording). (3) The `7d_oi`-only
+  deadline ignores `7d_oi-Reset` (ref and ADR text), so a model-scoped weekly
+  limit without Retry-After cools 1 min and escalates to 30 min; amending the
+  ADR to use `7d_oi-Reset` is a Human decision (AGENTS.md rule d). (4) The
+  observed snapshot is not dropped on credential change and `DisplayReport` has
+  no age cutoff. (5) A deleted account leaves a tiny in-memory entry.
+
+**PR-F validation (2026-10-12).** Checked with `go test -race` on quota, routing,
+server, store, accounts, config, `go vet ./...`, `GOOS=windows go vet`, `gofmt`,
+and a 210,000-case differential test (reviewer, scratch, not committed) of
+`ClassifyRejection`/`RejectionDeadline` against a copy of the ref functions.
+
+- **AC59** verified: `Test_passive_zero_http_calls` (quota) and
+  `TestProxy_passive_zero_http_calls_proxy_path` (1000 mixed responses, usage
+  `httptest` server sees 0, `quota_poll_state` unchanged);
+  `cooldown_reader_has_no_observation_accessor`; observer no-op tests for
+  `passive:false` / `enabled:false` (constructor level; `serve.go` passes
+  `enabled && passive`).
+- **AC60, AC61** verified: truth table, deadlines, formats, grace, 8-day clamp,
+  fallback levels (`Test_passive_*` in `passive_detect_test.go`, `passive_test.go`).
+- **AC62** verified: model-scoped and credential-wide cooldowns, bare 429
+  back-off ≤ 60 s, 429 passed through unchanged (`TestProxy_passive_*`,
+  `TestProxy_429_and_headers_passed_through_unchanged_when_observed`).
+- **AC63** verified: typed bounded observation, replace-not-merge, provider
+  scoping, no raw headers; Codex parsers fixtures-only and not called by the
+  proxy (`TestProxy_observer_not_called_for_api_key_openai_and_route_errors`).
+- **AC64** verified: `TestRoute_passive_*`, end-to-end
+  `TestProxy_passive_pool_skips_cooled_account_next_request_end_to_end`;
+  credential replace clears (store, registry hook); refresh does not.
+- **AC65** verified: `quota_cooldown`, `quota_snapshots.kind`, per-kind
+  retention, persistence across restart, write-on-change and the 60 s rule,
+  non-blocking writer with a slow store.
+- **AC66** partially verified, not complete: `accountUsage.passive` loads with
+  default true; `Window.Source`/`Status`, `Passive.Observed`, `DisplayReport`
+  and `WithPassiveOnChange` exist and are tested, but the wire `cooldown` object,
+  the `account.usage` event wiring and the UI text depend on PR-C and PR-D
+  and are **not** done here.
+- Independent review (`reviewer`, Sonnet 5.5, plan mode): no blockers; 7 minor
+  findings fixed in this PR, the rest listed under PR-F notes. Flaky and
+  unrelated, rerun green: a web `tab.jump` test and a `wsapi`
+  `TempDir` cleanup test.
+
 ### PR-D1 record (web: Settings -> Usage, modal, palette; 2026-10-12)
 
 - **Built.** `lib/account-usage/{types,tone,format,copy,model,preferences}.ts`
@@ -1228,4 +1300,55 @@ Unverified at spec time (the implementing PRs must confirm and record):
 - **Not covered here.** The full-screen Settings screen (`feat/settings-fullscreen`)
   is exercised through container test doubles, plus the screen that is on develop.
   Real-provider data is still the manual live check.
+
+### PR-E record (web: plan usage in each chat's usage hover card; 2026-10-12)
+
+- **Built.** `ChatUsageTotal` (chat header) and `RunUsagePill` (run footer) open a
+  card whose token rows are unchanged and whose new **Plan usage** section
+  (`components/account-usage/chat-plan-usage.tsx`, compact accounts in
+  `plan-usage-compact.tsx`) lists every OAuth account of the chat's provider
+  (`lib/account-usage/chat-provider.ts`: `claude-native` → `anthropic`,
+  `codex-native` → `openai`, anything else none), the filter-selected one first,
+  one meter line per summary window with percent / reset / tone, the problem in one
+  line, the age ("Updated 3m ago"), and the "This chat's login isn't tracked;
+  showing all Claude accounts" note when there are several. "Open Usage" opens the
+  modal. The shell provides its client and events through
+  `PlanUsageSourceProvider` (`hooks/use-chat-plan-usage.tsx`); a pill rendered
+  without it (the old unit tests) has no section.
+- **Call discipline.** The pill's hook attaches to the shared store with
+  `touch:false`: it sends at most one `account.usage` `mode:"cached"` (only when
+  the store is empty; at pill **mount**, not on hover, because the trigger of a
+  chat with no tokens depends on the data) and never `touch` or `refresh`.
+  Verified in vitest (`hover_sends_at_most_one_cached_list...`: 20 real open/close
+  cycles) and in the real browser: hover-only runs sent exactly `["cached"]`, a GLM
+  chat sent nothing, and the only `touch` after "Open Usage" is the modal's own.
+- **Deliberate deviations.** (1) **One controlled Popover with hover intent**
+  instead of a Radix HoverCard: a HoverCard's content cannot be reached by Tab
+  (Radix strips it from the tab order), which would have regressed keyboard access
+  to the token rows that the old click Popover gave. Hover/focus open after 200 ms
+  without taking focus and close 150 ms after leaving (the card keeps itself open
+  while the pointer is over it); a click or tap (and Enter/Space) opens it with
+  focus inside and it stays until dismissed; `(hover: none)` devices get the tap
+  only. One primitive also means a pointer-capability change never remounts an
+  open card. (2) A chat with no reported tokens shows the pill only when an account
+  has a summary window to draw (not for a lone expired login); a **run** pill still
+  requires the run's own usage. (3) A ready, empty store reads "No plan data yet"
+  (the cache is empty), while a store holding only API-key / other-provider
+  accounts shows no section (AC55).
+- **Found in review (Peer).** HoverCard keyboard reachability and primitive swap
+  on a media-query flip → deviation (1); click could only open → now toggles;
+  `addListener` fallback for old Safari; re-indentation of the provider wrap in
+  `App.tsx`; added tests for another provider's filter, reshaped reports,
+  error phase, click-opened focus + toggle, hover not stealing focus. Found in
+  screenshots: a stray divider on the plan-only card → `standalone`.
+- **Verified.** `tsc -b`, web vitest (`chat-plan-usage.test.tsx` 26 tests,
+  `chat-provider.test.ts`; the existing `chat-usage-total` / `run-usage-pill`
+  tests pass untouched), `task test`, `task lint`.
+- **Screenshots (AC41, E part).** Playwright against the built UI and a sandbox
+  daemon (temp `SMIND_HOME`, port 4771; seeded task/chat/run rows) with
+  `account.usage` answered by `routeWebSocket`; light and dark at 1440×900 (hover)
+  and 390×844 (touch, tap): one account, several with the note, empty cache, stale
+  (41 m), problem (expired login), danger tones, GLM chat (no section), plan-only
+  chat (no tokens), the run pill (one, several), and "Open Usage" opening the modal.
+  Viewed; the divider bug above was fixed from them.
 
