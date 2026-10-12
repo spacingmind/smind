@@ -5,6 +5,7 @@ import { Brain, CheckCheck, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-r
 import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { readRunConfigPreference, writeRunConfigPreference } from "@/components/composer/run-config-preference";
+import { setSettingsIntent } from "@/lib/settings-intent";
 import { buildBrowserProviders, type ProviderHealth } from "@/lib/model-browser";
 import { readStoredDefaultAgentId } from "@/lib/settings-preferences";
 import { cn } from "@/lib/utils";
@@ -72,6 +73,8 @@ export interface RunConfigContextValue {
   meta: {
     profiles: AgentProfile[];
     providers: ProviderInfo[];
+    /** provider.list has not settled yet: the combined picker shows loading states instead of the fallback catalog. */
+    providersLoading: boolean;
     /** The selected provider's own permission modes (provider.list's catalog). */
     modes: ModeInfo[];
     /** provider.test results by provider id (lazy, see use-provider-health.ts) -- an unhealthy provider is shown disabled with its reason in the combined picker. */
@@ -165,6 +168,7 @@ export function RunConfigToolbar({
   boundProvider = null,
   profiles,
   providers,
+  providersLoading = false,
   disabled = false,
   providerHealth = EMPTY_HEALTH,
   onPickerOpen,
@@ -182,6 +186,8 @@ export function RunConfigToolbar({
   boundProvider?: Provider | null;
   profiles: AgentProfile[];
   providers: ProviderInfo[];
+  /** provider.list has not settled yet (see meta.providersLoading). */
+  providersLoading?: boolean;
   disabled?: boolean;
   /** provider.test results by provider id; absent/untested providers are enabled. */
   providerHealth?: Record<string, ProviderHealth | undefined>;
@@ -317,6 +323,7 @@ export function RunConfigToolbar({
       meta: {
         profiles,
         providers,
+        providersLoading,
         modes: providerModes(providers, state.provider),
         health: providerHealth,
         onPickerOpen,
@@ -327,7 +334,7 @@ export function RunConfigToolbar({
         liveRun,
       },
     };
-  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
+  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, providersLoading, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
 
   useEffect(() => {
     onChange?.(value);
@@ -344,10 +351,12 @@ export function RunConfigToolbar({
   return <RunConfigContext.Provider value={value}>{children}</RunConfigContext.Provider>;
 }
 
-/** "<provider> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this. The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
+/** "<provider> · <model> · <mode> · <thinking>" -- the agent menu's per-row metadata and the header pill share this (Paseo's profile summary order). The model is shown only when the profile pins one (ADR-0025). The mode is the provider's own label (ADR-0019). Thinking is omitted for a non-Claude profile, mirroring the Thinking control's own visibility rule. */
 export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): string {
   const providerLabel = providers.find((candidate) => candidate.id === p.Provider)?.label ?? p.Provider;
-  const parts = [providerLabel, describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept)];
+  const parts = [providerLabel];
+  if (p.Model) parts.push(providers.find((candidate) => candidate.id === p.Provider)?.models?.find((m) => m.id === p.Model)?.label ?? p.Model);
+  parts.push(describePermission(providers, p.Provider, p.PermissionMode, p.AutoAccept));
   if (p.Provider === "claude-native") parts.push(thinkingLevelLabel(p.ThinkingLevel as ThinkingLevel));
   return parts.join(" · ");
 }
@@ -362,7 +371,7 @@ export function describeProfile(p: AgentProfile, providers: ProviderInfo[]): str
  */
 function RunConfigToolbarModelPicker() {
   const { state, actions, meta } = useRunConfig();
-  const browserProviders = useMemo(() => buildBrowserProviders(meta.providers, meta.health), [meta.providers, meta.health]);
+  const browserProviders = useMemo(() => buildBrowserProviders(meta.providers, meta.health, { loading: meta.providersLoading }), [meta.providers, meta.health, meta.providersLoading]);
   const profileRows = useMemo<PickerProfileRow[]>(
     () =>
       meta.profiles.map((p) => ({
@@ -370,11 +379,13 @@ function RunConfigToolbarModelPicker() {
         name: p.Name,
         summary: describeProfile(p, meta.providers),
         provider: p.Provider,
+        model: p.Model ?? "",
         notes: p.Notes || undefined,
       })),
     [meta.profiles, meta.providers],
   );
   const baseAgent = state.baseAgentId ? meta.profiles.find((p) => String(p.ID) === state.baseAgentId) : undefined;
+  const openSettings = (sectionId: string) => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId } }));
 
   return (
     <div className="flex shrink-0 items-center">
@@ -390,7 +401,17 @@ function RunConfigToolbarModelPicker() {
         onSelect={(provider, model) => actions.setProviderModel(provider as Provider, model)}
         onApplyProfile={actions.applyProfile}
         onClearAgent={actions.clearAgent}
-        onManageAgents={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
+        currentConfig={{ permissionMode: state.permissionMode, autoAccept: state.autoAccept, thinkingLevel: state.provider === "claude-native" ? state.thinkingLevel : "" }}
+        onManageAgents={() => openSettings("agents")}
+        onCreateProfile={(seed) => {
+          setSettingsIntent({ kind: "newProfile", seed });
+          openSettings("agents");
+        }}
+        onEditProfile={(profileId) => {
+          setSettingsIntent({ kind: "editProfile", id: Number(profileId) });
+          openSettings("agents");
+        }}
+        onOpenProviderSettings={() => openSettings("providers")}
         onOpen={meta.onPickerOpen}
       />
       {state.custom && (

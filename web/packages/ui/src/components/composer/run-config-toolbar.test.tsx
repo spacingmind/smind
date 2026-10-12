@@ -79,6 +79,9 @@ async function flush(): Promise<void> {
 /** Picks `modelId` ("" = the provider's default row) of `providerId` through the combined picker: open, drill into the provider if the root shows, click the row. */
 async function pickModel(providerId: string, modelId = ""): Promise<void> {
   fireEvent.click(screen.getByTestId("composer-model-picker"));
+  // The popover opens on the current provider's view: go back to the root when the target is another provider's.
+  const back = screen.queryByTestId("model-picker-back");
+  if (back && !screen.queryByTestId(`model-row-${providerId}:${modelId}`)) fireEvent.click(back);
   const drill = screen.queryByTestId(`model-provider-${providerId}`);
   if (drill) fireEvent.click(drill);
   fireEvent.click(await screen.findByTestId(`model-row-${providerId}:${modelId}`));

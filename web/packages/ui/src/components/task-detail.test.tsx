@@ -596,13 +596,15 @@ describe("TaskDetailPane", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    // Opens on the current provider's view; Back lists the providers.
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
       "model-provider-claude-native",
       "model-provider-glm",
       "model-provider-codex-native",
     ]);
-    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
+    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["Claude Code", "GLM", "Codex"]);
   });
 
   it("falls back to the hardcoded two-provider list when provider.list rejects, and the form still submits", async () => {
@@ -614,9 +616,11 @@ describe("TaskDetailPane", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    // Opens on the current provider's view; Back lists the providers.
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     const rows = await screen.findAllByTestId(/^model-provider-/);
     expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual(["model-provider-claude-native", "model-provider-glm"]);
-    expect(rows.map((r) => r.textContent?.replace(/\d+ models?$/, ""))).toEqual(["claude-native", "glm"]);
+    expect(rows.map((r) => r.textContent?.replace(/(\d+ models?|Default model)$/, ""))).toEqual(["claude-native", "glm"]);
     fireEvent.click(rows[0]);
     fireEvent.click(await screen.findByTestId("model-row-claude-native:"));
 
@@ -1036,6 +1040,7 @@ describe("run-config pill (run-config IA)", () => {
     expect(screen.queryByTestId("task-run-config-pill")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     fireEvent.click(await screen.findByTestId("model-provider-glm"));
     fireEvent.click(await screen.findByTestId("model-row-glm:"));
     await flush();
@@ -1067,6 +1072,7 @@ describe("run-config pill (run-config IA)", () => {
     await flush();
 
     fireEvent.click(screen.getByTestId("composer-model-picker"));
+    fireEvent.click(await screen.findByTestId("model-picker-back"));
     fireEvent.click(await screen.findByTestId("model-profile-row-1"));
     await flush();
 

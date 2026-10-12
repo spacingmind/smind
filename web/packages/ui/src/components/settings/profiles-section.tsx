@@ -11,6 +11,7 @@ import { StatusDot as SharedStatusDot } from "@/components/ui/status-dot";
 import { useDefaultAgentId } from "@/hooks/use-default-agent";
 import { AUTO_ACCEPT_HELP, AUTO_ACCEPT_LABEL, describePermission, providerModels, providerModes, supportsAutoAccept } from "@/lib/permission-modes";
 import { accountHealthTestKey } from "@/lib/provider-health";
+import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@/lib/settings-intent";
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, ModeInfo, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
@@ -53,6 +54,18 @@ function formFromProfile(p: AgentProfile): ProfileFormState {
     thinkingLevel: p.ThinkingLevel,
     model: p.Model ?? "",
     notes: p.Notes,
+  };
+}
+
+function formFromSeed(seed: ProfileSeed): ProfileFormState {
+  return {
+    ...EMPTY_FORM,
+    name: seed.name,
+    provider: seed.provider,
+    model: seed.model,
+    permissionMode: seed.permissionMode ?? "",
+    autoAccept: seed.autoAccept ?? false,
+    thinkingLevel: seed.thinkingLevel ?? "",
   };
 }
 
@@ -141,6 +154,28 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
       offDeleted();
     };
   }, [events]);
+
+  // Composer picker handoff (lib/settings-intent.ts): applied once the list has
+  // loaded (an edit intent needs the profile), and again whenever one arrives
+  // while this section is already open.
+  const [intentTick, setIntentTick] = useState(0);
+  useEffect(() => subscribeSettingsIntent(() => setIntentTick((t) => t + 1)), []);
+  useEffect(() => {
+    if (profiles === null) return;
+    const intent = takeSettingsIntent();
+    if (!intent) return;
+    if (intent.kind === "newProfile") {
+      setOpenCard("new");
+      setForm(formFromSeed(intent.seed));
+      setError(null);
+      return;
+    }
+    const target = profiles.find((p) => p.ID === intent.id);
+    if (!target) return;
+    setOpenCard(target.ID);
+    setForm(formFromProfile(target));
+    setError(null);
+  }, [profiles, intentTick]);
 
   function openNew() {
     setOpenCard("new");
