@@ -215,6 +215,7 @@ pub async fn install_from_release(client: &reqwest::Client, urls: &ReleaseUrls, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Write;
     use std::net::TcpListener;
 
@@ -290,6 +291,7 @@ mod tests {
         let _ = child.wait();
     }
 
+    #[cfg(unix)]
     #[test]
     fn is_pid_alive_true_for_self_false_after_reap() {
         assert!(is_pid_alive(std::process::id()));
@@ -300,6 +302,7 @@ mod tests {
         assert!(!is_pid_alive(pid));
     }
 
+    #[cfg(unix)]
     #[test]
     fn install_start_find_stop_round_trip_with_a_fake_binary() {
         let dir = tempfile::tempdir().unwrap();
@@ -361,6 +364,7 @@ mod tests {
         (format!("http://{addr}"), handle)
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn install_from_release_downloads_verifies_and_installs() {
         let dir = tempfile::tempdir().unwrap();
