@@ -120,3 +120,67 @@ func TestRoute_NeverFetches(t *testing.T) {
 		t.Errorf("fetches during ~1000 Route calls = %d, want 0", got-baseline)
 	}
 }
+
+// scriptedFetcher answers the poller from a func the test swaps.
+type scriptedFetcher struct {
+	fn    func() (quota.Report, error)
+	calls atomic.Int64
+}
+
+func (f *scriptedFetcher) Fetch(context.Context, accounts.Account) (quota.Report, error) {
+	f.calls.Add(1)
+	return f.fn()
+}
+
+// TestRoute_ExhaustedStandsThroughFailingRefetchRealPoller is AC21 end to end:
+// a real Poller fetched an exhausted report once; every later refetch fails;
+// routing keeps the account excluded until its ResetsAt and then routes to it
+// again, without ever making a fetch of its own.
+func TestRoute_ExhaustedStandsThroughFailingRefetchRealPoller(t *testing.T) {
+	t.Parallel()
+
+	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("store.Open() error = %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	reg := accounts.New(s)
+	a := newAccount(t, reg, "a")
+	b := newAccount(t, reg, "b")
+
+	resets := testNow.Add(2 * time.Hour)
+	f := &scriptedFetcher{}
+	f.fn = func() (quota.Report, error) {
+		rep := availableResult(window("five_hour", 100, &resets)).Report
+		return *rep, nil
+	}
+	clk := &fakeClock{t: testNow}
+	p := quota.New(s, reg, f, quota.WithEnabled(true), quota.WithTTL(testTTL), quota.WithClock(clk.Now), quota.WithJitter(func() float64 { return 0 }))
+	t.Cleanup(p.Close)
+	r := New(s, reg, p, WithClock(clk.Now))
+
+	if res := p.Touch(context.Background(), a); res.Report == nil || res.Stale {
+		t.Fatalf("Touch(a) = %+v, want a fresh exhausted report", res)
+	}
+	f.fn = func() (quota.Report, error) { return quota.Report{}, errors.New("boom") }
+	clk.Advance(30 * time.Minute) // past the TTL: the cache is stale
+	if res := p.Touch(context.Background(), a); res.LastError == "" || !res.Stale {
+		t.Fatalf("second Touch(a) = %+v, want a failed, stale refetch", res)
+	}
+	baseline := f.calls.Load()
+
+	for i := 0; i < 20; i++ {
+		got, err := r.Route(context.Background(), fmt.Sprintf("s%d", i), PolicyPool, []int64{a, b})
+		if err != nil || got.ID != b {
+			t.Fatalf("Route while exhausted = %v, %v; want account %d", got.ID, err, b)
+		}
+	}
+	clk.Advance(2 * time.Hour) // past ResetsAt, still no successful fetch
+	got, err := r.Route(context.Background(), "after-reset", PolicyPool, []int64{a, b})
+	if err != nil || got.ID != a {
+		t.Fatalf("Route after reset = %v, %v; want account %d", got.ID, err, a)
+	}
+	if n := f.calls.Load(); n != baseline {
+		t.Errorf("Route made %d fetches, want 0", n-baseline)
+	}
+}

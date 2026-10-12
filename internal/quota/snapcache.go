@@ -91,7 +91,11 @@ func cloneReport(r Report) Report {
 	if r.Details != nil {
 		r.Details = append([]Detail(nil), r.Details...)
 	}
-	r.Problem = clonePtr(r.Problem)
+	if r.Problem != nil {
+		pr := *r.Problem
+		pr.ExpiresAt = clonePtr(pr.ExpiresAt)
+		r.Problem = &pr
+	}
 	r.OverageEnabled = clonePtr(r.OverageEnabled)
 	return r
 }

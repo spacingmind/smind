@@ -1,6 +1,7 @@
 package quota
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -168,5 +169,22 @@ func BenchmarkPeekWarm(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_ = e.p.Peek(id)
+	}
+}
+
+func TestPeekCache_ProblemExpiresAtCloned(t *testing.T) {
+	t.Parallel()
+	exp := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	f := &fakeReportFetcher{fn: func(context.Context, accounts.Account) (Report, error) {
+		return Report{Status: StatusUnavailable, Problem: &Problem{Kind: ProblemExpired, ExpiresAt: &exp}}, nil
+	}}
+	e := fakeEnv(t, f)
+	id := e.addOAuth("tok")
+	e.touch(id)
+
+	first := e.p.Peek(id)
+	*first.Report.Problem.ExpiresAt = time.Time{}
+	if got := e.p.Peek(id); got.Report.Problem.ExpiresAt.IsZero() {
+		t.Error("mutating a returned Problem.ExpiresAt changed the cached report")
 	}
 }

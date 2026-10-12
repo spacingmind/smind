@@ -383,7 +383,8 @@ only the third can reach the network:
    and all receive its result. A forced refresh that arrives while a fetch
    is in flight joins it and spends no budget.
 3. **Routing and the proxy never trigger a fetch.** They hold a
-   `quota.Reader` (an interface with `Peek` only), so a fetch path does not
+   `quota.Reader` (an interface of cache reads: `Peek` and the accessor `TTL`, no
+   method that takes a context), so a fetch path does not
    exist from them at compile time. They read whatever the cache holds.
 4. **No fetch on daemon startup, on `account.updated` / `account.updateCredential`,
    on account creation, or on client reconnect**, and **no background timer**

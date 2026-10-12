@@ -502,7 +502,7 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 				// here, so the cache stays in sync. storeReport false (a
 				// failure that keeps the last good report) leaves the cache
 				// untouched; a store error invalidates so Peek reloads.
-				a.setSnapshotLocked(rep, now)
+				a.setSnapshotLocked(cloneReport(rep), now)
 			} else {
 				a.invalidateSnapshotLocked()
 			}

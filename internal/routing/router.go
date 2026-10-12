@@ -71,9 +71,14 @@ func WithUsageRouting(enabled bool) Option {
 }
 
 // WithExhaustThresholdPct sets the used percentage at or above which a window
-// counts as full. Defaults to 100.
+// counts as full. Defaults to 100; a value outside 1..100 is ignored, so a
+// bad config can never make every account look exhausted.
 func WithExhaustThresholdPct(pct int) Option {
-	return func(r *Router) { r.thresholdPct = pct }
+	return func(r *Router) {
+		if pct >= 1 && pct <= 100 {
+			r.thresholdPct = pct
+		}
+	}
 }
 
 // WithClock overrides the clock used to compare window reset times.

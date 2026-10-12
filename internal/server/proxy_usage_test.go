@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -185,25 +186,34 @@ func TestProxy_ExhaustedPoolReturns503WithResetMessage(t *testing.T) {
 func TestProxy_1000RequestsZeroUsageCalls(t *testing.T) {
 	t.Parallel()
 
-	up, _ := keyRecordingUpstream(t)
+	up, keys := keyRecordingUpstream(t)
 	s := newTestStoreForProxy(t)
 	f := &countingUsageFetcher{blockID: -1, entered: make(chan struct{}, 1)}
 	reg, router, poller := newEnabledRouting(t, s, f)
 	p := newProxy(reg, router, s, withAnthropicHTTPClient(testHTTPClient(t, up)))
 	t.Cleanup(p.Close)
 
-	cold := addAPIKeyAccount(t, reg, providerAnthropic, "cold", "sk-cold")
+	// Candidates are walked in id order and the first non-exhausted one wins,
+	// so every account before "cold" must be exhausted for a request to
+	// peek it: each routed request then reads all five states, and none of
+	// them may cause a fetch. Stale reports (polled hours ago) still count
+	// until their ResetsAt.
 	stale := addAPIKeyAccount(t, reg, providerAnthropic, "stale", "sk-stale")
-	backoff := addAPIKeyAccount(t, reg, providerAnthropic, "backoff", "sk-backoff")
 	exhausted := addAPIKeyAccount(t, reg, providerAnthropic, "exhausted", "sk-exhausted")
+	backoff := addAPIKeyAccount(t, reg, providerAnthropic, "backoff", "sk-backoff")
 	inflight := addAPIKeyAccount(t, reg, providerAnthropic, "inflight", "sk-inflight")
+	addAPIKeyAccount(t, reg, providerAnthropic, "cold", "sk-cold") // the only healthy account
 	f.blockID = inflight
-	_ = cold
 
 	hour := usageTestNow.Add(time.Hour)
-	seedUsageReport(t, s, stale, usageTestNow.Add(-3*time.Hour), usageWindow("five_hour", 40, hour, nil))
+	old := usageTestNow.Add(-3 * time.Hour)
+	seedUsageReport(t, s, stale, old, usageWindow("five_hour", 100, hour, nil))
 	seedUsageReport(t, s, exhausted, usageTestNow, usageWindow("five_hour", 100, hour, nil))
+	seedUsageReport(t, s, backoff, old, usageWindow("five_hour", 100, hour, nil))
+	seedUsageReport(t, s, inflight, old, usageWindow("five_hour", 100, hour, nil))
 
+	// backoff: a failing Touch (the old report is stale, so it fetches) leaves
+	// the last good report in place and the account in failure backoff.
 	if res := poller.Touch(context.Background(), backoff); res.LastError == "" {
 		t.Fatalf("Touch(backoff) LastError empty, want a recorded failure")
 	}
@@ -226,7 +236,7 @@ func TestProxy_1000RequestsZeroUsageCalls(t *testing.T) {
 			if i%2 == 1 {
 				model = "claude-opus-4-1"
 			}
-			if w := sendModel(p, "sess-"+string(rune('a'+i%10)), model); w.Code != http.StatusOK {
+			if w := sendModel(p, fmt.Sprintf("sess-%d", i%100), model); w.Code != http.StatusOK {
 				t.Errorf("request %d status = %d; body = %s", i, w.Code, w.Body.String())
 				return
 			}
@@ -236,6 +246,17 @@ func TestProxy_1000RequestsZeroUsageCalls(t *testing.T) {
 	case <-done:
 	case <-time.After(120 * time.Second):
 		t.Fatal("requests did not complete promptly with a fetcher blocked in flight")
+	}
+	// Every request must have landed on the only healthy account, which also
+	// proves the exhausted accounts before it were all peeked and skipped.
+	if got := keys(); len(got) != 1000 {
+		t.Errorf("upstream saw %d requests, want 1000", len(got))
+	} else {
+		for i, k := range got {
+			if k != "sk-cold" {
+				t.Fatalf("request %d went to key %q, want sk-cold", i, k)
+			}
+		}
 	}
 	if got := f.calls.Load(); got != baseline {
 		t.Errorf("usage fetches during 1000 requests = %d, want 0", got-baseline)

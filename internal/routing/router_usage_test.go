@@ -429,3 +429,21 @@ func TestRoute_HoldsReaderOnly(t *testing.T) {
 	var r Router
 	var _ quota.Reader = r.reader
 }
+
+// A bad threshold (config load returns the parsed value with its validation
+// error) must never make a healthy account look exhausted.
+func TestRoute_ThresholdOutOfRangeIgnored(t *testing.T) {
+	t.Parallel()
+	for _, pct := range []int{0, -5, 101} {
+		t.Run(fmt.Sprint(pct), func(t *testing.T) {
+			t.Parallel()
+			r, _, reg, fr, _ := newFakeRouter(t, WithExhaustThresholdPct(pct))
+			a := newAccount(t, reg, "a")
+			fr.set(a, availableResult(window("five_hour", 5, tptr(testNow.Add(time.Hour)))))
+			got, err := r.Route(context.Background(), "s", PolicyHard, []int64{a})
+			if err != nil || got.ID != a {
+				t.Fatalf("Route() = %v, %v; want account %d (5%% used, threshold %d ignored)", got.ID, err, a, pct)
+			}
+		})
+	}
+}
