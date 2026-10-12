@@ -16,6 +16,9 @@ import {
  */
 export const MIN_RAIL_PANE_WIDTH_PX = 860;
 
+/** How long a smooth jump may take before the active run is re-read from the scroll position. */
+const JUMP_SETTLE_MS = 700;
+
 export interface ChatOutline {
   prompts: OutlinePrompt[];
   activePrompt: ActivePromptSource;
@@ -53,6 +56,10 @@ export function useChatOutline<T extends HTMLElement>(
 ): ChatOutline {
   const [activePrompt] = useState(createActivePromptPublisher);
   const [fits, setFits] = useState({ overflow: false, wide: false });
+  // While a smooth jump is in flight the scroll events pass through intermediate runs; the
+  // clicked tick stays active until the animation is over, then position is re-resolved.
+  const jumpUntilRef = useRef(0);
+  const jumpTimerRef = useRef<number | null>(null);
 
   // Streaming makes a new `runs` array per chunk; keep the prompts identity while ids and
   // previews are unchanged so nothing downstream re-renders.
@@ -65,7 +72,7 @@ export function useChatOutline<T extends HTMLElement>(
 
   const updateActive = useCallback(() => {
     const scroll = scrollRef.current;
-    if (!scroll) return;
+    if (!scroll || performance.now() < jumpUntilRef.current) return;
     const elements = runElements(scroll);
     if (elements.length === 0) {
       activePrompt.publish(null);
@@ -135,8 +142,23 @@ export function useChatOutline<T extends HTMLElement>(
       if (typeof scroll.scrollTo === "function") scroll.scrollTo({ top, behavior });
       else scroll.scrollTop = top;
       activePrompt.publish(runId);
+      if (jumpTimerRef.current !== null) window.clearTimeout(jumpTimerRef.current);
+      jumpUntilRef.current = behavior === "smooth" ? performance.now() + JUMP_SETTLE_MS : 0;
+      if (behavior === "smooth") {
+        jumpTimerRef.current = window.setTimeout(() => {
+          jumpTimerRef.current = null;
+          updateActive();
+        }, JUMP_SETTLE_MS);
+      }
     },
-    [activePrompt, scrollRef],
+    [activePrompt, scrollRef, updateActive],
+  );
+
+  useEffect(
+    () => () => {
+      if (jumpTimerRef.current !== null) window.clearTimeout(jumpTimerRef.current);
+    },
+    [],
   );
 
   const jump = useCallback(

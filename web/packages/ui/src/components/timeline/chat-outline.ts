@@ -2,6 +2,8 @@
 export const ACTIVE_ANCHOR_PX = 24;
 
 const PREVIEW_MAX_CHARS = 120;
+/** Shown for a prompt with no text (attachment-only), so a tick never has a blank label. */
+export const EMPTY_PROMPT_PREVIEW = "(no text)";
 
 export interface OutlinePrompt {
   id: string;
@@ -12,6 +14,7 @@ export interface OutlinePrompt {
 export function promptPreview(prompt: string): string {
   const line = prompt.split(/\r?\n/).find((candidate) => candidate.trim() !== "") ?? "";
   const trimmed = line.trim();
+  if (trimmed === "") return EMPTY_PROMPT_PREVIEW;
   if (trimmed.length <= PREVIEW_MAX_CHARS) return trimmed;
   return `${trimmed.slice(0, PREVIEW_MAX_CHARS - 1).trimEnd()}…`;
 }

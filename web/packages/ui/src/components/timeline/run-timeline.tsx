@@ -56,7 +56,7 @@ export const RunTimeline = memo(function RunTimeline({
     <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-2">
       <div className="flex justify-end">
         <p
-          className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base whitespace-pre-wrap"
+          className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
           data-testid="run-prompt"
         >
           {run.prompt}
@@ -97,7 +97,8 @@ export const RunTimeline = memo(function RunTimeline({
       <div
         className={cn(
           "flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted transition-opacity",
-          run.status === "done" && "opacity-60 group-focus-within:opacity-100 group-hover:opacity-100",
+          run.status === "done" &&
+            "opacity-70 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
         )}
         data-testid="run-footer"
       >

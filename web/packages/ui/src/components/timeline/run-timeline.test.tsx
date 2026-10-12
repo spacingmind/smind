@@ -306,11 +306,11 @@ describe("RunTimeline borderless chrome", () => {
       return cls.split(/\s+/);
     };
     const done = dimmed("done");
-    expect(done).toContain("opacity-60");
+    expect(done).toContain("opacity-70");
     expect(done).toContain("group-hover:opacity-100");
     expect(done).toContain("group-focus-within:opacity-100");
     for (const status of ["running", "error", "stopped"] as const) {
-      expect(dimmed(status)).not.toContain("opacity-60");
+      expect(dimmed(status)).not.toContain("opacity-70");
     }
   });
 });

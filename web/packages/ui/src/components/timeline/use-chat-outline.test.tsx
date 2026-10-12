@@ -153,6 +153,28 @@ describe("useChatOutline", () => {
     expect(scrollTo).toHaveBeenCalledWith({ top: 600, behavior: "smooth" });
   });
 
+  it("a smooth jump keeps the clicked run active until it settles, then re-resolves from the scroll position", () => {
+    vi.useFakeTimers();
+    try {
+      mount();
+      flushRaf();
+      screen.getByTestId("scroll").scrollTo = vi.fn();
+      fireEvent.click(screen.getByTestId("chat-outline-tick-r3"), { detail: 0 });
+      expect(screen.getByTestId("chat-outline-tick-r3")).toHaveAttribute("aria-selected", "true");
+      // The animation passes through r2: the clicked tick must not flicker back.
+      geometry.scrollTop = 700;
+      fireEvent.scroll(screen.getByTestId("scroll"));
+      flushRaf();
+      expect(screen.getByTestId("chat-outline-tick-r3")).toHaveAttribute("aria-selected", "true");
+      act(() => {
+        vi.advanceTimersByTime(800);
+      });
+      expect(screen.getByTestId("chat-outline-tick-r2")).toHaveAttribute("aria-selected", "true");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("streaming a chunk does not change the prompts array identity", () => {
     const { rerender } = mount();
     const before = lastPrompts;

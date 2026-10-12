@@ -85,6 +85,9 @@ export const ChatOutlineRail = memo(function ChatOutlineRail({
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
+    // A press must not focus the tick: focus would pin the preview/magnification on it after
+    // the pointer leaves (keyboard focus owns them only when it came from the keyboard).
+    event.preventDefault();
     const index = indexAtPointer(event.clientY);
     if (index === null) return;
     pressedRef.current = true;
@@ -99,9 +102,15 @@ export const ChatOutlineRail = memo(function ChatOutlineRail({
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
     hoverIntent.move({ x: event.clientX, y: event.clientY });
     if (!pressedRef.current) return;
+    // The button was released somewhere we never heard about (outside the window).
+    if (event.buttons === 0) {
+      endPress();
+      return;
+    }
     const index = indexAtPointer(event.clientY);
     if (index === null || index === lastScrubRef.current) return;
     lastScrubRef.current = index;
+    hoverIntent.pointAt(index);
     (onScrub ?? onJump)(promptsRef.current[index].id);
   };
   const endPress = () => {
@@ -144,6 +153,7 @@ export const ChatOutlineRail = memo(function ChatOutlineRail({
       onPointerDown={handlePointerDown}
       onPointerUp={endPress}
       onPointerCancel={endPress}
+      onLostPointerCapture={endPress}
       onKeyDown={handleKeyDown}
     >
       {prompts.map((prompt, index) => (
@@ -235,7 +245,7 @@ const ChatOutlineTick = memo(function ChatOutlineTick({
           style={{ width: pillWidth, height: pillHeight }}
           className={cn(
             "block rounded-full transition-[width,height,background-color] duration-150 ease-out",
-            hasAttention ? "bg-foreground" : isActive ? "bg-foreground-muted" : "bg-border",
+            hasAttention ? "bg-foreground" : isActive ? "bg-foreground-muted" : "bg-border-hover",
           )}
         />
       </button>

@@ -64,9 +64,9 @@ export function ToolCallCard({
       data-tool-call-id={item.toolCallId}
       data-tool-name={item.toolName ?? ""}
       data-status={item.status}
-      className="-mx-2 rounded-md hover:bg-hover"
+      className="-mx-2"
     >
-      <div className="flex items-center gap-2 px-2 py-1 text-ui-sm text-foreground-muted">
+      <div className="flex items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted hover:bg-hover">
         <button
           type="button"
           aria-expanded={open}

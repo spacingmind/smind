@@ -11,7 +11,8 @@ import {
 describe("chat outline model", () => {
   it("promptPreview takes the first non-empty line, trimmed and truncated", () => {
     expect(promptPreview("\n  \n  fix the bug  \nsecond line")).toBe("fix the bug");
-    expect(promptPreview("")).toBe("");
+    expect(promptPreview("")).toBe("(no text)");
+    expect(promptPreview("  \n ")).toBe("(no text)");
     const long = promptPreview("x".repeat(300));
     expect(long.length).toBe(120);
     expect(long.endsWith("…")).toBe(true);

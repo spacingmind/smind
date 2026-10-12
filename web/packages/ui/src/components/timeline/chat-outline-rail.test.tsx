@@ -98,9 +98,9 @@ describe("ChatOutlineRail", () => {
     stubSlots(rail, 100, 100);
     // 4 slots of 100px each.
     fireEvent.pointerDown(rail, { clientY: 120, button: 0 });
-    fireEvent.pointerMove(rail, { clientY: 130 });
-    fireEvent.pointerMove(rail, { clientY: 230 });
-    fireEvent.pointerMove(rail, { clientY: 480 });
+    fireEvent.pointerMove(rail, { clientY: 130, buttons: 1 });
+    fireEvent.pointerMove(rail, { clientY: 230, buttons: 1 });
+    fireEvent.pointerMove(rail, { clientY: 480, buttons: 1 });
     fireEvent.pointerUp(rail, { clientY: 480 });
     fireEvent.pointerMove(rail, { clientY: 130 });
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["r1", "r2", "r4"]);
@@ -115,6 +115,24 @@ describe("ChatOutlineRail", () => {
     stubSlots(rail, 150, 25);
     fireEvent.pointerDown(rail, { clientY: 212, button: 0 });
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["r3"]);
+  });
+
+  it("a mouse press does not take focus, so the preview does not stay pinned to the tick", () => {
+    setup();
+    const rail = screen.getByTestId("chat-outline-rail");
+    stubSlots(rail, 100, 100);
+    const notPrevented = fireEvent.pointerDown(rail, { clientY: 120, button: 0 });
+    expect(notPrevented).toBe(false);
+  });
+
+  it("releasing the button outside the rail ends the drag", () => {
+    const { onJump } = setup();
+    const rail = screen.getByTestId("chat-outline-rail");
+    stubSlots(rail, 100, 100);
+    fireEvent.pointerDown(rail, { clientY: 120, button: 0 });
+    fireEvent.pointerMove(rail, { clientY: 230, buttons: 0 });
+    fireEvent.pointerMove(rail, { clientY: 330, buttons: 0 });
+    expect(onJump.mock.calls.map((c) => c[0])).toEqual(["r1"]);
   });
 
   it("does not re-render ticks when only the active prompt of a sibling changes", () => {
