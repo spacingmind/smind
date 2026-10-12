@@ -33,6 +33,7 @@ const SERVED_PROVIDERS: ProviderInfo[] = [
       { id: "accept_edits", label: "Accept Edits" },
       { id: "bypass_permissions", label: "Bypass Permissions", autoApproves: true },
     ],
+    models: [{ id: "glm-5.3", label: "GLM 5.3" }],
   },
 ];
 
@@ -55,9 +56,7 @@ function toolbarProps(over: Partial<React.ComponentProps<typeof RunConfigToolbar
 function Parts() {
   return (
     <>
-      <RunConfigToolbar.Agent />
-      <RunConfigToolbar.Provider />
-      <RunConfigToolbar.Model />
+      <RunConfigToolbar.ModelPicker />
       <RunConfigToolbar.Mode />
       <RunConfigToolbar.Thinking />
     </>
@@ -75,6 +74,15 @@ async function flush(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+}
+
+/** Picks `modelId` ("" = the provider's default row) of `providerId` through the combined picker: open, drill into the provider if the root shows, click the row. */
+async function pickModel(providerId: string, modelId = ""): Promise<void> {
+  fireEvent.click(screen.getByTestId("composer-model-picker"));
+  const drill = screen.queryByTestId(`model-provider-${providerId}`);
+  if (drill) fireEvent.click(drill);
+  fireEvent.click(await screen.findByTestId(`model-row-${providerId}:${modelId}`));
+  await flush();
 }
 
 /** Picks `optionText` from the Radix Select labelled `label` (same interaction shape composer.test.tsx uses). */
@@ -95,8 +103,7 @@ describe("RunConfigToolbar pills", () => {
   it("pills render an icon, the label and a chevron", () => {
     renderToolbar();
 
-    for (const label of ["Provider", "Permission mode", "Thinking level", "Model", "Agents"]) {
-      const trigger = screen.getByLabelText(label);
+    for (const trigger of [screen.getByTestId("composer-model-picker"), screen.getByLabelText("Permission mode"), screen.getByLabelText("Thinking level")]) {
       const svgs = trigger.querySelectorAll("svg");
       // leading icon before the label text, trailing chevron after it
       expect(svgs.length).toBeGreaterThanOrEqual(2);
@@ -107,11 +114,10 @@ describe("RunConfigToolbar pills", () => {
   it("pills keep their aria-labels and test ids", () => {
     renderToolbar();
 
-    for (const label of ["Provider", "Permission mode", "Thinking level", "Model", "Agents"]) {
+    expect(screen.getByTestId("composer-model-picker")).toHaveAttribute("aria-label", expect.stringMatching(/^Model: /));
+    for (const label of ["Permission mode", "Thinking level"]) {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
-    expect(screen.getByTestId("composer-agent-select")).toBeTruthy();
-    expect(screen.getByTestId("composer-model-select")).toBeTruthy();
   });
 
   it("permission pill is warning-tinted for an autoApproves mode and plain otherwise", async () => {
@@ -132,7 +138,7 @@ describe("RunConfigToolbar pills", () => {
   it("permission pill is warning-tinted while Auto-accept is on", async () => {
     renderToolbar();
 
-    await pick("Provider", "GLM");
+    await pickModel("glm");
     fireEvent.click(screen.getByTestId("composer-auto-accept"));
     await flush();
 
@@ -144,13 +150,12 @@ describe("RunConfigToolbar pills", () => {
   it("pill labels and chevrons carry the below-sm hide classes and 44px touch size", () => {
     renderToolbar();
 
-    for (const label of ["Provider", "Permission mode", "Thinking level", "Model", "Agents"]) {
-      const trigger = screen.getByLabelText(label);
+    for (const trigger of [screen.getByTestId("composer-model-picker"), screen.getByLabelText("Permission mode"), screen.getByLabelText("Thinking level")]) {
       expect(trigger.className).toContain("size-11");
       expect(trigger.className).toContain("md:h-7");
       expect(trigger.className).toContain("max-sm:[&>svg:last-child]:hidden");
-      // Radix's SelectValue ignores className, so Select pills hide the label from the trigger; the Agents button hides its own span.
-      if (label === "Agents") expect(trigger.querySelector("span")?.className).toContain("max-sm:hidden");
+      // Radix's SelectValue ignores className, so Select pills hide the label from the trigger; the picker trigger hides its own span.
+      if (trigger.dataset.testid === "composer-model-picker") expect(trigger.querySelector(":scope > span")?.className).toContain("max-sm:hidden");
       else expect(trigger.className).toContain("max-sm:[&>span]:hidden!");
     }
   });

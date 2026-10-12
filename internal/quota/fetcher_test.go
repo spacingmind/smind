@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/oauth2"
 
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/store"
@@ -164,10 +167,10 @@ func TestFetcherExpiredTokenRefreshesOnce(t *testing.T) {
 	}
 }
 
-func TestFetcherRefreshFailureIsExpired(t *testing.T) {
+func TestFetcherRefreshFailureExpired(t *testing.T) {
 	t.Parallel()
 	h := newFetcherHarness(t)
-	h.refresher.err = errors.New("invalid_grant refresh-secret-xyz")
+	h.refresher.err = &oauth2.RetrieveError{ErrorCode: "invalid_grant", Body: []byte("refresh-secret-xyz")}
 	expiredAt := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
 	acc := h.oauthAccount(t, "openai", "a", expiredAt)
 
@@ -187,6 +190,67 @@ func TestFetcherRefreshFailureIsExpired(t *testing.T) {
 	enc, _ := EncodeReport(got)
 	if strings.Contains(enc, "refresh-secret-xyz") || strings.Contains(enc, "invalid_grant") {
 		t.Errorf("stored report leaks the refresher error: %s", enc)
+	}
+}
+
+func TestFetcherRefreshFailureTransientIsError(t *testing.T) {
+	t.Parallel()
+	for name, rerr := range map[string]error{
+		"network":             errors.New("anthropic oauth refresh request: dial tcp: refused"),
+		"5xx":                 errors.New("anthropic oauth refresh failed with status 503: upstream secret-body"),
+		"429":                 errors.New("openai oauth refresh failed with status 429: slow down"),
+		"timeout":             context.DeadlineExceeded,
+		"oauth2-server_error": &oauth2.RetrieveError{ErrorCode: "server_error", Body: []byte("x")},
+	} {
+		t.Run("fetcher_refresh_failure_transient_is_error/"+name, func(t *testing.T) {
+			t.Parallel()
+			h := newFetcherHarness(t)
+			h.refresher.err = rerr
+			acc := h.oauthAccount(t, "anthropic", "a", time.Now().Add(-time.Hour))
+
+			got, err := h.fetcher.Fetch(context.Background(), acc)
+			var fe *FetchError
+			if !errors.As(err, &fe) || fe.Error() != "token refresh failed" {
+				t.Fatalf("err = %v, want *FetchError token refresh failed", err)
+			}
+			if got.Status != StatusError || got.Error != "token refresh failed" {
+				t.Errorf("report = %+v, want error/token refresh failed", got)
+			}
+			if n := h.requests.Load(); n != 0 {
+				t.Errorf("usage server saw %d requests, want 0", n)
+			}
+			enc, _ := EncodeReport(got)
+			if strings.Contains(enc, "secret-body") || strings.Contains(err.Error(), "secret-body") {
+				t.Errorf("leak of refresher text: %s / %v", enc, err)
+			}
+		})
+	}
+}
+
+func TestFetcherRefreshTerminalVariants(t *testing.T) {
+	t.Parallel()
+	for name, rerr := range map[string]error{
+		"oauth2_invalid_grant":      &oauth2.RetrieveError{ErrorCode: "invalid_grant"},
+		"wrapped_oauth2":            fmt.Errorf("refresh oauth token: %w", &oauth2.RetrieveError{ErrorCode: "invalid_grant"}),
+		"text_invalid_grant":        errors.New("status 400: {\"error\":\"invalid_grant\"}"),
+		"refresh_token_expired":     errors.New("status 401: refresh_token_expired"),
+		"refresh_token_reused":      errors.New("status 401: refresh_token_reused"),
+		"refresh_token_invalidated": errors.New("status 401: refresh_token_invalidated"),
+	} {
+		t.Run("fetcher_refresh_terminal_variants/"+name, func(t *testing.T) {
+			t.Parallel()
+			h := newFetcherHarness(t)
+			h.refresher.err = rerr
+			acc := h.oauthAccount(t, "openai", "a", time.Now().Add(-time.Hour))
+
+			got, err := h.fetcher.Fetch(context.Background(), acc)
+			if err != nil {
+				t.Fatalf("Fetch() error = %v, want nil", err)
+			}
+			if got.Status != StatusUnavailable || got.Problem == nil || got.Problem.Kind != ProblemExpired {
+				t.Errorf("report = %+v, want unavailable/expired", got)
+			}
+		})
 	}
 }
 

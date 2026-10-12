@@ -32,7 +32,8 @@ func newTestServer(t *testing.T, token string) *Server {
 	})
 
 	reg := accounts.New(s)
-	poller := quota.New(s, newFakeQuotaFetcher())
+	poller := quota.New(s, reg, neverQuotaFetcher{}, quota.WithEnabled(false))
+	t.Cleanup(poller.Close)
 	router := routing.New(s, reg, poller)
 	wm := workspace.New(s)
 	runner := taskrunner.New(wm)

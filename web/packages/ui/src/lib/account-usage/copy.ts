@@ -1,0 +1,76 @@
+import { formatRelativeTime } from "@/lib/relative-time";
+import type { AccountUsage } from "./types";
+
+/** "45 s", "3 min", "2 h": the wait until `iso`, rounded up; null when it is not in the future. */
+function waitUntil(iso: string | null | undefined, now: number): string | null {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - now;
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const seconds = Math.ceil(ms / 1000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.ceil(minutes / 60)} h`;
+}
+
+function tail(prefix: string, wait: string | null): string {
+  return wait ? `${prefix} ${wait}` : "";
+}
+
+function errorSentence(usage: AccountUsage, now: number): string {
+  const reason = usage.report?.error || usage.lastError || "unknown error";
+  const wait = waitUntil(usage.nextRefreshAt, now);
+  return `Couldn't read usage: ${reason}${tail(", retry in", wait)}`;
+}
+
+// User-facing copy for the usage surfaces, kept in one file so localization is a
+// single-file change. Every reader tolerates missing fields (AC39).
+export const usageCopy = {
+  /** Why an account shows no windows, or null when there is nothing to explain. */
+  problem: (usage: AccountUsage, now: number = Date.now()): string | null => {
+    const report = usage.report;
+    if (!report) return usage.lastError ? errorSentence(usage, now) : null;
+    const problem = report.problem;
+    if (problem?.kind === "no_quota") return problem.detail || "No plan usage for this account.";
+    if (problem?.kind === "rejected") {
+      const status = problem.status ? ` (HTTP ${problem.status})` : "";
+      return `Login rejected${status}. Reconnect it in Providers.`;
+    }
+    if (problem?.kind === "expired") {
+      const expired =
+        problem.expiresAt && Number.isFinite(new Date(problem.expiresAt).getTime())
+          ? ` ${formatRelativeTime(problem.expiresAt, now)}`
+          : "";
+      return `Login expired${expired}. Reconnect it in Providers.`;
+    }
+    if (report.status === "error") return errorSentence(usage, now);
+    return null;
+  },
+  /** The refresh button's tooltip and accessible name, and whether it is disabled. */
+  refreshState: (
+    usage: AccountUsage,
+    now: number = Date.now(),
+  ): { disabled: boolean; label: string } => {
+    const wait = waitUntil(usage.nextRefreshAt, now);
+    switch (usage.refreshBlocked) {
+      case "backoff":
+        return { disabled: true, label: `Rate limited${tail(", retry in", wait)}` };
+      case "floor":
+        return { disabled: true, label: "Refreshed just now" };
+      case "budget":
+        return { disabled: true, label: `Refresh limit reached${tail(", next in", wait)}` };
+      case "rejected":
+        return { disabled: true, label: "Reconnect this account to refresh" };
+      default:
+        return { disabled: false, label: "Refresh" };
+    }
+  },
+  disabled: "Plan usage is turned off. Set accountUsage.enabled to true in config to see it.",
+  daemonTooOld: "Update the daemon to see plan usage",
+  refreshFailed: "Unable to refresh usage",
+  updated: "Updated",
+  loading: "Loading plan usage…",
+  empty: "No accounts with plan usage yet",
+  unavailableLabel: "Unavailable",
+  errorLabel: "Error",
+} as const;

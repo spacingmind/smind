@@ -41,9 +41,12 @@ const (
 	TopicProfileDeleted     = "profile.deleted"
 	TopicAccountUpdated     = "account.updated"
 	TopicAccountRemoved     = "account.removed"
-	TopicMcpServerCreated   = "mcpServer.created"
-	TopicMcpServerUpdated   = "mcpServer.updated"
-	TopicMcpServerDeleted   = "mcpServer.deleted"
+	// TopicAccountUsage is published after every completed usage fetch
+	// (payload {usage: AccountUsage}); see AttachUsage.
+	TopicAccountUsage     = "account.usage"
+	TopicMcpServerCreated = "mcpServer.created"
+	TopicMcpServerUpdated = "mcpServer.updated"
+	TopicMcpServerDeleted = "mcpServer.deleted"
 )
 
 // knownTopics is the set events.subscribe/events.unsubscribe accept;
@@ -70,6 +73,7 @@ var knownTopics = map[string]bool{
 	TopicProfileDeleted:     true,
 	TopicAccountUpdated:     true,
 	TopicAccountRemoved:     true,
+	TopicAccountUsage:       true,
 	TopicMcpServerCreated:   true,
 	TopicMcpServerUpdated:   true,
 	TopicMcpServerDeleted:   true,

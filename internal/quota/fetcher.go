@@ -2,13 +2,19 @@ package quota
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	utls "github.com/refraction-networking/utls"
+	"golang.org/x/oauth2"
 
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/transport"
 )
+
+// errRefresh is the fixed Report.Error for a transient token-refresh failure.
+const errRefresh = "token refresh failed"
 
 // ReportFetcher retrieves an account's plan usage from its provider.
 //
@@ -127,15 +133,49 @@ func (f *AccountFetcher) Fetch(ctx context.Context, account accounts.Account) (R
 		case now.Before(expiredAt):
 			// Only inside the pre-expiry buffer: the current token still
 			// works, so use it rather than reporting the login as expired.
-		default:
+		case isTerminalRefreshError(err):
 			// The error text is not copied: it can carry provider response
-			// text. A refresh failure is "login expired".
+			// text. A terminal refusal is "login expired".
 			t := expiredAt.UTC()
-			return unavailableReport(Problem{Kind: ProblemExpired, ExpiresAt: &t, Detail: detailExpired}, now), nil
+			rep := unavailableReport(Problem{Kind: ProblemExpired, ExpiresAt: &t, Detail: detailExpired}, now)
+			rep.usedFP = secretFingerprint(cred.AccessToken)
+			return rep, nil
+		default:
+			// Network, timeout, 5xx, 429: transient. The poller backs off.
+			return errorReport(errRefresh, now), &FetchError{msg: errRefresh}
 		}
 	}
 	if cred.AccessToken == "" {
 		return unavailableReport(Problem{Kind: ProblemNoQuota, Detail: detailNoCredData}, now), nil
 	}
-	return spec.source.fetch(ctx, cred.AccessToken)
+	rep, err := spec.source.fetch(ctx, cred.AccessToken)
+	rep.usedFP = secretFingerprint(cred.AccessToken)
+	return rep, err
+}
+
+// terminalRefreshMarkers are substrings of a refresher's error text that mean
+// the refresh token itself is dead (the hand-written refreshers embed the
+// provider's response body in the error). Used for classification only; the
+// text is never copied out.
+var terminalRefreshMarkers = []string{
+	"invalid_grant",
+	"refresh_token_expired",
+	"refresh_token_reused",
+	"refresh_token_invalidated",
+}
+
+// isTerminalRefreshError reports whether err is the provider refusing the
+// refresh token for good, as opposed to a transient failure.
+func isTerminalRefreshError(err error) bool {
+	var re *oauth2.RetrieveError
+	if errors.As(err, &re) && re.ErrorCode == "invalid_grant" {
+		return true
+	}
+	msg := err.Error()
+	for _, m := range terminalRefreshMarkers {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
 }

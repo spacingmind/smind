@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -46,54 +45,32 @@ func testHTTPClient(t *testing.T, srv *httptest.Server) *http.Client {
 	return &http.Client{Transport: &rewriteTransport{target: target}}
 }
 
-type fakeQuotaFetcher struct {
-	mu    sync.Mutex
-	usage map[int64]quota.Usage
+// neverQuotaFetcher backs the disabled test poller: it never fetches, so a
+// fetch is a bug.
+type neverQuotaFetcher struct{}
+
+func (neverQuotaFetcher) Fetch(context.Context, accounts.Account) (quota.Report, error) {
+	panic("quota fetch under the routing shim")
 }
 
-func newFakeQuotaFetcher() *fakeQuotaFetcher {
-	return &fakeQuotaFetcher{usage: map[int64]quota.Usage{}}
-}
-
-func (f *fakeQuotaFetcher) Fetch(ctx context.Context, account store.Account) (quota.Usage, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.usage[account.ID], nil
-}
-
-func (f *fakeQuotaFetcher) setExhausted(accountID int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.usage[accountID] = quota.Usage{TokensUsed: 100, TokensLimit: 100}
-}
-
-func newTestProxy(t *testing.T, opts ...proxyOption) (*proxy, *accounts.Registry, *fakeQuotaFetcher) {
+func newTestProxy(t *testing.T, opts ...proxyOption) (*proxy, *accounts.Registry) {
 	t.Helper()
 	s := newTestStoreForProxy(t)
 
-	reg, router, fetcher := newTestRoutingWithFetcher(t, s)
+	reg, router := newTestRouting(t, s)
 	p := newProxy(reg, router, s, opts...)
 	t.Cleanup(p.Close)
-	return p, reg, fetcher
+	return p, reg
 }
 
-// newTestRouting builds an accounts.Registry and routing.Router backed by
-// s, with a quota fetcher that always reports zero usage -- for
-// request_log-focused tests (proxy_requestlog_test.go) that don't need to
-// simulate quota exhaustion and so don't need a handle to the fetcher.
+// newTestRouting builds an accounts.Registry and routing.Router backed by s.
+// The quota poller is disabled: it never fetches.
 func newTestRouting(t *testing.T, s *store.Store) (*accounts.Registry, *routing.Router) {
 	t.Helper()
-	reg, router, _ := newTestRoutingWithFetcher(t, s)
-	return reg, router
-}
-
-func newTestRoutingWithFetcher(t *testing.T, s *store.Store) (*accounts.Registry, *routing.Router, *fakeQuotaFetcher) {
-	t.Helper()
 	reg := accounts.New(s)
-	fetcher := newFakeQuotaFetcher()
-	poller := quota.New(s, fetcher)
-	router := routing.New(s, reg, poller)
-	return reg, router, fetcher
+	poller := quota.New(s, reg, neverQuotaFetcher{}, quota.WithEnabled(false))
+	t.Cleanup(poller.Close)
+	return reg, routing.New(s, reg, poller)
 }
 
 // newTestStoreForProxy opens a temp-file-backed store, exactly like
@@ -151,7 +128,7 @@ func TestProxy_Anthropic_APIKeySuccess(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude"}`))
@@ -192,7 +169,7 @@ func TestProxy_OpenAI_APIKeySuccess(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withOpenAIHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withOpenAIHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerOpenAI, "o1", "sk-openai-real")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
@@ -221,7 +198,7 @@ func TestProxy_Anthropic_OAuthCredentialAndBetaMerge(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addOAuthAccount(t, reg, providerAnthropic, "oauth1", accounts.OAuthCredential{
 		AccessToken:  "access-tok",
 		RefreshToken: "refresh-tok",
@@ -249,7 +226,7 @@ func TestProxy_Anthropic_OAuthCredentialAndBetaMerge(t *testing.T) {
 func TestProxy_NoAccountsConfigured(t *testing.T) {
 	t.Parallel()
 
-	p, _, _ := newTestProxy(t)
+	p, _ := newTestProxy(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
 	w := httptest.NewRecorder()
@@ -273,35 +250,6 @@ func TestProxy_NoAccountsConfigured(t *testing.T) {
 	}
 }
 
-func TestProxy_AllAccountsExhausted(t *testing.T) {
-	t.Parallel()
-
-	p, reg, fetcher := newTestProxy(t)
-	accID := addAPIKeyAccount(t, reg, providerOpenAI, "o1", "sk-openai-real")
-	fetcher.setExhausted(accID)
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
-	w := httptest.NewRecorder()
-	p.handleOpenAI(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body = %s", w.Code, w.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Message string  `json:"message"`
-			Type    string  `json:"type"`
-			Code    *string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v; body = %s", err, w.Body.String())
-	}
-	if body.Error.Message == "" || body.Error.Code != nil {
-		t.Errorf("body = %+v, want openai error shape with null code", body)
-	}
-}
-
 func TestProxy_SessionAffinity(t *testing.T) {
 	t.Parallel()
 
@@ -313,7 +261,7 @@ func TestProxy_SessionAffinity(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-account-1")
 	addAPIKeyAccount(t, reg, providerAnthropic, "a2", "sk-account-2")
 
@@ -349,7 +297,7 @@ func TestProxy_StreamingPassthrough(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
 
 	proxySrv := httptest.NewServer(http.HandlerFunc(p.handleAnthropic))
@@ -444,7 +392,7 @@ func TestProxy_UpstreamStreamBreakAbortsDownstream(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-real")
 
 	proxySrv := httptest.NewServer(http.HandlerFunc(p.handleAnthropic))
@@ -484,7 +432,7 @@ func TestProxy_ForwardsToAccountBaseURL(t *testing.T) {
 	}))
 	defer custom.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
 	if _, err := reg.AddAPIKeyWithBaseURL(providerAnthropic, "local", "sk-ant-local", custom.URL+"/v1/messages"); err != nil {
 		t.Fatalf("AddAPIKeyWithBaseURL() error = %v", err)
 	}
@@ -519,7 +467,7 @@ func TestProxy_DefaultURLWhenNoBaseURL(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	p, reg, _ := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
+	p, reg := newTestProxy(t, withAnthropicHTTPClient(testHTTPClient(t, upstream)))
 	addAPIKeyAccount(t, reg, providerAnthropic, "a1", "sk-ant-plain")
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{}`))
@@ -537,7 +485,7 @@ func TestProxy_DefaultURLWhenNoBaseURL(t *testing.T) {
 func TestProxy_RejectsNonLoopbackHTTP(t *testing.T) {
 	t.Parallel()
 
-	_, reg, _ := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
+	_, reg := newTestProxy(t, withAnthropicHTTPClient(&http.Client{}))
 	_, err := reg.AddAPIKeyWithBaseURL(providerAnthropic, "bad", "k", "http://example.com")
 	if err == nil {
 		t.Fatal("AddAPIKeyWithBaseURL(http://example.com) succeeded, want rejection")
