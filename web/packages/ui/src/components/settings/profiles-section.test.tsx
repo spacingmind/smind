@@ -1,10 +1,11 @@
 import { act } from "react";
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { listSettingsSections } from "@/components/settings/settings-registry";
 import "@/components/settings/profiles-section";
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
+import { setSettingsIntent, takeSettingsIntent } from "@/lib/settings-intent";
 import { FakeWsClient } from "@/test/fake-ws-client";
 
 const PROFILE = {
@@ -52,6 +53,49 @@ function renderSection(client: FakeWsClient, events?: DaemonEvents) {
 }
 
 describe("profiles-section", () => {
+  afterEach(() => {
+    takeSettingsIntent();
+  });
+
+  it("a pending new-profile intent opens the add card prefilled", async () => {
+    setSettingsIntent({
+      kind: "newProfile",
+      seed: { name: "Sonnet 5", provider: "claude-native", model: "sonnet-5", permissionMode: "plan", thinkingLevel: "extended" },
+    });
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    await flush();
+
+    expect(screen.getByTestId("profile-new-form")).toBeInTheDocument();
+    expect(screen.getByTestId("profile-form-name")).toHaveValue("Sonnet 5");
+    expect(screen.getByTestId("profile-form-provider")).toHaveTextContent(/claude/i);
+    expect(takeSettingsIntent()).toBeNull();
+  });
+
+  it("a pending edit intent opens that profile's inline editor", async () => {
+    setSettingsIntent({ kind: "editProfile", id: 1 });
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    await flush();
+
+    expect(screen.getByTestId("profile-edit-form-1-name")).toHaveValue("UI work");
+    expect(screen.queryByTestId("profile-new-form")).not.toBeInTheDocument();
+  });
+
+  it("an intent arriving while the section is open is applied", async () => {
+    const client = new FakeWsClient();
+    renderSection(client);
+    client.nth("profile.list").resolve([PROFILE]);
+    await flush();
+    expect(screen.queryByTestId("profile-edit-form-1-name")).not.toBeInTheDocument();
+
+    act(() => setSettingsIntent({ kind: "editProfile", id: 1 }));
+    await flush();
+    expect(screen.getByTestId("profile-edit-form-1-name")).toBeInTheDocument();
+  });
+
   it("renders an empty state with zero profiles", async () => {
     const client = new FakeWsClient();
     renderSection(client);
