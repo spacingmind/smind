@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { TaskLineageHeader } from "@/components/task-lineage";
+import { TaskLineageChips } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
 import { FindBar } from "@/components/find/find-bar";
@@ -306,7 +306,7 @@ export function TaskDetailPane({
        */}
       <PaneHeader
         testId="task-chat-meta"
-        className="border-b-0"
+        className="items-start border-b-0"
         subtitle={
           <>
             <SetupBadge status={task.SetupStatus} />
@@ -324,6 +324,7 @@ export function TaskDetailPane({
             )}
             <McpServersIndicator servers={latestRun?.mcpServers} />
             <ChatUsageTotal runs={runs} provider={chat.Provider ?? latestRun?.provider} />
+            <TaskLineageChips lineage={lineage} onJumpToTask={onJumpToTask} />
           </>
         }
         actions={
@@ -339,8 +340,6 @@ export function TaskDetailPane({
           </Button>
         }
       />
-
-      <TaskLineageHeader lineage={lineage} onJumpToTask={onJumpToTask} />
 
       <SetupDetails client={client} task={task} onTask={applyTask} />
 
