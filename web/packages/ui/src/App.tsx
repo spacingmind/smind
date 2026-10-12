@@ -56,6 +56,7 @@ import {
   type TabEntry,
   type TabKind,
 } from "@/components/tab-registry";
+import { PlanUsageSourceProvider } from "@/hooks/use-chat-plan-usage";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
 import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
@@ -1226,6 +1227,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // focus order and pointer events. Radix portals (palette, dialogs) are
   // outside this wrapper and still render on top.
   return (
+    <PlanUsageSourceProvider client={client} events={events}>
     <div className="relative h-svh w-full">
       <UsageModalRoot client={client} events={events} />
       <div
@@ -1250,6 +1252,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         </div>
       )}
     </div>
+    </PlanUsageSourceProvider>
   );
 }
 
