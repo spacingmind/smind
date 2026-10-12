@@ -1184,19 +1184,27 @@ function PinnedSection({
   onArchiveTask: (task: Task) => void;
 }) {
   const [open, toggleOpen] = useNodeOpen("pinned");
+  const { active, rowProps } = useRowActive();
 
   return (
     <SidebarMenuItem data-testid="sidebar-pinned-section">
-      <SidebarMenuButton
-        onClick={toggleOpen}
-        aria-expanded={open}
-        data-testid="sidebar-pinned-section-header"
-        className="rounded-lg"
-      >
-        <Pin className="size-3.5" />
-        <span className="min-w-0 truncate">Pinned</span>
-        <RowChevron open={open} />
-      </SidebarMenuButton>
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-pinned-section-header"
+          className="rounded-lg"
+        >
+          <Pin className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            Pinned
+          </FadeText>
+          <RowChevron open={open} />
+        </SidebarMenuButton>
+      </div>
       {open && (
         <ContainerContent kind="pinned">
           <TaskRows
@@ -1258,25 +1266,33 @@ function StatusGroupItem({
   onArchiveTask: (task: Task) => void;
 }) {
   const [open, toggleOpen] = useNodeOpen(`status:${group.key}`);
+  const { active, rowProps } = useRowActive();
 
   return (
     <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
-      <SidebarMenuButton
-        onClick={toggleOpen}
-        aria-expanded={open}
-        data-testid="sidebar-status-group-header"
-        className="rounded-lg"
-      >
-        <span className="min-w-0 truncate">{group.label}</span>
-        <RowChevron open={open} />
-        {/* A pill, as in ZCode's group headers (TASK_GROUP_COUNT_BADGE_CLASS). */}
-        <span
-          data-testid="status-group-count"
-          className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-tag/50 px-1.5 py-0.5 text-ui-sm font-medium leading-none text-foreground-subtle"
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-status-group-header"
+          className="rounded-lg"
         >
-          {group.tasks.length}
-        </span>
-      </SidebarMenuButton>
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            {group.label}
+          </FadeText>
+          <RowChevron open={open} />
+          {/* A pill, as in ZCode's group headers (TASK_GROUP_COUNT_BADGE_CLASS). */}
+          <span
+            data-testid="status-group-count"
+            className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-tag/50 px-1.5 py-0.5 text-ui-sm font-medium leading-none text-foreground-subtle"
+          >
+            {group.tasks.length}
+          </span>
+        </SidebarMenuButton>
+      </div>
       {open && (
         <ContainerContent kind="status">
           <TaskRows
@@ -1471,12 +1487,22 @@ function WorkspaceItem({
               data-testid="sidebar-workspace-row"
               data-workspace-id={workspace.ID}
               aria-expanded={expanded}
-              className="rounded-lg pr-8"
+              className={cn("rounded-lg", active && "pr-7")}
             >
               <FolderGit2 />
-              <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
+              <FadeText
+                data-testid="container-title"
+                fade={active}
+                className="flex-initial text-ui-base font-medium"
+              >
+                {workspace.Title || workspace.Path}
+              </FadeText>
               <RowChevron open={expanded} />
-              <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
+              <AggregateSlot
+                status={aggregate}
+                label={`${workspace.Title || workspace.Path} activity`}
+                className={active ? "invisible" : undefined}
+              />
             </SidebarMenuButton>
             <RowActions>
               {active && (
@@ -1662,7 +1688,10 @@ function SpaceLikeItem({
     <SidebarMenuSubItem>
       {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
       <div className="relative" {...rowProps}>
-        <SidebarMenuSubButton asChild className="h-8 w-full translate-x-0 gap-2 rounded-lg pr-8">
+        <SidebarMenuSubButton
+          asChild
+          className={cn("h-8 w-full translate-x-0 gap-2 rounded-lg", active && "pr-7")}
+        >
           <button
             type="button"
             onClick={toggleOpen}
@@ -1670,10 +1699,23 @@ function SpaceLikeItem({
             data-testid={testId}
             data-space-id={spaceId}
           >
-            <Layers className="size-3.5" />
-            <span className="min-w-0 truncate">{title}</span>
+            <Layers className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+            <FadeText
+              data-testid="container-title"
+              fade={active}
+              className={cn(
+                "flex-initial text-ui-sm",
+                active ? "text-foreground" : "text-foreground-subtle",
+              )}
+            >
+              {title}
+            </FadeText>
             <RowChevron open={open} />
-            <AggregateSlot status={aggregate} label={`${title} activity`} />
+            <AggregateSlot
+              status={aggregate}
+              label={`${title} activity`}
+              className={active ? "invisible" : undefined}
+            />
           </button>
         </SidebarMenuSubButton>
         {menuItems && (
@@ -1721,9 +1763,9 @@ function SpaceLikeItem({
  * same reserved-slot rule the task row's attention dot follows (Item 2's
  * layout stability; refs/paseo/docs/design.md §11).
  */
-function AggregateSlot({ status, label }: { status: StatusDotStatus | null; label: string }) {
+function AggregateSlot({ status, label, className }: { status: StatusDotStatus | null; label: string; className?: string }) {
   return (
-    <span data-testid="row-aggregate-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+    <span data-testid="row-aggregate-slot" className={cn("ml-auto flex w-2.5 shrink-0 items-center justify-center", className)}>
       {status && <StatusDot status={status} data-testid="row-aggregate" data-aggregate={status} aria-label={label} />}
     </span>
   );
@@ -2011,9 +2053,17 @@ const TaskRow = memo(function TaskRow({
                     )}
                   </span>
                   {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
-                  <FadeText data-testid="task-title" fade={active} className={active ? "@max-[14rem]/sb:pr-6" : undefined}>
-                      {task.Title}
-                    </FadeText>
+                  <FadeText
+                    data-testid="task-title"
+                    fade={active}
+                    className={cn(
+                      "text-ui-base opacity-[.76] transition-opacity",
+                      (active || isSelected) && "opacity-100",
+                      active && "@max-[14rem]/sb:pr-6",
+                    )}
+                  >
+                    {task.Title}
+                  </FadeText>
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"
@@ -2061,7 +2111,7 @@ const TaskRow = memo(function TaskRow({
                   <span
                     data-testid="task-row-time"
                     className={cn(
-                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtle @max-[14rem]/sb:hidden",
+                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtlest @max-[14rem]/sb:hidden",
                       active && "invisible",
                     )}
                   >

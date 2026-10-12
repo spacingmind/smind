@@ -4,7 +4,7 @@
 // menu (S6), title fade + per-row indentation (S7) and persisted expansion
 // (S8). The older app-sidebar*.test.tsx files keep the pre-existing contracts.
 import { act } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppSidebar } from "@/components/app-sidebar";
@@ -466,17 +466,88 @@ describe("container rows (S5)", () => {
     expect(screen.getByTestId("sidebar-space-actions-trigger")).toBeInTheDocument();
   });
 
-  it("the space ⋯ is outside the header button, which reserves its own right padding, so it can never sit on the chevron", async () => {
+  it("the space ⋯ is outside the header button, which reserves right padding only while active, so it can never sit on the chevron", async () => {
     await mountSidebar([IN_SPACE], {}, [SPACE_A]);
-    const trigger = await revealSpaceActions();
     const header = screen.getByTestId("sidebar-space-row");
 
+    // Idle: no reserved actions box, no truncation.
+    expect(header.className).not.toMatch(/(^|\s)pr-[78](\s|$)/);
+
+    const trigger = await revealSpaceActions();
     expect(header.contains(trigger)).toBe(false);
-    expect(header.className).toContain("pr-8");
+    expect(header.className).toContain("pr-7");
+    // The aggregate dot keeps its width but is hidden under the ⋯'s box.
+    expect(within(header).getByTestId("row-aggregate-slot").className).toContain("invisible");
     // The chevron sits right after the title inside the button, not at the far right.
     const chevron = within(header).getByTestId("row-chevron");
-    expect(chevron.previousElementSibling).toBe(within(header).getByText("Space A"));
+    expect(chevron.previousElementSibling).toBe(within(header).getByTestId("container-title"));
     expect(chevron.className).not.toContain("ml-auto");
+  });
+
+  it("container titles render via FadeText and the mask applies only when overflowing", async () => {
+    const restore = stubOverflow(300, 120);
+    try {
+      await mountSidebar([makeTask(1, "T")], {}, [SPACE_A], { waitForRows: false });
+      const workspaceTitle = within(screen.getByTestId("sidebar-workspace-row")).getByTestId("container-title");
+      expect(workspaceTitle.className).not.toContain("truncate");
+      expect(workspaceTitle.className).toContain("mask-image");
+      const spaceTitle = within(screen.getByTestId("sidebar-space-row")).getByTestId("container-title");
+      expect(spaceTitle.className).not.toContain("truncate");
+      expect(spaceTitle.className).toContain("mask-image");
+    } finally {
+      restore();
+    }
+    // Not overflowing: no mask.
+    cleanup();
+    const restore2 = stubOverflow(80, 120);
+    try {
+      await mountSidebar([makeTask(2, "T2")], {}, [SPACE_A], { waitForRows: false });
+      expect(within(screen.getByTestId("sidebar-workspace-row")).getByTestId("container-title").className).not.toContain("mask-image");
+    } finally {
+      restore2();
+    }
+  });
+
+  it("the workspace header reserves its right padding only while active", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A], { waitForRows: false });
+    const header = screen.getByTestId("sidebar-workspace-row");
+    expect(header.className).not.toMatch(/(^|\s)pr-[78](\s|$)/);
+    expect(within(header).getByTestId("row-aggregate-slot").className).not.toContain("invisible");
+
+    await revealWorkspaceActions();
+    expect(header.className).toContain("pr-7");
+    expect(within(header).getByTestId("row-aggregate-slot").className).toContain("invisible");
+  });
+
+  it("workspace title is the loud top-level heading; space titles are the quieter sub-heading", async () => {
+    await mountSidebar([IN_SPACE], {}, [SPACE_A], { waitForRows: false });
+    const workspaceTitle = within(screen.getByTestId("sidebar-workspace-row")).getByTestId("container-title");
+    expect(workspaceTitle.className).toContain("font-medium");
+    const spaceTitle = within(screen.getByTestId("sidebar-space-row")).getByTestId("container-title");
+    expect(spaceTitle.className).not.toContain("font-medium");
+    expect(spaceTitle.className).toContain("text-ui-sm");
+    expect(spaceTitle.className).toContain("text-foreground-subtle");
+  });
+
+  it("the task title is muted at idle and full opacity when hovered or selected", async () => {
+    await mountSidebar([ROOT]);
+
+    const idle = within(taskItem(ROOT.ID)).getByTestId("task-title");
+    expect(idle.className).toContain("opacity-[.76]");
+    expect(idle.className).toContain("transition-opacity");
+
+    hoverTask(ROOT.ID);
+    expect(within(taskItem(ROOT.ID)).getByTestId("task-title").className).toContain("opacity-100");
+  });
+
+  it("a selected task's title is at full opacity", async () => {
+    await mountSidebar([ROOT], { selectedTaskId: ROOT.ID });
+    expect(within(taskItem(ROOT.ID)).getByTestId("task-title").className).toContain("opacity-100");
+  });
+
+  it("the relative time is the quietest element on the row", async () => {
+    await mountSidebar([ROOT]);
+    expect(within(taskItem(ROOT.ID)).getByTestId("task-row-time").className).toContain("text-foreground-subtlest");
   });
 
   it("workspace, space, Pinned and status-group headers all use the same chevron", async () => {
@@ -577,18 +648,18 @@ describe("task context menu (S6)", () => {
   });
 });
 
+function stubOverflow(scrollWidth: number, clientWidth: number) {
+  const sw = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
+  const cw = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
+  return () => {
+    sw.mockRestore();
+    cw.mockRestore();
+  };
+}
+
 describe("title overflow and indentation (S7)", () => {
   function title(taskId: number): HTMLElement {
     return within(taskItem(taskId)).getByTestId("task-title");
-  }
-
-  function stubOverflow(scrollWidth: number, clientWidth: number) {
-    const sw = vi.spyOn(HTMLElement.prototype, "scrollWidth", "get").mockReturnValue(scrollWidth);
-    const cw = vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(clientWidth);
-    return () => {
-      sw.mockRestore();
-      cw.mockRestore();
-    };
   }
 
   it("the title fade mask applies only when the title overflows", async () => {
