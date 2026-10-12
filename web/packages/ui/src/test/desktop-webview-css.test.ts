@@ -62,7 +62,7 @@ describe("chrome-not-selectable (D2.3, desktop build only)", () => {
   });
 });
 
-describe("desktop overscroll / cursor / scrollbars (D2.4, D2.6, D2.7)", () => {
+describe("desktop overscroll / cursor; global scrollbars (D2.4, D2.6, D8)", () => {
   it("overscroll-behavior: none applies to the document root only", () => {
     const rule = desktopRules.find((r) => /overscroll-behavior: none/.test(r)) ?? "";
     expect(rule).toContain("html[data-desktop-os],");
@@ -85,41 +85,39 @@ describe("desktop overscroll / cursor / scrollbars (D2.4, D2.6, D2.7)", () => {
     expect(BROWSER_CSS).not.toMatch(/cursor: default/);
   });
 
-  it("thin themed scrollbars are gated to Windows only (html[data-desktop-os=\"windows\"])", () => {
-    const windows = desktopRules.filter((r) => r.includes('html[data-desktop-os="windows"]'));
-    const find = (pseudo: string) => windows.find((r) => r.includes(`${pseudo} {`)) ?? "";
-    expect(find("::-webkit-scrollbar")).toMatch(/width: \d+px; height: \d+px;/);
+  it("global themed scrollbars are not desktop-gated (D8/SFR-S-AC1)", () => {
+    // Ungated ::-webkit-scrollbar rules -- the browser build sees them too.
+    const global = (CSS.match(/^[^{}]*::-webkit-scrollbar[^{}]*\{[^}]*\}/gm) ?? []).map(stripRule);
+    const find = (pseudo: string) => global.find((r) => r.startsWith(`${pseudo} {`)) ?? "";
+    expect(find("::-webkit-scrollbar")).toBe("::-webkit-scrollbar { width: 8px; height: 8px; }");
     expect(find("::-webkit-scrollbar-track")).toContain("background: transparent");
     const thumb = find("::-webkit-scrollbar-thumb");
-    expect(thumb).toContain("background: var(--color-border)");
+    expect(thumb).toContain("var(--color-foreground)");
     expect(thumb).toContain("border-radius");
+    expect(thumb).toContain("border: 2px solid transparent");
     expect(find("::-webkit-scrollbar-corner")).toContain("background: transparent");
-    // None of it reaches the browser build; its only scrollbar rules are xterm's own hiding.
-    expect(
-      BROWSER_CSS.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\.terminal-xterm-shell \.xterm-viewport[^{]*\{[\s\S]*?\}/g, ""),
-    ).not.toMatch(
-      /scrollbar/,
-    );
+    // Hover-brighter thumb tiers.
+    expect(global.some((r) => r.includes(":hover::-webkit-scrollbar-thumb {"))).toBe(true);
+    expect(global.some((r) => r.includes("::-webkit-scrollbar-thumb:hover {"))).toBe(true);
   });
 
-  it("index.css under the windows gate sets no standard scrollbar-width/scrollbar-color", () => {
+  it("no scrollbar-width/scrollbar-color outside the @supports Firefox fallback and the xterm rule (SFR-S-AC2)", () => {
     // Chromium ignores ::-webkit-scrollbar* wherever these are non-auto.
-    const windows = desktopRules.filter((r) => r.includes('html[data-desktop-os="windows"]'));
-    expect(windows.length).toBeGreaterThan(0);
-    for (const rule of windows) expect(rule).not.toMatch(/scrollbar-(width|color)/);
-    // The only standard property left is xterm's hide-it-entirely rule.
-    const standard = CSS.match(/[^{}]*\{[^{}]*scrollbar-(?:width|color)[^{}]*\}/g) ?? [];
+    const withoutSupports = CSS.replace(/@supports not selector\(::-webkit-scrollbar\) \{[^}]*\{[^}]*\}[^}]*\}/g, "");
+    const standard = withoutSupports.match(/[^{}]*\{[^{}]*scrollbar-(?:width|color)[^{}]*\}/g) ?? [];
     expect(standard.map((r) => r.replace(/\s+/g, " ").trim().replace(/^\/\*[\s\S]*?\*\/ /, ""))).toEqual([
       ".terminal-xterm-shell .xterm-viewport { scrollbar-width: none; }",
     ]);
+    // The fallback itself is Firefox-only and uses the same foreground token.
+    const fallback = CSS.match(/@supports not selector\(::-webkit-scrollbar\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+    expect(fallback).toContain("scrollbar-width: thin");
+    expect(fallback).toContain("var(--color-foreground)");
+    expect(fallback).toContain("transparent;");
   });
 
-  it("index.css hides scrollbar buttons under the windows desktop gate", () => {
-    const rule = desktopRules.find((r) => r.includes("::-webkit-scrollbar-button")) ?? "";
-    expect(rule).toContain('html[data-desktop-os="windows"] ::-webkit-scrollbar-button');
-    expect(rule).toMatch(/display: none;\s*width: 0;\s*height: 0;/);
-    // Desktop-Windows only: the browser build never sees it.
-    expect(BROWSER_CSS).not.toMatch(/scrollbar-button/);
+  it("index.css hides scrollbar buttons globally (SFR-S-AC1)", () => {
+    const rule = stripRule(CSS.match(/^[^{}]*::-webkit-scrollbar-button[^{}]*\{[^}]*\}/gm)?.[0] ?? "");
+    expect(rule).toBe("::-webkit-scrollbar-button { display: none; width: 0; height: 0; }");
   });
 
   it("the xterm scrollbar rules are untouched (still scrollbar-width: none)", () => {

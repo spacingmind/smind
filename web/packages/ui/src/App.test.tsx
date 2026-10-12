@@ -1112,23 +1112,27 @@ describe("App sidebar resize", () => {
     expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
   });
 
-  it("icon-collapsing the sidebar shrinks its ResizablePanel instead of leaving its expanded width as dead space", async () => {
-    // jsdom never lays anything out, so react-resizable-panels can't report
-    // real pixel widths here (a real-browser check confirmed the panel
-    // actually goes 256px -> 48px -> 256px) -- what jsdom *can* prove is
-    // that toggling collapse drives the panel's own flex-grow via its
-    // imperative handle at all, which is the bug this guards: before this
-    // fix, nothing ever called collapse()/expand(), so the panel's style
-    // never changed no matter what the Sidebar's own data-state said.
+  it("toggling the sidebar retargets the panel's width var and keeps the transition (no handle on the icon rail)", async () => {
+    // jsdom never lays anything out, so assert the contract the CSS
+    // transition relies on: the panel flips `data-collapsed` (which swaps
+    // its width from --sidebar-width to --sidebar-width-icon) and keeps the
+    // ease-out width transition class; the handle only exists when open.
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     const { container } = render(<App connect={connect} />);
     await resolveSidebar(socket);
 
-    const panel = container.querySelector('[data-slot="resizable-panel"]') as HTMLElement;
+    const panel = container.querySelector('[data-slot="sidebar-panel"]') as HTMLElement;
     const sidebar = document.querySelector('[data-slot="sidebar"]');
     expect(sidebar).toHaveAttribute("data-state", "expanded");
-    const expandedStyle = panel.getAttribute("style");
+    expect(panel).not.toHaveAttribute("data-collapsed");
+    expect(panel.className).toContain("w-[min(var(--sidebar-width),50%)]");
+    expect(panel.className).toContain("transition-[width]");
+    expect(panel.className).toContain("duration-200");
+    expect(panel.className).toContain("ease-out");
+    expect(panel.className).toContain("motion-reduce:transition-none");
+    expect(panel.className).toContain("data-[collapsed]:w-(--sidebar-width-icon)");
+    expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
@@ -1136,7 +1140,8 @@ describe("App sidebar resize", () => {
     await flush();
 
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
-    expect(panel.getAttribute("style")).not.toBe(expandedStyle);
+    expect(panel).toHaveAttribute("data-collapsed");
+    expect(screen.queryByTestId("sidebar-resize-handle")).not.toBeInTheDocument();
 
     await act(async () => {
       fireEvent.keyDown(document, { key: "b", code: "KeyB", ctrlKey: true });
@@ -1144,7 +1149,31 @@ describe("App sidebar resize", () => {
     await flush();
 
     expect(sidebar).toHaveAttribute("data-state", "expanded");
-    expect(panel.getAttribute("style")).toBe(expandedStyle);
+    expect(panel).not.toHaveAttribute("data-collapsed");
+    expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
+  });
+
+  it("dragging the handle commits the width once on release, and a release below the snap width collapses without losing the width", async () => {
+    const socket = new FakeSocket();
+    const connect = vi.fn().mockResolvedValue(new WsClient(socket));
+    const { container } = render(<App connect={connect} />);
+    await resolveSidebar(socket);
+
+    const wrapper = container.querySelector('[data-slot="sidebar-wrapper"]') as HTMLElement;
+    const handle = screen.getByTestId("sidebar-resize-handle");
+    expect(handle).toHaveAttribute("aria-valuenow", "256");
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 256, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 320, pointerId: 1 });
+    expect(handle).toHaveAttribute("aria-valuenow", "320");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("320px");
+    expect(window.localStorage.getItem("smind:sidebar-width")).toBe("320");
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 320, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 100, pointerId: 1 });
+    expect(document.querySelector('[data-slot="sidebar"]')).toHaveAttribute("data-state", "collapsed");
+    expect(wrapper.style.getPropertyValue("--sidebar-width")).toBe("320px");
+    expect(window.localStorage.getItem("smind:sidebar-width")).toBe("320");
   });
 
   it("a fresh mount reads the sidebar width back from persistence (simulating a reload after a previous resize)", async () => {
@@ -2380,7 +2409,7 @@ describe("App settings view (dogfood Item 4)", () => {
     await flush();
     expect(sidebar).toHaveAttribute("data-state", "collapsed");
 
-    fireEvent.click(screen.getByTestId("sidebar-settings-button-collapsed"));
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     await flush();
     expect(screen.getByTestId("settings-screen")).toBeInTheDocument();
     // The sidebar toggle shortcut does not reach the hidden shell.

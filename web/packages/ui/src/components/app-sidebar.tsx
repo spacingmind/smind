@@ -19,7 +19,6 @@ import type { DaemonEvents } from "@/hooks/use-daemon-events";
 import {
   AlertCircle,
   Archive,
-  Bot,
   ChevronRight,
   Circle,
   FolderGit2,
@@ -27,7 +26,6 @@ import {
   FolderOpen,
   FolderTree,
   GitBranch,
-  KeyRound,
   Layers,
   ListChecks,
   Loader2,
@@ -36,7 +34,6 @@ import {
   PinOff,
   Plus,
   Search,
-  Settings,
   SquareArrowOutUpRight,
   Trash2,
 } from "lucide-react";
@@ -78,7 +75,8 @@ import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-no
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
-import { ThemeToggle } from "@/components/theme-toggle";
+import type { ConnectionStatus } from "@/lib/reconnect";
+import { SidebarFooterActions } from "@/components/sidebar-footer";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
   ArchiveTaskDialog,
@@ -413,6 +411,8 @@ export function AppSidebar({
   onTasksChange,
   onWorkspacesChange,
   onOpenSettings,
+  connectionStatus = "connected",
+  connectionStatusText,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -449,6 +449,9 @@ export function AppSidebar({
    * "providers".
    */
   onOpenSettings?: (sectionId?: string) => void;
+  /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
+  connectionStatus?: ConnectionStatus;
+  connectionStatusText?: string;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);
@@ -782,18 +785,6 @@ export function AppSidebar({
             <img src="/logo.png" alt="" className="size-4 dark:size-5" />
           </span>
           <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
-          <div className="ml-auto flex shrink-0 items-center gap-1">
-            <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Settings"
-              data-testid="sidebar-settings-button"
-              onClick={() => onOpenSettings?.()}
-            >
-              <Settings />
-            </Button>
-          </div>
         </div>
         {lights && (
           // Collapsed rail: the lights overhang the 48px rail, so keep the
@@ -805,21 +796,6 @@ export function AppSidebar({
             className="hidden h-12 shrink-0 group-data-[collapsible=icon]:block"
           />
         )}
-        <div
-          data-testid="sidebar-collapsed-header-actions"
-          className="hidden flex-col items-center gap-0.5 px-0 py-1.5 group-data-[collapsible=icon]:flex"
-        >
-          <ThemeToggle />
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label="Settings"
-            data-testid="sidebar-settings-button-collapsed"
-            onClick={() => onOpenSettings?.()}
-          >
-            <Settings />
-          </Button>
-        </div>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -971,64 +947,18 @@ export function AppSidebar({
       </SidebarContent>
 
       {/*
-       * Footer shortcuts (run-config IA plan): Providers and Agents are
-       * where account/agent management lives -- both deep-link straight
-       * into their Settings section (ADR-0015 gave Providers a real
-       * section; the old Accounts-dialog shim is gone).
+       * Footer (Paseo-style icon line): add workspace, usage, host (connection
+       * + Providers/Agents health popover), help, theme, settings.
        */}
-      <SidebarFooter>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              data-testid="sidebar-footer-providers"
-              onClick={() => onOpenSettings?.("providers")}
-            >
-              {/*
-               * An icon (rather than bare text) is what the icon-collapsed
-               * rail actually renders -- every other row in this sidebar
-               * leads with one (see WorkspaceItem's FolderGit2), the same
-               * way: no `hidden` on the label span, since that would strip
-               * it from the accessible tree (not just the icon-collapsed
-               * rail's clipped-to-32px visual). SidebarMenuButton's own
-               * `overflow-hidden` + fixed collapsed size already clips the
-               * label down to just the icon, the same as every other row.
-               */}
-              <KeyRound />
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="text-ui-sm text-foreground-subtle">Providers</span>
-                {providerHealth && providerHealth.total > 0 && (
-                  <span className="ml-auto flex items-center gap-1.5 text-ui-sm tabular-nums text-foreground-subtlest">
-                    <StatusDot
-                      status={
-                        providerHealth.healthy === providerHealth.total
-                          ? "success"
-                          : providerHealth.healthy > 0
-                            ? "warning"
-                            : "danger"
-                      }
-                      data-testid="sidebar-footer-providers-health-dot"
-                    />
-                    {providerHealth.healthy} healthy
-                  </span>
-                )}
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              data-testid="sidebar-footer-agents"
-              onClick={() => window.dispatchEvent(new CustomEvent("smind:open-settings", { detail: { sectionId: "agents" } }))}
-            >
-              <Bot />
-              <span className="flex min-w-0 items-center gap-2">
-                <span className="text-ui-sm text-foreground-subtle">Agents</span>
-                <span className="ml-auto text-ui-sm tabular-nums text-foreground-subtlest">
-                  {profiles.length}
-                </span>
-              </span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+      <SidebarFooter className="p-0">
+        <SidebarFooterActions
+          connectionStatus={connectionStatus}
+          connectionStatusText={connectionStatusText}
+          providerHealth={providerHealth}
+          agentCount={profiles.length}
+          onAddWorkspace={() => setCrud({ kind: "workspace" })}
+          onOpenSettings={onOpenSettings}
+        />
       </SidebarFooter>
 
       {client && (
