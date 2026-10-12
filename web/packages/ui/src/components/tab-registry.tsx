@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { File, FolderTree, GitCompare, MessageSquare, Plus, SquareTerminal } from "lucide-react";
+import { File, FolderTree, GitCompare, MessageSquare, Plus, Terminal } from "lucide-react";
 
 import { FileIcon } from "@/lib/file-icons";
 import { useBufferDirty } from "@/lib/dirty-buffers";
@@ -73,7 +73,7 @@ export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
   chat: { closable: true, defaultTitle: "Chat", icon: MessageSquare },
   files: { closable: true, defaultTitle: "Files", icon: FolderTree },
   diff: { closable: true, defaultTitle: "Diff", icon: GitCompare },
-  terminal: { closable: true, defaultTitle: "Terminal", icon: SquareTerminal },
+  terminal: { closable: true, defaultTitle: "Terminal", icon: Terminal },
   file: { closable: true, defaultTitle: "File", icon: File },
 };
 
@@ -331,7 +331,7 @@ export function NewTabButton({
           size="icon-sm"
           aria-label="Open a tab"
           data-testid="tabs-new-tab"
-          className="shrink-0 text-muted-foreground"
+          className="size-7 shrink-0 text-muted-foreground"
         >
           <Plus aria-hidden className="size-3.5" />
         </Button>
