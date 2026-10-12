@@ -111,6 +111,20 @@ quit/relaunch, stop; and an unmanaged WSL daemon on the port.
 ## Progress
 
 - 2026-10-12: ADR-0029 and this spec. R1 and R3 start first; R2 after R1.
+- 2026-10-12: Rust toolchain unblocked on the dev machine (Windows SDK
+  installed; cargo runs through an MSVC env wrapper). Baseline fix
+  `fix/desktop-client-windows-tests` (unix-only tests gated). Work is
+  integrated on `integration/desktop-windows-native`.
+- 2026-10-12: R3 merged (`editors.rs` has no WSL code; 50 src-tauri tests
+  pass, the 3 baseline failures were Unix-fixture bugs). R1 merged
+  (`windows_native.rs`, Windows release assets; 206 daemon-client tests
+  pass). Coordinator hardening on top: `GetExtendedTcpTable` retried on
+  size growth and read from a u32-aligned buffer. Deviations accepted: the
+  daemon takes no port argument, so `spawn_detached(layout, version)`; the
+  TCP table is read with `TCP_TABLE_OWNER_PID_ALL` and filtered to LISTEN
+  because the LISTENER class did not list the loopback listener.
+- 2026-10-12: R2 (wiring, WSL deletion, UI text) started as
+  `feat/desktop-windows-native-manager`.
 
 ## Validation
 
