@@ -3,13 +3,15 @@ import { pillStatusWithSubtree, statusSummary, usageChipText } from "@/lib/task-
 import type { TaskLineage } from "@/hooks/use-task-lineage";
 
 /**
- * The task header's hierarchy strip (task-hierarchy-tiers PR-U2): where
- * this task sits -- a "Spawned by" breadcrumb to its parent, a status
- * summary and usage rollup for its subtree, and one status pill per live
- * child, each jumping to that child. Renders nothing for a task with
- * neither parent nor children, so root leaf tasks keep today's header.
+ * The task's hierarchy chips (task-hierarchy-tiers PR-U2): the subtree usage
+ * total (labelled "Task", so it reads apart from the chat's own usage pill
+ * beside it), a "Spawned by" breadcrumb to the parent, a status summary for
+ * the subtree, and one status pill per live child, each jumping to that
+ * child. A fragment of chips with no row chrome of its own, so the chat pane
+ * can put them in its single meta row (chat-pane-single-meta-row); renders
+ * nothing for a task with neither parent, children nor usage.
  */
-export function TaskLineageHeader({
+export function TaskLineageChips({
   lineage,
   onJumpToTask,
 }: {
@@ -22,7 +24,16 @@ export function TaskLineageHeader({
   if (!parent && children.length === 0 && !summary && !usage) return null;
 
   return (
-    <div data-testid="task-lineage-header" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5 text-ui-sm text-foreground-muted">
+    <>
+      {usage && node && (
+        <span
+          data-testid="task-tree-usage"
+          title={`Task total (this task and its subtree) -- own: ${usageChipText(node.usage.own) ?? "—"} · tree: ${usageChipText(node.usage.subtree) ?? "—"}`}
+          className="truncate rounded-full border px-2 py-0.5"
+        >
+          Task {usage}
+        </span>
+      )}
       {parent && !parent.archived && (
         <button
           type="button"
@@ -45,17 +56,9 @@ export function TaskLineageHeader({
           {summary}
         </span>
       )}
-      {usage && node && (
-        <span
-          data-testid="task-tree-usage"
-          title={`own: ${usageChipText(node.usage.own) ?? "—"} · tree: ${usageChipText(node.usage.subtree) ?? "—"}`}
-          className="truncate rounded-full border px-2 py-0.5"
-        >
-          {usage}
-        </span>
-      )}
+      {/* Below sm the children are one tap away in the sidebar tree; keeping their pills would turn the meta row into a column. */}
       {children.length > 0 && (
-        <span className="flex min-w-0 flex-wrap items-center gap-1">
+        <span className="flex min-w-0 flex-wrap items-center gap-1 max-sm:hidden">
           {children.map((child) => (
             <button
               key={child.id}
@@ -74,6 +77,25 @@ export function TaskLineageHeader({
           ))}
         </span>
       )}
+    </>
+  );
+}
+
+/** The chips as their own bordered strip (kept for callers that want a standalone row). */
+export function TaskLineageHeader({
+  lineage,
+  onJumpToTask,
+}: {
+  lineage: TaskLineage;
+  onJumpToTask?: (taskId: number) => void;
+}) {
+  const { parent, node, children } = lineage;
+  const summary = node ? statusSummary(node.counts) : "";
+  const usage = node ? usageChipText(node.usage.subtree) : null;
+  if (!parent && children.length === 0 && !summary && !usage) return null;
+  return (
+    <div data-testid="task-lineage-header" className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-1.5 text-ui-sm text-foreground-muted">
+      <TaskLineageChips lineage={lineage} onJumpToTask={onJumpToTask} />
     </div>
   );
 }

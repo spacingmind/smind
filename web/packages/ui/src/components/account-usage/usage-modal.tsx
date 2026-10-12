@@ -28,6 +28,7 @@ function UsageModal({ client, events }: { client: WsClient | null; events: Daemo
         pressedAt={surface.snapshot.pressedAt}
         onRefreshOne={surface.refreshOne}
         onRetry={surface.retry}
+        pinning={surface.pinning}
       />
     </div>
   );

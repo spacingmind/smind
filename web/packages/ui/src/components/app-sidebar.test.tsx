@@ -1586,16 +1586,16 @@ describe("AppSidebar task tree (PR-U1)", () => {
     // titles start at one x (the parent's chevron lives in the gutter that
     // padding makes room for).
     expect(lone.style.paddingLeft).toBe(itemOf(PARENT.ID).style.paddingLeft);
-    expect(itemOf(PARENT.ID).style.paddingLeft).toBe("16px");
+    expect(itemOf(PARENT.ID).style.paddingLeft).toBe("12px");
   });
 
-  it("lists without parents reserve the gutter too, so depth-0 titles align across lists", async () => {
+  it("lists without parents reserve no gutter, giving depth-0 titles the room", async () => {
     const LONE_A: Task = { ...TASK, ID: 20, Title: "Lone A" };
     const LONE_B: Task = { ...TASK, ID: 21, Title: "Lone B" };
     await mountTree({}, [LONE_A, LONE_B]);
 
     for (const row of screen.getAllByTestId("sidebar-task-row")) {
-      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("16px");
+      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("0px");
     }
   });
 

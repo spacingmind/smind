@@ -79,15 +79,30 @@ func (s *Store) SetAccountModels(id int64, modelsJSON string) (Account, error) {
 // account replaced by an OAuth credential, or vice versa), stamping a new
 // updated_at. Unlike UpdateAccountCredential, which only replaces
 // credential_data on the refresh path, this is the account.updateCredential
-// RPC's store call. A nonexistent id is a clear not-found error.
+// RPC's store call. A credential change also clears the account's passive
+// quota cooldowns (ADR-0028 §7); the refresh path does not. A nonexistent id
+// is a clear not-found error.
 func (s *Store) ReplaceAccountCredential(id int64, credentialType, credentialData string) (Account, error) {
 	if _, err := s.GetAccount(id); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
-	if _, err := s.db.Exec(
+	// One transaction: a failed cooldown delete must not leave the new credential
+	// in place with the old credential's cooldowns still alive.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`UPDATE accounts SET credential_type = ?, credential_data = ?, updated_at = ? WHERE id = ?`,
 		credentialType, credentialData, time.Now().UTC(), id,
 	); err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
+	}
+	if _, err := tx.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
+		return Account{}, fmt.Errorf("update account %d credential: delete quota cooldowns: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
 		return Account{}, fmt.Errorf("update account %d credential: %w", id, err)
 	}
 	return s.GetAccount(id)
@@ -111,6 +126,9 @@ func (s *Store) DeleteAccount(id int64) error {
 	}
 	if _, err := s.db.Exec(`DELETE FROM quota_poll_state WHERE account_id = ?`, id); err != nil {
 		return fmt.Errorf("delete account %d: delete quota poll state: %w", id, err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM quota_cooldown WHERE account_id = ?`, id); err != nil {
+		return fmt.Errorf("delete account %d: delete quota cooldowns: %w", id, err)
 	}
 	if _, err := s.db.Exec(`DELETE FROM workspace_accounts WHERE account_id = ?`, id); err != nil {
 		return fmt.Errorf("delete account %d: delete workspace accounts: %w", id, err)

@@ -12,7 +12,8 @@
 //! running when the user cares about the daemon. `process_group(0)`
 //! (stable `std::os::unix::process::CommandExt`) detaches the child into
 //! its own process group so hiding/closing the main window never sends it
-//! a signal, mirroring the WSL2 path's `setsid`.
+//! a signal (the same detachment `windows_native` gets from its creation
+//! flags).
 
 use std::fs::{self, File};
 use std::io;
@@ -37,8 +38,8 @@ impl Layout {
     }
 }
 
-/// extract_argv matches the WSL2 path's own tar invocation (AC4): argv
-/// only, no shell, extracting just the `smind` member.
+/// extract_argv is the tar invocation (AC4): argv only, no shell,
+/// extracting just the `smind` member.
 pub fn extract_argv(tarball: &Path, dest_dir: &Path) -> Vec<String> {
     vec!["tar".into(), "-xzf".into(), tarball.display().to_string(), "-C".into(), dest_dir.display().to_string(), "smind".into()]
 }
@@ -78,7 +79,7 @@ pub fn spawn_detached(layout: &Layout) -> io::Result<Child> {
         .stderr(Stdio::from(log_err))
         .stdin(Stdio::null());
     // The native path only runs on macOS; the module still has to compile
-    // on Windows (WSL2 path) and Linux, where process groups are unix-only.
+    // on Windows and Linux, where process groups are unix-only.
     #[cfg(unix)]
     cmd.process_group(0);
     crate::windows_process::no_window(&mut cmd).spawn()
@@ -168,10 +169,7 @@ pub fn exe_matches(actual: &str, expected: &Path) -> bool {
 
 /// download_and_verify fetches `urls.checksums`, then `urls.tarball`, and
 /// verifies the tarball's SHA-256 against the checksums file -- the only
-/// place raw release bytes are downloaded directly in-process (the WSL2
-/// path downloads with `curl` inside the distro instead, per AC4, and
-/// verifies via `sha256sum` there so the tarball's bytes never cross the
-/// `wsl.exe` boundary).
+/// place raw release bytes are downloaded directly in-process.
 pub async fn download_and_verify(client: &reqwest::Client, urls: &ReleaseUrls) -> Result<Vec<u8>, ReleaseError> {
     let checksums_resp = client.get(&urls.checksums).send().await.map_err(|e| ReleaseError::Network(e.to_string()))?;
     if checksums_resp.status() == reqwest::StatusCode::NOT_FOUND {
@@ -215,6 +213,7 @@ pub async fn install_from_release(client: &reqwest::Client, urls: &ReleaseUrls, 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::io::Write;
     use std::net::TcpListener;
 
@@ -290,6 +289,7 @@ mod tests {
         let _ = child.wait();
     }
 
+    #[cfg(unix)]
     #[test]
     fn is_pid_alive_true_for_self_false_after_reap() {
         assert!(is_pid_alive(std::process::id()));
@@ -300,6 +300,7 @@ mod tests {
         assert!(!is_pid_alive(pid));
     }
 
+    #[cfg(unix)]
     #[test]
     fn install_start_find_stop_round_trip_with_a_fake_binary() {
         let dir = tempfile::tempdir().unwrap();
@@ -361,6 +362,7 @@ mod tests {
         (format!("http://{addr}"), handle)
     }
 
+    #[cfg(unix)]
     #[tokio::test]
     async fn install_from_release_downloads_verifies_and_installs() {
         let dir = tempfile::tempdir().unwrap();

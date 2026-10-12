@@ -139,7 +139,7 @@ function TerminalCommand({ body }: { body: string }) {
       <p className="text-ui-sm font-medium tracking-wide text-foreground-muted uppercase">Command</p>
       <pre
         data-testid="tool-detail-command"
-        className="mt-0.5 overflow-x-auto rounded-lg border bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
+        className="mt-0.5 overflow-x-auto rounded-lg bg-background p-2 font-mono text-foreground whitespace-pre-wrap"
       >
         {body}
       </pre>
@@ -178,7 +178,7 @@ function TerminalOutput({ output, failed }: { output: string; failed: boolean })
         ref={preRef}
         data-testid="tool-detail-output"
         className={cn(
-          "mt-0.5 overflow-auto rounded-lg border bg-background p-2 font-mono text-foreground whitespace-pre-wrap",
+          "mt-0.5 overflow-auto rounded-lg bg-background p-2 font-mono text-foreground whitespace-pre-wrap",
           failed ? "max-h-48" : "max-h-64",
         )}
       >
@@ -228,7 +228,7 @@ function SearchMatches({ output }: { output: string }) {
 /**
  * The unclassified fallback: a labeled IN/OUT layout (dsh's tool-card
  * pattern) instead of a raw JSON dump with no framing -- a small
- * uppercase gutter label plus a divider between the two sections, so a
+ * uppercase gutter label plus a thin gap between the two sections, so a
  * mystery tool's input and its result read as two distinct things rather
  * than one wall of braces.
  */
@@ -237,7 +237,7 @@ function GenericBody({ item }: { item: TimelineToolCallItem }) {
   const result = stringifyToolPayload(item.result);
   if (!input && !result) return <p className="text-foreground-muted">No detail recorded</p>;
   return (
-    <div className="divide-y divide-border overflow-hidden rounded-lg border">
+    <div className="space-y-px overflow-hidden rounded-lg">
       {input && <ToolSection label="IN" body={input} testId="tool-call-input" />}
       {result && <ToolSection label="OUT" body={result} testId="tool-call-result" />}
     </div>

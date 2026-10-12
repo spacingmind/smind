@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { appUpdateReducer, initialAppUpdateState, type AppUpdateState } from "@/lib/app-update";
+import { appUpdateReducer, initialAppUpdateState, pendingUpdate, type AppUpdateState } from "@/lib/app-update";
 import type { AppUpdateCheck } from "@/lib/platform";
 
 const AVAILABLE: AppUpdateCheck = {
@@ -32,7 +32,7 @@ describe("appUpdateReducer", () => {
 
   it("a version dismissed this session is not re-prompted by the launch check, but a manual check re-prompts", () => {
     const dismissed = new Set(["0.11.0"]);
-    expect(appUpdateReducer(initialAppUpdateState, { type: "checkResult", check: AVAILABLE, manual: false, dismissed })).toEqual({ stage: "idle" });
+    expect(appUpdateReducer(initialAppUpdateState, { type: "checkResult", check: AVAILABLE, manual: false, dismissed })).toEqual({ stage: "idle", available: promptState().info });
     expect(appUpdateReducer(initialAppUpdateState, { type: "checkResult", check: AVAILABLE, manual: true, dismissed })).toEqual(promptState());
   });
 
@@ -60,10 +60,32 @@ describe("appUpdateReducer", () => {
     expect(appUpdateReducer(errored, { type: "confirm" }).stage).toBe("downloading");
   });
 
-  it("dismiss from any stage returns to idle", () => {
-    for (const state of [promptState(), appUpdateReducer(promptState(), { type: "confirm" }), { stage: "installing" as const, info: promptState().info }]) {
+  it("dismiss from the prompt keeps the update for the badge; dismissing a running install offers nothing", () => {
+    expect(appUpdateReducer(promptState(), { type: "dismiss" })).toEqual({ stage: "idle", available: promptState().info });
+    for (const state of [appUpdateReducer(promptState(), { type: "confirm" }), { stage: "installing" as const, info: promptState().info }]) {
       expect(appUpdateReducer(state, { type: "dismiss" })).toEqual({ stage: "idle" });
     }
+  });
+
+  it("AH-AC11 pendingUpdate is the prompt or the dismissed update, and nothing else", () => {
+    const info = promptState().info;
+    expect(pendingUpdate(promptState())).toEqual(info);
+    expect(pendingUpdate({ stage: "idle", available: info })).toBe(info);
+    expect(pendingUpdate(initialAppUpdateState)).toBeNull();
+    expect(pendingUpdate(appUpdateReducer(promptState(), { type: "confirm" }))).toBeNull();
+    expect(pendingUpdate({ stage: "installing", info })).toBeNull();
+  });
+
+  it("AH-AC11 reopen turns a dismissed update back into the prompt, and is a no-op otherwise", () => {
+    const dismissed = appUpdateReducer(promptState(), { type: "dismiss" });
+    expect(appUpdateReducer(dismissed, { type: "reopen" })).toEqual(promptState());
+    expect(appUpdateReducer(initialAppUpdateState, { type: "reopen" })).toBe(initialAppUpdateState);
+    expect(appUpdateReducer(promptState(), { type: "reopen" })).toEqual(promptState());
+  });
+
+  it("a later up-to-date check clears the badge", () => {
+    const dismissed = appUpdateReducer(promptState(), { type: "dismiss" });
+    expect(appUpdateReducer(dismissed, { type: "checkResult", check: { kind: "upToDate", currentVersion: "0.11.0" }, manual: true, dismissed: new Set() })).toEqual({ stage: "idle" });
   });
 
   it("progress is ignored when idle", () => {

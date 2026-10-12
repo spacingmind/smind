@@ -70,12 +70,14 @@ import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
+import { useUsagePreferences } from "@/hooks/use-usage-preferences";
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
 import { SidebarFooterActions } from "@/components/sidebar-footer";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -139,10 +141,16 @@ import {
  * Task rows indent by their own left padding, not by nesting margins on the
  * task-tree lists they live in (sidebar-polish S7): a row's hover/selected
  * highlight then spans its container's content box at every depth, and the
- * title keeps its width. Every root task row starts at the 4px inset plus the
- * 12px chevron gutter (ROW_GUTTER_PX) -- reserved whether or not the list
- * contains a parent, so depth-0 titles share one x in every view -- and each
- * level of the task tree adds 12px (ROW_INDENT_PX).
+ * title keeps its width. A root task row starts flush with its container's
+ * content box (ROW_INSET_PX = 0: the container's own `pl-1` is the inset),
+ * plus the 12px chevron gutter (ROW_GUTTER_PX) ONLY when some root in the
+ * same list has children -- reserved per list so a parent's chevron has room
+ * and its siblings' dots stay in one column, but not spent on the (common)
+ * flat list, where it cost ~12px of a ~110px title in a 256px sidebar
+ * (real-app finding, 2026-10-12). The trade-off is accepted: a root title can
+ * sit 12px apart between a list with a parent and one without (sibling spaces,
+ * or the flat pinned/search/status views). Each level of the task tree adds
+ * 10px (ROW_INDENT_PX).
  *
  * Container nesting is drawn differently (ZCode's workspace-grouped-tasks):
  * the expanded content of a WORKSPACE, SPACE (or "Ungrouped"), Pinned or
@@ -153,11 +161,13 @@ import {
  * guide line to the sidebar's right edge. The task tree itself never
  * carries guide lines -- only per-row padding.
  */
-const ROW_INSET_PX = 4;
-const ROW_INDENT_PX = 12;
+const ROW_INSET_PX = 0;
+const ROW_INDENT_PX = 10;
 const ROW_GUTTER_PX = 12;
-/** Where every depth-0 task row's status slot starts: the inset plus the always-reserved chevron gutter. */
-const ROOT_PAD_PX = ROW_INSET_PX + ROW_GUTTER_PX;
+/** Where a depth-0 task row's status slot starts in a list where no row has children. */
+const ROOT_PAD_PX = ROW_INSET_PX;
+/** Where it starts in a list where some root has children, so the chevron has a gutter. */
+const ROOT_PAD_WITH_PARENT_PX = ROW_INSET_PX + ROW_GUTTER_PX;
 
 /**
  * Applied to every nested SidebarMenuSub: the list itself adds no indent,
@@ -175,15 +185,6 @@ const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
  * border-sidebar-border -- only the width was zeroed by FLUSH_SUB.
  */
 const CONTAINER_GUIDE_CLASS = "ml-4 border-l pl-1";
-
-/**
- * A space's (or "Ungrouped") content carries the same guide only while the
- * sidebar is wide: on a narrow one (<14rem, the container query the rows
- * already use) the second level would cost ~21px of a ~190px title column, so
- * tasks stay flush and rely on the header's own weight/size to read as nested
- * (their titles line up with the space's label either way).
- */
-const SPACE_GUIDE_CLASS = "@min-[14rem]/sb:ml-4 @min-[14rem]/sb:border-l @min-[14rem]/sb:pl-1";
 
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
@@ -415,8 +416,11 @@ export function AppSidebar({
   onOpenSettings,
   connectionStatus = "connected",
   connectionStatusText,
+  headerActions,
 }: {
   client: WsClient | null;
+  /** Right end of the expanded top strip: the shell's sidebar toggle and update badge (ZCode's left zone). Absent while the sidebar is a rail or a sheet -- the main header hosts them then. */
+  headerActions?: ReactNode;
   /** The currently-selected task's id, if any, so its row can render as active. */
   selectedTaskId?: number | null;
   /** Invoked with the full Task when a task row is clicked. */
@@ -573,6 +577,7 @@ export function AppSidebar({
     if (workspaces) onWorkspacesChange?.(workspaces);
   }, [workspaces, onWorkspacesChange]);
 
+  const { inSidebar: showUsageSummary } = useUsagePreferences();
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
 
@@ -767,17 +772,15 @@ export function AppSidebar({
        * under the rail. Rendering the buttons (rather than removing the
        * header) keeps every affordance reachable in collapsed mode.
        */}
-      <SidebarHeader className={lights ? "gap-0 p-0" : undefined}>
+      <SidebarHeader className="gap-0 p-0">
         <div
           data-testid="sidebar-expanded-header"
-          // macOS: this row is the window's title bar over the sidebar --
-          // the same 48px and bottom border as the main header, left-padded
-          // past the native traffic lights, draggable around its buttons.
+          // The sidebar's top strip is ZCode's "left zone": the same 48px as the
+          // main header beside it, so logo and title share one centre line.
+          // macOS: it is also the window's title bar over the sidebar --
+          // left-padded past the native traffic lights, draggable around its buttons.
           data-tauri-drag-region={lights ? "deep" : undefined}
-          className={cn(
-            "flex items-center gap-2 px-2 py-1.5 group-data-[collapsible=icon]:hidden",
-            lights && "h-12 border-b py-0",
-          )}
+          className="flex h-12 items-center gap-2 px-2 group-data-[collapsible=icon]:hidden"
           style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
         >
           <span
@@ -786,7 +789,8 @@ export function AppSidebar({
           >
             <img src="/logo.png" alt="" className="size-4 dark:size-5" />
           </span>
-          <span className="min-w-0 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          <span className="min-w-0 flex-1 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          {headerActions && <div className="flex shrink-0 items-center gap-1">{headerActions}</div>}
         </div>
         {lights && (
           // Collapsed rail: the lights overhang the 48px rail, so keep the
@@ -799,8 +803,15 @@ export function AppSidebar({
           />
         )}
       </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
+      {/*
+       * Only the tree scrolls: SidebarContent stops being the scroller
+       * (overflow-hidden) and the group/content chain is bounded
+       * (min-h-0 flex-1), so the ScrollArea below gets a real height and the
+       * "Workspaces" label row stays put above it. Left as the shadcn default
+       * the label scrolled away with the list (real-app finding, 2026-10-12).
+       */}
+      <SidebarContent className="overflow-hidden">
+        <SidebarGroup className="min-h-0 flex-1">
           <SidebarGroupLabel className="justify-between" ref={searchRef}>
             {searchOpen ? (
               <Input
@@ -861,10 +872,10 @@ export function AppSidebar({
               </>
             )}
           </SidebarGroupLabel>
-          <SidebarGroupContent>
+          <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
             {/* The rail rows carry a name tooltip (SidebarMenuButton `tooltip`). */}
             <TooltipProvider>
-            <ScrollArea className="h-full group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
+            <ScrollArea className="min-h-0 flex-1 group-data-[collapsible=icon]:[&_[data-slot=scroll-area-scrollbar]]:hidden">
               <RowSignalContext.Provider value={rowSignal}>
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
@@ -957,6 +968,7 @@ export function AppSidebar({
        */}
       <SidebarFooter className="p-0">
         <SidebarFooterActions
+          rows={showUsageSummary ? <UsageSidebarItem client={client} events={events ?? null} /> : undefined}
           connectionStatus={connectionStatus}
           connectionStatusText={connectionStatusText}
           providerHealth={providerHealth}
@@ -1264,11 +1276,18 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
  * from the flush task-tree lists.
  */
 function ContainerContent({ kind, children }: { kind: string; children: ReactNode }) {
+  // A space's (or "Ungrouped") content carries NO guide of its own at any
+  // width: the workspace's guide already frames it, and a second ~21px level
+  // left a depth-0 title ~88px from the edge of a 256px sidebar -- ~110px of
+  // title, so nearly every real title was cut. Tasks stay flush under the space
+  // header and rely on its icon/weight to read as nested (their status dots
+  // line up under the header's icon).
+  const isSpaceLike = kind === "space" || kind === "ungrouped";
   return (
     <SidebarMenuSub
       data-testid="sidebar-container-content"
       data-container-kind={kind}
-      className={cn(FLUSH_SUB, kind === "space" || kind === "ungrouped" ? SPACE_GUIDE_CLASS : CONTAINER_GUIDE_CLASS)}
+      className={cn(FLUSH_SUB, !isSpaceLike && CONTAINER_GUIDE_CLASS)}
     >
       {children}
     </SidebarMenuSub>
@@ -1428,9 +1447,13 @@ function WorkspaceItem({
         {/*
           * The hover/focus scope is this wrapper -- the header line only --
           * not the li, which also contains the workspace's whole subtree.
+          * It is also sticky (ZCode's grouped tasks): while the workspace's
+          * tasks scroll the header stays pinned, until the next workspace's
+          * header pushes it out (the li is its containing block). Space
+          * headers pin just beneath it (top-8 = this header's h-8).
           */}
         <ContextMenuTrigger asChild>
-          <div className="relative" {...rowProps}>
+          <div className="sticky top-0 z-20 bg-sidebar" {...rowProps}>
             <SidebarMenuButton
               onClick={onRowClick}
               tooltip={name}
@@ -1658,7 +1681,7 @@ function SpaceLikeItem({
   return (
     <SidebarMenuSubItem>
       {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
-      <div className="relative" {...rowProps}>
+      <div className="sticky top-8 z-10 bg-sidebar" {...rowProps}>
         <SidebarMenuSubButton
           asChild
           className={cn("h-8 w-full translate-x-0 gap-2 rounded-lg", active && "pr-7")}
@@ -1997,7 +2020,7 @@ const TaskRow = memo(function TaskRow({
                     data-attention-reason={reason ?? undefined}
                     data-run-status={runState}
                     data-unread={isUnread ? "true" : undefined}
-                    className="flex w-3 shrink-0 items-center justify-center"
+                    className="flex w-2 shrink-0 items-center justify-center"
                   >
                     {slotSignal.kind === "attention" && (
                       <StatusDot
@@ -2134,8 +2157,8 @@ const TaskRow = memo(function TaskRow({
  * than its parent. Without `nodes` -- SearchResults, PinnedSection,
  * StatusGroupItem -- the list is exactly today's flat rendering; those
  * lists have no forest, so the tier chip is skipped there rather than
- * guessed. Root rows always sit at ROW_INSET_PX + ROW_GUTTER_PX so a
- * task row starts at the same x in every view.
+ * guessed. Root rows sit at ROOT_PAD_PX, or ROOT_PAD_WITH_PARENT_PX when
+ * some root in the list has children.
  */
 function TaskRows({
   tasks,
@@ -2204,10 +2227,9 @@ function TaskRows({
     );
   }
 
-  // Every root row reserves the chevron gutter whether or not the list
-  // contains a parent, so depth-0 titles share one left edge across lists
-  // and views (search, pinned, status groups render roots at the same x).
-  const rootPad = ROOT_PAD_PX;
+  // The chevron gutter is reserved only when some root in this list has
+  // children (see ROW_GUTTER_PX); a flat list gives its titles that width.
+  const rootPad = nodes.some((n) => n.children.length > 0) ? ROOT_PAD_WITH_PARENT_PX : ROOT_PAD_PX;
 
   const renderNode = (node: TaskNode, padLeft: number): ReactNode => {
     const { task, tier, children } = node;
