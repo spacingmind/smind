@@ -182,6 +182,11 @@ export class UsageStore {
     if (at !== null && (this.lastTouchAt === null || at > this.lastTouchAt)) this.lastTouchAt = at;
   }
 
+  /** The daemon's TTL in milliseconds. */
+  snapshotTtlMs(): number {
+    return this.snapshot.ttlSeconds * 1000;
+  }
+
   /** Milliseconds until the next touch is allowed (0 = now). */
   msUntilTouch(): number {
     if (this.lastTouchAt === null) return 0;
@@ -350,7 +355,11 @@ export function useAccountUsage(
       clear();
       if (!windowIsActive()) return;
       store.touch();
-      timer = setTimeout(tick, Math.max(1_000, store.msUntilTouch()));
+      // Nothing is pending when polling is off or the daemon lacks the RPC (no touch sent, TTL clock
+      // never started): check again once per TTL instead of every second, since a permanently
+      // mounted footer would otherwise run a no-op timer for as long as the app is open.
+      const wait = store.msUntilTouch();
+      timer = setTimeout(tick, wait > 0 ? Math.max(1_000, wait) : store.snapshotTtlMs());
     };
     const onChange = () => {
       if (windowIsActive()) tick();
