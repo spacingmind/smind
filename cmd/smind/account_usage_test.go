@@ -307,3 +307,17 @@ func TestAccountUsageStaleHintOnlyForAvailableReports(t *testing.T) {
 		t.Fatalf("stale hint printed for an unavailable report:\n%s", buf.String())
 	}
 }
+
+func TestAccountUsageStripsControlCharacters(t *testing.T) {
+	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
+	res := &accountUsageResponse{Enabled: true, Reports: []accountUsageEntry{{
+		DisplayName: "Work\x1b[2J", Provider: "anthropic",
+		Report: &quota.Report{Status: quota.StatusAvailable, PlanLabel: "pro\nFAKE",
+			Windows: []quota.Window{{ID: "w", Label: "Ses\x1b[31msion", UsedPct: ptrFloat(10)}}},
+	}}}
+	var buf bytes.Buffer
+	renderAccountUsage(&buf, res, false, now)
+	if strings.ContainsRune(buf.String(), 0x1b) || strings.Contains(buf.String(), "pro\nFAKE") {
+		t.Fatalf("control characters reached the output: %q", buf.String())
+	}
+}

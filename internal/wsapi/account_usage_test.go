@@ -703,3 +703,31 @@ func TestUsage_NoSecretInWSAPIPayload(t *testing.T) {
 	}
 	_ = oauth
 }
+
+func TestUsage_NextRefreshAtRoundsUpToWholeSecond(t *testing.T) {
+	acc := accounts.Account{ID: 1, Provider: "anthropic"}
+	at := time.Date(2026, 10, 12, 12, 0, 30, 700_000_000, time.UTC)
+	got := usageFrom(acc, quota.Result{NextRefreshAt: &at}).NextRefreshAt
+	if got == nil || *got != "2026-10-12T12:00:31Z" {
+		t.Fatalf("nextRefreshAt = %v, want 2026-10-12T12:00:31Z", got)
+	}
+	exact := time.Date(2026, 10, 12, 12, 0, 30, 0, time.UTC)
+	got = usageFrom(acc, quota.Result{NextRefreshAt: &exact}).NextRefreshAt
+	if got == nil || *got != "2026-10-12T12:00:30Z" {
+		t.Fatalf("exact-second nextRefreshAt = %v, want unchanged", got)
+	}
+}
+
+func TestUsage_AccountRemovedDuringWaitIsOmitted(t *testing.T) {
+	h := newUsageHarness(t, 2)
+	h.fetcher.fn = func(_ context.Context, a accounts.Account) (quota.Report, error) {
+		if a.ID == h.ids[0] {
+			_ = h.reg.Delete(a.ID)
+		}
+		return usageFetcherDefault(), nil
+	}
+	res := h.mustDirect(usageParams("touch"))
+	if len(res.Reports) != 1 || res.Reports[0].AccountID != h.ids[1] {
+		t.Fatalf("reports = %+v, want only the surviving account %d", res.Reports, h.ids[1])
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+	"unicode"
 
 	"github.com/spacingmind/smind/internal/quota"
 )
@@ -134,11 +135,11 @@ func renderAccountUsage(w io.Writer, result *accountUsageResponse, refresh bool,
 }
 
 func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now time.Time) {
-	header := e.Provider
+	header := cleanText(e.Provider)
 	if e.DisplayName != "" {
-		header = fmt.Sprintf("%s (%s", e.DisplayName, e.Provider)
+		header = fmt.Sprintf("%s (%s", cleanText(e.DisplayName), cleanText(e.Provider))
 		if e.Report != nil && e.Report.PlanLabel != "" {
-			header += " · " + e.Report.PlanLabel
+			header += " · " + cleanText(e.Report.PlanLabel)
 		}
 		header += ")"
 	}
@@ -183,7 +184,7 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 			case b.Used != nil:
 				val = trimFloat(*b.Used)
 			}
-			fmt.Fprintf(w, "  %s: %s %s\n", b.Label, val, b.Unit)
+			fmt.Fprintf(w, "  %s: %s %s\n", cleanText(b.Label), val, cleanText(b.Unit))
 		}
 		if !e.Report.FetchedAt.IsZero() {
 			fmt.Fprintf(w, "  updated %s ago\n", formatCountdown(now.Sub(e.Report.FetchedAt)))
@@ -205,9 +206,9 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 // redundant with Label in the fixtures we render.
 func windowLabel(win quota.Window) string {
 	if win.Label != "" {
-		return win.Label
+		return cleanText(win.Label)
 	}
-	return win.ID
+	return cleanText(win.ID)
 }
 
 // unavailableWording renders a StatusUnavailable report's Problem as a
@@ -285,4 +286,15 @@ func trimFloat(f float64) string {
 		return "0"
 	}
 	return s
+}
+
+// cleanText drops control characters (ESC sequences, newlines) from a string
+// that came from a provider response, so it cannot rewrite the terminal.
+func cleanText(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }

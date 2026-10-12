@@ -88,7 +88,9 @@ func usageFrom(acc accounts.Account, res quota.Result) AccountUsage {
 		Report:         res.Report,
 	}
 	if res.NextRefreshAt != nil {
-		s := res.NextRefreshAt.UTC().Format(time.RFC3339)
+		// Round up to the next whole second: a client that re-enables
+		// Refresh at the stamp must not land just inside the floor.
+		s := res.NextRefreshAt.Add(time.Second - 1).UTC().Truncate(time.Second).Format(time.RFC3339)
 		u.NextRefreshAt = &s
 	}
 	if res.RefreshBlocked != "" {
@@ -155,7 +157,14 @@ func handleAccountUsage(p *quota.Poller, reg *accounts.Registry) handlerFunc {
 			wg.Wait()
 		}
 		for i, acc := range accs {
-			res.Reports = append(res.Reports, usageFrom(acc, results[i]))
+			// Re-read: an account removed (or renamed) during the wait is
+			// dropped (account.removed already told clients) or shown by its
+			// current name.
+			cur, err := reg.Get(acc.ID)
+			if err != nil {
+				continue
+			}
+			res.Reports = append(res.Reports, usageFrom(cur, results[i]))
 		}
 		return res, nil
 	}
