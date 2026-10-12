@@ -85,12 +85,27 @@ Web (vitest):
 
 ## Progress
 
-- [x] Spec, baseline screenshots (`/tmp/ahat-sbx/shots/before`, local)
-- [ ] T1 tab strip extracted + restyled (Peer)
-- [ ] H1 update badge state (Peer)
-- [ ] H2 header + panel + sidebar strip (Lead)
-- [ ] Review, screenshots, verify
+- [x] Spec, baseline screenshots (`/tmp/ahat-sbx/shots/before`, local, not committed)
+- [x] T1 tab strip restyle (Peer, peer-sonnet; `ab8d46d6`..`22fae36c`), then Lead rework of the affordances into a floating wrapper (`6b2db009`)
+- [x] H1 update badge state + component (Lead, `17e6efb1`)
+- [x] H2 header + inset panel + sidebar left-zone strip (Lead, `cd6f3ee0`, `6b2db009`)
+- [x] H3 header tests (Peer, peer-sonnet; `ee4a3eff`..`92cabab3`)
+- [x] Review, screenshots, `task lint`, `task test`
+
+Peer log: peer-glm (`3ba397b7`) hit a 429 usage limit before any edit (tree clean), so everything went to peer-sonnet (`fecb1c74`): tabs, then header tests. Candidates ACCEPTED after review.
+Review notes: (1) Peer keyed the active pill on `aria-selected` because `ContextMenuTrigger asChild` overwrites the trigger's `data-state` (confirmed) -- accepted. (2) Peer's in-flow opacity-0 close/split left a clickable invisible x and wide gaps between tabs; REJECTED in part and reworked by the Lead into one `pointer-events-none` floating wrapper (Paseo reserves 0px for the close too: `TAB_CLOSE_BUTTON_RESERVED_WIDTH = 0`) with a title fade on hover and an in-flow spacer for the active tab. (3) Tests accepted; AH-AC13's test selects at 1024px then resizes (compact sidebar is a closed sheet), not a phone-width first load.
 
 ## Validation
 
-(filled in as criteria are confirmed)
+Screenshots (local, `/tmp/ahat-sbx/shots/{before,after}`; 1440x900 and 390x844, light and dark): no task, task selected, title hover card, ⋯ menu, chat+terminal+files+diff tabs, tab hover, 11-tab overflow, collapsed rail / mobile sheet, plus a forced desktop build (`VITE_SMIND_DESKTOP=1` with a stubbed Tauri bridge and a spoofed user agent): macOS and Windows chrome, update prompt then badge after Later, editor pill and menu.
+
+- AH-AC1: `App.test.tsx` "AH-AC1 content panel holds header and panes"; screenshots show two tones (panel vs sidebar) in light and dark.
+- AH-AC2/3/4/5/6/7/8/9/10: `app-header.test.tsx`, `app-header-task.test.tsx`, `App.test.tsx`, `desktop-chrome.test.tsx` (names as in the scenarios above). Reveal / editor pill verified live only through the stubbed bridge, not a real Tauri build.
+- AH-AC11: `app-update.test.ts` (reducer + `pendingUpdate`), `update-badge.test.tsx`; forced-desktop screenshot shows the badge in the sidebar strip (expanded) and in the header (collapsed rail, macOS inset). Not verified against a real updater.
+- AH-AC12: `task-detail.test.tsx` "AH-AC12 ..."; screenshot shows only the compact meta row.
+- AH-AC13: `App.responsive.test.tsx`; 390px screenshots show toggle, title, menu, terminal, no overflow.
+- AH-AC14: light and dark screenshots; no clipped corner. macOS vibrancy behind the rounded corner (`[data-slot=sidebar-inset]` made transparent in `desktop-chrome.css`) is unverified on a real macOS window.
+- TB-AC1..7: new `App.test.tsx` describe "App tab strip (app-header-and-tabs TB)" plus screenshots (hover, active pill, overflow scroll with the active tab in view, `>_` terminal icon).
+- `bun run typecheck`, web `vitest` (all files), `task lint`, `task test`: see the PR description for the final numbers.
+
+Known residual: archiving the selected task keeps showing it (header and pane) until the user navigates; identical to archiving it from the sidebar before this change, so not addressed here.
