@@ -9,7 +9,7 @@ import (
 
 // TestConfig_AccountUsageDefaultsAndValidation covers ADR-0028's
 // accountUsage block: defaults, partial override keeping the rest, ttl
-// floor, exhaust threshold bounds, and the exact four-field shape (budget
+// floor, exhaust threshold bounds, and the exact five-field shape (budget
 // constants must not become config keys).
 func TestConfig_AccountUsageDefaultsAndValidation(t *testing.T) {
 	home := t.TempDir()
@@ -25,7 +25,7 @@ func TestConfig_AccountUsageDefaultsAndValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() missing file error = %v", err)
 	}
-	if want := (AccountUsageConfig{Enabled: true, TTLSeconds: 300, Routing: true, ExhaustThresholdPct: 100}); cfg.AccountUsage != want {
+	if want := (AccountUsageConfig{Enabled: true, TTLSeconds: 300, Routing: true, ExhaustThresholdPct: 100, Passive: true}); cfg.AccountUsage != want {
 		t.Fatalf("defaults = %+v, want %+v", cfg.AccountUsage, want)
 	}
 
@@ -63,12 +63,12 @@ func TestConfig_AccountUsageDefaultsAndValidation(t *testing.T) {
 		}
 	}
 
-	// Exactly four fields, so no budget constant can sneak in as a key.
+	// Exactly five fields, so no budget constant can sneak in as a key.
 	got := reflect.TypeOf(AccountUsageConfig{})
-	if got.NumField() != 4 {
-		t.Fatalf("AccountUsageConfig has %d fields, want exactly 4", got.NumField())
+	if got.NumField() != 5 {
+		t.Fatalf("AccountUsageConfig has %d fields, want exactly 5", got.NumField())
 	}
-	want := map[string]bool{"Enabled": false, "TTLSeconds": false, "Routing": false, "ExhaustThresholdPct": false}
+	want := map[string]bool{"Enabled": false, "TTLSeconds": false, "Routing": false, "ExhaustThresholdPct": false, "Passive": false}
 	for i := range got.NumField() {
 		name := got.Field(i).Name
 		if _, ok := want[name]; !ok {
@@ -79,6 +79,39 @@ func TestConfig_AccountUsageDefaultsAndValidation(t *testing.T) {
 	for name, seen := range want {
 		if !seen {
 			t.Fatalf("AccountUsageConfig is missing field %q", name)
+		}
+	}
+}
+
+// TestConfig_AccountUsagePassiveDefaultAndValidation is plan scenario
+// config_accountusage_passive_default_and_validation: passive defaults to
+// true, an explicit false is honoured, and omitting the key (while setting
+// others) keeps it true.
+func TestConfig_AccountUsagePassiveDefaultAndValidation(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("SMIND_HOME", home)
+	for _, tc := range []struct {
+		name, yaml string
+		want       bool
+	}{
+		{"missing file", "", true},
+		{"explicit false", "accountUsage:\n  passive: false\n", false},
+		{"explicit true", "accountUsage:\n  passive: true\n", true},
+		{"omitted keeps true", "accountUsage:\n  ttlSeconds: 600\n", true},
+		{"enabled false leaves key", "accountUsage:\n  enabled: false\n", true},
+	} {
+		path := filepath.Join(home, "config.yaml")
+		if tc.yaml == "" {
+			os.Remove(path)
+		} else if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := Load()
+		if err != nil {
+			t.Fatalf("%s: Load() error = %v", tc.name, err)
+		}
+		if cfg.AccountUsage.Passive != tc.want {
+			t.Fatalf("%s: Passive = %v, want %v", tc.name, cfg.AccountUsage.Passive, tc.want)
 		}
 	}
 }

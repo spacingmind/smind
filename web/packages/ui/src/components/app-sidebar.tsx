@@ -70,12 +70,14 @@ import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
+import { useUsagePreferences } from "@/hooks/use-usage-preferences";
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
 import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import type { ConnectionStatus } from "@/lib/reconnect";
+import { UsageSidebarItem } from "@/components/account-usage/usage-sidebar-item";
 import { SidebarFooterActions } from "@/components/sidebar-footer";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -574,6 +576,7 @@ export function AppSidebar({
     if (workspaces) onWorkspacesChange?.(workspaces);
   }, [workspaces, onWorkspacesChange]);
 
+  const { inSidebar: showUsageSummary } = useUsagePreferences();
   const [crud, setCrud] = useState<CrudTarget | null>(null);
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
 
@@ -954,6 +957,7 @@ export function AppSidebar({
        */}
       <SidebarFooter className="p-0">
         <SidebarFooterActions
+          rows={showUsageSummary ? <UsageSidebarItem client={client} events={events ?? null} /> : undefined}
           connectionStatus={connectionStatus}
           connectionStatusText={connectionStatusText}
           providerHealth={providerHealth}

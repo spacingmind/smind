@@ -23,7 +23,7 @@ export interface Connection {
 
 /** The app-managed local daemon's status (ADR-0013 part D2), mirroring the Rust `DaemonStatus` DTO. */
 export interface DaemonStatus {
-  platform: "wsl2" | "macos" | "unsupported";
+  platform: "windows" | "macos" | "unsupported";
   reachable: boolean;
   daemonVersion: string | null;
   appVersion: string;
@@ -34,6 +34,12 @@ export interface DaemonStatus {
   logPath: string | null;
   /** Whether the managed binary exists on disk right now -- distinct from `managedState`, since a bare take-over (no prior Install/Update) can be "managed" with nothing installed. Restart is disabled unless this is true. */
   binaryInstalled: boolean;
+  /** Windows only (AC6): an unmanaged port owner that is not an identifiable smind.exe -- typically the WSL relay forwarding a WSL daemon's port. Take over is hidden and an explanation is shown instead. */
+  wslDaemonSuspected: boolean;
+  /** Windows only (AC8): whether Git for Windows was found (null elsewhere). Install/start work without it. */
+  gitFound: boolean | null;
+  /** Set when a prerequisite is missing (AC8), e.g. Git for Windows. */
+  prerequisiteMessage: string | null;
 }
 
 /** A progress update emitted while `daemonInstall`/`daemonUpdate`/`daemonRestart` run. */

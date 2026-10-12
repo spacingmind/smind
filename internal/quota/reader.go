@@ -47,6 +47,10 @@ type Reader interface {
 	// TTL is the cache TTL the poller enforces (never under 5 minutes).
 	// Routing uses it to age out an exhausted window that has no reset time.
 	TTL() time.Duration
+	// Cooldown reports a passive routing block (ADR-0028 §7) on the account
+	// for model: a hard rejection seen on a proxied request, or a short
+	// bare-429 back-off. It reads memory only and never fetches.
+	Cooldown(accountID int64, model string, now time.Time) (Cooldown, bool)
 }
 
 var _ Reader = (*Poller)(nil)

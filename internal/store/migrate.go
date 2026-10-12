@@ -164,6 +164,15 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		// ADR-0028 §7: quota_snapshots.kind distinguishes polled ('fetched')
+		// from passively observed ('observed') readings. Every pre-existing
+		// row is a fetched one.
+		name: "quota_snapshots_kind",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "quota_snapshots", "kind", "TEXT NOT NULL DEFAULT 'fetched'")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

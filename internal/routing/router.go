@@ -189,15 +189,36 @@ func (r *Router) selectAccount(policy string, candidateAccountIDs []int64, model
 	}
 }
 
-// exhaustion reports whether accountID cannot serve model right now according
-// to the cached usage report, and if so the time it becomes usable again (the
-// latest reset among the windows that exhaust it). It only reads the cache:
-// anything unknown (cold, error, unavailable, legacy, disabled) is not
-// exhausted.
+// exhaustion reports whether accountID cannot serve model right now, and if so
+// the time it becomes usable again. Two independent sources are combined:
+//
+//   - a passive cooldown (ADR-0028 §7), a hard rejection or short bare-429
+//     back-off seen on a proxied request. It applies whatever the fetched
+//     report says (cold, stale, unavailable, overage) and a newer report does
+//     not clear it; only its end time does;
+//   - the cached usage report: the latest reset among the windows that
+//     exhaust it. Anything unknown (cold, error, unavailable, legacy,
+//     disabled) is not exhausted.
+//
+// Both only read memory; nothing here fetches.
 func (r *Router) exhaustion(accountID int64, model string, now time.Time) (exhausted bool, until time.Time) {
 	if !r.usageRouting {
 		return false, time.Time{}
 	}
+	if cd, ok := r.reader.Cooldown(accountID, model, now); ok && cd.Until.After(now) {
+		exhausted, until = true, cd.Until
+	}
+	if fetched, reset := r.windowExhaustion(accountID, model, now); fetched {
+		exhausted = true
+		if reset.After(until) {
+			until = reset
+		}
+	}
+	return exhausted, until
+}
+
+// windowExhaustion evaluates the cached fetched report only.
+func (r *Router) windowExhaustion(accountID int64, model string, now time.Time) (exhausted bool, until time.Time) {
 	res := r.reader.Peek(accountID)
 	rep := res.Report
 	if !res.Enabled || rep == nil || rep.Status != quota.StatusAvailable {
