@@ -106,6 +106,6 @@ Screenshots (local, `/tmp/ahat-sbx/shots/{before,after}`; 1440x900 and 390x844, 
 - AH-AC13: `App.responsive.test.tsx`; 390px screenshots show toggle, title, menu, terminal, no overflow.
 - AH-AC14: light and dark screenshots; no clipped corner. macOS vibrancy behind the rounded corner (`[data-slot=sidebar-inset]` made transparent in `desktop-chrome.css`) is unverified on a real macOS window.
 - TB-AC1..7: new `App.test.tsx` describe "App tab strip (app-header-and-tabs TB)" plus screenshots (hover, active pill, overflow scroll with the active tab in view, `>_` terminal icon).
-- `bun run typecheck`, web `vitest` (all files), `task lint`, `task test`: see the PR description for the final numbers.
+- On the branch merged with `origin/develop` (`0ecd4f13`): `bun run typecheck` clean; web vitest 170 files / 2126 tests pass; `task lint` clean; `task test` exit 0 (Go packages, desktop node tests). No Go, Rust or desktop file changed.
 
 Known residual: archiving the selected task keeps showing it (header and pane) until the user navigates; identical to archiving it from the sidebar before this change, so not addressed here.
