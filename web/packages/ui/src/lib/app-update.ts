@@ -17,7 +17,8 @@ export interface AppUpdateInfo {
  * to prompt with the error inline, so Update can be retried.
  */
 export type AppUpdateState =
-  | { stage: "idle" }
+  /** `available` is an update the user has not acted on (dismissed with Later): the header badge's source, and what `reopen` prompts with. */
+  | { stage: "idle"; available?: AppUpdateInfo }
   | { stage: "prompt"; info: AppUpdateInfo; error: string | null }
   | { stage: "downloading"; info: AppUpdateInfo; progress: AppUpdateProgress }
   | { stage: "installing"; info: AppUpdateInfo };
@@ -25,6 +26,7 @@ export type AppUpdateState =
 export type AppUpdateAction =
   | { type: "checkResult"; check: AppUpdateCheck; manual: boolean; dismissed: ReadonlySet<string> }
   | { type: "dismiss" }
+  | { type: "reopen" }
   | { type: "confirm" }
   | { type: "progress"; progress: AppUpdateProgress }
   | { type: "installError"; message: string };
@@ -37,22 +39,24 @@ export function appUpdateReducer(state: AppUpdateState, action: AppUpdateAction)
       // Never yank an in-flight download out from under the user.
       if (state.stage === "downloading" || state.stage === "installing") return state;
       if (action.check.kind !== "available") return { stage: "idle" };
-      // A version dismissed this session isn't re-prompted by the launch
-      // check; a manual check always asks again.
-      if (!action.manual && action.dismissed.has(action.check.version)) return { stage: "idle" };
-      return {
-        stage: "prompt",
-        info: {
-          version: action.check.version,
-          currentVersion: action.check.currentVersion,
-          notes: action.check.notes,
-          date: action.check.date,
-        },
-        error: null,
+      const info: AppUpdateInfo = {
+        version: action.check.version,
+        currentVersion: action.check.currentVersion,
+        notes: action.check.notes,
+        date: action.check.date,
       };
+      // A version dismissed this session isn't re-prompted by the launch
+      // check (the header badge still offers it); a manual check always asks again.
+      if (!action.manual && action.dismissed.has(action.check.version)) return { stage: "idle", available: info };
+      return { stage: "prompt", info, error: null };
     }
     case "dismiss":
-      return { stage: "idle" };
+      // Later keeps the update for the badge. Dismissing mid-download only hides
+      // the dialog (the install carries on), so there is nothing to offer again.
+      if (state.stage === "prompt") return { stage: "idle", available: state.info };
+      return state.stage === "idle" ? state : { stage: "idle" };
+    case "reopen":
+      return state.stage === "idle" && state.available ? { stage: "prompt", info: state.available, error: null } : state;
     case "confirm": {
       if (state.stage !== "prompt") return state;
       return {
@@ -71,6 +75,16 @@ export function appUpdateReducer(state: AppUpdateState, action: AppUpdateAction)
       return { stage: "prompt", info: state.info, error: action.message };
     }
   }
+}
+
+/** What `useAppUpdate` returns: the dialog and the header badge share one instance (the launch check must run once). */
+export type AppUpdateController = ReturnType<typeof useAppUpdate>;
+
+/** The update the badge offers: one waiting for a decision (prompt, or dismissed with Later). Null while downloading/installing or when there is none. */
+export function pendingUpdate(state: AppUpdateState): AppUpdateInfo | null {
+  if (state.stage === "prompt") return state.info;
+  if (state.stage === "idle") return state.available ?? null;
+  return null;
 }
 
 /**
@@ -140,5 +154,7 @@ export function useAppUpdate() {
     dispatch({ type: "dismiss" });
   }, []);
 
-  return { state, confirm, dismiss };
+  const reopen = useCallback(() => dispatch({ type: "reopen" }), []);
+
+  return { state, confirm, dismiss, reopen };
 }
