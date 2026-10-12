@@ -1126,7 +1126,7 @@ describe("App sidebar resize", () => {
     const sidebar = document.querySelector('[data-slot="sidebar"]');
     expect(sidebar).toHaveAttribute("data-state", "expanded");
     expect(panel).not.toHaveAttribute("data-collapsed");
-    expect(panel.className).toContain("w-(--sidebar-width)");
+    expect(panel.className).toContain("w-[min(var(--sidebar-width),50%)]");
     expect(panel.className).toContain("transition-[width]");
     expect(panel.className).toContain("duration-200");
     expect(panel.className).toContain("ease-out");
