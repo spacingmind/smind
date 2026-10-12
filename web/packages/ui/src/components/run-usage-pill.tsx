@@ -44,7 +44,7 @@ export function RunUsagePill({ usage }: { usage: RunUsage | undefined }) {
         type="button"
         data-testid="run-usage-pill"
         aria-label={label}
-        className="flex shrink-0 items-center gap-1 truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
+        className="flex shrink-0 items-center gap-1 truncate rounded-full px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
       >
         <Coins className="size-3" />
         <span className="truncate">{parts.join(" · ")}</span>
