@@ -486,7 +486,7 @@ function RunConfigToolbarMode() {
         </SelectTrigger>
         <SelectContent>
           {meta.modes.map((m) => (
-            <SelectItem key={m.id} value={m.id} title={m.description}>
+            <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
               {m.label}
             </SelectItem>
           ))}

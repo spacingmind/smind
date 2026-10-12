@@ -47,9 +47,9 @@ chip row above the card). Paseo is React Native, so this is a port of the
    `h-7` sizing. Accessible names are the existing `aria-label`s, so icon-only
    is still labelled.
 5. **Send cluster (ZCode):** idle → one icon button (`ArrowUp`, label "Send",
-   disabled grey when empty). Running → `Stop` (`Square`, always shown), plus —
-   only when the draft has text — `Send now` (`Zap`, interrupt) and `Queue`
-   (`ArrowUp`, label "Queue"). Queue/interrupt semantics (ADR-0021 §9),
+   disabled grey when empty). Running → `Stop` (`Square`, always shown), the
+   `Queue` button (`ArrowUp`, label "Queue", disabled while empty) and — only
+   when the draft has text — `Send now` (`Zap`, interrupt). Queue/interrupt semantics (ADR-0021 §9),
    Escape-to-stop and Cmd/Ctrl+Enter are unchanged.
 6. **Status chips above the card (Paseo):** a "Working" chip (pulsing dot) while
    a run is live; the existing diff-stat chip (`+adds −dels`, compact `k`
@@ -75,7 +75,7 @@ chip row above the card). Paseo is React Native, so this is a port of the
 - **AC4 Narrow.** Below `sm` pills collapse to icon-only 44px buttons without
   wrapping; `md:` and up are dense.
 - **AC5 Send/Stop.** Send is an icon-only button disabled when empty; running
-  state shows Stop always, Queue/Send-now with text; queue/interrupt/Escape
+  state shows Stop and Queue always (Queue disabled when empty), Send now with text; queue/interrupt/Escape
   behaviour unchanged.
 - **AC6 Chips.** "Working" chip while running; diff-stat chip when there are
   changes and a Diff tab; nothing otherwise.
@@ -100,7 +100,7 @@ chip row above the card). Paseo is React Native, so this is a port of the
 - `pill labels and chevrons carry the below-sm hide classes and 44px touch size` (AC4)
 - `composer card has no divider and the textarea is two rows` (AC1)
 - `send is icon-only, labelled Send, disabled while empty` (AC5)
-- `running shows Stop always, Queue and Send now only with text` (AC5)
+- `running shows Stop always, Queue enabled and Send now only with text` (AC5)
 - `Working chip shows while a run is live and hides when idle` (AC6)
 - `diff-stat chip compact-formats thousands and opens the diff` (AC6)
 - `composer.focus action focuses the textarea` (AC7)
@@ -111,14 +111,24 @@ chip row above the card). Paseo is React Native, so this is a port of the
 ## Progress
 
 - [x] Spec committed
-- [ ] Step 1 — toolbar pills (`run-config-toolbar.tsx`)
-- [ ] Step 2 — card shell, send cluster, chips, focus hint (`composer.tsx`,
+- [x] Step 1 — toolbar pills (`run-config-toolbar.tsx`)
+- [x] Step 2 — card shell, send cluster, chips, focus hint (`composer.tsx`,
       `prompt-textarea.tsx`, `composer-status-chips.tsx`)
-- [ ] Step 3 — screenshot pass + fixes
+- [x] Step 3 — screenshot pass + fixes (menu items for auto-approving modes
+      also tinted)
 
 ## Peer log
 
-_(filled in as Peers report)_
+- `peer-glm` (Step 1, `7f5a966b`): died on a provider session limit after two
+  commits. **ACCEPT** `d40367af` (pills) and `5b2c66ac` (warning tint) after
+  review of the diff. **REJECT** its uncommitted test file as delivered (5/5
+  failing: no model catalog in its fixture, `fireEvent` imported from
+  `react`); the Lead fixed and committed it (`4e52c43d`). The review also
+  caught a real bug the tests could not: Radix `SelectValue` drops its
+  `className`, so the `max-sm:hidden` the Peer put on it never hid anything.
+  The hide now lives on the trigger (`max-sm:[&>span]:hidden!`).
+- Step 2 (composer shell, chips, hint) and Step 3: done by the Lead after the
+  Peer died (Supervisor check-in asked the Lead to take over).
 
 ## Validation
 
