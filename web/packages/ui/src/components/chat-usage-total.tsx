@@ -101,7 +101,7 @@ function PlanOnlyPill({ plan }: { plan: ReturnType<typeof useChatPlanUsage> }) {
         </>
       }
     >
-      {(close) => <ChatPlanUsage plan={plan} onOpenUsage={close} />}
+      {(close) => <ChatPlanUsage plan={plan} onOpenUsage={close} standalone />}
     </UsagePillCard>
   );
 }

@@ -14,7 +14,16 @@ const NO_DATA = "No plan data yet";
  * windows, a daemon without `account.usage`, or a provider with no OAuth
  * account in a store that does hold accounts (API keys have no windows).
  */
-export function ChatPlanUsage({ plan, onOpenUsage }: { plan: ChatPlanUsageState; onOpenUsage?: () => void }) {
+export function ChatPlanUsage({
+  plan,
+  onOpenUsage,
+  standalone = false,
+}: {
+  plan: ChatPlanUsageState;
+  onOpenUsage?: () => void;
+  /** The section is the card's only content (no token rows above it): no divider, no top margin. */
+  standalone?: boolean;
+}) {
   const { provider, snapshot, accounts, displayAs } = plan;
   if (provider === null) return null;
 
@@ -55,7 +64,7 @@ export function ChatPlanUsage({ plan, onOpenUsage }: { plan: ChatPlanUsageState;
   }
 
   return (
-    <section data-testid="chat-plan-usage" aria-label="Plan usage" className="mt-3 flex flex-col gap-2 border-t pt-3">
+    <section data-testid="chat-plan-usage" aria-label="Plan usage" className={standalone ? "flex flex-col gap-2" : "mt-3 flex flex-col gap-2 border-t pt-3"}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-ui-sm font-medium text-foreground">Plan usage</p>
         <button
