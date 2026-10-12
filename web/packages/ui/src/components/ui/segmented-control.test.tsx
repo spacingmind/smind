@@ -17,7 +17,7 @@ function setup(value: "used" | "remaining" = "used") {
 describe("segmented_control_a11y", () => {
   it("is a named group whose segments report the selected state", () => {
     setup("remaining");
-    expect(screen.getByRole("group", { name: "Percentages" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Percentages" })).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Remaining" })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Used" })).toHaveAttribute("aria-checked", "false");
   });
