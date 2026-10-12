@@ -10,8 +10,10 @@ import "time"
 //     numbers.
 //   - Otherwise, where the observation is newer than the fetched report (or
 //     there is no fetched report), the observed windows are shown: they replace
-//     fetched windows with the same ID and are added otherwise. With no fetched
-//     report the result is the observation's own report.
+//     fetched windows with the same ID, field-wise: an observed value wins, but
+//     a window the observation carries no numbers for (status only) keeps the
+//     fetched used/remaining percent and reset. Windows with a new ID are added.
+//     With no fetched report the result is the observation's own report.
 //   - A fetched report with no newer observation is returned as it is.
 //   - ok is false when there is neither.
 func DisplayReport(fetched Result, obs *Observation, ttl time.Duration, now time.Time) (Report, bool) {
@@ -37,7 +39,7 @@ func DisplayReport(fetched Result, obs *Observation, ttl time.Duration, now time
 		replaced := false
 		for i := range out.Windows {
 			if out.Windows[i].ID == w.ID {
-				out.Windows[i], replaced = w, true
+				out.Windows[i], replaced = mergeObservedWindow(out.Windows[i], w), true
 				break
 			}
 		}
@@ -46,4 +48,22 @@ func DisplayReport(fetched Result, obs *Observation, ttl time.Duration, now time
 		}
 	}
 	return out, true
+}
+
+// mergeObservedWindow overlays the observed window o on the fetched one f: o
+// wins field by field, and f supplies the numbers o does not have.
+func mergeObservedWindow(f, o Window) Window {
+	if o.UsedPct == nil && o.RemainingPct == nil {
+		o.UsedPct, o.RemainingPct = f.UsedPct, f.RemainingPct
+		if o.Status != statusRejected && o.Status != statusAllowedWarning {
+			o.Tone = f.Tone
+		}
+	}
+	if o.ResetsAt == nil {
+		o.ResetsAt = f.ResetsAt
+	}
+	if o.DurationSeconds == nil {
+		o.DurationSeconds = f.DurationSeconds
+	}
+	return o
 }
