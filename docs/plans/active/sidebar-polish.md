@@ -54,15 +54,21 @@ decision on persisted order), S11 filter chips and ⌘1-9 badges. Do not touch
 
 ### S7 — title overflow and indentation
 - SP-S7-AC1: an overflowing title fades out at its right edge (mask) instead of showing an ellipsis; a title that fits has no mask.
-- SP-S7-AC2: nesting indentation is per-row padding (12px per depth level) — nested lists carry no margin/padding — so hover/selected highlight spans the whole sidebar width.
-- SP-S7-AC3: at most one thin guide line per expanded parent; DOM/ARIA nesting unchanged.
-- SP-S7-AC4: measured targets (screenshots/probe): depth-0 title starts at most 32px from its row's own padding edge (excluding container indent); at a 192px sidebar a depth-2 title has ~100px of width. Actuals are recorded in Validation.
+- SP-S7-AC2: nesting indentation inside the task tree is per-row padding (12px per depth level) -- task-tree nested lists carry no margin/padding -- so hover/selected highlight spans its container's content box. (Round 1: container content is inset behind a guide line, see SP-R1-AC1.)
+- SP-S7-AC3: no guide lines inside the task tree; DOM/ARIA nesting unchanged. (Round 1 replaces the original "one thin guide line per expanded parent" with container guides, SP-R1-AC1.)
+- SP-S7-AC4: measured targets (screenshots/probe): every depth-0 title in a container starts at the same x regardless of siblings (SP-R1-AC2). Actuals are recorded in Validation.
 
 ### S8 — persisted expansion
 - SP-S8-AC1: workspace expansion, space open, Pinned section and status-group collapse persist across a remount via `STORAGE_KEYS`.
 - SP-S8-AC2: a newly created workspace is expanded even if a stale id for it was persisted as collapsed.
 - SP-S8-AC3: searching never writes the stored state, and clearing the query restores the tree as it was.
 - SP-S8-AC4: corrupt/absent storage falls back to "everything expanded".
+
+### Review round 1 (PR #300 review: hierarchy, alignment, narrow titles, typography)
+- SP-R1-AC1: workspace content (spaces / Ungrouped / flat tasks), Pinned and status-group content sit behind one subtle guide line under the header's icon (`ml-4 border-l pl-1`, ZCode's `ml-4 border-l pl-2` narrowed); a space's / Ungrouped content carries the same guide only on a wide sidebar (>= 14rem container query) so a 192px sidebar keeps its title width. Spaces therefore read as nested under their workspace, not as siblings of the next workspace.
+- SP-R1-AC2: depth-0 task titles share one x within a container whether or not the list contains a parent: every root row reserves the chevron gutter (`ROOT_PAD_PX` = 4px inset + 12px gutter); a task row sits at the same x in tree, search, Pinned and status-group lists.
+- SP-R1-AC3: container titles (workspace, space, Ungrouped, Pinned, status group) use `FadeText` (no ellipsis) and the chevron sits right after the title; the right padding for the ⋯ box (`pr-7`) and the hidden aggregate dot apply only while the row is hovered / focused / has its menu open.
+- SP-R1-AC4: typography is muted and graded: task titles `text-ui-base` at .76 opacity (1 on hover / selected); workspace header `text-ui-base font-medium`; space / Ungrouped / Pinned / status-group headers `text-ui-sm` + `text-foreground-subtle` (-> foreground on hover); relative time `text-ui-xs text-foreground-subtlest`.
 
 ## Test Scenarios
 
@@ -77,6 +83,7 @@ Named to match the tests (`web/packages/ui/src`):
 - "task context menu (S6)": `right-click offers the same items as the actions menu`, `context menu Archive and Pin call the same handlers`, `context menu offers Move to space targets`.
 - "title overflow and indentation (S7)": `the title fade mask applies only when the title overflows` (mocked scrollWidth), `indentation is per-row padding by depth and nested lists add no indent`.
 - "expansion persistence (S8)": `collapsed workspace persists across a remount`, `collapsed space persists`, `collapsed Pinned section persists`, `collapsed status group persists`, `a created workspace is expanded even if its id was persisted collapsed`, `search does not touch stored state`, `corrupt stored value falls back to expanded`; `lib/sidebar-preferences.test.ts` for the node-set reader/writer.
+- Review round 1 (`components/app-sidebar-rows.test.tsx`, `app-sidebar.test.tsx`): `task-tree nested lists add no indent; container content wrappers carry the guide`, `workspace content and space content each carry one guide-line wrapper`, `depth-0 rows have identical padding with and without a parent sibling`, `flat views use the same root padding`, `container titles render via FadeText and the mask applies only when overflowing`, `the workspace header reserves its right padding only while active`, `workspace title is the loud top-level heading; space titles are the quieter sub-heading`, `the task title is muted at idle and full opacity when hovered or selected`, `a selected task's title is at full opacity`, `the relative time is the quietest element on the row`.
 - Live probes (screenshots): D1 probe (hover one nested row → exactly one ⋯), keyboard-focus state, light+dark at 256px and 192px.
 
 ## Decisions
@@ -92,6 +99,12 @@ Supervisor-approved (2026-10-12), implemented as written unless a deviation is l
 - S6: `ContextMenuSub*` wrappers are added to `components/ui/context-menu.tsx` so the Move-to-space submenu can be shared.
 - S7: ZCode's marquee is not ported — only the right-fade mask. Container levels (workspace/space) add no extra indentation to task rows; only task depth does, so rows at the same task depth align across containers.
 - S8: one `STORAGE_KEYS.collapsedSidebarNodes` key holds a string-id set (`ws:<id>`, `space:<id>`, `ungrouped:<wsId>`, `pinned`, `status:<key>`) of *collapsed* nodes, so anything new (a new workspace, a new space) defaults expanded without a write.
+Review round 1 (Supervisor findings 1-4, human asked to fix before merge):
+
+- Hierarchy: ZCode's group content `ml-4 border-l pl-2` is ported as `ml-4 border-l pl-1` (20px per level instead of 25px). Two guide levels plus the always-reserved chevron gutter left ~60px of title at 192px, so a space's guide is wide-only (container query `@min-[14rem]/sb`); below that, tasks stay flush and their titles still line up with the space's label. This supersedes the S7 "container levels add no indentation / no guide line" decision; highlight of rows inside a container now spans from the guide line to the sidebar edge (what ZCode does), workspace headers stay full-width.
+- Alignment: the chevron gutter is always reserved for root rows (`ROOT_PAD_PX`), costing 12px on lists with no parents; chosen over a per-list conditional because the Supervisor asked for one stable column. Row inset 8 -> 4px (the container guide's `pl-1` supplies the rest).
+- Relative time (refs checked): ZCode shows a time on every row (`text-ui-sm text-foreground-subtle`), Paseo's rows show none; neither hides it by recency. Kept on every row, quieter (`text-ui-xs text-foreground-subtlest`); no recency logic. To drop it entirely later, remove the `task-row-time` span.
+- Muting: Paseo's title opacity .76 -> 1 is applied to task titles only (workspace/space headers are graded by size/weight/colour, not opacity).
 - Visual tokens: existing classes only (`bg-hover`, `bg-selected`, `text-ui-base`, `text-foreground-subtle(st)`, `bg-tag`); no new color values.
 
 ## Progress
@@ -107,7 +120,9 @@ Supervisor-approved (2026-10-12), implemented as written unless a deviation is l
 - [x] S8 persisted expansion
 - [x] Screenshots light/dark 256/192 + hover + focus + D1 probe (local: `/private/tmp/sidebar-polish-shots/`)
 - [x] `task test`, `task lint`, tsc (see Validation)
-- [ ] PR opened / reviewed / merged (Lead never merges)
+- [x] PR opened
+- [x] Review round 1 fixes (findings 1-4): `3594811`/`77e4b054` (hierarchy + alignment), then fade/typography commit; screenshots in `tmp/before` / `tmp/after` (local)
+- [ ] Merged (Lead never merges)
 
 Tests live in `components/app-sidebar-rows.test.tsx` (new, S1-S8) with the
 older `app-sidebar*.test.tsx` / `open-in-editor.test.tsx` / `App.test.tsx`
@@ -134,6 +149,8 @@ Spec scenarios in the list above are the test names in
 - SP-S5-AC1..AC3: "container rows (S5)". Screenshots: `states-*-spacehover.png` (⋯ clear of the chevron, highlight spans the row), `states2-dark-status-groups.png` (count pill).
 - SP-S6-AC1: "task context menu (S6)". Screenshot: `states-*-contextmenu.png`.
 - SP-S7-AC1..AC3: "title overflow and indentation (S7)". Screenshots at 256/192 px light and dark (`sidebar-*-wide.png`, `sidebar-*-narrow.png`).
-- SP-S7-AC4 (measured, `report.json`): depth-0 title starts 30px from the row's left edge in a list with no parents and 42px where the list contains a parent (the 12px gutter for the chevron) -- the 32px target holds only for the first case. At a 192px sidebar the depth-2 title is 101px wide (89px for the depth-1 title that sits next to a child-count chip); at 256px it is 135px.
+- SP-S7-AC4 (original measurement, superseded by SP-R1-AC2 below; `report.json`): depth-0 title starts 30px from the row's left edge in a list with no parents and 42px where the list contains a parent (the 12px gutter for the chevron) -- the 32px target holds only for the first case. At a 192px sidebar the depth-2 title is 101px wide (89px for the depth-1 title that sits next to a child-count chip); at 256px it is 135px.
 - SP-S8-AC1..AC4: "expansion persistence (S8)" + `lib/sidebar-preferences.test.ts`. Live: after collapsing a space and a workspace and reloading, both stayed collapsed (`states2-*-after-reload.png`, stored `["space:2","ws:2"]`).
+- SP-R1-AC1..AC4 (measured against an isolated sandbox daemon, 1440x900, `tmp/after/report.json` vs `tmp/before/report.json`, local-only): at 256px depth-0 titles start at x=88 (inside a space) / x=67 (flat workspace) for every row of the container -- before: 50 or 38 (and 62/74 for children) depending on whether the list had a parent; at 192px x=67 in every container. Container titles: `smind-core` fits in full at 192px (before: "smind-co…" ellipsis, 4px short of the 73px it needed); "Sidebar polish" overflows by 6px and fades (before: "Sidebar …"). Hover on a nested task still mounts exactly one ⋯ (`["9"]`). Costs: depth-2 title width at 192px is 84px (was 101px) and at 256px 97px (was 135px) -- the price of the guide indent + reserved gutter; a space's guide is hidden below 14rem to bound it.
+- Screenshots (light + dark x 256/192): `{light,dark}-{256,192}-{full,taskhover,spacehover,workspacehover,focus,statusgroups}.png` in `tmp/before/` and `tmp/after/` (gitignored).
 - Commands: see the PR description for the exact `tsc`/vitest/`task test`/`task lint` runs and results.
