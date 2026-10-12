@@ -33,6 +33,8 @@ export const STORAGE_KEYS = {
   /** Collapsed workspace/space/Pinned/status-group ids (sidebar-polish S8); see lib/sidebar-preferences.ts. */
   collapsedSidebarNodes: "smind:sidebar-collapsed-nodes",
   notificationSound: "smind:notification-sound",
+  /** Plan-usage display preferences (ADR-0028); see lib/account-usage/preferences.ts. */
+  usage: "smind:usage-preferences",
 } as const;
 
 /**
