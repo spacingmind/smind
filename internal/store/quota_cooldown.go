@@ -23,15 +23,21 @@ type QuotaCooldown struct {
 // SaveQuotaCooldown upserts the cooldown row for (AccountID, ScopeModel).
 // Times are stored in UTC. An existing row's until is never moved earlier (a
 // cooldown only shortens by expiring or by a delete), so a stale or racing
-// write cannot cut a longer persisted cooldown short; reason, level and
-// observed_at are always replaced.
+// write cannot cut a longer persisted cooldown short. Reason, level and
+// rejected_window describe the cooldown that sets until, so they follow it: a
+// write with an earlier until keeps all three of the longer cooldown, a write
+// with the same until (the level reset after a non-rejected response) replaces
+// them. observed_at is always replaced.
 func (s *Store) SaveQuotaCooldown(c QuotaCooldown) error {
 	_, err := s.db.Exec(
 		`INSERT INTO quota_cooldown (account_id, scope_model, until, reason, level, rejected_window, observed_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(account_id, scope_model) DO UPDATE SET
-		   until = CASE WHEN excluded.until > until THEN excluded.until ELSE until END, reason = excluded.reason,
-		   level = excluded.level, rejected_window = excluded.rejected_window, observed_at = excluded.observed_at`,
+		   until = CASE WHEN excluded.until >= until THEN excluded.until ELSE until END,
+		   reason = CASE WHEN excluded.until >= until THEN excluded.reason ELSE reason END,
+		   level = CASE WHEN excluded.until >= until THEN excluded.level ELSE level END,
+		   rejected_window = CASE WHEN excluded.until >= until THEN excluded.rejected_window ELSE rejected_window END,
+		   observed_at = excluded.observed_at`,
 		c.AccountID, c.ScopeModel, c.Until.UTC(), c.Reason, c.Level, c.RejectedWindow, c.ObservedAt.UTC(),
 	)
 	if err != nil {
