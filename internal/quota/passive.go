@@ -685,4 +685,74 @@ func (p *Passive) Close() {
 
 // --- observation ------------------------------------------------------------
 
-func (p *Passive) observe(int64, *passiveAcct, Observation, time.Time) bool { return false }
+// observe replaces the account's in-memory observation at once (replaced, not
+// merged) and decides whether to persist it: only when the parsed values differ
+// from what was last queued for writing, and then at most once per
+// passiveObsMinInterval unless the verdict changed. It reports whether the
+// parsed values changed. Display only: nothing here reads or writes a cooldown.
+func (p *Passive) observe(id int64, a *passiveAcct, obs Observation, at time.Time) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	o := cloneObservation(obs)
+	changed := a.obs == nil || !a.obs.Equal(o)
+	a.obs, a.obsLoaded = &o, true
+
+	prev := a.obsPersisted
+	if prev == nil ||
+		(!o.Equal(*prev) && (at.Sub(a.obsLastWrite) >= passiveObsMinInterval || o.Verdict() != a.obsPersistedVerdict)) {
+		a.obsPersisted, a.obsPersistedVerdict, a.obsLastWrite = &o, o.Verdict(), at
+		a.obsPending = &o
+		p.markObservationLocked(id)
+	}
+	return changed
+}
+
+// Observed returns the account's latest observation for display: the one in
+// memory, else the stored observed snapshot (read once; an error is not
+// cached). Routing never calls it, and Reader has no such method.
+func (p *Passive) Observed(accountID int64) (Observation, bool) {
+	if !p.enabled {
+		return Observation{}, false
+	}
+	a := p.acct(accountID)
+	a.mu.Lock()
+	if a.obs != nil || a.obsLoaded {
+		defer a.mu.Unlock()
+		return a.observedLocked()
+	}
+	a.mu.Unlock()
+
+	snap, ok, err := p.store.GetLatestQuotaSnapshotKind(accountID, store.QuotaKindObserved)
+	if err != nil {
+		log.Printf("quota: account %d passive observation read failed", accountID)
+		return Observation{}, false
+	}
+	var stored *Observation
+	if ok {
+		if rep, decoded := DecodeReport(snap.UsageData); decoded {
+			if o, has := ObservationFromReport(rep); has {
+				stored = &o
+			}
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.obs == nil && !a.obsLoaded {
+		a.obs, a.obsLoaded = stored, true
+	}
+	return a.observedLocked()
+}
+
+func (a *passiveAcct) observedLocked() (Observation, bool) {
+	if a.obs == nil {
+		return Observation{}, false
+	}
+	return cloneObservation(*a.obs), true
+}
+
+// cloneObservation deep-copies the windows so a stored or returned observation
+// is never shared.
+func cloneObservation(o Observation) Observation {
+	o.Windows = cloneReport(Report{Windows: o.Windows}).Windows
+	return o
+}
