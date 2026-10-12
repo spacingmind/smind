@@ -81,7 +81,7 @@ func TaskEnv(t store.Task) []string {
 }
 
 // checkSetupSupported reports whether this daemon can run ws's scripts:
-// a POSIX shell must be findable (ADR-0028 D1). Unix assumes sh; on
+// a POSIX shell must be findable (ADR-0029 D1). Unix assumes sh; on
 // Windows the lookup covers PATH and Git for Windows. A missing shell
 // fails task creation fast instead of silently skipping the script.
 func (m *Manager) checkSetupSupported(script string) error {

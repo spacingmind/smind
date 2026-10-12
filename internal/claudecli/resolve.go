@@ -1,5 +1,5 @@
 // Package claudecli resolves and launches the Claude Code CLI on native
-// Windows (ADR-0028).
+// Windows (ADR-0029).
 //
 // Two Windows facts make the SDK's defaults unusable there:
 //

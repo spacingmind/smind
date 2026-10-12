@@ -26,7 +26,7 @@ const stopWaitTimeout = 30 * time.Second
 const stopPollInterval = 250 * time.Millisecond
 
 // cmdStop asks the running daemon to shut down gracefully via its
-// authenticated POST /api/shutdown endpoint (ADR-0028 D2), using the port
+// authenticated POST /api/shutdown endpoint (ADR-0029 D2), using the port
 // from config and the token from the same location the daemon itself
 // wrote (dialDaemon's credential model), then waits until the daemon
 // stops answering /healthz. It is the mechanism every caller can reach

@@ -11,7 +11,7 @@ const setupLogCap = 64 << 10
 
 // ErrSetupUnsupported is returned when a workspace has a setup/teardown
 // script configured but no POSIX shell can be found to run it (Windows
-// without Git for Windows' sh.exe, ADR-0028 D1). Scripts are never
+// without Git for Windows' sh.exe, ADR-0029 D1). Scripts are never
 // silently skipped.
 var ErrSetupUnsupported = errors.New("setup/teardown scripts need `sh`; install Git for Windows or add its bin directory to PATH")
 

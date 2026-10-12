@@ -23,7 +23,7 @@ func shutdownFired(srv *Server) bool {
 
 // TestShutdown_NoToken_Unauthorized: POST /api/shutdown without a token,
 // or with a wrong one, is 401 and never fires the shutdown signal
-// (ADR-0028 D2: the endpoint is guarded by auth.RequireToken exactly like
+// (ADR-0029 D2: the endpoint is guarded by auth.RequireToken exactly like
 // the /v1/* proxy routes).
 func TestShutdown_NoToken_Unauthorized(t *testing.T) {
 	for name, header := range map[string]string{

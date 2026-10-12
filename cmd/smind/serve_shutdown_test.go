@@ -148,7 +148,7 @@ func (b *stdBuffer) String() string { return string(b.data) }
 
 // TestServe_GracefulShutdown is AC3's mandatory scenario: a real
 // `smind serve` subprocess with a live terminal session, stopped by the
-// real `smind stop` (ADR-0028 D2's POST /api/shutdown), must run the same
+// real `smind stop` (ADR-0029 D2's POST /api/shutdown), must run the same
 // shutdown path as SIGTERM -- the daemon process exits and the terminal
 // session is persisted `closed`, not `interrupted`.
 func TestServe_GracefulShutdown(t *testing.T) {

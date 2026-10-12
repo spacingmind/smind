@@ -45,7 +45,7 @@ type Manager struct {
 	// Setup-script runtime (setup_run.go): tracked goroutines so archive and
 	// shutdown can cancel them; shLookup locates the POSIX shell the scripts
 	// run under (sh on Unix; PATH then Git for Windows on Windows,
-	// ADR-0028 D1) and is the seam tests use to simulate a machine without
+	// ADR-0029 D1) and is the seam tests use to simulate a machine without
 	// one.
 	setupMu       sync.Mutex
 	setupRuns     map[int64]*setupRun

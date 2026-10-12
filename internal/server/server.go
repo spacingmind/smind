@@ -69,7 +69,7 @@ func (s *Server) API() *wsapi.API {
 // ShutdownSignal returns a channel that is closed exactly once, when
 // POST /api/shutdown accepts a shutdown request (see handleShutdown).
 // cmdServe selects on it next to its signal context, so the API and
-// SIGINT/SIGTERM drive one shared shutdown code path (ADR-0028 D2).
+// SIGINT/SIGTERM drive one shared shutdown code path (ADR-0029 D2).
 func (s *Server) ShutdownSignal() <-chan struct{} {
 	return s.shutdownCh
 }
@@ -101,7 +101,7 @@ func (s *Server) Close() {
 // header check -- a browser WebSocket client can't set request headers on
 // the upgrade -- so it isn't wrapped in that middleware; see wsapi.Handler.
 // POST /api/shutdown is token-gated exactly like the proxy routes
-// (ADR-0028 D2): shutting the daemon down is as destructive as anything
+// (ADR-0029 D2): shutting the daemon down is as destructive as anything
 // the token already authorizes.
 // GET /api/token is unauthenticated for the same reason /ws's own check
 // isn't an Authorization header: see handleToken's doc comment.
@@ -155,7 +155,7 @@ func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleShutdown serves POST /api/shutdown (ADR-0028 D2): 202 Accepted,
+// handleShutdown serves POST /api/shutdown (ADR-0029 D2): 202 Accepted,
 // then the shutdown signal cmdServe selects on -- the same path SIGINT/
 // SIGTERM take. The sync.Once makes repeat calls during shutdown
 // idempotent: they still get their 202, and closing the channel twice

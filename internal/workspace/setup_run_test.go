@@ -116,7 +116,7 @@ func TestSetup_DaemonRestartMarksFailed(t *testing.T) {
 	}
 }
 
-// TestSetupScript_NoSh_FailsFast covers ADR-0028 D1's no-shell case on
+// TestSetupScript_NoSh_FailsFast covers ADR-0029 D1's no-shell case on
 // every OS via the injected lookup: a workspace with a script configured
 // must fail task creation fast (before any worktree exists) with an error
 // naming Git for Windows, while workspaces without scripts are unaffected.

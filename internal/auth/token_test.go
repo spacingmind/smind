@@ -19,7 +19,7 @@ func TestLoadOrCreateToken_Creates(t *testing.T) {
 	}
 
 	// Owner-only: 0600 on Unix, a protected owner+SYSTEM DACL on Windows
-	// (ADR-0028 D3) -- the parity plan's TestTokenFile_OwnerOnlyACL_Windows.
+	// (ADR-0029 D3) -- the parity plan's TestTokenFile_OwnerOnlyACL_Windows.
 	private, err := securefile.IsPrivate(TokenPath(dir))
 	if err != nil {
 		t.Fatalf("IsPrivate(%s) error = %v", TokenPath(dir), err)

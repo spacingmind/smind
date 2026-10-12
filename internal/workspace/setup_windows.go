@@ -23,7 +23,7 @@ import (
 var shCandidates = []string{"sh.exe", "../bin/sh.exe", "../usr/bin/sh.exe", "../../usr/bin/sh.exe"}
 
 // findSh locates the POSIX shell: `sh` on PATH first, else Git for
-// Windows' sh.exe derived from git.exe's location (ADR-0028 D1).
+// Windows' sh.exe derived from git.exe's location (ADR-0029 D1).
 func findSh() (string, error) {
 	if sh, err := exec.LookPath("sh"); err == nil {
 		return sh, nil

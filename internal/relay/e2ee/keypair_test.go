@@ -47,7 +47,7 @@ func TestLoadOrCreateKeyPairFileIs0600(t *testing.T) {
 }
 
 // assertPrivate: owner-only -- 0600 on Unix, a protected owner+SYSTEM DACL
-// on Windows (ADR-0028 D3).
+// on Windows (ADR-0029 D3).
 func assertPrivate(t *testing.T, path string) {
 	t.Helper()
 	private, err := securefile.IsPrivate(path)
