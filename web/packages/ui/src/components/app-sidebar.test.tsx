@@ -1592,21 +1592,20 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const lone = itemOf(OTHER_ROOT.ID);
     // No toggle button (it has nothing to collapse)...
     expect(lone.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
-    // ...but the reserved empty slot is the wrapper's first child, ahead of
-    // the select button, so this title lines up with its parent-bearing sibling.
-    expect(lone.children[0]!.tagName).toBe("SPAN");
-    expect(lone.children[0]!.className).toContain("w-3");
+    // ...but it shares its parent-bearing sibling's left padding, so both
+    // titles start at one x (the parent's chevron lives in the gutter that
+    // padding makes room for).
+    expect(lone.style.paddingLeft).toBe(itemOf(PARENT.ID).style.paddingLeft);
+    expect(itemOf(PARENT.ID).style.paddingLeft).toBe("20px");
   });
 
-  it("lists without parents do not reserve a chevron slot", async () => {
+  it("lists without parents keep the plain inset, with no gutter", async () => {
     const LONE_A: Task = { ...TASK, ID: 20, Title: "Lone A" };
     const LONE_B: Task = { ...TASK, ID: 21, Title: "Lone B" };
     await mountTree({}, [LONE_A, LONE_B]);
 
     for (const row of screen.getAllByTestId("sidebar-task-row")) {
-      // The wrapper's first child is the select button itself, not a reserved
-      // chevron span -- today's geometry, unchanged.
-      expect(row.closest('[data-testid="sidebar-task-item"]')!.children[0]).toBe(row);
+      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("8px");
     }
   });
 

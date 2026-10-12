@@ -613,14 +613,32 @@ describe("title overflow and indentation (S7)", () => {
     }
   });
 
-  it("indentation is per-row padding by depth: 8px at the root plus 12px per level", async () => {
+  it("indentation is per-row padding by depth: 12px per level, one gutter more where the root list has parents", async () => {
     await mountSidebar(TREE);
 
-    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("8px");
-    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("20px");
-    expect(taskItem(CODER.ID).style.paddingLeft).toBe("32px");
+    // The root list contains a parent, so roots start 12px past the 8px inset
+    // (the gutter for the chevron); each level below adds 12px.
+    expect(taskItem(ROOT.ID).style.paddingLeft).toBe("20px");
+    expect(taskItem(LEADER.ID).style.paddingLeft).toBe("32px");
+    expect(taskItem(CODER.ID).style.paddingLeft).toBe("44px");
     // Siblings at one depth share one left edge.
-    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("20px");
+    expect(taskItem(LEADER_B.ID).style.paddingLeft).toBe("32px");
+  });
+
+  it("a root list without parents keeps the plain 8px inset", async () => {
+    await mountSidebar([makeTask(1, "A"), makeTask(2, "B")]);
+
+    expect(taskItem(1).style.paddingLeft).toBe("8px");
+    expect(taskItem(2).style.paddingLeft).toBe("8px");
+  });
+
+  it("a parent's chevron sits in the gutter directly left of its own status slot", async () => {
+    await mountSidebar(TREE);
+
+    for (const id of [ROOT.ID, LEADER.ID]) {
+      const pad = parseInt(taskItem(id).style.paddingLeft, 10);
+      expect(toggleOf(id).style.left).toBe(`${pad - 12}px`);
+    }
   });
 
   it("nested lists add no margin, padding or guide line, so every highlight spans the sidebar", async () => {

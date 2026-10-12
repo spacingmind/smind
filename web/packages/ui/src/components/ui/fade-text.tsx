@@ -17,10 +17,13 @@ const OVERFLOW_FADE =
  * that fits is never dimmed. (ZCode also scrolls the overflowing title as a
  * marquee on hover; that is deliberately not ported.)
  *
+ * `fade` forces the mask regardless -- for a row whose trailing action button
+ * is about to be overlaid on the end of the text.
+ *
  * The element is a flex item that may shrink (`min-w-0 flex-1`), which is what
  * gives it a width to overflow against.
  */
-export function FadeText({ className, children, ...props }: ComponentPropsWithoutRef<"span">) {
+export function FadeText({ className, children, fade = false, ...props }: ComponentPropsWithoutRef<"span"> & { fade?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [overflowing, setOverflowing] = useState(false);
 
@@ -42,7 +45,7 @@ export function FadeText({ className, children, ...props }: ComponentPropsWithou
     <span
       ref={ref}
       data-overflowing={overflowing ? "true" : undefined}
-      className={cn("min-w-0 flex-1 overflow-hidden whitespace-nowrap", overflowing && OVERFLOW_FADE, className)}
+      className={cn("min-w-0 flex-1 overflow-hidden whitespace-nowrap", (overflowing || fade) && OVERFLOW_FADE, className)}
       {...props}
     >
       {children}

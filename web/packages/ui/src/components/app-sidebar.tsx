@@ -138,11 +138,15 @@ import {
  * Task rows indent by their own left padding, not by nesting margins on the
  * lists they live in (sidebar-polish S7): a row's hover/selected highlight
  * then spans the whole sidebar at every depth, and the title keeps its width.
- * Depth 0 starts 8px in (the same inset every header row has); each level of
- * the task tree adds 12px.
+ * A root row starts 8px in (the same inset every header row has); each level
+ * of the task tree adds 12px. A parent's collapse chevron lives in the 12px
+ * gutter just left of its own status slot -- the column its children's rows
+ * are indented past -- so a root list that contains parents shifts right by
+ * one gutter (ROW_GUTTER_PX) and nothing else ever has to reserve room.
  */
 const ROW_INSET_PX = 8;
 const ROW_INDENT_PX = 12;
+const ROW_GUTTER_PX = 12;
 
 /** Applied to every nested SidebarMenuSub: the list itself adds no indent, margin or guide line -- rows carry their own. */
 const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
@@ -1589,7 +1593,7 @@ function SpaceLikeItem({
     <SidebarMenuSubItem>
       {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
       <div className="relative" {...rowProps}>
-        <SidebarMenuSubButton asChild className="h-8 translate-x-0 gap-2 rounded-lg pr-8">
+        <SidebarMenuSubButton asChild className="h-8 w-full translate-x-0 gap-2 rounded-lg pr-8">
           <button
             type="button"
             onClick={() => setOpen((o) => !o)}
@@ -1777,8 +1781,7 @@ const TaskRow = memo(function TaskRow({
   task,
   tier,
   childCount,
-  depth,
-  reserveChevron,
+  padLeft,
   isCollapsed,
   onToggleCollapse,
   rollup,
@@ -1793,10 +1796,8 @@ const TaskRow = memo(function TaskRow({
   tier: string | null;
   /** Direct children; > 0 makes this row a parent (chevron + child-count chip). */
   childCount: number;
-  /** Depth in the task tree (0 = root); drives the row's own left padding. */
-  depth: number;
-  /** Whether childless rows in this sibling list still render the empty w-3 chevron slot so titles align (see TaskRows). */
-  reserveChevron: boolean;
+  /** The row's own left padding in px (see ROW_INSET_PX): where its status slot starts. */
+  padLeft: number;
   isCollapsed: boolean;
   onToggleCollapse?: (taskId: number) => void;
   /** The collapsed-parent attention rollup (PR-U1), or null when there is nothing to show. */
@@ -1824,6 +1825,10 @@ const TaskRow = memo(function TaskRow({
   // group on the li would reveal every descendant's actions on one hover
   // (see use-row-active.ts).
   const { active, rowProps, setMenuOpen } = useRowActive();
+  // On a narrow sidebar the ⋯ is overlaid on the row's right end (the time
+  // slot is dropped there), where the child-count chip, rollup and setup badge
+  // sit -- hide them while it shows rather than draw it over them.
+  const hideForActions = active && "@max-[14rem]/sb:invisible";
   const menuEntries = taskMenuEntries(task, { spaces, onMoveTask, isPinned: isTaskPinned, onTogglePin, onMarkUnread, onArchiveTask });
   const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
     if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -1849,40 +1854,39 @@ const TaskRow = memo(function TaskRow({
         <div
           data-testid="sidebar-task-item"
           data-task-id={task.ID}
-          className={cn("relative flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1", isSelected ? "bg-selected" : active && "bg-hover")}
-          style={{ paddingLeft: ROW_INSET_PX + ROW_INDENT_PX * depth }}
+          className={cn(
+            "relative flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1 ring-sidebar-ring has-focus-visible:ring-2 has-focus-visible:ring-inset",
+            isSelected ? "bg-selected" : active && "bg-hover",
+          )}
+          style={{ paddingLeft: padLeft }}
           {...rowProps}
         >
           {/*
-           * Collapse chevron (PR-U1), on rows that have children. A sibling of
-           * the row's select button, not a child: a button inside a button is
-           * invalid HTML and breaks keyboard focus order. The slot is always w-3
-           * on parent rows so toggling never shifts anything; childless siblings
-           * of a parent render the *empty* reserved slot instead, so every title
-           * in that sibling list shares one left edge; a list where nothing has
-           * children reserves nothing and keeps today's geometry exactly.
+           * Collapse chevron (PR-U1), on rows that have children, positioned
+           * in the gutter left of the status slot (see ROW_GUTTER_PX). A
+           * sibling of the row's select button, not a child: a button inside
+           * a button is invalid HTML and breaks keyboard focus order.
            */}
-          {hasChildren ? (
+          {hasChildren && (
             <button
               type="button"
               aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
               aria-expanded={!isCollapsed}
               data-testid="task-collapse-toggle"
               onClick={() => onToggleCollapse?.(task.ID)}
-              className="flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
+              style={{ left: padLeft - ROW_GUTTER_PX }}
+              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden"
             >
               <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
-          ) : reserveChevron ? (
-            <span className="w-3 shrink-0" />
-          ) : null}
+          )}
           <HoverCard openDelay={400} closeDelay={100}>
             <HoverCardTrigger asChild>
               <SidebarMenuSubButton
                 asChild
-                // The highlight lives on the wrapper (so the ⋯ overlay can inherit
-                // it and the chevron sits inside it), not on the select button.
-                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+                // The highlight lives on the wrapper (so the chevron sits inside
+                // it too), not on the select button.
+                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 text-left focus-visible:ring-0 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
                 isActive={isSelected}
               >
                 <button
@@ -1938,12 +1942,14 @@ const TaskRow = memo(function TaskRow({
                     )}
                   </span>
                   {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
-                  <FadeText data-testid="task-title">{task.Title}</FadeText>
+                  <FadeText data-testid="task-title" fade={active} className={active ? "@max-[14rem]/sb:pr-6" : undefined}>
+                      {task.Title}
+                    </FadeText>
                   {hasChildren && (
                     <span
                       data-testid="task-child-count"
                       aria-label={`${childCount} sub-task${childCount === 1 ? "" : "s"}`}
-                      className="shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle"
+                      className={cn("shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle", hideForActions)}
                     >
                       {childCount}
                     </span>
@@ -1959,13 +1965,13 @@ const TaskRow = memo(function TaskRow({
                       data-testid="task-rollup"
                       data-rollup-reason={rollup.reason}
                       aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
-                      className="flex shrink-0 items-center gap-1"
+                      className={cn("flex shrink-0 items-center gap-1", hideForActions)}
                     >
                       <StatusDot status={attentionDotStatus(rollup.reason)} />
                       <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
                     </span>
                   )}
-                  <SetupBadge status={task.SetupStatus} compact />
+                  <SetupBadge status={task.SetupStatus} compact className={cn(hideForActions) || undefined} />
                   {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
                   {stat && stat.filesChanged > 0 && (
                     <span
@@ -2000,7 +2006,7 @@ const TaskRow = memo(function TaskRow({
             </HoverCardContent>
           </HoverCard>
           {active && (
-            <span className="absolute inset-y-0 right-1 flex items-center rounded-md bg-inherit">
+            <span className="absolute inset-y-0 right-1 flex items-center">
               <DropdownMenu onOpenChange={setMenuOpen}>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -2091,8 +2097,7 @@ function TaskRows({
               task={task}
               tier={null}
               childCount={0}
-              depth={0}
-              reserveChevron={false}
+              padLeft={ROW_INSET_PX}
               isCollapsed={false}
               rollup={null}
               selectedTaskId={selectedTaskId}
@@ -2107,13 +2112,12 @@ function TaskRows({
     );
   }
 
-  // Per sibling list: if any root here is a parent, childless roots in
-  // the same list reserve the (empty) chevron slot so every title in the
-  // list shares one left edge. A list of childless roots reserves nothing
-  // -- those keep exactly the pre-tree geometry, roots and all.
-  const rootsReserveChevron = nodes.some((n) => n.children.length > 0);
+  // A root list that contains a parent shifts all its roots right by one
+  // gutter, so the parents' chevrons have a column and every root title shares
+  // one left edge; a list of childless roots keeps the plain inset.
+  const rootPad = ROW_INSET_PX + (nodes.some((n) => n.children.length > 0) ? ROW_GUTTER_PX : 0);
 
-  const renderNode = (node: TaskNode, reserveChevron: boolean, depth: number): ReactNode => {
+  const renderNode = (node: TaskNode, padLeft: number): ReactNode => {
     const { task, tier, children } = node;
     const isCollapsed = collapsed?.has(task.ID) ?? false;
     // Rollups only exist where children are hidden -- an expanded parent's
@@ -2127,8 +2131,7 @@ function TaskRows({
           task={task}
           tier={tier}
           childCount={children.length}
-          depth={depth}
-          reserveChevron={reserveChevron}
+          padLeft={padLeft}
           isCollapsed={isCollapsed}
           onToggleCollapse={onToggleCollapse}
           rollup={rollup.reason ? { reason: rollup.reason, count: rollup.count } : null}
@@ -2141,19 +2144,16 @@ function TaskRows({
         {children.length > 0 && !isCollapsed && (
           // A real nested list (ul > li > ul, so the tree's structure is in
           // the DOM) that adds no indent of its own: each child row pads
-          // itself by depth. The chevron reservation applies one level down
-          // too, against this parent's own children (a lone grandchild under
-          // a parent of parents aligns with its nieces/nephews, not with the
-          // roots).
+          // itself one indent deeper than its parent.
           <SidebarMenuSub className={FLUSH_SUB}>
-            {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0), depth + 1))}
+            {children.map((child) => renderNode(child, padLeft + ROW_INDENT_PX))}
           </SidebarMenuSub>
         )}
       </SidebarMenuSubItem>
     );
   };
 
-  return <>{nodes.map((node) => renderNode(node, rootsReserveChevron, 0))}</>;
+  return <>{nodes.map((node) => renderNode(node, rootPad))}</>;
 }
 
 /**
