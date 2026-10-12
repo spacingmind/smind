@@ -162,7 +162,7 @@ func availableTestReport() Report {
 // env is a store, registry and Poller on a fake clock. restart() rebuilds
 // everything over the same database file, like a daemon restart.
 type env struct {
-	t    *testing.T
+	t    testing.TB
 	path string
 	clk  *fakeClock
 	mk   func(reg *accounts.Registry, clk *fakeClock) ReportFetcher
@@ -173,7 +173,7 @@ type env struct {
 	p   *Poller
 }
 
-func newEnv(t *testing.T, mk func(reg *accounts.Registry, clk *fakeClock) ReportFetcher, opts ...Option) *env {
+func newEnv(t testing.TB, mk func(reg *accounts.Registry, clk *fakeClock) ReportFetcher, opts ...Option) *env {
 	t.Helper()
 	e := &env{t: t, path: filepath.Join(t.TempDir(), "smind.db"), clk: newFakeClock(), mk: mk}
 	e.opts = append([]Option{WithClock(e.clk.Now), WithJitter(func() float64 { return 0 })}, opts...)

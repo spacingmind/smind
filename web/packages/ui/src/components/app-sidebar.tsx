@@ -7,6 +7,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type ComponentType,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -63,15 +65,17 @@ import {
   type WorkspaceWithTree,
 } from "@/lib/workspace-tree";
 import type { AttentionReason, TaskAttention, TaskRunStatus } from "@/hooks/use-task-attention";
-import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, workspaceTasks } from "@/lib/sidebar-signal";
+import { aggregateStatus, attentionDotStatus, primaryAttentionReason, runDotStatus, taskSlotSignal, workspaceTasks } from "@/lib/sidebar-signal";
 import { attentionRollup, nestTasks, type TaskNode } from "@/lib/task-tree";
-import { formatRelativeTime } from "@/lib/relative-time";
+import { formatRelativeTime, formatRelativeTimeShort } from "@/lib/relative-time";
 import { useTaskStats, type TaskStats } from "@/hooks/use-task-stats";
 import { useAttentionNotifications } from "@/hooks/use-attention-notifications";
 import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
+import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
+import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -87,7 +91,15 @@ import {
 import { SetupBadge } from "@/components/task-setup";
 import { WorkspaceScriptsDialog } from "@/components/workspace-scripts-dialog";
 import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from "@/components/ui/context-menu";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,6 +110,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
+import { FadeText } from "@/components/ui/fade-text";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -115,13 +128,62 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
-  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+
+/**
+ * Task rows indent by their own left padding, not by nesting margins on the
+ * task-tree lists they live in (sidebar-polish S7): a row's hover/selected
+ * highlight then spans its container's content box at every depth, and the
+ * title keeps its width. Every root task row starts at the 4px inset plus the
+ * 12px chevron gutter (ROW_GUTTER_PX) -- reserved whether or not the list
+ * contains a parent, so depth-0 titles share one x in every view -- and each
+ * level of the task tree adds 12px (ROW_INDENT_PX).
+ *
+ * Container nesting is drawn differently (ZCode's workspace-grouped-tasks):
+ * the expanded content of a WORKSPACE, SPACE (or "Ungrouped"), Pinned or
+ * status-group header sits behind ONE subtle guide line under the parent
+ * header's icon centre (CONTAINER_GUIDE_CLASS via ContainerContent), so
+ * spaces read as nested under their workspace and tasks under their space;
+ * rows inside keep their own padding, so their highlight spans from the
+ * guide line to the sidebar's right edge. The task tree itself never
+ * carries guide lines -- only per-row padding.
+ */
+const ROW_INSET_PX = 4;
+const ROW_INDENT_PX = 12;
+const ROW_GUTTER_PX = 12;
+/** Where every depth-0 task row's status slot starts: the inset plus the always-reserved chevron gutter. */
+const ROOT_PAD_PX = ROW_INSET_PX + ROW_GUTTER_PX;
+
+/**
+ * Applied to every nested SidebarMenuSub: the list itself adds no indent,
+ * margin or guide line -- rows carry their own. Container content lists
+ * (ContainerContent) re-add exactly one guide line on top of this.
+ */
+const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
+
+/**
+ * The one guide line a container's expanded content carries (ZCode's
+ * TASK_GROUP_CONTENT_CLASS, narrowed from ml-4 + pl-2 = 25px so a 192px
+ * sidebar keeps its title width): the line sits under the parent header's
+ * icon centre (px-2 + half the 16px icon = 16px, hence ml-4) and content
+ * pads 4px past it. The border colour is SidebarMenuSub's own subtle
+ * border-sidebar-border -- only the width was zeroed by FLUSH_SUB.
+ */
+const CONTAINER_GUIDE_CLASS = "ml-4 border-l pl-1";
+
+/**
+ * A space's (or "Ungrouped") content carries the same guide only while the
+ * sidebar is wide: on a narrow one (<14rem, the container query the rows
+ * already use) the second level would cost ~21px of a ~190px title column, so
+ * tasks stay flush and rely on the header's own weight/size to read as nested
+ * (their titles line up with the space's label either way).
+ */
+const SPACE_GUIDE_CLASS = "@min-[14rem]/sb:ml-4 @min-[14rem]/sb:border-l @min-[14rem]/sb:pl-1";
 
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
@@ -250,6 +312,8 @@ interface RowSignal {
   onMarkUnread: (taskId: number) => void;
   /** Task ids pinned to the sidebar's Pinned section (AC4). */
   pinned: ReadonlySet<number>;
+  /** Wall clock (ms), refreshed once a minute, so the rows' relative times age without every row owning a timer. */
+  now: number;
   /** The task context menu's Pin/Unpin action. */
   onTogglePin: (taskId: number) => void;
 }
@@ -261,10 +325,25 @@ const EMPTY_SIGNAL: RowSignal = {
   unread: new Set(),
   onMarkUnread: () => {},
   pinned: new Set(),
+  now: 0,
   onTogglePin: () => {},
 };
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
+
+/** Persisted container expansion (S8), shared with the nested containers the same way as the row signal. */
+const NODE_COLLAPSE_FALLBACK: CollapsedNodes = {
+  collapsed: new Set(),
+  isOpen: () => true,
+  toggle: () => {},
+  open: () => {},
+};
+const CollapsedNodesContext = createContext<CollapsedNodes>(NODE_COLLAPSE_FALLBACK);
+
+function useNodeOpen(id: string): [boolean, () => void] {
+  const { isOpen, toggle } = useContext(CollapsedNodesContext);
+  return [isOpen(id), useCallback(() => toggle(id), [toggle, id])];
+}
 
 function useRowSignal(): RowSignal {
   return useContext(RowSignalContext);
@@ -426,8 +505,26 @@ export function AppSidebar({
     const hidden = chain.filter((id) => collapsed.has(id));
     if (hidden.length > 0) expandCollapsed(hidden);
   }, [selectedTaskId, taskForest, collapsed, expandCollapsed]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+  // Which workspaces/spaces/Pinned/status groups the user has collapsed (S8).
+  // Everything defaults open, so a new workspace or space needs no entry.
+  const liveNodeIds = useMemo(
+    () =>
+      workspaces === null
+        ? null
+        : new Set(
+            workspaces.flatMap((ws) => [`ws:${ws.ID}`, `ungrouped:${ws.ID}`, ...ws.spaces.map((sp) => `space:${sp.ID}`)]),
+          ),
+    [workspaces],
+  );
+  const nodes = useCollapsedNodes(liveNodeIds);
   const rowSignal = useMemo<RowSignal>(
     () => ({
+      now,
       attention,
       statusOverrides,
       runStatus: runStatus ?? EMPTY_RUN_STATUS,
@@ -437,7 +534,7 @@ export function AppSidebar({
       pinned,
       onTogglePin: togglePin,
     }),
-    [attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
+    [now, attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, togglePin],
   );
 
   const pinnedTasks = useMemo(() => allTasks.filter((t) => pinned.has(t.ID)), [allTasks, pinned]);
@@ -622,18 +719,6 @@ export function AppSidebar({
     return commands;
   }, [workspaces, profiles, onOpenSettings]);
   useCommands("sidebar:actions", 5, paletteCommands);
-  // The just-created workspace is expanded on landing; existing ones start
-  // collapsed until first refresh happens (empty state -> created).
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const didInitialLoad = useRef(false);
-  useEffect(() => {
-    if (workspaces === null) return;
-    if (!didInitialLoad.current) {
-      didInitialLoad.current = true;
-      setExpanded(new Set(workspaces.map((ws) => ws.ID)));
-    }
-  }, [workspaces]);
-
   // Collapsed search (audit-deepseek-harness.md §3): a header action that
   // expands into a field. An outside click collapses it only while the
   // query is empty -- a typed query survives clicking away, because
@@ -801,7 +886,8 @@ export function AppSidebar({
           <SidebarGroupContent>
             <ScrollArea className="h-full">
               <RowSignalContext.Provider value={rowSignal}>
-                <SidebarMenu>
+                <CollapsedNodesContext.Provider value={nodes}>
+                <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
                   {!error && workspaces === null && (
                     <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
@@ -862,15 +948,8 @@ export function AppSidebar({
                       forest={taskForest.filter((n) => n.task.WorkspaceID === ws.ID)}
                       collapsed={collapsed}
                       onToggleCollapse={toggleCollapsed}
-                      expanded={expanded.has(ws.ID)}
-                      onToggleExpanded={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(ws.ID)) next.delete(ws.ID);
-                          else next.add(ws.ID);
-                          return next;
-                        })
-                      }
+                      expanded={nodes.isOpen(`ws:${ws.ID}`)}
+                      onToggleExpanded={() => nodes.toggle(`ws:${ws.ID}`)}
                       onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
@@ -884,6 +963,7 @@ export function AppSidebar({
                     />
                   ))}
                 </SidebarMenu>
+                </CollapsedNodesContext.Provider>
               </RowSignalContext.Provider>
             </ScrollArea>
           </SidebarGroupContent>
@@ -958,8 +1038,9 @@ export function AppSidebar({
             open={crud?.kind === "workspace"}
             onOpenChange={(o) => !o && setCrud(null)}
             onCreated={(ws) => {
-              didInitialLoad.current = true;
-              setExpanded((prev) => new Set(prev).add(ws.ID));
+              // Land on the new workspace expanded, even if a deleted
+              // workspace's id is still persisted as collapsed.
+              nodes.open(`ws:${ws.ID}`);
               refresh();
             }}
             recentPaths={recentWorkspaceParentDirs(workspaces ?? [])}
@@ -1038,7 +1119,7 @@ export function AppSidebar({
 /**
  * The flat list a non-blank query replaces the tree with
  * (audit-deepseek-harness.md §3). Rows are the same TaskRows the tree
- * renders -- same dots, same meta line, same actions menu -- so a task
+ * renders -- same status slot, same actions menu -- so a task
  * found by search behaves identically to one found by browsing; only the
  * grouping is gone.
  */
@@ -1070,7 +1151,7 @@ function SearchResults({
 
   return (
     <SidebarMenuItem data-testid="sidebar-search-results">
-      <SidebarMenuSub>
+      <SidebarMenuSub className={FLUSH_SUB}>
         <TaskRows
           tasks={results.map((r) => r.task)}
           selectedTaskId={selectedTaskId}
@@ -1088,9 +1169,8 @@ function SearchResults({
  * workspaces, above the regular tree -- same TaskRows the tree itself
  * uses, so a pinned row behaves identically to its counterpart in its own
  * workspace/space (a task appears in both places; pinning doesn't remove
- * it from where it normally lives). Collapsed state is local, ephemeral
- * UI state, not persisted -- only *which* tasks are pinned is (AC4's own
- * "pin/unpin persists across reloads" scope).
+ * it from where it normally lives). Whether the section is collapsed is
+ * persisted too (sidebar-polish S8, id `pinned`).
  */
 function PinnedSection({
   tasks,
@@ -1103,17 +1183,30 @@ function PinnedSection({
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [open, toggleOpen] = useNodeOpen("pinned");
+  const { active, rowProps } = useRowActive();
 
   return (
     <SidebarMenuItem data-testid="sidebar-pinned-section">
-      <SidebarMenuButton onClick={() => setCollapsed((c) => !c)} data-testid="sidebar-pinned-section-header">
-        <Pin className="size-3.5" />
-        <span className="min-w-0 truncate">Pinned</span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", !collapsed && "rotate-90")} />
-      </SidebarMenuButton>
-      {!collapsed && (
-        <SidebarMenuSub>
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-pinned-section-header"
+          className="rounded-lg"
+        >
+          <Pin className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            Pinned
+          </FadeText>
+          <RowChevron open={open} />
+        </SidebarMenuButton>
+      </div>
+      {open && (
+        <ContainerContent kind="pinned">
           <TaskRows
             tasks={tasks}
             selectedTaskId={selectedTaskId}
@@ -1121,7 +1214,7 @@ function PinnedSection({
             emptyText="No pinned tasks"
             onArchiveTask={onArchiveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1132,8 +1225,8 @@ function PinnedSection({
  * lib/sidebar-status-groups.ts group, each rendering its tasks through the
  * same TaskRows the tree view uses -- replaces the workspace/space tree
  * entirely while active (Pinned stays above either view, per app-sidebar's
- * render order). Each bucket's own open/closed state is local, ephemeral
- * UI state, matching PinnedSection's own collapse.
+ * render order). Each bucket's open/closed state is persisted like
+ * PinnedSection's (sidebar-polish S8, id `status:<key>`).
  */
 function StatusGroupedList({
   groups,
@@ -1172,18 +1265,36 @@ function StatusGroupItem({
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, toggleOpen] = useNodeOpen(`status:${group.key}`);
+  const { active, rowProps } = useRowActive();
 
   return (
     <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
-      <SidebarMenuButton onClick={() => setOpen((o) => !o)} data-testid="sidebar-status-group-header">
-        <span className="min-w-0 truncate">
-          {group.label} <span className="text-muted-foreground">({group.tasks.length})</span>
-        </span>
-        <ChevronRight className={cn("ml-auto size-4 shrink-0 transition-transform", open && "rotate-90")} />
-      </SidebarMenuButton>
+      <div {...rowProps}>
+        <SidebarMenuButton
+          onClick={toggleOpen}
+          aria-expanded={open}
+          data-testid="sidebar-status-group-header"
+          className="rounded-lg"
+        >
+          <FadeText
+            data-testid="container-title"
+            className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
+          >
+            {group.label}
+          </FadeText>
+          <RowChevron open={open} />
+          {/* A pill, as in ZCode's group headers (TASK_GROUP_COUNT_BADGE_CLASS). */}
+          <span
+            data-testid="status-group-count"
+            className="ml-auto inline-flex min-w-5 shrink-0 items-center justify-center rounded-full bg-tag/50 px-1.5 py-0.5 text-ui-sm font-medium leading-none text-foreground-subtle"
+          >
+            {group.tasks.length}
+          </span>
+        </SidebarMenuButton>
+      </div>
       {open && (
-        <SidebarMenuSub>
+        <ContainerContent kind="status">
           <TaskRows
             tasks={group.tasks}
             selectedTaskId={selectedTaskId}
@@ -1191,7 +1302,7 @@ function StatusGroupItem({
             emptyText="No tasks"
             onArchiveTask={onArchiveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1208,17 +1319,61 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
   );
 }
 
-/** The "⋯" hover/context menu shared by workspace and space rows. */
+/**
+ * The expanded content of a container header (workspace, space, "Ungrouped",
+ * Pinned, status group): the same flush list as the task tree, plus ONE
+ * subtle guide line under the parent header's icon (CONTAINER_GUIDE_CLASS)
+ * so the content reads as nested under that header. Workspace headers
+ * themselves still span the full sidebar width; only their content is
+ * inset. Carries a stable testid so tests can tell container content apart
+ * from the flush task-tree lists.
+ */
+function ContainerContent({ kind, children }: { kind: string; children: ReactNode }) {
+  return (
+    <SidebarMenuSub
+      data-testid="sidebar-container-content"
+      data-container-kind={kind}
+      className={cn(FLUSH_SUB, kind === "space" || kind === "ungrouped" ? SPACE_GUIDE_CLASS : CONTAINER_GUIDE_CLASS)}
+    >
+      {children}
+    </SidebarMenuSub>
+  );
+}
+
+/**
+ * The one chevron every container header (workspace, space, Pinned, status
+ * group) uses, so they cannot drift apart (sidebar-polish S5): same size, the
+ * same muted colour, and always directly after the title -- where ZCode's
+ * group headers put it (workspace-grouped-tasks/types.ts) -- never pushed to
+ * the far edge where the row's own actions live.
+ */
+function RowChevron({ open }: { open: boolean }) {
+  return (
+    <ChevronRight
+      data-testid="row-chevron"
+      aria-hidden="true"
+      className={cn("size-3.5 shrink-0 text-foreground-subtlest transition-transform", open && "rotate-90")}
+    />
+  );
+}
+
+/**
+ * The "⋯" menu shared by workspace and space rows. Mounted by the caller only
+ * while its row is hovered/focused/menu-open (use-row-active.ts); `onOpenChange`
+ * is how the row learns its menu is open so it stays mounted.
+ */
 function RowMenu({
   items,
   triggerProps,
+  onOpenChange,
 }: {
   items: { label: string; icon: ReactNode; onSelect: () => void }[];
   /** Extra DOM attributes (data-testid, data-*-id) so callers can disambiguate this shared trigger's otherwise-identical "Row actions" label between workspace and space rows. */
   triggerProps?: Record<string, string | number>;
+  onOpenChange?: (open: boolean) => void;
 }) {
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0" {...triggerProps}>
           <MoreHorizontal />
@@ -1233,6 +1388,20 @@ function RowMenu({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+/**
+ * A container header's trailing action area: absolutely positioned on the
+ * row's right edge, a fixed 20px box that is empty until the row is active, so
+ * the ⋯ appearing never moves anything (and the button reserves the same space
+ * with its own right padding, so the aggregate dot and chevron never sit under it).
+ */
+function RowActions({ children }: { children: ReactNode }) {
+  return (
+    <span className="absolute inset-y-0 right-1 flex w-5 items-center justify-center group-data-[collapsible=icon]:hidden">
+      {children}
+    </span>
   );
 }
 
@@ -1302,20 +1471,52 @@ function WorkspaceItem({
     { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
   ];
 
+  const { active, rowProps, setMenuOpen } = useRowActive();
+
   return (
     <SidebarMenuItem>
       <ContextMenu>
+        {/*
+          * The hover/focus scope is this wrapper -- the header line only --
+          * not the li, which also contains the workspace's whole subtree.
+          */}
         <ContextMenuTrigger asChild>
-          <SidebarMenuButton
-            onClick={onToggleExpanded}
-            data-testid="sidebar-workspace-row"
-            data-workspace-id={workspace.ID}
-          >
-            <FolderGit2 />
-            <span className="min-w-0 truncate">{workspace.Title || workspace.Path}</span>
-            <AggregateSlot status={aggregate} label={`${workspace.Title || workspace.Path} activity`} />
-            <ChevronRight className={cn("size-4 shrink-0 transition-transform", expanded && "rotate-90")} />
-          </SidebarMenuButton>
+          <div className="relative" {...rowProps}>
+            <SidebarMenuButton
+              onClick={onToggleExpanded}
+              data-testid="sidebar-workspace-row"
+              data-workspace-id={workspace.ID}
+              aria-expanded={expanded}
+              className={cn("rounded-lg", active && "pr-7")}
+            >
+              <FolderGit2 />
+              <FadeText
+                data-testid="container-title"
+                fade={active}
+                className="flex-initial text-ui-base font-medium"
+              >
+                {workspace.Title || workspace.Path}
+              </FadeText>
+              <RowChevron open={expanded} />
+              <AggregateSlot
+                status={aggregate}
+                label={`${workspace.Title || workspace.Path} activity`}
+                className={active ? "invisible" : undefined}
+              />
+            </SidebarMenuButton>
+            <RowActions>
+              {active && (
+                <RowMenu
+                  items={items}
+                  onOpenChange={setMenuOpen}
+                  triggerProps={{
+                    "data-testid": "sidebar-workspace-actions-trigger",
+                    "data-workspace-id": workspace.ID,
+                  }}
+                />
+              )}
+            </RowActions>
+          </div>
         </ContextMenuTrigger>
         <ContextMenuContent data-testid="sidebar-workspace-context-menu">
           {items.map((item) => (
@@ -1326,17 +1527,8 @@ function WorkspaceItem({
           ))}
         </ContextMenuContent>
       </ContextMenu>
-      <SidebarMenuAction>
-        <RowMenu
-          items={items}
-          triggerProps={{
-            "data-testid": "sidebar-workspace-actions-trigger",
-            "data-workspace-id": workspace.ID,
-          }}
-        />
-      </SidebarMenuAction>
       {expanded && (
-        <SidebarMenuSub>
+        <ContainerContent kind="workspace">
           {flat ? (
             <TaskRows
               tasks={workspace.ungroupedTasks}
@@ -1370,6 +1562,7 @@ function WorkspaceItem({
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
+                  nodeId={`ungrouped:${workspace.ID}`}
                   title="Ungrouped"
                   tasks={workspace.ungroupedTasks}
                   nodes={forest.filter((n) => n.task.SpaceID === null)}
@@ -1384,7 +1577,7 @@ function WorkspaceItem({
               )}
             </>
           )}
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuItem>
   );
@@ -1431,20 +1624,12 @@ function SpaceItem({
       onMoveTask={onMoveTask}
       testId="sidebar-space-row"
       spaceId={space.ID}
-    >
-      <SidebarMenuSubItem className="absolute top-1 right-1 flex items-center">
-        <RowMenu
-          items={[
-            { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
-            { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
-          ]}
-          triggerProps={{
-            "data-testid": "sidebar-space-actions-trigger",
-            "data-space-id": space.ID,
-          }}
-        />
-      </SidebarMenuSubItem>
-    </SpaceLikeItem>
+      nodeId={`space:${space.ID}`}
+      menuItems={[
+        { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
+        { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
+      ]}
+    />
   );
 }
 
@@ -1467,9 +1652,10 @@ function SpaceLikeItem({
   onArchiveTask,
   spaces,
   onMoveTask,
-  children,
+  menuItems,
   testId,
   spaceId,
+  nodeId,
 }: {
   title: string;
   /** The bucket's own tasks, still used for the aggregate dot above the list. */
@@ -1484,38 +1670,72 @@ function SpaceLikeItem({
   /** Every space in the workspace, so each task row's "Move to space" submenu can list the others. */
   spaces: SpaceWithTasks[];
   onMoveTask: (task: Task, spaceId: number | null) => void;
-  children?: ReactNode;
+  /** The ⋯ menu's items; absent for the synthetic "Ungrouped" bucket, which has nothing to add to or delete. */
+  menuItems?: { label: string; icon: ReactNode; onSelect: () => void }[];
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
   testId?: string;
   spaceId?: number;
+  /** The id this bucket's open/closed state is persisted under (`space:<id>` / `ungrouped:<workspaceId>`). */
+  nodeId: string;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, toggleOpen] = useNodeOpen(nodeId);
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(tasks, attention, runStatus);
 
+  const { active, rowProps, setMenuOpen } = useRowActive();
+
   return (
     <SidebarMenuSubItem>
-      <SidebarMenuSubButton
-        onClick={() => setOpen((o) => !o)}
-        data-testid={testId}
-        data-space-id={spaceId}
-      >
-        <Layers className="size-3.5" />
-        <span className="min-w-0 truncate">{title}</span>
-        <AggregateSlot status={aggregate} label={`${title} activity`} />
-        <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-      </SidebarMenuSubButton>
-      {children}
+      {/* Hover/focus scope: this header line only, not the li with the space's tasks (use-row-active.ts). */}
+      <div className="relative" {...rowProps}>
+        <SidebarMenuSubButton
+          asChild
+          className={cn("h-8 w-full translate-x-0 gap-2 rounded-lg", active && "pr-7")}
+        >
+          <button
+            type="button"
+            onClick={toggleOpen}
+            aria-expanded={open}
+            data-testid={testId}
+            data-space-id={spaceId}
+          >
+            <Layers className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+            <FadeText
+              data-testid="container-title"
+              fade={active}
+              className={cn(
+                "flex-initial text-ui-sm",
+                active ? "text-foreground" : "text-foreground-subtle",
+              )}
+            >
+              {title}
+            </FadeText>
+            <RowChevron open={open} />
+            <AggregateSlot
+              status={aggregate}
+              label={`${title} activity`}
+              className={active ? "invisible" : undefined}
+            />
+          </button>
+        </SidebarMenuSubButton>
+        {menuItems && (
+          <RowActions>
+            {active && (
+              <RowMenu
+                items={menuItems}
+                onOpenChange={setMenuOpen}
+                triggerProps={{
+                  "data-testid": "sidebar-space-actions-trigger",
+                  "data-space-id": spaceId ?? "",
+                }}
+              />
+            )}
+          </RowActions>
+        )}
+      </div>
       {open && (
-        // Flush, not another full mx-3.5/border-l/px-2.5 indent step: this
-        // list is already the *second* SidebarMenuSub nesting level (a
-        // space/ungrouped bucket inside a workspace's own SidebarMenuSub),
-        // and compounding the default indent+guide-line at both levels
-        // pushed task rows far deeper than their own group (space) header
-        // -- a known P2 visual bug (zcode-visual-parity plan). The space
-        // row's own icon+indent already conveys the hierarchy; task rows
-        // here align close under it instead of adding a second full step.
-        <SidebarMenuSub className="mx-0 border-l-0 px-1">
+        // One guide line under this header's icon; rows carry their own indent.
+        <ContainerContent kind={spaceId != null ? "space" : "ungrouped"}>
           <TaskRows
             tasks={tasks}
             nodes={nodes}
@@ -1528,7 +1748,7 @@ function SpaceLikeItem({
             spaces={spaces}
             onMoveTask={onMoveTask}
           />
-        </SidebarMenuSub>
+        </ContainerContent>
       )}
     </SidebarMenuSubItem>
   );
@@ -1543,89 +1763,52 @@ function SpaceLikeItem({
  * same reserved-slot rule the task row's attention dot follows (Item 2's
  * layout stability; refs/paseo/docs/design.md §11).
  */
-function AggregateSlot({ status, label }: { status: StatusDotStatus | null; label: string }) {
+function AggregateSlot({ status, label, className }: { status: StatusDotStatus | null; label: string; className?: string }) {
   return (
-    <span data-testid="row-aggregate-slot" className="ml-auto flex w-2.5 shrink-0 items-center justify-center">
+    <span data-testid="row-aggregate-slot" className={cn("ml-auto flex w-2.5 shrink-0 items-center justify-center", className)}>
       {status && <StatusDot status={status} data-testid="row-aggregate" data-aggregate={status} aria-label={label} />}
     </span>
   );
 }
 
 /**
- * The task row's second line: its branch and the size of its diff, the two
- * things `audit-paseo.md` §5's sidebar meta row leads with.
- *
- * Always rendered, even with nothing to say, so the row's height is the
- * same for every task at every moment -- Item 2's layout-stability rule
- * applied to the one thing a reserved-width slot cannot fix. A task with
- * no stat (never run, no worktree, or a stat the daemon could not compute)
- * shows its coarse lifecycle status instead of a fabricated "0 files",
- * which would read as "no changes" and be a different, wrong claim.
- */
-function TaskMetaRow({ stat, status, tierLabel }: { stat?: TaskStat; status: string; tierLabel?: string | null }) {
-  return (
-    <span
-      data-testid="sidebar-task-meta"
-      // pl-8 lines this row's icon up under the title text above, not the
-      // row's own left edge -- the title row reserves a 32px run-status +
-      // unread-dot lead-in (w-2.5 + gap-2 + w-1.5 + gap-2) so a status
-      // change never shifts the title sideways; this row has no such
-      // slots of its own, so without the matching offset it visually
-      // hangs off to the left of the title it belongs to.
-      className="flex h-4 w-full items-center gap-1.5 overflow-hidden pl-8 text-ui-xs text-muted-foreground"
-    >
-      {/*
-       * The tier label (PR-U1) lives on this second line, not next to the
-       * title: a shrink-0 chip beside the title ate the title's width on a
-       * 255px sidebar ("Shi…"), while the branch name down here can
-       * truncate harmlessly. Untiered roots render no label.
-       */}
-      {tierLabel && (
-        <span data-testid="task-tier" className="shrink-0">
-          {tierLabel}
-        </span>
-      )}
-      {stat ? (
-        <>
-          <GitBranch className="size-2.5 shrink-0" />
-          <span data-testid="sidebar-task-branch" className="min-w-0 truncate" title={stat.branch}>
-            {stat.branch}
-          </span>
-          {stat.filesChanged > 0 && (
-            <span
-              data-testid="sidebar-task-diffstat"
-              className="ml-auto shrink-0 tabular-nums"
-              title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
-            >
-              {stat.filesChanged}f <span className="text-success">+{stat.insertions}</span>{" "}
-              <span className="text-destructive">-{stat.deletions}</span>
-            </span>
-          )}
-        </>
-      ) : (
-        <span data-testid="sidebar-task-status" className="uppercase">
-          {status}
-        </span>
-      )}
-    </span>
-  );
-}
-
-/**
  * The task row's hover card (AC5): branch, diff stat and last activity --
- * the same fields TaskMetaRow already shows plus task.UpdatedAt, no more.
+ * the fields the single-line row no longer prints (branch, tier, lifecycle
+ * status) plus the diff stat and task.UpdatedAt, no more.
  * Deliberately no PR state: smind's wire types (lib/types.ts's Task) carry
  * no PR field at all yet, and the plan's Decisions are explicit that this
  * card shows "only data the web UI already has; don't invent data."
  */
-function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat; status: string }) {
+function TaskHoverCardBody({
+  task,
+  stat,
+  status,
+  tier,
+  childCount,
+  now,
+}: {
+  task: Task;
+  stat?: TaskStat;
+  status: string;
+  tier: string | null;
+  childCount: number;
+  now: number;
+}) {
   return (
     <div className="flex flex-col gap-1.5">
       <p className="truncate text-ui-base font-medium text-foreground">{task.Title}</p>
+      {tier && (
+        <p data-testid="task-tier" className="text-ui-sm text-muted-foreground">
+          {tier}
+          {childCount > 0 && ` · ${childCount} sub-task${childCount === 1 ? "" : "s"}`}
+        </p>
+      )}
       {(stat?.branch ?? task.Branch) && (
         <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
           <GitBranch className="size-3 shrink-0" />
-          <span className="min-w-0 truncate">{stat?.branch ?? task.Branch}</span>
+          <span data-testid="sidebar-task-branch" className="min-w-0 truncate">
+            {stat?.branch ?? task.Branch}
+          </span>
         </div>
       )}
       {stat && stat.filesChanged > 0 && (
@@ -1636,11 +1819,63 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
         </p>
       )}
       <p className="text-ui-sm text-muted-foreground">
-        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt)}</span>
+        Last activity <span data-testid="task-hover-card-last-activity">{formatRelativeTime(task.UpdatedAt, now)}</span>
       </p>
-      <p className="text-ui-sm uppercase text-muted-foreground">{status}</p>
+      <p data-testid="sidebar-task-status" className="text-ui-sm uppercase text-muted-foreground">
+        {status}
+      </p>
     </div>
   );
+}
+
+/**
+ * Arrow-key navigation between task rows (the sidebar tree's keyboard
+ * contract, same as a WAI-ARIA tree): Down/Up move to the next/previous
+ * visible row, Left collapses an expanded parent (or jumps from a child to
+ * its parent), Right expands a collapsed parent (or steps into its first
+ * child). Only rows that are in the DOM count as visible: a collapsed
+ * parent's descendants are not rendered. Returns whether the key was handled.
+ */
+function handleTaskRowArrowKey(
+  key: string,
+  row: HTMLElement,
+  parent: { hasChildren: boolean; isCollapsed: boolean; onToggle: () => void },
+): boolean {
+  if (!key.startsWith("Arrow")) return false;
+  const rows = Array.from(
+    row.closest('[data-sidebar="menu"]')?.querySelectorAll<HTMLElement>('[data-testid="sidebar-task-row"]') ?? [],
+  );
+  const index = rows.indexOf(row);
+  if (index < 0) return false;
+  const focusRow = (target: HTMLElement | undefined): boolean => {
+    if (!target) return false;
+    target.focus();
+    return true;
+  };
+  switch (key) {
+    case "ArrowDown":
+      return focusRow(rows[index + 1]) || true;
+    case "ArrowUp":
+      return focusRow(rows[index - 1]) || true;
+    case "ArrowLeft": {
+      if (parent.hasChildren && !parent.isCollapsed) {
+        parent.onToggle();
+        return true;
+      }
+      const parentId = row.getAttribute("data-parent-task-id");
+      return parentId ? focusRow(rows.find((r) => r.getAttribute("data-task-id") === parentId)) : false;
+    }
+    case "ArrowRight": {
+      if (!parent.hasChildren) return false;
+      if (parent.isCollapsed) {
+        parent.onToggle();
+        return true;
+      }
+      return focusRow(rows[index + 1]);
+    }
+    default:
+      return false;
+  }
 }
 
 /**
@@ -1650,15 +1885,14 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
  * skipped for rows whose props are all referentially stable: each task's
  * entry in the maps comes from one parent memo, so an unrelated task's
  * change produces the same `undefined`/value this row saw last time.
- * `tierLabel` is computed once per row here (cheap: the forest already
- * knows children) rather than re-derived in flat lists, which don't have
- * a forest and therefore skip the chip.
+ * `tier`/`childCount` come from the forest (flat lists have none, and so
+ * skip the chip and the tier).
  */
 const TaskRow = memo(function TaskRow({
   task,
-  tierLabel,
-  hasChildren,
-  reserveChevron,
+  tier,
+  childCount,
+  padLeft,
   isCollapsed,
   onToggleCollapse,
   rollup,
@@ -1669,11 +1903,12 @@ const TaskRow = memo(function TaskRow({
   onMoveTask,
 }: {
   task: Task;
-  /** "<tier>" or "<tier> · <childCount>"; absent for an untiered root. Rendered on the meta row, not the title row. */
-  tierLabel: string | null;
-  hasChildren: boolean;
-  /** Whether childless rows in this sibling list still render the empty w-3 chevron slot so titles align (see TaskRows). */
-  reserveChevron: boolean;
+  /** "supervisor" | "leader" | "coder"; absent for an untiered root. Shown in the hover card and the row's aria-label, not on the row. */
+  tier: string | null;
+  /** Direct children; > 0 makes this row a parent (chevron + child-count chip). */
+  childCount: number;
+  /** The row's own left padding in px (see ROW_INSET_PX): where its status slot starts. */
+  padLeft: number;
   isCollapsed: boolean;
   onToggleCollapse?: (taskId: number) => void;
   /** The collapsed-parent attention rollup (PR-U1), or null when there is nothing to show. */
@@ -1684,204 +1919,252 @@ const TaskRow = memo(function TaskRow({
   spaces?: SpaceWithTasks[];
   onMoveTask?: (task: Task, spaceId: number | null) => void;
 }) {
-  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin } = useRowSignal();
+  const { attention, statusOverrides, runStatus, stats, unread, onMarkUnread, pinned, onTogglePin, now } = useRowSignal();
+  const hasChildren = childCount > 0;
   const reason = primaryAttentionReason(attention?.get(task.ID));
   const runState = runStatus.get(task.ID);
   const runDot = runDotStatus(runState);
   const stat = stats.get(task.ID);
   const isUnread = unread.has(task.ID);
+  const slotSignal = taskSlotSignal(reason, runState, isUnread);
   const isTaskPinned = pinned.has(task.ID);
+  const isSelected = task.ID === selectedTaskId;
   const status = statusOverrides.get(task.ID) ?? task.Status;
-  // No li here: the caller wraps the row, because a tree parent's li must
-  // also contain its nested children list (a flat row's li contains only
-  // the row).
+  const branch = stat?.branch ?? task.Branch;
+  // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
+  // caller's li also contains this task's nested children list, so a CSS
+  // group on the li would reveal every descendant's actions on one hover
+  // (see use-row-active.ts).
+  const { active, rowProps, setMenuOpen } = useRowActive();
+  // On a narrow sidebar the ⋯ is overlaid on the row's right end (the time
+  // slot is dropped there), where the child-count chip, rollup and setup badge
+  // sit -- hide them while it shows rather than draw it over them.
+  const hideForActions = active && "@max-[14rem]/sb:invisible";
+  const menuEntries = taskMenuEntries(task, { spaces, onMoveTask, isPinned: isTaskPinned, onTogglePin, onMarkUnread, onArchiveTask });
+  const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (handleTaskRowArrowKey(e.key, e.currentTarget, { hasChildren, isCollapsed, onToggle: () => onToggleCollapse?.(task.ID) })) {
+      e.preventDefault();
+    }
+  };
+  // The row shows only title + status + time, so everything it no longer
+  // prints (tier, branch, what the dot means) is spoken here instead.
+  const rowLabel = [
+    task.Title,
+    tier && (hasChildren ? `${tier} with ${childCount} sub-task${childCount === 1 ? "" : "s"}` : tier),
+    branch && `branch ${branch}`,
+    slotSignal.kind === "attention" && `needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`,
+    slotSignal.kind === "run" && `latest run ${slotSignal.status}`,
+    slotSignal.kind === "unread" && "unread",
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
-    <>
-      <HoverCard openDelay={400} closeDelay={100}>
-        <HoverCardTrigger asChild>
-
-            <SidebarMenuSubButton
-              className="h-auto flex-col items-stretch gap-0.5 py-1"
-              isActive={task.ID === selectedTaskId}
-              onClick={() => onSelectTask?.(task)}
-              data-testid="sidebar-task-row"
-              data-task-id={task.ID}
+    <ContextMenu onOpenChange={setMenuOpen}>
+      <ContextMenuTrigger asChild>
+        <div
+          data-testid="sidebar-task-item"
+          data-task-id={task.ID}
+          className={cn(
+            "relative flex h-8 min-w-0 items-center gap-1 rounded-lg pr-1 ring-sidebar-ring has-focus-visible:ring-2 has-focus-visible:ring-inset",
+            isSelected ? "bg-selected" : active && "bg-hover",
+          )}
+          style={{ paddingLeft: padLeft }}
+          {...rowProps}
+        >
+          {/*
+           * Collapse chevron (PR-U1), on rows that have children, positioned
+           * in the gutter left of the status slot (see ROW_GUTTER_PX). A
+           * sibling of the row's select button, not a child: a button inside
+           * a button is invalid HTML and breaks keyboard focus order.
+           */}
+          {hasChildren && (
+            <button
+              type="button"
+              aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
+              aria-expanded={!isCollapsed}
+              data-testid="task-collapse-toggle"
+              onClick={() => onToggleCollapse?.(task.ID)}
+              style={{ left: padLeft - ROW_GUTTER_PX }}
+              className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden"
             >
-              {/*
-               * min-w-0 on the row itself, not just on the title span
-               * inside it: a truncating label only clips if *every* box
-               * between it and the scrolling viewport can shrink below its
-               * content's width (see components/ui/scroll-area.tsx for the
-               * ancestor that used to break this chain).
-               */}
-              <span className="flex w-full min-w-0 items-center gap-2">
-              {/*
-               * Collapse chevron (PR-U1), on rows that have children. The
-               * slot is always w-3 on parent rows (not only collapsed or
-               * expanded) so toggling never shifts the run-status dot next
-               * to it. Childless siblings of a parent render the *empty*
-               * reserved slot instead, so every title in that sibling list
-               * shares one left edge; a list where nothing has children
-               * reserves nothing and keeps today's geometry exactly.
-               */}
-              {hasChildren ? (
+              <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
+            </button>
+          )}
+          <HoverCard openDelay={400} closeDelay={100}>
+            <HoverCardTrigger asChild>
+              <SidebarMenuSubButton
+                asChild
+                // The highlight lives on the wrapper (so the chevron sits inside
+                // it too), not on the select button.
+                className="h-8 min-w-0 flex-1 translate-x-0 gap-1.5 rounded-lg px-1 text-left focus-visible:ring-0 hover:bg-transparent active:bg-transparent data-active:bg-transparent"
+                isActive={isSelected}
+              >
                 <button
                   type="button"
-                  aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
-                  data-testid="task-collapse-toggle"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleCollapse?.(task.ID);
-                  }}
-                  className="-mr-1 flex w-3 shrink-0 items-center justify-center text-muted-foreground"
+                  aria-label={rowLabel}
+                  aria-current={isSelected ? "true" : undefined}
+                  onClick={() => onSelectTask?.(task)}
+                  onKeyDown={onRowKeyDown}
+                  data-testid="sidebar-task-row"
+                  data-task-id={task.ID}
+                  data-parent-task-id={task.ParentTaskID ?? undefined}
                 >
-                  <ChevronRight
-                    className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
-                  />
-                </button>
-              ) : reserveChevron ? (
-                <span className="-mr-1 w-3 shrink-0" />
-              ) : null}
-              {/*
-               * Leading run-status dot -- the task's latest run, live off
-               * run.status (Item 12). In its own reserved slot for the
-               * same reason the attention slot below is reserved: a task's
-               * first run must not shove the title sideways. Task.Status
-               * is not the source: internal/workspace moves a task
-               * created -> running on its first run and never back, so it
-               * means "has ever run", not "is running now".
-               */}
-              <span data-testid="task-run-status-slot" className="flex w-2.5 shrink-0 items-center justify-center">
-                {runDot && (
-                  <StatusDot
-                    status={runDot}
-                    data-testid="task-run-status"
-                    data-run-status={runState}
-                    aria-label={`latest run ${runState}`}
-                  />
-                )}
-              </span>
-              {/*
-               * The unread marker (AC2): a plain filled dot in its own
-               * reserved slot, same layout-stability rule as the run-status
-               * and attention slots either side of it. Deliberately not a
-               * StatusDot variant -- "unread" isn't a status the task is
-               * in, it's whether the *user* has looked at it yet, so it
-               * uses the neutral `primary` accent token rather than one of
-               * the success/danger/warning/running hues.
-               */}
-              <span data-testid="task-unread-slot" className="flex w-1.5 shrink-0 items-center justify-center">
-                {isUnread && (
+                  {/*
+                   * The ONE leading status slot (sidebar-polish S3): always in the
+                   * DOM at a constant width -- a signal arriving or clearing must
+                   * not move the title (refs/paseo/docs/design.md §11) -- and it
+                   * draws a single signal by priority (see taskSlotSignal). The
+                   * attention reason, latest run status and unread state stay
+                   * queryable on the slot itself even when a higher-priority
+                   * signal is the one drawn. The reason is in the accessible name
+                   * as well as the colour.
+                   */}
                   <span
-                    data-testid="task-unread-marker"
-                    aria-label="unread"
-                    className="size-1.5 shrink-0 rounded-full bg-primary"
-                  />
-                )}
-              </span>
-              {/*
-               * flex-1 so the title always takes the row's leftover width:
-               * it and only it may shrink (via min-w-0 truncate) when the
-               * rollup or the slots need room on a narrow sidebar.
-               */}
-              <span className="min-w-0 flex-1 truncate">{task.Title}</span>
-              {/*
-               * Collapsed-parent attention rollup (PR-U1): the loudest
-               * reason among the hidden descendants plus how many need
-               * attention, rendered right before the row's own attention
-               * slot so both dots read as "this row's signal" without
-               * moving any reserved slot. Expanded parents show nothing
-               * here -- their children carry their own dots.
-               */}
-              {rollup && (
-                <span
-                  data-testid="task-rollup"
-                  data-rollup-reason={rollup.reason}
-                  aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
-                  className="flex shrink-0 items-center gap-1"
-                >
-                  <StatusDot status={attentionDotStatus(rollup.reason)} />
-                  <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
-                </span>
-              )}
-              {/*
-               * The attention-dot slot is always in the DOM at a fixed
-               * width, whether or not there's anything to show -- only
-               * the dot *inside* it is conditional (queried by testid
-               * elsewhere, so it must stay absent-when-none). Without the
-               * reserved slot, the status text below shifts left/right by
-               * the dot's width whenever attention arrives or clears --
-               * exactly the "changing state must not move the layout"
-               * rule from refs/paseo/docs/design.md §11 that Item 2 calls
-               * out for this row specifically.
-               *
-               * The dot's variant now names *why* the task wants
-               * attention (Item 12): error, permission and finished each
-               * get their own, where all three used to render the same
-               * warning dot. The reason is on data-attention-reason and
-               * in the accessible name, so neither a test nor a screen
-               * reader has to tell them apart by colour.
-               */}
-              <SetupBadge status={task.SetupStatus} compact className="ml-auto" />
-              <span data-testid="task-attention-slot" className={cn(!task.SetupStatus && "ml-auto", "flex w-2.5 shrink-0 items-center justify-center")}>
-                {reason && (
-                  <StatusDot
-                    status={attentionDotStatus(reason)}
-                    data-testid="task-attention"
-                    data-attention-reason={reason}
-                    aria-label={`task needs attention: ${ATTENTION_LABEL[reason]}`}
-                  />
-                )}
-              </span>
-              </span>
-              <TaskMetaRow stat={stat} status={status} tierLabel={tierLabel} />
-            </SidebarMenuSubButton>
+                    data-testid="task-status-slot"
+                    data-slot-signal={slotSignal.kind}
+                    data-attention-reason={reason ?? undefined}
+                    data-run-status={runState}
+                    data-unread={isUnread ? "true" : undefined}
+                    className="flex w-3 shrink-0 items-center justify-center"
+                  >
+                    {slotSignal.kind === "attention" && (
+                      <StatusDot
+                        status={attentionDotStatus(slotSignal.reason)}
+                        data-testid="task-attention"
+                        data-attention-reason={slotSignal.reason}
+                        aria-label={`task needs attention: ${ATTENTION_LABEL[slotSignal.reason]}`}
+                      />
+                    )}
+                    {slotSignal.kind === "run" && runDot && (
+                      <StatusDot
+                        status={runDot}
+                        data-testid="task-run-status"
+                        data-run-status={runState}
+                        aria-label={`latest run ${runState}`}
+                      />
+                    )}
+                    {slotSignal.kind === "unread" && (
+                      <span
+                        data-testid="task-unread-marker"
+                        aria-label="unread"
+                        className="size-1.5 shrink-0 rounded-full bg-primary"
+                      />
+                    )}
+                  </span>
+                  {/* min-w-0 flex-1: the title is the only thing on the line that may shrink. */}
+                  <FadeText
+                    data-testid="task-title"
+                    fade={active}
+                    className={cn(
+                      "text-ui-base opacity-[.76] transition-opacity",
+                      (active || isSelected) && "opacity-100",
+                      active && "@max-[14rem]/sb:pr-6",
+                    )}
+                  >
+                    {task.Title}
+                  </FadeText>
+                  {hasChildren && (
+                    <span
+                      data-testid="task-child-count"
+                      aria-label={`${childCount} sub-task${childCount === 1 ? "" : "s"}`}
+                      className={cn("shrink-0 rounded-full bg-tag/50 px-1.5 text-ui-xs tabular-nums text-foreground-subtle", hideForActions)}
+                    >
+                      {childCount}
+                    </span>
+                  )}
+                  {/*
+                   * Collapsed-parent attention rollup (PR-U1): the loudest
+                   * reason among the hidden descendants plus how many need
+                   * attention. Expanded parents show nothing here -- their
+                   * children carry their own dots.
+                   */}
+                  {rollup && (
+                    <span
+                      data-testid="task-rollup"
+                      data-rollup-reason={rollup.reason}
+                      aria-label={`${rollup.count} ${rollup.count === 1 ? "descendant needs" : "descendants need"} attention: ${ATTENTION_LABEL[rollup.reason]}`}
+                      className={cn("flex shrink-0 items-center gap-1", hideForActions)}
+                    >
+                      <StatusDot status={attentionDotStatus(rollup.reason)} />
+                      <span className="text-ui-xs tabular-nums text-muted-foreground">{rollup.count}</span>
+                    </span>
+                  )}
+                  <SetupBadge status={task.SetupStatus} compact className={cn(hideForActions) || undefined} />
+                  {/* Dropped on a narrow sidebar (container query on the list) so the title keeps its width. */}
+                  {stat && stat.filesChanged > 0 && (
+                    <span
+                      data-testid="sidebar-task-diffstat"
+                      className="shrink-0 text-ui-xs tabular-nums @max-[14rem]/sb:hidden"
+                      title={`${stat.filesChanged} changed, +${stat.insertions} -${stat.deletions}`}
+                    >
+                      <span className="text-success">+{stat.insertions}</span>{" "}
+                      <span className="text-destructive">-{stat.deletions}</span>
+                    </span>
+                  )}
+                  {/*
+                   * Compact relative time. Its slot is a fixed width and is only
+                   * made invisible (not removed) while the row's ⋯ is showing, so
+                   * hovering never reflows the title; the ⋯ is overlaid on this
+                   * same spot (ZCode TaskListItem's time -> actions swap).
+                   */}
+                  <span
+                    data-testid="task-row-time"
+                    className={cn(
+                      "w-6 shrink-0 text-right text-ui-xs tabular-nums text-foreground-subtlest @max-[14rem]/sb:hidden",
+                      active && "invisible",
+                    )}
+                  >
+                    {formatRelativeTimeShort(task.UpdatedAt, now)}
+                  </span>
+                </button>
+              </SidebarMenuSubButton>
             </HoverCardTrigger>
             <HoverCardContent data-testid="task-hover-card" side="right" align="start">
-              <TaskHoverCardBody task={task} stat={stat} status={status} />
+              <TaskHoverCardBody task={task} stat={stat} status={status} tier={tier} childCount={childCount} now={now} />
             </HoverCardContent>
           </HoverCard>
-          <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={`Actions for ${task.Title}`}
-                  data-testid="sidebar-task-actions-trigger"
-                  data-task-id={task.ID}
-                  className="size-5 p-0"
-                >
-                  <MoreHorizontal />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <MoveTaskSubmenu task={task} spaces={spaces} onMoveTask={onMoveTask} />
-                <DropdownMenuItem data-testid="sidebar-task-pin-action" onSelect={() => onTogglePin(task.ID)}>
-                  {isTaskPinned ? <PinOff /> : <Pin />} {isTaskPinned ? "Unpin" : "Pin"}
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="sidebar-task-mark-unread-action" onSelect={() => onMarkUnread(task.ID)}>
-                  <Circle /> Mark unread
-                </DropdownMenuItem>
-                <DropdownMenuItem data-testid="sidebar-task-archive-action" onSelect={() => onArchiveTask(task)}>
-                  <Archive /> Archive task
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </span>
-    </>
+          {active && (
+            <span className="absolute inset-y-0 right-1 flex items-center">
+              <DropdownMenu onOpenChange={setMenuOpen}>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Actions for ${task.Title}`}
+                    data-testid="sidebar-task-actions-trigger"
+                    data-task-id={task.ID}
+                    className="size-5 p-0"
+                  >
+                    <MoreHorizontal />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <TaskMenuItems entries={menuEntries} parts={DROPDOWN_PARTS} />
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </span>
+          )}
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent data-testid="sidebar-task-context-menu">
+        <TaskMenuItems entries={menuEntries} parts={CONTEXT_PARTS} />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 });
 
 /**
  * Renders a bucket's task rows. In the tree view (`nodes` given, PR-U1)
  * rows come from the pre-nested forest: each parent row owns a chevron
- * and its children render in a nested list below it (one
- * ml-3/border-l/pl-1 step per level, via SidebarMenuSub -- plain ul/li
- * wrappers, so recursion handles any depth the daemon allows). Without
- * `nodes` -- SearchResults, PinnedSection, StatusGroupItem -- the list is
- * exactly today's flat rendering; those lists have no forest, so the tier
- * chip is skipped there rather than guessed.
+ * and its children render in a nested list below it -- a flush
+ * SidebarMenuSub (plain ul/li wrappers, so recursion handles any depth
+ * the daemon allows); each child row pads itself one ROW_INDENT_PX deeper
+ * than its parent. Without `nodes` -- SearchResults, PinnedSection,
+ * StatusGroupItem -- the list is exactly today's flat rendering; those
+ * lists have no forest, so the tier chip is skipped there rather than
+ * guessed. Root rows always sit at ROW_INSET_PX + ROW_GUTTER_PX so a
+ * task row starts at the same x in every view.
  */
 function TaskRows({
   tasks,
@@ -1933,9 +2216,9 @@ function TaskRows({
           <SidebarMenuSubItem key={task.ID}>
             <TaskRow
               task={task}
-              tierLabel={null}
-              hasChildren={false}
-              reserveChevron={false}
+              tier={null}
+              childCount={0}
+              padLeft={ROOT_PAD_PX}
               isCollapsed={false}
               rollup={null}
               selectedTaskId={selectedTaskId}
@@ -1950,13 +2233,12 @@ function TaskRows({
     );
   }
 
-  // Per sibling list: if any root here is a parent, childless roots in
-  // the same list reserve the (empty) chevron slot so every title in the
-  // list shares one left edge. A list of childless roots reserves nothing
-  // -- those keep exactly the pre-tree geometry, roots and all.
-  const rootsReserveChevron = nodes.some((n) => n.children.length > 0);
+  // Every root row reserves the chevron gutter whether or not the list
+  // contains a parent, so depth-0 titles share one left edge across lists
+  // and views (search, pinned, status groups render roots at the same x).
+  const rootPad = ROOT_PAD_PX;
 
-  const renderNode = (node: TaskNode, reserveChevron: boolean): ReactNode => {
+  const renderNode = (node: TaskNode, padLeft: number): ReactNode => {
     const { task, tier, children } = node;
     const isCollapsed = collapsed?.has(task.ID) ?? false;
     // Rollups only exist where children are hidden -- an expanded parent's
@@ -1968,9 +2250,9 @@ function TaskRows({
       <SidebarMenuSubItem key={task.ID}>
         <TaskRow
           task={task}
-          tierLabel={tier ? (children.length > 0 ? `${tier} · ${children.length}` : tier) : null}
-          hasChildren={children.length > 0}
-          reserveChevron={reserveChevron}
+          tier={tier}
+          childCount={children.length}
+          padLeft={padLeft}
           isCollapsed={isCollapsed}
           onToggleCollapse={onToggleCollapse}
           rollup={rollup.reason ? { reason: rollup.reason, count: rollup.count } : null}
@@ -1981,67 +2263,134 @@ function TaskRows({
           onMoveTask={onMoveTask}
         />
         {children.length > 0 && !isCollapsed && (
-          // One indent+guide-line step per level. Deliberately NOT the
-          // default SidebarMenuSub mx-3.5/px-2.5 compound: this list sits
-          // at the same second nesting level SpaceLikeItem already fixed
-          // (see its own comment about not compounding indents), and the
-          // per-level step below is what visually encodes depth. The
-          // chevron reservation applies one level down too, against this
-          // parent's own children (a lone grandchild under a parent of
-          // parents aligns with its nieces/nephews, not with the roots).
-          <SidebarMenuSub className="ml-3 mr-0 border-l border-sidebar-border pl-1 pr-0">
-            {children.map((child) => renderNode(child, children.some((c) => c.children.length > 0)))}
+          // A real nested list (ul > li > ul, so the tree's structure is in
+          // the DOM) that adds no indent of its own: each child row pads
+          // itself one indent deeper than its parent.
+          <SidebarMenuSub className={FLUSH_SUB}>
+            {children.map((child) => renderNode(child, padLeft + ROW_INDENT_PX))}
           </SidebarMenuSub>
         )}
       </SidebarMenuSubItem>
     );
   };
 
-  return <>{nodes.map((node) => renderNode(node, rootsReserveChevron))}</>;
+  return <>{nodes.map((node) => renderNode(node, rootPad))}</>;
 }
 
 /**
- * The task row action menu's "Move to space" submenu -- every other space
- * in the task's workspace, plus "Ungrouped" unless the task is already
- * there (no self-move option). Renders nothing if there's no `spaces`/
- * `onMoveTask` pair (SearchResults) or nowhere to move to (an already-
- * ungrouped task in a workspace with zero spaces).
+ * One task's menu, defined once and rendered by BOTH the ⋯ dropdown and the
+ * right-click context menu (sidebar-polish S6) so the two can never offer
+ * different items or call different handlers -- the same approach
+ * WorkspaceItem already takes with its `items`.
  */
-function MoveTaskSubmenu({
-  task,
-  spaces,
-  onMoveTask,
-}: {
-  task: Task;
-  spaces?: SpaceWithTasks[];
-  onMoveTask?: (task: Task, spaceId: number | null) => void;
-}) {
-  if (!spaces || !onMoveTask) return null;
+type TaskMenuEntry =
+  | { kind: "move"; targets: { id: number | null; label: string }[]; onMove: (spaceId: number | null) => void }
+  | { kind: "item"; testId: string; label: string; icon: ReactNode; onSelect: () => void };
 
-  const targets: { id: number | null; label: string }[] = [];
-  if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
-  for (const space of spaces) {
-    if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+/**
+ * "Move to space" lists every other space in the task's workspace plus
+ * "Ungrouped" unless the task is already there (no self-move). It is omitted
+ * with no `spaces`/`onMoveTask` pair (SearchResults' flat list spans workspaces
+ * and doesn't offer the move) or nowhere to move to.
+ */
+function taskMenuEntries(
+  task: Task,
+  o: {
+    spaces?: SpaceWithTasks[];
+    onMoveTask?: (task: Task, spaceId: number | null) => void;
+    isPinned: boolean;
+    onTogglePin: (taskId: number) => void;
+    onMarkUnread: (taskId: number) => void;
+    onArchiveTask: (task: Task) => void;
+  },
+): TaskMenuEntry[] {
+  const entries: TaskMenuEntry[] = [];
+  if (o.spaces && o.onMoveTask) {
+    const targets: { id: number | null; label: string }[] = [];
+    if (task.SpaceID !== null) targets.push({ id: null, label: "Ungrouped" });
+    for (const space of o.spaces) {
+      if (space.ID !== task.SpaceID) targets.push({ id: space.ID, label: space.Title });
+    }
+    const onMoveTask = o.onMoveTask;
+    if (targets.length > 0) entries.push({ kind: "move", targets, onMove: (spaceId) => onMoveTask(task, spaceId) });
   }
-  if (targets.length === 0) return null;
+  entries.push(
+    {
+      kind: "item",
+      testId: "sidebar-task-pin-action",
+      label: o.isPinned ? "Unpin" : "Pin",
+      icon: o.isPinned ? <PinOff /> : <Pin />,
+      onSelect: () => o.onTogglePin(task.ID),
+    },
+    {
+      kind: "item",
+      testId: "sidebar-task-mark-unread-action",
+      label: "Mark unread",
+      icon: <Circle />,
+      onSelect: () => o.onMarkUnread(task.ID),
+    },
+    {
+      kind: "item",
+      testId: "sidebar-task-archive-action",
+      label: "Archive task",
+      icon: <Archive />,
+      onSelect: () => o.onArchiveTask(task),
+    },
+  );
+  return entries;
+}
 
+/** The Radix wrappers one menu flavour renders with; dropdown and context menus share every prop used below. */
+interface MenuParts {
+  Item: ComponentType<{ onSelect?: () => void; children?: ReactNode; "data-testid"?: string; "data-space-id"?: string | number }>;
+  Sub: ComponentType<{ children?: ReactNode }>;
+  SubTrigger: ComponentType<{ children?: ReactNode; "data-testid"?: string }>;
+  SubContent: ComponentType<{ children?: ReactNode }>;
+}
+
+const DROPDOWN_PARTS: MenuParts = {
+  Item: DropdownMenuItem,
+  Sub: DropdownMenuSub,
+  SubTrigger: DropdownMenuSubTrigger,
+  SubContent: DropdownMenuSubContent,
+};
+
+const CONTEXT_PARTS: MenuParts = {
+  Item: ContextMenuItem,
+  Sub: ContextMenuSub,
+  SubTrigger: ContextMenuSubTrigger,
+  SubContent: ContextMenuSubContent,
+};
+
+function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: MenuParts }) {
+  const { Item, Sub, SubTrigger, SubContent } = parts;
   return (
-    <DropdownMenuSub>
-      <DropdownMenuSubTrigger data-testid="sidebar-task-move-action">
-        <Layers /> Move to space
-      </DropdownMenuSubTrigger>
-      <DropdownMenuSubContent>
-        {targets.map((target) => (
-          <DropdownMenuItem
-            key={target.id ?? "ungrouped"}
-            data-testid="sidebar-task-move-target"
-            data-space-id={target.id ?? "ungrouped"}
-            onSelect={() => onMoveTask(task, target.id)}
-          >
-            {target.label}
-          </DropdownMenuItem>
-        ))}
-      </DropdownMenuSubContent>
-    </DropdownMenuSub>
+    <>
+      {entries.map((entry) =>
+        entry.kind === "move" ? (
+          <Sub key="move">
+            <SubTrigger data-testid="sidebar-task-move-action">
+              <Layers /> Move to space
+            </SubTrigger>
+            <SubContent>
+              {entry.targets.map((target) => (
+                <Item
+                  key={target.id ?? "ungrouped"}
+                  data-testid="sidebar-task-move-target"
+                  data-space-id={target.id ?? "ungrouped"}
+                  onSelect={() => entry.onMove(target.id)}
+                >
+                  {target.label}
+                </Item>
+              ))}
+            </SubContent>
+          </Sub>
+        ) : (
+          <Item key={entry.testId} data-testid={entry.testId} onSelect={entry.onSelect}>
+            {entry.icon} {entry.label}
+          </Item>
+        ),
+      )}
+    </>
   );
 }

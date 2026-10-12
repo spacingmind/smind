@@ -45,9 +45,8 @@ func testHTTPClient(t *testing.T, srv *httptest.Server) *http.Client {
 	return &http.Client{Transport: &rewriteTransport{target: target}}
 }
 
-// neverQuotaFetcher backs the test poller. Under the ADR-0028 PR-A2 routing
-// shim nothing consults plan usage, and the poller is disabled, so a fetch is
-// a bug.
+// neverQuotaFetcher backs the disabled test poller: it never fetches, so a
+// fetch is a bug.
 type neverQuotaFetcher struct{}
 
 func (neverQuotaFetcher) Fetch(context.Context, accounts.Account) (quota.Report, error) {
@@ -248,36 +247,6 @@ func TestProxy_NoAccountsConfigured(t *testing.T) {
 	}
 	if body.Type != "error" || body.Error.Message == "" {
 		t.Errorf("body = %+v, want anthropic error shape", body)
-	}
-}
-
-func TestProxy_AllAccountsExhausted(t *testing.T) {
-	t.Parallel()
-
-	t.Skip("PR-B (ADR-0028): exhaustion needs plan-usage windows; restored with proxy_exhausted_pool_returns_503_with_reset_message")
-
-	p, reg := newTestProxy(t)
-	addAPIKeyAccount(t, reg, providerOpenAI, "o1", "sk-openai-real")
-
-	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{}`))
-	w := httptest.NewRecorder()
-	p.handleOpenAI(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want 503; body = %s", w.Code, w.Body.String())
-	}
-	var body struct {
-		Error struct {
-			Message string  `json:"message"`
-			Type    string  `json:"type"`
-			Code    *string `json:"code"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v; body = %s", err, w.Body.String())
-	}
-	if body.Error.Message == "" || body.Error.Code != nil {
-		t.Errorf("body = %+v, want openai error shape with null code", body)
 	}
 }
 

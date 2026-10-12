@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { openHoverCard, revealWorkspaceActions, taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
@@ -134,7 +135,7 @@ describe("AppSidebar", () => {
       const client = new FakeWsClient();
       const row = await mountTree(client);
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-workspace-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(await revealWorkspaceActions(), { button: 0, ctrlKey: false });
       const dropdownLabels = await labels(await screen.findByRole("menu"));
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
       await flush();
@@ -272,7 +273,7 @@ describe("AppSidebar", () => {
   });
 
   describe("task row layout stability (ui-redesign-parity Item 2)", () => {
-    it("the attention-dot slot is present at the same fixed width whether or not the task has attention", async () => {
+    it("the status slot is present at the same fixed width whether or not the task has attention", async () => {
       const client = new FakeWsClient();
       const attention: TaskAttention = new Map([[TASK.ID, new Set<AttentionReason>(["error"])]]);
 
@@ -284,7 +285,7 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
       const row = await screen.findByTestId("sidebar-task-row");
-      const slotWithoutAttention = row.querySelector('[data-testid="task-attention-slot"]');
+      const slotWithoutAttention = row.querySelector('[data-testid="task-status-slot"]');
       expect(slotWithoutAttention).toBeInTheDocument();
       expect(slotWithoutAttention?.querySelector('[data-testid="task-attention"]')).not.toBeInTheDocument();
       const classNameWithoutAttention = slotWithoutAttention?.className;
@@ -295,10 +296,10 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
 
-      const slotWithAttention = screen.getByTestId("task-attention-slot");
+      const slotWithAttention = screen.getByTestId("task-status-slot");
       // Same reserved-space wrapper, same width classes -- only the dot
       // *inside* it (queried separately, and absent above) is what
-      // changes, so the sidebar-task-status label after it never shifts.
+      // changes, so the title after it never shifts.
       expect(slotWithAttention.className).toBe(classNameWithoutAttention);
       expect(slotWithAttention.querySelector('[data-testid="task-attention"]')).toBeInTheDocument();
     });
@@ -313,7 +314,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK_IN_SPACE_A]);
 
-      const runSlotBefore = (await screen.findByTestId("task-run-status-slot")).className;
+      const runSlotBefore = (await screen.findByTestId("task-status-slot")).className;
       const aggregateSlotBefore = screen.getAllByTestId("row-aggregate-slot")[0]!.className;
       expect(screen.queryByTestId("task-run-status")).not.toBeInTheDocument();
       expect(screen.queryByTestId("row-aggregate")).not.toBeInTheDocument();
@@ -329,7 +330,7 @@ describe("AppSidebar", () => {
       );
 
       // The dots arrive; the slots holding them do not change width.
-      expect(screen.getByTestId("task-run-status-slot").className).toBe(runSlotBefore);
+      expect(screen.getByTestId("task-status-slot").className).toBe(runSlotBefore);
       expect(screen.getAllByTestId("row-aggregate-slot")[0]!.className).toBe(aggregateSlotBefore);
       expect(screen.getByTestId("task-run-status")).toBeInTheDocument();
       expect(screen.getAllByTestId("row-aggregate").length).toBeGreaterThan(0);
@@ -361,7 +362,7 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      const slotBefore = (await screen.findByTestId("task-unread-slot")).className;
+      const slotBefore = (await screen.findByTestId("task-status-slot")).className;
       expect(screen.queryByTestId("task-unread-marker")).not.toBeInTheDocument();
 
       rerender(
@@ -370,7 +371,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
 
-      expect(screen.getByTestId("task-unread-slot").className).toBe(slotBefore);
+      expect(screen.getByTestId("task-status-slot").className).toBe(slotBefore);
       expect(screen.getByTestId("task-unread-marker")).toBeInTheDocument();
     });
 
@@ -386,7 +387,7 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
       await screen.findByTestId("sidebar-task-row");
-      const taskMenu = screen.getByTestId("sidebar-task-actions-trigger");
+      const taskMenu = taskTrigger(TASK.ID);
       fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
 
@@ -411,7 +412,7 @@ describe("AppSidebar", () => {
 
       expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument();
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
 
       const pinned = await screen.findByTestId("sidebar-pinned-section");
@@ -428,11 +429,11 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
 
-      fireEvent.pointerDown(screen.getAllByTestId("sidebar-task-actions-trigger")[0]!, { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       expect(await screen.findByTestId("sidebar-task-pin-action")).toHaveTextContent("Unpin");
       fireEvent.click(screen.getByTestId("sidebar-task-pin-action"));
 
@@ -448,7 +449,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
       unmount();
@@ -473,7 +474,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
 
@@ -759,7 +760,8 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     stub.fire("task.status", { taskId: TASK.ID, status: "overridden" });
-    expect(await screen.findByTestId("sidebar-task-status")).toHaveTextContent("overridden");
+    // The lifecycle status lives in the row's hover card (sidebar-polish S4).
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-status")).toHaveTextContent("overridden");
 
     // event.dropped also re-triggers useWorkspaceTree's own refetch
     // (a separate, already-covered concern), which briefly unmounts every
@@ -774,7 +776,7 @@ describe("AppSidebar lifecycle events (ui-redesign-parity Item 16)", () => {
     client.nth("task.list", 1).resolve([TASK]);
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 });
 
@@ -857,7 +859,7 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     expect(screen.getByTestId("sidebar-workspace-row").querySelector('[data-testid="row-aggregate"]')).not.toBeInTheDocument();
   });
 
-  it("a task row shows its branch and diff stat once task.stats reports them", async () => {
+  it("a task row shows its diff stat on the row and its branch in the hover card once task.stats reports them", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -867,14 +869,17 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug");
     const diffstat = screen.getByTestId("sidebar-task-diffstat");
-    expect(diffstat).toHaveTextContent("3f");
     expect(diffstat).toHaveTextContent("+12");
     expect(diffstat).toHaveTextContent("-4");
+    // The branch is no longer printed on the row...
+    expect(screen.getByTestId("sidebar-task-row").textContent).not.toContain("feat/fix-bug");
+    // ...it is in the hover card and the row's accessible name.
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/fix-bug");
+    expect(screen.getByTestId("sidebar-task-row")).toHaveAccessibleName(/branch feat\/fix-bug/);
   });
 
-  it("a task the daemon reports no stat for falls back to its lifecycle status, never a fabricated zero", async () => {
+  it("a task the daemon reports no stat for shows no diff stat, and its lifecycle status is in the hover card, never a fabricated zero", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -883,11 +888,11 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     await flush();
 
     expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("sidebar-task-branch")).not.toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
+    const card = await openHoverCard(TASK.ID);
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent(TASK.Status);
   });
 
-  it("a clean task shows its branch but no diff stat -- zero changed files is not a count worth printing", async () => {
+  it("a clean task shows no diff stat -- zero changed files is not a count worth printing", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
     await screen.findByText("Fix the bug");
@@ -897,25 +902,27 @@ describe("AppSidebar signal (ui-redesign-parity Item 12)", () => {
     });
     await flush();
 
-    expect(screen.getByTestId("sidebar-task-branch")).toHaveTextContent("feat/clean");
     expect(screen.queryByTestId("sidebar-task-diffstat")).not.toBeInTheDocument();
+    expect(within(await openHoverCard(TASK.ID)).getByTestId("sidebar-task-branch")).toHaveTextContent("feat/clean");
   });
 
-  it("the meta line is present at a fixed height whether or not a stat has arrived", async () => {
+  it("the row is one fixed-height line whether or not a stat has arrived: no second meta line", async () => {
     const client = renderSidebar();
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-    const metaBefore = await screen.findByTestId("sidebar-task-meta");
-    const classNameBefore = metaBefore.className;
+    const itemBefore = (await screen.findByTestId("sidebar-task-item")).className;
+    expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
 
     client.nth("task.stats", 0).resolve({
       stats: [{ taskId: TASK.ID, branch: "feat/fix-bug", filesChanged: 3, insertions: 12, deletions: 4 }],
     });
     await flush();
 
-    // Same reserved line, same height class -- only its contents changed,
-    // so no row below it moves when a stat lands.
-    expect(screen.getByTestId("sidebar-task-meta").className).toBe(classNameBefore);
+    // Same height class before and after -- only the right cluster's content
+    // changed, so no row below it moves when a stat lands.
+    expect(screen.getByTestId("sidebar-task-item").className).toBe(itemBefore);
+    expect(itemBefore).toContain("h-8");
+    expect(screen.queryByTestId("sidebar-task-meta")).not.toBeInTheDocument();
   });
 
   it("selecting a task still invokes onSelectTask with the whole Task, dots or no dots", async () => {
@@ -1360,8 +1367,11 @@ describe("AppSidebar long-title truncation", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [LONG_TITLE_TASK]);
 
     const title = await screen.findByText(LONG_TITLE);
-    expect(title.className).toContain("truncate");
+    // Fade-out overflow (sidebar-polish S7), not a hard ellipsis: it clips
+    // (overflow-hidden) and may shrink (min-w-0) like the old truncate did.
+    expect(title.className).toContain("overflow-hidden");
     expect(title.className).toContain("min-w-0");
+    expect(title.className).not.toContain("truncate");
 
     const viewport = container.querySelector('[data-slot="scroll-area-viewport"]');
     expect(viewport).not.toBeNull();
@@ -1415,6 +1425,11 @@ describe("AppSidebar task tree (PR-U1)", () => {
     return { client, ...utils };
   }
 
+  /** The row's wrapper: select button, collapse chevron and (when active) actions are siblings inside it. */
+  function itemOf(id: number): HTMLElement {
+    return rowOf(id).closest<HTMLElement>('[data-testid="sidebar-task-item"]')!;
+  }
+
   function rowOf(id: number): HTMLElement {
     return screen.getAllByTestId("sidebar-task-row").find((r) => r.dataset.taskId === String(id))!;
   }
@@ -1428,18 +1443,17 @@ describe("AppSidebar task tree (PR-U1)", () => {
     expect(rowOf(PARENT.ID).closest("li")!.contains(childRow)).toBe(true);
     // The parent carries the chevron and a supervisor tier label with
     // its child count; the child a plain coder label, no chevron.
-    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    expect(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
     // A child that is itself a parent (leader) carries a chevron; a leaf
     // grandchild does not.
-    expect(childRow.querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
-    const grandchildRow = rowOf(GRANDCHILD.ID);
-    expect(grandchildRow.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
+    expect(itemOf(CHILD.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    expect(itemOf(GRANDCHILD.ID).querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
   });
 
   it("collapsing a parent hides its subtree", async () => {
     await mountTree();
 
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     expect(screen.queryByText("Child task")).not.toBeInTheDocument();
     expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
@@ -1449,7 +1463,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("collapsed parent shows the attention rollup of a descendant needing a permission", async () => {
     await mountTree({ attention: new Map([[CHILD.ID, new Set<AttentionReason>(["permission"])]]) });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
     expect(rollup).toBeInTheDocument();
@@ -1466,7 +1480,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
       ]),
       runStatus: new Map([[OTHER_CHILD.ID, "error" as const]]),
     });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
     expect(rollup).toBeInTheDocument();
@@ -1483,7 +1497,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("rollup appears live when run.status error arrives for a grandchild", async () => {
     const { rerender, client } = await mountTree({ runStatus: new Map() });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
     expect(rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]')).not.toBeInTheDocument();
 
     rerender(
@@ -1517,7 +1531,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const grandchild = await waitFor(() => rowOf(GRANDCHILD.ID));
     expect(rowOf(CHILD.ID).closest("li")!.contains(grandchild)).toBe(true);
     // The new grandchild promoted its parent to leader.
-    expect(rowOf(CHILD.ID).querySelector('[data-testid="task-tier"]')).toHaveTextContent("leader · 1");
+    expect(rowOf(CHILD.ID)).toHaveAccessibleName("Child task, leader with 1 sub-task, branch fix-bug");
   });
 
   it("task.archived of a parent leaves its live child as a root row", async () => {
@@ -1543,7 +1557,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("selecting a hidden child expands its ancestors", async () => {
     const { rerender, client } = await mountTree({ selectedTaskId: null }, [PARENT, CHILD, GRANDCHILD]);
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
     expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
 
     rerender(
@@ -1556,19 +1570,18 @@ describe("AppSidebar task tree (PR-U1)", () => {
     expect(rowOf(GRANDCHILD.ID).getAttribute("data-active")).not.toBeNull();
   });
 
-  it("tier label renders in the meta row, not the title row", async () => {
+  it("the tier is not printed on the row; it is in the hover card and the accessible name, and parents keep their child-count chip", async () => {
     await mountTree();
 
     const parentRow = rowOf(PARENT.ID);
-    // The label lives on the meta (second) line...
-    const tier = parentRow.querySelector('[data-testid="task-tier"]');
-    expect(tier).toBeInTheDocument();
-    expect(tier).toHaveTextContent("supervisor · 2");
-    expect(tier!.closest('[data-testid="sidebar-task-meta"]')).toBeInTheDocument();
-    // ...and the title line is [slots][title flex-1][attention] only.
-    const title = within(parentRow).getByText("Parent task");
-    expect(title.className).toContain("flex-1");
-    expect(title.parentElement!.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+    expect(parentRow.querySelector('[data-testid="task-tier"]')).not.toBeInTheDocument();
+    expect(parentRow.textContent).not.toMatch(/supervisor/);
+    expect(parentRow).toHaveAccessibleName("Parent task, supervisor with 2 sub-tasks, branch fix-bug");
+    // The chip stays: it is the one hierarchy cue visible while collapsed.
+    expect(within(parentRow).getByTestId("task-child-count")).toHaveTextContent("2");
+
+    const card = await openHoverCard(PARENT.ID);
+    expect(within(card).getByTestId("task-tier")).toHaveTextContent("supervisor · 2 sub-tasks");
   });
 
   it("siblings of a parent reserve the chevron slot so titles align", async () => {
@@ -1576,26 +1589,23 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const OTHER_ROOT: Task = { ...TASK, ID: 9, Title: "Lone root" };
     await mountTree({}, [PARENT, CHILD, OTHER_ROOT]);
 
-    const lone = rowOf(OTHER_ROOT.ID);
+    const lone = itemOf(OTHER_ROOT.ID);
     // No toggle button (it has nothing to collapse)...
     expect(lone.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
-    // ...but the reserved empty slot is there, and the title keeps the
-    // flex-1 shrink behaviour either way.
-    const titleRow = within(lone).getByText("Lone root").parentElement!;
-    expect(titleRow.children[0]!.tagName).toBe("SPAN");
-    expect(titleRow.children[0]!.className).toContain("w-3");
+    // ...but it shares its parent-bearing sibling's left padding, so both
+    // titles start at one x (the parent's chevron lives in the gutter that
+    // padding makes room for).
+    expect(lone.style.paddingLeft).toBe(itemOf(PARENT.ID).style.paddingLeft);
+    expect(itemOf(PARENT.ID).style.paddingLeft).toBe("16px");
   });
 
-  it("lists without parents do not reserve a chevron slot", async () => {
+  it("lists without parents reserve the gutter too, so depth-0 titles align across lists", async () => {
     const LONE_A: Task = { ...TASK, ID: 20, Title: "Lone A" };
     const LONE_B: Task = { ...TASK, ID: 21, Title: "Lone B" };
     await mountTree({}, [LONE_A, LONE_B]);
 
     for (const row of screen.getAllByTestId("sidebar-task-row")) {
-      const titleRow = within(row).getByText(/Lone [AB]/).parentElement!;
-      // First child of the title row is the run-status slot, not a
-      // reserved chevron span -- today's geometry, unchanged.
-      expect(titleRow.children[0]).toHaveAttribute("data-testid", "task-run-status-slot");
+      expect(row.closest<HTMLElement>('[data-testid="sidebar-task-item"]')!.style.paddingLeft).toBe("16px");
     }
   });
 

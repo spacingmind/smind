@@ -80,7 +80,8 @@ type Poller struct {
 	accts  map[int64]*acct
 	closed bool
 
-	stateLoads atomic.Int64 // quota_poll_state reads (tests)
+	stateLoads    atomic.Int64 // quota_poll_state reads (tests)
+	snapshotLoads atomic.Int64 // quota_snapshots reads (tests)
 }
 
 // acct is one account's in-memory ledger. After the first load it is
@@ -90,6 +91,13 @@ type acct struct {
 	loaded   bool
 	st       store.QuotaPollState
 	inflight *flight
+
+	// snapshot cache: the decoded Report of the latest quota_snapshots row
+	// (immutable; handed out as clones) with its PolledAt. snapLoaded
+	// distinguishes "read done, no report" from "not read yet".
+	snap       *Report
+	snapAt     time.Time
+	snapLoaded bool
 }
 
 type flight struct{ done chan struct{} }
@@ -197,13 +205,11 @@ func (p *Poller) build(id int64, v view, fp string, now time.Time, refused, ctxE
 	} else {
 		res.RefreshBlocked = BlockBackoff
 	}
-	snap, ok, err := p.store.GetLatestQuotaSnapshot(id)
-	if err == nil && ok {
-		if rep, decoded := DecodeReport(snap.UsageData); decoded {
-			res.Report = &rep
-			if res.LastError != "" || now.Sub(snap.PolledAt) > p.ttl {
-				res.Stale = true
-			}
+	if rep, ok, polledAt := p.cachedSnapshot(id, p.entry(id)); ok {
+		clone := rep
+		res.Report = &clone
+		if res.LastError != "" || now.Sub(polledAt) > p.ttl {
+			res.Stale = true
 		}
 	}
 	if refused {
@@ -464,8 +470,13 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 			st.LastError = "error"
 		}
 		st.NextAllowedAt = now.Add(wait)
-		// A failure never overwrites a stored available report.
-		if snap, ok, err := p.store.GetLatestQuotaSnapshot(id); err == nil && ok {
+		// A failure never overwrites a stored available report. Use the
+		// snapshot cache when loaded; otherwise fall back to the store.
+		if prev, ok, _ := a.snapshotLocked(); ok {
+			if prev.Status == StatusAvailable {
+				storeReport = false
+			}
+		} else if snap, ok, err := p.store.GetLatestQuotaSnapshot(id); err == nil && ok {
 			if prev, decoded := DecodeReport(snap.UsageData); decoded && prev.Status == StatusAvailable {
 				storeReport = false
 			}
@@ -489,9 +500,17 @@ func (p *Poller) complete(id int64, a *acct, fl *flight, acc accounts.Account, r
 	// swallowed: there is nothing left to keep consistent.
 	if storeReport {
 		if data, err := EncodeReport(rep); err == nil {
-			_, _ = p.store.ReplaceQuotaSnapshot(store.QuotaSnapshot{
+			if _, err := p.store.ReplaceQuotaSnapshot(store.QuotaSnapshot{
 				AccountID: id, UsageData: data, PolledAt: now, ExpiresAt: now.Add(p.ttl),
-			})
+			}); err == nil {
+				// Write-through: only production writer of quota_snapshots is
+				// here, so the cache stays in sync. storeReport false (a
+				// failure that keeps the last good report) leaves the cache
+				// untouched; a store error invalidates so Peek reloads.
+				a.setSnapshotLocked(cloneReport(rep), now)
+			} else {
+				a.invalidateSnapshotLocked()
+			}
 		}
 	}
 	// One retry: losing this row would lose a Retry-After across a restart.
