@@ -12,7 +12,9 @@ import { PortChip, SetupBadge, SetupDetails } from "@/components/task-setup";
 import { PermissionCard } from "@/components/permission/permission-card";
 import { useDetailLevel } from "@/components/timeline/detail-level";
 import { RunTimeline } from "@/components/timeline/run-timeline";
+import { ChatOutlineRail } from "@/components/timeline/chat-outline-rail";
 import { useAutoFollow } from "@/components/timeline/use-auto-follow";
+import { useChatOutline } from "@/components/timeline/use-chat-outline";
 import { useChatFind } from "@/components/timeline/use-chat-find";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -186,6 +188,7 @@ export function TaskDetailPane({
   // the transcript, and it's O(runs) rather than O(items) to compute.
   const itemCount = runs?.reduce((total, run) => total + run.items.length, 0) ?? 0;
   const follow = useAutoFollow<HTMLDivElement>(itemCount);
+  const outline = useChatOutline(follow.ref, runs);
 
   // Chat Find's revision signal: item count alone misses a streamed chunk
   // appended to the *last* item (no new item, just more text), so this
@@ -316,6 +319,15 @@ export function TaskDetailPane({
             )}
           </div>
         </div>
+
+        {outline.visible && (
+          <ChatOutlineRail
+            prompts={outline.prompts}
+            activePrompt={outline.activePrompt}
+            onJump={outline.jump}
+            onScrub={outline.scrub}
+          />
+        )}
 
         {!follow.following && (
           <Button
