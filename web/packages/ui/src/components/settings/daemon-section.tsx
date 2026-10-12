@@ -71,8 +71,8 @@ function DaemonSection() {
       <div className="flex flex-col gap-2" data-testid="settings-section-daemon">
         <SettingsSectionTitle title="Daemon" />
         <p data-testid="daemon-unsupported" className="text-ui-base text-muted-foreground">
-          This platform isn&apos;t supported for app-managed daemon install. On native Windows, use{" "}
-          <code>smind serve</code> directly, or run it inside WSL2.
+          This platform isn&apos;t supported for app-managed daemon install. The desktop app manages a
+          daemon on Windows and macOS only.
         </p>
       </div>
     );
@@ -99,6 +99,18 @@ function DaemonSection() {
       {error && (
         <p role="alert" data-testid="daemon-error" className="text-ui-base text-destructive">
           {error}
+        </p>
+      )}
+      {status.prerequisiteMessage && (
+        <p role="alert" data-testid="daemon-prerequisite" className="text-ui-base text-muted-foreground">
+          {status.prerequisiteMessage}
+        </p>
+      )}
+      {status.wslDaemonSuspected && (
+        <p data-testid="daemon-wsl-notice" className="text-ui-base text-muted-foreground">
+          A daemon that this app did not start is answering on this port. If you run smind inside
+          WSL, stop it there, then install the Windows daemon here. Data from a WSL install is not
+          migrated.
         </p>
       )}
       {busy && stageMessage && (
@@ -130,12 +142,12 @@ function DaemonSection() {
             Restart
           </Button>
         )}
-        {status.managedState === "unmanaged" && !confirmingTakeOver && (
+        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && !confirmingTakeOver && (
           <Button variant="outline" size="sm" data-testid="daemon-take-over" onClick={() => setConfirmingTakeOver(true)} disabled={busy}>
             Take over management
           </Button>
         )}
-        {status.managedState === "unmanaged" && confirmingTakeOver && (
+        {status.managedState === "unmanaged" && !status.wslDaemonSuspected && confirmingTakeOver && (
           <>
             <span className="self-center text-ui-base text-muted-foreground">Manage the daemon already running on this port?</span>
             <Button size="sm" data-testid="daemon-take-over-confirm" onClick={() => run(() => desktop.takeOverDaemon())} disabled={busy}>

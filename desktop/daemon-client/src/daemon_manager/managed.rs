@@ -2,7 +2,7 @@
 //! daemon it started itself, tracked by a pid recorded in `ManagedRecord`
 //! and re-validated against whoever is *actually* bound to the configured
 //! port right now (`find_port_owner`, implemented per-platform in
-//! `wsl`/`native`). This module is pure -- callers resolve "is a daemon
+//! `native`/`windows_native`). This module is pure -- callers resolve "is a daemon
 //! reachable" and "who owns the port" themselves (real OS calls) and pass
 //! the answers in, so the decision table itself needs no OS access to test.
 
@@ -80,7 +80,7 @@ pub fn assert_safe_to_install(record: Option<&ManagedRecord>, port_owner: Option
 /// the *managed* binary, never the adopted one, so without this check
 /// restart would kill the user's daemon and have nothing to replace it
 /// with. `binary_present` is resolved by the caller (a plain file-exists
-/// check on macOS, `test -x` inside the distro for WSL2), so this
+/// check per platform), so this
 /// decision itself needs no OS access to test.
 pub fn assert_restartable(binary_present: bool) -> Result<(), String> {
     if !binary_present {
@@ -97,7 +97,7 @@ pub fn assert_restartable(binary_present: bool) -> Result<(), String> {
 /// independent identity check -- a pid can be reused by an unrelated
 /// process, including the user's own unmanaged daemon, even while
 /// numerically matching a stale record). `exe_matches` is computed by the
-/// caller (`native`/`wsl`'s own OS-specific identity check), so this
+/// caller (`native`/`windows_native`'s own OS-specific identity check), so this
 /// function needs no OS access to test.
 pub fn safe_to_kill(record: &ManagedRecord, port_owner: Option<u32>, exe_matches: bool) -> bool {
     port_owner == Some(record.pid) && exe_matches
