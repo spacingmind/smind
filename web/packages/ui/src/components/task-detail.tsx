@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { PermissionModeControl } from "@/components/permission-mode-control";
 import { TaskLineageHeader } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
@@ -74,9 +73,9 @@ export function TaskDetailPane({
   chat: Chat;
   /** Whether chat is task's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
   isDefaultChat: boolean;
-  /** Another of this task's chats currently running a run, if any -- drives the concurrency banner ("Another chat is running in this worktree"). */
+  /** Another of this task's chats currently running a run, if any -- drives the composer's "Also running" chip (another chat is running in this worktree). */
   otherRunningChat?: { id: number; title: string } | null;
-  /** Jumps to otherRunningChat's own tab -- the banner's click target. */
+  /** Jumps to otherRunningChat's own tab -- the concurrency chip's click target. */
   onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
@@ -183,7 +182,38 @@ export function TaskDetailPane({
   // session progresses (see the hook's own doc comment for why there's no
   // dedicated push notification for this instead).
   const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
-  const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
+  // D1: while a live-switch-capable run is active the composer's Mode/Auto-accept pills drive it.
+  const liveRunId = runningRun?.id;
+  const liveProvider = runningRun?.provider;
+  const liveMode = runningRun?.permissionMode;
+  const liveAutoAccept = runningRun?.autoAccept;
+  const liveInFlight = useRef(false);
+  const liveRun = useMemo(
+    () =>
+      liveRunId && liveProvider && supportsLiveModeSwitch(providers, liveProvider)
+        ? {
+            provider: liveProvider,
+            runId: liveRunId,
+            modes: providerModes(providers, liveProvider),
+            mode: effectiveMode(providers, liveProvider, liveMode ?? ""),
+            autoAccept: liveAutoAccept ?? false,
+            showAutoAccept: supportsAutoAccept(providers, liveProvider),
+            // One switch at a time: a second change (a rapid Shift+Tab, a click during the
+            // RPC) would be computed from the not-yet-updated mode and double-fire.
+            onChange: async (change: { modeId?: string; autoAccept?: boolean }) => {
+              if (liveInFlight.current) return;
+              liveInFlight.current = true;
+              try {
+                await setPermissionMode(liveRunId, change);
+              } finally {
+                liveInFlight.current = false;
+              }
+            },
+          }
+        : null,
+    [liveRunId, liveProvider, liveMode, liveAutoAccept, providers, setPermissionMode],
+  );
+  const configOptions = useRunConfigOptions(client, configOptionsRunId, (runningRun?.items.length ?? 0) + (runningRun?.configRevision ?? 0));
 
   // Auto-follow keys off the total item count across every run: that is
   // the one number that changes whenever anything is appended anywhere in
@@ -420,7 +450,7 @@ export function TaskDetailPane({
        * wide screens.
        */}
       {pendingRuns.length > 0 && (
-        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 border-t bg-background px-4 py-2">
+        <div data-testid="pending-permission-dock" className="mx-auto w-full max-w-3xl shrink-0 space-y-2 px-4 py-2">
           {pendingRuns.map((run) => (
             <PermissionCard
               key={run.id}
@@ -431,35 +461,6 @@ export function TaskDetailPane({
             />
           ))}
         </div>
-      )}
-
-      {runningRun && supportsLiveModeSwitch(providers, runningRun.provider) && (
-        <PermissionModeControl
-          modes={providerModes(providers, runningRun.provider)}
-          mode={effectiveMode(providers, runningRun.provider, runningRun.permissionMode)}
-          autoAccept={runningRun.autoAccept}
-          showAutoAccept={supportsAutoAccept(providers, runningRun.provider)}
-          onChange={(change) => setPermissionMode(runningRun.id, change)}
-        />
-      )}
-
-      {/*
-       * ADR-0016 P3's concurrency banner: two chats of the same task share
-       * one worktree, so a run in another chat can touch the same files
-       * this one is looking at -- surfaced, not blocked (ADR-0016 §4).
-       * Sits above the composer, same "pinned, not scrolled away" dock
-       * placement as the pending-permission dock above.
-       */}
-      {otherRunningChat && (
-        <button
-          type="button"
-          data-testid="concurrency-banner"
-          onClick={() => onJumpToChat?.(otherRunningChat.id)}
-          className="mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 py-1.5 text-left text-ui-sm text-foreground-muted transition-colors hover:text-foreground"
-        >
-          <span className="size-1.5 shrink-0 rounded-full bg-warning" />
-          Another chat is running in this worktree — <span className="underline">{otherRunningChat.title}</span>
-        </button>
       )}
 
       <Composer
@@ -481,6 +482,9 @@ export function TaskDetailPane({
         prefill={prefill}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
+        liveRun={liveRun}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
       />
     </div>

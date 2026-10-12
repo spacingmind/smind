@@ -681,4 +681,26 @@ describe("useRunTimeline mcpServers", () => {
     });
     expect(result.current.runs?.[0]?.mcpServers).toEqual([{ name: "search", transport: "http", status: "active" }]);
   });
+
+  it("a dropped config/command raw update bumps configRevision without adding a row; other benign updates do not", async () => {
+    const client = new FakeWsClient();
+    const { result } = renderHook(() => useRunTimeline(client, 1, 10));
+
+    client.nth("run.list", 0).resolve([summary({ Status: "running", FinishedAt: null })]);
+    await act(async () => {});
+    await act(async () => {
+      client.emit("run.attach", 0, "raw", { kind: "available_commands_update", payload: {} });
+    });
+    expect(result.current.runs?.[0]?.items).toEqual([]);
+    expect(result.current.runs?.[0]?.configRevision).toBe(1);
+    await act(async () => {
+      client.emit("run.attach", 0, "raw", { kind: "config_option_update", payload: {} });
+    });
+    expect(result.current.runs?.[0]?.configRevision).toBe(2);
+    await act(async () => {
+      client.emit("run.attach", 0, "raw", { kind: "session_info_update", payload: {} });
+    });
+    expect(result.current.runs?.[0]?.configRevision).toBe(2);
+    expect(result.current.runs?.[0]?.items).toEqual([]);
+  });
 });

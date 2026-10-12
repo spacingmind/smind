@@ -1,4 +1,4 @@
-import { GitCompare } from "lucide-react";
+import { GitCompare, GitBranch } from "lucide-react";
 
 import { type DiffStat } from "@/lib/diff-stat";
 
@@ -36,6 +36,29 @@ function DiffStatChip({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
 }
 
 /**
+ * ADR-0016 P3's concurrency notice: two chats of the same task share one
+ * worktree, so a run in another chat can touch the same files this one is
+ * looking at -- surfaced, not blocked (ADR-0016 §4). A chip beside Working;
+ * clicking jumps to that chat's tab.
+ */
+function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }; onJump: () => void }) {
+  return (
+    <button
+      type="button"
+      data-testid="composer-concurrency-chip"
+      aria-label={`Also running ${chat.title} - another chat is running in this worktree; open it`}
+      title={`Another chat is running in this worktree: ${chat.title}`}
+      onClick={onJump}
+      className={`${CHIP_CLASS} min-w-0 transition-colors hover:bg-hover hover:text-foreground`}
+    >
+      <GitBranch aria-hidden className="size-3 shrink-0 text-warning" />
+      <span className="shrink-0">Also running ·</span>
+      <span className="max-w-48 truncate">{chat.title}</span>
+    </button>
+  );
+}
+
+/**
  * Paseo's chip row above the composer: a "Working" chip while the chat has a
  * live run, plus the diff-stat chip when the task has changes and there is a
  * Diff tab to jump to. Only real data -- the run state is the same
@@ -46,8 +69,14 @@ export function ComposerStatusChips({
   running,
   diffStat,
   onOpenDiff,
+  otherRunningChat,
+  onJumpToChat,
 }: {
   running: boolean;
+  /** Another chat of this task with a live run (shared worktree) -- renders the concurrency chip. */
+  otherRunningChat?: { id: number; title: string } | null;
+  /** Jumps to otherRunningChat's tab. */
+  onJumpToChat?: (chatId: number) => void;
   diffStat?: DiffStat | null;
   onOpenDiff?: () => void;
 }) {
@@ -56,7 +85,8 @@ export function ComposerStatusChips({
     diffStat !== undefined &&
     (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
   const showDiff = hasChanges && onOpenDiff !== undefined;
-  if (!running && !showDiff) return null;
+  const showOther = otherRunningChat !== null && otherRunningChat !== undefined;
+  if (!running && !showDiff && !showOther) return null;
   return (
     <div data-testid="composer-status-chips" className="flex flex-wrap items-center gap-2">
       {running && (
@@ -65,6 +95,7 @@ export function ComposerStatusChips({
           Working
         </span>
       )}
+      {showOther && <ConcurrencyChip chat={otherRunningChat} onJump={() => onJumpToChat?.(otherRunningChat.id)} />}
       {showDiff && <DiffStatChip stat={diffStat} onOpenDiff={onOpenDiff} />}
     </div>
   );

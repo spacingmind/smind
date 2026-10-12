@@ -73,6 +73,9 @@ export function groupTimeline(items: TimelineItem[], level: DetailLevel): Timeli
   };
 
   for (const item of items) {
+    // Overview is the quiet view: events this build can't classify (a raw ACP kind, an unknown
+    // wire type) are debugging aids, shown in Detailed only.
+    if (item.kind === "unknown") continue;
     if (item.kind === "tool_call") {
       run.push(item);
       continue;
