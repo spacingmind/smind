@@ -7,6 +7,14 @@ import type { RunLogEvent, RunLogsResult, RunStatusValue, RunSummary } from "@/l
 /** Why a task currently has the sidebar's attention marker. */
 export type AttentionReason = "error" | "finished" | "permission";
 
+/**
+ * A terminal run only badges "finished" if it finished within this window.
+ * The hook's seen-state lives in memory only, so without a recency bound
+ * every reload resurrects every historic run as unseen and dots the whole
+ * task list green. "error" is not bounded.
+ */
+export const FINISHED_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000;
+
 /** Task ids that currently warrant an attention dot, with the reasons why. */
 export type TaskAttention = Map<number, Set<AttentionReason>>;
 
@@ -47,6 +55,8 @@ export interface TaskSignal {
  */
 interface RunLike extends Pick<RunSummary, "ID" | "TaskID" | "ChatID" | "Status"> {
   order: number;
+  /** Epoch-ms finish time; null when unknown, which a terminal run treats as recent (conservative). */
+  finishedAtMs: number | null;
 }
 
 /**
@@ -120,7 +130,8 @@ export function useTaskAttention(
       if (run.Status !== "running") {
         const seen = seenRef.current.get(run.TaskID);
         if (!seen?.has(run.ID)) {
-          add(run.TaskID, run.Status === "error" ? "error" : "finished");
+          if (run.Status === "error") add(run.TaskID, "error");
+          else if (run.finishedAtMs === null || Date.now() - run.finishedAtMs <= FINISHED_ATTENTION_WINDOW_MS) add(run.TaskID, "finished");
         }
       } else {
         const chats = runningChatsByTask.get(run.TaskID) ?? new Set<number>();
@@ -161,13 +172,17 @@ export function useTaskAttention(
           if (isStale()) return;
           // Newest-first from the daemon, so index 0 is the most recent:
           // order 0, -1, -2... leaves every later live event above it.
-          const runs: RunLike[] = (rawRuns ?? []).map((r, index) => ({
-            ID: r.ID,
-            TaskID: r.TaskID,
-            ChatID: r.ChatID,
-            Status: r.Status,
-            order: -index,
-          }));
+          const runs: RunLike[] = (rawRuns ?? []).map((r, index) => {
+            const parsed = r.FinishedAt === null ? NaN : Date.parse(r.FinishedAt);
+            return {
+              ID: r.ID,
+              TaskID: r.TaskID,
+              ChatID: r.ChatID,
+              Status: r.Status,
+              order: -index,
+              finishedAtMs: Number.isNaN(parsed) ? null : parsed,
+            };
+          });
           runsRef.current = runs;
           orderRef.current = 0;
 
@@ -251,8 +266,11 @@ export function useTaskAttention(
       const runs = runsRef.current ?? (runsRef.current = []);
       const idx = runs.findIndex((r) => r.ID === p.runId);
       const order = ++orderRef.current;
-      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order };
-      else runs.push({ ID: p.runId, TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order });
+      // run.status payloads carry no timestamp; a live terminal event is
+      // "just now" by construction, which keeps it inside the window.
+      const finishedAtMs = p.status === "running" ? null : Date.now();
+      if (idx >= 0) runs[idx] = { ...runs[idx], TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs };
+      else runs.push({ ID: p.runId, TaskID: p.taskId, ChatID: chatId, Status: p.status as RunLike["Status"], order, finishedAtMs });
 
       if (p.status === "running") {
         // A (re)started run un-terminalizes: clear its seen marker and
