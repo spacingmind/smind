@@ -139,17 +139,62 @@ scope with the reason.
 ## Progress
 
 - [x] Gap analysis written (this file)
-- [ ] Before screenshots
-- [ ] Step 1 — `text-match` + `model-browser` logic + tests
-- [ ] Step 2 — glyphs + settings intent
-- [ ] Step 3 — picker UI rebuild
-- [ ] Step 4 — toolbar/composer/settings wiring + test migration
-- [ ] Step 5 — screenshots after + fixes, adversarial review
+- [x] Before screenshots (`/tmp/mp-shots/before`, real daemon, isolated `SMIND_HOME`)
+- [x] Step 1 — `text-match` + `model-browser` logic + tests
+- [x] Step 2 — glyphs + settings intent
+- [x] Step 3 — picker UI rebuild (+ review fixes)
+- [x] Step 4 — toolbar/composer wiring, profile summary names the model, test migration
+- [x] Step 5 — screenshots after + adversarial review
 
 ## Peer log
 
-(filled in as Peers report)
+- `peer-glm` (`0643c380`, Step 1 pure logic): **ACCEPT** (`c41d0185`, `45d1f60c`).
+  Lead fix `resolveTriggerTitle`: the Lead's own brief de-duplicated on
+  "label starts with the provider name", which dropped the model from the
+  title of `GLM · GLM 5.3`; now only an equal label is de-duplicated (test added).
+- `peer-sonnet` (`8fcad3f8`, Step 2 glyphs + settings intent): **ACCEPT**
+  (`11137eeb`, `3b912825`, `cbb8871a`).
+- `peer-sonnet` (`d6ac36ec`, Step 3 picker rebuild, then the review fixes and
+  the 17-test migration): **ACCEPT** (`1c33a964`, `ace62456`, `fef9b5ce`,
+  `e6f6495f`, `3b3c8f5f`). Its REOPEN_REQUEST on the title bug was correct.
+- `peer-glm` (`0a1b80e8`, test migration): **REJECT** — hit the 20-turn limit
+  without a commit; the work was given to `peer-sonnet`.
+- `reviewer` (`81f00633`, read-only adversarial review, 15 findings): fixed
+  sheet height (was content-height: `data-[side=bottom]:h-auto` beat
+  `h-[80dvh]`), keyboard route to Settings (pencil/gear are tab stops), Back
+  losing focus, "No models match" while loading, sheet autofocus with a fine
+  pointer, hidden row action on touch >= md, unhealthy-provider notice, Create
+  profile row seeding the provider, bound-note height, thinking seed only for
+  Claude, provider.list 8 s give-up. Left as residual: a11y nesting of the row
+  action `<button>` inside `role=option`, highlight not re-seeded when data
+  lands after open, bound chat whose provider is missing from the catalog,
+  single-slot settings intent can go stale if Settings never mounts.
+- Lead: wiring (`7778afab`), profile summary names the model (`09b24506`),
+  provider.list timeout (`713cbca7`), fine-pointer fix (`bfc37e79`), title fix,
+  screenshot harness, rebase onto develop (#319 live-run toolbar: one conflict
+  in `run-config-toolbar.tsx` memo deps).
 
 ## Validation
 
-(filled in at the end)
+Verified 2026-10-12 on `fix/model-picker-paseo-parity` rebased on `origin/develop`
+(`594f3725`).
+
+- AC1-AC13: `lib/text-match.test.ts`, `lib/model-browser.test.ts`,
+  `model-picker.test.tsx` (38), `provider-glyph.test.tsx`,
+  `lib/settings-intent.test.ts`, `profiles-section.test.tsx` (intent tests),
+  migrated `composer.test.tsx` / `run-config-toolbar.test.tsx` /
+  `task-detail.test.tsx`.
+- AC14: web `tsc -b` clean, full web suite 2227/2227; `task test` and
+  `task lint` — see the PR body for the run.
+- Screenshots (real daemon on an isolated `SMIND_HOME`/port, headless Chromium,
+  light + dark, 1440x900 and 390x844 with touch emulation): before
+  `/tmp/mp-shots/before`, after `/tmp/mp-shots/after` — closed trigger (GLM-5.3
+  and Opus 5.5 selected), open on the current provider, root with profiles,
+  provider views (Claude Code, GLM), ranked search, multi-token search, empty
+  search, row hover actions, create-profile-from-model landing in Settings →
+  Agents with the form seeded, narrow sheet.
+- Not verified: Windows/desktop shell, a real phone keyboard, screen readers.
+- Residual: no per-profile icon/colour (store + wire change), no per-provider
+  Retry, Paseo's two-step compact sheet and toolbar density rules not ported
+  (see the gap table), tab-only keyboard path to "create profile from this
+  model" (the pencil reaches Settings → Agents instead).
