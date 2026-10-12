@@ -25,6 +25,24 @@ type fakeReader struct {
 	mu      sync.Mutex
 	results map[int64]quota.Result
 	peeks   atomic.Int64
+
+	cooldowns     map[cooldownKey]quota.Cooldown
+	cooldownCalls atomic.Int64
+}
+
+// cooldownKey addresses a canned cooldown; model "" answers every model.
+type cooldownKey struct {
+	id    int64
+	model string
+}
+
+func (f *fakeReader) setCooldown(id int64, model string, cd quota.Cooldown) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.cooldowns == nil {
+		f.cooldowns = map[cooldownKey]quota.Cooldown{}
+	}
+	f.cooldowns[cooldownKey{id, model}] = cd
 }
 
 func (f *fakeReader) set(id int64, res quota.Result) {
@@ -46,8 +64,15 @@ func (f *fakeReader) Peek(id int64) quota.Result {
 
 func (f *fakeReader) TTL() time.Duration { return testTTL }
 
-func (f *fakeReader) Cooldown(int64, string, time.Time) (quota.Cooldown, bool) {
-	return quota.Cooldown{}, false
+func (f *fakeReader) Cooldown(id int64, model string, _ time.Time) (quota.Cooldown, bool) {
+	f.cooldownCalls.Add(1)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if cd, ok := f.cooldowns[cooldownKey{id, model}]; ok {
+		return cd, true
+	}
+	cd, ok := f.cooldowns[cooldownKey{id, ""}]
+	return cd, ok
 }
 
 type fakeClock struct {
@@ -410,6 +435,9 @@ func TestRoute_RoutingDisabledNeverConsultsWindows(t *testing.T) {
 	}
 	if n := fr.peeks.Load(); n != 0 {
 		t.Errorf("Peek calls = %d, want 0 with usage routing off", n)
+	}
+	if n := fr.cooldownCalls.Load(); n != 0 {
+		t.Errorf("Cooldown calls = %d, want 0 with usage routing off", n)
 	}
 }
 
