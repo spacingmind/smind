@@ -1130,7 +1130,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             ref={sidebarPanelRef}
             data-slot="sidebar-panel"
             data-collapsed={sidebarOpen ? undefined : ""}
-            className="h-full min-w-0 flex-none overflow-hidden w-(--sidebar-width) transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
+            className="h-full min-w-0 flex-none overflow-hidden bg-sidebar w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
           >
             {sidebarElement}
           </div>

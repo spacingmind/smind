@@ -222,4 +222,16 @@ describe("sidebar footer", () => {
     renderFooter({ rows: <div>usage</div> });
     expect(within(screen.getByTestId("sidebar-footer-rows")).getByText("usage")).toBeInTheDocument();
   });
+
+  it("closing a footer menu does not leave its trigger's tooltip open", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    renderFooter();
+    openMenu("sidebar-footer-help");
+    expect(await screen.findByTestId("sidebar-footer-help-palette")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByTestId("sidebar-footer-help-palette"), { key: "Escape" });
+    // Radix hands focus back to the trigger on close, which would open its tooltip.
+    screen.getByTestId("sidebar-footer-help").focus();
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
 });

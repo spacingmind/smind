@@ -32,12 +32,6 @@ function ResizablePanel({ ...props }: ResizablePrimitive.PanelProps) {
   return <ResizablePrimitive.Panel data-slot="resizable-panel" {...props} />
 }
 
-// Re-exported so callers driving a panel imperatively (collapse/expand,
-// e.g. syncing the sidebar's panel width to its icon-collapsed state) pull
-// the ref type from this wrapper like everything else here, rather than
-// reaching past it into "react-resizable-panels" directly.
-const usePanelRef = ResizablePrimitive.usePanelRef
-
 function ResizableHandle({
   className,
   onPointerEnter,
@@ -174,5 +168,4 @@ function SidebarResizeHandle({
   )
 }
 
-export { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle, usePanelRef }
-export type { PanelImperativeHandle } from "react-resizable-panels"
+export { ResizableHandle, ResizablePanel, ResizablePanelGroup, SidebarResizeHandle }

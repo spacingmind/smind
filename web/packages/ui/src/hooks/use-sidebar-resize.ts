@@ -92,6 +92,11 @@ export function useSidebarResize({ panelRef, width, onCommit, onCollapse }: UseS
         return;
       }
       if (clientX !== undefined) current.raw = current.startWidth + (clientX - current.startX);
+      // A click without movement is not a resize: never re-clamp (and so shrink) the committed width.
+      if (current.raw === current.startWidth) {
+        writeVar(committed);
+        return;
+      }
       if (current.raw < SIDEBAR_SNAP_WIDTH) {
         // Keep the committed width so re-expanding returns to it.
         writeVar(committed);
@@ -157,6 +162,9 @@ export function useSidebarResize({ panelRef, width, onCommit, onCollapse }: UseS
   );
 
   const onPointerCancel = useCallback(() => finish(false), [finish]);
+  // The captured handle can be removed mid-drag (toggle / palette collapses the sidebar), which fires
+  // neither pointerup nor pointercancel; losing the capture ends the gesture the same way a cancel does.
+  const onLostPointerCapture = useCallback(() => finish(false), [finish]);
 
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLElement>) => {
@@ -184,5 +192,5 @@ export function useSidebarResize({ panelRef, width, onCommit, onCollapse }: UseS
     [clampWidth, maxWidth],
   );
 
-  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onKeyDown };
+  return { onPointerDown, onPointerMove, onPointerUp, onPointerCancel, onLostPointerCapture, onKeyDown };
 }

@@ -1,6 +1,6 @@
 import { Check, Monitor, Moon, Sun } from "lucide-react";
 
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -27,6 +27,7 @@ const OPTIONS: { id: ThemePreference; label: string; icon: typeof Sun }[] = [
  */
 export function ThemeToggle({ withTooltip = false, className }: { withTooltip?: boolean; className?: string }) {
   const { preference, resolved, setPreference } = useTheme();
+  const themeTip = useMenuTooltip();
   const TriggerIcon = resolved === "dark" ? Moon : Sun;
 
   const trigger = (
@@ -36,10 +37,10 @@ export function ThemeToggle({ withTooltip = false, className }: { withTooltip?: 
   );
 
   return (
-    <DropdownMenu>
+    <DropdownMenu onOpenChange={themeTip.onMenuOpenChange}>
       {withTooltip ? (
         // Needs a TooltipProvider above (the sidebar footer supplies one).
-        <Tooltip>
+        <Tooltip {...themeTip.tooltip}>
           <TooltipTrigger asChild>
             <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
           </TooltipTrigger>

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
@@ -36,9 +36,18 @@ export function providerTone(health: { healthy: number; total: number } | null):
   return health.healthy > 0 ? "warning" : "danger";
 }
 
-function FooterTooltip({ label, children }: { label: string; children: ReactNode }) {
+function FooterTooltip({
+  label,
+  children,
+  tooltip,
+}: {
+  label: string;
+  children: ReactNode;
+  /** From useMenuTooltip, for a trigger that also opens a menu/popover. */
+  tooltip?: ReturnType<typeof useMenuTooltip>["tooltip"];
+}) {
   return (
-    <Tooltip>
+    <Tooltip {...tooltip}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       <TooltipContent side="top">{label}</TooltipContent>
     </Tooltip>
@@ -113,6 +122,7 @@ function HostButton({
   onOpenSettings?: (sectionId?: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const hostTip = useMenuTooltip();
   const tone = providerTone(providerHealth);
   const dot: StatusDotStatus | null = connectionStatus !== "connected" ? "danger" : tone;
 
@@ -122,8 +132,14 @@ function HostButton({
   }
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <FooterTooltip label="Host">
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        hostTip.onMenuOpenChange(next);
+      }}
+    >
+      <FooterTooltip label="Host" tooltip={hostTip.tooltip}>
         <PopoverTrigger asChild>
           <Button
             variant="ghost"
@@ -191,9 +207,10 @@ function HostButton({
 
 function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) => void }) {
   const { runAction } = useKeyboard();
+  const helpTip = useMenuTooltip();
   return (
-    <DropdownMenu>
-      <FooterTooltip label="Help & support">
+    <DropdownMenu onOpenChange={helpTip.onMenuOpenChange}>
+      <FooterTooltip label="Help & support" tooltip={helpTip.tooltip}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"

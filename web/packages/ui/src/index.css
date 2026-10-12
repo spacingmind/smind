@@ -813,6 +813,7 @@ html[data-desktop-os] body {
   background-clip: content-box;
   border-radius: 9999px;
   min-height: 32px;
+  min-width: 32px;
 }
 :hover::-webkit-scrollbar-thumb {
   background-color: color-mix(in srgb, var(--color-foreground) 32%, transparent);

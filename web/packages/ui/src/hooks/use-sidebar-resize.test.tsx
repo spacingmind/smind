@@ -152,4 +152,31 @@ describe("useSidebarResize", () => {
     expect(document.body).not.toHaveClass("select-none");
     expect(document.body).not.toHaveClass("sidebar-resizing");
   });
+
+  it("losing pointer capture mid-drag (handle unmounted by a toggle) ends the gesture like a cancel", () => {
+    render(<Probe />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 256, pointerId: 1 });
+    fireEvent.pointerMove(handle, { clientX: 400, pointerId: 1 });
+    flushFrames();
+    expect(cssVar()).toBe("400px");
+
+    fireEvent.lostPointerCapture(handle, { pointerId: 1 });
+    expect(cssVar()).toBe("256px");
+    expect(screen.getByTestId("panel")).not.toHaveAttribute("data-resizing");
+    expect(document.body).not.toHaveClass("sidebar-resizing");
+    expect(commits).toEqual([]);
+  });
+
+  it("a click without movement commits nothing, even if the committed width is above the cap", () => {
+    render(<Probe initial={SIDEBAR_MAX_WIDTH} />);
+    const handle = screen.getByTestId("handle");
+
+    fireEvent.pointerDown(handle, { button: 0, clientX: 512, pointerId: 1 });
+    fireEvent.pointerUp(handle, { clientX: 512, pointerId: 1 });
+    expect(commits).toEqual([]);
+    expect(collapses).toEqual([]);
+    expect(cssVar()).toBe(`${SIDEBAR_MAX_WIDTH}px`);
+  });
 });

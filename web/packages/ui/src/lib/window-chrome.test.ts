@@ -28,8 +28,10 @@ describe("window chrome layout maths", () => {
     // Expanded: the sidebar's own top strip holds them.
     expect(headerLeftInsetPx("macos", false, 192)).toBe(0);
     expect(headerLeftInsetPx("macos", false, 512)).toBe(0);
-    // Collapsed 48px rail: the cluster overhangs it and the handle.
-    expect(headerLeftInsetPx("macos", false, 48)).toBe(TRAFFIC_LIGHT_CLUSTER_PX - 48 - SIDEBAR_HANDLE_PX);
+    // Collapsed 48px rail: the cluster overhangs it; there is no resize handle beside a rail.
+    expect(headerLeftInsetPx("macos", false, 48)).toBe(TRAFFIC_LIGHT_CLUSTER_PX - 48);
+    // A wider sidebar's handle counts toward the clearance.
+    expect(headerLeftInsetPx("macos", false, 60)).toBe(TRAFFIC_LIGHT_CLUSTER_PX - 60 - SIDEBAR_HANDLE_PX);
     // Sidebar hidden (mobile sheet): the header is at the window edge.
     expect(headerLeftInsetPx("macos", false, 0)).toBe(TRAFFIC_LIGHT_CLUSTER_PX);
     // No lights, no inset.
