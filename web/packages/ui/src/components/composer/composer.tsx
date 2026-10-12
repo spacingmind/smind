@@ -93,6 +93,8 @@ export function Composer({
   toolbarRef,
   onRunConfigChange,
   configOptions,
+  otherRunningChat,
+  onJumpToChat,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -132,6 +134,10 @@ export function Composer({
   /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
   onRunConfigChange?: (state: RunConfigState) => void;
   /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
+  /** Another chat of this task with a live run in the shared worktree (ADR-0016 P3) -- a chip in the status row. */
+  otherRunningChat?: { id: number; title: string } | null;
+  /** Jumps to otherRunningChat's tab. */
+  onJumpToChat?: (chatId: number) => void;
   configOptions?: {
     options: ConfigOptionParams[];
     error: string | null;
@@ -321,7 +327,13 @@ export function Composer({
 
       {/* Paseo's chip row above the card: the live-run chip and the diff
           stat -- real data only, nothing when neither applies. */}
-      <ComposerStatusChips running={running} diffStat={diffStat} onOpenDiff={onOpenDiff} />
+      <ComposerStatusChips
+        running={running}
+        diffStat={diffStat}
+        onOpenDiff={onOpenDiff}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
+      />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the

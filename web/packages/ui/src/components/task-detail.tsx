@@ -76,7 +76,7 @@ export function TaskDetailPane({
   isDefaultChat: boolean;
   /** Another of this task's chats currently running a run, if any -- drives the concurrency banner ("Another chat is running in this worktree"). */
   otherRunningChat?: { id: number; title: string } | null;
-  /** Jumps to otherRunningChat's own tab -- the banner's click target. */
+  /** Jumps to otherRunningChat's own tab -- the concurrency chip's click target. */
   onJumpToChat?: (chatId: number) => void;
   /** Real-time connection status from App.tsx -- lets an active run.attach subscription visibly reflect a break instead of silently freezing on stale "live" output. Defaults to "connected" so every existing caller/test not wired up to App.tsx's status keeps behaving exactly as before. */
   connectionStatus?: ConnectionStatus;
@@ -401,25 +401,6 @@ export function TaskDetailPane({
         />
       )}
 
-      {/*
-       * ADR-0016 P3's concurrency banner: two chats of the same task share
-       * one worktree, so a run in another chat can touch the same files
-       * this one is looking at -- surfaced, not blocked (ADR-0016 §4).
-       * Sits above the composer, same "pinned, not scrolled away" dock
-       * placement as the pending-permission dock above.
-       */}
-      {otherRunningChat && (
-        <button
-          type="button"
-          data-testid="concurrency-banner"
-          onClick={() => onJumpToChat?.(otherRunningChat.id)}
-          className="mx-auto flex w-full max-w-3xl shrink-0 items-center gap-2 px-4 py-1.5 text-left text-ui-sm text-foreground-muted transition-colors hover:text-foreground"
-        >
-          <span className="size-1.5 shrink-0 rounded-full bg-warning" />
-          Another chat is running in this worktree — <span className="underline">{otherRunningChat.title}</span>
-        </button>
-      )}
-
       <Composer
         client={client}
         taskId={task.ID}
@@ -438,6 +419,8 @@ export function TaskDetailPane({
         textareaRef={composerTextareaRef}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}
       />
     </div>
