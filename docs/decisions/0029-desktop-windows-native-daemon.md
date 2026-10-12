@@ -37,8 +37,10 @@ On Windows the desktop app installs, updates, starts, stops and restarts a
   *take over* is offered only when the port owner is a Windows process
   whose image is a `smind.exe`; for a WSL daemon (the port is forwarded by
   WSL, so the owner is not `smind.exe`) the app explains that it is running
-  in WSL and how to stop it, and offers **Install** for the native one on a
-  free port. A WSL daemon can still be used as an ordinary *remote
+  in WSL and how to stop it, and refuses **Install** with a message naming
+  the port conflict (the app does not choose the port; the daemon reads it
+  from its own config) until that daemon is stopped. A WSL daemon can still
+  be used as an ordinary *remote
   connection* (the app already supports remote daemons by URL); it is just
   never managed.
 - **No data migration.** The native daemon starts with its own empty
