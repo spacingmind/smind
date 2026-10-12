@@ -12,6 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useMenuTooltip } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { desktop, isDesktop } from "@/lib/platform";
@@ -290,7 +291,7 @@ export function SidebarFooterActions({
             label="Usage"
             icon={CircleGauge}
             testId="sidebar-footer-usage"
-            onClick={() => onOpenSettings?.("usage")}
+            onClick={openUsageModal}
           />
           <HostButton
             connectionStatus={connectionStatus}

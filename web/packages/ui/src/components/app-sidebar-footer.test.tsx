@@ -8,12 +8,15 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
 
 const runAction = vi.fn();
+const openUsageModal = vi.fn();
+vi.mock("@/hooks/use-usage-modal", () => ({ openUsageModal: () => openUsageModal() }));
 vi.mock("@/keyboard/keyboard-provider", () => ({
   useKeyboard: () => ({ runAction }),
 }));
 
 afterEach(() => {
   runAction.mockClear();
+  openUsageModal.mockClear();
   vi.restoreAllMocks();
   vi.resetModules();
   vi.doUnmock("@/lib/platform");
@@ -82,7 +85,8 @@ describe("sidebar footer", () => {
     fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     expect(onOpenSettings).toHaveBeenLastCalledWith();
     fireEvent.click(screen.getByTestId("sidebar-footer-usage"));
-    expect(onOpenSettings).toHaveBeenLastCalledWith("usage");
+    expect(openUsageModal).toHaveBeenCalledTimes(1);
+    expect(onOpenSettings).toHaveBeenCalledTimes(1); // only the Settings click above
     fireEvent.click(screen.getByTestId("sidebar-footer-add-workspace"));
     expect(onAddWorkspace).toHaveBeenCalledTimes(1);
   });

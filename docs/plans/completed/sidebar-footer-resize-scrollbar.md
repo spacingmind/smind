@@ -59,8 +59,8 @@ transition during drag, one ease-out transition on toggle.
   full-width rows of low-frequency info; the icon line is the Paseo shape and
   Host is the nearest real analogue of Paseo's Hosts button. Providers health
   fetch (`provider.list`) stays where it is.
-- **D3 Usage** opens Settings → Usage (`onOpenSettings("usage")`) until PR-D1's
-  modal exists. No footer percentages (ADR-0028 D5: off by default).
+- **D3 Usage** opens the plan-usage modal (`openUsageModal()`, ADR-0028 PR-D1, merged
+  after this plan was written; originally Settings → Usage). No footer percentages (ADR-0028 D5: off by default).
 - **D4 Help & support** = dropdown (Paseo `SidebarHelpMenu`): Keyboard shortcuts
   (→ Settings → Shortcuts, same as `shortcuts.help`), Command palette,
   Documentation (repo README on GitHub), Report an issue (GitHub issues).
@@ -96,7 +96,7 @@ transition during drag, one ease-out transition on toggle.
 ### F — footer
 - SFR-F-AC1: the sidebar header no longer contains the theme toggle or the Settings button (expanded and collapsed); the wordmark row remains.
 - SFR-F-AC2: expanded, the footer renders `border-t` + one icon line with, in order, Add workspace, Usage, Host, a spacer, Help, Theme, Settings; each has an accessible name and a tooltip; no "Providers"/"Agents" rows remain.
-- SFR-F-AC3: Settings → opens Settings (no section); Usage → Settings at section `usage`; Add workspace → the create-workspace dialog (same one as the header "+").
+- SFR-F-AC3: Settings → opens Settings (no section); Usage → the plan-usage modal (`openUsageModal`, PR-D1); Add workspace → the create-workspace dialog (same one as the header "+").
 - SFR-F-AC4: Host opens a popover showing the connection status text and, once `provider.list` has answered, "N healthy" with a health dot; Providers row → Settings `providers`; Agents row (count = profiles) → Settings `agents`; on desktop only, Daemon and Daemon server rows → `daemon`/`connections`; the popover closes on selection.
 - SFR-F-AC5: Host trigger shows a status dot: danger when not connected, else provider-health tone (success/warning/danger), none while providers unknown and connected.
 - SFR-F-AC6: Help opens a menu with Keyboard shortcuts (→ Settings `shortcuts`), Command palette, Documentation and Report an issue (external links, `noopener`).
