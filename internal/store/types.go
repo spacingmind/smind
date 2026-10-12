@@ -34,7 +34,15 @@ type QuotaSnapshot struct {
 	UsageData string
 	PolledAt  time.Time
 	ExpiresAt time.Time
+	// Kind is QuotaKindFetched or QuotaKindObserved; "" means fetched on write.
+	Kind string
 }
+
+// Quota snapshot kinds (quota_snapshots.kind).
+const (
+	QuotaKindFetched  = "fetched"
+	QuotaKindObserved = "observed"
+)
 
 // Workspace is a local filesystem root (typically a git repo checkout) with
 // a routing policy and a pool of candidate accounts for requests scoped to

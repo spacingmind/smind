@@ -29,7 +29,7 @@ func Test_budget_reader_has_no_fetch_surface(t *testing.T) {
 	// path would need a context (every poller entry that can reach the
 	// network takes one), so none may appear.
 	rt := reflect.TypeOf((*Reader)(nil)).Elem()
-	allowed := map[string]bool{"Peek": true, "TTL": true}
+	allowed := map[string]bool{"Peek": true, "TTL": true, "Cooldown": true}
 	ctxType := reflect.TypeOf((*context.Context)(nil)).Elem()
 	for i := 0; i < rt.NumMethod(); i++ {
 		m := rt.Method(i)
