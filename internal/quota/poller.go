@@ -382,6 +382,11 @@ func (p *Poller) wait(ctx context.Context, id int64, a *acct, fl *flight, fp str
 		ended = true
 	}
 	now := p.clock()
+	// The fetch may have refreshed the token: report against the current
+	// credential, not the one the request started with.
+	if cur, err := p.src.Get(id); err == nil {
+		fp = fingerprint(cur)
+	}
 	v := p.viewOf(id, a, now)
 	return p.build(id, v, fp, now, false, ended)
 }
@@ -406,6 +411,11 @@ func (p *Poller) run(id int64, a *acct, fl *flight, acc accounts.Account) {
 	now := p.clock()
 	rep.FetchedAt = now.UTC()
 
+	if err == nil && rep.Status == StatusError {
+		// ReportFetcher's contract pairs an error report with an error;
+		// never let one through as a success.
+		err = &FetchError{msg: rep.Error}
+	}
 	kind := p.complete(id, a, fl, acc, rep, err, now)
 	log.Printf("quota: account %d fetch %s", id, kind)
 
