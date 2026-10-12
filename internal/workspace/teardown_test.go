@@ -1,5 +1,3 @@
-//go:build !windows
-
 package workspace
 
 import (
@@ -25,7 +23,9 @@ func TestTeardown_RunsAfterCheckpointBeforeRemove(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
 	w := setupWorkspace(t, m, "")
-	out := filepath.Join(t.TempDir(), "teardown.out")
+	// Sh receives this path inside a POSIX script; forward slashes work on
+	// every OS while native backslashes would be eaten as escapes.
+	out := filepath.ToSlash(filepath.Join(t.TempDir(), "teardown.out"))
 	setScripts(t, m, w, "", `{ git log -1 --format=%s; [ -d "$SMIND_WORKTREE_PATH" ] && echo present; } > `+out)
 	task, err := m.CreateTask(w.ID, nil, "td")
 	if err != nil {
@@ -74,7 +74,7 @@ func TestTeardown_NotRunWhenCheckpointFails(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
 	w := setupWorkspace(t, m, "")
-	marker := filepath.Join(t.TempDir(), "ran")
+	marker := filepath.ToSlash(filepath.Join(t.TempDir(), "ran"))
 	setScripts(t, m, w, "", `touch `+marker)
 	task, err := m.CreateTask(w.ID, nil, "tdcp")
 	if err != nil {
@@ -177,7 +177,9 @@ func TestSetup_RetryWhileRunningRejected(t *testing.T) {
 func TestSetup_RetryConcurrentOnlyOneRuns(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	runLog := filepath.Join(t.TempDir(), "runs.log")
+	// Forward slashes: the path is embedded in a POSIX script (backslashes
+	// would be eaten as shell escapes on Windows).
+	runLog := filepath.ToSlash(filepath.Join(t.TempDir(), "runs.log"))
 	w := setupWorkspace(t, m, `echo run >> `+runLog+`; sleep 1`)
 	task, err := m.CreateTask(w.ID, nil, "race")
 	if err != nil {

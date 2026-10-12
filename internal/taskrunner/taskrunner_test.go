@@ -7,10 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spacingmind/smind/internal/claudecli"
+	"github.com/spacingmind/smind/internal/securefile"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/workspace"
 )
@@ -35,6 +38,12 @@ var fakeCodexAgentPath string
 // worktree-relative "scenario" file convention from fakeagent above serves
 // the same purpose here without needing it.
 func TestMain(m *testing.M) {
+	// The Windows launcher test starts this binary as smind.exe in launcher
+	// mode; that role is recognised by claudecli.LaunchEnv and must win over
+	// the fake-CLI switch, which this process also inherits.
+	if code, handled := claudecli.MaybeRunLauncher(); handled {
+		os.Exit(code)
+	}
 	if os.Getenv("TASKRUNNER_FAKE_CLAUDE_CLI") == "1" {
 		runFakeClaudeCLI()
 		return
@@ -46,7 +55,7 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 
-	fakeACPAgentPath = filepath.Join(dir, "fakeagent")
+	fakeACPAgentPath = filepath.Join(dir, exeName("fakeagent"))
 	build := exec.Command("go", "build", "-o", fakeACPAgentPath, "./fakeagent")
 	build.Dir, err = os.Getwd()
 	if err != nil {
@@ -56,7 +65,7 @@ func TestMain(m *testing.M) {
 		panic(fmt.Sprintf("build fakeagent: %v: %s", err, out))
 	}
 
-	fakeCodexAgentPath = filepath.Join(dir, "codex-fakeagent")
+	fakeCodexAgentPath = filepath.Join(dir, exeName("codex-fakeagent"))
 	buildCodex := exec.Command("go", "build", "-o", fakeCodexAgentPath, "../codex/fakeagent")
 	buildCodex.Dir, err = os.Getwd()
 	if err != nil {
@@ -259,7 +268,17 @@ func runFakeClaudeCLI() {
 				_ = os.WriteFile(filepath.Join(wd, "mcp-config-content"), data, 0o644)
 				fi, _ := os.Stat(cfg)
 				di, _ := os.Stat(filepath.Dir(cfg))
-				modes := fmt.Sprintf("%o %o", fi.Mode().Perm(), di.Mode().Perm())
+				fileMode, dirMode := fmt.Sprintf("%o", fi.Mode().Perm()), fmt.Sprintf("%o", di.Mode().Perm())
+				if runtime.GOOS == "windows" {
+					// No POSIX mode bits: the file must be owner-only by
+					// ACL (internal/securefile); the temp dir sits under the
+					// user's %TEMP% and has no mode to assert.
+					fileMode, dirMode = "not-private", "n/a"
+					if private, err := securefile.IsPrivate(cfg); err == nil && private {
+						fileMode = "600"
+					}
+				}
+				modes := fileMode + " " + dirMode
 				_ = os.WriteFile(filepath.Join(wd, "mcp-config-modes"), []byte(modes), 0o644)
 			}
 		}
@@ -461,6 +480,7 @@ func newTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	runGitT(t, dir, "init")
+	runGitT(t, dir, "config", "core.autocrlf", "false")
 	runGitT(t, dir, "config", "user.email", "test@example.com")
 	runGitT(t, dir, "config", "user.name", "Test")
 

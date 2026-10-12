@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 
 	"github.com/spacingmind/smind/internal/relay/admission"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 type workspaceRecord struct {
@@ -52,7 +54,7 @@ func (s workspaceStore) save(records map[string]workspaceRecord) error {
 		return fmt.Errorf("relay workspaces: mkdir: %w", err)
 	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	if err := securefile.WriteFile(tmp, data); err != nil {
 		return fmt.Errorf("relay workspaces: write: %w", err)
 	}
 	if err := os.Rename(tmp, s.path); err != nil {

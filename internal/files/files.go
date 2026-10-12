@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/spacingmind/smind/internal/realpath"
 )
 
 // Entry is one entry returned by List: a file or subdirectory of a listed
@@ -203,7 +205,7 @@ func resolveInRoot(root, reqPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree root %q: %w", root, err)
 	}
-	realRoot, err := filepath.EvalSymlinks(absRoot)
+	realRoot, err := realpath.Resolve(absRoot)
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree root %q: %w", root, err)
 	}
@@ -236,11 +238,11 @@ func resolveInRoot(root, reqPath string) (string, error) {
 
 // resolveExistingPrefix resolves symlinks along path, tolerating a leaf
 // component that doesn't exist yet: it walks up to the nearest existing
-// ancestor, resolves *that* via filepath.EvalSymlinks, then rejoins the
+// ancestor, resolves *that* via realpath.Resolve, then rejoins the
 // missing suffix component verbatim (recursing again if more than one
 // trailing component is missing).
 func resolveExistingPrefix(path string) (string, error) {
-	resolved, err := filepath.EvalSymlinks(path)
+	resolved, err := realpath.Resolve(path)
 	if err == nil {
 		return resolved, nil
 	}
