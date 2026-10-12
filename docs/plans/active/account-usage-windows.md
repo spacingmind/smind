@@ -974,7 +974,7 @@ scratch).
 - [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
 - [x] PR-E chat hover card (required) — PR open (2026-10-12), awaiting review (see "PR-E record")
 - [ ] PR-D2 web footer item (default off) and pins
-- [~] PR-F rejection cooldown + observed headers: PR open (2026-10-12); core (AC59-AC65) built, AC66 surfaces (wire `cooldown`/`Window.source`, `account.usage` event, UI text) wait for PR-C, see "PR-F notes"
+- [x] PR-F rejection cooldown + observed headers: core merged (#308); surfaces (AC66) in the cooldown-surface PR, see "PR-F surfaces notes"
 - [ ] Manual live check against one real account per provider
 - [ ] Close-out docs; plan moved to `completed/`
 
@@ -1351,4 +1351,44 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
   (41 m), problem (expired login), danger tones, GLM chat (no section), plan-only
   chat (no tokens), the run pill (one, several), and "Open Usage" opening the modal.
   Viewed; the divider bug above was fixed from them.
+
+### PR-F surfaces notes (2026-10-12; AC66 remainder + affinity fix)
+
+- **Wire.** Each `account.usage` row (RPC and event) carries an optional
+  `cooldown {until (RFC 3339 UTC), scope "account"|"model", model?, reason
+  "rejected"|"fallback", window? "five_hour"|"weekly"|"weekly_model"|"unified"}`:
+  the account-wide cooldown when it is the latest-ending one, else the
+  latest-ending model-scoped one; bare-429 back-offs are never shown. `window` is
+  persisted (`quota_cooldown.rejected_window`) and follows the header that supplied
+  the deciding deadline. `report` goes through `quota.DisplayReport` (fresh fetched
+  numbers always win; observed windows are merged field-wise and flagged
+  `source:"observed"`). `mode:"cached"` and the event path use `Peek` only: no
+  usage call.
+- **Event.** `Passive.SetOnChange` publishes `account.usage` on cooldown
+  start/extend/clear and on observation changes (verdict flip at once, else at
+  most once per account per 5 s with a trailing-edge flush). Built off the proxy
+  goroutine (coalescing queue). A cooldown's end is time-based and fires no event;
+  the web card hides itself at `until`.
+- **Surfaces.** CLI `smind account usage`: `cooling down until <time> (<what>
+  rejected)` and `from recent traffic`; web Usage card (modal, Settings) and the
+  PR-E compact chat card: danger "Rate limited" badge + "until …", observed label,
+  status tone for percent-less windows. Not done: the PR-D2 sidebar footer summary
+  (merged after this branch started) does not show cooldowns; the `smind account`
+  help line in `main.go` does not mention cooldowns.
+- **Affinity.** A transient bare-429 back-off (<= 60 s) is routed around for that
+  request only and never rewrites the stored 24 h decision; with no alternative the
+  pinned account is used (its upstream answers the 429). A rejected/fallback
+  cooldown or fetched exhaustion still moves affinity.
+- **Residuals.** `DisplayReport` merges observed windows into an `unavailable`
+  report but the card only draws windows for `available` (narrow: the poller keeps
+  the last available report on errors); two event paths (fetch vs. notifier) can
+  publish out of build order within microseconds; wire `until` is truncated to
+  seconds and the client uses its own clock; a second fallback rejection while one
+  is active keeps the first window label.
+- **Validation.** `go test -race` (quota, routing, server, store, wsapi,
+  cmd/smind), web `typecheck` + vitest (usage components and libs), `GOOS=windows
+  go vet`; a real daemon (isolated `SMIND_HOME`, own port, seeded SQLite rows, no
+  network) rendered the cooldown in the CLI and the web modal/Settings in light and
+  dark (screenshots in the PR description). Independent review (no blockers): 8
+  findings fixed here, the rest listed above.
 
