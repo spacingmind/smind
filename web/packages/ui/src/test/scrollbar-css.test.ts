@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -82,10 +83,9 @@ describe("xterm and .no-scrollbar still win (SFR-S-AC3)", () => {
     // .no-scrollbar is a Tailwind @utility in shadcn/tailwind.css; a class
     // selector beats these bare pseudo-element rules, and the utility sets
     // scrollbar-width: none -- verify it still exists.
-    const shadcnCss = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "node_modules", "shadcn", "dist", "tailwind.css"),
-      "utf-8",
-    );
+    // Resolved exactly like index.css's `@import "shadcn/tailwind.css"`, so it
+    // does not depend on where the package manager hoists node_modules.
+    const shadcnCss = readFileSync(createRequire(import.meta.url).resolve("shadcn/tailwind.css"), "utf-8");
     expect(shadcnCss).toMatch(/@utility no-scrollbar[\s\S]*?scrollbar-width: none/);
     expect(shadcnCss).toMatch(/@utility no-scrollbar[\s\S]*?&::-webkit-scrollbar \{\s*display: none;/);
   });
