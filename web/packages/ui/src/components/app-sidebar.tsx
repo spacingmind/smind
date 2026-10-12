@@ -182,16 +182,6 @@ const FLUSH_SUB = "mx-0 translate-x-0 gap-0.5 border-l-0 px-0 py-0.5";
  */
 const CONTAINER_GUIDE_CLASS = "ml-4 border-l pl-1";
 
-/**
- * A space's (or "Ungrouped") content carries NO guide of its own at any
- * width: the workspace's guide already frames it, and a second ~21px level
- * left a depth-0 title ~88px from the edge of a 256px sidebar -- ~110px of
- * title, so nearly every real title was cut. Tasks stay flush under the space
- * header and rely on its icon/weight to read as nested (their status dots line
- * up under the header's icon).
- */
-const SPACE_GUIDE_CLASS = "";
-
 /** Stable empty fallback for AppSidebar's own `attention?: TaskAttention` (optional prop -- e.g. tests that don't wire one up) -- a literal `new Map()` inline would be a fresh reference every render, needlessly re-running useAttentionNotifications' effect. */
 const EMPTY_ATTENTION: TaskAttention = new Map();
 
@@ -1279,11 +1269,18 @@ function StatusRow({ icon, text, className }: { icon?: ReactNode; text: string; 
  * from the flush task-tree lists.
  */
 function ContainerContent({ kind, children }: { kind: string; children: ReactNode }) {
+  // A space's (or "Ungrouped") content carries NO guide of its own at any
+  // width: the workspace's guide already frames it, and a second ~21px level
+  // left a depth-0 title ~88px from the edge of a 256px sidebar -- ~110px of
+  // title, so nearly every real title was cut. Tasks stay flush under the space
+  // header and rely on its icon/weight to read as nested (their status dots
+  // line up under the header's icon).
+  const isSpaceLike = kind === "space" || kind === "ungrouped";
   return (
     <SidebarMenuSub
       data-testid="sidebar-container-content"
       data-container-kind={kind}
-      className={cn(FLUSH_SUB, kind === "space" || kind === "ungrouped" ? SPACE_GUIDE_CLASS : CONTAINER_GUIDE_CLASS)}
+      className={cn(FLUSH_SUB, !isSpaceLike && CONTAINER_GUIDE_CLASS)}
     >
       {children}
     </SidebarMenuSub>
