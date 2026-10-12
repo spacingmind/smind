@@ -56,12 +56,27 @@ Follow-up to #318, requested by the Supervisor from the live-permission screensh
 
 ## Progress
 
-- [ ] Spec
-- [ ] Step 1 timeline noise (D3)
-- [ ] Step 2 composer live controls + status chip row (D1, D2, D5)
-- [ ] Step 3 dock (D4)
-- [ ] Step 4 screenshots, review, `task test`, `task lint`, PR
+- [x] Spec — `61125f92`
+- [x] Step 1 timeline noise (D3) — `7a7e99a2` (Lead)
+- [x] Step 2 composer live controls + status chip row (D1, D2, D5) — `cf1ce853`, `b70352a7`, `dd63615d` (peer-sonnet)
+- [x] Step 3 dock (D4) — `97abfd65` (Lead)
+- [x] Step 4 adversarial review (sonnet, read-only) → fixes `5f5c6b2e`; screenshots before/after; `task test`, `task lint`; PR
 
 ## Validation
 
-(filled in as criteria are confirmed)
+`task test` (Go + web: 177 files / 2172 tests), `task lint`, `tsc -b` all green on the final tree.
+
+Sandbox daemon (isolated `SMIND_HOME`, own port) with the GLM agent against the fake OpenAI-SSE server (live run + permission prompt). Before (develop `1cbe6de3`): `/private/tmp/ctr-shots/before2/`; after: `/private/tmp/ctr-shots/final3/` — `{light,dark}-{desktop,mobile}-{10-live-permission,11-live-composer-zoom,12-live-mode-menu,13-live-after-mode-change}.png`, idle: `*-08-short.png`, plus the earlier long/mixed set. DOM probes in `report2.json`.
+
+- **L-AC1**: live toolbar = `Model: GLM · Permission mode · Auto-accept · Thinking · Model (this session) · Stop · Queue` (before: two permission controls plus the `Mode:` row); `mode-row` probe false in all four theme×viewport runs.
+- **L-AC2**: picking "Auto-approve edits" from the live pill: pill shows it afterwards in all four runs (RPC path); unit tests assert `setPermissionMode(runId, { modeId })` / `{ autoAccept }` and, with no run, no RPC.
+- **L-AC3**: `task-detail.test.tsx` Codex case keeps next-run semantics.
+- **L-AC4**: live options use `PILL_TRIGGER_CLASS` (Brain/Cpu icons); mode option dropped only when the pill has more than one mode to offer; model pill reads `This run: GLM-5.3` with the ADR-0025 aria-label.
+- **L-AC5**: `unrecognised` probe false (before: true in 3 of 4 runs); `benign ACP session updates produce no timeline item`, `a plan raw event still produces an unknown row`, `overview drops unknown rows, detailed keeps them`.
+- **L-AC6**: dock computed style `border-top-width: 0px`, transparent background (before: `1px`, `rgb(22,22,22)` block); `task-detail.test.tsx` asserts no `border`/`bg-` class on the dock.
+- **L-AC7**: `Also running · <title>` chip beside `Working`, same row; `composer-status-chips.test.tsx`.
+- **L-AC8**: screenshots above, all viewed.
+
+Review follow-ups beyond the spec: a successful live switch also becomes the next-run config (a queued follow-up goes out with what the pill shows); Shift+Tab while live cycles the *running* run's mode; `configRevision` keeps the live option list refetching after dropped `available_commands_update`/`config_option_update`; stale switch error cleared when the run ends; pills no longer disable (focus kept) during the RPC; `liveRun` memoized with a single-flight guard; chip aria-label starts with its visible text; ADR-0010 addendum.
+
+Deferred (low): Shift+Tab errors are swallowed (no inline message on that path); a non-model live select whose current value is not among its options renders blank; live thinking option and the next-run Thinking pill share the Brain icon for claude-native; `timelineToText` still emits `[unrecognised event]` for remaining unknown items; `docs/plans/active/account-usage-windows.md-e` (a stray sed backup) is tracked on develop and untouched here.
