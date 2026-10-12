@@ -10,7 +10,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { closeUsageModal, openUsageModal } from "@/hooks/use-usage-modal";
 import { STORAGE_KEYS } from "@/lib/storage";
-import { claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
+import { FIXTURE_NOW, claudeAccount, codexAccount } from "@/test/account-usage-fixtures";
 import { FakeUsageDaemon } from "@/test/usage-test-client";
 
 async function flush(): Promise<void> {
@@ -81,6 +81,15 @@ describe("UsageWindowBar pinning", () => {
 });
 
 describe("pins in the modal and Settings", () => {
+  // The fixtures' reset times are fixed relative to FIXTURE_NOW; pin only
+  // Date (timers stay real so the async flushes keep working), otherwise the
+  // rows read "resetting now" once the wall clock passes them.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(FIXTURE_NOW);
+  });
+  afterEach(() => vi.useRealTimers());
+
   async function openModal(daemon: FakeUsageDaemon) {
     render(<UsageModalRoot client={daemon.client} events={daemon.events} />);
     act(() => openUsageModal());
