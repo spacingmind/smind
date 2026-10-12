@@ -4,7 +4,10 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { useCanHover } from "@/hooks/use-can-hover";
 
 const PILL_CLASS =
-  "flex shrink-0 items-center gap-1 truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground";
+  "flex shrink-0 items-center gap-1 truncate rounded-full px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground";
+
+/** The pill's outline: kept for header pills, dropped inside the transcript (messages are borderless). */
+const PILL_BORDER_CLASS = "border";
 
 const OPEN_DELAY_MS = 200;
 const CLOSE_DELAY_MS = 150;
@@ -30,6 +33,7 @@ export function UsagePillCard({
   label,
   pill,
   contentTestId,
+  borderless = false,
   children,
 }: {
   testId: string;
@@ -38,6 +42,8 @@ export function UsagePillCard({
   /** What the pill shows (an icon and a one-line summary). */
   pill: ReactNode;
   contentTestId: string;
+  /** Omit the pill outline (the run footer sits inside the borderless transcript). */
+  borderless?: boolean;
   /** The card's content; `close` dismisses the card without handing focus back (the "Open Usage" link uses it). */
   children: (close: () => void) => ReactNode;
 }) {
@@ -93,7 +99,7 @@ export function UsagePillCard({
         type="button"
         data-testid={testId}
         aria-label={label}
-        className={PILL_CLASS}
+        className={borderless ? PILL_CLASS : `${PILL_CLASS} ${PILL_BORDER_CLASS}`}
         onPointerEnter={(e) => canHover && !touch(e) && schedule("hover", true)}
         onPointerLeave={(e) => canHover && !touch(e) && schedule("hover", false)}
         onFocus={() => canHover && schedule("focus", true)}

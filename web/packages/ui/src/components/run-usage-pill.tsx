@@ -55,6 +55,7 @@ export function RunUsagePill({ usage, provider }: { usage: RunUsage | undefined;
         </>
       }
       contentTestId="run-usage-popover"
+      borderless
     >
       {(close) => (
         <>

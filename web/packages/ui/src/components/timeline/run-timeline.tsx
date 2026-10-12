@@ -7,6 +7,7 @@ import { ToolGroupRow } from "@/components/timeline/tool-group-row";
 import { formatElapsed, timelineToText } from "@/components/timeline/timeline-text";
 import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import { describeStopReason } from "@/components/timeline/stop-reason";
 import { canRetryWithHigherEffort, type RunEntry } from "@/hooks/use-run-timeline";
@@ -52,67 +53,70 @@ export const RunTimeline = memo(function RunTimeline({
   const groups = groupTimeline(run.items, detailLevel);
 
   return (
-    <li data-testid="run-entry" data-run-id={run.id} className="rounded-xl border">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-ui-sm text-foreground-muted">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
-          {run.model && (
-            // ADR-0025: only a *requested* model is shown -- a default run has no chip.
-            <span
-              data-testid="run-model-chip"
-              title={`Requested model: ${run.model}`}
-              className="max-w-40 shrink truncate rounded border border-border bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
-            >
-              {run.model}
-            </span>
-          )}
-        </span>
-        <span className="flex shrink-0 items-center gap-1.5">
-          <StatusDot status={RUN_STATUS_DOT[run.status]} />
-          <span className="uppercase" data-testid="run-status">
-            {run.status}
-          </span>
-        </span>
-      </div>
-
-      <div className="px-3 py-2">
-        <p className="text-ui-base font-medium whitespace-pre-wrap" data-testid="run-prompt">
+    <li data-testid="run-entry" data-run-id={run.id} className="group flex flex-col gap-2">
+      <div className="flex justify-end">
+        <p
+          className="max-w-[85%] rounded-2xl rounded-tr-sm bg-surface px-4 py-3 text-ui-base break-words whitespace-pre-wrap"
+          data-testid="run-prompt"
+        >
           {run.prompt}
         </p>
-
-        {run.items.length > 0 && (
-          <ol className="mt-2 space-y-2" data-testid="run-timeline">
-            {groups.map((group) =>
-              group.kind === "tool-group" ? (
-                <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-              ) : (
-                <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
-              ),
-            )}
-          </ol>
-        )}
-
-        {run.err && (
-          <div className="mt-2 flex items-center gap-2">
-            <p className="text-ui-sm text-destructive" data-testid="run-error">
-              {run.err}
-            </p>
-            {onRetry && canRetryWithHigherEffort(run) && (
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                data-testid="run-retry-higher-effort"
-                onClick={() => onRetry(run)}
-              >
-                Retry with higher effort
-              </Button>
-            )}
-          </div>
-        )}
       </div>
 
-      <div className="flex items-center gap-2 border-t px-3 py-1 text-ui-sm text-foreground-muted" data-testid="run-footer">
+      {run.items.length > 0 && (
+        <ol className="space-y-1.5" data-testid="run-timeline">
+          {groups.map((group) =>
+            group.kind === "tool-group" ? (
+              <ToolGroupRow key={group.id} items={group.items} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+            ) : (
+              <TimelineRow key={group.id} item={group.item} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+            ),
+          )}
+        </ol>
+      )}
+
+      {run.err && (
+        <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2">
+          <p className="text-ui-sm text-destructive" data-testid="run-error">
+            {run.err}
+          </p>
+          {onRetry && canRetryWithHigherEffort(run) && (
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              data-testid="run-retry-higher-effort"
+              onClick={() => onRetry(run)}
+            >
+              Retry with higher effort
+            </Button>
+          )}
+        </div>
+      )}
+
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-x-3 gap-y-1 text-ui-sm text-foreground-muted transition-opacity",
+          run.status === "done" &&
+            "opacity-70 group-focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100",
+        )}
+        data-testid="run-footer"
+      >
+        <span className="flex items-center gap-1.5">
+          <StatusDot status={RUN_STATUS_DOT[run.status] ?? "neutral"} />
+          <span data-testid="run-status">{run.status}</span>
+        </span>
+        <span className="truncate">{providerLabels?.[run.provider] ?? run.provider}</span>
+        {run.model && (
+          // ADR-0025: only a *requested* model is shown -- a default run has no chip.
+          <span
+            data-testid="run-model-chip"
+            title={`Requested model: ${run.model}`}
+            className="max-w-40 shrink truncate rounded bg-surface px-1.5 py-0.5 font-mono text-ui-xs text-foreground-muted"
+          >
+            {run.model}
+          </span>
+        )}
         {elapsed && <span data-testid="run-elapsed">{elapsed}</span>}
         {stop && (
           <span

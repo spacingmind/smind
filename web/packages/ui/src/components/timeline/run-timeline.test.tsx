@@ -237,6 +237,84 @@ describe("RunTimeline", () => {
   });
 });
 
+describe("RunTimeline borderless chrome", () => {
+  /**
+   * Allow-list: semantic borders that legitimately stay inside a message --
+   * markdown tables/blockquotes (rendered under `.markdown`, timeline-markdown.tsx)
+   * the usage Popover's content (a floating surface, not a message row), and
+   * the shared Button primitive (`border-transparent` is invisible; the retry
+   * button's outline variant is an actionable control, not message chrome).
+   */
+  function borderOffenders(root: HTMLElement): string[] {
+    const offenders: string[] = [];
+    for (const el of root.querySelectorAll("*")) {
+      if (el.closest("[data-testid='run-usage-popover']")) continue;
+      if (el.closest("[data-slot='button']")) continue;
+      if (el.closest(".markdown, [data-testid='timeline-assistant']")) continue;
+      const tokens = (el.getAttribute("class") ?? "").split(/\s+/);
+      if (tokens.some((t) => /^(border|divide)(-|$)/.test(t))) offenders.push(`${el.tagName} ${el.getAttribute("class")}`);
+    }
+    return offenders;
+  }
+
+  const richEvents: RunLogEvent[] = [
+    { type: "thinking", text: "reasoning" },
+    { type: "chunk", text: "# Title\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> quote\n\n```go\nfmt.Println()\n```" },
+    { type: "tool_call", toolCallId: "t1", toolName: "Bash", title: "go test", status: "success", input: { command: "go test" }, result: "ok" },
+    { type: "tool_call", toolCallId: "t2", toolName: "Read", title: "a.go", status: "success", input: { file_path: "/w/a.go" }, result: "package a" },
+    { type: "tool_call", toolCallId: "t3", toolName: "Edit", title: "b.go", status: "failure", input: { file_path: "/w/b.go", old_string: "x", new_string: "y" } },
+    { type: "tool_call", toolCallId: "t4", toolName: "Mystery", title: "huh", status: "running", input: { a: 1 }, result: "r" },
+    { type: "permission_resolved", requestId: "r1", optionId: "allow-1", reason: "user" },
+    { type: "todo_list" },
+    { type: "raw", kind: "plan", payload: { a: 1 } },
+  ];
+
+  for (const level of ["detailed", "overview"] as const) {
+    it(`run entry carries no border or divide classes in ${level} level`, () => {
+      render(
+        <ul>
+          <RunTimeline
+            detailLevel={level}
+            run={run(richEvents, {
+              err: "boom",
+              usage: { inputTokens: 1, outputTokens: 2, costUsd: 0.01, source: "claude_result" },
+              model: "claude-opus-5-5",
+              stopReason: "max_turn_requests",
+            })}
+          />
+        </ul>,
+      );
+      // Expand everything so the detail bodies are swept too.
+      for (const btn of [...screen.queryAllByTestId("tool-group-toggle")]) fireEvent.click(btn);
+      for (const btn of [...screen.queryAllByTestId("tool-call-toggle")]) fireEvent.click(btn);
+      for (const d of document.querySelectorAll("details")) d.setAttribute("open", "");
+      fireEvent.click(screen.getByTestId("run-usage-pill"));
+
+      expect(borderOffenders(screen.getByTestId("run-entry"))).toEqual([]);
+    });
+  }
+
+  it("run footer is dimmed when finished and full strength when running or errored", () => {
+    const dimmed = (status: RunEntry["status"]) => {
+      const { unmount } = render(
+        <ul>
+          <RunTimeline run={run([], { status })} />
+        </ul>,
+      );
+      const cls = screen.getByTestId("run-footer").className;
+      unmount();
+      return cls.split(/\s+/);
+    };
+    const done = dimmed("done");
+    expect(done).toContain("opacity-70");
+    expect(done).toContain("group-hover:opacity-100");
+    expect(done).toContain("group-focus-within:opacity-100");
+    for (const status of ["running", "error", "stopped"] as const) {
+      expect(dimmed(status)).not.toContain("opacity-70");
+    }
+  });
+});
+
 describe("TimelineRow memoization", () => {
   /**
    * A render probe that doesn't require touching the component under
