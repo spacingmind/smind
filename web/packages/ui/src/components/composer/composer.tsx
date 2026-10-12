@@ -6,6 +6,7 @@ import { ComposerStatusChips } from "@/components/composer/composer-status-chips
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
 import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
+import { useProviderHealth } from "@/hooks/use-provider-health";
 import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
@@ -146,6 +147,8 @@ export function Composer({
   // pre-profiles defaults are exactly what an empty-profiles daemon still
   // gets (AC15's regression requirement).
   const [profiles, setProfiles] = useState<AgentProfile[]>([]);
+  // Lazy provider.test results for the combined picker: fetched when it first opens, not on render.
+  const providerHealth = useProviderHealth(client, providers);
   // The run config itself lives in RunConfigToolbar's shared context
   // (run-config IA); this mirror is what the composer's own submit and
   // Shift+Tab cycle read, updated by the toolbar's onChange.
@@ -381,6 +384,8 @@ export function Composer({
           profiles={profiles}
           providers={providers}
           disabled={inactive}
+          providerHealth={providerHealth.health}
+          onPickerOpen={providerHealth.ensure}
           onChange={(value) => {
             setRunConfig(value);
             onRunConfigChange?.(value.state);
@@ -392,9 +397,7 @@ export function Composer({
             data-testid="composer-toolbar-row"
             className="flex flex-wrap items-center px-2 pb-2 pt-1 focus-visible:ring-3 focus-visible:ring-ring/50 rounded-xl"
           >
-            <RunConfigToolbar.Agent />
-            <RunConfigToolbar.Provider />
-            <RunConfigToolbar.Model />
+            <RunConfigToolbar.ModelPicker />
             <RunConfigToolbar.Thinking />
             <RunConfigToolbar.Mode />
             {configOptions && (
