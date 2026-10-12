@@ -73,7 +73,9 @@ func TestParseRetryAfter(t *testing.T) {
 		{"negative", "-5", 0},
 		{"empty", "", 0},
 		{"junk", "soon", 0},
-		{"absurd", "99999999999999", 0},
+		{"absurd", "99999999999999", retryAfterCap},
+		{"over the cap", "1e12", retryAfterCap},
+		{"just under the cap", "21599", 21599 * time.Second},
 		{"http-date future", now.Add(90 * time.Second).In(time.FixedZone("GMT", 0)).Format(time.RFC1123), 90 * time.Second},
 		{"http-date past", now.Add(-time.Hour).In(time.FixedZone("GMT", 0)).Format(time.RFC1123), 0},
 	}
@@ -153,9 +155,15 @@ func TestParseRFC3339RejectsUnmarshalableYears(t *testing.T) {
 
 func TestParseRetryAfterNaNAndInf(t *testing.T) {
 	t.Parallel()
-	for _, v := range []string{"NaN", "nan", "Inf", "+Inf", "-Inf"} {
+	for _, v := range []string{"NaN", "nan", "-Inf"} {
 		if got := parseRetryAfter(v, time.Unix(0, 0)); got != 0 {
 			t.Errorf("parseRetryAfter(%q) = %v, want 0", v, got)
+		}
+	}
+	// "A very long time" is the cap, never the shortest wait.
+	for _, v := range []string{"Inf", "+Inf"} {
+		if got := parseRetryAfter(v, time.Unix(0, 0)); got != retryAfterCap {
+			t.Errorf("parseRetryAfter(%q) = %v, want %v", v, got, retryAfterCap)
 		}
 	}
 }

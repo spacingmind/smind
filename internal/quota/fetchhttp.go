@@ -133,13 +133,20 @@ func parseRetryAfter(v string, now time.Time) time.Duration {
 		return 0
 	}
 	if secs, err := strconv.ParseFloat(v, 64); err == nil {
-		if math.IsNaN(secs) || secs < 0 || secs > float64(1<<31) {
+		if math.IsNaN(secs) || secs < 0 {
 			return 0
+		}
+		// An absurd value means "a very long time": hand back the cap, not
+		// the shortest wait.
+		if secs >= retryAfterCap.Seconds() {
+			return retryAfterCap
 		}
 		return time.Duration(secs * float64(time.Second))
 	}
 	if at, err := http.ParseTime(v); err == nil {
-		if d := at.Sub(now); d > 0 {
+		if d := at.Sub(now); d > retryAfterCap {
+			return retryAfterCap
+		} else if d > 0 {
 			return d
 		}
 	}

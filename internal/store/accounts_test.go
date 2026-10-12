@@ -128,6 +128,12 @@ func TestStore_DeleteAccountCascades(t *testing.T) {
 	if _, err := s.CreateQuotaSnapshot(QuotaSnapshot{AccountID: keep.ID, UsageData: "{}", PolledAt: now, ExpiresAt: later}); err != nil {
 		t.Fatalf("CreateQuotaSnapshot() error = %v", err)
 	}
+	if err := s.SaveQuotaPollState(QuotaPollState{AccountID: kill.ID, LastAttemptAt: now}); err != nil {
+		t.Fatalf("SaveQuotaPollState(kill) error = %v", err)
+	}
+	if err := s.SaveQuotaPollState(QuotaPollState{AccountID: keep.ID, LastAttemptAt: now}); err != nil {
+		t.Fatalf("SaveQuotaPollState(keep) error = %v", err)
+	}
 	if err := s.AddWorkspaceAccount(ws.ID, kill.ID); err != nil {
 		t.Fatalf("AddWorkspaceAccount(kill) error = %v", err)
 	}
@@ -172,6 +178,13 @@ func TestStore_DeleteAccountCascades(t *testing.T) {
 	}
 	if len(links) != 1 || links[0] != keep.ID {
 		t.Fatalf("ListWorkspaceAccountIDs() = %+v, want only the sibling's link", links)
+	}
+
+	if _, ok, err := s.GetQuotaPollState(kill.ID); err != nil || ok {
+		t.Fatalf("GetQuotaPollState(kill) = %v, %v, want false, nil", ok, err)
+	}
+	if _, ok, err := s.GetQuotaPollState(keep.ID); err != nil || !ok {
+		t.Fatalf("GetQuotaPollState(keep) = %v, %v, want true, nil", ok, err)
 	}
 }
 
