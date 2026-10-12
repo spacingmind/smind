@@ -30,6 +30,36 @@ function TooltipTrigger({
   return <TooltipPrimitive.Trigger data-slot="tooltip-trigger" {...props} />
 }
 
+/** How long after a menu closes a focus-opened tooltip on its trigger is ignored. */
+const MENU_CLOSE_TOOLTIP_GRACE_MS = 400
+
+/**
+ * For an icon button that is both a tooltip trigger and a menu/popover
+ * trigger: Radix returns focus to the trigger when the menu closes, and a
+ * tooltip trigger opens on focus, so without this the tooltip pops up after
+ * every menu selection and stays until blur. Spread `tooltip` on <Tooltip>
+ * and call `onMenuOpenChange` from the menu root's `onOpenChange`: opening
+ * the menu hides the tooltip, and a tooltip open requested right after the
+ * menu closed is dropped (hovering the trigger later opens it normally).
+ */
+function useMenuTooltip() {
+  const [open, setOpen] = React.useState(false)
+  const closedAt = React.useRef(0)
+  return {
+    tooltip: {
+      open,
+      onOpenChange: (next: boolean) => {
+        if (next && Date.now() - closedAt.current < MENU_CLOSE_TOOLTIP_GRACE_MS) return
+        setOpen(next)
+      },
+    },
+    onMenuOpenChange: (menuOpen: boolean) => {
+      if (menuOpen) setOpen(false)
+      else closedAt.current = Date.now()
+    },
+  }
+}
+
 function TooltipContent({
   className,
   sideOffset = 0,
@@ -54,4 +84,4 @@ function TooltipContent({
   )
 }
 
-export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger }
+export { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger, useMenuTooltip }
