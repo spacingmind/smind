@@ -72,11 +72,11 @@ Borderless
 
 ## Progress
 
-- [ ] Spec (this file)
-- [ ] Step 1 rail model + hover intent port + tests
-- [ ] Step 2 rail component + hook + task-detail wiring + tests
-- [ ] Step 3 borderless restyle + tests
-- [ ] Step 4 sandbox seed + screenshots before/after, fixes
+- [x] Spec (this file) — `1a91e0ef`
+- [x] Step 1 rail model + hover intent port + tests — `bdb369d6` (peer-sonnet; peer-glm hit a 429 usage limit before writing anything)
+- [x] Step 2 rail component + hook + task-detail wiring + tests — `b977809a`, `351ade84`, `ee24bd9c`
+- [x] Step 3 borderless restyle + tests — `cd638b3e`, `58b8b85d`, `8c432988`, `b3da533c` (peer-sonnet, in parallel with step 2: disjoint write scopes)
+- [x] Step 4 sandbox seed + screenshots before/after, fixes — Lead: pointer→slot mapping bug found by the live click probe (`b60f9eed`), row alignment / footer / interrupted dot / path-row layout (`440bfa02`), merge of origin/develop (usage pill card from PR-E made borderless via a `borderless` prop), `text-ui-sm` token
 - [ ] Step 5 review, `task test`, `task lint`, PR
 
 ## Validation
