@@ -240,7 +240,7 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 	// (Phase 2). Until then, every configured account of the right provider
 	// is a pool candidate; this is a documented Phase 1 simplification, not
 	// a bug.
-	account, err := p.router.Route(ctx, row.SessionKey, routing.PolicyPool, candidateIDs)
+	account, err := p.router.Route(ctx, row.SessionKey, routing.PolicyPool, candidateIDs, routing.WithModel(model))
 	if err != nil {
 		routeError(http.StatusServiceUnavailable, fmt.Errorf("route request: %w", err))
 		return

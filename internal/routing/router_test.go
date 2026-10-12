@@ -14,49 +14,27 @@ import (
 	"github.com/spacingmind/smind/internal/store"
 )
 
-type fakeFetcher struct {
-	mu    sync.Mutex
-	usage map[int64]quota.Usage
-	calls map[int64]int
-	errs  map[int64]error
+// neverFetcher is the ReportFetcher behind the routing tests' poller: it must
+// never be called. WithEnabled(false) means the poller never reaches it, so
+// any call is a shim bug.
+type neverFetcher struct {
+	t *testing.T
 }
 
-func newFakeFetcher() *fakeFetcher {
-	return &fakeFetcher{usage: map[int64]quota.Usage{}, calls: map[int64]int{}}
+func (f neverFetcher) Fetch(ctx context.Context, account accounts.Account) (quota.Report, error) {
+	f.t.Errorf("Fetch(%d) called, want zero fetches under the shim", account.ID)
+	return quota.Report{}, errors.New("unreachable")
 }
 
-func (f *fakeFetcher) Fetch(ctx context.Context, account store.Account) (quota.Usage, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls[account.ID]++
-	if err := f.errs[account.ID]; err != nil {
-		return quota.Usage{}, err
-	}
-	return f.usage[account.ID], nil
+// newShimPoller builds the disabled poller every routing test routes over:
+// enabled=false, so nothing is fetched, so Peek reports "no data" and
+// nothing is exhausted.
+func newShimPoller(t *testing.T, s *store.Store, reg *accounts.Registry) *quota.Poller {
+	t.Helper()
+	return quota.New(s, reg, neverFetcher{t: t}, quota.WithEnabled(false))
 }
 
-func (f *fakeFetcher) setAvailable(accountID int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.usage[accountID] = quota.Usage{TokensUsed: 10, TokensLimit: 100}
-}
-
-func (f *fakeFetcher) setExhausted(accountID int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.usage[accountID] = quota.Usage{TokensUsed: 100, TokensLimit: 100}
-}
-
-func (f *fakeFetcher) setError(accountID int64, err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.errs == nil {
-		f.errs = map[int64]error{}
-	}
-	f.errs[accountID] = err
-}
-
-func newTestRouter(t *testing.T, opts ...Option) (*Router, *store.Store, *accounts.Registry, *fakeFetcher) {
+func newTestRouter(t *testing.T, opts ...Option) (*Router, *store.Store, *accounts.Registry) {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -69,10 +47,10 @@ func newTestRouter(t *testing.T, opts ...Option) (*Router, *store.Store, *accoun
 	})
 
 	reg := accounts.New(s)
-	fetcher := newFakeFetcher()
-	poller := quota.New(s, fetcher)
+	poller := newShimPoller(t, s, reg)
+	t.Cleanup(poller.Close)
 	r := New(s, reg, poller, opts...)
-	return r, s, reg, fetcher
+	return r, s, reg
 }
 
 func newAccount(t *testing.T, reg *accounts.Registry, label string) int64 {
@@ -90,22 +68,21 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 	tests := []struct {
 		name    string
 		policy  string
-		setup   func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) (candidateIDs []int64, wantID int64)
+		setup   func(t *testing.T, reg *accounts.Registry, fr *fakeReader) (candidateIDs []int64, wantID int64)
 		wantErr bool
 	}{
 		{
 			name:   "hard policy success",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
-				fetcher.setAvailable(a)
 				return []int64{a}, a
 			},
 		},
 		{
 			name:   "hard policy zero candidates errors",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				return nil, 0
 			},
 			wantErr: true,
@@ -113,11 +90,9 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "hard policy multiple candidates errors",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
-				fetcher.setAvailable(a)
-				fetcher.setAvailable(b)
 				return []int64{a, b}, 0
 			},
 			wantErr: true,
@@ -125,9 +100,9 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "hard policy exhausted account errors with no failover",
 			policy: PolicyHard,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
-				fetcher.setExhausted(a)
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
 				return []int64{a}, 0
 			},
 			wantErr: true,
@@ -135,35 +110,32 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "pool policy picks first non-exhausted candidate",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
-				fetcher.setAvailable(a)
-				fetcher.setAvailable(b)
 				return []int64{a, b}, a
 			},
 		},
 		{
 			name:   "pool policy fails over past exhausted candidates",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
 				c := newAccount(t, reg, "c")
-				fetcher.setExhausted(a)
-				fetcher.setExhausted(b)
-				fetcher.setAvailable(c)
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
+				fr.set(b, exhaustedResult(testNow.Add(2*time.Hour)))
 				return []int64{a, b, c}, c
 			},
 		},
 		{
 			name:   "pool policy all exhausted errors",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
 				b := newAccount(t, reg, "b")
-				fetcher.setExhausted(a)
-				fetcher.setExhausted(b)
+				fr.set(a, exhaustedResult(testNow.Add(time.Hour)))
+				fr.set(b, exhaustedResult(testNow.Add(2*time.Hour)))
 				return []int64{a, b}, 0
 			},
 			wantErr: true,
@@ -171,7 +143,7 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "pool policy empty candidates errors",
 			policy: PolicyPool,
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				return nil, 0
 			},
 			wantErr: true,
@@ -179,9 +151,8 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		{
 			name:   "unknown policy errors",
 			policy: "bogus",
-			setup: func(t *testing.T, reg *accounts.Registry, fetcher *fakeFetcher) ([]int64, int64) {
+			setup: func(t *testing.T, reg *accounts.Registry, fr *fakeReader) ([]int64, int64) {
 				a := newAccount(t, reg, "a")
-				fetcher.setAvailable(a)
 				return []int64{a}, 0
 			},
 			wantErr: true,
@@ -192,8 +163,8 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
-			candidateIDs, wantID := tt.setup(t, reg, fetcher)
+			r, s, reg, fr, _ := newFakeRouter(t)
+			candidateIDs, wantID := tt.setup(t, reg, fr)
 
 			got, err := r.Route(context.Background(), "session-"+tt.name, tt.policy, candidateIDs)
 
@@ -231,11 +202,9 @@ func TestRouter_Route_PolicySelection(t *testing.T) {
 func TestRouter_Route_SessionAffinityHolds(t *testing.T) {
 	t.Parallel()
 
-	r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	r, s, reg := newTestRouter(t)
 	a := newAccount(t, reg, "a")
 	b := newAccount(t, reg, "b")
-	fetcher.setAvailable(a)
-	fetcher.setAvailable(b)
 
 	ctx := context.Background()
 	first, err := r.Route(ctx, "sess", PolicyPool, []int64{a, b})
@@ -262,9 +231,8 @@ func TestRouter_Route_SessionAffinityHolds(t *testing.T) {
 func TestRouter_Route_SessionAffinityExpires(t *testing.T) {
 	t.Parallel()
 
-	r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0), WithRoutingTTL(20*time.Millisecond))
+	r, s, reg := newTestRouter(t, WithRoutingTTL(20*time.Millisecond))
 	a := newAccount(t, reg, "a")
-	fetcher.setAvailable(a)
 
 	ctx := context.Background()
 	if _, err := r.Route(ctx, "sess", PolicyHard, []int64{a}); err != nil {
@@ -286,49 +254,11 @@ func TestRouter_Route_SessionAffinityExpires(t *testing.T) {
 	}
 }
 
-func TestRouter_Route_SessionAffinityBrokenByExhaustion(t *testing.T) {
-	t.Parallel()
-
-	r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
-	a := newAccount(t, reg, "a")
-	b := newAccount(t, reg, "b")
-	fetcher.setAvailable(a)
-	fetcher.setAvailable(b)
-
-	ctx := context.Background()
-	first, err := r.Route(ctx, "sess", PolicyPool, []int64{a, b})
-	if err != nil {
-		t.Fatalf("first Route() error = %v", err)
-	}
-	if first.ID != a {
-		t.Fatalf("first Route() account = %d, want %d", first.ID, a)
-	}
-
-	fetcher.setExhausted(a)
-
-	second, err := r.Route(ctx, "sess", PolicyPool, []int64{a, b})
-	if err != nil {
-		t.Fatalf("second Route() error = %v", err)
-	}
-	if second.ID != b {
-		t.Errorf("second Route() account = %d, want %d (should fail over once affinity account is exhausted)", second.ID, b)
-	}
-
-	decisions, err := s.ListRoutingDecisions()
-	if err != nil {
-		t.Fatalf("ListRoutingDecisions() error = %v", err)
-	}
-	if len(decisions) != 2 {
-		t.Errorf("routing decisions = %d, want 2 (exhaustion should re-decide)", len(decisions))
-	}
-}
-
 func TestRouter_Route_ConcurrentDifferentSessions(t *testing.T) {
 	t.Parallel()
 
-	r, _, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	r, _, reg := newTestRouter(t)
 	a := newAccount(t, reg, "a")
-	fetcher.setAvailable(a)
 
 	const sessions = 8
 	var wg sync.WaitGroup
@@ -350,15 +280,13 @@ func TestRouter_Route_ConcurrentDifferentSessions(t *testing.T) {
 	}
 }
 
+// TestRouter_Route_UnknownQuotaFailsOpen: with no report at all (a disabled
+// poller), routing still succeeds.
 func TestRouter_Route_UnknownQuotaFailsOpen(t *testing.T) {
 	t.Parallel()
 
-	r, _, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	r, _, reg := newTestRouter(t)
 	a := newAccount(t, reg, "a")
-	// Deliberately not calling fetcher.setAvailable/setExhausted: the fake
-	// returns a zero-value quota.Usage (TokensLimit == 0), simulating an
-	// account with no known quota data yet.
-	_ = fetcher
 
 	got, err := r.Route(context.Background(), "sess", PolicyHard, []int64{a})
 	if err != nil {
@@ -369,37 +297,11 @@ func TestRouter_Route_UnknownQuotaFailsOpen(t *testing.T) {
 	}
 }
 
-func TestRouter_Route_QuotaFetchErrorPropagates(t *testing.T) {
-	t.Parallel()
-
-	r, s, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
-	a := newAccount(t, reg, "a")
-	wantErr := errors.New("provider usage API unreachable")
-	fetcher.setError(a, wantErr)
-
-	_, err := r.Route(context.Background(), "sess", PolicyHard, []int64{a})
-	if err == nil {
-		t.Fatal("Route() error = nil, want propagated fetch error")
-	}
-	if !errors.Is(err, wantErr) {
-		t.Errorf("Route() error = %v, want wrapping %v", err, wantErr)
-	}
-
-	decisions, err := s.ListRoutingDecisions()
-	if err != nil {
-		t.Fatalf("ListRoutingDecisions() error = %v", err)
-	}
-	if len(decisions) != 0 {
-		t.Errorf("routing decisions = %d, want 0 (no decision on quota-check failure)", len(decisions))
-	}
-}
-
 func TestRouter_Route_ConcurrentSameSession(t *testing.T) {
 	t.Parallel()
 
-	r, _, reg, fetcher := newTestRouter(t, WithQuotaTTL(0))
+	r, _, reg := newTestRouter(t)
 	a := newAccount(t, reg, "a")
-	fetcher.setAvailable(a)
 
 	const workers = 8
 	var wg sync.WaitGroup

@@ -27,17 +27,6 @@ import (
 	"github.com/spacingmind/smind/internal/workspace"
 )
 
-// noopQuotaFetcher always reports zero usage. Real per-provider usage
-// polling (Anthropic/OpenAI/etc. quota APIs) isn't implemented yet, so this
-// is a known gap, not a mistake: routing.Router treats an account with no
-// known limit as available, so this keeps routing failing open (never
-// blocking on quota) until real quota fetching lands.
-type noopQuotaFetcher struct{}
-
-func (noopQuotaFetcher) Fetch(ctx context.Context, account store.Account) (quota.Usage, error) {
-	return quota.Usage{}, nil
-}
-
 // cmdServe starts the daemon: HTTP API (proxy endpoints + /ws) plus the
 // embedded web UI, until SIGINT/SIGTERM, then shuts down gracefully. This
 // is the previous (pre-subcommand) main()'s entire body, unchanged except
@@ -60,8 +49,16 @@ func cmdServe(args []string) int {
 	defer db.Close()
 
 	registry := accounts.New(db)
-	poller := quota.New(db, noopQuotaFetcher{})
-	router := routing.New(db, registry, poller)
+	// The poller makes no request until a user surface asks (ADR-0028 §3):
+	// no fetch at startup, on account events, or on a timer.
+	uc := cfg.AccountUsage
+	poller := quota.New(db, registry, quota.NewAccountFetcher(registry),
+		quota.WithEnabled(uc.Enabled),
+		quota.WithTTL(time.Duration(uc.TTLSeconds)*time.Second))
+	defer poller.Close()
+	router := routing.New(db, registry, poller,
+		routing.WithUsageRouting(uc.Routing),
+		routing.WithExhaustThresholdPct(uc.ExhaustThresholdPct))
 	wm := workspace.New(db)
 	wm.SetMaxDepth(cfg.Orchestration.MaxDepth)
 	wtSettings := workspace.WorktreesSettings{

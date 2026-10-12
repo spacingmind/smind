@@ -5,6 +5,7 @@ package routing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -24,20 +25,34 @@ const (
 	PolicyPool = "pool"
 )
 
-const (
-	defaultRoutingTTL = 24 * time.Hour
-	defaultQuotaTTL   = 5 * time.Minute
-)
+const defaultRoutingTTL = 24 * time.Hour
 
 // Router selects an account for a session, honoring session affinity and the
 // given routing policy.
 type Router struct {
 	store    *store.Store
 	registry *accounts.Registry
-	poller   *quota.Poller
+	reader   quota.Reader
 
 	routingTTL time.Duration
-	quotaTTL   time.Duration
+
+	usageRouting bool
+	thresholdPct int
+	clock        func() time.Time
+}
+
+// RouteOption adjusts a single Route call.
+type RouteOption func(*routeConfig)
+
+type routeConfig struct {
+	model string
+}
+
+// WithModel tells Route which model the request is for, so model-scoped
+// usage windows (e.g. weekly Opus) count only for matching requests. Without
+// it only account-wide windows count.
+func WithModel(model string) RouteOption {
+	return func(c *routeConfig) { c.model = model }
 }
 
 // Option configures a Router constructed via New.
@@ -49,20 +64,41 @@ func WithRoutingTTL(ttl time.Duration) Option {
 	return func(r *Router) { r.routingTTL = ttl }
 }
 
-// WithQuotaTTL overrides the TTL used when checking account quota via
-// quota.Poller.Get. Defaults to 5m.
-func WithQuotaTTL(ttl time.Duration) Option {
-	return func(r *Router) { r.quotaTTL = ttl }
+// WithUsageRouting toggles exhaustion-aware routing on cached usage windows.
+// Defaults to true; when false the Reader is never consulted.
+func WithUsageRouting(enabled bool) Option {
+	return func(r *Router) { r.usageRouting = enabled }
 }
 
-// New returns a Router backed by s, reg, and poller.
-func New(s *store.Store, reg *accounts.Registry, poller *quota.Poller, opts ...Option) *Router {
+// WithExhaustThresholdPct sets the used percentage at or above which a window
+// counts as full. Defaults to 100; a value outside 1..100 is ignored, so a
+// bad config can never make every account look exhausted.
+func WithExhaustThresholdPct(pct int) Option {
+	return func(r *Router) {
+		if pct >= 1 && pct <= 100 {
+			r.thresholdPct = pct
+		}
+	}
+}
+
+// WithClock overrides the clock used to compare window reset times.
+func WithClock(now func() time.Time) Option {
+	return func(r *Router) { r.clock = now }
+}
+
+// New returns a Router backed by s and reg. reader is the quota read view
+// consulted for exhaustion (ADR-0028 §4). It holds a quota.Reader, which has
+// no fetch method, so routing can never reach a usage endpoint.
+func New(s *store.Store, reg *accounts.Registry, reader quota.Reader, opts ...Option) *Router {
 	r := &Router{
 		store:      s,
 		registry:   reg,
-		poller:     poller,
+		reader:     reader,
 		routingTTL: defaultRoutingTTL,
-		quotaTTL:   defaultQuotaTTL,
+
+		usageRouting: true,
+		thresholdPct: 100,
+		clock:        time.Now,
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -76,7 +112,14 @@ func New(s *store.Store, reg *accounts.Registry, poller *quota.Poller, opts ...O
 // account isn't currently exhausted, that account is reused (session
 // affinity). Otherwise a new account is selected from candidateAccountIDs
 // per policy, persisted as the new decision, and returned.
-func (r *Router) Route(ctx context.Context, sessionKey string, policy string, candidateAccountIDs []int64) (accounts.Account, error) {
+//
+// Exhaustion is judged from the cached usage windows only; Route never
+// fetches and never fails because usage data is missing or stale.
+func (r *Router) Route(ctx context.Context, sessionKey string, policy string, candidateAccountIDs []int64, opts ...RouteOption) (accounts.Account, error) {
+	var rc routeConfig
+	for _, opt := range opts {
+		opt(&rc)
+	}
 	decision, found, err := r.latestDecision(sessionKey)
 	if err != nil {
 		return accounts.Account{}, fmt.Errorf("latest routing decision for session %q: %w", sessionKey, err)
@@ -86,16 +129,12 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 	// a pin to an account outside that set (e.g. a glm-* account for a
 	// claude-* request) must not override it.
 	if found && time.Now().UTC().Before(decision.ExpiresAt) && slices.Contains(candidateAccountIDs, decision.AccountID) {
-		exhausted, err := r.isExhausted(ctx, decision.AccountID)
-		if err != nil {
-			return accounts.Account{}, err
-		}
-		if !exhausted {
+		if exhausted, _ := r.exhaustion(decision.AccountID, rc.model, r.clock()); !exhausted {
 			return r.registry.Get(decision.AccountID)
 		}
 	}
 
-	accountID, err := r.selectAccount(ctx, policy, candidateAccountIDs)
+	accountID, err := r.selectAccount(policy, candidateAccountIDs, rc.model)
 	if err != nil {
 		return accounts.Account{}, err
 	}
@@ -116,48 +155,87 @@ func (r *Router) Route(ctx context.Context, sessionKey string, policy string, ca
 
 // selectAccount picks a new account for policy from candidateAccountIDs,
 // without consulting or persisting any routing decision.
-func (r *Router) selectAccount(ctx context.Context, policy string, candidateAccountIDs []int64) (int64, error) {
+func (r *Router) selectAccount(policy string, candidateAccountIDs []int64, model string) (int64, error) {
+	now := r.clock()
 	switch policy {
 	case PolicyHard:
 		if len(candidateAccountIDs) != 1 {
 			return 0, fmt.Errorf("routing: hard policy requires exactly one candidate account, got %d", len(candidateAccountIDs))
 		}
 		accountID := candidateAccountIDs[0]
-		exhausted, err := r.isExhausted(ctx, accountID)
-		if err != nil {
-			return 0, err
-		}
-		if exhausted {
-			return 0, fmt.Errorf("routing: account %d is exhausted; hard policy has no failover", accountID)
+		if exhausted, until := r.exhaustion(accountID, model, now); exhausted {
+			return 0, fmt.Errorf("routing: account %d is exhausted until %s; hard policy has no failover", accountID, until.UTC().Format(time.RFC3339))
 		}
 		return accountID, nil
 
 	case PolicyPool:
+		var earliest time.Time
 		for _, accountID := range candidateAccountIDs {
-			exhausted, err := r.isExhausted(ctx, accountID)
-			if err != nil {
-				return 0, err
-			}
+			exhausted, until := r.exhaustion(accountID, model, now)
 			if !exhausted {
 				return accountID, nil
 			}
+			if earliest.IsZero() || until.Before(earliest) {
+				earliest = until
+			}
 		}
-		return 0, fmt.Errorf("routing: no non-exhausted candidate accounts for pool policy (%d checked)", len(candidateAccountIDs))
+		if len(candidateAccountIDs) == 0 {
+			return 0, errors.New("routing: no non-exhausted candidate accounts for pool policy (0 checked)")
+		}
+		return 0, fmt.Errorf("routing: all %d candidate accounts are exhausted; earliest reset %s", len(candidateAccountIDs), earliest.UTC().Format(time.RFC3339))
 
 	default:
 		return 0, fmt.Errorf("routing: unknown policy %q", policy)
 	}
 }
 
-// isExhausted reports whether accountID has used up its known quota. An
-// account with no known limit (TokensLimit == 0) is treated as available,
-// since the absence of data shouldn't block routing.
-func (r *Router) isExhausted(ctx context.Context, accountID int64) (bool, error) {
-	usage, err := r.poller.Get(ctx, accountID, r.quotaTTL)
-	if err != nil {
-		return false, fmt.Errorf("check quota for account %d: %w", accountID, err)
+// exhaustion reports whether accountID cannot serve model right now according
+// to the cached usage report, and if so the time it becomes usable again (the
+// latest reset among the windows that exhaust it). It only reads the cache:
+// anything unknown (cold, error, unavailable, legacy, disabled) is not
+// exhausted.
+func (r *Router) exhaustion(accountID int64, model string, now time.Time) (exhausted bool, until time.Time) {
+	if !r.usageRouting {
+		return false, time.Time{}
 	}
-	return usage.TokensLimit > 0 && usage.TokensUsed >= usage.TokensLimit, nil
+	res := r.reader.Peek(accountID)
+	rep := res.Report
+	if !res.Enabled || rep == nil || rep.Status != quota.StatusAvailable {
+		return false, time.Time{}
+	}
+	// Extra usage lets the account keep serving past its windows (ADR-0028 D9).
+	if rep.OverageEnabled != nil && *rep.OverageEnabled {
+		return false, time.Time{}
+	}
+	threshold := float64(r.thresholdPct)
+	for _, w := range rep.Windows {
+		if !w.AppliesTo(model) {
+			continue
+		}
+		full := (w.UsedPct != nil && *w.UsedPct >= threshold) || (w.RemainingPct != nil && *w.RemainingPct <= 0)
+		if !full {
+			continue
+		}
+		var reset time.Time
+		if w.ResetsAt != nil {
+			// A passed reset means the window rolled over; trust that
+			// without refetching.
+			if !now.Before(*w.ResetsAt) {
+				continue
+			}
+			reset = *w.ResetsAt
+		} else {
+			reset = rep.FetchedAt.Add(2 * r.reader.TTL())
+			if now.After(reset) {
+				continue
+			}
+		}
+		exhausted = true
+		if reset.After(until) {
+			until = reset
+		}
+	}
+	return exhausted, until
 }
 
 // latestDecision returns the most recent routing decision for sessionKey.
