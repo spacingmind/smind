@@ -9,7 +9,7 @@ import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
-import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, type LiveRunControls, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -95,6 +95,7 @@ export function Composer({
   configOptions,
   otherRunningChat,
   onJumpToChat,
+  liveRun,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -138,6 +139,8 @@ export function Composer({
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's tab. */
   onJumpToChat?: (chatId: number) => void;
+  /** The running run's mode controls (D1): while set, the toolbar's Mode/Auto-accept pills drive that run via run.setPermissionMode instead of the next run's config. Omit when there is no live-switch-capable run. */
+  liveRun?: LiveRunControls | null;
   configOptions?: {
     options: ConfigOptionParams[];
     error: string | null;
@@ -304,10 +307,13 @@ export function Composer({
     // Select re-rendering with the new value *is* the visible feedback --
     // no separate indicator to keep in sync.
     if (e.key === "Tab" && e.shiftKey && !inactive) {
-      const next = resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
+      const next = liveRun
+        ? resolveNextPermissionMode(liveRun.modes, liveRun.mode)
+        : resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
       if (next) {
         e.preventDefault();
-        runConfig?.actions.setPermissionMode(next);
+        if (liveRun) liveRun.onChange({ modeId: next }).catch(() => {});
+        else runConfig?.actions.setPermissionMode(next);
       }
     }
   }
@@ -396,6 +402,7 @@ export function Composer({
           profiles={profiles}
           providers={providers}
           disabled={inactive}
+          liveRun={liveRun}
           providerHealth={providerHealth.health}
           onPickerOpen={providerHealth.ensure}
           onChange={(value) => {

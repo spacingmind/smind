@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
-import { PermissionModeControl } from "@/components/permission-mode-control";
 import { TaskLineageHeader } from "@/components/task-lineage";
 import { Composer } from "@/components/composer/composer";
 import type { RunConfigState } from "@/components/composer/run-config-toolbar";
@@ -183,6 +182,17 @@ export function TaskDetailPane({
   // session progresses (see the hook's own doc comment for why there's no
   // dedicated push notification for this instead).
   const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
+  // D1: while a live-switch-capable run is active the composer's Mode/Auto-accept pills drive it.
+  const liveRun =
+    runningRun && supportsLiveModeSwitch(providers, runningRun.provider)
+      ? {
+          modes: providerModes(providers, runningRun.provider),
+          mode: effectiveMode(providers, runningRun.provider, runningRun.permissionMode),
+          autoAccept: runningRun.autoAccept,
+          showAutoAccept: supportsAutoAccept(providers, runningRun.provider),
+          onChange: (change: { modeId?: string; autoAccept?: boolean }) => setPermissionMode(runningRun.id, change),
+        }
+      : null;
   const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
 
   // Auto-follow keys off the total item count across every run: that is
@@ -391,16 +401,6 @@ export function TaskDetailPane({
         </div>
       )}
 
-      {runningRun && supportsLiveModeSwitch(providers, runningRun.provider) && (
-        <PermissionModeControl
-          modes={providerModes(providers, runningRun.provider)}
-          mode={effectiveMode(providers, runningRun.provider, runningRun.permissionMode)}
-          autoAccept={runningRun.autoAccept}
-          showAutoAccept={supportsAutoAccept(providers, runningRun.provider)}
-          onChange={(change) => setPermissionMode(runningRun.id, change)}
-        />
-      )}
-
       <Composer
         client={client}
         taskId={task.ID}
@@ -419,6 +419,7 @@ export function TaskDetailPane({
         textareaRef={composerTextareaRef}
         toolbarRef={toolbarRef}
         onRunConfigChange={setRunConfigState}
+        liveRun={liveRun}
         otherRunningChat={otherRunningChat}
         onJumpToChat={onJumpToChat}
         configOptions={{ options: configOptions.options, error: configOptions.error, onSetOption: configOptions.setOption }}

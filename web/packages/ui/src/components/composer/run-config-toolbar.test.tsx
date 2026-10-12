@@ -1,8 +1,8 @@
 import { act } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { RunConfigToolbar } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, type LiveRunControls } from "@/components/composer/run-config-toolbar";
 import type { AgentProfile, ProviderInfo } from "@/lib/types";
 
 /** The same served catalog shape composer.test.tsx stubs provider.list with: Claude's mode list is static, GLM's ACP auto-accept is on. */
@@ -158,5 +158,50 @@ describe("RunConfigToolbar pills", () => {
       if (trigger.dataset.testid === "composer-model-picker") expect(trigger.querySelector(":scope > span")?.className).toContain("max-sm:hidden");
       else expect(trigger.className).toContain("max-sm:[&>span]:hidden!");
     }
+  });
+});
+
+describe("RunConfigToolbar live run (D1)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  const claudeModes = SERVED_PROVIDERS[0].modes!;
+  function live(over: Partial<LiveRunControls> = {}): LiveRunControls {
+    return { modes: claudeModes, mode: "plan", autoAccept: false, showAutoAccept: false, onChange: vi.fn().mockResolvedValue(undefined), ...over };
+  }
+
+  it("live run: the mode pill shows the running run's mode and changing it calls the live onChange", async () => {
+    const liveRun = live();
+    renderToolbar({ liveRun });
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
+
+    await pick("Permission mode", "Always Ask");
+    expect(liveRun.onChange).toHaveBeenCalledWith({ modeId: "default" });
+  });
+
+  it("live run: Auto-accept toggle calls onChange with autoAccept", async () => {
+    const liveRun = live({ modes: SERVED_PROVIDERS[1].modes!, mode: "default", showAutoAccept: true });
+    renderToolbar({ liveRun });
+    const toggle = screen.getByTestId("composer-auto-accept");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+    await flush();
+    expect(liveRun.onChange).toHaveBeenCalledWith({ autoAccept: true });
+  });
+
+  it("live run: a failed switch is shown inline", async () => {
+    const liveRun = live({ onChange: vi.fn().mockRejectedValue(new Error("run already finished")) });
+    renderToolbar({ liveRun });
+    await pick("Permission mode", "Always Ask");
+    expect(screen.getByTestId("permission-mode-error")).toHaveTextContent("run already finished");
+  });
+
+  it("no live run: the mode pill edits the next run's config and makes no RPC", async () => {
+    const onChange = vi.fn();
+    renderToolbar({ liveRun: null, onChange });
+    await pick("Permission mode", "Plan Mode");
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
+    expect(onChange.mock.calls.at(-1)![0].state.permissionMode).toBe("plan");
   });
 });

@@ -844,40 +844,44 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("run-config-options-error")).toHaveTextContent("no such config option");
   });
 
-  it("shows the live permission-mode control for a running run and switches it via run.setPermissionMode (W5)", async () => {
+  it("the Mode: row is gone and the toolbar mode pill drives the live run", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ PermissionMode: "acceptEdits" })]);
     await flush();
 
-    const control = screen.getByTestId("permission-mode-control");
-    expect(within(control).getByTestId("permission-mode-option-acceptEdits")).toHaveAttribute("aria-pressed", "true");
-    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mode:")).not.toBeInTheDocument();
+    expect(screen.getAllByLabelText("Permission mode")).toHaveLength(1);
+    const pill = screen.getByLabelText("Permission mode");
+    expect(pill).toHaveTextContent("Accept File Edits");
     // Claude takes no auto-accept toggle.
-    expect(within(control).queryByTestId("permission-mode-auto-accept")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-auto-accept")).not.toBeInTheDocument();
 
-    fireEvent.click(within(control).getByTestId("permission-mode-option-plan"));
+    fireEvent.click(pill);
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     await flush();
 
     const setCall = client.nth("run.setPermissionMode", 0);
     expect(setCall.params).toEqual({ runId: "run-1", modeId: "plan" });
-
     await act(async () => {
       setCall.resolve({ permissionMode: "plan", autoAccept: false });
     });
-
-    expect(within(control).getByTestId("permission-mode-option-plan")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
   });
 
-  it("offers the Auto-accept toggle for a running ACP run and flips it via run.setPermissionMode", async () => {
+  it("the Auto-accept pill flips a running ACP run via run.setPermissionMode", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "glm", PermissionMode: "default" })]);
+    client.nth("provider.list", 0).resolve({
+      providers: [{ id: "glm", label: "GLM", defaultMode: "default", supportsAutoAccept: true, liveModeSwitch: true, modes: [{ id: "default", label: "Default" }] }],
+    });
     await flush();
 
-    const toggle = screen.getByTestId("permission-mode-auto-accept");
+    const toggle = screen.getByTestId("composer-auto-accept");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(toggle);
     await flush();
@@ -887,7 +891,7 @@ describe("TaskDetailPane", () => {
     await act(async () => {
       setCall.resolve({ permissionMode: "default", autoAccept: true });
     });
-    expect(screen.getByTestId("permission-mode-auto-accept")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("composer-auto-accept")).toHaveAttribute("aria-pressed", "true");
   });
 
   it("surfaces a failed run.setPermissionMode as an error instead of silently no-op'ing", async () => {
@@ -897,7 +901,8 @@ describe("TaskDetailPane", () => {
     client.nth("run.list", 0).resolve([runningRun()]);
     await flush();
 
-    fireEvent.click(screen.getByTestId("permission-mode-option-plan"));
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
     await flush();
 
     await act(async () => {
@@ -907,17 +912,21 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("permission-mode-error")).toHaveTextContent("run already finished");
   });
 
-  it("hides the permission-mode control for a running Codex run (no mid-run switch)", async () => {
+  it("a running Codex run keeps next-run semantics on the mode pill (no mid-run switch)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
     client.nth("run.list", 0).resolve([runningRun({ Provider: "codex-native", PermissionMode: "auto" })]);
     await flush();
 
-    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    const options = await screen.findAllByRole("option");
+    fireEvent.click(options[0]);
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.setPermissionMode")).toHaveLength(0);
   });
 
-  it("hides the permission-mode control once the run has finished", async () => {
+  it("once the run has finished the mode pill edits the next run again (no RPC)", async () => {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
 
@@ -926,7 +935,11 @@ describe("TaskDetailPane", () => {
     client.nth("run.logs", 0).resolve({ runId: "run-1", status: "done", events: [] });
     await flush();
 
-    expect(screen.queryByTestId("permission-mode-control")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Permission mode"));
+    fireEvent.click(await screen.findByRole("option", { name: "Plan Mode" }));
+    await flush();
+    expect(client.calls.filter((c) => c.method === "run.setPermissionMode")).toHaveLength(0);
+    expect(screen.getByLabelText("Permission mode")).toHaveTextContent("Plan Mode");
   });
 
   it("shows Retry with higher effort for a failed Claude run below extended and resubmits at the next tier", async () => {

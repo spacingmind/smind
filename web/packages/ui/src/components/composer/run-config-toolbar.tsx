@@ -85,7 +85,24 @@ export interface RunConfigContextValue {
     disabled: boolean;
     /** ADR-0016 P3: the chat's own bound provider (chats.Provider, set on its first run and immutable after) -- non-null makes the combined picker offer only that provider, since a stored agent session is provider-native. */
     boundProvider: Provider | null;
+    /** Set while a live-switch-capable run is active: the Mode/Auto-accept pills drive it instead of the next run's config. */
+    liveRun: LiveRunControls | null;
   };
+}
+
+/**
+ * D1 of live-run-composer-and-noise: while a run is live on a provider that
+ * supports a live switch (ADR-0019) the Mode and Auto-accept pills show and
+ * drive the RUNNING run instead of the next run's config. Absent otherwise.
+ */
+export interface LiveRunControls {
+  modes: ModeInfo[];
+  /** The running run's effective mode id. */
+  mode: string;
+  autoAccept: boolean;
+  showAutoAccept: boolean;
+  /** run.setPermissionMode; rejects when the switch fails (the pill surfaces the message). */
+  onChange: (change: { modeId?: string; autoAccept?: boolean }) => Promise<void>;
 }
 
 const RunConfigContext = createContext<RunConfigContextValue | null>(null);
@@ -149,6 +166,7 @@ export function RunConfigToolbar({
   providerHealth = EMPTY_HEALTH,
   onPickerOpen,
   onChange,
+  liveRun = null,
   children,
 }: {
   /** Keys the per-task legacy-migration lookup only now (ADR-0016 P3 moved the actual persisted state to the chat) -- still needed alongside chatId to form the storage key. null renders with EMPTY_STATE and persists nothing. */
@@ -173,6 +191,8 @@ export function RunConfigToolbar({
    * without re-implementing either where the keydown lives.
    */
   onChange?: (value: RunConfigContextValue) => void;
+  /** The running run's mode controls (see LiveRunControls); null/absent edits the next run's config. */
+  liveRun?: LiveRunControls | null;
   /** The row's parts in layout order, plus any live ACP option controls. */
   children?: ReactNode;
 }) {
@@ -301,9 +321,10 @@ export function RunConfigToolbar({
         supportsAutoAccept: supportsAutoAccept(providers, state.provider),
         disabled,
         boundProvider,
+        liveRun,
       },
     };
-  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider, providerHealth, onPickerOpen]);
+  }, [state, setProviderModel, setPermissionMode, setAutoAccept, setThinkingLevel, applyProfile, clearAgent, resetToAgent, profiles, providers, disabled, boundProvider, providerHealth, onPickerOpen, liveRun]);
 
   useEffect(() => {
     onChange?.(value);
@@ -395,13 +416,44 @@ function RunConfigToolbarModelPicker() {
  */
 function RunConfigToolbarMode() {
   const { state, actions, meta } = useRunConfig();
-  const current = meta.modes.find((m) => m.id === meta.effectiveMode);
+  const live = meta.liveRun;
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const modes = live ? live.modes : meta.modes;
+  const modeId = live ? live.mode : meta.effectiveMode;
+  const autoAccept = live ? live.autoAccept : state.autoAccept;
+  const showAutoAccept = live ? live.showAutoAccept : meta.supportsAutoAccept;
+  const current = modes.find((m) => m.id === modeId);
   // The mode auto-approves (or ACP Auto-accept is on) -- the pill warns
   // (ShieldAlert + warning colour) without changing any mode semantics.
-  const dangerous = current?.autoApproves === true || state.autoAccept;
+  const dangerous = current?.autoApproves === true || autoAccept;
+  const disabled = meta.disabled || pending;
+
+  // Live: the RPC switches the running session; a failure is shown inline.
+  async function changeLive(liveRun: LiveRunControls, change: { modeId?: string; autoAccept?: boolean }) {
+    if (pending) return;
+    setPending(true);
+    try {
+      await liveRun.onChange(change);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPending(false);
+    }
+  }
+  const pickMode = (v: string) => {
+    if (!v || v === modeId) return;
+    if (live) void changeLive(live, { modeId: v });
+    else actions.setPermissionMode(v);
+  };
+  const toggleAutoAccept = () => {
+    if (live) void changeLive(live, { autoAccept: !autoAccept });
+    else actions.setAutoAccept(!autoAccept);
+  };
   return (
     <>
-      <Select value={meta.effectiveMode} onValueChange={(v) => v && actions.setPermissionMode(v)} disabled={meta.disabled}>
+      <Select value={modeId} onValueChange={pickMode} disabled={disabled}>
         <SelectTrigger
           aria-label="Permission mode"
           title={current?.description}
@@ -412,28 +464,33 @@ function RunConfigToolbarMode() {
           <SelectValue placeholder="Select mode" />
         </SelectTrigger>
         <SelectContent>
-          {meta.modes.map((m) => (
+          {modes.map((m) => (
             <SelectItem key={m.id} value={m.id} title={m.description} className={m.autoApproves ? "text-warning" : undefined}>
               {m.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      {meta.supportsAutoAccept && (
+      {showAutoAccept && (
         <Button
           type="button"
           variant="ghost"
-          aria-pressed={state.autoAccept}
+          aria-pressed={autoAccept}
           title={AUTO_ACCEPT_HELP}
           data-testid="composer-auto-accept"
-          disabled={meta.disabled}
-          onClick={() => actions.setAutoAccept(!state.autoAccept)}
+          disabled={disabled}
+          onClick={toggleAutoAccept}
           aria-label="Auto-accept"
-          className={cn(PILL_TRIGGER_CLASS, state.autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
+          className={cn(PILL_TRIGGER_CLASS, autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
         >
           <CheckCheck aria-hidden className="shrink-0" />
           <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
         </Button>
+      )}
+      {error && (
+        <span data-testid="permission-mode-error" role="alert" className="px-1 text-ui-sm text-destructive">
+          {error}
+        </span>
       )}
     </>
   );
