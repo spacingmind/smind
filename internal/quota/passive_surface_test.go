@@ -214,3 +214,121 @@ func Test_passive_onchange_throttles_observation_changes_but_not_cooldowns(t *te
 		t.Fatalf("cooldown start+extend+clear: %d calls, want %d", count(), before+3)
 	}
 }
+
+func Test_passive_observation_trailing_edge_notification(t *testing.T) {
+	t.Parallel()
+	util := func(u float64) http.Header {
+		return hdr(uf+"5h-status", "allowed", uf+"5h-utilization", strconv.FormatFloat(u, 'f', 2, 64))
+	}
+	setup := func(t *testing.T) (*Passive, *fakeClock, *fakeTimers, func() int) {
+		var mu sync.Mutex
+		var calls int
+		ft := &fakeTimers{}
+		p, clk := newFakePassive(t, newFakeStore(), WithPassiveAfterFunc(ft.after))
+		p.SetOnChange(func(int64) { mu.Lock(); calls++; mu.Unlock() })
+		return p, clk, ft, func() int { mu.Lock(); defer mu.Unlock(); return calls }
+	}
+
+	t.Run("a swallowed change is delivered once the interval is over", func(t *testing.T) {
+		p, clk, ft, count := setup(t)
+		at := clk.Now()
+		p.Observe(respAt(1, "m", 200, util(0.10), at))
+		if count() != 1 || ft.total() != 0 {
+			t.Fatalf("leading change: %d calls, %d timers, want 1/0", count(), ft.total())
+		}
+		// Two changes inside the interval, then traffic stops.
+		p.Observe(respAt(1, "m", 200, util(0.20), at.Add(time.Second)))
+		p.Observe(respAt(1, "m", 200, util(0.30), at.Add(2*time.Second)))
+		if count() != 1 {
+			t.Fatalf("swallowed changes notified at once: %d calls, want 1", count())
+		}
+		live := ft.live()
+		if len(live) != 1 || ft.total() != 1 {
+			t.Fatalf("timers = %d live of %d, want exactly one", len(live), ft.total())
+		}
+		if want := passiveNotifyInterval - time.Second; live[0].d != want {
+			t.Errorf("timer delay = %v, want %v (obsNotifyAt + interval)", live[0].d, want)
+		}
+		ft.fire()
+		if count() != 2 {
+			t.Fatalf("after the timer: %d calls, want 2", count())
+		}
+		ft.fire()
+		if count() != 2 {
+			t.Fatalf("timer delivered twice: %d calls", count())
+		}
+		// The timer's notification restarts the throttle.
+		clk.Advance(time.Second)
+		p.Observe(respAt(1, "m", 200, util(0.40), clk.Now()))
+		if count() != 2 || len(ft.live()) != 1 {
+			t.Fatalf("change right after the trailing one: %d calls, %d live timers, want 2/1", count(), len(ft.live()))
+		}
+	})
+
+	t.Run("a leading notification cancels the pending one", func(t *testing.T) {
+		p, clk, ft, count := setup(t)
+		at := clk.Now()
+		p.Observe(respAt(1, "m", 200, util(0.10), at))
+		p.Observe(respAt(1, "m", 200, util(0.20), at.Add(time.Second)))
+		p.Observe(respAt(1, "m", 200, util(0.30), at.Add(passiveNotifyInterval+time.Second)))
+		if count() != 2 || len(ft.live()) != 0 {
+			t.Fatalf("calls = %d, live timers = %d, want 2/0", count(), len(ft.live()))
+		}
+		ft.fire()
+		if count() != 2 {
+			t.Fatalf("cancelled timer still notified: %d calls", count())
+		}
+	})
+
+	t.Run("a verdict flip is not left to the timer", func(t *testing.T) {
+		p, clk, ft, count := setup(t)
+		at := clk.Now()
+		p.Observe(respAt(1, "m", 200, util(0.10), at))
+		p.Observe(respAt(1, "m", 200, hdr(uf+"5h-status", "allowed_warning", uf+"5h-utilization", "0.9"), at.Add(time.Second)))
+		if count() != 2 || len(ft.live()) != 0 {
+			t.Fatalf("calls = %d, live timers = %d, want 2/0", count(), len(ft.live()))
+		}
+	})
+
+	t.Run("Close stops the timer and a late fire is a no-op", func(t *testing.T) {
+		p, clk, ft, count := setup(t)
+		at := clk.Now()
+		p.Observe(respAt(1, "m", 200, util(0.10), at))
+		p.Observe(respAt(1, "m", 200, util(0.20), at.Add(time.Second)))
+		pending := ft.live()
+		if len(pending) != 1 {
+			t.Fatalf("live timers = %d, want 1", len(pending))
+		}
+		p.Close()
+		if len(ft.live()) != 0 {
+			t.Fatalf("Close left %d live timers", len(ft.live()))
+		}
+		pending[0].f() // a timer that already fired when Close ran
+		if count() != 1 {
+			t.Fatalf("notified after Close: %d calls, want 1", count())
+		}
+		// No new timer after Close.
+		p.Observe(respAt(1, "m", 200, util(0.30), at.Add(2*time.Second)))
+		if ft.total() != 1 {
+			t.Fatalf("timer armed after Close: %d total", ft.total())
+		}
+	})
+
+	t.Run("ClearCooldown consumes the pending notification", func(t *testing.T) {
+		p, clk, ft, count := setup(t)
+		at := clk.Now()
+		p.Observe(respAt(1, "m", 200, util(0.10), at))
+		p.Observe(respAt(1, "m", 200, util(0.20), at.Add(time.Second)))
+		p.ClearCooldown(1)
+		if len(ft.live()) != 0 {
+			t.Fatalf("ClearCooldown left %d live timers", len(ft.live()))
+		}
+		if count() != 2 {
+			t.Fatalf("calls = %d, want 2 (the clear delivers the pending change)", count())
+		}
+		ft.fire()
+		if count() != 2 {
+			t.Fatalf("notified again: %d calls", count())
+		}
+	})
+}

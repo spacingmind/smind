@@ -79,6 +79,13 @@ func WithPassiveEnabled(enabled bool) PassiveOption { return func(p *Passive) { 
 // WithPassiveClock injects the clock used when a Response has no At (tests).
 func WithPassiveClock(now func() time.Time) PassiveOption { return func(p *Passive) { p.clock = now } }
 
+// WithPassiveAfterFunc injects the timer behind the trailing observation
+// notification (tests): it must run f once after d, and the returned stop must
+// cancel it (reporting whether it did). The default is time.AfterFunc.
+func WithPassiveAfterFunc(after func(d time.Duration, f func()) (stop func() bool)) PassiveOption {
+	return func(p *Passive) { p.after = after }
+}
+
 // WithPassiveGrace injects the grace source added to a cooldown end (tests).
 func WithPassiveGrace(g GraceFunc) PassiveOption { return func(p *Passive) { p.grace = g } }
 
@@ -86,10 +93,10 @@ func WithPassiveGrace(g GraceFunc) PassiveOption { return func(p *Passive) { p.g
 // cooldown starts, is extended or is cleared (ClearCooldown), or when the
 // parsed observation changed in a way that is worth telling a surface: the
 // verdict flipped, or at most once per passiveNotifyInterval per account (a
-// change swallowed by that throttle is not delivered later; the next response
-// that changes something is). It must not block. It is NOT invoked when a
-// cooldown ends: that is time-based, so a caller that shows cooldown state
-// must schedule its own refresh for Cooldown.Until.
+// change swallowed by that throttle is delivered once, when the interval is
+// over, even if no further response arrives). It must not block. It is NOT
+// invoked when a cooldown ends: that is time-based, so a caller that shows
+// cooldown state must schedule its own refresh for Cooldown.Until.
 func WithPassiveOnChange(fn func(accountID int64)) PassiveOption {
 	return func(p *Passive) { p.onChange = fn }
 }
@@ -140,6 +147,11 @@ type passiveAcct struct {
 	obsPersistedVerdict string
 	obsLastWrite        time.Time
 	obsNotifyAt         time.Time // last onChange for an observation change (throttle)
+	// obsNotifyDirty: an observation change was swallowed by the throttle and
+	// not delivered yet; obsNotifyStop cancels the timer that will deliver it
+	// (nil = none armed).
+	obsNotifyDirty bool
+	obsNotifyStop  func() bool
 }
 
 func newPassiveAcct() *passiveAcct {
@@ -157,6 +169,7 @@ type Passive struct {
 	clock    func() time.Time
 	grace    GraceFunc
 	onChange func(accountID int64)
+	after    func(d time.Duration, f func()) (stop func() bool)
 
 	mu    sync.RWMutex // guards accts only
 	accts map[int64]*passiveAcct
@@ -182,10 +195,13 @@ type Passive struct {
 // write is queued.
 func NewPassive(s PassiveStore, opts ...PassiveOption) *Passive {
 	p := &Passive{
-		store:    s,
-		enabled:  true,
-		clock:    time.Now,
-		grace:    DefaultGrace,
+		store:   s,
+		enabled: true,
+		clock:   time.Now,
+		grace:   DefaultGrace,
+		after: func(d time.Duration, f func()) func() bool {
+			return time.AfterFunc(d, f).Stop
+		},
 		accts:    map[int64]*passiveAcct{},
 		dirtyCD:  map[cooldownKey]struct{}{},
 		dirtyObs: map[int64]struct{}{},
@@ -589,6 +605,7 @@ func (p *Passive) ClearCooldown(accountID int64) {
 		}
 	}
 	a.gen++
+	pendingNotify := a.stopObsNotifyLocked()
 	a.rows = map[string]cooldownRow{}
 	a.backoff = map[string]time.Time{}
 	a.failed = map[string]struct{}{}
@@ -607,7 +624,9 @@ func (p *Passive) ClearCooldown(accountID int64) {
 		p.markCooldownLocked(accountID, a, scope)
 	}
 	a.mu.Unlock()
-	if fn := p.onChange; had && fn != nil {
+	// A pending trailing observation notification is consumed here: this call's
+	// own notification covers it.
+	if fn := p.onChange; (had || pendingNotify) && fn != nil {
 		fn(accountID)
 	}
 }
@@ -801,6 +820,18 @@ func (p *Passive) Close() {
 	}
 	started := p.started
 	p.wmu.Unlock()
+
+	p.mu.RLock()
+	accts := make([]*passiveAcct, 0, len(p.accts))
+	for _, a := range p.accts {
+		accts = append(accts, a)
+	}
+	p.mu.RUnlock()
+	for _, a := range accts {
+		a.mu.Lock()
+		a.stopObsNotifyLocked()
+		a.mu.Unlock()
+	}
 	if started {
 		<-p.done
 	}
@@ -827,6 +858,9 @@ func (p *Passive) observe(id int64, a *passiveAcct, obs Observation, at time.Tim
 		since := at.Sub(a.obsNotifyAt)
 		if flipped || a.obsNotifyAt.IsZero() || since >= passiveNotifyInterval || since < 0 {
 			notify, a.obsNotifyAt = true, at
+			a.stopObsNotifyLocked() // this notification covers the pending one
+		} else {
+			p.armObsNotifyLocked(id, a, passiveNotifyInterval-since)
 		}
 	}
 
@@ -838,6 +872,53 @@ func (p *Passive) observe(id int64, a *passiveAcct, obs Observation, at time.Tim
 		p.markObservationLocked(id)
 	}
 	return notify
+}
+
+// stopObsNotifyLocked cancels the trailing notification timer and clears the
+// dirty flag; it reports whether a notification was pending. a.mu must be held.
+func (a *passiveAcct) stopObsNotifyLocked() bool {
+	pending := a.obsNotifyDirty
+	a.obsNotifyDirty = false
+	if a.obsNotifyStop != nil {
+		a.obsNotifyStop()
+		a.obsNotifyStop = nil
+	}
+	return pending
+}
+
+// armObsNotifyLocked records that a change was swallowed by the throttle and
+// makes sure one timer will deliver it d from now (one timer per account, however
+// many changes are swallowed meanwhile). After Close it does nothing. a.mu must
+// be held.
+func (p *Passive) armObsNotifyLocked(id int64, a *passiveAcct, d time.Duration) {
+	p.wmu.Lock()
+	closed := p.closed
+	p.wmu.Unlock()
+	if closed {
+		return
+	}
+	a.obsNotifyDirty = true
+	if a.obsNotifyStop != nil {
+		return
+	}
+	a.obsNotifyStop = p.after(d, func() { p.fireObsNotify(id, a) })
+}
+
+// fireObsNotify delivers the swallowed observation notification, outside every
+// lock. It does nothing when the notification was delivered or cancelled in the
+// meantime.
+func (p *Passive) fireObsNotify(id int64, a *passiveAcct) {
+	a.mu.Lock()
+	if a.obsNotifyStop == nil || !a.obsNotifyDirty {
+		a.mu.Unlock()
+		return
+	}
+	a.obsNotifyStop, a.obsNotifyDirty = nil, false
+	a.obsNotifyAt = p.clock()
+	a.mu.Unlock()
+	if fn := p.onChange; fn != nil {
+		fn(id)
+	}
 }
 
 // Observed returns the account's latest observation for display: the one in
