@@ -206,17 +206,30 @@ fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
         // ERROR_INSUFFICIENT_BUFFER, which is not an error here.
         GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, family, TCP_TABLE_OWNER_PID_ALL, 0);
     }
-    let mut buf = vec![0u8; size as usize];
-    let rc = unsafe { GetExtendedTcpTable(buf.as_mut_ptr().cast(), &mut size, 0, family, TCP_TABLE_OWNER_PID_ALL, 0) };
-    if rc != 0 {
-        return Err(io::Error::other(format!("GetExtendedTcpTable failed with error {rc}")));
+    // The table can grow between the sizing call and the read (a socket
+    // opened in between), so retry with the size the API reports. The buffer
+    // is u32-backed because the rows are u32 structs; a Vec<u8> carries no
+    // alignment guarantee for them.
+    let mut buf: Vec<u32>;
+    let mut attempts = 0;
+    loop {
+        buf = vec![0u32; (size as usize).div_ceil(4)];
+        let rc = unsafe { GetExtendedTcpTable(buf.as_mut_ptr().cast(), &mut size, 0, family, TCP_TABLE_OWNER_PID_ALL, 0) };
+        if rc == 0 {
+            break;
+        }
+        attempts += 1;
+        if rc != ERROR_INSUFFICIENT_BUFFER || attempts >= 5 {
+            return Err(io::Error::other(format!("GetExtendedTcpTable failed with error {rc}")));
+        }
     }
+    let buf_len = buf.len() * std::mem::size_of::<u32>();
     if family == AF_INET {
         // Table header (entry count) followed by fixed-size rows; validate
         // the buffer is large enough for the declared rows before reading.
         let table = buf.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>();
         let count = unsafe { (*table).dwNumEntries } as usize;
-        if buf.len() < std::mem::size_of::<u32>() + count * std::mem::size_of::<MIB_TCPROW_OWNER_PID>() {
+        if buf_len < std::mem::size_of::<u32>() + count * std::mem::size_of::<MIB_TCPROW_OWNER_PID>() {
             return Err(io::Error::other("GetExtendedTcpTable returned a truncated IPv4 table"));
         }
         let rows = unsafe { std::slice::from_raw_parts((&(*table).table) as *const MIB_TCPROW_OWNER_PID, count) };
@@ -228,7 +241,7 @@ fn tcp_table_owner_pid(family: u32, port: u16) -> io::Result<Option<u32>> {
     } else {
         let table = buf.as_ptr().cast::<MIB_TCP6TABLE_OWNER_PID>();
         let count = unsafe { (*table).dwNumEntries } as usize;
-        if buf.len() < std::mem::size_of::<u32>() + count * std::mem::size_of::<MIB_TCP6ROW_OWNER_PID>() {
+        if buf_len < std::mem::size_of::<u32>() + count * std::mem::size_of::<MIB_TCP6ROW_OWNER_PID>() {
             return Err(io::Error::other("GetExtendedTcpTable returned a truncated IPv6 table"));
         }
         let rows = unsafe { std::slice::from_raw_parts((&(*table).table) as *const MIB_TCP6ROW_OWNER_PID, count) };
