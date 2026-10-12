@@ -3,6 +3,8 @@ import { useCallback, useSyncExternalStore } from "react";
 import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import {
   readUsagePreferences,
+  toggleUsagePin,
+  type PinnedWindow,
   setUsageAccount,
   setUsageDisplayAs,
   setUsageInSidebar,
@@ -49,6 +51,8 @@ export function useUsagePreferences(): {
   setDisplayAs: (displayAs: UsageDisplayAs) => void;
   setAccountKey: (accountKey: string | null) => void;
   setInSidebar: (inSidebar: boolean) => void;
+  /** Pins or unpins one window; the first toggle snapshots `defaults` (what the surface shows pinned) before editing. */
+  togglePin: (defaults: readonly PinnedWindow[], pin: PinnedWindow) => void;
 } {
   const preferences = useSyncExternalStore(subscribe, getSnapshot);
   const setDisplayAs = useCallback(
@@ -63,6 +67,11 @@ export function useUsagePreferences(): {
     (inSidebar: boolean) => updateUsagePreferences((p) => setUsageInSidebar(p, inSidebar)),
     [],
   );
+  const togglePin = useCallback(
+    (defaults: readonly PinnedWindow[], pin: PinnedWindow) =>
+      updateUsagePreferences((p) => toggleUsagePin(p, defaults, pin)),
+    [],
+  );
   return {
     preferences,
     displayAs: preferences.displayAs,
@@ -71,5 +80,6 @@ export function useUsagePreferences(): {
     setDisplayAs,
     setAccountKey,
     setInSidebar,
+    togglePin,
   };
 }

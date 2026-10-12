@@ -2,6 +2,7 @@ import { UsageBalanceBar } from "@/components/account-usage/usage-balance-bar";
 import { UsageRefreshButton } from "@/components/account-usage/usage-refresh-button";
 import { UsageSourceIcon } from "@/components/account-usage/usage-source-icon";
 import { UsageWindowBar } from "@/components/account-usage/usage-window-bar";
+import type { UsagePinning } from "@/components/account-usage/use-usage-surface";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -36,7 +37,7 @@ function list<T>(value: T[] | undefined | null): T[] {
 }
 
 /**
- * One account's plan usage (Paseo's UsageCard, minus pins): header, why it has no windows if
+ * One account's plan usage (Paseo's UsageCard): header, why it has no windows if
  * it has none, one bar per window then per balance, detail rows, freshness. Every field may be
  * missing or reshaped (AC39).
  */
@@ -44,12 +45,15 @@ export function UsageCard({
   usage,
   displayAs,
   refresh,
+  pinning = null,
   compact = false,
 }: {
   usage: AccountUsage;
   displayAs: UsageDisplayAs;
   /** Null = no Refresh button; the freshness is then printed on the card. */
   refresh: UsageCardRefresh | null;
+  /** Window rows become pin checkboxes while the sidebar summary is on; null = plain bars. */
+  pinning?: UsagePinning | null;
   compact?: boolean;
 }) {
   const isMobile = useIsMobile();
@@ -117,7 +121,20 @@ export function UsageCard({
       {windows.length > 0 || balances.length > 0 ? (
         <div className="flex flex-col gap-1">
           {windows.map((window, i) => (
-            <UsageWindowBar key={window.id ?? i} window={window} displayAs={displayAs} />
+            <UsageWindowBar
+              key={window.id ?? i}
+              window={window}
+              displayAs={displayAs}
+              pin={
+                pinning && typeof window.id === "string"
+                  ? {
+                      pinned: pinning.isPinned(provider, window.id),
+                      onToggle: () => pinning.toggle(provider, window.id),
+                      pinLabel: `Pin ${displayName} ${window.label || window.id}`,
+                    }
+                  : null
+              }
+            />
           ))}
           {balances.map((balance, i) => (
             <UsageBalanceBar key={balance.id ?? i} balance={balance} />

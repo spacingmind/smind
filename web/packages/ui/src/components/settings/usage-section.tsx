@@ -93,6 +93,7 @@ function PlanUsageBlock({ client, events }: SettingsSectionContext) {
         pressedAt={surface.snapshot.pressedAt}
         onRefreshOne={surface.refreshOne}
         onRetry={surface.retry}
+        pinning={surface.pinning}
       />
     </section>
   );

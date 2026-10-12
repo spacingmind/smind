@@ -5,12 +5,19 @@ import { useAccountUsage, type UsageSnapshot, type UsageStore } from "@/hooks/us
 import { useUsagePreferences } from "@/hooks/use-usage-preferences";
 import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import { resolveAccountFilter, resolveUsageView } from "@/lib/account-usage/model";
+import { effectiveUsagePins } from "@/lib/account-usage/preferences";
 import type { AccountUsage, UsageView } from "@/lib/account-usage/types";
 import type { WsClient } from "@/lib/ws-client";
 
 export interface UsageAccountOption {
   key: string;
   displayName: string;
+}
+
+/** Window pinning for a surface; null while "Show summary in sidebar" is off, when rows are plain bars. */
+export interface UsagePinning {
+  isPinned: (provider: string, windowId: string) => boolean;
+  toggle: (provider: string, windowId: string) => void;
 }
 
 /** Everything a usage surface (the modal, Settings -> Usage) renders from, in one place so both stay identical. */
@@ -25,6 +32,8 @@ export interface UsageSurface {
   setDisplayAs: (displayAs: UsageDisplayAs) => void;
   inSidebar: boolean;
   setInSidebar: (on: boolean) => void;
+  /** Pinning is offered only while the sidebar summary is on (AC30). */
+  pinning: UsagePinning | null;
   /** Refresh all: one `refresh` for every account. Never called except from a button. */
   refreshAll: () => void;
   refreshOne: (accountId: number) => void;
@@ -70,6 +79,20 @@ export function useUsageSurface(
     [snapshot.reports],
   );
 
+  const pinning = useMemo<UsagePinning | null>(() => {
+    if (!prefs.inSidebar) return null;
+    // Pins are read and snapshotted against the reports this surface shows, so the first toggle
+    // starts from exactly what the footer displays as pinned.
+    const pinned = new Set(
+      effectiveUsagePins(prefs.preferences, reports).map((pin) => `${pin.provider}\u0000${pin.windowId}`),
+    );
+    const defaults = effectiveUsagePins({ ...prefs.preferences, pins: null }, reports);
+    return {
+      isPinned: (provider, windowId) => pinned.has(`${provider}\u0000${windowId}`),
+      toggle: (provider, windowId) => prefs.togglePin(defaults, { provider, windowId }),
+    };
+  }, [prefs.inSidebar, prefs.preferences, prefs.togglePin, reports]);
+
   const refreshAll = useCallback(() => void store?.refreshAll(), [store]);
   const refreshOne = useCallback((id: number) => void store?.refreshOne(id), [store]);
   const retry = useCallback(() => void retryList(store), [store]);
@@ -84,6 +107,7 @@ export function useUsageSurface(
     setDisplayAs: prefs.setDisplayAs,
     inSidebar: prefs.inSidebar,
     setInSidebar: prefs.setInSidebar,
+    pinning,
     refreshAll,
     refreshOne,
     retry,
