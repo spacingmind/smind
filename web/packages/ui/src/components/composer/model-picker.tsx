@@ -13,6 +13,7 @@ import {
   ProviderNotice,
   ProviderRow,
   SectionHeading,
+  UnavailableNotice,
   type ModelRowAction,
   type PickerProfileRow,
   type RowShellProps,
@@ -209,7 +210,10 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
       isSearchFocused: searchFocused,
     });
     if (all.kind === "noSearchMatches") {
-      return { kind: "empty", query: query.trim() };
+      // A loading provider may still contribute rows, so an empty result is not final yet.
+      return visibleProviders.some((p) => p.modelSelection.kind === "loading")
+        ? { kind: "entries", band: [], entries: [], notice: { kind: "loading" } }
+        : { kind: "empty", query: query.trim() };
     }
     if (all.kind === "searchResults") {
       return { kind: "entries", band: [], entries: modelEntries(all.rows, true) };
@@ -228,8 +232,8 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   const extraRows = useMemo(() => {
     const profiles = view.kind === "provider" ? profileRows.filter((p) => p.provider === view.providerId) : profileRows;
     // Heading + No agent + (profiles | Create row) + the Models/Providers heading.
-    return 1 + (baseAgentId !== null ? 1 : 0) + Math.max(profiles.length, 1) + 1;
-  }, [view, profileRows, baseAgentId]);
+    return 1 + (baseAgentId !== null ? 1 : 0) + Math.max(profiles.length, 1) + 1 + (boundProvider ? 1 : 0);
+  }, [view, profileRows, baseAgentId, boundProvider]);
   const popoverHeight = resolveDesktopFixedHeight(view, visibleProviders, extraRows);
 
   // Arrow keys walk only the rows that can be activated; headings, disabled providers and row action buttons are skipped.
@@ -291,7 +295,11 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
         return;
       case "createProfile":
         changeOpen(false);
-        onManageAgents();
+        if (view.kind === "provider" && onCreateProfile) {
+          onCreateProfile({ name: "", provider: view.providerId, model: "" });
+        } else {
+          onManageAgents();
+        }
         return;
     }
   };
@@ -300,6 +308,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     setView({ kind: "all" });
     setQuery("");
     setActiveIndex(0);
+    inputRef.current?.focus();
   };
 
   const manageAgents = () => {
@@ -368,6 +377,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   };
 
   const inProviderView = view.kind === "provider";
+  const viewProvider = view.kind === "provider" ? visibleProviders.find((p) => p.id === view.providerId) : undefined;
   const boundLabel = boundProvider ? (providers.find((p) => p.id === boundProvider)?.label ?? boundProvider) : null;
 
   const shellFor = (entry: PickerRow): RowShellProps => ({
@@ -444,6 +454,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
           Bound to {boundLabel} — start a new chat to switch providers
         </p>
       )}
+      {viewProvider?.unavailableReason && <UnavailableNotice reason={viewProvider.unavailableReason} />}
       <div className="border-b px-3 pb-2">
         <input
           ref={inputRef}
@@ -518,7 +529,8 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
   // leaves focus alone: a focused input would pop the keyboard over the list.
   const focusInput = (e: Event) => {
     e.preventDefault();
-    if (!isMobile) {
+    // Touch keeps it unfocused; a fine pointer (desktop-class sheet) can type straight away.
+    if (!isMobile || window.matchMedia?.("(pointer: fine)").matches) {
       inputRef.current?.focus();
     }
   };
@@ -530,7 +542,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
         <Sheet open={open} onOpenChange={changeOpen}>
           <SheetContent
             side="bottom"
-            className="h-[80dvh] gap-0 p-0"
+            className="gap-0 p-0 data-[side=bottom]:h-[80dvh]"
             data-testid="model-picker-sheet"
             onOpenAutoFocus={focusInput}
           >

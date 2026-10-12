@@ -93,7 +93,6 @@ export function ProfilesHeading({ onEdit }: { onEdit: () => void }) {
         type="button"
         variant="quiet"
         size="icon-sm"
-        tabIndex={-1}
         aria-label="Edit profiles"
         title="Edit profiles"
         data-testid="model-profiles-edit"
@@ -226,7 +225,7 @@ function ModelRowProfileButton({ row, action, onAct }: { row: ModelRow; action: 
       onClick={stop}
       className={cn(
         "flex size-6 shrink-0 items-center justify-center rounded text-foreground-muted hover:bg-muted hover:text-foreground",
-        "md:opacity-0 md:group-hover/row:opacity-100 md:group-data-[active=true]/row:opacity-100 md:group-focus-within/row:opacity-100",
+        "md:pointer-fine:opacity-0 md:pointer-fine:group-hover/row:opacity-100 md:pointer-fine:group-data-[active=true]/row:opacity-100 md:pointer-fine:group-focus-within/row:opacity-100",
       )}
     >
       {icon}
@@ -274,6 +273,14 @@ export function EmptyState({ query }: { query: string }) {
   );
 }
 
+export function UnavailableNotice({ reason }: { reason: string }) {
+  return (
+    <p data-testid="model-provider-unavailable" className="px-3 pb-2 text-ui-sm text-foreground-muted">
+      {reason}
+    </p>
+  );
+}
+
 export function ProviderNotice({ kind, message }: { kind: "loading" | "error"; message?: string }) {
   return (
     <div
@@ -318,6 +325,8 @@ export function PickerHeader({
           size="icon-sm"
           aria-label="Back"
           data-testid="model-picker-back"
+          onMouseDown={keepInputFocus}
+          onPointerDown={keepInputFocus}
           onClick={onBack}
         >
           <ArrowLeft aria-hidden />
@@ -332,7 +341,6 @@ export function PickerHeader({
           type="button"
           variant="quiet"
           size="icon-sm"
-          tabIndex={-1}
           aria-label={`Open ${title} settings`}
           title={`${title} settings`}
           data-testid="model-picker-provider-settings"

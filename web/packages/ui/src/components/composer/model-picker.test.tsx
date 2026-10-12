@@ -310,12 +310,12 @@ describe("model picker", () => {
   });
 
   it("no profiles shows a Create profile row", () => {
-    const { onManageAgents } = renderPicker();
+    const { onCreateProfile } = renderPicker();
     open();
     const empty = screen.getByTestId("model-profiles-empty");
     expect(empty).toHaveTextContent("Create profile");
     fireEvent.click(empty);
-    expect(onManageAgents).toHaveBeenCalledOnce();
+    expect(onCreateProfile).toHaveBeenCalledOnce();
   });
 
   it("model row + creates a profile seeded with provider and model", () => {
@@ -450,7 +450,7 @@ describe("model picker", () => {
     open();
     expect(searchInput()).not.toHaveFocus();
     expect(screen.getByText("Providers")).toBeInTheDocument();
-    expect(screen.getByTestId("model-picker-sheet").className).toContain("h-[80dvh]");
+    expect(screen.getByTestId("model-picker-sheet").className).toContain("data-[side=bottom]:h-[80dvh]");
 
     act(() => searchInput().focus());
     expect(screen.queryByText("Providers")).not.toBeInTheDocument();
@@ -460,6 +460,89 @@ describe("model picker", () => {
 
     act(() => searchInput().blur());
     expect(screen.getByText("Providers")).toBeInTheDocument();
+  });
+
+  it("sheet focuses search on open only with a fine pointer", () => {
+    mobile.value = true;
+    const original = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: q === "(pointer: fine)" })) as typeof window.matchMedia;
+    try {
+      renderPicker({ selectedProvider: "none" });
+      open();
+      expect(searchInput()).toHaveFocus();
+    } finally {
+      window.matchMedia = original;
+    }
+  });
+
+  it("settings buttons are tab stops, row actions are not, and the action reveal is fine-pointer only", () => {
+    renderPicker();
+    open();
+    expect(screen.getByTestId("model-profiles-edit")).not.toHaveAttribute("tabindex");
+    expect(screen.getByTestId("model-picker-provider-settings")).not.toHaveAttribute("tabindex");
+    const plus = screen.getByTestId("model-create-profile-claude-native-sonnet-5-5");
+    expect(plus).toHaveAttribute("tabindex", "-1");
+    expect(plus.className).toContain("pointer-fine:opacity-0");
+    expect(fireEvent.mouseDown(screen.getByTestId("model-profiles-edit"))).toBe(false);
+  });
+
+  it("Back keeps the search input focused for arrows and typing", () => {
+    renderPicker();
+    open();
+    const back = screen.getByTestId("model-picker-back");
+    expect(fireEvent.mouseDown(back)).toBe(false);
+    expect(fireEvent.pointerDown(back)).toBe(false);
+    act(() => screen.getByTestId("model-profiles-edit").focus());
+    fireEvent.click(back);
+    expect(searchInput()).toHaveFocus();
+  });
+
+  it("an empty result while a provider is loading says Loading…, not no matches", () => {
+    const providers = [
+      ...buildBrowserProviders([INFOS[0]!], {}),
+      ...buildBrowserProviders([INFOS[1]!], {}, { loading: true }),
+    ];
+    renderPicker({ providers, selectedProvider: "none" });
+    open();
+    fireEvent.change(searchInput(), { target: { value: "zzzqq" } });
+    expect(screen.getByTestId("model-provider-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-search-empty")).not.toBeInTheDocument();
+  });
+
+  it("a focused empty sheet search with every provider loading says Loading…", () => {
+    mobile.value = true;
+    renderPicker({ providers: buildBrowserProviders(INFOS, {}, { loading: true }), selectedProvider: "none" });
+    open();
+    act(() => searchInput().focus());
+    expect(screen.getByTestId("model-provider-loading")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-search-empty")).not.toBeInTheDocument();
+  });
+
+  it("an unavailable provider's view shows its reason and keeps models selectable", () => {
+    const { onSelect } = renderPicker({ health: { "claude-native": { ok: false, detail: "claude CLI not found" } } });
+    open();
+    expect(screen.getByTestId("model-provider-unavailable")).toHaveTextContent("claude CLI not found");
+    fireEvent.click(screen.getByTestId("model-row-claude-native:sonnet-5-5"));
+    expect(onSelect).toHaveBeenCalledWith("claude-native", "sonnet-5-5");
+  });
+
+  it("Create profile in a provider view seeds that provider; at the root it opens Agents", () => {
+    const { onCreateProfile, onManageAgents } = renderPicker();
+    open();
+    fireEvent.click(screen.getByTestId("model-profiles-empty"));
+    expect(onCreateProfile).toHaveBeenCalledExactlyOnceWith({ name: "", provider: "claude-native", model: "" });
+    expect(onManageAgents).not.toHaveBeenCalled();
+    open();
+    fireEvent.click(screen.getByTestId("model-picker-back"));
+    fireEvent.click(screen.getByTestId("model-profiles-empty"));
+    expect(onManageAgents).toHaveBeenCalledOnce();
+  });
+
+  it("popover height counts the bound-chat note", () => {
+    renderPicker({ boundProvider: "glm", selectedProvider: "glm", selectedModel: "" });
+    open();
+    // 3 glm rows + heading + create + models heading + note = 7 -> 360.
+    expect(screen.getByTestId("model-picker-popover").getAttribute("style")).toContain("min(360px,");
   });
 
   it("desktop autofocuses search", () => {
