@@ -323,3 +323,88 @@ func TestStore_QuotaCooldown_CredentialReplaceIsAtomic(t *testing.T) {
 		t.Fatalf("account after a failed replace = %+v, want unchanged %+v", after, before)
 	}
 }
+
+// TestStore_QuotaCooldown_RejectedWindowMigrationOnExistingDB is
+// quota_cooldown_rejected_window_migration_on_existing_db: a database that
+// already has the pre-column quota_cooldown table gets the column on Open (twice:
+// idempotent), keeps its rows with an empty window, and saves the new field.
+func TestStore_QuotaCooldown_RejectedWindowMigrationOnExistingDB(t *testing.T) {
+	t.Parallel()
+
+	path := oldAccountsDB(t, `CREATE TABLE quota_cooldown (
+		account_id INTEGER NOT NULL REFERENCES accounts(id),
+		scope_model TEXT NOT NULL DEFAULT '',
+		until TIMESTAMP NOT NULL,
+		reason TEXT NOT NULL,
+		level INTEGER NOT NULL DEFAULT 0,
+		observed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (account_id, scope_model))`)
+	raw, err := sql.Open("sqlite", sqliteDSN(path))
+	if err != nil {
+		t.Fatalf("open raw db error = %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := raw.Exec(`INSERT INTO quota_cooldown (account_id, scope_model, until, reason, level, observed_at) VALUES (1, '', ?, 'rejected', 0, ?)`, now.Add(time.Hour), now); err != nil {
+		t.Fatalf("seed old cooldown: %v", err)
+	}
+	raw.Close()
+
+	for i := 0; i < 2; i++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("Open() #%d error = %v", i, err)
+		}
+		got, err := s.ListQuotaCooldowns(1)
+		if err != nil || len(got) != 1 {
+			t.Fatalf("ListQuotaCooldowns() #%d = %+v, %v", i, got, err)
+		}
+		if i == 0 {
+			if got[0].RejectedWindow != "" || got[0].Reason != "rejected" {
+				t.Fatalf("old row = %+v, want empty window", got[0])
+			}
+			c := got[0]
+			c.RejectedWindow = "weekly"
+			if err := s.SaveQuotaCooldown(c); err != nil {
+				t.Fatalf("SaveQuotaCooldown() on migrated db error = %v", err)
+			}
+		} else if got[0].RejectedWindow != "weekly" {
+			t.Fatalf("window after reopen = %q, want weekly", got[0].RejectedWindow)
+		}
+		s.Close()
+	}
+}
+
+// TestStore_QuotaCooldown_RejectedWindowRoundtrip: the window is saved, listed,
+// replaced by an upsert (even with an equal until) and defaults to "".
+func TestStore_QuotaCooldown_RejectedWindowRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	s, err := Open(filepath.Join(t.TempDir(), "smind.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+	a := newTestAccount(t, s, "anthropic", "a")
+	now := time.Now().UTC().Truncate(time.Second)
+	wide := QuotaCooldown{AccountID: a.ID, Until: now.Add(time.Hour), Reason: "rejected", RejectedWindow: "five_hour", ObservedAt: now}
+	scoped := QuotaCooldown{AccountID: a.ID, ScopeModel: "opus", Until: now.Add(time.Hour), Reason: "fallback", Level: 2, RejectedWindow: "weekly_model", ObservedAt: now}
+	bare := QuotaCooldown{AccountID: a.ID, ScopeModel: "zzz", Until: now.Add(time.Hour), Reason: "rejected", ObservedAt: now}
+	for _, c := range []QuotaCooldown{wide, scoped, bare} {
+		if err := s.SaveQuotaCooldown(c); err != nil {
+			t.Fatalf("SaveQuotaCooldown() error = %v", err)
+		}
+	}
+	wide.RejectedWindow = "weekly" // a later rejection extends and renames
+	if err := s.SaveQuotaCooldown(wide); err != nil {
+		t.Fatalf("SaveQuotaCooldown(upsert) error = %v", err)
+	}
+	got, err := s.ListQuotaCooldowns(a.ID)
+	if err != nil || len(got) != 3 {
+		t.Fatalf("ListQuotaCooldowns() = %+v, %v", got, err)
+	}
+	for i, want := range []string{"weekly", "weekly_model", ""} { // scope order: "", opus, zzz
+		if got[i].RejectedWindow != want {
+			t.Fatalf("row %d window = %q, want %q", i, got[i].RejectedWindow, want)
+		}
+	}
+}

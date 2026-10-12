@@ -61,6 +61,9 @@ type Cooldown struct {
 	Model  string // set when Scope is CooldownModel
 	Reason CooldownReason
 	Level  int // fallback level (1 = 1 min ...); 0 unless Reason is ReasonFallback
+	// Window is the rejected window (Window* constants) of a declared
+	// rejection, for display only; "" for a bare-429 back-off. Routing ignores it.
+	Window string
 }
 
 // Transient reports whether c is only a short routing back-off (bare 429),

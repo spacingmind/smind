@@ -37,7 +37,22 @@ type Rejection struct {
 	// ModelOnly: the rejection is the 7d_oi-only shape, which cools down only
 	// the model of the rejected request.
 	ModelOnly bool
+	// Window names the rejected window for display (one of the Window*
+	// constants): weekly when the 7d window is rejected (also when the 5h one
+	// is too: the weekly reset is the later one, so it is what binds), else
+	// five_hour when the 5h one is, weekly_model for the ModelOnly shape, else
+	// unified (only the overall status said rejected). Empty when not Rejected.
+	Window string
 }
+
+// Rejected-window names carried by Rejection.Window and Cooldown.Window. They
+// are the wire values of the cooldown's window field.
+const (
+	WindowFiveHour    = "five_hour"
+	WindowWeekly      = "weekly"
+	WindowWeeklyModel = "weekly_model"
+	WindowUnified     = "unified"
+)
 
 // ClassifyRejection reports whether a response is a declared hard rejection.
 // Only a 429 can be one; header names are case-insensitive.
@@ -46,13 +61,17 @@ func ClassifyRejection(status int, h http.Header) Rejection {
 		return Rejection{}
 	}
 	s := readUnifiedStatuses(h)
-	if s.fiveH == "rejected" || s.sevenD == "rejected" {
-		return Rejection{Rejected: true}
-	}
-	if s.unified != "rejected" {
+	switch {
+	case s.sevenD == "rejected":
+		return Rejection{Rejected: true, Window: WindowWeekly}
+	case s.fiveH == "rejected":
+		return Rejection{Rejected: true, Window: WindowFiveHour}
+	case s.unified != "rejected":
 		return Rejection{}
+	case s.oiOnly():
+		return Rejection{Rejected: true, ModelOnly: true, Window: WindowWeeklyModel}
 	}
-	return Rejection{Rejected: true, ModelOnly: s.oiOnly()}
+	return Rejection{Rejected: true, Window: WindowUnified}
 }
 
 type unifiedStatuses struct {

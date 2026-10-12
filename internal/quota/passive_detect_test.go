@@ -45,6 +45,17 @@ func Test_passive_rejection_truth_table(t *testing.T) {
 						wantModel = false
 					}
 					want := Rejection{Rejected: wantRej, ModelOnly: wantModel}
+					switch {
+					case !wantRej:
+					case d == "rejected":
+						want.Window = WindowWeekly
+					case f == "rejected":
+						want.Window = WindowFiveHour
+					case wantModel:
+						want.Window = WindowWeeklyModel
+					default:
+						want.Window = WindowUnified
+					}
 
 					name := "u=" + u + ",5h=" + f + ",7d=" + d + ",oi=" + oi
 					t.Run(name, func(t *testing.T) {
@@ -76,11 +87,11 @@ func Test_passive_rejection_named_shapes(t *testing.T) {
 			Rejection{}},
 		{"oi-only with unified rejected is model scoped",
 			rawHeader("Anthropic-Ratelimit-Unified-Status", "rejected", "Anthropic-Ratelimit-Unified-5h-Status", "allowed", "Anthropic-Ratelimit-Unified-7d-Status", "allowed", "Anthropic-Ratelimit-Unified-7d_oi-Status", "REJECTED"),
-			Rejection{Rejected: true, ModelOnly: true}},
+			Rejection{Rejected: true, ModelOnly: true, Window: WindowWeeklyModel}},
 		// claude_executor_ratelimit_test.go:30-41
 		{"ref 7-day example",
 			rawHeader("Anthropic-Ratelimit-Unified-Status", "rejected", "Anthropic-Ratelimit-Unified-5h-Status", "allowed", "Anthropic-Ratelimit-Unified-7d-Status", "rejected"),
-			Rejection{Rejected: true}},
+			Rejection{Rejected: true, Window: WindowWeekly}},
 		{"bare 429 with allowed windows",
 			rawHeader("Anthropic-Ratelimit-Unified-5h-Status", "allowed", "Anthropic-Ratelimit-Unified-7d-Status", "allowed"),
 			Rejection{}},
@@ -293,5 +304,36 @@ func Test_passive_bare_429_retry_after_backoff_capped_60s(t *testing.T) {
 				t.Fatalf("got %v %v want %v %v", got, ok, tc.want, tc.wantOK)
 			}
 		})
+	}
+}
+
+func Test_passive_rejection_window_classification(t *testing.T) {
+	t.Parallel()
+	const p = "Anthropic-Ratelimit-Unified-"
+	tests := []struct {
+		name string
+		h    http.Header
+		want string
+	}{
+		{"5h rejected", rawHeader(p+"Status", "rejected", p+"5h-Status", "rejected", p+"7d-Status", "allowed"), WindowFiveHour},
+		{"7d rejected", rawHeader(p+"Status", "rejected", p+"5h-Status", "allowed", p+"7d-Status", "rejected"), WindowWeekly},
+		{"both 5h and 7d rejected: weekly", rawHeader(p+"Status", "rejected", p+"5h-Status", "rejected", p+"7d-Status", "rejected"), WindowWeekly},
+		{"7d_oi only", rawHeader(p+"Status", "rejected", p+"5h-Status", "allowed", p+"7d-Status", "allowed", p+"7d_oi-Status", "rejected"), WindowWeeklyModel},
+		{"7d_oi rejected next to a rejected 5h", rawHeader(p+"Status", "rejected", p+"5h-Status", "rejected", p+"7d_oi-Status", "rejected"), WindowFiveHour},
+		{"only the unified status says rejected", rawHeader(p+"Status", "rejected"), WindowUnified},
+		{"unified rejected with allowed_warning windows", rawHeader(p+"Status", "rejected", p+"5h-Status", "allowed_warning", p+"7d-Status", "allowed"), WindowUnified},
+		{"7d_oi rejected with a warning 5h is not model only", rawHeader(p+"Status", "rejected", p+"5h-Status", "allowed_warning", p+"7d_oi-Status", "rejected"), WindowUnified},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := ClassifyRejection(429, tc.h)
+			if !got.Rejected || got.Window != tc.want {
+				t.Fatalf("got %+v, want window %q", got, tc.want)
+			}
+		})
+	}
+	if got := ClassifyRejection(429, rawHeader(p+"5h-Status", "allowed")); got.Window != "" {
+		t.Fatalf("a non-rejection carries window %q", got.Window)
 	}
 }

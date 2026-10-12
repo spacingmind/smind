@@ -90,6 +90,7 @@ type cooldownRow struct {
 	until      time.Time
 	reason     CooldownReason
 	level      int
+	window     string // Rejection.Window of the rejection that set it; display only
 	observedAt time.Time
 }
 
@@ -292,7 +293,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 
 	var next cooldownRow
 	if hasDeadline {
-		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected}
+		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected, window: rej.Window}
 	} else {
 		if active {
 			// A second rejection while a cooldown runs must not escalate.
@@ -302,7 +303,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 		if have {
 			level = min(cur.level+1, passiveMaxLevel)
 		}
-		next = cooldownRow{until: at.Add(FallbackDuration(level)), reason: ReasonFallback, level: level}
+		next = cooldownRow{until: at.Add(FallbackDuration(level)), reason: ReasonFallback, level: level, window: rej.Window}
 	}
 	if active && !next.until.After(cur.until) {
 		return false // never shorten
@@ -414,11 +415,11 @@ func (p *Passive) Cooldown(accountID int64, model string, now time.Time) (Cooldo
 		}
 	}
 	if row, ok := a.rows[""]; ok {
-		consider(Cooldown{Until: row.until, Scope: CooldownAccount, Reason: row.reason, Level: row.level})
+		consider(Cooldown{Until: row.until, Scope: CooldownAccount, Reason: row.reason, Level: row.level, Window: row.window})
 	}
 	if m != "" {
 		if row, ok := a.rows[m]; ok {
-			consider(Cooldown{Until: row.until, Scope: CooldownModel, Model: m, Reason: row.reason, Level: row.level})
+			consider(Cooldown{Until: row.until, Scope: CooldownModel, Model: m, Reason: row.reason, Level: row.level, Window: row.window})
 		}
 		if until, ok := a.backoff[m]; ok {
 			consider(Cooldown{Until: until, Scope: CooldownModel, Model: m, Reason: ReasonBackoff})
@@ -464,6 +465,7 @@ func (p *Passive) mergeStoredLocked(id int64, a *passiveAcct, rows []store.Quota
 			until:      r.Until,
 			reason:     sanitizeReason(r.Reason),
 			level:      max(0, min(r.Level, passiveMaxLevel)),
+			window:     sanitizeWindow(r.RejectedWindow),
 			observedAt: r.ObservedAt,
 		}
 		scope := r.ScopeModel
@@ -499,6 +501,15 @@ func sanitizeReason(r string) CooldownReason {
 		return ReasonFallback
 	}
 	return ReasonRejected
+}
+
+// sanitizeWindow keeps only a known rejected-window name from the store.
+func sanitizeWindow(w string) string {
+	switch w {
+	case WindowFiveHour, WindowWeekly, WindowWeeklyModel, WindowUnified:
+		return w
+	}
+	return ""
 }
 
 // ClearCooldown drops the account's cooldowns and back-offs from memory, the
@@ -662,12 +673,13 @@ func (p *Passive) writeCooldown(k cooldownKey) {
 	var err error
 	if have {
 		err = p.store.SaveQuotaCooldown(store.QuotaCooldown{
-			AccountID:  k.account,
-			ScopeModel: k.scope,
-			Until:      row.until,
-			Reason:     string(row.reason),
-			Level:      row.level,
-			ObservedAt: row.observedAt,
+			AccountID:      k.account,
+			ScopeModel:     k.scope,
+			Until:          row.until,
+			Reason:         string(row.reason),
+			Level:          row.level,
+			RejectedWindow: row.window,
+			ObservedAt:     row.observedAt,
 		})
 	} else {
 		err = p.store.DeleteQuotaCooldown(k.account, k.scope)
