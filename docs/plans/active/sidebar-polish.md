@@ -96,19 +96,44 @@ Supervisor-approved (2026-10-12), implemented as written unless a deviation is l
 
 ## Progress
 
-- [ ] Plan committed
-- [ ] S1 scoped actions
-- [ ] S2 keyboard
-- [ ] S3 single status slot
-- [ ] S4 single-line row
-- [ ] S5 container rows
-- [ ] S6 task context menu
-- [ ] S7 fade + per-row indent
-- [ ] S8 persisted expansion
-- [ ] Screenshots light/dark 256/192 + hover + focus + D1 probe
-- [ ] `task test`, `task lint`, tsc
-- [ ] PR opened
+- [x] Plan committed
+- [x] S1 scoped actions (6ebcbc2)
+- [x] S2 keyboard: focusable rows, Enter/Space, arrow keys (all four arrows landed)
+- [x] S3 single status slot
+- [x] S4 single-line row
+- [x] S5 container rows
+- [x] S6 task context menu
+- [x] S7 fade + per-row indent (+ geometry follow-up after the screenshot pass)
+- [x] S8 persisted expansion
+- [x] Screenshots light/dark 256/192 + hover + focus + D1 probe (local: `/private/tmp/sidebar-polish-shots/`)
+- [x] `task test`, `task lint`, tsc (see Validation)
+- [ ] PR opened / reviewed / merged (Lead never merges)
+
+Tests live in `components/app-sidebar-rows.test.tsx` (new, S1-S8) with the
+older `app-sidebar*.test.tsx` / `open-in-editor.test.tsx` / `App.test.tsx`
+re-baselined where the row's contract changed (status slots, meta line, tier,
+hover-only triggers). Shared helpers: `test/sidebar-helpers.ts`.
+
+Not done / follow-ups: S9 (scroll-edge fade, show-more), S10 (drag reorder:
+needs a decision on persisted order), S11 (filter chips, ⌘1-9 badges). Touch
+devices have no hover, so the ⋯ is reachable there only through the row's
+long-press context menu (S6) -- unverified on a real touch device. Pre-existing,
+untouched: the "reveal the selected task's collapsed ancestors" effect in
+`AppSidebar` re-expands immediately, so a parent of the selected task cannot be
+collapsed.
 
 ## Validation
 
-(filled in as items land — AC → test name / screenshot path)
+Spec scenarios in the list above are the test names in
+`components/app-sidebar-rows.test.tsx` unless a file is named.
+
+- SP-S1-AC1..AC4: "task row actions (S1)" -- `hovering a task row mounts only that row's actions`, `hovering a child row does not mount its parent's or siblings' actions`, `hovering a parent row does not mount its descendants' actions`, `leaving a row unmounts its actions`, `keyboard focus within a row mounts its actions, and blur unmounts them`, `an open menu keeps its row's actions mounted after the pointer leaves`. Live D1 probe against a sandbox daemon: hovering the nested row of task 9 left exactly `["9"]` triggers in all four theme x width runs (`/private/tmp/sidebar-polish-scripts/report.json`).
+- SP-S2-AC1..AC5: "task row keyboard (S2)" -- focusable button, Enter/Space are native button activation (jsdom cannot synthesize the click, so the test asserts `<button type=button>` + click selects), ArrowDown/Up, skipping collapsed rows, ArrowLeft/Right collapse/expand and parent/first-child hops, modified arrows ignored, nested `ul > li > ul` + `aria-expanded`. Screenshot: `sidebar-*-focus.png` (ring wraps the whole row), `states3-*-collapsed-keyboard.png`.
+- SP-S3-AC1..AC4: "task row status slot (S3)" -- single slot at constant width, 8-case priority table (`priority: ...`), data attributes, idle slot carries none; the old three-slot layout-stability tests were re-baselined in `app-sidebar.test.tsx`. Screenshot: `states-*-unread.png`.
+- SP-S4-AC1..AC5: "task row, single line (S4)" + `lib/relative-time.test.ts` (`formatRelativeTimeShort`) + the re-baselined signal/tier tests in `app-sidebar.test.tsx`. Measured row height 32px in every run (`report.json`).
+- SP-S5-AC1..AC3: "container rows (S5)". Screenshots: `states-*-spacehover.png` (⋯ clear of the chevron, highlight spans the row), `states2-dark-status-groups.png` (count pill).
+- SP-S6-AC1: "task context menu (S6)". Screenshot: `states-*-contextmenu.png`.
+- SP-S7-AC1..AC3: "title overflow and indentation (S7)". Screenshots at 256/192 px light and dark (`sidebar-*-wide.png`, `sidebar-*-narrow.png`).
+- SP-S7-AC4 (measured, `report.json`): depth-0 title starts 30px from the row's left edge in a list with no parents and 42px where the list contains a parent (the 12px gutter for the chevron) -- the 32px target holds only for the first case. At a 192px sidebar the depth-2 title is 101px wide (89px for the depth-1 title that sits next to a child-count chip); at 256px it is 135px.
+- SP-S8-AC1..AC4: "expansion persistence (S8)" + `lib/sidebar-preferences.test.ts`. Live: after collapsing a space and a workspace and reloading, both stayed collapsed (`states2-*-after-reload.png`, stored `["space:2","ws:2"]`).
+- Commands: see the PR description for the exact `tsc`/vitest/`task test`/`task lint` runs and results.
