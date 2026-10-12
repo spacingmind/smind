@@ -9,7 +9,7 @@ import { useComposerDraft } from "@/components/composer/use-composer-draft";
 import { useProviderHealth } from "@/hooks/use-provider-health";
 import type { SubmitResult } from "@/hooks/use-run-timeline";
 import { PromptTextarea } from "@/components/composer/prompt-textarea";
-import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
+import { RunConfigToolbar, type LiveRunControls, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
 import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
@@ -93,6 +93,9 @@ export function Composer({
   toolbarRef,
   onRunConfigChange,
   configOptions,
+  otherRunningChat,
+  onJumpToChat,
+  liveRun,
 }: {
   client: WsClientLike | null;
   /** null when no task is selected -- the composer renders, disabled, and says so. */
@@ -131,6 +134,12 @@ export function Composer({
   toolbarRef?: Ref<HTMLDivElement>;
   /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
   onRunConfigChange?: (state: RunConfigState) => void;
+  /** Another chat of this task with a live run in the shared worktree (ADR-0016 P3) -- a chip in the status row. */
+  otherRunningChat?: { id: number; title: string } | null;
+  /** Jumps to otherRunningChat's tab. */
+  onJumpToChat?: (chatId: number) => void;
+  /** The running run's mode controls (D1): while set, the toolbar's Mode/Auto-accept pills drive that run via run.setPermissionMode instead of the next run's config. Omit when there is no live-switch-capable run. */
+  liveRun?: LiveRunControls | null;
   /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
   configOptions?: {
     options: ConfigOptionParams[];
@@ -298,10 +307,13 @@ export function Composer({
     // Select re-rendering with the new value *is* the visible feedback --
     // no separate indicator to keep in sync.
     if (e.key === "Tab" && e.shiftKey && !inactive) {
-      const next = resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
+      const next = liveRun
+        ? resolveNextPermissionMode(liveRun.modes, liveRun.mode)
+        : resolveNextPermissionMode(runConfig?.meta.modes ?? [], runConfig?.meta.effectiveMode ?? "");
       if (next) {
         e.preventDefault();
-        runConfig?.actions.setPermissionMode(next);
+        if (liveRun) liveRun.onChange({ modeId: next }).catch(() => {});
+        else runConfig?.actions.setPermissionMode(next);
       }
     }
   }
@@ -321,7 +333,13 @@ export function Composer({
 
       {/* Paseo's chip row above the card: the live-run chip and the diff
           stat -- real data only, nothing when neither applies. */}
-      <ComposerStatusChips running={running} diffStat={diffStat} onOpenDiff={onOpenDiff} />
+      <ComposerStatusChips
+        running={running}
+        diffStat={diffStat}
+        onOpenDiff={onOpenDiff}
+        otherRunningChat={otherRunningChat}
+        onJumpToChat={onJumpToChat}
+      />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
@@ -384,6 +402,7 @@ export function Composer({
           profiles={profiles}
           providers={providers}
           disabled={inactive}
+          liveRun={liveRun}
           providerHealth={providerHealth.health}
           onPickerOpen={providerHealth.ensure}
           onChange={(value) => {
@@ -405,6 +424,7 @@ export function Composer({
                 options={configOptions.options}
                 error={configOptions.error}
                 onSetOption={configOptions.onSetOption}
+                omitMode={liveRun != null && liveRun.modes.length > 1}
               />
             )}
             <div className="ml-auto flex items-center gap-1">

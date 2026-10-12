@@ -128,3 +128,12 @@ Purely additive, the same shape ADR 0008 and ADR 0009 both establish:
 - **`EventType` stays append-only.** `EventTypeRaw` is added after
   `EventTypeToolCall`, not interleaved, so no already-persisted event's
   integer type is reinterpreted.
+
+## Addendum (2026-10-12): rendering policy
+
+The persisted log and wire stay lossless: every unknown kind is still stored and
+delivered as a `raw` event. The web timeline now decides what to show
+(`web/packages/ui/src/hooks/use-run-timeline.ts`): session-housekeeping kinds
+(`available_commands_update`, `session_info_update`, `current_mode_update`,
+`config_option_update`, `usage_update`) produce no row, and every remaining
+`raw`/unknown event renders only in the Detailed view, not Overview.
