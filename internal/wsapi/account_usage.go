@@ -66,7 +66,7 @@ type accountUsagePayload struct {
 // enriched from (*quota.Passive). It has no method that reaches the network.
 type PassiveUsage interface {
 	// Active lists the account's un-expired non-transient cooldowns, the
-	// account-wide one first.
+	// account-wide one first, then the model-scoped ones, latest end first.
 	Active(accountID int64, now time.Time) []quota.Cooldown
 	// Observed is the latest rate-limit observation, for display only.
 	Observed(accountID int64) (quota.Observation, bool)
@@ -211,7 +211,14 @@ func usageRow(acc accounts.Account, res quota.Result, passive PassiveUsage, ttl 
 		return u
 	}
 	if active := passive.Active(acc.ID, now); len(active) > 0 {
-		c := active[0] // the account-wide one, else the model-scoped one ending last
+		// The card must not understate the block: the cooldown that ends last,
+		// the account-wide one on a tie (Active lists it first).
+		c := active[0]
+		for _, o := range active[1:] {
+			if o.Until.After(c.Until) {
+				c = o
+			}
+		}
 		u.Cooldown = &usageCooldown{
 			Until:  c.Until.UTC().Format(time.RFC3339),
 			Scope:  string(c.Scope),

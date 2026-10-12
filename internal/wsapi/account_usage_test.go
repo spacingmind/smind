@@ -1070,3 +1070,34 @@ func TestUsage_NoSecretsInCooldownPayload(t *testing.T) {
 		t.Fatalf("the rejection did not produce a cooldown: %s", rpc)
 	}
 }
+
+func TestUsage_AccountUsageCooldownPicksLatestEndingScope(t *testing.T) {
+	h := newPassiveUsageHarness(t, 3)
+	a, b, c := h.ids[0], h.ids[1], h.ids[2]
+	at := time.Now()
+
+	// a: a short account-wide cooldown, a longer model-scoped one: the model one.
+	h.observe(a, "m", http.StatusTooManyRequests, rejected5h(at.Add(10*time.Minute)))
+	h.observe(a, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(3600))
+	// b: the account-wide one ends last: it shows.
+	h.observe(b, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(600))
+	h.observe(b, "m", http.StatusTooManyRequests, rejected5h(at.Add(2*time.Hour)))
+	// c: two model-scoped ones: the later one.
+	h.observe(c, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(600))
+	h.observe(c, "claude-sonnet-4", http.StatusTooManyRequests, rejectedOIOnly(1800))
+
+	res := h.mustDirect(usageParams("cached"))
+	ra := res.byID(t, a)
+	if ra.Cooldown == nil || ra.Cooldown.Scope != "model" || ra.Cooldown.Model != "claude-opus-5" {
+		t.Fatalf("a: cooldown = %+v, want the longer model-scoped one", ra.Cooldown)
+	}
+	if want := rfc3339(at.Add(time.Hour + passiveTestGrace)); ra.Cooldown.Until != want {
+		t.Errorf("a: until = %s, want %s", ra.Cooldown.Until, want)
+	}
+	if rb := res.byID(t, b); rb.Cooldown == nil || rb.Cooldown.Scope != "account" || rb.Cooldown.Window != "five_hour" {
+		t.Fatalf("b: cooldown = %+v, want the account-wide one", rb.Cooldown)
+	}
+	if rc := res.byID(t, c); rc.Cooldown == nil || rc.Cooldown.Model != "claude-sonnet-4" {
+		t.Fatalf("c: cooldown = %+v, want the later model-scoped one", rc.Cooldown)
+	}
+}
