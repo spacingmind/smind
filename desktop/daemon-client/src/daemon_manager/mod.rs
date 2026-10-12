@@ -16,6 +16,8 @@ pub mod native;
 pub mod release;
 pub mod version;
 pub mod wsl;
+#[cfg(windows)]
+pub mod windows_native;
 
 pub use managed::{ManagedRecord, ManagedState};
 pub use release::{ReleaseError, ReleaseUrls};
