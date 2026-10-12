@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
-import { GitCompare } from "lucide-react";
+import { ArrowUp, Square, Zap } from "lucide-react";
 
+import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
 import { resolveNextPermissionMode } from "@/components/composer/permission-mode-cycle";
 import { useComposerDraft } from "@/components/composer/use-composer-draft";
@@ -10,6 +11,8 @@ import { PromptTextarea } from "@/components/composer/prompt-textarea";
 import { RunConfigToolbar, type RunConfigContextValue, type RunConfigState } from "@/components/composer/run-config-toolbar";
 import { RunConfigOptions } from "@/components/run-config-options";
 import { Button } from "@/components/ui/button";
+import { useActionHandler, useKeyboard } from "@/keyboard/keyboard-provider";
+import { formatCombo } from "@/keyboard/shortcut-string";
 import { type DiffStat } from "@/lib/diff-stat";
 import type {
   AgentProfile,
@@ -26,7 +29,8 @@ import type { WsClientLike } from "@/lib/ws-client";
 /** Used until provider.list answers (and kept if it fails) so the composer is never unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
 
-const COMPACT_TOUCH_ACTION_BUTTON_CLASS = "h-11 px-4 text-ui-base md:h-7 md:px-2.5 md:text-ui-sm";
+/** Icon-only send cluster: 44px touch targets below md (Item 21), ZCode's 32px rounded squares from md up. */
+const ICON_ACTION_BUTTON_CLASS = "size-11 rounded-xl md:size-8";
 
 /**
  * Why the composer can't send right now, phrased for the placeholder. A
@@ -51,36 +55,15 @@ export function composerPlaceholder({
 }
 
 /**
- * The task's diff stat as a compact pill above the input card
- * (web-ui-dogfood-polish Item 5): additions green, deletions red, and a
- * click jumps to the task's Diff tab. The numbers are the same stat the
- * diff pane renders (hooks/use-task-diff.ts), so nothing new is fetched
- * here -- the parent hands the already-derived stat in.
- */
-function DiffStatPill({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => void }) {
-  return (
-    <button
-      type="button"
-      data-testid="composer-diff-stat"
-      aria-label={`Open diff: ${stat.additions} additions, ${stat.deletions} deletions`}
-      onClick={onOpenDiff}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-input bg-surface px-2.5 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
-    >
-      <GitCompare aria-hidden className="size-3 opacity-70" />
-      <span className="font-medium text-success">+{stat.additions}</span>
-      <span className="font-medium text-destructive">−{stat.deletions}</span>
-    </button>
-  );
-}
-
-/**
  * The task composer (ui-redesign-parity Item 10, reshaped to the input
- * card anatomy by web-ui-dogfood-polish Item 5): one rounded card whose
- * top is the autogrowing prompt textarea and whose bottom edge is the
- * toolbar (compact provider/permission-mode selects, Stop/Send), with the
- * task's diff-stat pill sitting above the card. The only affordances
- * shown are ones that work -- no attachment "+" placeholder until
- * attachments exist.
+ * card anatomy by web-ui-dogfood-polish Item 5, then to ZCode's card with
+ * Paseo's chips and focus hint by docs/plans/active/composer-redesign.md):
+ * one rounded card whose top is the autogrowing prompt textarea (two rows
+ * at rest) and whose bottom edge is the toolbar -- icon+label run-config
+ * pills on the left, the icon-only Send/Stop cluster on the right -- with
+ * the status chips (Working, diff stat) above the card. The only
+ * affordances shown are ones that work -- no attachment "+", mic or voice
+ * buttons until those features exist.
  *
  * **Queue, not steer.** The daemon exposes no "send more input to a run
  * already in flight" RPC, so submitting while a run is live hands the
@@ -177,6 +160,24 @@ export function Composer({
   const [submitting, setSubmitting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const textareaNode = useRef<HTMLTextAreaElement | null>(null);
+  const setTextareaNode = useCallback(
+    (node: HTMLTextAreaElement | null) => {
+      textareaNode.current = node;
+      if (typeof textareaRef === "function") textareaRef(node);
+      else if (textareaRef) textareaRef.current = node;
+    },
+    [textareaRef],
+  );
+
+  // `composer.focus` is in the shortcut registry but nothing claimed it
+  // until now. The hint shows the *effective* combo (a user rebinding is
+  // honoured; an unbound action shows nothing), Paseo-style: only while the
+  // box is unfocused and empty, and only where a keyboard exists (md+).
+  useActionHandler("composer.focus", () => textareaNode.current?.focus());
+  const { bindings, isMac } = useKeyboard();
+  const focusCombo = bindings.find((b) => b.id === "composer-focus")?.effectiveCombo ?? null;
 
   useEffect(() => {
     setProviders(FALLBACK_PROVIDERS);
@@ -210,10 +211,6 @@ export function Composer({
 
   const canSend = connected && taskId !== null;
   const running = runningRunId !== null;
-  const hasChanges =
-    diffStat !== null &&
-    diffStat !== undefined &&
-    (diffStat.files > 0 || diffStat.additions > 0 || diffStat.deletions > 0);
 
   const send = useCallback(
     async (text: string, whenBusy: "queue" | "interrupt") => {
@@ -312,26 +309,24 @@ export function Composer({
   }
 
   const inactive = !canSend || submitting;
+  const hasText = draft.value.trim() !== "";
+  const showFocusHint = focusCombo !== null && canSend && !focused && draft.value === "";
 
   return (
-    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto w-full max-w-3xl shrink-0 flex-col gap-2 border-t px-4 py-3 flex">
+    <form onSubmit={handleFormSubmit} data-testid="composer" className="mx-auto flex w-full max-w-3xl shrink-0 flex-col gap-2 px-4 pb-3 pt-2">
       <QueuedPrompts items={queuedItems} onCancel={onCancelQueued} />
 
-      {/* The pill row above the card (Item 5): only real data -- the diff
-          stat, only when there are changes and there's a Diff tab to jump
-          to. No invented run/subagent pills. */}
-      {hasChanges && onOpenDiff && (
-        <div className="flex items-center gap-2">
-          <DiffStatPill stat={diffStat} onOpenDiff={onOpenDiff} />
-        </div>
-      )}
+      {/* Paseo's chip row above the card: the live-run chip and the diff
+          stat -- real data only, nothing when neither applies. */}
+      <ComposerStatusChips running={running} diffStat={diffStat} onOpenDiff={onOpenDiff} />
 
       {/*
        * The input card (Item 5): one rounded surface whose top is the
-       * textarea and whose bottom edge is the toolbar. The card carries
-       * the border/focus ring; the textarea and toolbar controls inside
-       * are chrome-less, which is why the selects are aria-labelled
-       * rather than sitting under visible <label> text anymore.
+       * textarea and whose bottom edge is the toolbar, with no divider
+       * between them (ZCode). The card carries the border/focus ring; the
+       * textarea and toolbar controls inside are chrome-less, which is why
+       * the selects are aria-labelled rather than sitting under visible
+       * <label> text.
        *
        * `rounded-2xl`/`bg-input`/`border-input-border` (zcode-visual-parity
        * P3): the main chat input shell is one of DESIGN.md's three
@@ -341,23 +336,41 @@ export function Composer({
        */}
       <div
         data-testid="composer-card"
-        className="flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
+        className="relative flex flex-col rounded-2xl border border-input-border bg-input transition-colors hover:border-input-border-hover focus-within:border-input-border-focused focus-within:bg-input-focused"
       >
         <PromptTextarea
-          ref={textareaRef}
+          ref={setTextareaNode}
           label="Prompt"
+          rows={2}
           value={draft.value}
           onChange={draft.setValue}
           onSubmit={submit}
           onKeyDown={handleKeyDown}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           placeholder={composerPlaceholder({ connected, hasTask: taskId !== null, running })}
           disabled={inactive}
-          className="rounded-none border-0 bg-transparent px-3 py-2.5 focus-visible:border-transparent focus-visible:ring-0"
+          className="rounded-none border-0 bg-transparent px-4 pb-1 pt-3.5 focus-visible:border-transparent focus-visible:ring-0"
         />
+        {showFocusHint && (
+          <span
+            data-testid="composer-focus-hint"
+            aria-hidden
+            className="pointer-events-none absolute right-4 top-3.5 text-ui-sm text-foreground-subtlest max-md:hidden"
+          >
+            {formatCombo(focusCombo, isMac)} to focus
+          </span>
+        )}
+
+        {formError && (
+          <p role="alert" className="px-4 pb-1 text-ui-sm text-destructive">
+            {formError}
+          </p>
+        )}
 
         {/*
          * The run-config toolbar (run-config IA): one compound component
-         * whose four parts share a single context, replacing the four
+         * whose parts share a single context, replacing the four
          * independent Selects that each carried their own state here.
          */}
         <RunConfigToolbar
@@ -377,13 +390,13 @@ export function Composer({
             ref={toolbarRef}
             tabIndex={-1}
             data-testid="composer-toolbar-row"
-            className="flex flex-wrap items-center gap-1.5 rounded-md border-t border-border/60 px-2 py-1.5 focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="flex flex-wrap items-center px-2 pb-2 pt-1 focus-visible:ring-3 focus-visible:ring-ring/50 rounded-xl"
           >
             <RunConfigToolbar.Agent />
             <RunConfigToolbar.Provider />
-            <RunConfigToolbar.Mode />
-            <RunConfigToolbar.Thinking />
             <RunConfigToolbar.Model />
+            <RunConfigToolbar.Thinking />
+            <RunConfigToolbar.Mode />
             {configOptions && (
               <RunConfigOptions
                 options={configOptions.options}
@@ -391,46 +404,47 @@ export function Composer({
                 onSetOption={configOptions.onSetOption}
               />
             )}
-          <div className="ml-auto flex items-center gap-2">
-            {formError && <span className="text-ui-sm text-destructive">{formError}</span>}
-            {running && (
-              <>
+            <div className="ml-auto flex items-center gap-1">
+              {running && hasText && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className={ICON_ACTION_BUTTON_CLASS}
+                  disabled={inactive}
+                  aria-label="Send now"
+                  data-testid="chat-send-now-button"
+                  title="Interrupt the running turn and send now (⌘/Ctrl+Enter)"
+                  onClick={sendNow}
+                >
+                  <Zap aria-hidden />
+                </Button>
+              )}
+              {running && (
+                <Button
+                  type="button"
+                  variant="execute"
+                  className={ICON_ACTION_BUTTON_CLASS}
+                  disabled={stopping}
+                  aria-label={stopping ? "Stopping…" : "Stop"}
+                  title="Stop the running turn (Esc)"
+                  data-testid="chat-stop-button"
+                  onClick={handleStop}
+                >
+                  <Square aria-hidden className="fill-current" />
+                </Button>
+              )}
               <Button
-                type="button"
-                variant="execute"
-                size="sm"
-                className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-                disabled={stopping}
-                data-testid="chat-stop-button"
-                onClick={handleStop}
+                type="submit"
+                variant={running ? "default" : "execute"}
+                className={ICON_ACTION_BUTTON_CLASS}
+                disabled={inactive || !hasText}
+                aria-label={running ? "Queue" : "Send"}
+                title={running ? "Queue this prompt — it sends when the run finishes (Enter)" : "Send (Enter)"}
+                data-testid="chat-send-button"
               >
-                {stopping ? "Stopping…" : "Stop"}
+                <ArrowUp aria-hidden />
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-                disabled={inactive || !draft.value.trim()}
-                data-testid="chat-send-now-button"
-                title="Interrupt the running turn and send now (⌘/Ctrl+Enter)"
-                onClick={sendNow}
-              >
-                Send now
-              </Button>
-              </>
-            )}
-            <Button
-              type="submit"
-              variant={running ? "default" : "execute"}
-              size="sm"
-              className={COMPACT_TOUCH_ACTION_BUTTON_CLASS}
-              disabled={inactive || !draft.value.trim()}
-              data-testid="chat-send-button"
-            >
-              {running ? "Queue" : "Send"}
-            </Button>
-          </div>
+            </div>
           </div>
         </RunConfigToolbar>
       </div>

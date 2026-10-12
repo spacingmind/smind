@@ -58,6 +58,9 @@ export function PromptTextarea({
   label,
   ref,
   className,
+  rows = 1,
+  onFocus,
+  onBlur,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -69,6 +72,10 @@ export function PromptTextarea({
   label: string;
   ref?: Ref<HTMLTextAreaElement>;
   className?: string;
+  /** Resting height in rows; the box still grows with content up to MAX_COMPOSER_HEIGHT. */
+  rows?: number;
+  onFocus?: () => void;
+  onBlur?: () => void;
 }) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -86,12 +93,14 @@ export function PromptTextarea({
         else if (ref) ref.current = node;
       }}
       aria-label={label}
-      rows={1}
+      rows={rows}
       value={value}
       placeholder={placeholder}
       disabled={disabled}
       style={{ maxHeight: MAX_COMPOSER_HEIGHT }}
       onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
+      onBlur={onBlur}
       onKeyDown={(e) => {
         if (isSubmitKey(e)) {
           e.preventDefault();

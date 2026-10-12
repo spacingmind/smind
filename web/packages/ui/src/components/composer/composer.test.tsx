@@ -9,6 +9,7 @@ import type { ChatQueueItem, RunSummary, Task } from "@/lib/types";
 import { autoGrow, isSubmitKey, MAX_COMPOSER_HEIGHT } from "@/components/composer/prompt-textarea";
 import { draftStorageKey } from "@/components/composer/use-composer-draft";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { KeyboardProvider } from "@/keyboard/keyboard-provider";
 import type { Provider, ThinkingLevel } from "@/lib/types";
 
 interface Submission {
@@ -667,8 +668,8 @@ describe("Composer", () => {
     renderComposer();
 
     const send = screen.getByTestId("chat-send-button");
-    expect(send.className).toContain("h-11");
-    expect(send.className).toContain("md:h-7");
+    expect(send.className).toContain("size-11");
+    expect(send.className).toContain("md:size-8");
 
     // The trigger element is what the finger lands on, so the rule has to
     // survive on it and not be merged away by SelectTrigger's own h-8.
@@ -778,12 +779,16 @@ describe("Composer server queue (ADR-0021 §9)", () => {
     expect(whenBusy).toEqual(["interrupt"]);
   });
 
-  it("Send now button is absent when idle", () => {
+  it("Send now button is absent when idle, and while running needs text", () => {
     const { rerender } = renderComposer({ runningRunId: null });
+    fireEvent.change(textarea(), { target: { value: "hurry" } });
     expect(screen.queryByTestId("chat-send-now-button")).not.toBeInTheDocument();
 
     rerender({ runningRunId: "run-1" });
     expect(screen.getByTestId("chat-send-now-button")).toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "" } });
+    expect(screen.queryByTestId("chat-send-now-button")).not.toBeInTheDocument();
   });
 
   it("cancel button calls chat.queueCancel with the item id", async () => {
@@ -1224,5 +1229,139 @@ describe("Composer diff-stat pill (Item 5)", () => {
       await flush();
       expect(select).toHaveTextContent("GLM");
     });
+  });
+});
+
+describe("Composer redesign (composer-redesign plan)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("composer card has no divider and the textarea is two rows", () => {
+    renderComposer();
+    expect(textarea()).toHaveAttribute("rows", "2");
+    const card = screen.getByTestId("composer-card");
+    expect(card.className).toContain("rounded-2xl");
+    expect(screen.getByTestId("composer-toolbar-row").className).not.toMatch(/border-t|border-b/);
+  });
+
+  it("send is icon-only, labelled Send, disabled while empty", () => {
+    renderComposer();
+    const send = screen.getByRole("button", { name: "Send" });
+    expect(send).toBeDisabled();
+    expect(send).toHaveTextContent("");
+    expect(send.querySelector("svg")).not.toBeNull();
+
+    fireEvent.change(textarea(), { target: { value: "go" } });
+    expect(send).toBeEnabled();
+  });
+
+  it("running shows Stop always, Queue and Send now only with text", () => {
+    renderComposer({ runningRunId: "run-1" });
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Queue" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send now" })).not.toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "next" } });
+    expect(screen.getByRole("button", { name: "Queue" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send now" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+  });
+
+  it("Working chip shows while a run is live and hides when idle", () => {
+    const { rerender } = renderComposer({ runningRunId: null });
+    expect(screen.queryByTestId("composer-working-chip")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("composer-status-chips")).not.toBeInTheDocument();
+
+    rerender({ runningRunId: "run-1" });
+    expect(screen.getByTestId("composer-working-chip")).toHaveTextContent("Working");
+  });
+
+  it("diff-stat chip compact-formats thousands and opens the diff", () => {
+    const onOpenDiff = vi.fn();
+    renderComposer({ diffStat: { files: 40, additions: 33500, deletions: 940 }, onOpenDiff });
+    const chip = screen.getByTestId("composer-diff-stat");
+    expect(chip).toHaveTextContent("+33.5k");
+    expect(chip).toHaveTextContent("\u2212940");
+    expect(chip).toHaveAttribute("aria-label", "Open diff: 33500 additions, 940 deletions");
+    fireEvent.click(chip);
+    expect(onOpenDiff).toHaveBeenCalledTimes(1);
+  });
+
+  it("composer.focus action focuses the textarea", () => {
+    render(
+      <KeyboardProvider>
+        <Composer
+          client={new FakeWsClient()}
+          taskId={1}
+          chatId={10}
+          isDefaultChat
+          boundProvider={null}
+          connected
+          runningRunId={null}
+          queuedItems={[]}
+          onCancelQueued={async () => {}}
+          onSubmit={async () => ({ kind: "started", runId: "r" })}
+          onStop={async () => {}}
+        />
+      </KeyboardProvider>,
+    );
+    expect(textarea()).not.toHaveFocus();
+    // Ctrl+L: jsdom is not a mac, so Mod resolves to Ctrl.
+    fireEvent.keyDown(document, { key: "l", code: "KeyL", ctrlKey: true });
+    expect(textarea()).toHaveFocus();
+  });
+
+  it("focus hint shows the effective combo when empty and unfocused, hides on focus or text", () => {
+    renderComposer();
+    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+L to focus");
+
+    fireEvent.focus(textarea());
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+
+    fireEvent.blur(textarea());
+    expect(screen.getByTestId("composer-focus-hint")).toBeInTheDocument();
+
+    fireEvent.change(textarea(), { target: { value: "typing" } });
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+  });
+
+  it("focus hint follows a rebound shortcut and hides when unbound", () => {
+    const props = {
+      client: new FakeWsClient(),
+      taskId: 1,
+      chatId: 10,
+      isDefaultChat: true,
+      boundProvider: null,
+      connected: true,
+      runningRunId: null,
+      queuedItems: [],
+      onCancelQueued: async () => {},
+      onSubmit: async () => ({ kind: "started" as const, runId: "r" }),
+      onStop: async () => {},
+    };
+    const { unmount } = render(
+      <KeyboardProvider readOverrides={() => ({ "composer-focus": "Mod+J" })}>
+        <Composer {...props} />
+      </KeyboardProvider>,
+    );
+    expect(screen.getByTestId("composer-focus-hint")).toHaveTextContent("Ctrl+J to focus");
+    unmount();
+
+    render(
+      <KeyboardProvider readOverrides={() => ({ "composer-focus": "" })}>
+        <Composer {...props} />
+      </KeyboardProvider>,
+    );
+    expect(screen.queryByTestId("composer-focus-hint")).not.toBeInTheDocument();
+  });
+
+  it("placeholder does not advertise unsupported features", () => {
+    const { rerender } = renderComposer();
+    for (const running of [null, "run-1"]) {
+      rerender({ runningRunId: running });
+      const placeholder = textarea().getAttribute("placeholder") ?? "";
+      expect(placeholder).not.toMatch(/@|\/command|\/skill|file/i);
+    }
   });
 });
