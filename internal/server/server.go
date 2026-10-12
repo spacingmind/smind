@@ -12,6 +12,7 @@ import (
 	"github.com/spacingmind/smind/internal/accounts"
 	"github.com/spacingmind/smind/internal/auth"
 	"github.com/spacingmind/smind/internal/config"
+	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/runs"
 	"github.com/spacingmind/smind/internal/store"
@@ -36,18 +37,35 @@ type Server struct {
 	shutdownOnce sync.Once
 }
 
+// Option configures New.
+type Option func(*options)
+
+type options struct {
+	observer quota.Observer
+}
+
+// WithQuotaObserver reports every Anthropic OAuth upstream response the proxy
+// receives to o (ADR-0028 §7). Nil is a no-op.
+func WithQuotaObserver(o quota.Observer) Option {
+	return func(opts *options) { opts.observer = o }
+}
+
 // New builds a Server from config, backed by reg/router for the proxy
 // endpoints and wm/runner/db for the /ws workspace/space/task/run/terminal
 // API (db backs runs.Registry's persistence -- see wsapi.New). token gates
 // the proxy endpoints and the /ws upgrade; see Handler.
-func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string) (*Server, error) {
+func New(cfg config.Config, reg *accounts.Registry, router *routing.Router, wm *workspace.Manager, runner *taskrunner.Runner, db *store.Store, token string, opts ...Option) (*Server, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	api, err := wsapi.New(wm, reg, runner, db, token)
 	if err != nil {
 		return nil, fmt.Errorf("server: new: %w", err)
 	}
 	return &Server{
 		cfg:       cfg,
-		proxy:     newProxy(reg, router, db),
+		proxy:     newProxy(reg, router, db, withObserver(o.observer)),
 		ws:        api.Handler,
 		api:       api,
 		runs:      api.Runs,

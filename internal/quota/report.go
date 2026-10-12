@@ -108,8 +108,8 @@ type Window struct {
 	DurationSeconds *int64     `json:"durationSeconds,omitempty"`
 	Tone            Tone       `json:"tone"`
 
-	// Source ("fetched" | "observed") and Status are reserved for ADR-0028
-	// PR-F (locally observed limits). Nothing sets them yet.
+	// Source ("fetched" | "observed") and Status are set by the passive
+	// observer for display only; routing ignores them.
 	Source string `json:"source,omitempty"`
 	Status string `json:"status,omitempty"`
 }

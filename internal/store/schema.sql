@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS quota_snapshots (
     account_id INTEGER NOT NULL REFERENCES accounts(id),
     usage_data TEXT NOT NULL,
     polled_at TIMESTAMP NOT NULL,
-    expires_at TIMESTAMP NOT NULL
+    expires_at TIMESTAMP NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'fetched'
 );
 
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -258,4 +259,18 @@ CREATE TABLE IF NOT EXISTS quota_poll_state (
     forced_at TEXT NOT NULL DEFAULT '[]',
     rejected_fp TEXT NOT NULL DEFAULT '',
     last_error TEXT NOT NULL DEFAULT ''
+);
+
+-- quota_cooldown: passive rejection cooldowns (ADR-0028 §7), one row per
+-- account and scope. scope_model '' is a credential-wide cooldown; a model id
+-- scopes it to that model. Additive: CREATE TABLE IF NOT EXISTS applies it to
+-- existing databases on the next Open, so no migrate.go entry.
+CREATE TABLE IF NOT EXISTS quota_cooldown (
+    account_id INTEGER NOT NULL REFERENCES accounts(id),
+    scope_model TEXT NOT NULL DEFAULT '',
+    until TIMESTAMP NOT NULL,
+    reason TEXT NOT NULL,
+    level INTEGER NOT NULL DEFAULT 0,
+    observed_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (account_id, scope_model)
 );
