@@ -970,7 +970,7 @@ scratch).
 - [x] PR-A2 poller with the call budget, persisted state, config, wiring — PR open (2026-10-12), awaiting review
 - [ ] Human go-ahead for the manual live probe (see Validation)
 - [ ] PR-B routing integration
-- [ ] PR-C wsapi, CLI, MCP
+- [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
 - [ ] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry)
 - [ ] PR-E chat hover card (required)
 - [ ] PR-D2 web footer item (default off) and pins
@@ -1102,3 +1102,38 @@ Unverified at spec time (the implementing PRs must confirm and record):
 - How run-scoped callers are identified at the wsapi layer for the
   `refresh` denial (ADR-0027 describes the same need; PR-C must reuse the
   existing mechanism rather than invent one).
+  **Resolved in PR-C (2026-10-12): there is none.** ADR-0027 run tokens are
+  proposed, not built; every ws client (browser, CLI, `smind mcp serve`, an
+  agent's shell) holds the daemon token, and `source`/`fromTaskId` on
+  `run.start` are self-reported. PR-C therefore adds only an unexported
+  `conn.runScoped` seam (default false, plumbed to `requestContext`) that
+  downgrades `refresh` to `touch`; nothing sets it yet. **Known gap:** an
+  agent with a shell can run `smind account usage --refresh`; the daemon's
+  30 s floor and 6/h budget still cap it at 18 requests/hour/account, and the
+  MCP tool has no refresh input. Closing the gap is part of the ADR-0027
+  run-token work (set `runScoped` at auth time, add an end-to-end test).
+
+### PR-C record (wsapi, CLI, MCP)
+
+- Wire (what PR-D1 consumes): `account.usage` params `{accountIds?, mode?}`
+  (default `cached`), result `{enabled, ttlSeconds, reports: AccountUsage[]}`;
+  `AccountUsage` = `{accountId, key, provider, displayName, credentialType,
+  stale, nextRefreshAt|null (RFC3339 UTC, rounded up to the second),
+  refreshBlocked|null, inFlight, lastError|null, report|null, cooldown?}`.
+  Deviations from the ADR §5 example, both deliberate: `displayName`
+  replaces `label` (AC58), and `inFlight` is added (the caller's 20 s wait
+  ended before the fetch did). Event `account.usage` payload `{usage:
+  AccountUsage}`; removal is signalled by the existing `account.removed`
+  (no separate usage event), so a UI should ignore a usage event for an
+  account it does not know.
+- `quota.Window` reserves `source`/`status`, `AccountUsage` reserves
+  `cooldown`; all `omitempty`, never populated before PR-F.
+- `quota.Poller.SetOnFetch` was added so `AttachUsage` can wire the event
+  after the bus exists (`serve.go` +1 line). It must be called before the
+  poller is used; the unsynchronized write is safe today because nothing can
+  fetch before `ListenAndServe` (reviewer residual).
+- CLI default is `touch`; `--refresh` is the only way to send `refresh`.
+  MCP `account_usage` hard-codes `touch`, input is only `accountIds`.
+- Residual (reviewer): provider-supplied label strings are not
+  control-character-stripped in the poller's `capText` (CLI strips them on
+  output; the MCP tool forwards them) - candidate for a poller follow-up.
