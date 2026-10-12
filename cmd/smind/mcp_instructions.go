@@ -44,7 +44,10 @@ The loop:
    past a pending permission until a NEW one, a terminal status, or timeout.
    task_diff reads a task's worktree diff (capped at 256 KiB); queue_list
    and queue_cancel inspect and cancel your own queued prompts;
-   usage_summary reports token/cost usage. task_send also accepts
+   usage_summary reports token/cost usage; account_usage reports each
+   account's plan usage (5h/weekly limit windows) from the daemon's
+   usage cache (refreshed at most once per 5 minutes per account).
+   task_send also accepts
    promptFile (a path relative to the task's worktree, max 64 KiB) instead
    of prompt.
 

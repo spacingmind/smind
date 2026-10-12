@@ -15,6 +15,7 @@ import {
 import { AppSidebar } from "@/components/app-sidebar";
 import { TabRenameInput } from "@/components/tab-rename-input";
 import { ArchiveChatDialog } from "@/components/crud-dialogs";
+import { UsageModalRoot } from "@/components/account-usage/usage-modal";
 import { CommandPalette } from "@/components/command-palette";
 import { DesktopDaemonBanner } from "@/components/desktop-daemon-banner";
 import { DesktopUpdateDialog } from "@/components/desktop-update-dialog";
@@ -56,10 +57,12 @@ import {
   type TabKind,
 } from "@/components/tab-registry";
 import { useDaemonEvents } from "@/hooks/use-daemon-events";
+import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useInitialValue } from "@/hooks/use-initial-value";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
-import { KeyboardProvider, useActionHandler } from "@/keyboard/keyboard-provider";
+import type { ActionId } from "@/keyboard/actions";
+import { KeyboardProvider, useActionHandler, useActionRestriction } from "@/keyboard/keyboard-provider";
 import { PaletteProvider, useCommands, usePalette } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 import { useTaskAttention } from "@/hooks/use-task-attention";
@@ -145,6 +148,21 @@ export function App({
   );
 }
 
+/**
+ * The only shortcut actions that dispatch while Settings covers the shell.
+ * Everything else (task/tab/pane/chat navigation, new tab, quick open,
+ * run.interrupt, sidebar toggle, ...) belongs to handlers that stay mounted
+ * in the hidden shell and must not act on it unseen.
+ */
+const SETTINGS_SAFE_ACTIONS: readonly ActionId[] = [
+  "palette.open",
+  "shortcuts.help",
+  "settings.open",
+  "usage.open",
+  "theme.cycle",
+  "app.quit",
+];
+
 function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // Item 21: below the 768px breakpoint (Tailwind's own `md`, and the
   // number `hooks/use-mobile.ts` already used for the shadcn Sidebar's
@@ -184,6 +202,17 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // deep-linkable and does not disturb the hash the task routing below
   // owns.
   const [activeView, setActiveView] = useState<"workspace" | "settings">("workspace");
+  // Bumped on every request to open Settings, and used as the screen's key:
+  // asking for a section while Settings is already open (shortcuts.help,
+  // a deep link) remounts it onto that section instead of being ignored.
+  const [settingsOpenNonce, setSettingsOpenNonce] = useState(0);
+  useActionRestriction(activeView === "settings" ? SETTINGS_SAFE_ACTIONS : null);
+  const openSettings = useCallback((sectionId?: string) => {
+    setSettingsInitialSectionId(sectionId ?? null);
+    setSettingsOpenNonce((n) => n + 1);
+    setActiveView("settings");
+  }, []);
+  const closeSettings = useCallback(() => setActiveView("workspace"), []);
 
   const {
     tabsByTask,
@@ -677,8 +706,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // deliberately absent here; the composer claims them itself.
 
   useActionHandler("shortcuts.help", () => {
-    setSettingsInitialSectionId("shortcuts");
-    setActiveView("settings");
+    openSettings("shortcuts");
   });
 
   // RunConfigToolbar's "Manage agents…" entry (run-config-toolbar.tsx) is
@@ -689,12 +717,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   useEffect(() => {
     const onOpenSettings = (e: Event) => {
       const sectionId = (e as CustomEvent<{ sectionId?: string }>).detail?.sectionId;
-      setSettingsInitialSectionId(sectionId ?? null);
-      setActiveView("settings");
+      openSettings(sectionId);
     };
     window.addEventListener("smind:open-settings", onOpenSettings);
     return () => window.removeEventListener("smind:open-settings", onOpenSettings);
-  }, []);
+  }, [openSettings]);
 
   const { open: paletteOpen, setOpen: setPaletteOpen } = usePalette();
   useActionHandler("palette.open", () => setPaletteOpen(!paletteOpen));
@@ -817,9 +844,14 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   useActionHandler("pane.focus.down", () => focusAdjacentPane("down"), { enabled: paneCount > 1 });
 
   useActionHandler("settings.open", () => {
-    setSettingsInitialSectionId(null);
-    setActiveView("settings");
+    // Already open: keep the user's current section rather than resetting it.
+    if (activeView !== "settings") openSettings();
   });
+
+  // Plan usage opens as a modal over whatever is showing, Settings included
+  // (AC32/AC67/AC68); the footer item and chat hover card claim the same
+  // action later, so they never need to know about the modal.
+  useActionHandler("usage.open", openUsageModal);
 
   useActionHandler(
     "sidebar.task-jump",
@@ -867,10 +899,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setAllWorkspaces(workspaces);
         setTreeLoaded(true);
       }}
-      onOpenSettings={(sectionId) => {
-        setSettingsInitialSectionId(sectionId ?? null);
-        setActiveView("settings");
-      }}
+      onOpenSettings={openSettings}
     />
   );
 
@@ -944,33 +973,18 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     />
   );
 
-  // Dogfood Item 4: the settings screen replaces the task pane wholesale
-  // (same surface) while active. Unmounting the task pane on the way in
-  // is intentional and matches the detach-on-switch contract every pane
-  // already implements for tab/task switches -- terminal sessions detach,
-  // not close, and reattach when the view returns.
   const mainContentElement = (
     // bg-background is explicit (not just inherited from SidebarInset): on macOS the
     // body is transparent over the window's vibrancy, and only the sidebar may show it.
     <div data-testid="app-main-content" className="min-h-0 flex-1 bg-background">
-      {activeView === "settings" ? (
-        <SettingsScreen
-          client={client}
-          events={events}
-          onNavigateBack={() => setActiveView("workspace")}
-          initialSectionId={settingsInitialSectionId ?? undefined}
-        />
-      ) : isDesktop && connectionStatus === "disconnected" ? (
+      {isDesktop && connectionStatus === "disconnected" ? (
         // AC6: replaces offline.html's job for the bundled flow -- shown
         // only for the "initial connect never succeeded" case (see
         // ConnectionStatus's own comment in reconnect.ts: an established
         // connection dropping goes through the automatic reconnect loop
         // and its own header status text instead, never this).
         <DesktopUnreachable
-          onSwitchConnection={() => {
-            setSettingsInitialSectionId("connections");
-            setActiveView("settings");
-          }}
+          onSwitchConnection={() => openSettings("connections")}
         />
       ) : selectedTask && taskState ? (
         // p-1 (4px) gives the frame(s) below the same gap against the
@@ -1048,15 +1062,30 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     </div>
   );
 
-  return (
-    // SidebarProvider's own wrapper only sets min-h-svh (a floor, not a
-    // definite height), which used to be fine when its child just flowed
-    // in document order -- ResizablePanelGroup's inner Panels need a
-    // *definite* ancestor height to resolve their percentage-based
-    // stretch, so an explicit h-svh here (additive with min-h-svh, not
-    // conflicting -- different CSS properties) is what actually gives the
-    // resize handle its full-height drag area instead of collapsing to
-    // the height of the header row.
+  const settingsOpen = activeView === "settings";
+  // Stable identities: ShellCommands memoizes its palette entries on them.
+  const selectTaskFromPalette = useCallback(
+    (task: Task) => {
+      closeSettings();
+      selectTask(task);
+    },
+    [closeSettings, selectTask],
+  );
+  const openTabFromPalette = useCallback(
+    (taskId: number, entry: TabEntry, placement?: TabPlacement) => {
+      closeSettings();
+      openTab(taskId, entry, placement);
+    },
+    [closeSettings, openTab],
+  );
+  const activateFromPalette = useCallback(
+    (taskId: number, key: string) => {
+      closeSettings();
+      activate(taskId, key);
+    },
+    [closeSettings, activate],
+  );
+  const shellElement = (
     <SidebarProvider
       className="h-svh"
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
@@ -1069,7 +1098,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
        * zero-render component is the cheapest way to be inside a provider
        * its own parent mounts.
        */}
-      <SidebarToggleAction />
+      <SidebarToggleAction settingsOpen={settingsOpen} />
       <CommandPalette />
       <ShellCommands
         client={client}
@@ -1078,11 +1107,19 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         selectedTask={selectedTask}
         tabs={taskState ? collectAllTabs(taskState.root) : null}
         chats={chats}
-        onSelectTask={selectTask}
-        onOpenTab={openTab}
-        onActivateTab={activate}
-        onNewChat={() => openNewChat("prefer")}
-        onOpenChat={(chatId) => openChatById(chatId, "prefer")}
+        // The palette stays reachable over Settings; anything that changes
+        // the selection leaves Settings first so it is not applied behind it.
+        onSelectTask={selectTaskFromPalette}
+        onOpenTab={openTabFromPalette}
+        onActivateTab={activateFromPalette}
+        onNewChat={() => {
+          closeSettings();
+          openNewChat("prefer");
+        }}
+        onOpenChat={(chatId) => {
+          closeSettings();
+          openChatById(chatId, "prefer");
+        }}
       />
       {isMobile ? (
         // Item 21: below the breakpoint, the sidebar-vs-content split
@@ -1178,6 +1215,41 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         onArchived={onChatArchived}
       />
     </SidebarProvider>
+  );
+
+  // Settings is a full-screen screen with its own layout, not a pane: while
+  // it is open it covers the whole shell. The shell is hidden, never
+  // unmounted -- the task pane keeps its live chat stream, terminals, scroll
+  // and split sizes. `invisible` (visibility:hidden) rather than `hidden`
+  // (display:none) keeps the shell's box, so react-resizable-panels never
+  // sees a 0-size group and re-snaps the sidebar; `inert` takes it out of
+  // focus order and pointer events. Radix portals (palette, dialogs) are
+  // outside this wrapper and still render on top.
+  return (
+    <div className="relative h-svh w-full">
+      <UsageModalRoot client={client} events={events} />
+      <div
+        data-testid="app-shell"
+        className={cn("h-full w-full", settingsOpen && "invisible")}
+        inert={settingsOpen}
+        aria-hidden={settingsOpen || undefined}
+      >
+        {shellElement}
+      </div>
+      {settingsOpen && (
+        // No background here: on macOS the settings sidebar is a vibrancy
+        // surface and the screen paints its own opaque panes.
+        <div className="absolute inset-0 z-40">
+          <SettingsScreen
+            key={settingsOpenNonce}
+            client={client}
+            events={events}
+            onNavigateBack={closeSettings}
+            initialSectionId={settingsInitialSectionId ?? undefined}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1319,6 +1391,15 @@ function ShellCommands({
   const actionCommands = useMemo<Command[]>(
     () => [
       {
+        id: "open-usage",
+        group: "Actions",
+        title: "Usage: open plan usage",
+        subtitle: "Plan windows for each account",
+        keywords: ["quota", "limits", "plan", "5h", "weekly", "rate limit"],
+        action: "usage.open",
+        run: openUsageModal,
+      },
+      {
         id: "cycle-theme",
         group: "Actions",
         title: "Cycle theme",
@@ -1377,10 +1458,19 @@ function useTaskChangedFiles(client: WsClient | null, task: Task | null): string
   return files;
 }
 
-/** Claims `sidebar.toggle` from inside SidebarProvider (where `useSidebar()` is legal) and renders nothing. */
-function SidebarToggleAction() {
-  const { toggleSidebar } = useSidebar();
+/**
+ * Claims `sidebar.toggle` from inside SidebarProvider (where `useSidebar()` is
+ * legal) and renders nothing. While Settings covers the shell the toggle is
+ * restricted away with every other shell action (see SETTINGS_SAFE_ACTIONS),
+ * and a compact-layout sidebar sheet that was open when Settings opened is closed --
+ * it portals out of the hidden shell and would otherwise float over Settings.
+ */
+function SidebarToggleAction({ settingsOpen }: { settingsOpen: boolean }) {
+  const { toggleSidebar, setOpenMobile } = useSidebar();
   useActionHandler("sidebar.toggle", toggleSidebar);
+  useEffect(() => {
+    if (settingsOpen) setOpenMobile(false);
+  }, [settingsOpen, setOpenMobile]);
   return null;
 }
 

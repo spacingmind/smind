@@ -36,6 +36,7 @@ export type ActionId =
   | "quick-open.open"
   | "pane.find"
   | "settings.open"
+  | "usage.open"
   | "sidebar.task-jump"
   | "pane.split.right"
   | "pane.split.down"

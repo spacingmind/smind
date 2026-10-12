@@ -22,3 +22,9 @@ html[data-desktop-os="macos"] [data-slot="sidebar-inner"] {
 html[data-desktop-os="macos"] #sidebar-resize-handle {
   background: var(--background);
 }
+
+/* The settings screen's sidebar is the same vibrancy surface as the app
+ * sidebar (settings-fullscreen D5). */
+html[data-desktop-os="macos"] [data-settings-sidebar] {
+  background: color-mix(in srgb, var(--sidebar) 72%, transparent);
+}

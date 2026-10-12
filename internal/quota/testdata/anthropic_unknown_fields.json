@@ -1,0 +1,6 @@
+{
+  "email": "someone@example.test",
+  "organization": { "uuid": "org-uuid", "name": "Spy Org" },
+  "foo": { "bar": "secret-foo-value" },
+  "five_hour": { "utilization": 6, "resets_at": "2026-06-01T21:00:00Z" }
+}

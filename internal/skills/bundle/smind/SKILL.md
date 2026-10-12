@@ -56,6 +56,6 @@ A task agent can orchestrate too if it has this MCP server. Add it once as an ag
 
 Discovery: `workspace_list`, `provider_list`, `profile_list`, `task_list`, `task_get`, `run_list`, `chat_list`.
 Lifecycle: `task_new`, `chat_new`, `task_send`, `task_wait`, `task_stop`, `task_archive`.
-Inspection: `task_status`, `task_logs`, `task_permissions`, `task_diff`, `usage_summary`.
+Inspection: `task_status`, `task_logs`, `task_permissions`, `task_diff`, `usage_summary` (tokens), `account_usage` (plan windows, read-only).
 Queue: `queue_list`, `queue_cancel`.
 Live settings: `task_set_mode`, `task_options`, `task_set_option`.

@@ -95,6 +95,7 @@ Usage:
   smind account login <provider> <label>                  browser OAuth login (anthropic, openai)
   smind account rm <id>                                    remove an account (cascades routing/quota/workspace links)
   smind account test <provider>                           check whether a provider looks ready to run
+  smind account usage [--refresh] [--json]               plan usage windows per account
 
   smind space create <workspaceId> <title>                create a space within a workspace
   smind space ls <workspaceId>                             list a workspace's spaces
