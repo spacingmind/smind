@@ -257,6 +257,25 @@ describe("call budget (AC54)", () => {
     expect(daemon.modes()).toEqual(["cached", "touch"]);
   });
 
+  it("a hidden window sends no touch even while focused", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    await renderItem(daemon);
+    await advance(3 * 300_000);
+    expect(daemon.modes()).toEqual(["cached"]);
+  });
+
+  it("with polling disabled the footer row is gone and sends nothing more after the first answer", async () => {
+    vi.useFakeTimers();
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    daemon.enabled = false;
+    await renderItem(daemon);
+    expect(daemon.modes()).toEqual(["touch"]);
+    await advance(20 * 300_000);
+    expect(daemon.modes()).toEqual(["touch"]);
+  });
+
   it("a live account.usage event updates the row without another request", async () => {
     const daemon = new FakeUsageDaemon([claudeAccount()]);
     await renderItem(daemon);

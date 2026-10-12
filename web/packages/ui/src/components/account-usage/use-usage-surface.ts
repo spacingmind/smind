@@ -81,17 +81,17 @@ export function useUsageSurface(
 
   const pinning = useMemo<UsagePinning | null>(() => {
     if (!prefs.inSidebar) return null;
-    // Pins are read and snapshotted against the reports this surface shows, so the first toggle
-    // starts from exactly what the footer displays as pinned.
+    // Pins are provider-wide, so the first toggle snapshots the defaults of every account, not
+    // only the filtered one: filtering to Claude must not drop Codex's default pins.
     const pinned = new Set(
       effectiveUsagePins(prefs.preferences, reports).map((pin) => `${pin.provider}\u0000${pin.windowId}`),
     );
-    const defaults = effectiveUsagePins({ ...prefs.preferences, pins: null }, reports);
+    const defaults = effectiveUsagePins({ ...prefs.preferences, pins: null }, snapshot.reports);
     return {
       isPinned: (provider, windowId) => pinned.has(`${provider}\u0000${windowId}`),
       toggle: (provider, windowId) => prefs.togglePin(defaults, { provider, windowId }),
     };
-  }, [prefs.inSidebar, prefs.preferences, prefs.togglePin, reports]);
+  }, [prefs.inSidebar, prefs.preferences, prefs.togglePin, reports, snapshot.reports]);
 
   const refreshAll = useCallback(() => void store?.refreshAll(), [store]);
   const refreshOne = useCallback((id: number) => void store?.refreshOne(id), [store]);

@@ -180,8 +180,8 @@ function PinnedUsageTrigger({ sources }: { sources: readonly PinnedUsageSource[]
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="flex flex-col gap-0.5">
-        {lines.map((line) => (
-          <span key={line}>{line}</span>
+        {lines.map((line, index) => (
+          <span key={index}>{line}</span>
         ))}
       </TooltipContent>
     </Tooltip>

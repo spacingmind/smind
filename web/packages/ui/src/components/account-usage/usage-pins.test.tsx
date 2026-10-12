@@ -70,7 +70,7 @@ describe("UsageWindowBar pinning", () => {
     expect(screen.getByRole("checkbox").className).not.toContain("hover:bg-muted");
   });
 
-  it("the checkbox is a real button, so it is focusable and the browser toggles it on Space and Enter", () => {
+  it("the checkbox is a native button (focusable; the browser fires click on Space and Enter)", () => {
     const onToggle = vi.fn();
     render(<UsageWindowBar window={win} displayAs="used" pin={{ pinned: false, pinLabel: "Pin x", onToggle }} />);
     const box = screen.getByRole("checkbox");
@@ -126,6 +126,19 @@ describe("pins in the modal and Settings", () => {
     expect(screen.getByRole("checkbox", { name: /^Pin Claude Weekly/ })).not.toBeChecked();
   });
 
+  it("filtered to one account, the first toggle keeps every other provider's default pins", async () => {
+    setPrefs({ accountKey: "anthropic-1" });
+    const daemon = new FakeUsageDaemon([claudeAccount(), codexAccount()]);
+    await openModal(daemon);
+    expect(screen.queryByTestId("usage-report-2")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Pin Claude Weekly/ }));
+    expect(stored().pins).toEqual([
+      { provider: "anthropic", windowId: "five_hour" },
+      { provider: "openai", windowId: "five_hour" },
+      { provider: "openai", windowId: "weekly" },
+    ]);
+  });
+
   it("a pin matches the window on every account of the provider", async () => {
     setPrefs({ pins: [] });
     const second = claudeAccount({ accountId: 3, key: "anthropic-3", displayName: "Work Max" });
@@ -173,5 +186,27 @@ describe("pins in the modal and Settings", () => {
     expect(screen.getByTestId("sidebar-usage-summary")).toHaveAttribute("data-layout", "plain");
     fireEvent.click(screen.getByRole("checkbox", { name: /^Pin Claude Weekly/ }));
     expect(within(screen.getByTestId("sidebar-usage-summary")).getByTestId("sidebar-usage-pinned-window").textContent).toBe("54% wk");
+  });
+
+  it("the footer and the modal it opens share one ttl clock: together still one touch per ttl", async () => {
+    vi.useFakeTimers();
+    const daemon = new FakeUsageDaemon([claudeAccount()]);
+    render(
+      <SidebarProvider>
+        <TooltipProvider>
+          <UsageSidebarItem client={daemon.client} events={daemon.events} />
+        </TooltipProvider>
+        <UsageModalRoot client={daemon.client} events={daemon.events} />
+      </SidebarProvider>,
+    );
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+    expect(daemon.modes()).toEqual(["touch"]);
+    fireEvent.click(screen.getByTestId("sidebar-usage-summary"));
+    await act(async () => void (await vi.advanceTimersByTimeAsync(0)));
+    expect(screen.getByTestId("usage-modal")).toBeInTheDocument();
+    expect(daemon.modes()).toEqual(["touch"]);
+    await act(async () => void (await vi.advanceTimersByTimeAsync(301_000)));
+    expect(daemon.modes()).toEqual(["touch", "touch"]);
+    vi.useRealTimers();
   });
 });
