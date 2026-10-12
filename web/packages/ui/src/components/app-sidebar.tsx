@@ -145,8 +145,10 @@ import {
  * same list has children -- reserved per list so a parent's chevron has room
  * and its siblings' dots stay in one column, but not spent on the (common)
  * flat list, where it cost ~12px of a ~110px title in a 256px sidebar
- * (real-app finding, 2026-10-12). Each level of the task tree adds 10px
- * (ROW_INDENT_PX).
+ * (real-app finding, 2026-10-12). The trade-off is accepted: a root title can
+ * sit 12px apart between a list with a parent and one without (sibling spaces,
+ * or the flat pinned/search/status views). Each level of the task tree adds
+ * 10px (ROW_INDENT_PX).
  *
  * Container nesting is drawn differently (ZCode's workspace-grouped-tasks):
  * the expanded content of a WORKSPACE, SPACE (or "Ungrouped"), Pinned or
@@ -868,8 +870,8 @@ export function AppSidebar({
               </>
             )}
           </SidebarGroupLabel>
-          <SidebarGroupContent className="min-h-0 flex-1">
-            <ScrollArea className="h-full">
+          <SidebarGroupContent className="flex min-h-0 flex-1 flex-col">
+            <ScrollArea className="min-h-0 flex-1">
               <RowSignalContext.Provider value={rowSignal}>
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
