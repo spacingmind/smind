@@ -304,7 +304,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 		}
 		scope = model
 	}
-	deadline, hasDeadline := RejectionDeadline(r.Header, at, rej)
+	deadline, window, hasDeadline := RejectionDeadlineWindow(r.Header, at, rej)
 	var grace time.Duration
 	if hasDeadline {
 		grace = p.grace()
@@ -325,7 +325,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 
 	var next cooldownRow
 	if hasDeadline {
-		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected, window: rej.Window}
+		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected, window: window}
 	} else {
 		if active {
 			// A second rejection while a cooldown runs must not escalate.

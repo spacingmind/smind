@@ -42,6 +42,8 @@ type Rejection struct {
 	// is too: the weekly reset is the later one, so it is what binds), else
 	// five_hour when the 5h one is, weekly_model for the ModelOnly shape, else
 	// unified (only the overall status said rejected). Empty when not Rejected.
+	// This is the verdict before any deadline is known: the label of a stored
+	// cooldown comes from RejectionDeadlineWindow.
 	Window string
 }
 
@@ -98,15 +100,38 @@ func (s unifiedStatuses) oiOnly() bool {
 // RejectionDeadline returns the latest future reset among the candidates that
 // apply to r (exactly ParseClaudeRateLimitReset's rules). No grace, no clamp.
 func RejectionDeadline(h http.Header, now time.Time, r Rejection) (time.Time, bool) {
+	t, _, ok := RejectionDeadlineWindow(h, now, r)
+	return t, ok
+}
+
+// RejectionDeadlineWindow is RejectionDeadline plus the window to name for it:
+// when the winning deadline comes from a window's own reset header (5h-Reset or
+// 7d-Reset, each considered only while that window is rejected) that window
+// (five_hour or weekly), so the label never contradicts the end time when both
+// are rejected; when it comes from Retry-After, the 7d_oi reset or the unified
+// reset, r.Window. A tie between the 5h and 7d resets is weekly. window is
+// r.Window when there is no deadline.
+func RejectionDeadlineWindow(h http.Header, now time.Time, r Rejection) (deadline time.Time, window string, ok bool) {
 	if !r.Rejected {
-		return time.Time{}, false
+		return time.Time{}, "", false
 	}
 	s := readUnifiedStatuses(h)
 	oiOnly := s.oiOnly()
 	var latest time.Time
-	consider := func(t time.Time, ok bool) {
-		if ok && t.After(now) && t.After(latest) {
-			latest = t
+	window = r.Window
+	// own is the window a candidate belongs to ("" = none in particular).
+	consider := func(t time.Time, ok bool, own string) {
+		if !ok || !t.After(now) {
+			return
+		}
+		tie := own == WindowWeekly && t.Equal(latest)
+		if !t.After(latest) && !tie {
+			return
+		}
+		latest = t
+		window = r.Window
+		if own != "" {
+			window = own
 		}
 	}
 	reset := func(name string) (time.Time, bool) {
@@ -114,23 +139,28 @@ func RejectionDeadline(h http.Header, now time.Time, r Rejection) (time.Time, bo
 	}
 
 	if raw := headerFold(h, "Retry-After"); raw != "" {
-		consider(parseRetryAfterTime(raw, now))
+		t, ok := parseRetryAfterTime(raw, now)
+		consider(t, ok, "")
 	}
 	if s.fiveH == "rejected" {
-		consider(reset("5h-Reset"))
+		t, ok := reset("5h-Reset")
+		consider(t, ok, WindowFiveHour)
 	}
 	if s.sevenD == "rejected" {
-		consider(reset("7d-Reset"))
+		t, ok := reset("7d-Reset")
+		consider(t, ok, WindowWeekly)
 	}
 	if s.sevenDOI == "rejected" && !oiOnly {
-		consider(reset("7d_oi-Reset"))
+		t, ok := reset("7d_oi-Reset")
+		consider(t, ok, "")
 	}
 	unifiedRejected := !oiOnly && (s.unified == "rejected" || s.fiveH == "rejected" || s.sevenD == "rejected" ||
 		s.sevenDOI == "rejected" || (s.unified == "" && s.fiveH != "allowed" && s.sevenD != "allowed"))
 	if unifiedRejected {
-		consider(reset("Reset"))
+		t, ok := reset("Reset")
+		consider(t, ok, "")
 	}
-	return latest, !latest.IsZero()
+	return latest, window, !latest.IsZero()
 }
 
 // CooldownEnd is min(deadline + max(grace, 0), now + MaxCooldown).
