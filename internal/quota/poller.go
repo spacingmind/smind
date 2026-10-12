@@ -42,6 +42,11 @@ func WithJitter(jit func() float64) Option { return func(p *Poller) { p.jitter =
 // a poller lock is held. It must not block.
 func WithOnFetch(fn func(Result)) Option { return func(p *Poller) { p.onFetch = fn } }
 
+// SetOnFetch sets the same callback as WithOnFetch after construction, for a
+// caller that needs the Poller before the callback's dependencies exist. Call
+// it before the poller is used; not safe to change while serving.
+func (p *Poller) SetOnFetch(fn func(Result)) { p.onFetch = fn }
+
 // Poller serves account usage from the store and is the only code that may
 // cause a usage request. The call-budget rules live here (ADR-0028 §3):
 //
