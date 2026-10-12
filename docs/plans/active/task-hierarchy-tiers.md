@@ -238,7 +238,7 @@ children's states. More than 16 running runs → the 16 oldest-started, with a
   the chain`, `rollup counts permission before error before finished`,
   `rollup counts every descendant once`, `rollup ignores a seen finished
   child`, `tierOf table`.
-- **U1-AC3** the sidebar tree view renders nested rows: depth indent with a
+- **U1-AC3** (tier-on-row part superseded 2026-10-12 by [sidebar-polish.md](sidebar-polish.md) S4: the tier is now in the hover card and aria-label, not on the row; depth indent is per-row padding) the sidebar tree view renders nested rows: depth indent with a
   guide line per level (no change to root rows' geometry), a chevron on a
   parent row to collapse/expand (default expanded; state kept per task in
   `localStorage`, key `smind.sidebar.collapsedTasks`), a child-count chip,
