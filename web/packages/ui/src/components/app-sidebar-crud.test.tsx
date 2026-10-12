@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { clearToasts, Toaster } from "@/components/ui/toast";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { revealTaskActions } from "@/test/sidebar-helpers";
 import type { Space, Task, Workspace } from "@/lib/types";
 
 const WORKSPACE: Workspace = {
@@ -254,7 +255,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE);
 
-    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    const taskMenu = await revealTaskActions("Fix the bug");
     fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
     await flush();
     fireEvent.click(await screen.findByText("Archive task"));
@@ -283,7 +284,7 @@ describe("AppSidebar CRUD", () => {
     const spaceB: Space = { ...SPACE_A, ID: 11, Title: "Space B" };
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A, spaceB], [taskInSpaceA]);
 
-    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    const taskMenu = await revealTaskActions("Fix the bug");
     fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
     await flush();
     const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
@@ -299,7 +300,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
 
-    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    const taskMenu = await revealTaskActions("Fix the bug");
     fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
     await flush();
     const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
@@ -327,7 +328,7 @@ describe("AppSidebar CRUD", () => {
     );
     await resolveWorkspaceTree(client, WORKSPACE, [SPACE_A], [TASK]);
 
-    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    const taskMenu = await revealTaskActions("Fix the bug");
     fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
     await flush();
     const moveTrigger = await screen.findByTestId("sidebar-task-move-action");
@@ -352,7 +353,7 @@ describe("AppSidebar CRUD", () => {
     mount(client);
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-    const taskMenu = await screen.findByRole("button", { name: "Actions for Fix the bug" });
+    const taskMenu = await revealTaskActions("Fix the bug");
     fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
     await flush();
 

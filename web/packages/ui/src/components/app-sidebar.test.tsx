@@ -6,6 +6,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { PaletteProvider, useRegisteredCommands } from "@/palette/palette-provider";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { FakeWsClient } from "@/test/fake-ws-client";
+import { taskTrigger } from "@/test/sidebar-helpers";
 import type { AttentionReason, TaskAttention } from "@/hooks/use-task-attention";
 import type { LocalPathActions } from "@/hooks/use-local-path-actions";
 import type { AgentProfile, Space, Task, Workspace } from "@/lib/types";
@@ -386,7 +387,7 @@ describe("AppSidebar", () => {
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
       await screen.findByTestId("sidebar-task-row");
-      const taskMenu = screen.getByTestId("sidebar-task-actions-trigger");
+      const taskMenu = taskTrigger(TASK.ID);
       fireEvent.pointerDown(taskMenu, { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-mark-unread-action"));
 
@@ -411,7 +412,7 @@ describe("AppSidebar", () => {
 
       expect(screen.queryByTestId("sidebar-pinned-section")).not.toBeInTheDocument();
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
 
       const pinned = await screen.findByTestId("sidebar-pinned-section");
@@ -428,11 +429,11 @@ describe("AppSidebar", () => {
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
 
-      fireEvent.pointerDown(screen.getAllByTestId("sidebar-task-actions-trigger")[0]!, { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       expect(await screen.findByTestId("sidebar-task-pin-action")).toHaveTextContent("Unpin");
       fireEvent.click(screen.getByTestId("sidebar-task-pin-action"));
 
@@ -448,7 +449,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
       unmount();
@@ -473,7 +474,7 @@ describe("AppSidebar", () => {
         </SidebarProvider>,
       );
       await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
-      fireEvent.pointerDown(screen.getByTestId("sidebar-task-actions-trigger"), { button: 0, ctrlKey: false });
+      fireEvent.pointerDown(taskTrigger(TASK.ID), { button: 0, ctrlKey: false });
       fireEvent.click(await screen.findByTestId("sidebar-task-pin-action"));
       await screen.findByTestId("sidebar-pinned-section");
 

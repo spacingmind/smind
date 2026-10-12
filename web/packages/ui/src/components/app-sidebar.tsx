@@ -72,6 +72,7 @@ import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
+import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -1692,11 +1693,13 @@ const TaskRow = memo(function TaskRow({
   const isUnread = unread.has(task.ID);
   const isTaskPinned = pinned.has(task.ID);
   const status = statusOverrides.get(task.ID) ?? task.Status;
-  // No li here: the caller wraps the row, because a tree parent's li must
-  // also contain its nested children list (a flat row's li contains only
-  // the row).
+  // Hover/focus/menu-open state lives on a wrapper around THIS row only. The
+  // caller's li also contains this task's nested children list, so a CSS
+  // group on the li would reveal every descendant's actions on one hover
+  // (see use-row-active.ts).
+  const { active, rowProps, setMenuOpen } = useRowActive();
   return (
-    <>
+    <div data-testid="sidebar-task-item" data-task-id={task.ID} className="relative" {...rowProps}>
       <HoverCard openDelay={400} closeDelay={100}>
         <HoverCardTrigger asChild>
 
@@ -1841,8 +1844,9 @@ const TaskRow = memo(function TaskRow({
               <TaskHoverCardBody task={task} stat={stat} status={status} />
             </HoverCardContent>
           </HoverCard>
-          <span className="absolute top-0.5 right-0 opacity-0 transition-opacity group-hover/menu-sub-item:opacity-100 focus-within/menu-sub-item:opacity-100">
-            <DropdownMenu>
+          {active && (
+          <span className="absolute top-0.5 right-0">
+            <DropdownMenu onOpenChange={setMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
@@ -1869,7 +1873,8 @@ const TaskRow = memo(function TaskRow({
               </DropdownMenuContent>
             </DropdownMenu>
           </span>
-    </>
+          )}
+    </div>
   );
 });
 
