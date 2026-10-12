@@ -11,7 +11,7 @@ function ScrollArea({
   return (
     <ScrollAreaPrimitive.Root
       data-slot="scroll-area"
-      className={cn("relative", className)}
+      className={cn("group/scroll-area relative", className)}
       {...props}
     >
       {/*
@@ -52,14 +52,19 @@ function ScrollBar({
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        "flex touch-none p-px transition-colors select-none data-horizontal:h-2.5 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent data-vertical:h-full data-vertical:w-2.5 data-vertical:border-l data-vertical:border-l-transparent",
+        "flex touch-none p-px transition-colors select-none data-horizontal:h-2 data-horizontal:flex-col data-horizontal:border-t data-horizontal:border-t-transparent data-vertical:h-full data-vertical:w-2 data-vertical:border-l data-vertical:border-l-transparent",
         className
       )}
       {...props}
     >
+      {/*
+       * Matches index.css's global native scrollbar (8px track, rounded
+       * foreground-alpha thumb, brighter on hover) so the sidebar list's
+       * bar is not a second style next to every native scroller.
+       */}
       <ScrollAreaPrimitive.ScrollAreaThumb
         data-slot="scroll-area-thumb"
-        className="relative flex-1 rounded-full bg-border"
+        className="relative flex-1 rounded-full bg-foreground/20 transition-colors group-hover/scroll-area:bg-foreground/30 hover:bg-foreground/40"
       />
     </ScrollAreaPrimitive.ScrollAreaScrollbar>
   )
