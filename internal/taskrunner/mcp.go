@@ -10,6 +10,8 @@ import (
 
 	"github.com/spacingmind/smind/internal/acp"
 	"github.com/spacingmind/smind/internal/store"
+
+	"github.com/spacingmind/smind/internal/securefile"
 )
 
 // McpServerSource is the slice of *mcpservers.Registry the Runner needs:
@@ -220,7 +222,7 @@ func writeClaudeMcpConfigFile(config string) (path string, cleanup func(), err e
 	}
 	cleanup = func() { _ = os.RemoveAll(dir) }
 	path = filepath.Join(dir, "mcp-config.json")
-	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+	if err := securefile.WriteFile(path, []byte(config)); err != nil {
 		cleanup()
 		return "", nil, fmt.Errorf("write mcp config: %w", err)
 	}

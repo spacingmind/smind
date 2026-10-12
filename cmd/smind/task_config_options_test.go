@@ -99,7 +99,7 @@ func newConfigOptionTestEnvArgs(t *testing.T, home string, agentArgs ...string) 
 	}
 	t.Cleanup(func() { os.RemoveAll(dir) })
 
-	fakeAgent := filepath.Join(dir, "fakeagent")
+	fakeAgent := filepath.Join(dir, exeName("fakeagent"))
 	buildOut, err := buildFakeAgent(t, fakeAgent)
 	if err != nil {
 		t.Fatalf("build fakeagent: %v: %s", err, buildOut)

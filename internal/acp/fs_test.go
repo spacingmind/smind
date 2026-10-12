@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/spacingmind/smind/internal/testutil"
 )
 
 func newFSTestClient(t *testing.T, root string) *Client {
@@ -134,9 +136,7 @@ func TestResolveScopedPath_SymlinkEscape(t *testing.T) {
 	}
 
 	link := filepath.Join(root, "escape")
-	if err := os.Symlink(outside, link); err != nil {
-		t.Fatalf("Symlink() error = %v", err)
-	}
+	testutil.Link(t, outside, link)
 
 	_, err := resolveScopedPath(root, filepath.Join(link, "secret.txt"))
 	if err == nil {

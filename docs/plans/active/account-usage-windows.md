@@ -971,7 +971,7 @@ scratch).
 - [ ] Human go-ahead for the manual live probe (see Validation)
 - [x] PR-B routing integration — PR open (2026-10-12), awaiting review (see Progress / Validation notes below)
 - [x] PR-C wsapi, CLI, MCP — PR open (2026-10-12), awaiting review
-- [ ] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry)
+- [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
 - [ ] PR-E chat hover card (required)
 - [ ] PR-D2 web footer item (default off) and pins
 - [~] PR-F rejection cooldown + observed headers: PR open (2026-10-12); core (AC59-AC65) built, AC66 surfaces (wire `cooldown`/`Window.source`, `account.usage` event, UI text) wait for PR-C, see "PR-F notes"
@@ -1245,4 +1245,59 @@ and a 210,000-case differential test (reviewer, scratch, not committed) of
   findings fixed in this PR, the rest listed under PR-F notes. Flaky and
   unrelated, rerun green: a web `tab.jump` test and a `wsapi`
   `TempDir` cleanup test.
+
+### PR-D1 record (web: Settings -> Usage, modal, palette; 2026-10-12)
+
+- **Built.** `lib/account-usage/{types,tone,format,copy,model,preferences}.ts`
+  (ported from Paseo's `usage/*`, with their unit tests), `hooks/use-account-usage.ts`
+  (one report store per `WsClient` + the touch driver), `hooks/use-usage-preferences.ts`,
+  `hooks/use-usage-modal.ts` (open-state store: `openUsageModal()` is what a footer
+  item or hover card calls), `components/account-usage/{usage-card,list,body,controls,
+  options,modal,window-bar,balance-bar,meter,refresh-button,source-icon}`,
+  `components/ui/segmented-control.tsx`, the **Plan usage** block in
+  `settings/usage-section.tsx` (token table retitled **Token usage**), the
+  `usage.open` keyboard action (no key binding) plus the palette entry "Usage: open
+  plan usage", and the two `account.*` topics in `useDaemonEvents`.
+- **Call discipline as built (AC54).** The only `account.usage` call sites are
+  `UsageStore.list` (`cached` or `touch`) and `UsageStore.refresh` (`refresh`,
+  from a button press). `touch` is sent only by a surface that is open (modal
+  open, Settings -> Usage mounted) in a visible and focused window, once on
+  open and then at most once per `ttlSeconds` (timer paused while hidden or
+  blurred; on return it touches only if the TTL has elapsed). The first touch
+  doubles as the list, so opening sends one request, not two. A reconnect swaps
+  the client and so the store; the TTL clock is carried across the swap, so the
+  re-list is one `cached` and the next touch still waits out the TTL.
+  An old daemon ("method not found") is asked once and never again.
+- **Deliberate deviations.** (1) Options open in a Popover on narrow screens too
+  (viewport-capped), not a sheet; it is visible and clean in the screenshots.
+  (2) Events for an account the UI does not know are ignored (PR-C note); a
+  touch/refresh list adds new accounts. (3) A daemon-reported `refreshBlocked`
+  lifts by itself at `nextRefreshAt` (rounded up to the second by the daemon),
+  except `rejected`, which stays until the account is reconnected. (4) Rows are
+  plain bars: pins, the pin glyph and the footer item are PR-D2.
+- **Found in review.** A `null` entry in `report.windows` crashed the card (AC39):
+  fixed in the card and in default-pin derivation, with tests. A reconnect with a
+  surface open would have sent an immediate `touch` (empty TTL clock on the new
+  store): fixed, with `a reconnect while a touching surface is open ...`.
+- **Verified.** `bunx tsc -b packages/ui`; web vitest (1990+ tests; the new ones
+  are `lib/account-usage/*.test.ts`, `hooks/use-account-usage.test.tsx`,
+  `components/account-usage/*.test.tsx`, `settings/usage-section.plan.test.tsx`,
+  two tests in `App.test.tsx`: `command_palette_opens_usage_modal`,
+  `modal_opens_above_settings_screen`); `go test ./...`; `task lint`.
+  On a loaded machine unrelated heavy tests in `App.test.tsx`/sidebar/composer
+  occasionally hit vitest's 5 s timeout (a different one each run); they pass
+  alone.
+- **Screenshots (AC41, D1 part).** Playwright against the built UI and a sandbox
+  daemon (temp `SMIND_HOME`, port 4761) with `account.usage` answered from the
+  browser by `routeWebSocket` (real fetchers are not overridable): Settings ->
+  Usage with one account, several, filter open and applied, Remaining, problem
+  states (expired, rejected, no_quota, error with retry), refresh blocked
+  (backoff/floor/budget/rejected, countdown tooltip), polling disabled, old
+  daemon; the modal over the shell, over Settings, with one account, a long list
+  (scrolled to the last card), problems, blocked, refresh in flight and options
+  open; light and dark at 1440x900 and 390x844. The real browser sent exactly
+  one `touch` per opened surface. Footer/pins/chat card screenshots belong to D2/E.
+- **Not covered here.** The full-screen Settings screen (`feat/settings-fullscreen`)
+  is exercised through container test doubles, plus the screen that is on develop.
+  Real-provider data is still the manual live check.
 

@@ -64,6 +64,9 @@ func claudeNativeRunner(t *testing.T, wm *workspace.Manager) *Runner {
 		t.Fatalf("os.Executable() error = %v", err)
 	}
 	r := New(wm)
+	// This helper already points the SDK at the fake CLI itself; on Windows
+	// the default would try to resolve a real claude.exe first.
+	r.claudeLaunch = nil
 	r.newClaudeClient = func(worktreePath string, opts ...claudecode.Option) (claudeBackend, error) {
 		opts = append(opts, claudecode.WithCLIPath(self))
 		return claudecode.New(worktreePath, opts...)

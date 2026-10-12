@@ -270,9 +270,18 @@ func TestHome_ConcurrentMigrationSafe(t *testing.T) {
 
 	if runtime.GOOS != "windows" {
 		assertMigratedState(t, legacy, smind)
+	} else if _, err := os.ReadFile(filepath.Join(smind, "token")); err != nil {
+		t.Fatalf("content not migrated: %v", err)
 	}
-	if n := bytes.Count(buf.Bytes(), []byte("moved")); n != 1 {
-		t.Fatalf("concurrent migration logged %d moved lines, want 1:\n%s", n, buf.String())
+	// On Windows both concurrent os.Rename calls can return nil for the
+	// same source and target (the final state is still correct), so the
+	// losing migration may also log its success line.
+	wantMoved := 1
+	if runtime.GOOS == "windows" {
+		wantMoved = 2
+	}
+	if n := bytes.Count(buf.Bytes(), []byte("moved")); n < 1 || n > wantMoved {
+		t.Fatalf("concurrent migration logged %d moved lines, want 1..%d:\n%s", n, wantMoved, buf.String())
 	}
 
 	// Deterministic variant: winner performs the real rename; loser's
@@ -336,8 +345,15 @@ func TestHome_SymlinkFailureStillMigrates(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(smind, "token")); err != nil || string(got) != "secret-token" {
 		t.Fatalf("content not migrated: %q, %v", got, err)
 	}
-	if n := bytes.Count(buf.Bytes(), []byte("compat symlink not created")); n != 1 {
-		t.Fatalf("want one symlink warning, got:\n%s", buf.String())
+	if runtime.GOOS != "windows" {
+		if n := bytes.Count(buf.Bytes(), []byte("compat symlink not created")); n != 1 {
+			t.Fatalf("want one symlink warning, got:\n%s", buf.String())
+		}
+	} else if n := bytes.Count(buf.Bytes(), []byte("no compat symlink on windows")); n != 1 {
+		// Windows deliberately skips the compat symlink (see
+		// TestHome_WindowsSkipsSymlink), so the forced symlink failure is
+		// never reached.
+		t.Fatalf("want one windows moved warning, got:\n%s", buf.String())
 	}
 	if got := Dir(); got != smind {
 		t.Fatalf("Dir() = %q, want %q", got, smind)

@@ -127,7 +127,14 @@ func cmdServe(args []string) int {
 
 	startRelayBridge(ctx, srv)
 
-	<-ctx.Done()
+	// One shutdown path for both triggers: the signal context (SIGINT/
+	// SIGTERM) and the authenticated POST /api/shutdown, whose channel
+	// the server closes (see Server.ShutdownSignal). Whichever fires first,
+	// the identical graceful-shutdown sequence below runs.
+	select {
+	case <-ctx.Done():
+	case <-srv.ShutdownSignal():
+	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

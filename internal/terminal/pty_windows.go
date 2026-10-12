@@ -5,9 +5,10 @@ package terminal
 import (
 	"os/exec"
 	"sync"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/spacingmind/smind/internal/winjob"
 )
 
 // startPty creates a ConPTY (this package's own wrapper, ADR-0022) and
@@ -96,25 +97,10 @@ func (h *killHandle) release() {
 	h.killTree(0)
 }
 
-// newKillOnCloseJob creates a Job Object whose processes are killed when
-// its last handle closes, and returns our handle -- deliberately the only
-// one, so closing it is what triggers the kill.
+// newKillOnCloseJob creates the kill-on-close Job Object whose handle is
+// passed to CreateProcess as PROC_THREAD_ATTRIBUTE_JOB_LIST (conpty.spawn),
+// so the shell is born inside it. The creation itself lives in internal/winjob
+// together with the other places that need the same Job.
 func newKillOnCloseJob() (windows.Handle, error) {
-	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-
-	job, err := windows.CreateJobObject(nil, nil)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := windows.SetInformationJobObject(
-		job,
-		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
-		uint32(unsafe.Sizeof(info)),
-	); err != nil {
-		_ = windows.CloseHandle(job)
-		return 0, err
-	}
-	return job, nil
+	return winjob.NewHandle()
 }

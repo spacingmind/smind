@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/spacingmind/smind/internal/realpath"
 )
 
 //go:embed bundle
@@ -130,7 +132,7 @@ func prepare(opts Options) (*env, error) {
 		}
 		home = h
 	}
-	resolved, err := filepath.EvalSymlinks(home)
+	resolved, err := realpath.Resolve(home)
 	if err != nil {
 		return nil, fmt.Errorf("resolve home %s: %w", home, err)
 	}
@@ -188,7 +190,7 @@ func (e *env) checkContained(p string) error {
 	cur := p
 	for {
 		if _, err := os.Lstat(cur); err == nil {
-			r, err := filepath.EvalSymlinks(cur)
+			r, err := realpath.Resolve(cur)
 			if err != nil {
 				return fmt.Errorf("resolve %s: %w", cur, err)
 			}
