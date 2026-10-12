@@ -1184,12 +1184,16 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             ref={sidebarPanelRef}
             data-slot="sidebar-panel"
             data-collapsed={sidebarOpen ? undefined : ""}
-            className="h-full min-w-0 flex-none overflow-hidden bg-sidebar w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
+            className="h-full min-w-0 flex-none overflow-hidden bg-sidebar [&_[data-slot=sidebar-container]]:border-r-0 w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
           >
             {sidebarElement}
           </div>
           {sidebarOpen && (
             <SidebarResizeHandle
+              // Zero layout width: the 4px hit area straddles the seam, so the
+              // panel's own border-l is the only divider (no gutter between
+              // the sidebar and the inset panel).
+              className="-mx-0.5"
               data-testid="sidebar-resize-handle"
               aria-label="Resize sidebar"
               aria-valuenow={sidebarWidth}
