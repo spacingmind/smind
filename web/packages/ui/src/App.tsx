@@ -427,13 +427,13 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
 
   // --- Chats (ADR-0016 P3) -----------------------------------------------
 
-  /** Opens (or activates) chat's own tab -- the "+" menu's reopen section, the concurrency banner's jump target, and the route restore effect below all funnel through here. */
+  /** Opens (or activates) chat's own tab -- the "+" menu's reopen section, the "Also running" chip's jump target, and the route restore effect below all funnel through here. */
   function openChatTab(chat: Pick<Chat, "ID" | "Title">, placement?: TabPlacement) {
     if (!selectedTask) return;
     openTab(selectedTask.ID, chatTab(selectedTask.ID, chat), placement ?? "prefer");
   }
 
-  /** Looks chatId up in the selected task's already-fetched chats and opens it -- what the "+" menu's per-chat items and the concurrency banner (which only knows a chatId, from run.status) actually call. */
+  /** Looks chatId up in the selected task's already-fetched chats and opens it -- what the "+" menu's per-chat items and the "Also running" chip (which only knows a chatId, from run.status) actually call. */
   function openChatById(chatId: number, placement?: TabPlacement) {
     const chat = chats?.find((c) => c.ID === chatId);
     if (chat) openChatTab(chat, placement);
@@ -1512,11 +1512,11 @@ interface SplitPaneCallbacks {
   chats: Chat[] | null;
   /** Which of `chats` already have a tab open somewhere in the task's split tree -- excluded from the "+" menu's reopen section. */
   openChatIds: ReadonlySet<number>;
-  /** Which chats of each task are currently running (use-task-attention.ts) -- the concurrency banner's data source. */
+  /** Which chats of each task are currently running (use-task-attention.ts) -- the "Also running" chip's data source. */
   runningChatsByTask: ReadonlyMap<number, ReadonlySet<number>>;
   /** "+" -> "New chat": creates a chat and opens its tab. */
   onNewChat: (placement: TabPlacement) => void;
-  /** "+" -> an existing not-open chat: opens its tab. Also the concurrency banner's jump target and a chat tab's own rename/archive dispatch path. */
+  /** "+" -> an existing not-open chat: opens its tab. Also the "Also running" chip's jump target and a chat tab's own rename/archive dispatch path. */
   onOpenChat: (chatId: number, placement?: TabPlacement) => void;
   /** Selects another task (the lineage strip's parent/child jumps, PR-U2). */
   onJumpToTask: (taskId: number) => void;

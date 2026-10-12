@@ -96,6 +96,9 @@ export interface RunConfigContextValue {
  * drive the RUNNING run instead of the next run's config. Absent otherwise.
  */
 export interface LiveRunControls {
+  /** The running run's provider and id (a live change only syncs the next-run config for the same provider). */
+  provider: Provider;
+  runId: string;
   modes: ModeInfo[];
   /** The running run's effective mode id. */
   mode: string;
@@ -427,7 +430,11 @@ function RunConfigToolbarMode() {
   // The mode auto-approves (or ACP Auto-accept is on) -- the pill warns
   // (ShieldAlert + warning colour) without changing any mode semantics.
   const dangerous = current?.autoApproves === true || autoAccept;
-  const disabled = meta.disabled || pending;
+  const disabled = meta.disabled;
+
+  // The run ended (or another one started) with a switch still failing: its message is stale.
+  const liveRunId = live?.runId;
+  useEffect(() => setError(null), [liveRunId]);
 
   // Live: the RPC switches the running session; a failure is shown inline.
   async function changeLive(liveRun: LiveRunControls, change: { modeId?: string; autoAccept?: boolean }) {
@@ -436,6 +443,12 @@ function RunConfigToolbarMode() {
     try {
       await liveRun.onChange(change);
       setError(null);
+      // The session mode sticks: the next prompt (a queued follow-up, or the run after this
+      // one) must go out with what the pill shows now, not the config this run started with.
+      if (liveRun.provider === state.provider) {
+        if (change.modeId !== undefined) actions.setPermissionMode(change.modeId);
+        if (change.autoAccept !== undefined) actions.setAutoAccept(change.autoAccept);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -476,6 +489,7 @@ function RunConfigToolbarMode() {
           type="button"
           variant="ghost"
           aria-pressed={autoAccept}
+          aria-busy={pending || undefined}
           title={AUTO_ACCEPT_HELP}
           data-testid="composer-auto-accept"
           disabled={disabled}

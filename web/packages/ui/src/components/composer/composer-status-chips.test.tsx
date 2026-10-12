@@ -9,7 +9,7 @@ describe("ComposerStatusChips", () => {
     render(<ComposerStatusChips running otherRunningChat={{ id: 7, title: "Fix login" }} onJumpToChat={onJumpToChat} />);
     expect(screen.getByTestId("composer-working-chip")).toBeInTheDocument();
     const chip = screen.getByTestId("composer-concurrency-chip");
-    expect(chip).toHaveAccessibleName("Another chat is running in this worktree: Fix login. Open it.");
+    expect(chip).toHaveAccessibleName("Also running Fix login - another chat is running in this worktree; open it");
     expect(chip).toHaveTextContent("Fix login");
     fireEvent.click(chip);
     expect(onJumpToChat).toHaveBeenCalledWith(7);

@@ -46,7 +46,7 @@ function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }
     <button
       type="button"
       data-testid="composer-concurrency-chip"
-      aria-label={`Another chat is running in this worktree: ${chat.title}. Open it.`}
+      aria-label={`Also running ${chat.title} - another chat is running in this worktree; open it`}
       title={`Another chat is running in this worktree: ${chat.title}`}
       onClick={onJump}
       className={`${CHIP_CLASS} min-w-0 transition-colors hover:bg-hover hover:text-foreground`}

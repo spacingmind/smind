@@ -134,13 +134,13 @@ export function Composer({
   toolbarRef?: Ref<HTMLDivElement>;
   /** Fires whenever RunConfigToolbar's shared state changes -- lets task-detail.tsx mirror it for the header pill without owning the state itself (run-config IA: "display-only, derived from the same state the toolbar reads"). */
   onRunConfigChange?: (state: RunConfigState) => void;
-  /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
   /** Another chat of this task with a live run in the shared worktree (ADR-0016 P3) -- a chip in the status row. */
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's tab. */
   onJumpToChat?: (chatId: number) => void;
   /** The running run's mode controls (D1): while set, the toolbar's Mode/Auto-accept pills drive that run via run.setPermissionMode instead of the next run's config. Omit when there is no live-switch-capable run. */
   liveRun?: LiveRunControls | null;
+  /** GLM/Kimi's live ACP config options for the currently-running run, if any -- rendered inside this row per run-config IA's "same row, not a separate control" requirement. */
   configOptions?: {
     options: ConfigOptionParams[];
     error: string | null;
@@ -424,7 +424,7 @@ export function Composer({
                 options={configOptions.options}
                 error={configOptions.error}
                 onSetOption={configOptions.onSetOption}
-                omitMode={liveRun != null}
+                omitMode={liveRun != null && liveRun.modes.length > 1}
               />
             )}
             <div className="ml-auto flex items-center gap-1">

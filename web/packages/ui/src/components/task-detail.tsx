@@ -73,7 +73,7 @@ export function TaskDetailPane({
   chat: Chat;
   /** Whether chat is task's default (oldest) chat -- migrates the pre-ADR-0016 per-task-only run-config key onto it. */
   isDefaultChat: boolean;
-  /** Another of this task's chats currently running a run, if any -- drives the concurrency banner ("Another chat is running in this worktree"). */
+  /** Another of this task's chats currently running a run, if any -- drives the composer's "Also running" chip (another chat is running in this worktree). */
   otherRunningChat?: { id: number; title: string } | null;
   /** Jumps to otherRunningChat's own tab -- the concurrency chip's click target. */
   onJumpToChat?: (chatId: number) => void;
@@ -183,17 +183,37 @@ export function TaskDetailPane({
   // dedicated push notification for this instead).
   const configOptionsRunId = runningRun && (runningRun.provider === "glm" || runningRun.provider === "kimi" || runningRun.provider === "claude-native") ? runningRun.id : null;
   // D1: while a live-switch-capable run is active the composer's Mode/Auto-accept pills drive it.
-  const liveRun =
-    runningRun && supportsLiveModeSwitch(providers, runningRun.provider)
-      ? {
-          modes: providerModes(providers, runningRun.provider),
-          mode: effectiveMode(providers, runningRun.provider, runningRun.permissionMode),
-          autoAccept: runningRun.autoAccept,
-          showAutoAccept: supportsAutoAccept(providers, runningRun.provider),
-          onChange: (change: { modeId?: string; autoAccept?: boolean }) => setPermissionMode(runningRun.id, change),
-        }
-      : null;
-  const configOptions = useRunConfigOptions(client, configOptionsRunId, runningRun?.items.length ?? 0);
+  const liveRunId = runningRun?.id;
+  const liveProvider = runningRun?.provider;
+  const liveMode = runningRun?.permissionMode;
+  const liveAutoAccept = runningRun?.autoAccept;
+  const liveInFlight = useRef(false);
+  const liveRun = useMemo(
+    () =>
+      liveRunId && liveProvider && supportsLiveModeSwitch(providers, liveProvider)
+        ? {
+            provider: liveProvider,
+            runId: liveRunId,
+            modes: providerModes(providers, liveProvider),
+            mode: effectiveMode(providers, liveProvider, liveMode ?? ""),
+            autoAccept: liveAutoAccept ?? false,
+            showAutoAccept: supportsAutoAccept(providers, liveProvider),
+            // One switch at a time: a second change (a rapid Shift+Tab, a click during the
+            // RPC) would be computed from the not-yet-updated mode and double-fire.
+            onChange: async (change: { modeId?: string; autoAccept?: boolean }) => {
+              if (liveInFlight.current) return;
+              liveInFlight.current = true;
+              try {
+                await setPermissionMode(liveRunId, change);
+              } finally {
+                liveInFlight.current = false;
+              }
+            },
+          }
+        : null,
+    [liveRunId, liveProvider, liveMode, liveAutoAccept, providers, setPermissionMode],
+  );
+  const configOptions = useRunConfigOptions(client, configOptionsRunId, (runningRun?.items.length ?? 0) + (runningRun?.configRevision ?? 0));
 
   // Auto-follow keys off the total item count across every run: that is
   // the one number that changes whenever anything is appended anywhere in

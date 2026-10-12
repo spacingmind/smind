@@ -168,7 +168,7 @@ describe("RunConfigToolbar live run (D1)", () => {
 
   const claudeModes = SERVED_PROVIDERS[0].modes!;
   function live(over: Partial<LiveRunControls> = {}): LiveRunControls {
-    return { modes: claudeModes, mode: "plan", autoAccept: false, showAutoAccept: false, onChange: vi.fn().mockResolvedValue(undefined), ...over };
+    return { provider: "claude-native", runId: "run-1", modes: claudeModes, mode: "plan", autoAccept: false, showAutoAccept: false, onChange: vi.fn().mockResolvedValue(undefined), ...over };
   }
 
   it("live run: the mode pill shows the running run's mode and changing it calls the live onChange", async () => {
@@ -195,6 +195,26 @@ describe("RunConfigToolbar live run (D1)", () => {
     renderToolbar({ liveRun });
     await pick("Permission mode", "Always Ask");
     expect(screen.getByTestId("permission-mode-error")).toHaveTextContent("run already finished");
+  });
+
+  it("live run: a successful switch also becomes the next run's config (a follow-up goes out with what the pill shows)", async () => {
+    const onChange = vi.fn();
+    renderToolbar({ liveRun: live(), onChange });
+    await pick("Permission mode", "Always Ask");
+    expect(onChange.mock.calls.at(-1)![0].state.permissionMode).toBe("default");
+  });
+
+  it("live run: the failed-switch message is cleared once the run is no longer live", async () => {
+    const liveRun = live({ onChange: vi.fn().mockRejectedValue(new Error("run already finished")) });
+    const { props, rerender } = renderToolbar({ liveRun });
+    await pick("Permission mode", "Always Ask");
+    expect(screen.getByTestId("permission-mode-error")).toBeInTheDocument();
+    rerender(
+      <RunConfigToolbar {...props} liveRun={null}>
+        <Parts />
+      </RunConfigToolbar>,
+    );
+    expect(screen.queryByTestId("permission-mode-error")).toBeNull();
   });
 
   it("no live run: the mode pill edits the next run's config and makes no RPC", async () => {
