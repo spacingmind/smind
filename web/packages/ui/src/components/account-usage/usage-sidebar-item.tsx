@@ -143,6 +143,11 @@ function PinnedUsageTrigger({ sources }: { sources: readonly PinnedUsageSource[]
   const windowCount = sources.reduce((count, source) => count + source.windows.length, 0);
   const layout = choosePinnedUsageLayout({ available, labelsWidth, percentsWidth, windowCount });
   const lines = describeSources(sources);
+  // Even the smallest layout can be wider than the row (several accounts at the minimum sidebar
+  // width): the line is clipped, and a fade makes the cut read as intentional. The tooltip and
+  // accessible name still carry every window.
+  const shownWidth = layout === "percents" ? percentsWidth : layout === "labels" ? labelsWidth : null;
+  const clipped = available !== null && shownWidth !== null && shownWidth > available;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -152,9 +157,16 @@ function PinnedUsageTrigger({ sources }: { sources: readonly PinnedUsageSource[]
           aria-label={`Usage: ${lines.join(", ")}`}
           data-testid="sidebar-usage-summary"
           data-layout={layout}
+          data-clipped={clipped || undefined}
           className={ROW_CLASS}
         >
-          <span ref={availableRef} className="flex min-w-0 flex-1 items-center overflow-hidden">
+          <span
+            ref={availableRef}
+            className={cn(
+              "flex min-w-0 flex-1 items-center overflow-hidden",
+              clipped && "[mask-image:linear-gradient(to_right,#000_calc(100%_-_28px),transparent)]",
+            )}
+          >
             <PinnedUsageLine sources={sources} layout={layout} />
           </span>
           <span aria-hidden className="pointer-events-none invisible absolute top-0 left-0 w-[10000px]">
