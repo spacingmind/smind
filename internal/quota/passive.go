@@ -465,8 +465,11 @@ func (p *Passive) Cooldown(accountID int64, model string, now time.Time) (Cooldo
 // account-wide one first, then the model-scoped ones, latest end first. Bare-429
 // back-offs (transient) are left out. Like Cooldown it answers from memory
 // after reading the persisted rows once (sharing Cooldown's negative cache on a
-// failed read), clamps an end beyond now+MaxCooldown, never makes a request and
-// queues no write of its own. Disabled, it answers nil.
+// failed read), clamps an end beyond now+MaxCooldown and never makes a request.
+// It starts no cooldown and changes no end; the only write it can cause is the
+// one that reading the persisted rows may queue, a level reset or the removal of
+// an expired row that a non-rejected response made obsolete (mergeStoredLocked).
+// Disabled, it answers nil.
 func (p *Passive) Active(accountID int64, now time.Time) []Cooldown {
 	if !p.enabled {
 		return nil
