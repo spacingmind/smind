@@ -158,13 +158,13 @@ describe("open in editor", () => {
   it("open-in-editor-error-toast: a rejected openInEditor shows the Rust error message", async () => {
     const openInEditor = mockPlatform({
       current: LOCAL,
-      openInEditor: () => Promise.reject(new Error("wslpath failed: no such distro")),
+      openInEditor: () => Promise.reject(new Error("path must be absolute: /etc/passwd is not registered for this connection")),
     });
     await mountSidebar();
     fireEvent.click(await screen.findByText("Open in VS Code"));
 
     await waitFor(() => expect(openInEditor).toHaveBeenCalled());
-    expect(await screen.findByText("wslpath failed: no such distro")).toBeInTheDocument();
+    expect(await screen.findByText("path must be absolute: /etc/passwd is not registered for this connection")).toBeInTheDocument();
     expect(screen.getByText("Couldn't open in VS Code")).toBeInTheDocument();
   });
 

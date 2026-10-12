@@ -27,6 +27,9 @@ function baseStatus(overrides: Partial<Record<string, unknown>> = {}) {
     installedPath: "/tmp/smind/bin/smind",
     logPath: "/tmp/smind/smind.log",
     binaryInstalled: true,
+    wslDaemonSuspected: false,
+    gitFound: null,
+    prerequisiteMessage: null,
     ...overrides,
   };
 }
@@ -144,9 +147,56 @@ describe("daemon-section (desktop build)", () => {
   it("shows the unsupported message and no action buttons on an unsupported platform", async () => {
     await renderSection({ daemonStatus: () => Promise.resolve(baseStatus({ platform: "unsupported", managedState: "notRunning", reachable: false })) });
 
-    expect(screen.getByTestId("daemon-unsupported")).toBeInTheDocument();
+    const unsupported = screen.getByTestId("daemon-unsupported");
+    expect(unsupported).toBeInTheDocument();
+    // Unsupported now means "not Windows and not macOS" -- the message
+    // must not point at WSL2 any more.
+    expect(unsupported).toHaveTextContent("Windows and macOS only");
+    expect(unsupported.textContent).not.toMatch(/WSL2/);
     expect(screen.queryByTestId("daemon-install")).not.toBeInTheDocument();
     expect(screen.queryByTestId("daemon-restart")).not.toBeInTheDocument();
+  });
+
+  it("shows Windows paths as returned and the prerequisite notice when git is missing", async () => {
+    await renderSection({
+      daemonStatus: () =>
+        Promise.resolve(
+          baseStatus({
+            platform: "windows",
+            installedPath: "C:\\Users\\test\\AppData\\Local\\smind\\bin\\smind.exe",
+            logPath: "C:\\Users\\test\\AppData\\Local\\smind\\smind.log",
+            gitFound: false,
+            prerequisiteMessage: "Git for Windows was not found. Worktrees need git, and setup scripts need its sh. Install Git for Windows and restart smind.",
+          }),
+        ),
+    });
+
+    expect(screen.getByTestId("daemon-log-path")).toHaveTextContent("C:\\Users\\test\\AppData\\Local\\smind\\smind.log");
+    expect(screen.getByTestId("daemon-prerequisite")).toHaveTextContent("Git for Windows was not found");
+    expect(screen.queryByTestId("daemon-wsl-notice")).not.toBeInTheDocument();
+  });
+
+  it("hides take over and explains the situation when a WSL daemon is suspected", async () => {
+    const takeOverDaemon = vi.fn();
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", wslDaemonSuspected: true })),
+      takeOverDaemon,
+    });
+
+    const notice = screen.getByTestId("daemon-wsl-notice");
+    expect(notice).toHaveTextContent("A daemon that this app did not start is answering on this port");
+    expect(notice).toHaveTextContent("not migrated");
+    expect(screen.queryByTestId("daemon-take-over")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("daemon-take-over-confirm")).not.toBeInTheDocument();
+    expect(takeOverDaemon).not.toHaveBeenCalled();
+  });
+
+  it("still offers take over for an unmanaged native smind.exe on Windows", async () => {
+    await renderSection({
+      daemonStatus: () => Promise.resolve(baseStatus({ platform: "windows", managedState: "unmanaged", wslDaemonSuspected: false })),
+    });
+
+    expect(screen.getByTestId("daemon-take-over")).toBeInTheDocument();
   });
 
   it("a progress event updates the shown stage text while an action is busy", async () => {
@@ -182,9 +232,8 @@ describe("daemon-section (desktop build)", () => {
   });
 
   it("fetches daemon_status exactly once on mount, never polling", async () => {
-    // Each daemon_status call spawns wsl.exe/lsof/ps under the hood
-    // (daemon_manager.rs), and every uncached spawn on Windows flashes a
-    // console window -- a polling loop here would flicker continuously.
+    // Each daemon_status call probes the daemon and the port owner
+    // (daemon_manager.rs), so a polling loop here would keep churning;
     // Settings sections mount once and stay mounted, so extra time
     // passing (simulated by repeated flushes) must never trigger a
     // second fetch.
