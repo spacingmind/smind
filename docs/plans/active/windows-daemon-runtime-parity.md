@@ -162,7 +162,7 @@ Named scenarios:
 ## Decisions
 
 **D1–D3 decided 2026-10-11 by the user, all as recommended, and recorded in
-ADR-0028** (`docs/decisions/0028-native-windows-daemon-runtime.md`): D1 (a)
+ADR-0029** (`docs/decisions/0029-native-windows-daemon-runtime.md`): D1 (a)
 Git for Windows `sh`; D2 (a) `POST /api/shutdown` + `smind stop`; D3 (a)
 owner-only DACL. The option lists below are kept for the record.
 
@@ -210,7 +210,7 @@ Settled for this plan:
   (`ci/windows-full-suite-nightly`, not merged yet) moves the full suite out
   of PR CI.
 - 2026-10-11: spec written. D1–D3 are open.
-- 2026-10-11: D1–D3 decided (ADR-0028).
+- 2026-10-11: D1–D3 decided (ADR-0029).
 - 2026-10-12: branch `fix/windows-test-agent-exe` (not merged yet):
   - **Group A:** fake agents built with `.exe`. Failures in the 7 agent
     packages drop from ~170 to 26.

@@ -1,4 +1,4 @@
-# 0028: Native Windows daemon runtime — setup shell, shutdown endpoint, secret ACLs
+# 0029: Native Windows daemon runtime — setup shell, shutdown endpoint, secret ACLs
 
 ## Status
 

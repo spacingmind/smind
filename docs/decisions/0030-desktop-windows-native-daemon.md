@@ -1,10 +1,10 @@
-# 0029: The Windows desktop app manages a native `smind.exe`, not a WSL2 daemon
+# 0030: The Windows desktop app manages a native `smind.exe`, not a WSL2 daemon
 
 ## Status
 
 Accepted (2026-10-12, chosen by the user: "replace it outright"). Amends
 ADR-0013's app-managed-daemon host matrix: the **Windows + WSL2** host is
-removed and **Windows native** becomes the Windows host. Depends on ADR-0028
+removed and **Windows native** becomes the Windows host. Depends on ADR-0029
 (the native daemon runtime) and on the Windows release assets of
 `docs/plans/active/windows-daemon-runtime-parity.md` (AC9). Implementation
 plan: `docs/plans/active/desktop-windows-native-daemon.md`.
@@ -23,7 +23,7 @@ On Windows the desktop app installs, updates, starts, stops and restarts a
 - **Start.** Spawn `smind.exe serve` detached with no console window, so it
   survives the app quitting (as on macOS, ADR-0013). The daemon's own data
   directory stays `%USERPROFILE%\.smind`.
-- **Stop / restart.** `POST /api/shutdown` with the daemon's token (ADR-0028
+- **Stop / restart.** `POST /api/shutdown` with the daemon's token (ADR-0029
   D2), then wait for `/healthz` to stop answering. If the daemon never
   answers, fall back to terminating the recorded pid, but only after
   checking the live port owner is that pid and its image path is the
@@ -52,7 +52,7 @@ On Windows the desktop app installs, updates, starts, stops and restarts a
   (`daemon_manager/wsl.rs`, `Platform::Wsl2`).
 - **Prerequisites** the app checks and explains instead of failing
   obscurely: Git for Windows (git worktrees, and the `sh` that runs
-  setup/teardown scripts, ADR-0028 D1) and, per provider, the agent CLI
+  setup/teardown scripts, ADR-0029 D1) and, per provider, the agent CLI
   installed natively on Windows.
 
 ## Alternatives considered
@@ -71,7 +71,7 @@ On Windows the desktop app installs, updates, starts, stops and restarts a
 
 ## Rationale
 
-The native daemon is now a supported runtime (ADR-0022, ADR-0028, release
+The native daemon is now a supported runtime (ADR-0022, ADR-0029, release
 assets), so the WSL indirection only costs complexity: a distro must exist,
 agents and git must be installed inside it, and every path crossing the
 boundary needs translation. Native also gives the app tree-kill semantics it

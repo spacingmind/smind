@@ -1,6 +1,6 @@
 # Desktop app: manage a native Windows daemon (replace WSL2)
 
-Implements ADR-0029. On Windows the Tauri app installs, starts, stops and
+Implements ADR-0030. On Windows the Tauri app installs, starts, stops and
 updates a native `smind.exe` and drops every WSL2 code path. Depends on
 `docs/plans/active/windows-daemon-runtime-parity.md` (the daemon runtime,
 `POST /api/shutdown`, and the `smind_<version>_windows_<arch>.zip` release
@@ -92,7 +92,7 @@ quit/relaunch, stop; and an unmanaged WSL daemon on the port.
 
 ## Decisions
 
-- ADR-0029 (the user chose to replace WSL2 outright, 2026-10-12).
+- ADR-0030 (the user chose to replace WSL2 outright, 2026-10-12).
 - No data migration from WSL; a WSL daemon remains usable as a plain remote
   connection.
 - The app stays an x64 installer for now; only the daemon asset follows the OS
@@ -110,7 +110,7 @@ quit/relaunch, stop; and an unmanaged WSL daemon on the port.
 
 ## Progress
 
-- 2026-10-12: ADR-0029 and this spec. R1 and R3 start first; R2 after R1.
+- 2026-10-12: ADR-0030 and this spec. R1 and R3 start first; R2 after R1.
 - 2026-10-12: Rust toolchain unblocked on the dev machine (Windows SDK
   installed; cargo runs through an MSVC env wrapper). Baseline fix
   `fix/desktop-client-windows-tests` (unix-only tests gated). Work is
