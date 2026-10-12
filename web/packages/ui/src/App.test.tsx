@@ -6,6 +6,7 @@ import { App } from "@/App";
 import { platformBindings, SHORTCUT_BINDINGS } from "@/keyboard/shortcuts";
 import { WsClient } from "@/lib/ws-client";
 import { FakeSocket } from "@/test/fake-socket";
+import { openHoverCard } from "@/test/sidebar-helpers";
 import { resetTerminalSessions } from "@/lib/terminal-sessions";
 import type { Chat, RunLogsResult, RunSummary, Task, TerminalSessionStatus, Workspace } from "@/lib/types";
 
@@ -526,20 +527,21 @@ describe("App live events", () => {
     expect(screen.getByTestId("task-attention")).toBeInTheDocument();
   });
 
-  it("a task.status notification updates the sidebar row's status text live", async () => {
+  it("a task.status notification updates the status shown in the sidebar row's hover card live", async () => {
     const socket = new FakeSocket();
     const connect = vi.fn().mockResolvedValue(new WsClient(socket));
     render(<App connect={connect} />);
     await resolveSidebar(socket, [TASK_A]);
 
+    // The lifecycle status moved off the row into its hover card (sidebar-polish S4).
     // TASK_A.Status is "active" from the fetch; the event says "done".
-    expect(screen.getByText("active")).toBeInTheDocument();
+    const card = await openHoverCard(TASK_A.ID);
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("active");
 
     pushNotification(socket, "task.status", { taskId: TASK_A.ID, status: "done" });
     await flush();
 
-    expect(screen.queryByText("active")).not.toBeInTheDocument();
-    expect(screen.getByText("done")).toBeInTheDocument();
+    expect(within(card).getByTestId("sidebar-task-status")).toHaveTextContent("done");
   });
 
   it("an empty daemon (every list RPC resolving null) renders the sidebar empty state without throwing", async () => {

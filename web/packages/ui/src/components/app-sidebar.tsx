@@ -74,6 +74,7 @@ import { useNotificationPermission } from "@/hooks/use-notification-permission";
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { usePinnedTasks } from "@/hooks/use-pinned-tasks";
 import { useCollapsedTasks } from "@/hooks/use-collapsed-tasks";
+import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-nodes";
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
@@ -297,6 +298,20 @@ const EMPTY_SIGNAL: RowSignal = {
 
 const RowSignalContext = createContext<RowSignal>(EMPTY_SIGNAL);
 
+/** Persisted container expansion (S8), shared with the nested containers the same way as the row signal. */
+const NODE_COLLAPSE_FALLBACK: CollapsedNodes = {
+  collapsed: new Set(),
+  isOpen: () => true,
+  toggle: () => {},
+  open: () => {},
+};
+const CollapsedNodesContext = createContext<CollapsedNodes>(NODE_COLLAPSE_FALLBACK);
+
+function useNodeOpen(id: string): [boolean, () => void] {
+  const { isOpen, toggle } = useContext(CollapsedNodesContext);
+  return [isOpen(id), useCallback(() => toggle(id), [toggle, id])];
+}
+
 function useRowSignal(): RowSignal {
   return useContext(RowSignalContext);
 }
@@ -462,6 +477,18 @@ export function AppSidebar({
     const id = window.setInterval(() => setNow(Date.now()), 60_000);
     return () => window.clearInterval(id);
   }, []);
+  // Which workspaces/spaces/Pinned/status groups the user has collapsed (S8).
+  // Everything defaults open, so a new workspace or space needs no entry.
+  const liveNodeIds = useMemo(
+    () =>
+      workspaces === null
+        ? null
+        : new Set(
+            workspaces.flatMap((ws) => [`ws:${ws.ID}`, `ungrouped:${ws.ID}`, ...ws.spaces.map((sp) => `space:${sp.ID}`)]),
+          ),
+    [workspaces],
+  );
+  const nodes = useCollapsedNodes(liveNodeIds);
   const rowSignal = useMemo<RowSignal>(
     () => ({
       now,
@@ -659,18 +686,6 @@ export function AppSidebar({
     return commands;
   }, [workspaces, profiles, onOpenSettings]);
   useCommands("sidebar:actions", 5, paletteCommands);
-  // The just-created workspace is expanded on landing; existing ones start
-  // collapsed until first refresh happens (empty state -> created).
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
-  const didInitialLoad = useRef(false);
-  useEffect(() => {
-    if (workspaces === null) return;
-    if (!didInitialLoad.current) {
-      didInitialLoad.current = true;
-      setExpanded(new Set(workspaces.map((ws) => ws.ID)));
-    }
-  }, [workspaces]);
-
   // Collapsed search (audit-deepseek-harness.md §3): a header action that
   // expands into a field. An outside click collapses it only while the
   // query is empty -- a typed query survives clicking away, because
@@ -838,6 +853,7 @@ export function AppSidebar({
           <SidebarGroupContent>
             <ScrollArea className="h-full">
               <RowSignalContext.Provider value={rowSignal}>
+                <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
                   {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
                   {!error && workspaces === null && (
@@ -899,15 +915,8 @@ export function AppSidebar({
                       forest={taskForest.filter((n) => n.task.WorkspaceID === ws.ID)}
                       collapsed={collapsed}
                       onToggleCollapse={toggleCollapsed}
-                      expanded={expanded.has(ws.ID)}
-                      onToggleExpanded={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(ws.ID)) next.delete(ws.ID);
-                          else next.add(ws.ID);
-                          return next;
-                        })
-                      }
+                      expanded={nodes.isOpen(`ws:${ws.ID}`)}
+                      onToggleExpanded={() => nodes.toggle(`ws:${ws.ID}`)}
                       onAddSpace={() => setCrud({ kind: "space", workspace: ws })}
                       onAddTask={(spaceId) => setCrud({ kind: "task", workspace: ws, spaceId })}
                       onArchiveTask={(task) => setCrud({ kind: "archive", task })}
@@ -921,6 +930,7 @@ export function AppSidebar({
                     />
                   ))}
                 </SidebarMenu>
+                </CollapsedNodesContext.Provider>
               </RowSignalContext.Provider>
             </ScrollArea>
           </SidebarGroupContent>
@@ -995,8 +1005,9 @@ export function AppSidebar({
             open={crud?.kind === "workspace"}
             onOpenChange={(o) => !o && setCrud(null)}
             onCreated={(ws) => {
-              didInitialLoad.current = true;
-              setExpanded((prev) => new Set(prev).add(ws.ID));
+              // Land on the new workspace expanded, even if a deleted
+              // workspace's id is still persisted as collapsed.
+              nodes.open(`ws:${ws.ID}`);
               refresh();
             }}
             recentPaths={recentWorkspaceParentDirs(workspaces ?? [])}
@@ -1140,21 +1151,21 @@ function PinnedSection({
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [open, toggleOpen] = useNodeOpen("pinned");
 
   return (
     <SidebarMenuItem data-testid="sidebar-pinned-section">
       <SidebarMenuButton
-        onClick={() => setCollapsed((c) => !c)}
-        aria-expanded={!collapsed}
+        onClick={toggleOpen}
+        aria-expanded={open}
         data-testid="sidebar-pinned-section-header"
         className="rounded-lg"
       >
         <Pin className="size-3.5" />
         <span className="min-w-0 truncate">Pinned</span>
-        <RowChevron open={!collapsed} />
+        <RowChevron open={open} />
       </SidebarMenuButton>
-      {!collapsed && (
+      {open && (
         <SidebarMenuSub className={FLUSH_SUB}>
           <TaskRows
             tasks={tasks}
@@ -1214,12 +1225,12 @@ function StatusGroupItem({
   onSelectTask?: (task: Task) => void;
   onArchiveTask: (task: Task) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, toggleOpen] = useNodeOpen(`status:${group.key}`);
 
   return (
     <SidebarMenuItem data-testid="sidebar-status-group" data-status-group={group.key}>
       <SidebarMenuButton
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggleOpen}
         aria-expanded={open}
         data-testid="sidebar-status-group-header"
         className="rounded-lg"
@@ -1472,6 +1483,7 @@ function WorkspaceItem({
               ))}
               {workspace.ungroupedTasks.length > 0 && (
                 <SpaceLikeItem
+                  nodeId={`ungrouped:${workspace.ID}`}
                   title="Ungrouped"
                   tasks={workspace.ungroupedTasks}
                   nodes={forest.filter((n) => n.task.SpaceID === null)}
@@ -1533,6 +1545,7 @@ function SpaceItem({
       onMoveTask={onMoveTask}
       testId="sidebar-space-row"
       spaceId={space.ID}
+      nodeId={`space:${space.ID}`}
       menuItems={[
         { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
         { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
@@ -1563,6 +1576,7 @@ function SpaceLikeItem({
   menuItems,
   testId,
   spaceId,
+  nodeId,
 }: {
   title: string;
   /** The bucket's own tasks, still used for the aggregate dot above the list. */
@@ -1582,8 +1596,10 @@ function SpaceLikeItem({
   /** Only set for a real Space (not the synthetic "Ungrouped" bucket, which has no Space to key on). */
   testId?: string;
   spaceId?: number;
+  /** The id this bucket's open/closed state is persisted under (`space:<id>` / `ungrouped:<workspaceId>`). */
+  nodeId: string;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, toggleOpen] = useNodeOpen(nodeId);
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(tasks, attention, runStatus);
 
@@ -1596,7 +1612,7 @@ function SpaceLikeItem({
         <SidebarMenuSubButton asChild className="h-8 w-full translate-x-0 gap-2 rounded-lg pr-8">
           <button
             type="button"
-            onClick={() => setOpen((o) => !o)}
+            onClick={toggleOpen}
             aria-expanded={open}
             data-testid={testId}
             data-space-id={spaceId}

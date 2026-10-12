@@ -66,6 +66,7 @@ async function mountSidebar(
   tasks: Task[],
   props: Partial<Parameters<typeof AppSidebar>[0]> = {},
   spaces: Space[] = [],
+  { waitForRows = true }: { waitForRows?: boolean } = {},
 ) {
   const client = new FakeWsClient();
   const utils = render(
@@ -78,7 +79,8 @@ async function mountSidebar(
   client.nth("space.list", 0).resolve(spaces);
   client.nth("task.list", 0).resolve(tasks);
   await flush();
-  await screen.findAllByTestId("sidebar-task-row");
+  if (waitForRows) await screen.findAllByTestId("sidebar-task-row");
+  else await screen.findByTestId("sidebar-workspace-row");
   return { client, ...utils };
 }
 
@@ -668,5 +670,154 @@ describe("title overflow and indentation (S7)", () => {
     expect(rootLi.contains(leaderLi)).toBe(true);
     expect(leaderLi.contains(taskItem(CODER.ID))).toBe(true);
     expect(leaderLi.contains(taskItem(LEADER_B.ID))).toBe(false);
+  });
+});
+
+describe("expansion persistence (S8)", () => {
+  const IN_A = makeTask(5, "Spaced task", { SpaceID: SPACE_A.ID });
+  const UNGROUPED = makeTask(6, "Loose task");
+  const KEY = "smind:sidebar-collapsed-nodes";
+
+  const stored = (): string[] => JSON.parse(window.localStorage.getItem(KEY) ?? "[]");
+
+  it("a collapsed workspace persists across a remount", async () => {
+    const first = await mountSidebar([UNGROUPED]);
+    fireEvent.click(screen.getByTestId("sidebar-workspace-row"));
+    expect(screen.queryByText("Loose task")).not.toBeInTheDocument();
+    expect(stored()).toEqual(["ws:1"]);
+    first.unmount();
+
+    // Remount: the tree loads but the workspace stays collapsed.
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} />
+      </SidebarProvider>,
+    );
+    client.nth("workspace.list", 0).resolve([WORKSPACE]);
+    await flush();
+    client.nth("space.list", 0).resolve([]);
+    client.nth("task.list", 0).resolve([UNGROUPED]);
+    await flush();
+
+    expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Loose task")).not.toBeInTheDocument();
+  });
+
+  it("a collapsed space persists across a remount, and re-expanding it clears the stored id", async () => {
+    const first = await mountSidebar([IN_A], {}, [SPACE_A]);
+    fireEvent.click(screen.getByTestId("sidebar-space-row"));
+    expect(screen.queryByText("Spaced task")).not.toBeInTheDocument();
+    expect(stored()).toEqual(["space:10"]);
+    first.unmount();
+
+    // Collapsed space: no task rows at all, so don't wait for one.
+    await mountSidebar([IN_A], {}, [SPACE_A], { waitForRows: false });
+
+    expect(screen.getByTestId("sidebar-space-row")).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Spaced task")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-space-row"));
+    expect(screen.getByText("Spaced task")).toBeInTheDocument();
+    expect(window.localStorage.getItem("smind:sidebar-collapsed-nodes")).toBeNull();
+  });
+
+  it("a collapsed Pinned section persists across a remount", async () => {
+    window.localStorage.setItem("smind:pinned-tasks", JSON.stringify([UNGROUPED.ID]));
+    const first = await mountSidebar([UNGROUPED]);
+    fireEvent.click(screen.getByTestId("sidebar-pinned-section-header"));
+    expect(stored()).toEqual(["pinned"]);
+    first.unmount();
+
+    await mountSidebar([UNGROUPED]);
+
+    expect(screen.getByTestId("sidebar-pinned-section-header")).toHaveAttribute("aria-expanded", "false");
+    // The pinned task still shows in the tree, just not in the (collapsed) Pinned section.
+    expect(within(screen.getByTestId("sidebar-pinned-section")).queryByText("Loose task")).not.toBeInTheDocument();
+  });
+
+  it("a collapsed status group persists across a remount", async () => {
+    const first = await mountSidebar([UNGROUPED]);
+    fireEvent.click(screen.getByTestId("sidebar-group-mode-toggle"));
+    const header = (await screen.findAllByTestId("sidebar-status-group-header"))[0]!;
+    const key = header.closest<HTMLElement>('[data-testid="sidebar-status-group"]')!.dataset.statusGroup;
+    fireEvent.click(header);
+    expect(stored()).toEqual([`status:${key}`]);
+    first.unmount();
+
+    const client = new FakeWsClient();
+    render(
+      <SidebarProvider>
+        <AppSidebar client={client as never} />
+      </SidebarProvider>,
+    );
+    client.nth("workspace.list", 0).resolve([WORKSPACE]);
+    await flush();
+    client.nth("space.list", 0).resolve([]);
+    client.nth("task.list", 0).resolve([UNGROUPED]);
+    await flush();
+
+    expect((await screen.findAllByTestId("sidebar-status-group-header"))[0]).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a workspace created after its id was left persisted as collapsed lands expanded", async () => {
+    window.localStorage.setItem(KEY, JSON.stringify(["ws:2"]));
+    const { client } = await mountSidebar([UNGROUPED]);
+    // The id of a workspace that no longer exists is pruned on load...
+    await waitFor(() => expect(stored()).toEqual([]));
+
+    // ...while a live one (ws:1) is honoured; creating a workspace forces its id open.
+    fireEvent.click(screen.getByTestId("sidebar-workspace-row"));
+    expect(stored()).toEqual(["ws:1"]);
+    fireEvent.click(screen.getByTestId("sidebar-new-workspace-button"));
+    fireEvent.change(await screen.findByLabelText("Path"), { target: { value: "/tmp/new" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+    const create = await waitFor(() => client.nth("workspace.create"));
+    await act(async () => {
+      create.resolve({ ...WORKSPACE, ID: 1, Title: "Reborn" });
+    });
+    await flush();
+
+    expect(stored()).toEqual([]);
+  });
+
+  it("searching never writes the stored state, and clearing the query restores the tree as it was", async () => {
+    window.localStorage.setItem(KEY, JSON.stringify(["space:10"]));
+    await mountSidebar([IN_A, UNGROUPED], {}, [SPACE_A]);
+    const before = window.localStorage.getItem(KEY);
+
+    fireEvent.click(screen.getByTestId("sidebar-search-toggle"));
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "Spaced" } });
+    // The flat result list shows the match even though its space is collapsed.
+    expect(await screen.findByTestId("sidebar-search-results")).toHaveTextContent("Spaced task");
+    expect(window.localStorage.getItem(KEY)).toBe(before);
+
+    fireEvent.change(screen.getByTestId("sidebar-search-input"), { target: { value: "" } });
+    await screen.findByText("Loose task");
+    expect(window.localStorage.getItem(KEY)).toBe(before);
+    expect(screen.getByTestId("sidebar-space-row")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("a corrupt stored value falls back to everything expanded", async () => {
+    window.localStorage.setItem(KEY, "{not json");
+    await mountSidebar([IN_A], {}, [SPACE_A]);
+
+    expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("sidebar-space-row")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("a stored value of the wrong shape falls back to everything expanded", async () => {
+    window.localStorage.setItem(KEY, JSON.stringify([1, 2, 3]));
+    await mountSidebar([IN_A], {}, [SPACE_A]);
+
+    expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("everything is expanded on first load with nothing stored, including new workspaces", async () => {
+    await mountSidebar([IN_A], {}, [SPACE_A]);
+
+    expect(screen.getByTestId("sidebar-workspace-row")).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("sidebar-space-row")).toHaveAttribute("aria-expanded", "true");
+    expect(window.localStorage.getItem(KEY)).toBeNull();
   });
 });
