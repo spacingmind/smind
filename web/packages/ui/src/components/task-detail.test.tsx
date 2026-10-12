@@ -139,6 +139,32 @@ describe("TaskDetailPane", () => {
     expect(screen.getByTestId("run-status")).toHaveTextContent("done");
   });
 
+  it("shows the chat timeline rail once two runs overflow a wide pane", async () => {
+    const sizes: Record<string, number> = { scrollHeight: 3000, clientHeight: 600, clientWidth: 1200 };
+    for (const [key, value] of Object.entries(sizes)) {
+      Object.defineProperty(HTMLElement.prototype, key, { configurable: true, get: () => value });
+    }
+    try {
+      const client = new FakeWsClient();
+      render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
+      client.nth("run.list", 0).resolve([
+        doneRun({ ID: "run-1", Prompt: "first ask" }),
+        doneRun({ ID: "run-2", Prompt: "second ask" }),
+      ]);
+      await flush();
+      for (const n of [0, 1]) {
+        client.nth("run.logs", n).resolve({ runId: `run-${n + 1}`, status: "done", stopReason: "end_turn", events: [] });
+      }
+      await flush();
+      expect(screen.getByTestId("chat-outline-rail")).toBeInTheDocument();
+      expect(screen.getByTestId("chat-outline-tick-run-2")).toHaveAttribute("aria-label", "2 of 2: second ask");
+    } finally {
+      for (const key of Object.keys(sizes)) {
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+      }
+    }
+  });
+
   it("switching to a different task and back doesn't duplicate entries or leak the live subscription", async () => {
     const client = new FakeWsClient();
     const { rerender } = render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
