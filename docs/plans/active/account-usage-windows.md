@@ -974,7 +974,7 @@ scratch).
 - [x] PR-D1 web core (store, cards, modal, Settings → Usage, palette entry) — PR open (2026-10-12), awaiting review (see "PR-D1 record")
 - [ ] PR-E chat hover card (required)
 - [ ] PR-D2 web footer item (default off) and pins
-- [ ] PR-F rejection cooldown + observed headers (right after PR-B)
+- [~] PR-F rejection cooldown + observed headers: PR open (2026-10-12); core (AC59-AC65) built, AC66 surfaces (wire `cooldown`/`Window.source`, `account.usage` event, UI text) wait for PR-C, see "PR-F notes"
 - [ ] Manual live check against one real account per provider
 - [ ] Close-out docs; plan moved to `completed/`
 
@@ -1173,6 +1173,78 @@ Unverified at spec time (the implementing PRs must confirm and record):
   a stale, an exhausted, a backoff and an in-flight account to the one healthy
   one). Mutation-checked: a router that calls `Poller.Touch` on each Peek
   fails both.
+
+### PR-F notes (2026-10-12)
+
+- **Shape.** `quota.Passive` (`internal/quota/passive.go`) implements the
+  write-only `quota.Observer` (held by the proxy via `server.WithQuotaObserver`)
+  and the read-only `quota.CooldownSource` behind `Reader.Cooldown` (attached
+  with `quota.WithCooldowns`). Pure parsers: `passive_detect.go`
+  (`ClassifyRejection`, `RejectionDeadline`, `CooldownEnd`, grace, fallback,
+  bare-429 back-off), `passive_observe.go` (typed Anthropic observation),
+  `passive_codex.go` (fixtures-only, not called by the proxy). Persistence:
+  `quota_cooldown` table, `quota_snapshots.kind`, an async coalescing writer.
+  Routing: `Router.exhaustion` asks `Reader.Cooldown` first, independent of the
+  fetched report and of D9 overage; `routing:false` never consults the Reader.
+  Daemon: `serve.go` builds one `Passive` (off when `accountUsage.enabled` or
+  `accountUsage.passive` is false), clears it on `Registry.ReplaceCredential`
+  (hook) and the store call deletes the persisted rows; token refresh does not.
+- **Decisions taken inside the ADR text.** A `7d_oi`-only shape is a rejection
+  only when the unified status is `rejected` (as the ref); then it is
+  model-scoped, and a model-scoped rejection with no known model is not
+  recorded (fail open). Only API-less OAuth Anthropic accounts are observed;
+  `/v1/messages/count_tokens` is not observed (a bare 429 there must not back off
+  real traffic). A fallback rejection never shortens or escalates a running
+  cooldown. Bare-429 back-off is memory-only.
+- **Not in this PR (needs PR-C's wire fields).** AC66's `cooldown` object,
+  `Window.source`/`status` on the wire, the `account.usage` event on cooldown
+  start/observation change (`WithPassiveOnChange` exists, unwired), and the UI
+  text. `Passive.Observed` and `quota.DisplayReport` are ready for PR-C to call.
+  A cooldown's end fires no event (time-based).
+- **Known residuals / for the Human.** (1) A transient bare-429 back-off makes
+  `Route` persist a new 24 h affinity decision for the session (spec-compliant,
+  costs prompt-cache locality). (2) The fallback level resets on any non-rejected
+  response, including a bare 429 or 5xx (ADR wording). (3) The `7d_oi`-only
+  deadline ignores `7d_oi-Reset` (ref and ADR text), so a model-scoped weekly
+  limit without Retry-After cools 1 min and escalates to 30 min; amending the
+  ADR to use `7d_oi-Reset` is a Human decision (AGENTS.md rule d). (4) The
+  observed snapshot is not dropped on credential change and `DisplayReport` has
+  no age cutoff. (5) A deleted account leaves a tiny in-memory entry.
+
+**PR-F validation (2026-10-12).** Checked with `go test -race` on quota, routing,
+server, store, accounts, config, `go vet ./...`, `GOOS=windows go vet`, `gofmt`,
+and a 210,000-case differential test (reviewer, scratch, not committed) of
+`ClassifyRejection`/`RejectionDeadline` against a copy of the ref functions.
+
+- **AC59** verified: `Test_passive_zero_http_calls` (quota) and
+  `TestProxy_passive_zero_http_calls_proxy_path` (1000 mixed responses, usage
+  `httptest` server sees 0, `quota_poll_state` unchanged);
+  `cooldown_reader_has_no_observation_accessor`; observer no-op tests for
+  `passive:false` / `enabled:false` (constructor level; `serve.go` passes
+  `enabled && passive`).
+- **AC60, AC61** verified: truth table, deadlines, formats, grace, 8-day clamp,
+  fallback levels (`Test_passive_*` in `passive_detect_test.go`, `passive_test.go`).
+- **AC62** verified: model-scoped and credential-wide cooldowns, bare 429
+  back-off ≤ 60 s, 429 passed through unchanged (`TestProxy_passive_*`,
+  `TestProxy_429_and_headers_passed_through_unchanged_when_observed`).
+- **AC63** verified: typed bounded observation, replace-not-merge, provider
+  scoping, no raw headers; Codex parsers fixtures-only and not called by the
+  proxy (`TestProxy_observer_not_called_for_api_key_openai_and_route_errors`).
+- **AC64** verified: `TestRoute_passive_*`, end-to-end
+  `TestProxy_passive_pool_skips_cooled_account_next_request_end_to_end`;
+  credential replace clears (store, registry hook); refresh does not.
+- **AC65** verified: `quota_cooldown`, `quota_snapshots.kind`, per-kind
+  retention, persistence across restart, write-on-change and the 60 s rule,
+  non-blocking writer with a slow store.
+- **AC66** partially verified, not complete: `accountUsage.passive` loads with
+  default true; `Window.Source`/`Status`, `Passive.Observed`, `DisplayReport`
+  and `WithPassiveOnChange` exist and are tested, but the wire `cooldown` object,
+  the `account.usage` event wiring and the UI text depend on PR-C and PR-D
+  and are **not** done here.
+- Independent review (`reviewer`, Sonnet 5.5, plan mode): no blockers; 7 minor
+  findings fixed in this PR, the rest listed under PR-F notes. Flaky and
+  unrelated, rerun green: a web `tab.jump` test and a `wsapi`
+  `TempDir` cleanup test.
 
 ### PR-D1 record (web: Settings -> Usage, modal, palette; 2026-10-12)
 

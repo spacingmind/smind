@@ -15,6 +15,7 @@ import (
 	utls "github.com/refraction-networking/utls"
 
 	"github.com/spacingmind/smind/internal/accounts"
+	"github.com/spacingmind/smind/internal/quota"
 	"github.com/spacingmind/smind/internal/routing"
 	"github.com/spacingmind/smind/internal/store"
 	"github.com/spacingmind/smind/internal/transport"
@@ -58,6 +59,10 @@ type proxy struct {
 
 	reqLog              *requestLogWriter
 	requestLogQueueSize int
+
+	// observer receives every Anthropic OAuth upstream response (ADR-0028
+	// §7). Nil means no observation.
+	observer quota.Observer
 }
 
 // proxyOption configures a proxy constructed via newProxy.
@@ -92,6 +97,12 @@ func withRequestLogWriter(w *requestLogWriter) proxyOption {
 	return func(p *proxy) { p.reqLog = w }
 }
 
+// withObserver reports every Anthropic OAuth upstream response to o. Nil is
+// a no-op.
+func withObserver(o quota.Observer) proxyOption {
+	return func(p *proxy) { p.observer = o }
+}
+
 // newProxy returns a proxy backed by reg and router. By default it reaches
 // providers over uTLS-fingerprinted clients, matching internal/accounts'
 // refreshers: Anthropic over Firefox, OpenAI over Chrome. db backs the
@@ -114,6 +125,21 @@ func newProxy(reg *accounts.Registry, router *routing.Router, db *store.Store, o
 		p.reqLog = newRequestLogWriter(db, p.requestLogQueueSize)
 	}
 	return p
+}
+
+// observe hands resp to the observer. It never fails or delays the response:
+// a panicking observer is recovered and logged with a fixed string only
+// (never header values).
+func (p *proxy) observe(resp quota.Response) {
+	if p.observer == nil {
+		return
+	}
+	defer func() {
+		if recover() != nil {
+			log.Printf("proxy: quota observer panicked; ignored")
+		}
+	}()
+	p.observer.Observe(resp)
 }
 
 // Close drains the proxy's async request_log writer: blocks until every
@@ -281,6 +307,22 @@ func (p *proxy) serve(w http.ResponseWriter, r *http.Request, provider string, c
 		return
 	}
 	defer resp.Body.Close()
+
+	// Before copyResponse, so a concurrent next request already sees any
+	// cooldown this response starts. count_tokens is not observed: it is
+	// unmetered and has its own, separate rate limit, so a 429 with Retry-After
+	// there would otherwise start a bare-429 back-off that keeps real
+	// /v1/messages calls off the account.
+	if !countTokens && provider == providerAnthropic && account.CredentialType == accounts.CredentialTypeOAuth {
+		p.observe(quota.Response{
+			AccountID: account.ID,
+			Provider:  providerAnthropic,
+			Model:     model,
+			Status:    resp.StatusCode,
+			Header:    resp.Header,
+			At:        time.Now(),
+		})
+	}
 
 	upstreamStatus := resp.StatusCode
 	row.UpstreamStatus = &upstreamStatus
