@@ -37,12 +37,16 @@ import type { AgentProfile, ModeInfo, ModelInfo, Provider, ProviderInfo, Thinkin
 // rather than a threaded `isMobile` prop (see composer.tsx's
 // COMPACT_TOUCH_BUTTON_CLASS for the same call).
 //
+// Radix's SelectValue drops its own className, so the below-sm label hide
+// lives on the trigger (`max-sm:[&>span]:hidden!`, important to beat
+// SelectTrigger's own `[&>span]:line-clamp-1` display).
+//
 // Label-less, per web-ui-dogfood-polish Item 5: the selects sit inside the
 // input card's bottom toolbar, so their visible chrome is nothing -- the
 // card is the border, and cn()'s tailwind-merge strips SelectTrigger's own
 // border/background halves in favour of these.
 const PILL_TRIGGER_CLASS =
-  "size-11 shrink-0 justify-center gap-1.5 rounded-xl border-0 bg-transparent px-0 text-ui-base font-normal text-foreground-muted hover:bg-hover hover:text-foreground data-[state=open]:bg-hover sm:h-11 sm:w-auto sm:justify-start sm:px-2 md:h-7 md:px-1.5 md:text-ui-sm [&>svg:first-child]:size-4 [&>svg:first-child]:md:size-3.5 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 max-sm:[&>svg:last-child]:hidden";
+  "size-11 shrink-0 justify-center gap-1.5 rounded-xl border-0 bg-transparent px-0 text-ui-base font-normal text-foreground-muted hover:bg-hover hover:text-foreground data-[state=open]:bg-hover sm:h-11 sm:w-auto sm:justify-start sm:px-2 md:h-7 md:px-1.5 md:text-ui-sm [&>svg:first-child]:size-4 [&>svg:first-child]:md:size-3.5 [&>svg:last-child]:size-3 [&>svg:last-child]:opacity-60 max-sm:[&>svg:last-child]:hidden max-sm:[&>span]:hidden!";
 
 /**
  * The per-run configuration the composer submits with (run-config IA
@@ -443,7 +447,7 @@ function RunConfigToolbarProvider() {
         className={PILL_TRIGGER_CLASS}
       >
         <SquareTerminal aria-hidden className="shrink-0" />
-        <SelectValue placeholder="Select provider" className="max-sm:hidden" />
+        <SelectValue placeholder="Select provider" />
       </SelectTrigger>
       <SelectContent>
         {meta.providers.map((p) => (
@@ -478,7 +482,7 @@ function RunConfigToolbarMode() {
           className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
         >
           {dangerous ? <ShieldAlert aria-hidden className="shrink-0" /> : <ShieldCheck aria-hidden className="shrink-0" />}
-          <SelectValue placeholder="Select mode" className="max-sm:hidden" />
+          <SelectValue placeholder="Select mode" />
         </SelectTrigger>
         <SelectContent>
           {meta.modes.map((m) => (
@@ -530,7 +534,7 @@ function RunConfigToolbarThinking() {
         className={PILL_TRIGGER_CLASS}
       >
         <Brain aria-hidden className="shrink-0" />
-        <SelectValue placeholder="Select thinking level" className="max-sm:hidden" />
+        <SelectValue placeholder="Select thinking level" />
       </SelectTrigger>
       <SelectContent>
         {THINKING_LEVELS.map((t) => (
@@ -580,9 +584,7 @@ function RunConfigToolbarModel() {
         className={PILL_TRIGGER_CLASS}
       >
         <Cpu aria-hidden className="shrink-0" />
-        <SelectValue placeholder="Select model" className="max-sm:hidden">
-          {current}
-        </SelectValue>
+        <SelectValue placeholder="Select model">{current}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={DEFAULT_MODEL_VALUE} title="The provider's own default model">
