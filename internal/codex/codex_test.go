@@ -16,14 +16,25 @@ import (
 // `codex` binary/network access.
 var fakeAgentPath string
 
+// crashHelperEnv re-execs the test binary as the "daemon" subprocess of
+// TestAgentJob_DaemonCrashKillsTree_Windows (procgroup_windows_test.go):
+// its value is the treeagent path to spawn a conn against. Defined here
+// so TestMain's guard compiles on every platform.
+const crashHelperEnv = "SMIND_CODEX_TEST_CRASH_HELPER"
+
 func TestMain(m *testing.M) {
+	if v := os.Getenv(crashHelperEnv); v != "" {
+		crashHelper(v)
+		return
+	}
+
 	dir, err := os.MkdirTemp("", "smind-codex-test-")
 	if err != nil {
 		panic(err)
 	}
 	defer os.RemoveAll(dir)
 
-	fakeAgentPath = filepath.Join(dir, "fakeagent")
+	fakeAgentPath = filepath.Join(dir, exeName("fakeagent"))
 	build := exec.Command("go", "build", "-o", fakeAgentPath, "./fakeagent")
 	build.Dir, err = os.Getwd()
 	if err != nil {

@@ -7,7 +7,7 @@ export const SIDEBAR_MIN_WIDTH = 192;
 export const SIDEBAR_MAX_WIDTH = 512;
 /** Matches the prior fixed SIDEBAR_WIDTH ("16rem") in components/ui/sidebar.tsx, now just the initial value instead of a constant. */
 export const SIDEBAR_DEFAULT_WIDTH = 256;
-/** Matches `SIDEBAR_WIDTH_ICON` ("3rem") in components/ui/sidebar.tsx -- the icon-collapsed rail's width, at the usual 16px/rem. The sidebar's ResizablePanel collapses to exactly this many pixels rather than leaving its last dragged width as dead space beside the icon rail. */
+/** Matches `SIDEBAR_WIDTH_ICON` ("3rem") in components/ui/sidebar.tsx -- the icon-collapsed rail's width, at the usual 16px/rem. The sidebar panel collapses to exactly this many pixels rather than leaving its last dragged width as dead space beside the icon rail. */
 export const SIDEBAR_ICON_WIDTH = 48;
 
 /** Clamps to [SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH] -- dragging past either bound settles at the bound, never collapses to 0 or grows off-screen. */
@@ -31,11 +31,9 @@ function readPersistedWidth(): number {
  * second time against the same localStorage) reads back whatever was last
  * set, defaulting to SIDEBAR_DEFAULT_WIDTH the first time ever.
  *
- * This is the state the drag handle (react-resizable-panels' own
- * ResizableHandle, wired up in App.tsx) ultimately updates via its
- * onResize callback -- clamping and persistence both happen here, in one
- * place, regardless of what the underlying drag math (percentage of the
- * panel group's measured width) hands back.
+ * This is the committed state the sidebar drag handle updates on release
+ * (hooks/use-sidebar-resize.ts, wired up in App.tsx) -- clamping and
+ * persistence both happen here, in one place, whatever the drag math hands back.
  */
 export function useSidebarWidth(): [number, (next: number) => void] {
   const [width, setWidthState] = useState<number>(() => readPersistedWidth());

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/spacingmind/smind/internal/realpath"
 )
 
 // Caps on what a PermissionDetail carries, so a permission request stays a
@@ -220,7 +222,7 @@ func resolveInWorktree(worktree, path string) (resolved string, inside, exists b
 		abs = filepath.Join(worktree, abs)
 	}
 	abs = filepath.Clean(abs)
-	root, rerr := filepath.EvalSymlinks(worktree)
+	root, rerr := realpath.Resolve(worktree)
 	if rerr != nil {
 		root = filepath.Clean(worktree)
 	}
@@ -233,7 +235,7 @@ func resolveInWorktree(worktree, path string) (resolved string, inside, exists b
 		// the remainder lexically.
 		anc, rest := abs, ""
 		for {
-			if rp, err := filepath.EvalSymlinks(anc); err == nil {
+			if rp, err := realpath.Resolve(anc); err == nil {
 				anc = rp
 				break
 			}
@@ -249,7 +251,7 @@ func resolveInWorktree(worktree, path string) (resolved string, inside, exists b
 	if rerr != nil {
 		return abs, false, true
 	}
-	real, err := filepath.EvalSymlinks(abs)
+	real, err := realpath.Resolve(abs)
 	if err != nil {
 		return abs, false, true
 	}

@@ -145,7 +145,7 @@ describe("AppHeader", () => {
 
   it("header-reserves-traffic-light-space: macOS pads the header clear of the lights wherever the sidebar doesn't cover them", async () => {
     mockPlatform({ desktop: true, os: "macos" });
-    const { TRAFFIC_LIGHT_CLUSTER_PX, SIDEBAR_HANDLE_PX } = await import("@/lib/window-chrome");
+    const { TRAFFIC_LIGHT_CLUSTER_PX } = await import("@/lib/window-chrome");
 
     // Sidebar expanded: the header's left edge is already past the lights --
     // the sidebar's own header row holds them (see the AppSidebar tests).
@@ -156,7 +156,7 @@ describe("AppHeader", () => {
     // Sidebar collapsed to the 48px rail: the lights overhang it.
     const collapsed = await renderHeader(48);
     expect(screen.getByTestId("app-header").style.paddingLeft).toBe(
-      `${8 + TRAFFIC_LIGHT_CLUSTER_PX - 48 - SIDEBAR_HANDLE_PX}px`,
+      `${8 + TRAFFIC_LIGHT_CLUSTER_PX - 48}px`,
     );
     collapsed.unmount();
 

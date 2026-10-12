@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,15 +116,23 @@ func TestSetup_DaemonRestartMarksFailed(t *testing.T) {
 	}
 }
 
-func TestSetup_WindowsUnsupported(t *testing.T) {
+// TestSetupScript_NoSh_FailsFast covers ADR-0029 D1's no-shell case on
+// every OS via the injected lookup: a workspace with a script configured
+// must fail task creation fast (before any worktree exists) with an error
+// naming Git for Windows, while workspaces without scripts are unaffected.
+func TestSetupScript_NoSh_FailsFast(t *testing.T) {
 	t.Parallel()
 	m := newTestManager(t)
-	m.goos = "windows"
+	m.shLookup = func() (string, error) { return "", ErrSetupUnsupported }
 	w := setupWorkspace(t, m, "echo hi")
-	if _, err := m.CreateTask(w.ID, nil, "win"); err == nil {
+	_, err := m.CreateTask(w.ID, nil, "nosh")
+	if err == nil {
 		t.Fatal("expected error")
 	} else if !errors.Is(err, ErrSetupUnsupported) {
 		t.Fatalf("err = %v", err)
+	}
+	if !strings.Contains(err.Error(), "Git for Windows") {
+		t.Fatalf("err = %v, want it to name Git for Windows", err)
 	}
 	tasks, _ := m.store.ListTasksByWorkspace(w.ID)
 	if len(tasks) != 0 {

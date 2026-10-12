@@ -20,6 +20,8 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/spacingmind/smind/internal/shimguard"
 )
 
 // RPCError is the error object shape a peer returns for a failed request, or
@@ -90,6 +92,11 @@ type conn struct {
 
 	closeOnce sync.Once
 	readDone  chan struct{}
+
+	// pg (set right after a successful Start) owns the whole-tree kill
+	// switch: a kill-on-close Job Object handle on Windows, the
+	// process-group id on Unix. See procgroup_*.go.
+	pg *processGroup
 }
 
 // newConn spawns command[0] with command[1:] as arguments, wiring its
@@ -98,9 +105,13 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 	if len(command) == 0 {
 		return nil, fmt.Errorf("codex: empty command")
 	}
+	if err := shimguard.Validate("codex", command); err != nil {
+		return nil, err
+	}
 
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stderr = logWriter
+	setProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -115,6 +126,13 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 		return nil, fmt.Errorf("codex: start %q: %w", command[0], err)
 	}
 
+	pg, err := attachProcessGroup(cmd)
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, err
+	}
+
 	c := &conn{
 		cmd:           cmd,
 		stdin:         stdin,
@@ -123,6 +141,7 @@ func newConn(command []string, logWriter io.Writer) (*conn, error) {
 		reqHandlers:   make(map[string]RequestHandler),
 		notifHandlers: make(map[string]NotificationHandler),
 		readDone:      make(chan struct{}),
+		pg:            pg,
 	}
 
 	go c.readLoop()
@@ -331,9 +350,12 @@ func (c *conn) close(timeout time.Duration) error {
 
 	select {
 	case err := <-waitDone:
+		c.pg.release()
 		return err
 	case <-time.After(timeout):
-		_ = c.cmd.Process.Kill()
+		// Kill the CLI's whole process tree, not just the CLI process, so
+		// MCP-server grandchildren (npx -> node -> ...) don't outlive it.
+		c.pg.kill()
 		return <-waitDone
 	}
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/spacingmind/smind/internal/taskrunner"
 	"github.com/spacingmind/smind/internal/wsclient"
+
+	"github.com/spacingmind/smind/internal/realpath"
 )
 
 // task_send, ADR-0017's one write tool: a non-blocking wrapper over the
@@ -258,11 +260,11 @@ func readPromptFile(worktree, rel string) (string, error) {
 			return "", fmt.Errorf("path %q must not contain \"..\"", rel)
 		}
 	}
-	root, err := filepath.EvalSymlinks(worktree)
+	root, err := realpath.Resolve(worktree)
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree: %w", err)
 	}
-	resolved, err := filepath.EvalSymlinks(filepath.Join(root, rel))
+	resolved, err := realpath.Resolve(filepath.Join(root, rel))
 	if err != nil {
 		return "", fmt.Errorf("resolve %q: %w", rel, err)
 	}
