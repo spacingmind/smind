@@ -1102,7 +1102,7 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("the Providers button deep-links Settings to the providers section", async () => {
+  it("the footer Host popover (not a header gear) is the entry to Providers", async () => {
     const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
@@ -1113,14 +1113,18 @@ describe("AppSidebar settings entry point (ui-redesign-parity Item 13)", () => {
     await resolveWorkspaceTree(client, WORKSPACE, [], [TASK]);
 
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
-    // Accounts moved to the footer's Providers shortcut (run-config IA
-    // plan) -- still reachable from the sidebar, just no longer a header
-    // gear that users mistake for Settings.
-    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
+    // Providers/Agents live in the footer Host popover (sidebar-footer plan D2).
+    fireEvent.click(screen.getByTestId("sidebar-footer-host"));
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toBeInTheDocument();
   });
 });
 
-describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)", () => {
+/** Opens the footer Host popover (Providers/Agents/health rows live inside it). */
+function openHost(): void {
+  fireEvent.click(screen.getByTestId("sidebar-footer-host"));
+}
+
+describe("AppSidebar footer Host popover and agent palette entries (run-config IA)", () => {
   const PROFILE: AgentProfile = {
     ID: 7,
     Name: "Quick Fixes",
@@ -1132,7 +1136,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     UpdatedAt: "2024-01-01T00:00:00Z",
   };
 
-  it("Providers row deep-links to Settings -> Providers; Agents row deep-links to Settings -> Agents", async () => {
+  it("Host popover: Providers row deep-links to Settings -> Providers; Agents row deep-links to Settings -> Agents", async () => {
     const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
@@ -1150,22 +1154,16 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     // need the window-event indirection the composer's toolbar (outside
     // the sidebar's tree) uses for the same "land on a specific settings
     // section" problem.
-    fireEvent.click(screen.getByTestId("sidebar-footer-providers"));
+    openHost();
+    fireEvent.click(screen.getByTestId("sidebar-footer-host-providers"));
     expect(onOpenSettings).toHaveBeenCalledWith("providers");
 
-    // Deep-links via the same window-event channel the toolbar's own
-    // "Manage agents…" entry uses for its cross-tree navigation
-    // (run-config IA: "each deep-links straight into the matching
-    // Settings section").
-    const openSettingsListener = vi.fn();
-    window.addEventListener("smind:open-settings", openSettingsListener);
-    fireEvent.click(screen.getByTestId("sidebar-footer-agents"));
-    window.removeEventListener("smind:open-settings", openSettingsListener);
-    expect(openSettingsListener).toHaveBeenCalledTimes(1);
-    expect((openSettingsListener.mock.calls[0]![0] as CustomEvent).detail).toEqual({ sectionId: "agents" });
+    openHost();
+    fireEvent.click(screen.getByTestId("sidebar-footer-host-agents"));
+    expect(onOpenSettings).toHaveBeenCalledWith("agents");
   });
 
-  it("Agents row shows the profile count", async () => {
+  it("Host popover Agents row shows the profile count", async () => {
     const client = new FakeWsClient();
     render(
       <SidebarProvider>
@@ -1176,10 +1174,11 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     client.nth("profile.list", 0).resolve([PROFILE]);
     await flush();
 
-    expect(screen.getByTestId("sidebar-footer-agents")).toHaveTextContent("1");
+    openHost();
+    expect(screen.getByTestId("sidebar-footer-host-agents")).toHaveTextContent("1");
   });
 
-  it("Providers row shows a health dot + healthy count from provider.test, tested once (not per render)", async () => {
+  it("Host popover Providers row shows a health dot + healthy count from provider.test, tested once (not per render)", async () => {
     const client = new FakeWsClient();
     const { rerender } = render(
       <SidebarProvider>
@@ -1190,6 +1189,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
     await flush();
 
     // No dot/count until provider.list answers.
+    openHost();
     expect(screen.queryByTestId("sidebar-footer-providers-health-dot")).not.toBeInTheDocument();
 
     client.nth("provider.list", 0).resolve({
@@ -1210,7 +1210,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
 
     const dot = screen.getByTestId("sidebar-footer-providers-health-dot");
     expect(dot).toHaveAttribute("data-status", "warning");
-    expect(screen.getByTestId("sidebar-footer-providers")).toHaveTextContent("1 healthy");
+    expect(screen.getByTestId("sidebar-footer-host-providers")).toHaveTextContent("1 healthy");
 
     // Re-rendering the same client doesn't re-test.
     rerender(
@@ -1275,7 +1275,7 @@ describe("AppSidebar footer shortcuts and agent palette entries (run-config IA)"
   });
 });
 
-describe("AppSidebar collapsed header (dogfood Item 1)", () => {
+describe("AppSidebar collapsed rail (dogfood Item 1)", () => {
   /** Renders with the sidebar icon-collapsed -- SidebarProvider's controlled `open=false` plus collapsible="icon" is exactly what the rail toggle produces. */
   function renderCollapsed() {
     const client = new FakeWsClient();
@@ -1287,24 +1287,20 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
     return document.querySelector("[data-slot='sidebar']") as HTMLElement;
   }
 
-  it("collapsed mode renders a compact icon stack of the header buttons instead of an empty padded row", () => {
+  it("collapsed mode renders the footer actions as a vertical icon stack and no header actions", () => {
     renderCollapsed();
 
-    const stack = screen.getByTestId("sidebar-collapsed-header-actions");
-    // The collapsed stack is laid out as a vertical stack (flex-col), not
-    // the expanded header's horizontal row -- the structural assertion
-    // that there is no phantom horizontal dead-space row left behind.
-    expect(stack.className).toContain("flex-col");
-    // And the expanded row is the one Tailwind hides in this state
-    // (display:none via `hidden`); jsdom cannot compute that, so the class
-    // is asserted directly.
+    const actions = screen.getByTestId("sidebar-footer-actions");
+    // Vertical stack (flex-col) under the icon-collapsed variant; jsdom cannot compute CSS, so classes are asserted.
+    expect(actions.className).toContain("group-data-[collapsible=icon]:flex-col");
     expect(screen.getByTestId("sidebar-expanded-header").className).toContain("group-data-[collapsible=icon]:hidden");
-    expect(within(stack).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
-    expect(within(stack).getByTestId("sidebar-settings-button-collapsed")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-footer-providers")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-collapsed-header-actions")).not.toBeInTheDocument();
+    expect(within(actions).getByTestId("theme-toggle-trigger")).toBeInTheDocument();
+    expect(within(actions).getByTestId("sidebar-settings-button")).toBeInTheDocument();
+    expect(within(actions).getByTestId("sidebar-footer-host")).toBeInTheDocument();
   });
 
-  it("the collapsed stack's settings button still opens settings", () => {
+  it("the collapsed footer's settings button still opens settings", () => {
     const onOpenSettings = vi.fn();
     const client = new FakeWsClient();
     render(
@@ -1313,11 +1309,11 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
       </SidebarProvider>,
     );
 
-    fireEvent.click(screen.getByTestId("sidebar-settings-button-collapsed"));
+    fireEvent.click(screen.getByTestId("sidebar-settings-button"));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("expanded mode renders the horizontal header row and not the collapsed stack", async () => {
+  it("expanded mode renders the header row with the footer actions horizontal", async () => {
     const client = new FakeWsClient();
     render(
       <SidebarProvider>
@@ -1325,14 +1321,8 @@ describe("AppSidebar collapsed header (dogfood Item 1)", () => {
       </SidebarProvider>,
     );
 
-    // Both variants live in the DOM and swap via CSS (see the collapsed
-    // test); expanded mode is asserted by which variant carries `hidden`.
-    expect(screen.getByTestId("sidebar-collapsed-header-actions").className).toContain("hidden");
-    // The expanded row's only "hidden" is the collapsed-state variant
-    // class itself (group-data-[collapsible=icon]:hidden), which is the
-    // expected content -- so it must NOT also carry the bare `hidden`
-    // (display:none) that the collapsed stack does in this state.
     expect(screen.getByTestId("sidebar-expanded-header").className.split(" ")).not.toContain("hidden");
+    expect(screen.getByTestId("sidebar-footer-actions").className.split(" ")).not.toContain("flex-col");
     expect(screen.getByTestId("sidebar-settings-button")).toBeInTheDocument();
   });
 });
