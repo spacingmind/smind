@@ -1086,7 +1086,7 @@ export function AppSidebar({
 /**
  * The flat list a non-blank query replaces the tree with
  * (audit-deepseek-harness.md §3). Rows are the same TaskRows the tree
- * renders -- same dots, same meta line, same actions menu -- so a task
+ * renders -- same status slot, same actions menu -- so a task
  * found by search behaves identically to one found by browsing; only the
  * grouping is gone.
  */
@@ -1136,9 +1136,8 @@ function SearchResults({
  * workspaces, above the regular tree -- same TaskRows the tree itself
  * uses, so a pinned row behaves identically to its counterpart in its own
  * workspace/space (a task appears in both places; pinning doesn't remove
- * it from where it normally lives). Collapsed state is local, ephemeral
- * UI state, not persisted -- only *which* tasks are pinned is (AC4's own
- * "pin/unpin persists across reloads" scope).
+ * it from where it normally lives). Whether the section is collapsed is
+ * persisted too (sidebar-polish S8, id `pinned`).
  */
 function PinnedSection({
   tasks,
@@ -1185,8 +1184,8 @@ function PinnedSection({
  * lib/sidebar-status-groups.ts group, each rendering its tasks through the
  * same TaskRows the tree view uses -- replaces the workspace/space tree
  * entirely while active (Pinned stays above either view, per app-sidebar's
- * render order). Each bucket's own open/closed state is local, ephemeral
- * UI state, matching PinnedSection's own collapse.
+ * render order). Each bucket's open/closed state is persisted like
+ * PinnedSection's (sidebar-polish S8, id `status:<key>`).
  */
 function StatusGroupedList({
   groups,
@@ -1678,7 +1677,8 @@ function AggregateSlot({ status, label }: { status: StatusDotStatus | null; labe
 
 /**
  * The task row's hover card (AC5): branch, diff stat and last activity --
- * the same fields TaskMetaRow already shows plus task.UpdatedAt, no more.
+ * the fields the single-line row no longer prints (branch, tier, lifecycle
+ * status) plus the diff stat and task.UpdatedAt, no more.
  * Deliberately no PR state: smind's wire types (lib/types.ts's Task) carry
  * no PR field at all yet, and the plan's Decisions are explicit that this
  * card shows "only data the web UI already has; don't invent data."
@@ -1789,9 +1789,8 @@ function handleTaskRowArrowKey(
  * skipped for rows whose props are all referentially stable: each task's
  * entry in the maps comes from one parent memo, so an unrelated task's
  * change produces the same `undefined`/value this row saw last time.
- * `tierLabel` is computed once per row here (cheap: the forest already
- * knows children) rather than re-derived in flat lists, which don't have
- * a forest and therefore skip the chip.
+ * `tier`/`childCount` come from the forest (flat lists have none, and so
+ * skip the chip and the tier).
  */
 const TaskRow = memo(function TaskRow({
   task,
