@@ -1416,6 +1416,11 @@ describe("AppSidebar task tree (PR-U1)", () => {
     return { client, ...utils };
   }
 
+  /** The row's wrapper: select button, collapse chevron and (when active) actions are siblings inside it. */
+  function itemOf(id: number): HTMLElement {
+    return rowOf(id).closest<HTMLElement>('[data-testid="sidebar-task-item"]')!;
+  }
+
   function rowOf(id: number): HTMLElement {
     return screen.getAllByTestId("sidebar-task-row").find((r) => r.dataset.taskId === String(id))!;
   }
@@ -1429,18 +1434,17 @@ describe("AppSidebar task tree (PR-U1)", () => {
     expect(rowOf(PARENT.ID).closest("li")!.contains(childRow)).toBe(true);
     // The parent carries the chevron and a supervisor tier label with
     // its child count; the child a plain coder label, no chevron.
-    expect(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    expect(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
     // A child that is itself a parent (leader) carries a chevron; a leaf
     // grandchild does not.
-    expect(childRow.querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
-    const grandchildRow = rowOf(GRANDCHILD.ID);
-    expect(grandchildRow.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
+    expect(itemOf(CHILD.ID).querySelector('[data-testid="task-collapse-toggle"]')).toBeInTheDocument();
+    expect(itemOf(GRANDCHILD.ID).querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
   });
 
   it("collapsing a parent hides its subtree", async () => {
     await mountTree();
 
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     expect(screen.queryByText("Child task")).not.toBeInTheDocument();
     expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
@@ -1450,7 +1454,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("collapsed parent shows the attention rollup of a descendant needing a permission", async () => {
     await mountTree({ attention: new Map([[CHILD.ID, new Set<AttentionReason>(["permission"])]]) });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
     expect(rollup).toBeInTheDocument();
@@ -1467,7 +1471,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
       ]),
       runStatus: new Map([[OTHER_CHILD.ID, "error" as const]]),
     });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
 
     const rollup = rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]');
     expect(rollup).toBeInTheDocument();
@@ -1484,7 +1488,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("rollup appears live when run.status error arrives for a grandchild", async () => {
     const { rerender, client } = await mountTree({ runStatus: new Map() });
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
     expect(rowOf(PARENT.ID).querySelector('[data-testid="task-rollup"]')).not.toBeInTheDocument();
 
     rerender(
@@ -1544,7 +1548,7 @@ describe("AppSidebar task tree (PR-U1)", () => {
 
   it("selecting a hidden child expands its ancestors", async () => {
     const { rerender, client } = await mountTree({ selectedTaskId: null }, [PARENT, CHILD, GRANDCHILD]);
-    fireEvent.click(rowOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
+    fireEvent.click(itemOf(PARENT.ID).querySelector('[data-testid="task-collapse-toggle"]')!);
     expect(screen.queryByText("Grandchild task")).not.toBeInTheDocument();
 
     rerender(
@@ -1577,14 +1581,13 @@ describe("AppSidebar task tree (PR-U1)", () => {
     const OTHER_ROOT: Task = { ...TASK, ID: 9, Title: "Lone root" };
     await mountTree({}, [PARENT, CHILD, OTHER_ROOT]);
 
-    const lone = rowOf(OTHER_ROOT.ID);
+    const lone = itemOf(OTHER_ROOT.ID);
     // No toggle button (it has nothing to collapse)...
     expect(lone.querySelector('[data-testid="task-collapse-toggle"]')).not.toBeInTheDocument();
-    // ...but the reserved empty slot is there, and the title keeps the
-    // flex-1 shrink behaviour either way.
-    const titleRow = within(lone).getByText("Lone root").parentElement!;
-    expect(titleRow.children[0]!.tagName).toBe("SPAN");
-    expect(titleRow.children[0]!.className).toContain("w-3");
+    // ...but the reserved empty slot is the wrapper's first child, ahead of
+    // the select button, so this title lines up with its parent-bearing sibling.
+    expect(lone.children[0]!.tagName).toBe("SPAN");
+    expect(lone.children[0]!.className).toContain("w-3");
   });
 
   it("lists without parents do not reserve a chevron slot", async () => {
@@ -1593,10 +1596,9 @@ describe("AppSidebar task tree (PR-U1)", () => {
     await mountTree({}, [LONE_A, LONE_B]);
 
     for (const row of screen.getAllByTestId("sidebar-task-row")) {
-      const titleRow = within(row).getByText(/Lone [AB]/).parentElement!;
-      // First child of the title row is the run-status slot, not a
-      // reserved chevron span -- today's geometry, unchanged.
-      expect(titleRow.children[0]).toHaveAttribute("data-testid", "task-run-status-slot");
+      // The wrapper's first child is the select button itself, not a reserved
+      // chevron span -- today's geometry, unchanged.
+      expect(row.closest('[data-testid="sidebar-task-item"]')!.children[0]).toBe(row);
     }
   });
 

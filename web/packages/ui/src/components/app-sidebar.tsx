@@ -7,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
 } from "react";
 
@@ -1645,6 +1646,56 @@ function TaskHoverCardBody({ task, stat, status }: { task: Task; stat?: TaskStat
 }
 
 /**
+ * Arrow-key navigation between task rows (the sidebar tree's keyboard
+ * contract, same as a WAI-ARIA tree): Down/Up move to the next/previous
+ * visible row, Left collapses an expanded parent (or jumps from a child to
+ * its parent), Right expands a collapsed parent (or steps into its first
+ * child). Only rows that are in the DOM count as visible: a collapsed
+ * parent's descendants are not rendered. Returns whether the key was handled.
+ */
+function handleTaskRowArrowKey(
+  key: string,
+  row: HTMLElement,
+  parent: { hasChildren: boolean; isCollapsed: boolean; onToggle: () => void },
+): boolean {
+  if (!key.startsWith("Arrow")) return false;
+  const rows = Array.from(
+    row.closest('[data-sidebar="menu"]')?.querySelectorAll<HTMLElement>('[data-testid="sidebar-task-row"]') ?? [],
+  );
+  const index = rows.indexOf(row);
+  if (index < 0) return false;
+  const focusRow = (target: HTMLElement | undefined): boolean => {
+    if (!target) return false;
+    target.focus();
+    return true;
+  };
+  switch (key) {
+    case "ArrowDown":
+      return focusRow(rows[index + 1]) || true;
+    case "ArrowUp":
+      return focusRow(rows[index - 1]) || true;
+    case "ArrowLeft": {
+      if (parent.hasChildren && !parent.isCollapsed) {
+        parent.onToggle();
+        return true;
+      }
+      const parentId = row.getAttribute("data-parent-task-id");
+      return parentId ? focusRow(rows.find((r) => r.getAttribute("data-task-id") === parentId)) : false;
+    }
+    case "ArrowRight": {
+      if (!parent.hasChildren) return false;
+      if (parent.isCollapsed) {
+        parent.onToggle();
+        return true;
+      }
+      return focusRow(rows[index + 1]);
+    }
+    default:
+      return false;
+  }
+}
+
+/**
  * The task row itself. Memoized so that one task's attention/run status
  * changing (a new RowSignal context value) re-renders only TaskRows -- the
  * parent components don't depend on it -- and the per-row work below is
@@ -1698,17 +1749,57 @@ const TaskRow = memo(function TaskRow({
   // group on the li would reveal every descendant's actions on one hover
   // (see use-row-active.ts).
   const { active, rowProps, setMenuOpen } = useRowActive();
+  const onRowKeyDown = (e: KeyboardEvent<HTMLButtonElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (handleTaskRowArrowKey(e.key, e.currentTarget, { hasChildren, isCollapsed, onToggle: () => onToggleCollapse?.(task.ID) })) {
+      e.preventDefault();
+    }
+  };
   return (
-    <div data-testid="sidebar-task-item" data-task-id={task.ID} className="relative" {...rowProps}>
+    <div
+      data-testid="sidebar-task-item"
+      data-task-id={task.ID}
+      className="relative flex min-w-0 items-start gap-1"
+      {...rowProps}
+    >
+      {/*
+       * Collapse chevron (PR-U1), on rows that have children. A sibling of
+       * the row's select button, not a child: a button inside a button is
+       * invalid HTML and breaks keyboard focus order. The slot is always w-3
+       * on parent rows so toggling never shifts anything; childless siblings
+       * of a parent render the *empty* reserved slot instead, so every title
+       * in that sibling list shares one left edge; a list where nothing has
+       * children reserves nothing and keeps today's geometry exactly.
+       */}
+      {hasChildren ? (
+        <button
+          type="button"
+          aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
+          aria-expanded={!isCollapsed}
+          data-testid="task-collapse-toggle"
+          onClick={() => onToggleCollapse?.(task.ID)}
+          className="mt-2 flex w-3 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-hidden focus-visible:ring-2 ring-sidebar-ring"
+        >
+          <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
+        </button>
+      ) : reserveChevron ? (
+        <span className="w-3 shrink-0" />
+      ) : null}
       <HoverCard openDelay={400} closeDelay={100}>
         <HoverCardTrigger asChild>
-
-            <SidebarMenuSubButton
-              className="h-auto flex-col items-stretch gap-0.5 py-1"
-              isActive={task.ID === selectedTaskId}
+          <SidebarMenuSubButton
+            asChild
+            className="h-auto min-w-0 flex-1 flex-col items-stretch gap-0.5 py-1"
+            isActive={task.ID === selectedTaskId}
+          >
+            <button
+              type="button"
+              aria-current={task.ID === selectedTaskId ? "true" : undefined}
               onClick={() => onSelectTask?.(task)}
+              onKeyDown={onRowKeyDown}
               data-testid="sidebar-task-row"
               data-task-id={task.ID}
+              data-parent-task-id={task.ParentTaskID ?? undefined}
             >
               {/*
                * min-w-0 on the row itself, not just on the title span
@@ -1718,33 +1809,6 @@ const TaskRow = memo(function TaskRow({
                * ancestor that used to break this chain).
                */}
               <span className="flex w-full min-w-0 items-center gap-2">
-              {/*
-               * Collapse chevron (PR-U1), on rows that have children. The
-               * slot is always w-3 on parent rows (not only collapsed or
-               * expanded) so toggling never shifts the run-status dot next
-               * to it. Childless siblings of a parent render the *empty*
-               * reserved slot instead, so every title in that sibling list
-               * shares one left edge; a list where nothing has children
-               * reserves nothing and keeps today's geometry exactly.
-               */}
-              {hasChildren ? (
-                <button
-                  type="button"
-                  aria-label={(isCollapsed ? "Expand " : "Collapse ") + task.Title}
-                  data-testid="task-collapse-toggle"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleCollapse?.(task.ID);
-                  }}
-                  className="-mr-1 flex w-3 shrink-0 items-center justify-center text-muted-foreground"
-                >
-                  <ChevronRight
-                    className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")}
-                  />
-                </button>
-              ) : reserveChevron ? (
-                <span className="-mr-1 w-3 shrink-0" />
-              ) : null}
               {/*
                * Leading run-status dot -- the task's latest run, live off
                * run.status (Item 12). In its own reserved slot for the
@@ -1838,8 +1902,9 @@ const TaskRow = memo(function TaskRow({
               </span>
               </span>
               <TaskMetaRow stat={stat} status={status} tierLabel={tierLabel} />
-            </SidebarMenuSubButton>
-            </HoverCardTrigger>
+            </button>
+          </SidebarMenuSubButton>
+        </HoverCardTrigger>
             <HoverCardContent data-testid="task-hover-card" side="right" align="start">
               <TaskHoverCardBody task={task} stat={stat} status={status} />
             </HoverCardContent>
