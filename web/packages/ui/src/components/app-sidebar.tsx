@@ -78,6 +78,7 @@ import { useCollapsedNodes, type CollapsedNodes } from "@/hooks/use-collapsed-no
 import { useRowActive } from "@/hooks/use-row-active";
 import { useSidebarGroupMode } from "@/hooks/use-sidebar-group-mode";
 import { groupTasksByStatus, type StatusGroup } from "@/lib/sidebar-status-groups";
+import type { ConnectionStatus } from "@/lib/reconnect";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import {
@@ -413,6 +414,8 @@ export function AppSidebar({
   onTasksChange,
   onWorkspacesChange,
   onOpenSettings,
+  connectionStatus = "connected",
+  connectionStatusText,
 }: {
   client: WsClient | null;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -449,6 +452,9 @@ export function AppSidebar({
    * "providers".
    */
   onOpenSettings?: (sectionId?: string) => void;
+  /** The daemon connection state and its human text (App.tsx's STATUS_LABEL / connect error) -- the footer's Host popover shows it. */
+  connectionStatus?: ConnectionStatus;
+  connectionStatusText?: string;
 }) {
   const { workspaces, error, refresh } = useWorkspaceTree(client, events ?? null);
   const statusOverrides = useStatusOverrides(client, events ?? null);

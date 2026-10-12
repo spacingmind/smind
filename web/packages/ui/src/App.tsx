@@ -892,6 +892,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         setTreeLoaded(true);
       }}
       onOpenSettings={openSettings}
+      connectionStatus={connectionStatus}
+      connectionStatusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
     />
   );
 
