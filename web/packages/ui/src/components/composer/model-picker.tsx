@@ -270,7 +270,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
       />
       {boundLabel && (
         // ADR-0016 P3: a bound chat cannot switch providers, so say why the list is short.
-        <p className="px-3 pb-2 text-ui-xs text-foreground-muted">
+        <p className="px-3 pb-2 text-ui-sm text-foreground-muted">
           Bound to {boundLabel} — start a new chat to switch providers
         </p>
       )}
@@ -307,7 +307,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
                 <div
                   key={entry.key}
                   role="presentation"
-                  className="px-2 pt-2 pb-1 text-ui-xs font-medium text-foreground-muted"
+                  className="px-2 pt-2 pb-1 text-ui-sm font-medium text-foreground-muted"
                 >
                   {entry.label}
                 </div>
@@ -330,13 +330,13 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
               case "noAgent":
                 return (
                   <RowShell key={entry.key} {...rowProps} testId="model-no-agent">
-                    <span className="text-ui-sm text-foreground">No agent</span>
+                    <span className="text-ui-base text-foreground">No agent</span>
                   </RowShell>
                 );
               case "manage":
                 return (
                   <RowShell key={entry.key} {...rowProps} testId="model-manage-agents">
-                    <span className="text-ui-sm text-foreground-muted">Manage agents…</span>
+                    <span className="text-ui-base text-foreground-muted">Manage agents…</span>
                   </RowShell>
                 );
               case "profile":
@@ -502,12 +502,12 @@ function ProfileRow({
     <RowShell {...shell} testId={`model-profile-row-${profile.id}`} selected={checked}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="truncate text-ui-sm text-foreground">{profile.name}</span>
+          <span className="truncate text-ui-base text-foreground">{profile.name}</span>
           {checked && custom && (
-            <span className="shrink-0 rounded bg-muted px-1 text-ui-2xs text-foreground-muted">custom</span>
+            <span className="shrink-0 rounded bg-muted px-1 text-ui-xs text-foreground-muted">custom</span>
           )}
         </div>
-        <div className="truncate text-ui-xs text-foreground-muted">{profile.summary}</div>
+        <div className="truncate text-ui-sm text-foreground-muted">{profile.summary}</div>
       </div>
       <SelectedCheck show={checked} />
     </RowShell>
@@ -530,8 +530,8 @@ function ProviderRow({ provider, ...shell }: RowShellProps & { provider: Browser
   return (
     <RowShell {...shell} testId={`model-provider-${provider.id}`}>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-ui-sm text-foreground">{provider.label}</div>
-        <div className="truncate text-ui-xs text-foreground-muted">{detail}</div>
+        <div className="truncate text-ui-base text-foreground">{provider.label}</div>
+        <div className="truncate text-ui-sm text-foreground-muted">{detail}</div>
       </div>
       {!shell.disabled && <ChevronRight aria-hidden className="size-4 shrink-0 text-foreground-muted" />}
     </RowShell>
@@ -553,8 +553,8 @@ function ModelRowItem({
   return (
     <RowShell {...shell} testId={`model-row-${row.key}`} selected={selected}>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-ui-sm text-foreground">{row.modelLabel}</div>
-        {description && <div className="truncate text-ui-xs text-foreground-muted">{description}</div>}
+        <div className="truncate text-ui-base text-foreground">{row.modelLabel}</div>
+        {description && <div className="truncate text-ui-sm text-foreground-muted">{description}</div>}
       </div>
       <SelectedCheck show={selected} />
     </RowShell>
