@@ -202,13 +202,13 @@ describe("AppHeader", () => {
   });
 });
 
-async function renderSidebar() {
+async function renderSidebar(windowToggle = false) {
   const { SidebarProvider } = await import("@/components/ui/sidebar");
   const { AppSidebar } = await import("@/components/app-sidebar");
   const { FakeWsClient } = await import("@/test/fake-ws-client");
   return render(
     <SidebarProvider>
-      <AppSidebar client={new FakeWsClient() as never} />
+      <AppSidebar client={new FakeWsClient() as never} windowToggle={windowToggle} />
     </SidebarProvider>,
   );
 }
@@ -268,6 +268,171 @@ describe("AppSidebar window chrome", () => {
     expect(row).toHaveClass("h-12");
     expect(row.style.paddingLeft).toBe("");
     expect(screen.queryByTestId("sidebar-rail-inset")).not.toBeInTheDocument();
+  });
+});
+
+describe("window-level sidebar toggle (desktop shell)", () => {
+  it.each([
+    ["macos", false, 84, 120],
+    ["macos", true, 10, 46],
+    ["windows", false, 10, 46],
+    ["linux", false, 10, 46],
+  ] as const)("%s (fullscreen %s): one toggle at x=%i; the strip pads to %ipx and stays a drag strip", async (os, fullscreen, left, zoneEnd) => {
+    const win = mockPlatform({ desktop: true, os });
+    const { SidebarProvider } = await import("@/components/ui/sidebar");
+    const { WindowSidebarToggle } = await import("@/components/window-sidebar-toggle");
+    const { AppSidebar } = await import("@/components/app-sidebar");
+    const { FakeWsClient } = await import("@/test/fake-ws-client");
+    render(
+      <SidebarProvider>
+        <WindowSidebarToggle />
+        <AppSidebar client={new FakeWsClient() as never} windowToggle />
+      </SidebarProvider>,
+    );
+    act(() => win.emit({ maximized: false, fullscreen }));
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+    expect(screen.getByTestId("window-sidebar-toggle").style.left).toBe(`${left}px`);
+    const row = screen.getByTestId("sidebar-expanded-header");
+    expect(row.style.paddingLeft).toBe(`${zoneEnd}px`);
+    expect(row).toHaveAttribute("data-tauri-drag-region", "deep");
+    // The rail keeps an empty strip for the toggle (and lights) to sit on.
+    expect(screen.getByTestId("sidebar-rail-inset")).toHaveAttribute("data-tauri-drag-region");
+  });
+
+  it("the toggle wrapper is click-through so the drag strips beneath keep working; only the button takes pointer events", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const { SidebarProvider } = await import("@/components/ui/sidebar");
+    const { WindowSidebarToggle } = await import("@/components/window-sidebar-toggle");
+    render(
+      <SidebarProvider>
+        <WindowSidebarToggle />
+      </SidebarProvider>,
+    );
+    expect(screen.getByTestId("window-sidebar-toggle")).toHaveClass("pointer-events-none");
+    expect(screen.getByRole("button", { name: "Toggle Sidebar" })).toHaveClass("pointer-events-auto");
+  });
+
+  it("App on macOS: collapsing keeps the very same toggle node (focus survives) and puts the rail under a panel-coloured bar", async () => {
+    const win = mockPlatform({ desktop: true, os: "macos" });
+    const { App } = await import("@/App");
+    render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+    const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    toggle.focus();
+    fireEvent.click(toggle);
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })[0]).toBe(toggle);
+    expect(toggle).toHaveFocus();
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    // The rail/content divider is the main content's own left border (one 1px line, not two).
+    expect(screen.queryByTestId("sidebar-rail-seam")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-main-content")).toHaveClass("border-l");
+    // The corner and left border that would cut through the lights are gone from the panel.
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("border-l");
+    // Fullscreen: no lights, the normal panel (and no bar) is back.
+    act(() => win.emit({ maximized: false, fullscreen: true }));
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-main-content")).not.toHaveClass("border-l");
+    // ... and the strip/header reclaim the lights' zone: the toggle moves to the rail, strip pads 46, header needs no inset.
+    expect(screen.getByTestId("window-sidebar-toggle").style.left).toBe("10px");
+    expect(screen.getByTestId("sidebar-expanded-header").style.paddingLeft).toBe("46px");
+    expect(screen.getByTestId("app-header").style.paddingLeft).toBe("");
+  });
+
+  it("App on macOS mid-transition: the sidebar content is hidden and inert, the bar stays and the layout flips only once the width has settled", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) =>
+      new Proxy(real(el), { get: (t, p) => (p === "transitionDuration" ? "0.2s" : Reflect.get(t, p)) }),
+    );
+    const { App } = await import("@/App");
+    render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+    const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
+    const content = screen.getByTestId("sidebar-content");
+    expect(content).not.toHaveAttribute("data-settling");
+    fireEvent.click(toggle);
+    // Requested collapsed, layout still expanded: hidden, inert, bar already across the title row.
+    expect(content).toHaveAttribute("data-settling");
+    expect(content).toHaveClass("opacity-0");
+    expect(content).toHaveAttribute("inert");
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    expect(screen.getByTestId("sidebar-expanded-header").closest("[data-state]")).toHaveAttribute("data-state", "expanded");
+    // Width transition ends: the rail layout takes over and fades in.
+    act(() => {
+      const e = new Event("transitionend") as TransitionEvent & { propertyName: string };
+      Object.assign(e, { propertyName: "width" });
+      screen.getByTestId("sidebar-content").parentElement!.dispatchEvent(e);
+    });
+    expect(screen.getByTestId("sidebar-content")).not.toHaveAttribute("data-settling");
+    expect(screen.getByTestId("sidebar-expanded-header").closest("[data-state]")).toHaveAttribute("data-state", "collapsed");
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    // Expanding: the bar stays until the width has settled, so the lights never meet the returning corner.
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    // The resize handle's 4px would show as a band in the strip: not until settled.
+    expect(screen.queryByTestId("sidebar-resize-handle")).not.toBeInTheDocument();
+    act(() => {
+      const e = new Event("transitionend") as TransitionEvent & { propertyName: string };
+      Object.assign(e, { propertyName: "width" });
+      screen.getByTestId("sidebar-content").parentElement!.dispatchEvent(e);
+    });
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("sidebar-resize-handle")).toBeInTheDocument();
+  });
+
+  it("App on Windows: the rail keeps an empty strip under the single window-level toggle and the panel keeps its corner", async () => {
+    mockPlatform({ desktop: true, os: "windows" });
+    const { App } = await import("@/App");
+    render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+    const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
+    fireEvent.click(toggle);
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+    expect(screen.getByTestId("sidebar-rail-inset")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+  });
+
+  it("compact layout: no window-level toggle; the header hosts the single toggle past the lights", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const prev = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+    try {
+      const { App } = await import("@/App");
+      render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+      await screen.findByTestId("app-header");
+      expect(screen.queryByTestId("window-sidebar-toggle")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+      expect(screen.getByTestId("app-header").style.paddingLeft).toBe("92px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prev });
+    }
+  });
+
+  it.each([
+    ["macos", false, 48, 64],
+    ["macos", false, 256, 0],
+    ["macos", true, 48, 0],
+    ["windows", false, 48, 0],
+  ] as const)("header: %s (fullscreen %s) beside a %ipx sidebar pads %ipx past the base", async (os, fullscreen, sidebarPx, extra) => {
+    const win = mockPlatform({ desktop: true, os });
+    const { SidebarProvider } = await import("@/components/ui/sidebar");
+    const { AppHeader } = await import("@/components/app-header");
+    render(
+      <SidebarProvider>
+        <AppHeader statusText="Connected" sidebarPx={sidebarPx} showSidebarToggle={false} windowToggle />
+      </SidebarProvider>,
+    );
+    act(() => win.emit({ maximized: false, fullscreen }));
+    const header = screen.getByTestId("app-header");
+    expect(header.style.paddingLeft).toBe(extra > 0 ? `${8 + extra}px` : "");
+    // It owns no toggle of its own: the window-level one is the only one.
+    expect(screen.queryByRole("button", { name: "Toggle Sidebar" })).not.toBeInTheDocument();
   });
 });
 

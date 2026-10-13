@@ -98,7 +98,7 @@ import { toast } from "@/components/ui/toast";
 import { useLocalPathActions, type LocalPathActions } from "@/hooks/use-local-path-actions";
 import { useWindowState } from "@/hooks/use-window-state";
 import { desktopOS, isDesktop } from "@/lib/platform";
-import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights } from "@/lib/window-chrome";
+import { TRAFFIC_LIGHT_CLUSTER_PX, hasTrafficLights, toggleZoneEndPx } from "@/lib/window-chrome";
 import {
   Sidebar,
   SidebarContent,
@@ -396,8 +396,11 @@ export function AppSidebar({
   connectionStatus = "connected",
   connectionStatusText,
   headerActions,
+  windowToggle = false,
 }: {
   client: WsClient | null;
+  /** The desktop shell's window-level toggle floats over this sidebar's top-left (`WindowSidebarToggle`): the expanded strip pads past it and the rail keeps an empty h-12 strip under it. */
+  windowToggle?: boolean;
   /** Right end of the expanded top strip: the shell's sidebar toggle and update badge (ZCode's left zone). Absent while the sidebar is a rail or a sheet -- the main header hosts them then. */
   headerActions?: ReactNode;
   /** The currently-selected task's id, if any, so its row can render as active. */
@@ -756,11 +759,19 @@ export function AppSidebar({
           data-testid="sidebar-expanded-header"
           // The sidebar's top strip is ZCode's "left zone": the same 48px as the
           // main header beside it, so logo and title share one centre line.
-          // macOS: it is also the window's title bar over the sidebar --
-          // left-padded past the native traffic lights, draggable around its buttons.
-          data-tauri-drag-region={lights ? "deep" : undefined}
-          className="flex h-12 items-center gap-2 px-2 group-data-[collapsible=icon]:hidden"
-          style={lights ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX } : undefined}
+          // Desktop: it is also the window's title bar over the sidebar --
+          // left-padded past the native traffic lights and the window-level
+          // toggle (or just the lights in a compact sheet), draggable around
+          // its buttons.
+          data-tauri-drag-region={windowToggle || lights ? "deep" : undefined}
+          className="@container/strip flex h-12 items-center gap-2 px-2 transition-[padding-left] duration-200 ease-out group-data-[collapsible=icon]:hidden motion-reduce:transition-none"
+          style={
+            windowToggle
+              ? { paddingLeft: toggleZoneEndPx(desktopOS, fullscreen) }
+              : lights
+                ? { paddingLeft: TRAFFIC_LIGHT_CLUSTER_PX }
+                : undefined
+          }
         >
           <span
             data-testid="sidebar-logo"
@@ -768,13 +779,23 @@ export function AppSidebar({
           >
             <img src="/logo.png" alt="" className="size-4 dark:size-5" />
           </span>
-          <span className="min-w-0 flex-1 truncate text-ui-base font-semibold tracking-tight">smind</span>
+          {/* Past the lights/toggle zone (the query measures the strip's content box, i.e. what is left of the width after that padding) the strip can be too narrow for the wordmark: drop it then (rather than truncating to "s…"). */}
+          <span
+            className={cn(
+              "min-w-0 flex-1 truncate text-ui-base font-semibold tracking-tight",
+              (windowToggle || lights) && "hidden @min-[7rem]/strip:block",
+            )}
+          >
+            smind
+          </span>
+          {(windowToggle || lights) && <div className="min-w-0 flex-1 @min-[7rem]/strip:hidden" />}
           {headerActions && <div className="flex shrink-0 items-center gap-1">{headerActions}</div>}
         </div>
-        {lights && (
-          // Collapsed rail: the lights overhang the 48px rail, so keep the
-          // rail's icons below them. No border -- the main header's own
-          // border carries the line across.
+        {(windowToggle || lights) && (
+          // Collapsed rail: an empty h-12 strip for the window-level toggle (and,
+          // on macOS, the lights) to sit on, so the rail's icons start below
+          // them. No border -- the main header's own border carries the line
+          // across.
           <div
             data-testid="sidebar-rail-inset"
             data-tauri-drag-region

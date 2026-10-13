@@ -72,10 +72,14 @@ import { useTaskAttention } from "@/hooks/use-task-attention";
 import { useTaskChats } from "@/hooks/use-task-chats";
 import { useUnreadTasks } from "@/hooks/use-unread-tasks";
 import { isMovableKind, useTaskTabs, type PaneId, type SplitDirection, type TabPlacement } from "@/hooks/use-task-tabs";
+import { useSettledSidebarOpen } from "@/hooks/use-settled-sidebar-open";
 import { useSidebarResize } from "@/hooks/use-sidebar-resize";
 import { SIDEBAR_ICON_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH, useSidebarWidth } from "@/hooks/use-sidebar-width";
 import { connectDaemon } from "@/lib/daemon";
-import { desktop, isDesktop } from "@/lib/platform";
+import { desktop, desktopOS, isDesktop } from "@/lib/platform";
+import { hasTrafficLights } from "@/lib/window-chrome";
+import { useWindowState } from "@/hooks/use-window-state";
+import { WindowSidebarToggle } from "@/components/window-sidebar-toggle";
 import { watchForReconnect, type ConnectionStatus, type ReconnectHandle } from "@/lib/reconnect";
 import { formatRoute, parseRoute, type Route } from "@/lib/route";
 import { formatTabTitle } from "@/lib/tab-title";
@@ -293,6 +297,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     onCommit: setSidebarWidth,
     onCollapse: () => setSidebarOpen(false),
   });
+  // The sidebar's layout (expanded rows vs icon rail) trails `sidebarOpen` until
+  // the panel's width animation ends; its content is hidden meanwhile so it is
+  // never shown clipped or shifted mid-transition.
+  const layoutOpen = useSettledSidebarOpen(sidebarOpen, sidebarPanelRef, !isMobile);
+  const sidebarSettling = layoutOpen !== sidebarOpen;
 
   useEffect(() => {
     let cancelled = false;
@@ -886,9 +895,20 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   // ZCode's left zone: the toggle and update badge ride in the sidebar's top
   // strip while it is expanded; collapsed to the rail or a compact sheet there
   // is no room, so the main header hosts them instead (exactly one of the two).
-  const toggleInSidebar = !isMobile && sidebarOpen;
+  // Desktop (non-compact): the toggle is one window-level overlay at a fixed x
+  // (WindowSidebarToggle), so it neither jumps nor remounts when the sidebar
+  // collapses; neither the strip nor the header hosts it then.
+  const { fullscreen } = useWindowState();
+  const windowToggle = isDesktop && !isMobile;
+  // macOS, whenever the sidebar is not settled-expanded (collapsed rail and
+  // every frame of the collapse/expand animation): the lights would straddle the
+  // rail / content-panel seam, so the title row is ONE panel-coloured bar across
+  // the window and the panel's corner and left border start below it.
+  const lightsBar = windowToggle && !(sidebarOpen && layoutOpen) && hasTrafficLights(desktopOS, fullscreen);
+  const toggleInSidebar = !isMobile && sidebarOpen && !windowToggle;
   const sidebarElement = (
     <AppSidebar
+      windowToggle={windowToggle}
       client={client}
       selectedTaskId={selectedTask?.ID ?? null}
       onSelectTask={selectTask}
@@ -911,6 +931,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
             <SidebarTrigger className="text-foreground-muted hover:text-foreground" />
           </>
+        ) : windowToggle && sidebarOpen ? (
+          <UpdateBadge state={appUpdate.state} onOpen={appUpdate.reopen} />
         ) : undefined
       }
     />
@@ -922,7 +944,9 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
         statusText={connectError ? `Disconnected: ${connectError}` : STATUS_LABEL[connectionStatus]}
         connectionStatus={connectionStatus}
         sidebarPx={isMobile ? 0 : sidebarOpen ? sidebarWidth : SIDEBAR_ICON_WIDTH}
-        showSidebarToggle={!toggleInSidebar}
+        showSidebarToggle={!toggleInSidebar && !windowToggle}
+        showUpdateBadge={isMobile || !sidebarOpen}
+        windowToggle={windowToggle}
         task={selectedTask}
         client={client}
         events={events}
@@ -997,7 +1021,7 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
   const mainContentElement = (
     // bg-background is explicit (not just inherited from SidebarInset): on macOS the
     // body is transparent over the window's vibrancy, and only the sidebar may show it.
-    <div data-testid="app-main-content" className="min-h-0 flex-1 bg-panel">
+    <div data-testid="app-main-content" className={cn("min-h-0 flex-1 bg-panel", lightsBar && "border-l")}>
       {isDesktop && connectionStatus === "disconnected" ? (
         // AC6: replaces offline.html's job for the bundled flow -- shown
         // only for the "initial connect never succeeded" case (see
@@ -1090,7 +1114,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
       data-testid="app-content-panel"
       className={cn(
         "flex min-h-0 flex-1 flex-col overflow-hidden bg-panel",
-        !isMobile && "rounded-tl-xl border-t border-l",
+        // Under the lights the corner and the left border would cut through them: the bar and the rail seam draw the separation below the bar instead (the transparent top border keeps the header on the same line as when expanded).
+        !isMobile && (lightsBar ? "border-t border-t-transparent" : "rounded-tl-xl border-t border-l"),
       )}
     >
       {headerElement}
@@ -1125,8 +1150,10 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
     <SidebarProvider
       className="h-svh"
       style={{ "--sidebar-width": `${sidebarWidth}px` } as CSSProperties}
-      open={sidebarOpen}
-      onOpenChange={setSidebarOpen}
+      open={layoutOpen}
+      // Only ever called by the toggle: flip the *requested* state, which can
+      // already differ from the (trailing) layout state.
+      onOpenChange={() => setSidebarOpen((o) => !o)}
     >
       {/*
        * `sidebar.toggle` is claimed by a child of SidebarProvider rather
@@ -1172,7 +1199,8 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           <SidebarInset className="min-h-0 flex-1">{contentPanelElement}</SidebarInset>
         </div>
       ) : (
-        <div className="flex h-svh w-full">
+        <div className="relative flex h-svh w-full">
+          {windowToggle && <WindowSidebarToggle />}
           {/*
            * The sidebar-vs-content split: a plain flex row (ZCode's model),
            * not react-resizable-panels. The panel clips the shadcn Sidebar
@@ -1184,11 +1212,28 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
             ref={sidebarPanelRef}
             data-slot="sidebar-panel"
             data-collapsed={sidebarOpen ? undefined : ""}
-            className="h-full min-w-0 flex-none overflow-hidden bg-sidebar [&_[data-slot=sidebar-container]]:border-r-0 w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
+            className="relative h-full min-w-0 flex-none overflow-hidden bg-sidebar [&_[data-slot=sidebar-container]]:border-r-0 w-[min(var(--sidebar-width),50%)] transition-[width] duration-200 ease-out data-[collapsed]:w-(--sidebar-width-icon) data-[resizing=true]:transition-none motion-reduce:transition-none"
           >
-            {sidebarElement}
+            <div
+              data-testid="sidebar-content"
+              data-settling={sidebarSettling ? "" : undefined}
+              inert={sidebarSettling}
+              // Hidden at once while the width animates (no clipped/shifted rows),
+              // then the settled layout fades in.
+              className={cn("h-full", sidebarSettling ? "opacity-0 transition-none" : "opacity-100 transition-opacity duration-150 motion-reduce:transition-none")}
+            >
+              {sidebarElement}
+            </div>
+            {lightsBar && (
+              <div
+                aria-hidden
+                data-testid="sidebar-rail-bar"
+                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[49px] border-b border-border/50 bg-panel"
+              />
+            )}
           </div>
-          {sidebarOpen && (
+          {/* Only once settled-expanded: its 4px would otherwise show as a sidebar-coloured band in the title strip beside the lights while the width animates. */}
+          {sidebarOpen && layoutOpen && (
             <SidebarResizeHandle
               // Zero layout width: the 4px hit area straddles the seam, so the
               // panel's own border-l is the only divider (no gutter between
