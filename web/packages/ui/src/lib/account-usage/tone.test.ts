@@ -26,4 +26,16 @@ describe("windowTone", () => {
   it("ignores an unknown tone string", () => {
     expect(windowTone({ ...window(31), tone: "loud" as UsageWindow["tone"] })).toBe("ok");
   });
+
+  it("without a percent, the status decides: rejected is danger, allowed_warning is warning", () => {
+    expect(windowTone({ ...window(null), status: "rejected" })).toBe("danger");
+    expect(windowTone({ ...window(null), status: "allowed_warning" })).toBe("warning");
+    expect(windowTone({ ...window(null), status: "allowed" })).toBe("default");
+    expect(windowTone({ ...window(null), status: "bogus" })).toBe("default");
+  });
+
+  it("a percent wins over the status", () => {
+    expect(windowTone({ ...window(10), status: "rejected" })).toBe("ok");
+    expect(windowTone({ ...window(95), status: "allowed" })).toBe("danger");
+  });
 });

@@ -6,8 +6,15 @@ import { usageCopy } from "@/lib/account-usage/copy";
 import { formatDisplayPct, formatResetLabel, type UsageDisplayAs } from "@/lib/account-usage/format";
 import { displayPercent, usageWindowRowLabel } from "@/lib/account-usage/model";
 import { windowTone } from "@/lib/account-usage/tone";
-import type { UsageWindow } from "@/lib/account-usage/types";
+import type { UsageTone, UsageWindow } from "@/lib/account-usage/types";
 import { cn } from "@/lib/utils";
+
+const STATUS_TEXT: Record<UsageTone, string> = {
+  ok: "text-success",
+  warning: "text-warning",
+  danger: "text-destructive",
+  default: "text-foreground",
+};
 
 /** What a pinnable row needs: whether it is pinned, how to toggle it, and what it pins ("Pin Work Max Session"). */
 export interface UsageWindowPin {
@@ -19,13 +26,15 @@ export interface UsageWindowPin {
 /**
  * One window as a row: label left, value and reset label right, the meter
  * below (Paseo's UsageWindowBar). Every field may be missing (AC39): a
- * window without a percent reads "—" over an empty meter. With `pin` (only
- * while "Show summary in sidebar" is on, AC30) the whole row is a checkbox
- * that pins the window to the sidebar footer: a pin glyph with a tooltip,
- * the pinned surface behind a pinned row, and the same surface at half
- * strength under a hovered unpinned row so a hover never reads as the
- * selection. Pinnable and plain rows share padding, so toggling the switch
- * does not move anything.
+ * window without a percent reads "—" over an empty meter, unless it carries a
+ * limiting `status` (an observed window may have nothing else), which is then
+ * written out in its tone in place of the meter. An observed window is marked
+ * "from recent traffic". With `pin` (only while "Show summary in sidebar" is
+ * on, AC30) the whole row is a checkbox that pins the window to the sidebar
+ * footer: a pin glyph with a tooltip, the pinned surface behind a pinned row,
+ * and the same surface at half strength under a hovered unpinned row so a
+ * hover never reads as the selection. Pinnable and plain rows share padding,
+ * so toggling the switch does not move anything.
  */
 export function UsageWindowBar({
   window,
@@ -39,25 +48,42 @@ export function UsageWindowBar({
   const percent = displayPercent(window, displayAs);
   const reset = formatResetLabel(window.resetsAt);
   const label = window.label || window.id;
-  const value = formatDisplayPct(window, displayAs);
+  const tone = windowTone(window);
+  const status = percent == null ? usageCopy.windowStatus(window.status) : null;
+  const value = status ?? formatDisplayPct(window, displayAs);
   const content = (
     <>
       <div className="flex items-center justify-between gap-2 text-ui-sm">
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">{label}</span>
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="min-w-0 truncate text-muted-foreground">{label}</span>
+          {window.source === "observed" ? (
+            <span className="shrink-0 text-ui-xs text-muted-foreground/80" data-testid="usage-window-observed">
+              {usageCopy.observedWindow}
+            </span>
+          ) : null}
+        </span>
         <span className="shrink-0 font-medium text-foreground">
-          {value}
+          {status ? (
+            <span className={STATUS_TEXT[tone]} data-testid="usage-window-status" data-tone={tone}>
+              {status}
+            </span>
+          ) : (
+            value
+          )}
           {reset ? <span className="font-normal text-muted-foreground">{` · ${reset}`}</span> : null}
         </span>
       </div>
-      <div
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={percent == null ? undefined : Math.round(percent)}
-      >
-        <UsageMeter percent={percent ?? 0} tone={windowTone(window)} />
-      </div>
+      {status ? null : (
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={percent == null ? undefined : Math.round(percent)}
+        >
+          <UsageMeter percent={percent ?? 0} tone={tone} />
+        </div>
+      )}
     </>
   );
 

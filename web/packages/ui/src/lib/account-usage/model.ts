@@ -1,7 +1,15 @@
 import { formatRelativeTime } from "@/lib/relative-time";
 import { usageCopy } from "./copy";
 import type { UsageDisplayAs } from "./format";
-import type { AccountUsage, UsageView, UsageWindow } from "./types";
+import type {
+  AccountUsage,
+  UsageCooldown,
+  UsageCooldownReason,
+  UsageCooldownScope,
+  UsageCooldownWindow,
+  UsageView,
+  UsageWindow,
+} from "./types";
 
 export function usedPercent(window: UsageWindow): number | null {
   if (window.usedPct != null) return window.usedPct;
@@ -127,4 +135,41 @@ export function resolveAccountFilter(
 ): string | null {
   if (picked === null) return null;
   return reports.find((usage) => usage.key === picked)?.key ?? null;
+}
+
+/** A passive cooldown that is still in force: the wire's, with `until` parsed and every field validated. */
+export interface ActiveCooldown {
+  untilMs: number;
+  scope: UsageCooldownScope;
+  model?: string;
+  reason: UsageCooldownReason;
+  window?: UsageCooldownWindow;
+}
+
+const COOLDOWN_WINDOWS: readonly string[] = ["five_hour", "weekly", "weekly_model", "unified"];
+
+/**
+ * The account's passive cooldown while `until` is still ahead of `now`; null when it is absent,
+ * malformed (no readable `until`) or over. A reshaped optional field degrades (an unknown scope
+ * reads as the whole account, an unknown reason as a plain rejection, an unknown window as none)
+ * rather than hiding a real rate limit (AC39). Never throws.
+ */
+export function activeCooldown(usage: AccountUsage | null | undefined, now: number = Date.now()): ActiveCooldown | null {
+  const raw: unknown = usage?.cooldown;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const cooldown = raw as Partial<Record<keyof UsageCooldown, unknown>>;
+  if (typeof cooldown.until !== "string") return null;
+  const untilMs = Date.parse(cooldown.until);
+  if (!Number.isFinite(untilMs) || untilMs <= now) return null;
+  const model = typeof cooldown.model === "string" && cooldown.model.trim() ? cooldown.model.trim() : undefined;
+  const window = COOLDOWN_WINDOWS.includes(cooldown.window as string)
+    ? (cooldown.window as UsageCooldownWindow)
+    : undefined;
+  return {
+    untilMs,
+    scope: cooldown.scope === "model" ? "model" : "account",
+    model,
+    reason: cooldown.reason === "fallback" ? "fallback" : "rejected",
+    window,
+  };
 }

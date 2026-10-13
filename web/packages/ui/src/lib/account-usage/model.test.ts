@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  activeCooldown,
   displayPercent,
   formatUsageFreshness,
   replaceReport,
@@ -205,5 +206,47 @@ describe("resolveAccountFilter", () => {
   it("falls back to All when the picked account is gone", () => {
     expect(resolveAccountFilter("anthropic-9", reports)).toBeNull();
     expect(resolveAccountFilter("anthropic-1", [])).toBeNull();
+  });
+});
+
+describe("activeCooldown", () => {
+  const cooldown = (over: Record<string, unknown> = {}) =>
+    ({ ...entry({ id: 1 }), cooldown: { until: "2026-10-01T12:05:00Z", scope: "account", reason: "rejected", ...over } }) as AccountUsage;
+
+  it("reads a cooldown whose until is still ahead", () => {
+    expect(activeCooldown(cooldown({ window: "five_hour" }), NOW)).toEqual({
+      untilMs: Date.parse("2026-10-01T12:05:00Z"),
+      scope: "account",
+      model: undefined,
+      reason: "rejected",
+      window: "five_hour",
+    });
+  });
+
+  it("is null when absent, null, over, or exactly due", () => {
+    expect(activeCooldown(entry({ id: 1 }), NOW)).toBeNull();
+    expect(activeCooldown({ ...entry({ id: 1 }), cooldown: null }, NOW)).toBeNull();
+    expect(activeCooldown(cooldown(), Date.parse("2026-10-01T12:05:00Z"))).toBeNull();
+    expect(activeCooldown(cooldown(), Date.parse("2026-10-01T12:06:00Z"))).toBeNull();
+  });
+
+  it("is null for a malformed cooldown and never throws", () => {
+    for (const bad of [{ until: "soon" }, { until: 12 }, { until: null }, {}, "x", 7, []]) {
+      const usage = { ...entry({ id: 1 }), cooldown: bad } as unknown as AccountUsage;
+      expect(activeCooldown(usage, NOW)).toBeNull();
+    }
+    expect(activeCooldown(null, NOW)).toBeNull();
+    expect(activeCooldown(undefined, NOW)).toBeNull();
+    expect(activeCooldown({} as AccountUsage, NOW)).toBeNull();
+  });
+
+  it("degrades a reshaped optional field instead of hiding the cooldown", () => {
+    const got = activeCooldown(cooldown({ scope: "galaxy", reason: 5, window: "hourly", model: 3 }), NOW);
+    expect(got).toMatchObject({ scope: "account", reason: "rejected", window: undefined, model: undefined });
+    expect(activeCooldown(cooldown({ scope: "model", model: " opus-4 ", reason: "fallback" }), NOW)).toMatchObject({
+      scope: "model",
+      model: "opus-4",
+      reason: "fallback",
+    });
   });
 });

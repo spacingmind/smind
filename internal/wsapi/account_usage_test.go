@@ -1,14 +1,18 @@
 package wsapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -46,13 +50,31 @@ func TestUsage_AccountJSONKeysAllowlist(t *testing.T) {
 	if _, ok := m["cooldown"]; !ok || len(m) != len(want)+1 {
 		t.Fatalf("cooldown key missing or extra keys: %v", m)
 	}
+	// the cooldown's own keys: model and window are optional
+	keys := func(c usageCooldown) []string {
+		b, _ := json.Marshal(c)
+		var m map[string]json.RawMessage
+		_ = json.Unmarshal(b, &m)
+		var out []string
+		for k := range m {
+			out = append(out, k)
+		}
+		sort.Strings(out)
+		return out
+	}
+	if got, want := keys(usageCooldown{}), []string{"reason", "scope", "until"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cooldown keys = %v, want %v", got, want)
+	}
+	if got, want := keys(usageCooldown{Model: "m", Window: "weekly"}), []string{"model", "reason", "scope", "until", "window"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("full cooldown keys = %v, want %v", got, want)
+	}
 }
 
 func TestUsage_AccountCooldownAndObservedFieldsRoundTrip(t *testing.T) {
 	t.Parallel()
 	in := AccountUsage{
 		AccountID: 1, Key: "anthropic-1",
-		Cooldown: &usageCooldown{Until: time.Unix(0, 0).UTC().Format(time.RFC3339), Scope: "model", Model: "opus", Reason: "rate_limited"},
+		Cooldown: &usageCooldown{Until: time.Unix(0, 0).UTC().Format(time.RFC3339), Scope: "model", Model: "opus", Reason: "rejected", Window: "weekly_model"},
 		Report:   &quota.Report{Version: 2, Windows: []quota.Window{{ID: "w", Source: "observed", Status: "limited"}}},
 	}
 	b, _ := json.Marshal(in)
@@ -130,9 +152,22 @@ type usageHarness struct {
 	clk     *usageClock
 	ids     []int64
 	nextReq int
+	passive *quota.Passive // set by newPassiveUsageHarness
 }
 
 func newUsageHarness(t *testing.T, accountCount int, opts ...quota.Option) *usageHarness {
+	t.Helper()
+	return buildUsageHarness(t, accountCount, false, opts...)
+}
+
+// newPassiveUsageHarness is newUsageHarness with a real quota.Passive (fixed
+// 5 s grace) attached through AttachUsage, over the harness's store.
+func newPassiveUsageHarness(t *testing.T, accountCount int, opts ...quota.Option) *usageHarness {
+	t.Helper()
+	return buildUsageHarness(t, accountCount, true, opts...)
+}
+
+func buildUsageHarness(t *testing.T, accountCount int, withPassive bool, opts ...quota.Option) *usageHarness {
 	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "smind.db"))
 	if err != nil {
@@ -154,7 +189,13 @@ func newUsageHarness(t *testing.T, accountCount int, opts ...quota.Option) *usag
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
-	api.AttachUsage(h.poller, reg)
+	if withPassive {
+		h.passive = quota.NewPassive(db, quota.WithPassiveGrace(func() time.Duration { return passiveTestGrace }))
+		t.Cleanup(h.passive.Close) // runs before the store closes
+		api.AttachUsage(h.poller, reg, h.passive)
+	} else {
+		api.AttachUsage(h.poller, reg, nil)
+	}
 	h.api = api
 	h.srv = httptest.NewServer(api.Handler)
 	t.Cleanup(h.srv.Close) // runs before the store closes
@@ -729,5 +770,334 @@ func TestUsage_AccountRemovedDuringWaitIsOmitted(t *testing.T) {
 	res := h.mustDirect(usageParams("touch"))
 	if len(res.Reports) != 1 || res.Reports[0].AccountID != h.ids[1] {
 		t.Fatalf("reports = %+v, want only the surviving account %d", res.Reports, h.ids[1])
+	}
+}
+
+// ---- passive cooldown and observed windows (ADR-0028 §7, PR-F surfaces) ----
+
+const (
+	passiveTestGrace = 5 * time.Second
+	unifiedPrefix    = "Anthropic-Ratelimit-Unified-"
+)
+
+func hdrKV(kv ...string) http.Header {
+	h := http.Header{}
+	for i := 0; i+1 < len(kv); i += 2 {
+		h.Set(kv[i], kv[i+1])
+	}
+	return h
+}
+
+func epochOf(t time.Time) string { return strconv.FormatInt(t.Unix(), 10) }
+
+// rejected5h declares a 5h rejection that resets at reset.
+func rejected5h(reset time.Time) http.Header {
+	return hdrKV(unifiedPrefix+"Status", "rejected", unifiedPrefix+"5h-Status", "rejected", unifiedPrefix+"5h-Reset", epochOf(reset))
+}
+
+// rejectedOIOnly is the 7d_oi-only (model-scoped) rejection, deadline from Retry-After.
+func rejectedOIOnly(retryAfterSec int) http.Header {
+	return hdrKV(unifiedPrefix+"Status", "rejected", unifiedPrefix+"5h-Status", "allowed", unifiedPrefix+"7d-Status", "allowed",
+		unifiedPrefix+"7d_oi-Status", "rejected", "Retry-After", strconv.Itoa(retryAfterSec))
+}
+
+func (h *usageHarness) observe(id int64, model string, status int, header http.Header) {
+	h.passive.Observe(quota.Response{AccountID: id, Provider: "anthropic", Model: model, Status: status, Header: header, At: time.Now()})
+}
+
+func rfc3339(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+func (res accountUsageResult) byID(t *testing.T, id int64) AccountUsage {
+	t.Helper()
+	for _, r := range res.Reports {
+		if r.AccountID == id {
+			return r
+		}
+	}
+	t.Fatalf("no report for account %d in %+v", id, res.Reports)
+	return AccountUsage{}
+}
+
+func TestUsage_CooldownAccountAndModelScopeInRPC(t *testing.T) {
+	h := newPassiveUsageHarness(t, 4)
+	a, b, c, d := h.ids[0], h.ids[1], h.ids[2], h.ids[3]
+	at := time.Now()
+	reset := at.Add(2 * time.Hour)
+
+	h.observe(a, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(10*60))     // model scope only
+	h.observe(b, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(10*60))     // model scope, then
+	h.observe(b, "claude-sonnet-4", http.StatusTooManyRequests, rejected5h(reset))       // an account-wide one: it wins
+	h.observe(c, "claude-haiku", http.StatusTooManyRequests, hdrKV("Retry-After", "30")) // transient back-off: not shown
+	h.observe(d, "m", http.StatusTooManyRequests, hdrKV(unifiedPrefix+"Status", "rejected", unifiedPrefix+"5h-Status", "rejected", unifiedPrefix+"5h-Reset", "garbage"))
+
+	res := h.mustDirect(usageParams("cached"))
+	ra := res.byID(t, a)
+	if ra.Cooldown == nil || ra.Cooldown.Scope != "model" || ra.Cooldown.Model != "claude-opus-5" ||
+		ra.Cooldown.Reason != "rejected" || ra.Cooldown.Window != "weekly_model" {
+		t.Fatalf("model-scoped cooldown = %+v", ra.Cooldown)
+	}
+	if want := rfc3339(at.Add(10*time.Minute + passiveTestGrace)); ra.Cooldown.Until != want {
+		t.Errorf("model cooldown until = %s, want %s", ra.Cooldown.Until, want)
+	}
+	rb := res.byID(t, b)
+	if rb.Cooldown == nil || rb.Cooldown.Scope != "account" || rb.Cooldown.Model != "" ||
+		rb.Cooldown.Reason != "rejected" || rb.Cooldown.Window != "five_hour" {
+		t.Fatalf("account-wide cooldown = %+v", rb.Cooldown)
+	}
+	if want := rfc3339(time.Unix(reset.Unix(), 0).Add(passiveTestGrace)); rb.Cooldown.Until != want {
+		t.Errorf("account cooldown until = %s, want %s", rb.Cooldown.Until, want)
+	}
+	if rc := res.byID(t, c); rc.Cooldown != nil {
+		t.Errorf("a bare-429 back-off is shown as a cooldown: %+v", rc.Cooldown)
+	}
+	rd := res.byID(t, d)
+	if rd.Cooldown == nil || rd.Cooldown.Reason != "fallback" || rd.Cooldown.Window != "five_hour" || rd.Cooldown.Scope != "account" {
+		t.Fatalf("fallback cooldown = %+v", rd.Cooldown)
+	}
+	if h.fetcher.Calls() != 0 {
+		t.Errorf("fetcher calls = %d, want 0", h.fetcher.Calls())
+	}
+
+	// The same rows arrive over the wire with exactly these JSON keys.
+	raw, _ := json.Marshal(rb)
+	if !strings.Contains(string(raw), `"cooldown":{"until":"`) || !strings.Contains(string(raw), `"window":"five_hour"`) {
+		t.Errorf("wire row = %s", raw)
+	}
+}
+
+func TestUsage_EventPublishedOnCooldownStartAndClear(t *testing.T) {
+	h := newPassiveUsageHarness(t, 2)
+	id := h.ids[0]
+	c := usageEventConn(t, h, TopicAccountUsage)
+
+	h.observe(id, "m", http.StatusTooManyRequests, rejected5h(time.Now().Add(time.Hour)))
+	u := decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	if u.AccountID != id || u.Cooldown == nil || u.Cooldown.Window != "five_hour" || u.Cooldown.Scope != "account" {
+		t.Fatalf("start event = %+v cooldown %+v", u, u.Cooldown)
+	}
+
+	first := u.Cooldown.Until
+	h.observe(id, "m", http.StatusTooManyRequests, rejected5h(time.Now().Add(3*time.Hour))) // extension
+	u = decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	if u.Cooldown == nil || u.Cooldown.Until <= first {
+		t.Fatalf("extension event = %+v, want a later end than %s", u.Cooldown, first)
+	}
+
+	h.passive.ClearCooldown(id) // credential replaced
+	u = decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	if u.AccountID != id || u.Cooldown != nil {
+		t.Fatalf("clear event = %+v cooldown %+v, want none", u, u.Cooldown)
+	}
+	// a removed account publishes nothing, and nothing fetched anything
+	if err := h.reg.Delete(h.ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	h.observe(h.ids[1], "m", http.StatusTooManyRequests, rejected5h(time.Now().Add(time.Hour)))
+	c.expectNoEvent(300 * time.Millisecond)
+	if h.fetcher.Calls() != 0 {
+		t.Errorf("fetcher calls = %d, want 0", h.fetcher.Calls())
+	}
+}
+
+func TestUsage_CachedModeStillMakesNoHTTPCall(t *testing.T) {
+	h := newPassiveUsageHarness(t, 2)
+	c := usageEventConn(t, h, TopicAccountUsage)
+	h.observe(h.ids[0], "m", http.StatusTooManyRequests, rejected5h(time.Now().Add(time.Hour)))
+	h.observe(h.ids[1], "m", http.StatusOK, hdrKV(unifiedPrefix+"5h-Status", "allowed", unifiedPrefix+"5h-Utilization", "0.4"))
+	decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	decodeUsageEvent(t, c.nextEvent(5*time.Second))
+	for i := 0; i < 5; i++ {
+		h.mustDirect(usageParams("cached"))
+		h.mustDirect(usageParams(""))
+	}
+	h.passive.ClearCooldown(h.ids[0])
+	if got := h.fetcher.Calls(); got != 0 {
+		t.Fatalf("usage fetcher calls = %d, want 0 (cooldowns, observations and events never fetch)", got)
+	}
+	// A typed-nil passive is the same as no passive.
+	var none *quota.Passive
+	h2 := newUsageHarness(t, 1)
+	h2.api.AttachUsage(h2.poller, h2.reg, none)
+	if res := h2.mustDirect(usageParams("cached")); len(res.Reports) != 1 || res.Reports[0].Cooldown != nil {
+		t.Fatalf("typed-nil passive result = %+v", res)
+	}
+	if h2.fetcher.Calls() != 0 {
+		t.Fatalf("fetcher calls with a typed-nil passive = %d", h2.fetcher.Calls())
+	}
+}
+
+func TestUsage_DisplayRuleObservedWhenNoFreshFetch(t *testing.T) {
+	obsHeader := func(util string) http.Header {
+		return hdrKV(unifiedPrefix+"5h-Status", "allowed_warning", unifiedPrefix+"5h-Utilization", util,
+			unifiedPrefix+"5h-Reset", epochOf(time.Now().Add(time.Hour)), unifiedPrefix+"7d-Status", "allowed", unifiedPrefix+"7d-Utilization", "0.10")
+	}
+	window := func(t *testing.T, r AccountUsage, id string) quota.Window {
+		t.Helper()
+		if r.Report != nil {
+			for _, w := range r.Report.Windows {
+				if w.ID == id {
+					return w
+				}
+			}
+		}
+		t.Fatalf("no %s window in %+v", id, r.Report)
+		return quota.Window{}
+	}
+
+	h := newPassiveUsageHarness(t, 1)
+	id := h.ids[0]
+
+	// No fetched report: the observation is the report, flagged observed.
+	h.observe(id, "m", http.StatusOK, obsHeader("0.80"))
+	r := h.mustDirect(usageParams("cached")).byID(t, id)
+	if w := window(t, r, "five_hour"); w.Source != "observed" || w.Status != "allowed_warning" || w.UsedPct == nil || *w.UsedPct != 80 {
+		t.Fatalf("observed-only window = %+v", w)
+	}
+
+	// A fresh fetched report keeps its numbers; the observation never overrides them.
+	h.mustDirect(usageParams("touch"))
+	h.observe(id, "m", http.StatusOK, obsHeader("0.95"))
+	w := window(t, h.mustDirect(usageParams("cached")).byID(t, id), "five_hour")
+	if w.Source == "observed" || w.UsedPct == nil || *w.UsedPct != 25 {
+		t.Fatalf("fresh fetched window = %+v, want the fetched 25%%", w)
+	}
+
+	// Once the fetched report is older than the TTL and a newer observation
+	// exists, the observed window replaces the fetched one.
+	h.clk.Advance(10 * time.Minute)
+	h.observe(id, "m", http.StatusOK, obsHeader("0.96"))
+	r = h.mustDirect(usageParams("cached")).byID(t, id)
+	if w := window(t, r, "five_hour"); w.Source != "observed" || w.UsedPct == nil || *w.UsedPct != 96 {
+		t.Fatalf("stale fetched + newer observation: window = %+v", w)
+	}
+	if w := window(t, r, "weekly"); w.Source != "observed" {
+		t.Fatalf("observed weekly window not added: %+v", w)
+	}
+	if h.fetcher.Calls() != 1 {
+		t.Fatalf("fetcher calls = %d, want exactly the one explicit touch", h.fetcher.Calls())
+	}
+}
+
+func TestUsage_EventPublishDoesNotBlockObserve(t *testing.T) {
+	h := newPassiveUsageHarness(t, 1)
+	id := h.ids[0]
+	// A subscriber whose lock is held makes bus.Publish block until released.
+	// Observe (the proxy goroutine) must not care.
+	slow := newSubscriber()
+	slow.subscribe([]string{TopicAccountUsage})
+	h.api.bus.register(slow)
+	slow.mu.Lock()
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			slow.mu.Unlock()
+		}
+	}
+	t.Cleanup(release)
+
+	done := make(chan time.Duration, 1)
+	go func() {
+		start := time.Now()
+		for i := 1; i <= 200; i++ {
+			h.observe(id, "m", http.StatusTooManyRequests, rejected5h(time.Now().Add(time.Duration(i)*time.Minute)))
+		}
+		done <- time.Since(start)
+	}()
+	select {
+	case d := <-done:
+		if d > 2*time.Second {
+			t.Fatalf("200 Observe calls took %v with a blocked subscriber", d)
+		}
+	case <-time.After(5 * time.Second):
+		release() // unblock the goroutine so the test can end
+		t.Fatal("Observe blocked behind a subscriber that is not draining")
+	}
+	release()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		slow.mu.Lock()
+		n := len(slow.queue)
+		slow.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no event reached the subscriber after it was released")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	// 200 changes did not become 200 events: bursts coalesce per account.
+	slow.mu.Lock()
+	n := len(slow.queue)
+	slow.mu.Unlock()
+	if n >= 200 {
+		t.Errorf("queued %d events for 200 changes of one account, want coalescing", n)
+	}
+}
+
+func TestUsage_NoSecretsInCooldownPayload(t *testing.T) {
+	const sentinel = "SENTINEL_HEADER_VALUE_3b7e"
+	var logs bytes.Buffer
+	oldOut := log.Writer()
+	log.SetOutput(&logs)
+	t.Cleanup(func() { log.SetOutput(oldOut) })
+
+	h := newPassiveUsageHarness(t, 1)
+	id := h.ids[0]
+	c := usageEventConn(t, h, TopicAccountUsage)
+	header := hdrKV(
+		unifiedPrefix+"Status", "rejected",
+		unifiedPrefix+"5h-Status", "rejected",
+		unifiedPrefix+"5h-Reset", sentinel+"_RESET", // unparseable: falls back, never echoed
+		unifiedPrefix+"Representative-Claim", sentinel+"_CLAIM",
+		unifiedPrefix+"Overage-Disabled-Reason", sentinel+"_OVERAGE",
+		"Retry-After", sentinel+"_RA",
+		"Anthropic-Workspace-Id", sentinel+"_WS",
+		"Set-Cookie", "sid="+sentinel+"_COOKIE",
+		"Authorization", "Bearer "+sentinel+"_AUTH",
+		"X-Request-Id", sentinel+"_REQ",
+	)
+	h.observe(id, "m", http.StatusTooManyRequests, header)
+	ev, _ := json.Marshal(c.nextEvent(5 * time.Second))
+	rpc, _ := json.Marshal(h.mustDirect(usageParams("cached")))
+	for name, b := range map[string]string{"event": string(ev), "rpc": string(rpc), "log": logs.String()} {
+		if strings.Contains(b, sentinel) {
+			t.Fatalf("%s leaks a header value: %s", name, b)
+		}
+	}
+	if !strings.Contains(string(rpc), `"cooldown"`) {
+		t.Fatalf("the rejection did not produce a cooldown: %s", rpc)
+	}
+}
+
+func TestUsage_AccountUsageCooldownPicksLatestEndingScope(t *testing.T) {
+	h := newPassiveUsageHarness(t, 3)
+	a, b, c := h.ids[0], h.ids[1], h.ids[2]
+	at := time.Now()
+
+	// a: a short account-wide cooldown, a longer model-scoped one: the model one.
+	h.observe(a, "m", http.StatusTooManyRequests, rejected5h(at.Add(10*time.Minute)))
+	h.observe(a, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(3600))
+	// b: the account-wide one ends last: it shows.
+	h.observe(b, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(600))
+	h.observe(b, "m", http.StatusTooManyRequests, rejected5h(at.Add(2*time.Hour)))
+	// c: two model-scoped ones: the later one.
+	h.observe(c, "claude-opus-5", http.StatusTooManyRequests, rejectedOIOnly(600))
+	h.observe(c, "claude-sonnet-4", http.StatusTooManyRequests, rejectedOIOnly(1800))
+
+	res := h.mustDirect(usageParams("cached"))
+	ra := res.byID(t, a)
+	if ra.Cooldown == nil || ra.Cooldown.Scope != "model" || ra.Cooldown.Model != "claude-opus-5" {
+		t.Fatalf("a: cooldown = %+v, want the longer model-scoped one", ra.Cooldown)
+	}
+	if want := rfc3339(at.Add(time.Hour + passiveTestGrace)); ra.Cooldown.Until != want {
+		t.Errorf("a: until = %s, want %s", ra.Cooldown.Until, want)
+	}
+	if rb := res.byID(t, b); rb.Cooldown == nil || rb.Cooldown.Scope != "account" || rb.Cooldown.Window != "five_hour" {
+		t.Fatalf("b: cooldown = %+v, want the account-wide one", rb.Cooldown)
+	}
+	if rc := res.byID(t, c); rc.Cooldown == nil || rc.Cooldown.Model != "claude-sonnet-4" {
+		t.Fatalf("c: cooldown = %+v, want the later model-scoped one", rc.Cooldown)
 	}
 }

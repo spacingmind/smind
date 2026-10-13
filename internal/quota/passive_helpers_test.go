@@ -358,3 +358,59 @@ func captureLog() (*lockedBuffer, func()) {
 	log.SetFlags(0)
 	return buf, func() { log.SetOutput(prevOut); log.SetFlags(prevFlags) }
 }
+
+// fakeTimers is a WithPassiveAfterFunc scheduler a test fires by hand.
+type fakeTimers struct {
+	mu     sync.Mutex
+	timers []*fakeTimer
+}
+
+type fakeTimer struct {
+	d       time.Duration
+	f       func()
+	stopped bool
+	fired   bool
+}
+
+func (ft *fakeTimers) after(d time.Duration, f func()) func() bool {
+	t := &fakeTimer{d: d, f: f}
+	ft.mu.Lock()
+	ft.timers = append(ft.timers, t)
+	ft.mu.Unlock()
+	return func() bool {
+		ft.mu.Lock()
+		defer ft.mu.Unlock()
+		was := !t.stopped && !t.fired
+		t.stopped = true
+		return was
+	}
+}
+
+// live returns the timers neither fired nor stopped.
+func (ft *fakeTimers) live() []*fakeTimer {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	var out []*fakeTimer
+	for _, t := range ft.timers {
+		if !t.stopped && !t.fired {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func (ft *fakeTimers) total() int {
+	ft.mu.Lock()
+	defer ft.mu.Unlock()
+	return len(ft.timers)
+}
+
+// fire runs every live timer, as the real timer would, outside the lock.
+func (ft *fakeTimers) fire() {
+	for _, t := range ft.live() {
+		ft.mu.Lock()
+		t.fired = true
+		ft.mu.Unlock()
+		t.f()
+	}
+}

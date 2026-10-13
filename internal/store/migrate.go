@@ -173,6 +173,16 @@ var migrations = []migration{
 			return addColumnIfMissing(db, "quota_snapshots", "kind", "TEXT NOT NULL DEFAULT 'fetched'")
 		},
 	},
+	{
+		// ADR-0028 §7.4: quota_cooldown.rejected_window records which window
+		// (five_hour, weekly, weekly_model, unified) a rejection cooldown came
+		// from, for display. Existing rows predate it: '' (unknown). Not named
+		// "window": that is an SQL keyword.
+		name: "quota_cooldown_rejected_window",
+		apply: func(db *sql.DB) error {
+			return addColumnIfMissing(db, "quota_cooldown", "rejected_window", "TEXT NOT NULL DEFAULT ''")
+		},
+	},
 }
 
 // legacyPermissionModeSQL maps a row's legacy approval_policy (and

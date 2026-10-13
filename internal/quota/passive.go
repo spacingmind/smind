@@ -2,6 +2,7 @@ package quota
 
 import (
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,6 +49,11 @@ const (
 	// cooldowns is not retried, so an unhealthy store costs one read and one log
 	// line per window instead of one per Cooldown call.
 	passiveLoadRetry = 5 * time.Second
+	// passiveNotifyInterval is the minimum time between two onChange calls for
+	// an observation change of one account, unless the verdict flips, so a
+	// stream of utilization changes cannot flood the event bus. Cooldown
+	// changes are never throttled.
+	passiveNotifyInterval = 5 * time.Second
 )
 
 // PassiveStore is the narrow store view Passive needs, so tests can inject a
@@ -73,14 +79,24 @@ func WithPassiveEnabled(enabled bool) PassiveOption { return func(p *Passive) { 
 // WithPassiveClock injects the clock used when a Response has no At (tests).
 func WithPassiveClock(now func() time.Time) PassiveOption { return func(p *Passive) { p.clock = now } }
 
+// WithPassiveAfterFunc injects the timer behind the trailing observation
+// notification (tests): it must run f once after d, and the returned stop must
+// cancel it (reporting whether it did). The default is time.AfterFunc.
+func WithPassiveAfterFunc(after func(d time.Duration, f func()) (stop func() bool)) PassiveOption {
+	return func(p *Passive) { p.after = after }
+}
+
 // WithPassiveGrace injects the grace source added to a cooldown end (tests).
 func WithPassiveGrace(g GraceFunc) PassiveOption { return func(p *Passive) { p.grace = g } }
 
 // WithPassiveOnChange registers a callback invoked, outside every lock, when a
 // cooldown starts, is extended or is cleared (ClearCooldown), or when the
-// parsed observation changed. It must not block. It is NOT invoked when a
-// cooldown ends: that is time-based, so a caller that shows cooldown state
-// must schedule its own refresh for Cooldown.Until.
+// parsed observation changed in a way that is worth telling a surface: the
+// verdict flipped, or at most once per passiveNotifyInterval per account (a
+// change swallowed by that throttle is delivered once, when the interval is
+// over, even if no further response arrives). It must not block. It is NOT
+// invoked when a cooldown ends: that is time-based, so a caller that shows
+// cooldown state must schedule its own refresh for Cooldown.Until.
 func WithPassiveOnChange(fn func(accountID int64)) PassiveOption {
 	return func(p *Passive) { p.onChange = fn }
 }
@@ -90,6 +106,7 @@ type cooldownRow struct {
 	until      time.Time
 	reason     CooldownReason
 	level      int
+	window     string // Rejection.Window of the rejection that set it; display only
 	observedAt time.Time
 }
 
@@ -125,10 +142,17 @@ type passiveAcct struct {
 	// Observation (display only).
 	obs                 *Observation
 	obsLoaded           bool
+	obsLoadRetryAt      time.Time    // a failed snapshot read is not retried before this time
 	obsPending          *Observation // handed to the writer, not yet written
 	obsPersisted        *Observation // last observation queued for writing; nil = unknown
 	obsPersistedVerdict string
 	obsLastWrite        time.Time
+	obsNotifyAt         time.Time // last onChange for an observation change (throttle)
+	// obsNotifyDirty: an observation change was swallowed by the throttle and
+	// not delivered yet; obsNotifyStop cancels the timer that will deliver it
+	// (nil = none armed).
+	obsNotifyDirty bool
+	obsNotifyStop  func() bool
 }
 
 func newPassiveAcct() *passiveAcct {
@@ -146,6 +170,7 @@ type Passive struct {
 	clock    func() time.Time
 	grace    GraceFunc
 	onChange func(accountID int64)
+	after    func(d time.Duration, f func()) (stop func() bool)
 
 	mu    sync.RWMutex // guards accts only
 	accts map[int64]*passiveAcct
@@ -171,10 +196,13 @@ type Passive struct {
 // write is queued.
 func NewPassive(s PassiveStore, opts ...PassiveOption) *Passive {
 	p := &Passive{
-		store:    s,
-		enabled:  true,
-		clock:    time.Now,
-		grace:    DefaultGrace,
+		store:   s,
+		enabled: true,
+		clock:   time.Now,
+		grace:   DefaultGrace,
+		after: func(d time.Duration, f func()) func() bool {
+			return time.AfterFunc(d, f).Stop
+		},
 		accts:    map[int64]*passiveAcct{},
 		dirtyCD:  map[cooldownKey]struct{}{},
 		dirtyObs: map[int64]struct{}{},
@@ -254,10 +282,16 @@ func (p *Passive) Observe(r Response) {
 	if hasObs && p.observe(r.AccountID, a, obs, at) {
 		changed = true
 	}
-	if changed && p.onChange != nil {
-		p.onChange(r.AccountID)
+	if fn := p.onChange; changed && fn != nil {
+		fn(r.AccountID)
 	}
 }
+
+// SetOnChange registers (or, with nil, removes) the callback described at
+// WithPassiveOnChange. Like Poller.SetOnFetch it is not safe to call while
+// the Passive is serving: set it once, before the first Observe, so the
+// callback is read without a lock.
+func (p *Passive) SetOnChange(fn func(accountID int64)) { p.onChange = fn }
 
 // reject starts or extends a cooldown for a declared rejection. It reports
 // whether a cooldown changed.
@@ -271,7 +305,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 		}
 		scope = model
 	}
-	deadline, hasDeadline := RejectionDeadline(r.Header, at, rej)
+	deadline, window, hasDeadline := RejectionDeadlineWindow(r.Header, at, rej)
 	var grace time.Duration
 	if hasDeadline {
 		grace = p.grace()
@@ -292,7 +326,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 
 	var next cooldownRow
 	if hasDeadline {
-		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected}
+		next = cooldownRow{until: CooldownEnd(deadline, at, grace), reason: ReasonRejected, window: window}
 	} else {
 		if active {
 			// A second rejection while a cooldown runs must not escalate.
@@ -302,7 +336,7 @@ func (p *Passive) reject(r Response, a *passiveAcct, rej Rejection, model string
 		if have {
 			level = min(cur.level+1, passiveMaxLevel)
 		}
-		next = cooldownRow{until: at.Add(FallbackDuration(level)), reason: ReasonFallback, level: level}
+		next = cooldownRow{until: at.Add(FallbackDuration(level)), reason: ReasonFallback, level: level, window: rej.Window}
 	}
 	if active && !next.until.After(cur.until) {
 		return false // never shorten
@@ -414,17 +448,62 @@ func (p *Passive) Cooldown(accountID int64, model string, now time.Time) (Cooldo
 		}
 	}
 	if row, ok := a.rows[""]; ok {
-		consider(Cooldown{Until: row.until, Scope: CooldownAccount, Reason: row.reason, Level: row.level})
+		consider(Cooldown{Until: row.until, Scope: CooldownAccount, Reason: row.reason, Level: row.level, Window: row.window})
 	}
 	if m != "" {
 		if row, ok := a.rows[m]; ok {
-			consider(Cooldown{Until: row.until, Scope: CooldownModel, Model: m, Reason: row.reason, Level: row.level})
+			consider(Cooldown{Until: row.until, Scope: CooldownModel, Model: m, Reason: row.reason, Level: row.level, Window: row.window})
 		}
 		if until, ok := a.backoff[m]; ok {
 			consider(Cooldown{Until: until, Scope: CooldownModel, Model: m, Reason: ReasonBackoff})
 		}
 	}
 	return best, found
+}
+
+// Active lists the account's un-expired rate-limit cooldowns for display: the
+// account-wide one first, then the model-scoped ones, latest end first. Bare-429
+// back-offs (transient) are left out. Like Cooldown it answers from memory
+// after reading the persisted rows once (sharing Cooldown's negative cache on a
+// failed read), clamps an end beyond now+MaxCooldown and never makes a request.
+// It starts no cooldown and changes no end; the only write it can cause is the
+// one that reading the persisted rows may queue, a level reset or the removal of
+// an expired row that a non-rejected response made obsolete (mergeStoredLocked).
+// Disabled, it answers nil.
+func (p *Passive) Active(accountID int64, now time.Time) []Cooldown {
+	if !p.enabled {
+		return nil
+	}
+	a := p.acct(accountID)
+	p.ensureLoaded(accountID, a)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	limit := now.Add(MaxCooldown)
+	var wide []Cooldown
+	var scoped []Cooldown
+	for scope, row := range a.rows {
+		if !row.until.After(now) {
+			continue
+		}
+		c := Cooldown{Until: row.until, Scope: CooldownAccount, Reason: row.reason, Level: row.level, Window: row.window}
+		if c.Until.After(limit) {
+			c.Until = limit
+		}
+		if scope == "" {
+			wide = append(wide, c)
+			continue
+		}
+		c.Scope, c.Model = CooldownModel, scope
+		scoped = append(scoped, c)
+	}
+	sort.Slice(scoped, func(i, j int) bool {
+		if !scoped[i].Until.Equal(scoped[j].Until) {
+			return scoped[i].Until.After(scoped[j].Until)
+		}
+		return scoped[i].Model < scoped[j].Model
+	})
+	return append(wide, scoped...)
 }
 
 // ensureLoaded merges the account's persisted rows into memory, once. A read
@@ -464,6 +543,7 @@ func (p *Passive) mergeStoredLocked(id int64, a *passiveAcct, rows []store.Quota
 			until:      r.Until,
 			reason:     sanitizeReason(r.Reason),
 			level:      max(0, min(r.Level, passiveMaxLevel)),
+			window:     sanitizeWindow(r.RejectedWindow),
 			observedAt: r.ObservedAt,
 		}
 		scope := r.ScopeModel
@@ -501,6 +581,15 @@ func sanitizeReason(r string) CooldownReason {
 	return ReasonRejected
 }
 
+// sanitizeWindow keeps only a known rejected-window name from the store.
+func sanitizeWindow(w string) string {
+	switch w {
+	case WindowFiveHour, WindowWeekly, WindowWeeklyModel, WindowUnified:
+		return w
+	}
+	return ""
+}
+
 // ClearCooldown drops the account's cooldowns and back-offs from memory, the
 // persisted rows, and any queued write, because its credential changed. A write
 // already running is undone by the writer (generation check), so nothing can
@@ -520,6 +609,7 @@ func (p *Passive) ClearCooldown(accountID int64) {
 		}
 	}
 	a.gen++
+	pendingNotify := a.stopObsNotifyLocked()
 	a.rows = map[string]cooldownRow{}
 	a.backoff = map[string]time.Time{}
 	a.failed = map[string]struct{}{}
@@ -538,8 +628,10 @@ func (p *Passive) ClearCooldown(accountID int64) {
 		p.markCooldownLocked(accountID, a, scope)
 	}
 	a.mu.Unlock()
-	if had && p.onChange != nil {
-		p.onChange(accountID)
+	// A pending trailing observation notification is consumed here: this call's
+	// own notification covers it.
+	if fn := p.onChange; (had || pendingNotify) && fn != nil {
+		fn(accountID)
 	}
 }
 
@@ -662,12 +754,13 @@ func (p *Passive) writeCooldown(k cooldownKey) {
 	var err error
 	if have {
 		err = p.store.SaveQuotaCooldown(store.QuotaCooldown{
-			AccountID:  k.account,
-			ScopeModel: k.scope,
-			Until:      row.until,
-			Reason:     string(row.reason),
-			Level:      row.level,
-			ObservedAt: row.observedAt,
+			AccountID:      k.account,
+			ScopeModel:     k.scope,
+			Until:          row.until,
+			Reason:         string(row.reason),
+			Level:          row.level,
+			RejectedWindow: row.window,
+			ObservedAt:     row.observedAt,
 		})
 	} else {
 		err = p.store.DeleteQuotaCooldown(k.account, k.scope)
@@ -731,6 +824,18 @@ func (p *Passive) Close() {
 	}
 	started := p.started
 	p.wmu.Unlock()
+
+	p.mu.RLock()
+	accts := make([]*passiveAcct, 0, len(p.accts))
+	for _, a := range p.accts {
+		accts = append(accts, a)
+	}
+	p.mu.RUnlock()
+	for _, a := range accts {
+		a.mu.Lock()
+		a.stopObsNotifyLocked()
+		a.mu.Unlock()
+	}
 	if started {
 		<-p.done
 	}
@@ -741,14 +846,27 @@ func (p *Passive) Close() {
 // observe replaces the account's in-memory observation at once (replaced, not
 // merged) and decides whether to persist it: only when the parsed values differ
 // from what was last queued for writing, and then at most once per
-// passiveObsMinInterval unless the verdict changed. It reports whether the
-// parsed values changed. Display only: nothing here reads or writes a cooldown.
+// passiveObsMinInterval unless the verdict changed. It reports whether a
+// surface should be told: the parsed values changed and either the verdict
+// flipped or passiveNotifyInterval passed since the last such notification.
+// Display only: nothing here reads or writes a cooldown.
 func (p *Passive) observe(id int64, a *passiveAcct, obs Observation, at time.Time) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	o := cloneObservation(obs)
 	changed := a.obs == nil || !a.obs.Equal(o)
+	flipped := a.obs != nil && a.obs.Verdict() != o.Verdict()
 	a.obs, a.obsLoaded = &o, true
+	notify := false
+	if changed {
+		since := at.Sub(a.obsNotifyAt)
+		if flipped || a.obsNotifyAt.IsZero() || since >= passiveNotifyInterval || since < 0 {
+			notify, a.obsNotifyAt = true, at
+			a.stopObsNotifyLocked() // this notification covers the pending one
+		} else {
+			p.armObsNotifyLocked(id, a, passiveNotifyInterval-since)
+		}
+	}
 
 	prev := a.obsPersisted
 	if prev == nil ||
@@ -757,26 +875,82 @@ func (p *Passive) observe(id int64, a *passiveAcct, obs Observation, at time.Tim
 		a.obsPending = &o
 		p.markObservationLocked(id)
 	}
-	return changed
+	return notify
+}
+
+// stopObsNotifyLocked cancels the trailing notification timer and clears the
+// dirty flag; it reports whether a notification was pending. a.mu must be held.
+func (a *passiveAcct) stopObsNotifyLocked() bool {
+	pending := a.obsNotifyDirty
+	a.obsNotifyDirty = false
+	if a.obsNotifyStop != nil {
+		a.obsNotifyStop()
+		a.obsNotifyStop = nil
+	}
+	return pending
+}
+
+// armObsNotifyLocked records that a change was swallowed by the throttle and
+// makes sure one timer will deliver it d from now (one timer per account, however
+// many changes are swallowed meanwhile). After Close it does nothing. a.mu must
+// be held.
+func (p *Passive) armObsNotifyLocked(id int64, a *passiveAcct, d time.Duration) {
+	p.wmu.Lock()
+	closed := p.closed
+	p.wmu.Unlock()
+	if closed {
+		return
+	}
+	a.obsNotifyDirty = true
+	if a.obsNotifyStop != nil {
+		return
+	}
+	a.obsNotifyStop = p.after(d, func() { p.fireObsNotify(id, a) })
+}
+
+// fireObsNotify delivers the swallowed observation notification, outside every
+// lock. It does nothing when the notification was delivered or cancelled in the
+// meantime.
+func (p *Passive) fireObsNotify(id int64, a *passiveAcct) {
+	a.mu.Lock()
+	if a.obsNotifyStop == nil || !a.obsNotifyDirty {
+		a.mu.Unlock()
+		return
+	}
+	a.obsNotifyStop, a.obsNotifyDirty = nil, false
+	a.obsNotifyAt = p.clock()
+	a.mu.Unlock()
+	if fn := p.onChange; fn != nil {
+		fn(id)
+	}
 }
 
 // Observed returns the account's latest observation for display: the one in
-// memory, else the stored observed snapshot (read once; an error is not
-// cached). Routing never calls it, and Reader has no such method.
+// memory, else the stored observed snapshot (read once; an error is
+// negative-cached for passiveLoadRetry, like ensureLoaded's). Routing never calls
+// it, and Reader has no such method.
 func (p *Passive) Observed(accountID int64) (Observation, bool) {
 	if !p.enabled {
 		return Observation{}, false
 	}
 	a := p.acct(accountID)
+	now := p.clock()
 	a.mu.Lock()
 	if a.obs != nil || a.obsLoaded {
 		defer a.mu.Unlock()
 		return a.observedLocked()
 	}
+	if now.Before(a.obsLoadRetryAt) {
+		a.mu.Unlock()
+		return Observation{}, false
+	}
 	a.mu.Unlock()
 
 	snap, ok, err := p.store.GetLatestQuotaSnapshotKind(accountID, store.QuotaKindObserved)
 	if err != nil {
+		a.mu.Lock()
+		a.obsLoadRetryAt = now.Add(passiveLoadRetry)
+		a.mu.Unlock()
 		log.Printf("quota: account %d passive observation read failed", accountID)
 		return Observation{}, false
 	}
@@ -791,7 +965,7 @@ func (p *Passive) Observed(accountID int64) (Observation, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.obs == nil && !a.obsLoaded {
-		a.obs, a.obsLoaded = stored, true
+		a.obs, a.obsLoaded, a.obsLoadRetryAt = stored, true, time.Time{}
 	}
 	return a.observedLocked()
 }

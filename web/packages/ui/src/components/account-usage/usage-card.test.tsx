@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { UsageCard } from "@/components/account-usage/usage-card";
-import type { AccountUsage, UsageWindow } from "@/lib/account-usage/types";
+import type { AccountUsage, UsageCooldown, UsageWindow } from "@/lib/account-usage/types";
 import { FIXTURE_NOW, claudeAccount, codexAccount, problemAccount } from "@/test/account-usage-fixtures";
 
 beforeEach(() => {
@@ -145,5 +145,190 @@ describe("UsageCard", () => {
     card(usage);
     expect(screen.getByTestId("usage-balance-extra")).toHaveTextContent("$5.00 / $20.00");
     expect(screen.getByTestId("usage-detail-org")).toHaveTextContent("Acme");
+  });
+
+  describe("passive cooldown", () => {
+    const MIN = 60_000;
+    const cooldown = (over: Partial<UsageCooldown> = {}): UsageCooldown => ({
+      until: new Date(FIXTURE_NOW + 10 * MIN).toISOString(),
+      scope: "account",
+      reason: "rejected",
+      ...over,
+    });
+    const observed = (over: Partial<UsageWindow> = {}): UsageWindow => ({
+      id: "five_hour",
+      label: "5-hour",
+      usedPct: 100,
+      source: "observed",
+      status: "rejected",
+      ...over,
+    });
+    const observedOnly = (over: Partial<AccountUsage> = {}) =>
+      claudeAccount({
+        report: { status: "available", planLabel: "max", windows: [observed()], fetchedAt: new Date(FIXTURE_NOW).toISOString() },
+        cooldown: cooldown({ window: "five_hour" }),
+        ...over,
+      });
+    const untilClock = (ms: number) =>
+      new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(ms));
+
+    it("card_shows_rate_limited_until_and_from_recent_traffic_only_when_no_fresh_fetch", () => {
+      card(observedOnly());
+      const box = screen.getByTestId("usage-cooldown");
+      expect(screen.getByTestId("usage-cooldown-until").parentElement).toHaveTextContent(
+        `Rate limited until ${untilClock(FIXTURE_NOW + 10 * MIN)} · 5-hour window`,
+      );
+      expect(screen.getByTestId("usage-cooldown-note")).toHaveTextContent("seen on a proxied request");
+      expect(screen.getByTestId("usage-cooldown-badge")).toHaveTextContent("Rate limited");
+      expect(screen.getByTestId("usage-cooldown-badge")).toHaveAttribute("data-status", "danger");
+      // The badge sits under the title row and above the windows.
+      expect(box.compareDocumentPosition(screen.getByTestId("usage-window-five_hour"))).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+      expect(screen.getByTestId("usage-window-five_hour")).toHaveTextContent("from recent traffic");
+      cleanup();
+      // A fresh fetch alone: no cooldown, no observed label.
+      card(claudeAccount());
+      expect(screen.queryByTestId("usage-cooldown")).toBeNull();
+      expect(screen.queryByText("from recent traffic")).toBeNull();
+    });
+
+    it("cooldown_badge_disappears_at_until_without_reload", () => {
+      card(claudeAccount({ cooldown: cooldown() }));
+      expect(screen.getByTestId("usage-cooldown")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(10 * MIN - 1);
+      });
+      expect(screen.getByTestId("usage-cooldown")).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.queryByTestId("usage-cooldown")).toBeNull();
+      // The windows stay.
+      expect(screen.getByTestId("usage-window-five_hour")).toHaveTextContent("31%");
+    });
+
+    it("the cooldown timer is one timeout, replaced on change and cleared on unmount", () => {
+      const before = vi.getTimerCount();
+      const { rerender, unmount } = card(claudeAccount({ cooldown: cooldown() }));
+      expect(vi.getTimerCount()).toBe(before + 1);
+      rerender(
+        <UsageCard
+          usage={claudeAccount({ cooldown: cooldown({ until: new Date(FIXTURE_NOW + 20 * MIN).toISOString() }) })}
+          displayAs="used"
+          refresh={idle}
+        />,
+      );
+      expect(vi.getTimerCount()).toBe(before + 1);
+      act(() => {
+        vi.advanceTimersByTime(10 * MIN);
+      });
+      expect(screen.getByTestId("usage-cooldown")).toBeInTheDocument();
+      unmount();
+      expect(vi.getTimerCount()).toBe(before);
+    });
+
+    it("a cooldown arriving after render shows without a reload", () => {
+      const { rerender } = card(claudeAccount());
+      expect(screen.queryByTestId("usage-cooldown")).toBeNull();
+      rerender(<UsageCard usage={claudeAccount({ cooldown: cooldown() })} displayAs="used" refresh={idle} />);
+      expect(screen.getByTestId("usage-cooldown")).toBeInTheDocument();
+      rerender(<UsageCard usage={claudeAccount({ cooldown: null })} displayAs="used" refresh={idle} />);
+      expect(screen.queryByTestId("usage-cooldown")).toBeNull();
+    });
+
+    it("cooldown_hidden_when_expired_or_malformed", () => {
+      const cases: unknown[] = [
+        cooldown({ until: new Date(FIXTURE_NOW - MIN).toISOString() }),
+        cooldown({ until: new Date(FIXTURE_NOW).toISOString() }),
+        { scope: "account", reason: "rejected" },
+        { until: "soon" },
+        { until: 42 },
+        "rate limited",
+        null,
+      ];
+      for (const bad of cases) {
+        const { unmount } = card(claudeAccount({ cooldown: bad as UsageCooldown }));
+        expect(screen.queryByTestId("usage-cooldown")).toBeNull();
+        expect(root()).toHaveTextContent("Claude");
+        unmount();
+      }
+    });
+
+    it("cooldown_model_scope_and_fallback_wording", () => {
+      card(claudeAccount({ cooldown: cooldown({ scope: "model", model: "claude-opus-4", reason: "fallback" }) }));
+      expect(screen.getByTestId("usage-cooldown-until")).toHaveTextContent("claude-opus-4 only · reset time unknown");
+      cleanup();
+      card(claudeAccount({ cooldown: cooldown({ scope: "model", model: "claude-opus-4", window: "weekly_model" }) }));
+      expect(screen.getByTestId("usage-cooldown-until")).toHaveTextContent("weekly limit for claude-opus-4");
+      expect(screen.getByTestId("usage-cooldown-until")).not.toHaveTextContent("reset time unknown");
+      cleanup();
+      card(claudeAccount({ cooldown: cooldown({ window: "weekly" }) }));
+      expect(screen.getByTestId("usage-cooldown-until")).toHaveTextContent("weekly window");
+    });
+
+    it("cooldown_model_text_is_escaped_and_truncated", () => {
+      const evil = `<img src=x onerror="alert(1)">${"x".repeat(300)}`;
+      const { container } = card(claudeAccount({ cooldown: cooldown({ scope: "model", model: evil }) }));
+      expect(container.querySelector("img")).toBeNull();
+      const line = screen.getByTestId("usage-cooldown-until");
+      expect(line).toHaveTextContent('<img src=x onerror="alert(1)">');
+      expect(line).toHaveTextContent("…");
+      expect(line.textContent ?? "").not.toContain("x".repeat(100));
+      expect((line.textContent ?? "").length).toBeLessThan(120);
+    });
+
+    it("observed_window_status_tone_without_percent", () => {
+      const windows = [
+        observed({ id: "five_hour", usedPct: null, status: "rejected" }),
+        observed({ id: "weekly", label: "Weekly", usedPct: null, status: "allowed_warning" }),
+        observed({ id: "other", label: "Other", usedPct: null, status: "allowed" }),
+      ];
+      card(claudeAccount({ report: { status: "available", windows, fetchedAt: new Date(FIXTURE_NOW).toISOString() } }));
+      const rejected = within(screen.getByTestId("usage-window-five_hour")).getByTestId("usage-window-status");
+      expect(rejected).toHaveTextContent("Limit reached");
+      expect(rejected).toHaveAttribute("data-tone", "danger");
+      expect(rejected).toHaveClass("text-destructive");
+      const warning = within(screen.getByTestId("usage-window-weekly")).getByTestId("usage-window-status");
+      expect(warning).toHaveTextContent("Near limit");
+      expect(warning).toHaveAttribute("data-tone", "warning");
+      expect(warning).toHaveClass("text-warning");
+      // No percent and nothing to say: the old em dash over an empty meter.
+      expect(within(screen.getByTestId("usage-window-other")).queryByTestId("usage-window-status")).toBeNull();
+      expect(screen.getByTestId("usage-window-other")).toHaveTextContent("—");
+      // The status word replaces the empty meter; the percent-less "allowed" row keeps it.
+      expect(within(screen.getByTestId("usage-window-five_hour")).queryByRole("progressbar")).toBeNull();
+      expect(within(screen.getByTestId("usage-window-other")).getByRole("progressbar")).toBeInTheDocument();
+    });
+
+    it("a percent wins over the status word", () => {
+      const windows = [observed({ usedPct: 40, status: "rejected" })];
+      card(claudeAccount({ report: { status: "available", windows, fetchedAt: new Date(FIXTURE_NOW).toISOString() } }));
+      const row = screen.getByTestId("usage-window-five_hour");
+      expect(row).toHaveTextContent("40%");
+      expect(within(row).queryByTestId("usage-window-status")).toBeNull();
+    });
+
+    it("observed_label_not_shown_for_fetched_windows", () => {
+      const windows = [
+        { id: "five_hour", label: "5-hour", usedPct: 31, source: "fetched", status: "allowed" },
+        { id: "weekly", label: "Weekly", usedPct: 54 },
+      ];
+      card(claudeAccount({ report: { status: "available", windows, fetchedAt: new Date(FIXTURE_NOW).toISOString() } }));
+      expect(screen.queryByText("from recent traffic")).toBeNull();
+      expect(screen.queryByTestId("usage-window-observed")).toBeNull();
+    });
+
+    it("long names wrap or truncate instead of widening the card", () => {
+      const model = "claude-opus-4-with-an-unreasonably-long-model-identifier-1234567890";
+      card(
+        claudeAccount({
+          displayName: "A very long account display name that keeps going and going",
+          cooldown: cooldown({ scope: "model", model, window: "weekly_model", reason: "fallback" }),
+        }),
+      );
+      expect(screen.getByTestId("usage-cooldown-until")).toHaveClass("break-words", "min-w-0");
+      expect(screen.getByText(/A very long account/)).toHaveClass("truncate");
+    });
   });
 });

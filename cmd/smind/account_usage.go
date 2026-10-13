@@ -36,6 +36,42 @@ type accountUsageEntry struct {
 	InFlight       bool          `json:"inFlight"`
 	LastError      *string       `json:"lastError"`
 	Report         *quota.Report `json:"report"`
+
+	// Cooldown is the daemon's passive rejection cooldown for the account,
+	// absent when none is active.
+	Cooldown *accountUsageCooldown `json:"cooldown,omitempty"`
+}
+
+// accountUsageCooldown mirrors the optional `cooldown` key of an
+// account.usage row. Model comes from the client and is never printed raw.
+type accountUsageCooldown struct {
+	Until  time.Time `json:"until"`
+	Scope  string    `json:"scope"`
+	Model  string    `json:"model,omitempty"`
+	Reason string    `json:"reason"`
+	Window string    `json:"window,omitempty"`
+}
+
+// UnmarshalJSON reads until as a string and parses it here, so a malformed or
+// mistyped value (or key) leaves this one cooldown without an end, which the
+// renderer skips, instead of failing the decode of the whole result.
+func (c *accountUsageCooldown) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Until  string `json:"until"`
+		Scope  string `json:"scope"`
+		Model  string `json:"model"`
+		Reason string `json:"reason"`
+		Window string `json:"window"`
+	}
+	*c = accountUsageCooldown{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	c.Scope, c.Model, c.Reason, c.Window = raw.Scope, raw.Model, raw.Reason, raw.Window
+	if until, err := time.Parse(time.RFC3339, raw.Until); err == nil {
+		c.Until = until
+	}
+	return nil
 }
 
 type accountUsageResponse struct {
@@ -144,6 +180,9 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 		header += ")"
 	}
 	fmt.Fprintf(w, "%s\n", header)
+	if e.Cooldown != nil && e.Cooldown.Until.After(now) {
+		fmt.Fprintf(w, "  cooling down until %s (%s)\n", cooldownTime(e.Cooldown.Until, now), cooldownWhat(e.Cooldown))
+	}
 
 	switch {
 	case e.Report == nil:
@@ -166,12 +205,17 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 			pct := "—"
 			if win.UsedPct != nil {
 				pct = fmt.Sprintf("%d%% used", int(math.Round(*win.UsedPct)))
+			} else if win.Status == "rejected" || win.Status == "allowed_warning" {
+				pct = cleanText(win.Status)
 			}
 			line := fmt.Sprintf("  %s\t%s", windowLabel(win), pct)
 			if win.ResetsAt != nil && win.ResetsAt.After(now) {
 				line += " · resets in " + formatCountdown(win.ResetsAt.Sub(now))
 			} else if win.ResetsAt != nil {
 				line += " · reset"
+			}
+			if win.Source == "observed" {
+				line += " · from recent traffic"
 			}
 			fmt.Fprintln(tw, line)
 		}
@@ -200,6 +244,44 @@ func renderAccountUsageOne(w io.Writer, e *accountUsageEntry, refresh bool, now 
 	if e.InFlight {
 		fmt.Fprintln(w, "  still refreshing…")
 	}
+}
+
+// cooldownTime renders until in local time: the clock alone on the same
+// local calendar day as now, otherwise with the date.
+func cooldownTime(until, now time.Time) string {
+	until, now = until.Local(), now.Local()
+	if until.YearDay() == now.YearDay() && until.Year() == now.Year() {
+		return until.Format("15:04")
+	}
+	return until.Format("Jan 2 15:04")
+}
+
+// cooldownWhat names what was rejected, e.g. "5-hour window rejected".
+func cooldownWhat(c *accountUsageCooldown) string {
+	model := cleanText(c.Model)
+	what := "rate limit"
+	phrased := false
+	switch c.Window {
+	case "five_hour":
+		what = "5-hour window"
+	case "weekly":
+		what = "weekly window"
+	case "weekly_model":
+		phrased = true
+		if model != "" {
+			what = "weekly limit for " + model
+		} else {
+			what = "weekly model limit"
+		}
+	}
+	if c.Scope == "model" && model != "" && !phrased {
+		what += " for " + model
+	}
+	what += " rejected"
+	if c.Reason == "fallback" {
+		what += ", reset time unknown"
+	}
+	return what
 }
 
 // windowLabel prefers the human Label, falling back to ID; shortLabel is
