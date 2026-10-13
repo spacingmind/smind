@@ -169,7 +169,7 @@ light cluster at x=16..76, y=17..31; Playwright drives the app's own Cmd+B short
 - DC-AC5: fullscreen: toggle x=10, strip pad 46, header inset 0, panel back to rounded + bordered (unit tests +
   `*-4-fullscreen-*.png`).
 - DC-AC6: Windows/Linux at 1280/900/640: caption buttons flush with the right edge, no overlap with header actions.
-- DC-AC7/8: unit tests; full web suite 2338 passing; `task test`, `task lint`, `task build` green.
+- DC-AC7/8: unit tests; full web suite 2340 passing; `task test`, `task lint`, `task build` green.
 - Real macOS: the Human's session was locked (`CGSSessionScreenIsLocked=1`) for the whole run, so the
   WKWebView never painted and full-screen captures are black. A window capture of the real bundle
   (`/tmp/smind-tl/shots/real-new-locked.png`, real macOS) does confirm the lights' real geometry: three circles
@@ -178,3 +178,15 @@ light cluster at x=16..76, y=17..31; Playwright drives the app's own Cmd+B short
   `desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/smind.app`; run with
   `HOME=<tmp> SMIND_DAEMON_URL=http://127.0.0.1:<sandbox port>` and capture with `screencapture -x -o -l <id>` once
   the screen is unlocked.
+
+### Adversarial review (Sonnet peer, read-only)
+
+- Fixed: double (2px) divider on the macOS collapsed rail (the extra in-panel seam is gone; the main content's own
+  left border is the single line); strip left padding now transitions with the strip so fullscreen enter/exit
+  doesn't jump while the toggle glides; added tests for compact (single header toggle, 92px inset, no overlay),
+  Windows rail strip, fullscreen strip/header/toggle reclaim.
+- Accepted (documented): the "smind" wordmark is dropped for sidebar widths 192..~239px on macOS (min width
+  cannot fit it beside the lights + toggle zone); expanding from the rail removes the bar in one frame, so the
+  lights may straddle the returning corner for a few ease-out frames (<~25ms).
+- Confirmed no problem: stacking (overlay z-30 < Settings z-40 < Radix z-50, inside the inert shell), drag regions,
+  drag-resize, isMobile flip, duplicate toggles, browser build.

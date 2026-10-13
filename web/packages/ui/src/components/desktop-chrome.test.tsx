@@ -325,7 +325,9 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })[0]).toBe(toggle);
     expect(toggle).toHaveFocus();
     expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
-    expect(screen.getByTestId("sidebar-rail-seam")).toBeInTheDocument();
+    // The rail/content divider is the main content's own left border (one 1px line, not two).
+    expect(screen.queryByTestId("sidebar-rail-seam")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-main-content")).toHaveClass("border-l");
     // The corner and left border that would cut through the lights are gone from the panel.
     expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
     expect(screen.getByTestId("app-content-panel")).not.toHaveClass("border-l");
@@ -333,6 +335,39 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     act(() => win.emit({ maximized: false, fullscreen: true }));
     expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
     expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+    expect(screen.getByTestId("app-main-content")).not.toHaveClass("border-l");
+    // ... and the strip/header reclaim the lights' zone: the toggle moves to the rail, strip pads 46, header needs no inset.
+    expect(screen.getByTestId("window-sidebar-toggle").style.left).toBe("10px");
+    expect(screen.getByTestId("sidebar-expanded-header").style.paddingLeft).toBe("46px");
+    expect(screen.getByTestId("app-header").style.paddingLeft).toBe("");
+  });
+
+  it("App on Windows: the rail keeps an empty strip under the single window-level toggle and the panel keeps its corner", async () => {
+    mockPlatform({ desktop: true, os: "windows" });
+    const { App } = await import("@/App");
+    render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+    const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
+    fireEvent.click(toggle);
+    expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+    expect(screen.getByTestId("sidebar-rail-inset")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+  });
+
+  it("compact layout: no window-level toggle; the header hosts the single toggle past the lights", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const prev = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 500 });
+    try {
+      const { App } = await import("@/App");
+      render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+      await screen.findByTestId("app-header");
+      expect(screen.queryByTestId("window-sidebar-toggle")).not.toBeInTheDocument();
+      expect(screen.getAllByRole("button", { name: "Toggle Sidebar" })).toHaveLength(1);
+      expect(screen.getByTestId("app-header").style.paddingLeft).toBe("92px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prev });
+    }
   });
 
   it.each([

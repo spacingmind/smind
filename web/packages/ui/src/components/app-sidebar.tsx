@@ -764,7 +764,7 @@ export function AppSidebar({
           // toggle (or just the lights in a compact sheet), draggable around
           // its buttons.
           data-tauri-drag-region={windowToggle || lights ? "deep" : undefined}
-          className="@container/strip flex h-12 items-center gap-2 px-2 group-data-[collapsible=icon]:hidden"
+          className="@container/strip flex h-12 items-center gap-2 px-2 transition-[padding-left] duration-200 ease-out group-data-[collapsible=icon]:hidden motion-reduce:transition-none"
           style={
             windowToggle
               ? { paddingLeft: toggleZoneEndPx(desktopOS, fullscreen) }

@@ -1207,18 +1207,11 @@ function AppShell({ connect }: { connect: () => Promise<WsClient> }) {
           >
             {sidebarElement}
             {railUnderLights && (
-              <>
-                <div
-                  aria-hidden
-                  data-testid="sidebar-rail-bar"
-                  className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[49px] border-b border-border/50 bg-panel animate-in fade-in duration-200 motion-reduce:animate-none"
-                />
-                <div
-                  aria-hidden
-                  data-testid="sidebar-rail-seam"
-                  className="pointer-events-none absolute inset-y-0 top-[49px] right-0 z-10 w-px bg-border"
-                />
-              </>
+              <div
+                aria-hidden
+                data-testid="sidebar-rail-bar"
+                className="pointer-events-none absolute inset-x-0 top-0 z-10 h-[49px] border-b border-border/50 bg-panel animate-in fade-in duration-200 motion-reduce:animate-none"
+              />
             )}
           </div>
           {sidebarOpen && (
