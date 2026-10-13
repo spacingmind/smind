@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.11.0](https://github.com/spacingmind/smind/compare/v0.10.0...v0.11.0) (2026-10-13)
+
+
+### Features
+
+* bundled orchestration skills + smind skill install|ls|uninstall ([#279](https://github.com/spacingmind/smind/issues/279)) ([90469fb](https://github.com/spacingmind/smind/commit/90469fbc3b1eb78280108cee6dd8fb67dbc833dd))
+* default home dir is ~/.smind, with one-time migration from ~/.spacingmind ([#294](https://github.com/spacingmind/smind/issues/294)) ([9f71b49](https://github.com/spacingmind/smind/commit/9f71b49e618bbcbfc531ff8d47a3c06057d4a4e7))
+* **desktop:** manage a native Windows daemon instead of WSL2 ([#311](https://github.com/spacingmind/smind/issues/311)) ([aaf0cd9](https://github.com/spacingmind/smind/commit/aaf0cd940e756439eda766f28b206bb72f3aaf44))
+* **desktop:** signed auto-update via the Tauri 2 updater ([#274](https://github.com/spacingmind/smind/issues/274)) ([8b6ecf6](https://github.com/spacingmind/smind/commit/8b6ecf6c28cbf3adaab5463cec5dfcccb8f09c48))
+* **mcp:** discovery tools (workspace/task/run/provider/profile) + server instructions ([#264](https://github.com/spacingmind/smind/issues/264)) ([6b4d15b](https://github.com/spacingmind/smind/commit/6b4d15b02cc9c072288cf9a063f85ebd082c8ff6))
+* **mcp:** task_set_mode, task_options, task_set_option, task_wait wait-any (ADR-0019 [#6](https://github.com/spacingmind/smind/issues/6) guarded) ([#269](https://github.com/spacingmind/smind/issues/269)) ([45d7933](https://github.com/spacingmind/smind/commit/45d793331961e3e1ae5e361a08122f3c7bf98cc5))
+* model selection on runs and profiles (ADR-0025) ([#272](https://github.com/spacingmind/smind/issues/272)) ([e4ec6b4](https://github.com/spacingmind/smind/commit/e4ec6b46e946e53fe0c96e2cd08c66f3db262338))
+* native Windows daemon runtime parity (setup scripts, shutdown API, secret ACLs, claude.exe launcher) ([#310](https://github.com/spacingmind/smind/issues/310)) ([7a1dff2](https://github.com/spacingmind/smind/commit/7a1dff22f0c75a997198ed7f6f2b38129f0e6e22))
+* per-run MCP servers indicator, light-theme logo tile, plan housekeeping ([#258](https://github.com/spacingmind/smind/issues/258)) ([5302f89](https://github.com/spacingmind/smind/commit/5302f8936dd446ce78f6b6557fc3e62b0de7c683))
+* **queue:** structured cancel_kind on chat_queue items + Step 3 dogfood gap log ([#265](https://github.com/spacingmind/smind/issues/265)) ([c2d516d](https://github.com/spacingmind/smind/commit/c2d516d9f2a47fc34774518ef45f6b449b03895c))
+* **quota:** account usage report types and Anthropic/ChatGPT fetchers (ADR-0028 PR-A1) ([#298](https://github.com/spacingmind/smind/issues/298)) ([3ea8f3b](https://github.com/spacingmind/smind/commit/3ea8f3b1140a9e872dbb1d435dc667a116774098))
+* **quota:** passive rejection cooldown from upstream rate-limit headers (ADR-0028 PR-F) ([#308](https://github.com/spacingmind/smind/issues/308)) ([36aa220](https://github.com/spacingmind/smind/commit/36aa220770a2908427a54aaff39d532ace455849))
+* **quota:** surface cooldowns in account.usage, CLI and UI; keep affinity on transient 429 ([#317](https://github.com/spacingmind/smind/issues/317)) ([86b7ca2](https://github.com/spacingmind/smind/commit/86b7ca25b6014998b07924db844f92bf539a7fc9))
+* **quota:** usage poller with daemon-enforced call budget (ADR-0028 PR-A2) ([#302](https://github.com/spacingmind/smind/issues/302)) ([978a841](https://github.com/spacingmind/smind/commit/978a841944652f7055710d69e6a4923ae78bbe14))
+* **release:** ship native Windows daemon binaries with every release ([#313](https://github.com/spacingmind/smind/issues/313)) ([38c2dd4](https://github.com/spacingmind/smind/commit/38c2dd4751a9f8ac55cdfadcf0ebe4574c79d7a5))
+* **routing:** route around exhausted accounts from cached usage windows (ADR-0028 PR-B) ([#304](https://github.com/spacingmind/smind/issues/304)) ([15b89ca](https://github.com/spacingmind/smind/commit/15b89ca26baa07f73161b628854463387b17f768))
+* **runs:** per-tree concurrent-run guard (orchestration.maxConcurrentRunsPerTree) ([#289](https://github.com/spacingmind/smind/issues/289)) ([26a31e1](https://github.com/spacingmind/smind/commit/26a31e1f53d482b51642007a1bc6c0483c03ab3f))
+* task from base ref/branch/PR + task_archive with active-run guard ([#266](https://github.com/spacingmind/smind/issues/266)) ([d6dcd2a](https://github.com/spacingmind/smind/commit/d6dcd2a2456a44dc94bed965a39fc18c55fe0239))
+* **web:** chat timeline rail and borderless messages ([#318](https://github.com/spacingmind/smind/issues/318)) ([f09df1b](https://github.com/spacingmind/smind/commit/f09df1b00d1b3870d76a73e5c44df49dce7988f7))
+* **web:** combined provider + model picker (Paseo-style) ([#303](https://github.com/spacingmind/smind/issues/303)) ([4c8526c](https://github.com/spacingmind/smind/commit/4c8526cc591a6438b5282f5e4189160fb0180e7c))
+* **web:** composer uses the server-side prompt queue (ADR-0021 §9) ([#259](https://github.com/spacingmind/smind/issues/259)) ([081c3a4](https://github.com/spacingmind/smind/commit/081c3a461549712d4ffec94e5a581fcd11170122))
+* **web:** hover actions on chat messages ([#322](https://github.com/spacingmind/smind/issues/322)) ([8b06bfe](https://github.com/spacingmind/smind/commit/8b06bfeb2c1565d5d081e9fe2fbb74b74346f5a1))
+* **web:** model picker, profile model field, run model chip, live model option (ADR-0025) ([#276](https://github.com/spacingmind/smind/issues/276)) ([683d14d](https://github.com/spacingmind/smind/commit/683d14dad4dddc1abeaeed4418a4a91615656fad))
+* **web:** nested, collapsible task tree in the sidebar with attention rollup ([#293](https://github.com/spacingmind/smind/issues/293)) ([50b2c78](https://github.com/spacingmind/smind/commit/50b2c786644391d0cfd41ec0971304143488ff6e))
+* **web:** optional plan-usage summary in the sidebar footer (ADR-0028 PR-D2) ([#315](https://github.com/spacingmind/smind/issues/315)) ([d55e654](https://github.com/spacingmind/smind/commit/d55e65470f7711d9882caa3ddd9a9a4b7b91d738))
+* **web:** plan usage in each chat's context-usage hover (ADR-0028 PR-E) ([#309](https://github.com/spacingmind/smind/issues/309)) ([a4de74e](https://github.com/spacingmind/smind/commit/a4de74e1e2400760029568a3962f299580530f89))
+* **web:** plan usage in Settings and a Usage modal (ADR-0028 PR-D1) ([#307](https://github.com/spacingmind/smind/issues/307)) ([4bf8edd](https://github.com/spacingmind/smind/commit/4bf8eddf46482e6a9c7d8881cdffc6c576c68f5e))
+* **web:** settings as a full-screen screen with its own sidebar ([#297](https://github.com/spacingmind/smind/issues/297)) ([a8542ff](https://github.com/spacingmind/smind/commit/a8542ffc039013c55275bd5fe81da8b0c20c6cbc))
+* **web:** sidebar footer actions, smoother resize/toggle, themed scrollbars ([#306](https://github.com/spacingmind/smind/issues/306)) ([5f614fb](https://github.com/spacingmind/smind/commit/5f614fb43d3275444e30da6bce1237d85fddb407))
+* **web:** sidebar polish — single-line rows, scoped actions, keyboard, persistence ([#300](https://github.com/spacingmind/smind/issues/300)) ([6ea1985](https://github.com/spacingmind/smind/commit/6ea1985930971b62da86c12488c82eaa80bccecc))
+* **web:** task header lineage (spawned-by, children strip, tree rollups) and archive confirm ([#295](https://github.com/spacingmind/smind/issues/295)) ([90409bc](https://github.com/spacingmind/smind/commit/90409bc296a4467e9542498be77d179a9ac1e2e3))
+* **web:** usage in the UI — run pill, chat total, Settings → Usage (ADR-0020) ([#262](https://github.com/spacingmind/smind/issues/262)) ([2041b0f](https://github.com/spacingmind/smind/commit/2041b0f986b800268e344be4a862e9b09474e0f5))
+* **web:** worktree setup scripts editor, task setup badge/log/retry, port chip (ADR-0024) ([#275](https://github.com/spacingmind/smind/issues/275)) ([6308f34](https://github.com/spacingmind/smind/commit/6308f34240b221134870a356d2a16d9c3bc258f1))
+* **web:** ZCode-style app header and Paseo-style tabs ([#316](https://github.com/spacingmind/smind/issues/316)) ([1cbe6de](https://github.com/spacingmind/smind/commit/1cbe6de31cf0f54eeb9ced93e9576ae7f86bde2b))
+* **web:** ZCode/Paseo-style composer ([#301](https://github.com/spacingmind/smind/issues/301)) ([3ffad8e](https://github.com/spacingmind/smind/commit/3ffad8ec9093fc4894b68daa725b9781cad59266))
+* worktree setup/teardown scripts + per-task ports (ADR-0024) ([#270](https://github.com/spacingmind/smind/issues/270)) ([80823fb](https://github.com/spacingmind/smind/commit/80823fb0f1659a3e10e28d1b92d1710382fc0c08))
+* **wsapi,mcp:** task.tree read model, task_tree and task_wait childrenOf ([#291](https://github.com/spacingmind/smind/issues/291)) ([7167736](https://github.com/spacingmind/smind/commit/71677361e9e0a9a7abebdbee80d5bffa8492e9db))
+* **wsapi:** account.usage RPC/event, smind account usage, MCP account_usage (ADR-0028 PR-C) ([#305](https://github.com/spacingmind/smind/issues/305)) ([65059f6](https://github.com/spacingmind/smind/commit/65059f6d3e56c9523db5c1a8f68bd4da70498206))
+
+
+### Bug Fixes
+
+* **cli:** open the OAuth URL intact on Windows; stub the opener in tests ([#281](https://github.com/spacingmind/smind/issues/281)) ([e1b78a0](https://github.com/spacingmind/smind/commit/e1b78a0623f12cf3bbb12e5fff4de4560c8e6fb2))
+* **desktop:** Windows tray/menu/Find/Ctrl+Q + devtools, theme, scrollbars, VS Code on WSL (QA W3/W4) ([#285](https://github.com/spacingmind/smind/issues/285)) ([1ec1e25](https://github.com/spacingmind/smind/commit/1ec1e256c5d9e9471fdbc9244475d457b68df28c))
+* **desktop:** WSL daemon start + badge clears on permission resolved (Windows QA W1/W2) ([#283](https://github.com/spacingmind/smind/issues/283)) ([70dc67d](https://github.com/spacingmind/smind/commit/70dc67da361a9385976e9063d24565cc7aecc728))
+* GLM pin 1.14.0, permission detail (daemon/CLI/MCP/web), task_wait state, stop note ([#271](https://github.com/spacingmind/smind/issues/271)) ([c09ee15](https://github.com/spacingmind/smind/commit/c09ee15287c2c80a9b104bf913e5af40c497b86c))
+* **mcp:** dogfood fixes — task_status/task_logs blocker, task_wait ignorePermissionIds, review tools, CLI deny, promptFile ([#273](https://github.com/spacingmind/smind/issues/273)) ([0626d14](https://github.com/spacingmind/smind/commit/0626d14ce8b7918373b83616d9bb4aa40dbe66d6))
+* terminal keeps shell keys, live runs via permission.pending, workspace context menu, CLI task approve (Windows QA) ([#284](https://github.com/spacingmind/smind/issues/284)) ([21ea3ad](https://github.com/spacingmind/smind/commit/21ea3ad063b6d08dfcd920998d50b9bc20dbf9e3))
+* **ui:** send the terminal's fitted size on attach ([#282](https://github.com/spacingmind/smind/issues/282)) ([17d0c6a](https://github.com/spacingmind/smind/commit/17d0c6acc33a8df3f3dc66dfdbdcd8c5226cb508))
+* **web:** distinguishable workspaces in the collapsed sidebar rail ([#314](https://github.com/spacingmind/smind/issues/314)) ([17caa07](https://github.com/spacingmind/smind/commit/17caa073c8c857369c02dcf92b94e8f87f2c5627))
+* **web:** hide the normal end_turn stop reason in the run footer ([#326](https://github.com/spacingmind/smind/issues/326)) ([913448e](https://github.com/spacingmind/smind/commit/913448e66a85464d0da4183a3bf3b283448dd5ff))
+* **web:** model/profile picker parity with Paseo ([#323](https://github.com/spacingmind/smind/issues/323)) ([6a8ba27](https://github.com/spacingmind/smind/commit/6a8ba2750e49daf8f1808ac4ed508d5bdba13e76))
+* **web:** no gutter between the sidebar and the inset panel ([#321](https://github.com/spacingmind/smind/issues/321)) ([bafa216](https://github.com/spacingmind/smind/commit/bafa216ce91ed851e64d5319accc71e2b46287d8))
+* **web:** one meta row above the chat (task total + lineage chips merged into the chat meta row) ([#324](https://github.com/spacingmind/smind/issues/324)) ([3a0c51a](https://github.com/spacingmind/smind/commit/3a0c51abcc9b092376e7cc03da650b6fa3329259))
+* **web:** readable run footers ([#328](https://github.com/spacingmind/smind/issues/328)) ([2b25a3d](https://github.com/spacingmind/smind/commit/2b25a3de270cbacbedce6b0154426eeac7ffe429))
+* **web:** sticky sidebar header, tighter indentation, quieter unread dots ([#320](https://github.com/spacingmind/smind/issues/320)) ([37abdf6](https://github.com/spacingmind/smind/commit/37abdf6973150729816e982c6802c46e7a130c32))
+* **web:** unified live-run composer controls, quiet ACP noise, borderless permission dock ([#319](https://github.com/spacingmind/smind/issues/319)) ([594f372](https://github.com/spacingmind/smind/commit/594f3725acdc1c1c6fc400a03a47021076c8e7d0))
+
 ## [0.10.0](https://github.com/spacingmind/smind/compare/v0.9.1...v0.10.0) (2026-10-11)
 
 
