@@ -113,7 +113,7 @@ describe("TaskDetailPane", () => {
 
     const entry = screen.getByTestId("run-entry");
     expect(within(entry).getByTestId("timeline-assistant")).toHaveTextContent("hello world");
-    expect(within(entry).getByTestId("run-status")).toHaveTextContent("done");
+    expect(within(entry).getByTestId("run-meta")).toHaveAttribute("data-status", "done");
   });
 
   it("streams a running run's live chunks into the timeline as they arrive, not buffered until the terminal event", async () => {
@@ -128,7 +128,7 @@ describe("TaskDetailPane", () => {
     client.emit("run.attach", 0, "chunk", { text: "partial " });
     await flush();
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial");
-    expect(screen.getByTestId("run-status")).toHaveTextContent("running");
+    expect(screen.getByTestId("run-status")).toHaveTextContent(/^Working…/);
 
     client.emit("run.attach", 0, "chunk", { text: "and more" });
     await flush();
@@ -136,7 +136,7 @@ describe("TaskDetailPane", () => {
 
     client.nth("run.attach", 0).resolve({ runId: "run-1", stopReason: "end_turn" });
     await flush();
-    expect(screen.getByTestId("run-status")).toHaveTextContent("done");
+    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "done");
   });
 
   it("shows the chat timeline rail once two runs overflow a wide pane", async () => {
@@ -257,7 +257,7 @@ describe("TaskDetailPane", () => {
     expect(startIdx).toBeLessThan(attachIdx);
 
     expect(screen.getByTestId("run-entry")).toBeInTheDocument();
-    expect(screen.getByTestId("run-status")).toHaveTextContent("running");
+    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
   });
 
   it("a rapid double-switch (A -> B -> A) discards task B's now-stale fetch instead of letting it overwrite the re-selected task A view", async () => {
@@ -1268,20 +1268,45 @@ describe("chat meta row (app-header-and-tabs)", () => {
 });
 
 describe("TaskDetailPane message hover actions", () => {
-  async function renderWithDoneRun(overrides: Partial<RunSummary> = {}) {
+  async function renderWithDoneRun(overrides: Partial<RunSummary> = {}, stopReason = "end_turn") {
     const client = new FakeWsClient();
     render(<TaskDetailPane client={client} task={TASK_A} chat={CHAT_A} isDefaultChat />);
-    client.nth("run.list", 0).resolve([doneRun(overrides)]);
+    client.nth("run.list", 0).resolve([doneRun({ ...overrides, StopReason: stopReason })]);
     await flush();
     client.nth("run.logs", 0).resolve({
       runId: "run-1",
       status: "done",
-      stopReason: "end_turn",
-      events: [{ type: "chunk", text: "answer" }, { type: "done", stopReason: "end_turn" }],
+      stopReason,
+      events: [{ type: "chunk", text: "answer" }, { type: "done", stopReason }],
     } satisfies RunLogsResult);
     await flush();
     return client;
   }
+
+  it("Continue sends \"Continue\" with the run's provider and model through the queue path", async () => {
+    const client = await renderWithDoneRun({
+      Provider: "glm",
+      Model: "glm-5.3",
+      PermissionMode: "accept_edits",
+      AutoAccept: true,
+      ThinkingLevel: "extended",
+    }, "max_tokens");
+    fireEvent.click(await screen.findByTestId("run-continue"));
+    await flush();
+    const startCall = client.nth("run.start", 0);
+    expect(startCall.params).toEqual({
+      taskId: TASK_A.ID,
+      chatId: CHAT_A.ID,
+      provider: "glm",
+      prompt: "Continue",
+      whenBusy: "queue",
+      permissionMode: "accept_edits",
+      autoAccept: true,
+      thinkingLevel: "extended",
+      model: "glm-5.3",
+    });
+    expect(client.calls.some((c) => c.method === "task.prompt")).toBe(false);
+  });
 
   it("Re-run submits the same prompt, provider, model and permission with whenBusy queue", async () => {
     const client = await renderWithDoneRun({

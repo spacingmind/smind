@@ -111,6 +111,19 @@ export function TaskDetailPane({
   // pre-existing behavior.
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const providerLabels = useMemo(() => Object.fromEntries(providers.map((p) => [p.id, p.label ?? p.id])), [providers]);
+  // The run footer's human model labels: every catalog entry plus the
+  // provider's default model under a bare `${id}/` key (the footer's
+  // fallback order lives in run-footer-model.ts).
+  const modelLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const p of providers) {
+      for (const m of p.models ?? []) {
+        labels[`${p.id}/${m.id}`] = m.label;
+        if (m.default) labels[`${p.id}/`] = m.label;
+      }
+    }
+    return labels;
+  }, [providers]);
   useEffect(() => {
     if (!client) return;
     let cancelled = false;
@@ -260,21 +273,23 @@ export function TaskDetailPane({
   const queueRefreshRef = useRef(queue.refresh);
   queueRefreshRef.current = queue.refresh;
   const rerunsInFlight = useRef(new Set<string>());
-  const rerun = useCallback((run: RunEntry) => {
+  // The shared path under Re-run and the footer's Continue: submit `prompt`
+  // on the run's own config. Provider, model and thinking come from the
+  // run; the permission settings come from what the composer shows NOW
+  // (when it is on the same provider), so a re-submit never silently
+  // replays a looser mode the old run was live-switched to.
+  const resubmit = useCallback((run: RunEntry, prompt: string) => {
     // One re-submit per run at a time: a double click must not start (or queue) the prompt twice.
     if (rerunsInFlight.current.has(run.id)) return;
     rerunsInFlight.current.add(run.id);
     setActionError(null);
-    // Provider, model and thinking come from the run; the permission settings come from what the
-    // composer shows NOW (when it is on the same provider), so a re-run never silently replays a
-    // looser mode the old run was live-switched to.
     const composer = runConfigRef.current;
     const permission =
       composer && composer.provider === run.provider
         ? { permissionMode: composer.permissionMode, autoAccept: composer.autoAccept }
         : { permissionMode: run.permissionMode, autoAccept: run.autoAccept };
     submitPromptRef
-      .current(run.provider, run.prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
+      .current(run.provider, prompt, permission, run.thinkingLevel, "queue", run.model || undefined)
       .then((result) => {
         // A queued prompt shows up in the composer's queue list straight away.
         if (result.kind === "queued") queueRefreshRef.current();
@@ -282,6 +297,8 @@ export function TaskDetailPane({
       .catch((err: unknown) => setActionError(err instanceof Error ? err.message : String(err)))
       .finally(() => rerunsInFlight.current.delete(run.id));
   }, []);
+  const rerun = useCallback((run: RunEntry) => resubmit(run, run.prompt), [resubmit]);
+  const continueRun = useCallback((run: RunEntry) => resubmit(run, "Continue"), [resubmit]);
   const editPrompt = useCallback((run: RunEntry) => {
     setActionError(null);
     setPrefill((prev) => ({ text: run.prompt, nonce: (prev?.nonce ?? 0) + 1 }));
@@ -389,7 +406,10 @@ export function TaskDetailPane({
                     onRetry={retryWithHigherEffort}
                     onRerun={rerun}
                     onEditPrompt={editPrompt}
+                    onContinue={continueRun}
                     providerLabels={providerLabels}
+                    modelLabels={modelLabels}
+                    isLatest={run.id === runs[runs.length - 1]?.id}
                   />
                 ))}
               </ul>
