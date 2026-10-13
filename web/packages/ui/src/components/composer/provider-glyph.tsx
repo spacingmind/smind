@@ -1,4 +1,4 @@
-import { Bot, Star } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 interface GlyphProps {
   size?: number;
@@ -32,10 +32,10 @@ export function ProviderGlyph({ provider, size = 16, className }: { provider: st
   const id = provider.toLowerCase();
   if (id.includes("claude")) return <MarkSvg size={size} className={className} d={CLAUDE_PATH} />;
   if (id.includes("codex")) return <MarkSvg size={size} className={className} d={CODEX_PATH} />;
-  return <Bot aria-hidden size={size} className={className} data-testid="provider-glyph" />;
+  return <Icons.agent aria-hidden size={size} className={className} data-testid="provider-glyph" />;
 }
 
 /** Profile glyph: Paseo's default profile mark (a star). Per-profile icon/colour is deferred (no store field). */
 export function ProfileGlyph({ size = 16, className }: GlyphProps) {
-  return <Star aria-hidden size={size} className={className} data-testid="profile-glyph" />;
+  return <Icons.defaultAgent aria-hidden size={size} className={className} data-testid="profile-glyph" />;
 }

@@ -1,12 +1,4 @@
-import {
-  FileDiff,
-  FileText,
-  Globe,
-  Search,
-  SquareTerminal,
-  Wrench,
-  type LucideIcon,
-} from "lucide-react";
+import { Icons, type IconComponent } from "@/lib/icons";
 
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
 
@@ -20,7 +12,7 @@ export type ToolIntent = "terminal" | "read" | "edit" | "search" | "fetch" | "ge
 
 export interface ToolRenderer {
   intent: ToolIntent;
-  icon: LucideIcon;
+  icon: IconComponent;
   /** Display name override; defaults to the wire tool name. */
   label?: string;
   /** The card's one-line summary, from the call's own input. Return "" to fall back to the daemon-supplied title. */
@@ -80,13 +72,13 @@ export function toolInput(item: TimelineToolCallItem): Record<string, unknown> {
 
 const TERMINAL: ToolRenderer = {
   intent: "terminal",
-  icon: SquareTerminal,
+  icon: Icons.terminal,
   summary: (input) => str(input, "command", "cmd") ?? "",
 };
 
 const READ: ToolRenderer = {
   intent: "read",
-  icon: FileText,
+  icon: Icons.fileText,
   summary: (input) => {
     const path = str(input, "file_path", "filePath", "path", "abs_path");
     if (!path) return "";
@@ -101,14 +93,14 @@ const READ: ToolRenderer = {
 
 const EDIT: ToolRenderer = {
   intent: "edit",
-  icon: FileDiff,
+  icon: Icons.fileEdit,
   summary: (input) => str(input, "file_path", "filePath", "path", "abs_path") ?? "",
   filePath: (input) => str(input, "file_path", "filePath", "path", "abs_path"),
 };
 
 const SEARCH: ToolRenderer = {
   intent: "search",
-  icon: Search,
+  icon: Icons.search,
   summary: (input) => {
     const query = str(input, "pattern", "query", "regex");
     const scope = str(input, "path", "glob", "include");
@@ -119,11 +111,11 @@ const SEARCH: ToolRenderer = {
 
 const FETCH: ToolRenderer = {
   intent: "fetch",
-  icon: Globe,
+  icon: Icons.web,
   summary: (input) => str(input, "url", "query") ?? "",
 };
 
-export const GENERIC_RENDERER: ToolRenderer = { intent: "generic", icon: Wrench };
+export const GENERIC_RENDERER: ToolRenderer = { intent: "generic", icon: Icons.tool };
 
 // The built-ins, registered rather than switched on. Both vocabularies
 // map onto the same six intents: Claude's explicit tool names and ACP's

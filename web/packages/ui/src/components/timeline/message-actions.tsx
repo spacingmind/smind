@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
-import { Check, Copy } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -105,7 +105,7 @@ export function CopyAction({
   return (
     <MessageAction
       label={copied ? "Copied" : label}
-      icon={copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+      icon={copied ? <Icons.check aria-hidden /> : <Icons.copy aria-hidden />}
       onClick={() => void copy(getText())}
       {...props}
     />

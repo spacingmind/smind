@@ -1,4 +1,4 @@
-import { GitCompare, GitBranch } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { type DiffStat } from "@/lib/diff-stat";
 
@@ -28,7 +28,7 @@ function DiffStatChip({ stat, onOpenDiff }: { stat: DiffStat; onOpenDiff: () => 
       onClick={onOpenDiff}
       className={`${CHIP_CLASS} transition-colors hover:bg-hover hover:text-foreground`}
     >
-      <GitCompare aria-hidden className="size-3 opacity-70" />
+      <Icons.diff aria-hidden className="size-3 opacity-70" />
       <span className="font-medium text-success">+{formatCompactCount(stat.additions)}</span>
       <span className="font-medium text-destructive">−{formatCompactCount(stat.deletions)}</span>
     </button>
@@ -51,7 +51,7 @@ function ConcurrencyChip({ chat, onJump }: { chat: { id: number; title: string }
       onClick={onJump}
       className={`${CHIP_CLASS} min-w-0 transition-colors hover:bg-hover hover:text-foreground`}
     >
-      <GitBranch aria-hidden className="size-3 shrink-0 text-warning" />
+      <Icons.branch aria-hidden className="size-3 shrink-0 text-warning" />
       <span className="shrink-0">Also running ·</span>
       <span className="max-w-48 truncate">{chat.title}</span>
     </button>

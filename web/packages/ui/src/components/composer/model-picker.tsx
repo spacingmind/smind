@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type JSX, type KeyboardEvent } from "react";
 
-import { ChevronDown } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import {
   CreateProfileRow,
@@ -528,7 +528,7 @@ export function ModelPicker(props: ModelPickerProps): JSX.Element {
     >
       <ProviderGlyph provider={selectedProvider} className="shrink-0" />
       <span className="max-w-[12rem] min-w-0 truncate max-sm:hidden">{label}</span>
-      <ChevronDown aria-hidden className="shrink-0" />
+      <Icons.chevronDown aria-hidden className="shrink-0" />
     </Button>
   );
 
