@@ -70,7 +70,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: desktop/src-tauri
+          workspaces: |
+            desktop/src-tauri
+            desktop/daemon-client
 
       # Release path: reuse the daemon this run's build-binaries job already
       # built (same ldflags/version as the GitHub Release asset).
@@ -98,8 +100,9 @@ jobs:
         if: inputs.daemon-version == ''
         run: git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
 
+      # Needed on both paths: besides building the daemon, the daemon-client
+      # tests `go run` a relay harness (tests/relay_harness_interop.rs).
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
-        if: inputs.daemon-version == ''
         with:
           go-version-file: go.mod
 

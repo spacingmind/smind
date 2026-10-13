@@ -15,6 +15,12 @@ pub fn sidecar_placeholder_name(target_os: &str, profile: &str, target: &str) ->
     if profile == "release" {
         return None;
     }
+    sidecar_path(target_os, target)
+}
+
+/// sidecar_path is where the staged daemon lives for `target`, regardless
+/// of profile; `None` on platforms with no sidecar.
+pub fn sidecar_path(target_os: &str, target: &str) -> Option<PathBuf> {
     let ext = match target_os {
         "macos" => "",
         "windows" => ".exe",
@@ -35,5 +41,7 @@ mod tests {
         assert_eq!(name("windows", "release", win), None, "release never writes a placeholder");
         assert_eq!(name("macos", "release", "aarch64-apple-darwin"), None);
         assert_eq!(name("linux", "debug", "x86_64-unknown-linux-gnu"), None);
+        assert_eq!(super::sidecar_path("windows", win), Some(PathBuf::from("binaries/smind-x86_64-pc-windows-msvc.exe")));
+        assert_eq!(super::sidecar_path("linux", "x86_64-unknown-linux-gnu"), None);
     }
 }

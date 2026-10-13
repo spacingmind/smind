@@ -105,9 +105,19 @@ page copy (separate repo).
 - [x] Rust: sidecar path, shared copy install, placeholder, remove download (peer-sonnet a8c3c1b4, 26517d2e, e583de74 — ACCEPTED by Lead after reading the full diff).
 - [x] Taskfile `desktop:win:daemon`, `desktop-windows.yml`, `release-please.yml` (Lead, 22cedfa5).
 - [x] README (peer-glm 0acf8066, ACCEPTED; installer file-name claim corrected by Lead).
-- [ ] Adversarial review of workflow + Rust.
-- [ ] PR + `desktop-windows` workflow green with the Verify bundle step.
+- [x] Adversarial review of workflow + Rust (reviewer 4e5f67f3 on #334; findings 1, 4, 5, 6 applied, 3 disproved by the green Windows `cargo test`, 7 (jq CRLF) not needed: the daemon reported `smind 0.11.1`; finding 2 -- the release-path artifact download -- still needs a `release-please` workflow_dispatch dry run, see AC3).
+- [x] PR #334 + `desktop-windows` workflow green with the Verify bundle step (push run 38389176580).
 
 ## Validation
 
-(filled in as the work lands)
+- **AC1** verified: `tauri.windows.conf.json` `externalBin`; Windows `tauri build` succeeded with the staged sidecar (run 38389176580). Placeholder naming: `sidecar_placeholder_name` test; release build refuses an empty placeholder (checked locally: `cargo build --release` panics).
+- **AC2** verified: `task desktop:win:daemon` ran on the `windows-latest` runner (PR path) and produced a daemon reporting `smind 0.11.1`.
+- **AC3 NOT yet verified**: the `release-please.yml` wiring (`needs: build-binaries`, `daemon-version`, artifact download + unzip in `desktop-windows.yml`) has never run. It needs a `release-please` `workflow_dispatch` dry run on this branch (publishes workflow artifacts only, no Release) -- left to the Human because dispatching it was not authorized in this session.
+- **AC4** verified: the push/PR run built the daemon in-job.
+- **AC5** verified on the real runner (run 38389176580, `Verify installers bundle smind.exe`): NSIS installer -> `smind.exe` 40,391,680 bytes; MSI -> `PFiles\smind\smind.exe` 40,391,680 bytes; both SHA-256-identical to the staged sidecar; `smind.exe version` -> `smind 0.11.1`.
+- **AC6/AC7/AC9** verified by unit tests on macOS and on the Windows runner (`cargo test` for `desktop/src-tauri` and `desktop/daemon-client` both ran green on `windows-latest`, which compiles the `cfg(windows)` install branch): `windows_install_sources_bundled_binary`, `windows_install_missing_bundled_binary_is_error`, `bundled_daemon_path_is_platform_named`, `windows_install_uses_bundled_source`, plus the unchanged `windows_update_stops_running_daemon_before_replacing_binary`. Rename-over-running-exe is retried 5 x 200 ms then reported with a "stop it first" hint; the old binary is kept.
+- **AC8** verified: the #311 tests pass unmodified.
+- **AC10** verified by reading Tauri's templates (`tauri-apps/tauri` master; the app locks tauri 2.11.6, so not version-pinned -- recheck on Tauri upgrades): NSIS install path `$LOCALAPPDATA\smind` (`installer.nsi:523-524`), sidecar written as `$INSTDIR\smind.exe` (`:674-677`), uninstall deletes only listed files + non-recursive `RMDir` (`:802-836`), "delete app data" touches only `...\dev.spacingmind.desktop` (`:898-899`), the running-app check only watches `smind-desktop.exe` (`:661`, `:798`); WiX is perMachine `ProgramFiles64\smind` by default, `RemoveFolder` only removes empty dirs (`main.wxs:28, 121-122, 185-186`). Caveat: an MSI installed after an NSIS install can pick up the NSIS HKCU install dir (`main.wxs:77-82`) -- still only removes its own components. Layout unchanged.
+- **AC11** verified by reading: README, ADR-0030 amendment, ADR-0013 note.
+- **AC12 NOT verified -- needs the Windows session**: fresh install of the CI installer + Install button -> daemon runs from `bin\`; Update over a daemon previously downloaded by the old flow; Defender holding the freshly copied exe; ARM64 (amd64 daemon under emulation).
+- Host checks: `task test`, `task lint`, `task check:versions`, desktop node tests, `cargo test` in both crates. `cargo clippy --all-targets -D warnings` on macOS reports `dead_code` for Windows-only helpers (not touched here); `daemon-client` clippy trips `should_implement_trait` in `backoff.rs` (untouched file).

@@ -15,6 +15,16 @@ fn ensure_sidecar_placeholder() {
     let profile = std::env::var("PROFILE").unwrap_or_default();
     let target = std::env::var("TARGET").expect("cargo sets TARGET for build scripts");
     let Some(path) = build_sidecar::sidecar_placeholder_name(&target_os, &profile, &target) else {
+        // A release bundle must carry a real daemon: refuse a zero-length
+        // sidecar left behind by an earlier debug build (a missing one is
+        // already rejected by tauri-build).
+        if profile == "release" {
+            if let Some(real) = build_sidecar::sidecar_path(&target_os, &target) {
+                if std::fs::metadata(&real).map(|m| m.len() == 0).unwrap_or(false) {
+                    panic!("smind desktop: {} is an empty placeholder -- stage the daemon (task desktop:mac / task desktop:win:daemon) before a release build", real.display());
+                }
+            }
+        }
         return;
     };
     if path.exists() {

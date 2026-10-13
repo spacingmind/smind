@@ -290,13 +290,29 @@ fn install_bundled_binary(bundled: &Path, bin_path: &Path) -> Result<(), String>
     // best-effort clear so Gatekeeper never judges the spawned daemon.
     #[cfg(target_os = "macos")]
     let _ = std::process::Command::new("xattr").args(["-d", "com.apple.quarantine"]).arg(&staging).output();
-    // Windows refuses to rename over a running exe; keep the old binary
-    // and say why instead of leaving a bare OS error.
-    std::fs::rename(&staging, bin_path).map_err(|e| {
-        let _ = std::fs::remove_file(&staging);
-        format!("install the daemon at {} (is the daemon still running? stop it first): {e}", bin_path.display())
-    })
+    // Windows refuses to rename over a running exe, and Defender or the
+    // search indexer can briefly hold a freshly written one: retry a few
+    // times, then keep the old binary and say why instead of leaving a bare
+    // OS error.
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&staging, bin_path) {
+            Ok(()) => return Ok(()),
+            Err(_) if cfg!(windows) && attempt < RENAME_RETRIES => {
+                attempt += 1;
+                std::thread::sleep(RENAME_RETRY_DELAY);
+            }
+            Err(e) => {
+                let _ = std::fs::remove_file(&staging);
+                let hint = if cfg!(windows) { " (is the daemon still running? stop it first)" } else { "" };
+                return Err(format!("install the daemon at {}{hint}: {e}", bin_path.display()));
+            }
+        }
+    }
 }
+
+const RENAME_RETRIES: u32 = 5;
+const RENAME_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// LaunchAction is what the app does about the local daemon at startup
 /// (desktop-macos-app M2.3/M2.4).
