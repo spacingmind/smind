@@ -1,5 +1,5 @@
 import { memo } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 /**
@@ -23,14 +23,23 @@ import remarkGfm from "remark-gfm";
  * render, and a streaming run re-renders its tail row on every chunk --
  * the earlier rows must not pay for that.
  */
-export const TimelineMarkdown = memo(function TimelineMarkdown({ content }: { content: string }) {
+export const TimelineMarkdown = memo(function TimelineMarkdown({
+  content,
+  components,
+  "data-testid": testId = "timeline-markdown",
+}: {
+  content: string;
+  /** react-markdown element overrides, e.g. links that must not navigate the webview. */
+  components?: Components;
+  "data-testid"?: string;
+}) {
   return (
     <div
-      data-testid="timeline-markdown"
+      data-testid={testId}
       data-chat-find-text="true"
       className="max-w-none text-content break-words [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-foreground-muted [&_code]:rounded-sm [&_code]:bg-surface [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-ui-sm [&_h1]:mt-3 [&_h1]:mb-1 [&_h1]:text-ui-xl [&_h1]:font-medium [&_h2]:mt-3 [&_h2]:mb-1 [&_h2]:text-ui-lg [&_h2]:font-medium [&_h3]:mt-2 [&_h3]:mb-1 [&_h3]:text-ui-base [&_h3]:font-semibold [&_h4]:mt-2 [&_h4]:mb-1 [&_h4]:text-ui-base [&_h4]:font-semibold [&_h5]:mt-2 [&_h5]:mb-1 [&_h5]:text-ui-base [&_h5]:font-medium [&_h6]:mt-2 [&_h6]:mb-1 [&_h6]:text-ui-base [&_h6]:font-normal [&_li]:my-0.5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-surface [&_pre]:p-2.5 [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_table]:my-2 [&_table]:w-full [&_table]:text-ui-sm [&_td]:border [&_td]:border-border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left [&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>{content}</ReactMarkdown>
     </div>
   );
 });
