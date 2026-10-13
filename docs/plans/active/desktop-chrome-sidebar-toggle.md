@@ -148,7 +148,7 @@ All within the existing model (collapsible="icon" rail, inset panel); no new arc
 - [x] Baseline diagnosed (stubbed bridge render).
 - [x] Implementation (`window-sidebar-toggle.tsx`, `window-chrome.ts`, `app-sidebar.tsx`, `app-header.tsx`, `App.tsx`).
 - [x] Unit tests (T1-T3) + stubbed-bridge harness (T4).
-- [ ] Real-macOS screenshots of the new chrome: BLOCKED (see Validation).
+- [x] Real-macOS screenshots of the new chrome (see Validation).
 
 ## Validation
 
@@ -170,14 +170,17 @@ light cluster at x=16..76, y=17..31; Playwright drives the app's own Cmd+B short
   `*-4-fullscreen-*.png`).
 - DC-AC6: Windows/Linux at 1280/900/640: caption buttons flush with the right edge, no overlap with header actions.
 - DC-AC7/8: unit tests; full web suite 2340 passing; `task test`, `task lint`, `task build` green.
-- Real macOS: the Human's session was locked (`CGSSessionScreenIsLocked=1`) for the whole run, so the
-  WKWebView never painted and full-screen captures are black. A window capture of the real bundle
-  (`/tmp/smind-tl/shots/real-new-locked.png`, real macOS) does confirm the lights' real geometry: three circles
-  centred at x~23/46/69, y=24, i.e. the x=16..76 cluster the constants assume. Pixel-level screenshots of the
-  rendered new chrome on real macOS (vibrancy sidebar, mid-toggle) are still owed -- the bundle is built at
-  `desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/smind.app`; run with
-  `HOME=<tmp> SMIND_DAEMON_URL=http://127.0.0.1:<sandbox port>` and capture with `screencapture -x -o -l <id>` once
-  the screen is unlocked.
+- **Real macOS (screen unlocked later in the run):** the built bundle
+  (`desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/smind.app`, run with `HOME=<tmp>` and
+  `SMIND_DAEMON_URL` pointing at the sandbox daemon; not /Applications) was captured with `screencapture -l`
+  (Accessibility is denied, so a throwaway debug-only bundle with a local command hook drove toggle / Settings /
+  theme / real fullscreen via the app's own `fullscreen` menu action; mid-toggle frames use a 2s transition
+  override; the hook was never committed). Frames in `/tmp/smind-tl/shots/real/` (REAL macOS, vibrancy sidebar,
+  native lights): `d-*` dark, `l-*` light: 1 expanded, 2 collapsed rail, 3/4 mid-collapse / mid-expand,
+  5 Settings, 6 fullscreen expanded/collapsed. Observed: the native lights sit on one surface in every state
+  (expanded sidebar, the collapsed bar, Settings sidebar), the toggle stays at x~98 (84+14) after the lights in
+  every frame including mid-toggle, rail badges start below the bar, one 1px divider, fullscreen drops the lights
+  and the toggle/strip reclaim the space (toggle at the rail, logo at 46). No defect found, nothing to fix.
 
 ### Adversarial review (Sonnet peer, read-only)
 
