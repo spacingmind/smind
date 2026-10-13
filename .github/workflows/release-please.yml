@@ -397,3 +397,30 @@ jobs:
           fi
           git push origin "$TAG:refs/heads/master"
           echo "master fast-forwarded to $TAG"
+
+  # Rebuilds spacingmind.com so its download page and version badge pick up
+  # the new release: the site reads releases/latest only at build time and
+  # listens for `repository_dispatch: smind-release`. GITHUB_TOKEN can't
+  # dispatch to another repository, so this needs LANDING_DISPATCH_TOKEN (a
+  # fine-grained token with Contents: read & write on
+  # spacingmind/spacing-mind-landing-page). Without the secret the job only
+  # warns, so a release never fails on it.
+  notify-landing:
+    needs: [release-please, publish]
+    if: needs.release-please.outputs.release_created == 'true' && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: Dispatch smind-release to the landing site
+        env:
+          GH_TOKEN: ${{ secrets.LANDING_DISPATCH_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::warning::LANDING_DISPATCH_TOKEN is not set -- spacingmind.com was not rebuilt for $TAG"
+            exit 0
+          fi
+          gh api -X POST repos/spacingmind/spacing-mind-landing-page/dispatches \
+            -f event_type=smind-release -F "client_payload[tag]=$TAG"
+          echo "dispatched smind-release ($TAG) to spacingmind/spacing-mind-landing-page"
