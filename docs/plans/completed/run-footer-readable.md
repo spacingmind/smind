@@ -124,17 +124,37 @@ higher effort".
 
 Light + dark screenshots at 1440×900 and 390×844, before and after: normal
 finish, hover, stopped by user, output limit, turn limit, refusal, error,
-running. Saved under `docs/plans/active/run-footer-readable-shots/` (kept out
-of git if large — paths reported in the PR).
+running. Saved (gitignored) under `docs/research/local/run-footer-shots/{before,after}/`,
+rendered from a throwaway Vite fixture page (one `RunTimeline` per state, not
+committed) at 1440×900 and 390×844, light and dark; plus `*-normal-hover.png`
+and `*-usage-card.png` (desktop).
 
 ## Progress
 
-- [ ] spec
-- [ ] pure model + tests
-- [ ] footer component + usage pill
-- [ ] task-detail wiring (modelLabels, isLatest, onContinue)
-- [ ] screenshots + review
+- [x] spec
+- [x] pure model + tests (`run-footer-model.ts`)
+- [x] footer component + usage pill (`run-footer.tsx`, `run-usage-pill.tsx`)
+- [x] task-detail wiring (modelLabels, isLatest, onContinue)
+- [x] screenshots + independent review (Sonnet reviewer; fixes applied)
 
 ## Validation
 
-(filled in at the end)
+| AC | Evidence |
+|---|---|
+| 1 normal finish | `run-timeline.test.tsx` "a finished run shows model, duration and cost and no "done""; `*-normal.png` / `*-normal-glm.png` (after) |
+| 2 tokens in the card | `run-usage-pill.test.tsx` (pill text, aria-label, card fields); `run-timeline.test.tsx` usage-card reachability tests; `desktop-*-usage-card.png` |
+| 3 abnormal endings | `run-footer-model.test.ts` `describeRunFooter: …`; component tests for Continue/Retry on the latest run only; `task-detail.test.tsx` "Continue sends "Continue"…"; `*-stopped-by-user|output-limit|turn-limit|refusal|error.png` |
+| 4 running | `run-timeline.test.tsx` "a running run shows Working…" (fake timers); `*-running.png` |
+| 5 relative time | `run-timeline.test.tsx` "the relative time carries the absolute time as its title"; `formatRelativeTime` tests |
+| 6 model label order | `resolveRunModelLabel …` tests incl. dated / `[1m]` ids (review finding 1) |
+| 7 a11y + 390 px | `aria-label` tests; running label is `role="status"` for the static word and `role="timer"` for the ticking time (review finding 2); `mobile-*-all.png` both themes |
+| 8 suites | web typecheck clean; web suite 2272/2272 (3 clean runs; under machine load, load avg 10-13, unrelated tests flake — the untouched baseline `913448e6` fails 1–42 tests under the same load); `go test ./...` ok; desktop node tests ok; `task lint` clean |
+
+Independent review (Sonnet, read-only) — accepted and fixed: dated/`[1m]`
+model ids, a ticking live region, lost requested-model title (ADR-0025), 30 s
+timer per finished run, stale tick `now`, flex+truncate on the model label.
+Rejected: (3) repeated Continue clicks while a queue is busy — the footer
+action only shows on the latest run, which is the busy run itself whenever a
+queue exists, and the in-flight guard covers the click; (5) the failed run's
+duration lives in the sentence on purpose; (10) `cancelled` is ACP's user
+cancel stop reason.
