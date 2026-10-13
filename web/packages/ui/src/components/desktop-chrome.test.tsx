@@ -342,6 +342,47 @@ describe("window-level sidebar toggle (desktop shell)", () => {
     expect(screen.getByTestId("app-header").style.paddingLeft).toBe("");
   });
 
+  it("App on macOS mid-transition: the sidebar content is hidden and inert, the bar stays and the layout flips only once the width has settled", async () => {
+    mockPlatform({ desktop: true, os: "macos" });
+    const real = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el: Element) =>
+      new Proxy(real(el), { get: (t, p) => (p === "transitionDuration" ? "0.2s" : Reflect.get(t, p)) }),
+    );
+    const { App } = await import("@/App");
+    render(<App connect={() => Promise.reject(new Error("no daemon"))} />);
+    const toggle = await screen.findByRole("button", { name: "Toggle Sidebar" });
+    const content = screen.getByTestId("sidebar-content");
+    expect(content).not.toHaveAttribute("data-settling");
+    fireEvent.click(toggle);
+    // Requested collapsed, layout still expanded: hidden, inert, bar already across the title row.
+    expect(content).toHaveAttribute("data-settling");
+    expect(content).toHaveClass("opacity-0");
+    expect(content).toHaveAttribute("inert");
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    expect(screen.getByTestId("sidebar-expanded-header").closest("[data-state]")).toHaveAttribute("data-state", "expanded");
+    // Width transition ends: the rail layout takes over and fades in.
+    act(() => {
+      const e = new Event("transitionend") as TransitionEvent & { propertyName: string };
+      Object.assign(e, { propertyName: "width" });
+      screen.getByTestId("sidebar-content").parentElement!.dispatchEvent(e);
+    });
+    expect(screen.getByTestId("sidebar-content")).not.toHaveAttribute("data-settling");
+    expect(screen.getByTestId("sidebar-expanded-header").closest("[data-state]")).toHaveAttribute("data-state", "collapsed");
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    // Expanding: the bar stays until the width has settled, so the lights never meet the returning corner.
+    fireEvent.click(toggle);
+    expect(screen.getByTestId("sidebar-rail-bar")).toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).not.toHaveClass("rounded-tl-xl");
+    act(() => {
+      const e = new Event("transitionend") as TransitionEvent & { propertyName: string };
+      Object.assign(e, { propertyName: "width" });
+      screen.getByTestId("sidebar-content").parentElement!.dispatchEvent(e);
+    });
+    expect(screen.queryByTestId("sidebar-rail-bar")).not.toBeInTheDocument();
+    expect(screen.getByTestId("app-content-panel")).toHaveClass("rounded-tl-xl", "border-l");
+  });
+
   it("App on Windows: the rail keeps an empty strip under the single window-level toggle and the panel keeps its corner", async () => {
     mockPlatform({ desktop: true, os: "windows" });
     const { App } = await import("@/App");
