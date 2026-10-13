@@ -236,7 +236,7 @@ export function RunConfigToolbar({
     setState((prev) => (prev.provider === boundProvider ? prev : { ...prev, provider: boundProvider, permissionMode: "", autoAccept: false, model: "" }));
   }, [boundProvider]);
 
-  // The ★ default agent (Icons.settings -> Agents): a task that has never had a
+  // The ★ default agent (Settings -> Agents): a task that has never had a
   // run-config persisted for it starts from whichever profile is marked
   // default, once profiles have actually loaded (profile.list is async --
   // an empty `profiles` on the first render just means "not answered yet",
@@ -449,7 +449,7 @@ function RunConfigToolbarMode() {
   const showAutoAccept = live ? live.showAutoAccept : meta.supportsAutoAccept;
   const current = modes.find((m) => m.id === modeId);
   // The mode auto-approves (or ACP Auto-accept is on) -- the pill warns
-  // (Icons.permissionDanger + warning colour) without changing any mode semantics.
+  // (ShieldAlert + warning colour) without changing any mode semantics.
   const dangerous = current?.autoApproves === true || autoAccept;
   const disabled = meta.disabled;
 
