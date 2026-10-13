@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.11.1](https://github.com/spacingmind/smind/compare/v0.11.0...v0.11.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* **desktop:** render update release notes as markdown ([#333](https://github.com/spacingmind/smind/issues/333)) ([9e76db5](https://github.com/spacingmind/smind/commit/9e76db53f10b96df56e91fe778e817c7e9068b86))
+* **desktop:** traffic lights and caption buttons stay clear when the sidebar toggles ([#332](https://github.com/spacingmind/smind/issues/332)) ([f0cd6a2](https://github.com/spacingmind/smind/commit/f0cd6a217f849cb6ae58a2050143a14dba77583f))
+* **web:** consistent icons via one registry ([#330](https://github.com/spacingmind/smind/issues/330)) ([e8f3064](https://github.com/spacingmind/smind/commit/e8f3064050719f6e52f2a319ca1a74ed18636801))
+
 ## [0.11.0](https://github.com/spacingmind/smind/compare/v0.10.0...v0.11.0) (2026-10-13)
 
 
