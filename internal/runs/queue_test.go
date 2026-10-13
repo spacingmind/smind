@@ -465,10 +465,7 @@ func TestChatQueue_RestartKeepsDelivering(t *testing.T) {
 	// Simulate a restart: a fresh Registry (New reconciles the running row
 	// to interrupted) with the starter wired after construction, then
 	// DeliverQueued once the dependencies exist.
-	reg2, err := New(e.st)
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
-	}
+	reg2 := newTestRegistry(t, e.st)
 	reg2.SetStarter(e.wm, e.runner)
 	// The hang scenario that kept run A "running" would also hang the
 	// delivered run -- clear it so delivery can complete.
