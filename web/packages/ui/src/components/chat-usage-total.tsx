@@ -1,4 +1,4 @@
-import { Gauge, Sigma } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { ChatPlanUsage } from "@/components/account-usage/chat-plan-usage";
 import { UsagePillCard } from "@/components/usage-pill-card";
@@ -59,7 +59,7 @@ export function ChatUsageTotal({
       label={label}
       pill={
         <>
-          <Sigma className="size-3" />
+          <Icons.usageTotal className="size-3" />
           <span className="truncate">{parts.join(" · ")}</span>
         </>
       }
@@ -96,7 +96,7 @@ function PlanOnlyPill({ plan }: { plan: ReturnType<typeof useChatPlanUsage> }) {
       label="Plan usage"
       pill={
         <>
-          <Gauge className="size-3" />
+          <Icons.usage className="size-3" />
           <span className="truncate">Plan usage</span>
         </>
       }

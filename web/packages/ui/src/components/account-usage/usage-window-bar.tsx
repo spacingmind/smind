@@ -1,4 +1,3 @@
-import { Pin } from "lucide-react";
 
 import { UsageMeter } from "@/components/account-usage/usage-meter";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -8,6 +7,7 @@ import { displayPercent, usageWindowRowLabel } from "@/lib/account-usage/model";
 import { windowTone } from "@/lib/account-usage/tone";
 import type { UsageTone, UsageWindow } from "@/lib/account-usage/types";
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 const STATUS_TEXT: Record<UsageTone, string> = {
   ok: "text-success",
@@ -123,7 +123,7 @@ function PinGlyph({ pinned }: { pinned: boolean }) {
             data-testid={pinned ? "usage-pin-glyph-pinned" : "usage-pin-glyph-unpinned"}
             className="flex w-3 shrink-0 justify-center text-muted-foreground"
           >
-            <Pin aria-hidden className={cn("size-3", pinned && "fill-current")} />
+            <Icons.pin aria-hidden className={cn("size-3", pinned && "fill-current")} />
           </span>
         </TooltipTrigger>
         <TooltipContent side="top">{pinned ? usageCopy.unpin : usageCopy.pin}</TooltipContent>

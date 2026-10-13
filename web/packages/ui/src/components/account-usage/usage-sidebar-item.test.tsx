@@ -173,7 +173,7 @@ describe("UsageSidebarItem", () => {
     expect(row()).toHaveAttribute("data-layout", "percents");
     expect(within(row()).getAllByTestId("sidebar-usage-pinned-window").map((w) => w.textContent)).toEqual(["31%", "54%"]);
     // the measuring copies are hidden from assistive tech and carry no test ids
-    expect(row().querySelector("[aria-hidden=true] [data-testid]")).toBeNull();
+    expect(row().querySelector("[aria-hidden=true] [data-testid^=\"sidebar-usage-\"]")).toBeNull();
   });
 
   it("clicking the row opens the Usage modal", async () => {

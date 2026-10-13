@@ -1,4 +1,3 @@
-import { Clock } from "lucide-react";
 
 import { UsageMeter } from "@/components/account-usage/usage-meter";
 import { UsageSourceIcon } from "@/components/account-usage/usage-source-icon";
@@ -10,6 +9,7 @@ import { formatDisplayPct, formatResetLabel, type UsageDisplayAs } from "@/lib/a
 import { displayPercent, formatUsageFreshness } from "@/lib/account-usage/model";
 import { windowTone } from "@/lib/account-usage/tone";
 import type { AccountUsage, UsageTone, UsageWindow } from "@/lib/account-usage/types";
+import { Icons } from "@/lib/icons";
 
 const STATUS_TEXT: Record<UsageTone, string> = {
   ok: "text-success",
@@ -97,7 +97,7 @@ export function PlanUsageCompact({ usage, displayAs }: { usage: AccountUsage; di
           title={[cooldownCopy.rejected, cooldownCopy.note].filter(Boolean).join(" · ")}
           className="flex min-w-0 items-center gap-1 text-ui-sm font-medium text-destructive"
         >
-          <Clock aria-hidden className="size-3 shrink-0" />
+          <Icons.time aria-hidden className="size-3 shrink-0" />
           <span className="min-w-0 truncate">{cooldownCopy.headline}</span>
         </p>
       ) : null}

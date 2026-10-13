@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RotateCw } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import { InlineSpinner } from "@/components/ui/inline-spinner";
@@ -22,7 +22,7 @@ export function UsageRefreshAllButton({ busy, onRefresh }: { busy: boolean; onRe
       data-testid="usage-refresh-all"
       className="text-foreground-muted"
     >
-      {busy ? <InlineSpinner className="text-inherit" /> : <RotateCw aria-hidden className="size-3.5" />}
+      {busy ? <InlineSpinner className="text-inherit" /> : <Icons.refresh aria-hidden className="size-3.5" />}
     </Button>
   );
 }
@@ -91,7 +91,7 @@ export function UsageRefreshButton({
               data-testid="usage-refresh"
               className="text-foreground-muted"
             >
-              {pending ? <InlineSpinner className="text-inherit" /> : <RotateCw aria-hidden className="size-3.5" />}
+              {pending ? <InlineSpinner className="text-inherit" /> : <Icons.refresh aria-hidden className="size-3.5" />}
             </Button>
           </span>
         </TooltipTrigger>

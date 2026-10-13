@@ -1,7 +1,7 @@
-import { Plug } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { McpServerState } from "@/lib/types";
+import { Icons } from "@/lib/icons";
 
 const NOT_ACTIVE_REASONS: Partial<Record<NonNullable<McpServerState["reason"]>, string>> = {
   transport_unsupported: "transport not supported",
@@ -32,7 +32,7 @@ export function McpServersIndicator({ servers }: { servers: McpServerState[] | u
         aria-label={`MCP servers: ${active} of ${servers.length} active`}
         className="flex shrink-0 items-center gap-1 truncate rounded-full border px-2 py-0.5 text-ui-sm text-foreground-muted transition-colors hover:bg-hover hover:text-foreground"
       >
-        <Plug className="size-3" />
+        <Icons.mcp className="size-3" />
         <span className="truncate">
           {allActive ? `MCP ${active}` : `MCP ${active}/${servers.length}`}
         </span>

@@ -1,10 +1,10 @@
-import { Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 const DISPLAY_AS_OPTIONS: { value: UsageDisplayAs; label: string }[] = [
   { value: "used", label: "Used" },
@@ -42,7 +42,7 @@ export function UsageOptions({
           data-testid="usage-options-menu"
           className={cn(!labelled && "text-muted-foreground")}
         >
-          <Settings aria-hidden className="size-3.5" />
+          <Icons.settings aria-hidden className="size-3.5" />
           {labelled && "Settings"}
         </Button>
       </PopoverTrigger>

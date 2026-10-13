@@ -1,10 +1,10 @@
-import { Coins } from "lucide-react";
 
 import { ChatPlanUsage } from "@/components/account-usage/chat-plan-usage";
 import { UsagePillCard } from "@/components/usage-pill-card";
 import { useChatPlanUsage } from "@/hooks/use-chat-plan-usage";
 import { EM_DASH, formatCost, formatTokens, usageSourceLabel } from "@/lib/usage-format";
 import type { RunUsage } from "@/lib/types";
+import { Icons } from "@/lib/icons";
 
 /**
  * The footer's compact cost: like formatCost, but two decimals once the
@@ -69,7 +69,7 @@ export function RunUsagePill({ usage, provider }: { usage: RunUsage | undefined;
       label={label}
       pill={
         <>
-          <Coins className="size-3" />
+          <Icons.tokens className="size-3" />
           {inline !== null && <span className="truncate">{inline}</span>}
         </>
       }
