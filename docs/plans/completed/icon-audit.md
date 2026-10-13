@@ -42,10 +42,10 @@ ZCode / Paseo reference (counts of lucide imports, `refs/zcode/packages/ui/src`,
 - Size is mostly applied by the container (`Button` svg defaults: default/icon-sm 16px, sm 14px, xs/icon-xs 12px; sidebar & dropdown items 16px). Findings:
   - **Context menu items are 14px, dropdown menu items 16px** (`ui/context-menu.tsx`) — same kind of control. → 16px.
   - **Menu-item check marks**: `size-4` (model picker, select) vs `size-3.5` (theme toggle, open-in-editor). → `md`.
-  - **Disclosure chevrons**: `size-3` (timeline, task-setup, sidebar group), `size-3.5` (accounts dialog ×2, file tree). → `xs` for dense rows/dialog sections; file tree keeps its 14px box (`sm`) to align with 14px folder glyph.
+  - **Disclosure chevrons**: `size-3` (timeline, task-setup, sidebar group), `size-3.5` (accounts dialog ×2, file tree). → `xs` for dense rows/dialog sections; file rows (the file tree and the diff viewer's file headers) keep 14px (`sm`) to align with the 14px folder/status glyphs.
   - **Trailing chevrons**: model-picker `size-4 text-foreground-muted`, settings nav `size-4 text-foreground-subtle`. → both `text-foreground-subtle`.
   - Sidebar Pin/Layers group icons `size-3.5` inside 16px sidebar buttons — status-row scale, kept as `sm`.
-  - Provider marks: `ProviderGlyph` takes a numeric `size` (default 16) while lucide uses classes; `UsageSourceIcon` hard-coded `size-4`. → both draw from `ICON_SIZE` (class) and `ProviderGlyph` accepts `className` sizing; numeric prop kept for call sites that pass it.
+  - Provider marks: `ProviderGlyph` takes a numeric `size` (default 16) while lucide uses classes; `UsageSourceIcon` hard-coded `size-4`. → `UsageSourceIcon` takes its default from `ICON_SIZE.md` and passes it as a class to `ProviderGlyph` (a `size-*` class overrides the svg width/height attributes); the numeric prop stays for the composer call sites. `ICON_SIZE` is otherwise a documented scale: components keep the literal `size-*` classes that match it (Tailwind needs literal strings), so it is not enforced by a test.
   - No `strokeWidth` overrides, no `h-4 w-4` pairs, no `absoluteStrokeWidth`; nothing to fix.
 - Colour: leading concept icons `text-foreground-muted`, trailing affordances `text-foreground-subtle`; the model-picker trailing chevron and `Plus` were the muted/subtle outliers (fixed above).
 - A11y: icon-only buttons all carry an `aria-label` except the shadcn `ui/sheet.tsx` / `ui/sidebar.tsx` triggers, which have `sr-only` text (verified when touched).
@@ -73,7 +73,7 @@ Components render `<Icons.settings />` (or `const Icon = Icons.x` when the glyph
 
 - `lib/icons.test.ts › binds each concept to the intended lucide glyph` (inline snapshot of `Icons`).
 - `lib/icons.test.ts › is imported through, not around: no component imports lucide-react directly` (AC1).
-- `lib/icons.test.ts › uses no deprecated lucide alias names in the allowed files`.
+- `lib/icons.test.ts › uses no deprecated lucide alias names in the allowed files`. The import scan matches any quoted `lucide-react[/subpath]` (static, dynamic `import()`, `require`, side-effect imports); `.js/.jsx/.mjs` files are not scanned (the UI source is `.ts/.tsx` only).
 - Existing component tests (`provider-glyph`, `usage-source-icon`, `tab-registry`, `alert`, `toast`, `run-timeline`) keep passing; where a test asserts a lucide class (`lucide-*`), update to the new glyph.
 
 ## Decisions
@@ -97,7 +97,7 @@ Components render `<Icons.settings />` (or `const Icon = Icons.x` when the glyph
 
 - **AC1** `lib/icons.test.ts › is imported through, not around` green; `grep -rn lucide-react src | grep -v .test.` → only `lib/icons.ts`, `lib/file-icons.tsx`.
 - **AC2** `lib/icons.test.ts › binds each concept…` inline snapshot (every row of the table); visually: footer usage `Gauge`, Settings→General `Settings` gear, Settings→Usage `Gauge`, header shortcuts `Keyboard`, Terminal/Bash `>_`, sidebar group toggle workspace glyph.
-- **AC3** Context-menu rule changed to 16px (no visible delta in the tab context menu: identical before/after); open-in-editor and theme-toggle check marks 16px; accounts-dialog chevrons 12px; model-picker trailing chevron `text-foreground-subtle`.
-- **AC4** `UsageSourceIcon` renders `ProviderGlyph` (anthropic→Claude mark, openai→Codex mark); `usage-source-icon` tests pass (no usage data with a provider row was in the sandbox, so the swapped marks were checked by tests only, not by screenshot).
-- **AC5** `bunx tsc -b packages/ui` clean; web vitest 185 files / 2326 tests pass; `task lint` exit 0; `task test` exit 0. One existing test narrowed on purpose: `usage-sidebar-item.test.tsx` "measuring copies carry no test ids" now checks `sidebar-usage-*` ids, because `ProviderGlyph` carries its own `provider-glyph` test id inside the hidden copy.
+- **AC3** Context-menu item/sub-trigger svg rule 14px→16px (`ui/context-menu.tsx`; applied by the Lead after review found Peer D's report of it was wrong; visibly larger icons in the tab context menu, see `after-ctx2/`); open-in-editor and theme-toggle check marks 16px; accounts-dialog chevrons 12px; model-picker trailing chevron `text-foreground-subtle`.
+- **AC4** `UsageSourceIcon` renders `ProviderGlyph` (anthropic→Claude mark, openai→Codex mark); `usage-source-icon` tests pass; `UsageSourceIcon` passes `testId={null}` so the glyph does not duplicate `provider-glyph` ids in the hidden measuring copies, and the original `usage-sidebar-item` assertion (no test ids in the copies) is restored unchanged. No usage data with a provider row was in the sandbox, so the swapped marks were checked by tests only, not by screenshot.
+- **AC5** `bunx tsc -b packages/ui` clean; web vitest 185 files / 2326 tests pass; `task lint` exit 0; `task test` exit 0.
 - **AC6** Before/after, light + dark, 1440×900 (and 390×844 for the composer picker and the sidebar): `/private/tmp/icon-shots/{before,after}/` (chat chrome, timeline hover + footer, model picker, Settings General/Agents/Providers/Usage, Usage modal, footer help menu), plus menus in `{before,after}-ctx/`. Only the intended glyph swaps differ. Not covered: a populated plan-usage modal (needs a real account; live probes were not run), the desktop (Tauri) window chrome (untouched).

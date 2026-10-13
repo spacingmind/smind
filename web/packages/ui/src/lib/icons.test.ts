@@ -106,13 +106,13 @@ describe("icon registry", () => {
   it("is imported through, not around: no component imports lucide-react directly", () => {
     const offenders = Object.entries(SOURCES)
       .filter(([path]) => !ALLOWED.has(path) && !/\.test\.tsx?$/.test(path))
-      .filter(([, text]) => /from\s+["']lucide-react["']/.test(text))
+      .filter(([, text]) => /["']lucide-react(?:\/[^"']*)?["']/.test(text))
       .map(([path]) => path);
     expect(offenders).toEqual([]);
   });
 
   it("uses no deprecated lucide alias names in the allowed files", () => {
-    const alias = /\b(AlertCircle|AlertTriangle|CheckCircle2|Loader2|MoreHorizontal|HelpCircle|BarChart3)\b/;
+    const alias = /\b(AlertCircle|AlertTriangle|CheckCircle2|Loader2|MoreHorizontal|MoreVertical|HelpCircle|CircleHelp|BarChart3)\b/;
     for (const path of ALLOWED) {
       const code = SOURCES[path]!.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
       expect(code, path).not.toMatch(alias);

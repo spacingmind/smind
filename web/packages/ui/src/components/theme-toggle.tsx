@@ -63,7 +63,7 @@ export function ThemeToggle({ withTooltip = false, className }: { withTooltip?: 
             >
               <Icon />
               {option.label}
-              {active && <Icons.check className="ml-auto size-3.5" />}
+              {active && <Icons.check className="ml-auto size-4" />}
             </DropdownMenuItem>
           );
         })}
