@@ -73,7 +73,7 @@ func run(args []string) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprint(w, `smind is the Spacing Mind daemon and CLI.
+	fmt.Fprint(w, `sMind is the Spacing Mind daemon and CLI.
 
 Usage:
   smind serve                                             start the daemon
