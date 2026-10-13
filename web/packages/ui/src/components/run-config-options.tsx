@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 
-import { Brain, Cpu, SlidersHorizontal } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
 import { cn } from "@/lib/utils";
@@ -99,7 +99,7 @@ function ConfigOptionControl({
         className={cn(PILL_TRIGGER_CLASS, on && "text-foreground")}
         onClick={() => change(on ? "false" : "true")}
       >
-        <SlidersHorizontal aria-hidden className="shrink-0" />
+        <Icons.options aria-hidden className="shrink-0" />
         <span className="max-sm:hidden">
           {option.name}: {on ? "On" : "Off"}
         </span>
@@ -124,7 +124,7 @@ function ConfigOptionControl({
           data-testid={isModel ? "run-config-option-model" : undefined}
           className={PILL_TRIGGER_CLASS}
         >
-          {isModel ? <Cpu aria-hidden className="shrink-0" /> : <Brain aria-hidden className="shrink-0" />}
+          {isModel ? <Icons.model aria-hidden className="shrink-0" /> : <Icons.thinking aria-hidden className="shrink-0" />}
           {isModel ? (
             // Prefixed so it reads apart from the composer's next-run Model picker sitting beside it.
             <SelectValue placeholder={option.name}>

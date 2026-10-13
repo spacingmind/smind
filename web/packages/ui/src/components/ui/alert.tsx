@@ -1,16 +1,16 @@
 import type { ComponentProps, ReactNode } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 export type AlertVariant = "default" | "info" | "success" | "warning" | "error";
 
-const VARIANT_ICON: Record<AlertVariant, typeof Info> = {
-  default: Info,
-  info: Info,
-  success: CheckCircle2,
-  warning: AlertTriangle,
-  error: AlertCircle,
+const VARIANT_ICON: Record<AlertVariant, typeof Icons.info> = {
+  default: Icons.info,
+  info: Icons.info,
+  success: Icons.success,
+  warning: Icons.warning,
+  error: Icons.error,
 };
 
 const VARIANT_CLASSES: Record<AlertVariant, string> = {

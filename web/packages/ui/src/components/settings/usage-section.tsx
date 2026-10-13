@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { BarChart3, RefreshCw } from "lucide-react";
 
 import { UsageBody } from "@/components/account-usage/usage-body";
 import { UsageControls } from "@/components/account-usage/usage-controls";
@@ -12,6 +11,7 @@ import { InlineSpinner } from "@/components/ui/inline-spinner";
 import { StepGroup } from "@/components/ui/step-group";
 import { EM_DASH, formatCost, formatTokens, usageSince } from "@/lib/usage-format";
 import type { Task, UsageGroupBy, UsageRange, UsageScope, UsageSummaryRow, Workspace } from "@/lib/types";
+import { Icons } from "@/lib/icons";
 
 const SCOPE_OPTIONS: { value: UsageScope; label: string }[] = [
   { value: "runs", label: "Runs" },
@@ -212,7 +212,7 @@ function UsageSection({ client, events }: SettingsSectionContext) {
               data-testid="usage-refresh"
               onClick={() => setRefreshTick((n) => n + 1)}
             >
-              <RefreshCw aria-hidden className="size-3.5" /> Refresh
+              <Icons.refresh aria-hidden className="size-3.5" /> Refresh
             </Button>
           }
         />
@@ -305,6 +305,6 @@ registerSettingsSection({
   label: "Usage",
   groupLabel: "Agents & providers",
   order: 190,
-  icon: <BarChart3 aria-hidden className="size-3.5" />,
+  icon: <Icons.usage aria-hidden className="size-3.5" />,
   render: (ctx) => <UsageSection {...ctx} />,
 });

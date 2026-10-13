@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -289,7 +289,7 @@ export function ConnectAccountPanel({
             onClick={() => setShowManual((v) => !v)}
             className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
           >
-            {showManual ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            {showManual ? <Icons.chevronDown className="size-3" /> : <Icons.chevronRight className="size-3" />}
             Paste a credential instead
           </button>
           <p className="mt-1 pl-4.5 text-ui-sm text-muted-foreground">
@@ -351,7 +351,7 @@ export function ConnectAccountPanel({
                     onClick={() => setShowBaseUrl((v) => !v)}
                     className="flex items-center gap-1 text-ui-base text-muted-foreground hover:text-foreground"
                   >
-                    {showBaseUrl ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+                    {showBaseUrl ? <Icons.chevronDown className="size-3" /> : <Icons.chevronRight className="size-3" />}
                     Base URL (optional)
                   </button>
                   {showBaseUrl && (

@@ -1,8 +1,8 @@
-import { Download } from "lucide-react";
 
 import { pendingUpdate, type AppUpdateState } from "@/lib/app-update";
 import { isDesktop } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 /**
  * ZCode's "update available" badge (ADR-0023 U4 follow-up): a small green
@@ -35,7 +35,7 @@ export function UpdateBadge({
         className,
       )}
     >
-      <Download className="size-3.5" aria-hidden />
+      <Icons.download className="size-3.5" aria-hidden />
     </button>
   );
 }

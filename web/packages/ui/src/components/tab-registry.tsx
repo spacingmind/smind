@@ -1,5 +1,4 @@
-import type { LucideIcon } from "lucide-react";
-import { File, FolderTree, GitCompare, MessageSquare, Plus, Terminal } from "lucide-react";
+import { Icons, type IconComponent } from "@/lib/icons";
 
 import { FileIcon } from "@/lib/file-icons";
 import { useBufferDirty } from "@/lib/dirty-buffers";
@@ -66,15 +65,15 @@ export interface TabEntry {
 export interface TabKindDescriptor {
   closable: boolean;
   defaultTitle: string;
-  icon: LucideIcon;
+  icon: IconComponent;
 }
 
 export const TAB_KINDS: Record<TabKind, TabKindDescriptor> = {
-  chat: { closable: true, defaultTitle: "Chat", icon: MessageSquare },
-  files: { closable: true, defaultTitle: "Files", icon: FolderTree },
-  diff: { closable: true, defaultTitle: "Diff", icon: GitCompare },
-  terminal: { closable: true, defaultTitle: "Terminal", icon: Terminal },
-  file: { closable: true, defaultTitle: "File", icon: File },
+  chat: { closable: true, defaultTitle: "Chat", icon: Icons.chat },
+  files: { closable: true, defaultTitle: "Files", icon: Icons.files },
+  diff: { closable: true, defaultTitle: "Diff", icon: Icons.diff },
+  terminal: { closable: true, defaultTitle: "Terminal", icon: Icons.terminal },
+  file: { closable: true, defaultTitle: "File", icon: Icons.file },
 };
 
 /** The tab entry for one base kind -- the one constructor behind both the seed set and every "reopen Files/Diff/Terminal" affordance. */
@@ -333,7 +332,7 @@ export function NewTabButton({
           data-testid="tabs-new-tab"
           className="size-7 shrink-0 text-muted-foreground"
         >
-          <Plus aria-hidden className="size-3.5" />
+          <Icons.add aria-hidden className="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">

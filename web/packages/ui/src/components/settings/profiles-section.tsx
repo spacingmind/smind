@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { MoreHorizontal, Plus, Star, Bot } from "lucide-react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -15,6 +14,7 @@ import { subscribeSettingsIntent, takeSettingsIntent, type ProfileSeed } from "@
 import { thinkingLevelLabel } from "@/lib/thinking-levels";
 import type { AgentProfile, ModeInfo, ProviderInfo, ProviderListResult, ProviderTestResult, ThinkingLevel } from "@/lib/types";
 import type { WsClient } from "@/lib/ws-client";
+import { Icons } from "@/lib/icons";
 
 /** Used until provider.list answers (and kept if it fails), same fallback composer.tsx uses -- this form must never be unusable because one fetch lost. */
 const FALLBACK_PROVIDERS: ProviderInfo[] = [{ id: "claude-native" }, { id: "glm" }];
@@ -245,7 +245,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
 
   const newAgentButton = (
     <Button type="button" size="sm" data-testid="profile-new-button" onClick={openNew}>
-      <Plus aria-hidden className="size-3.5" /> New agent
+      <Icons.add aria-hidden className="size-3.5" /> New agent
     </Button>
   );
 
@@ -302,7 +302,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
                           title={isDefault ? "Default agent for new tasks — click to clear" : "Set as default agent for new tasks"}
                           onClick={() => setDefaultAgentId(isDefault ? null : String(p.ID))}
                         >
-                          <Star aria-hidden fill={isDefault ? "currentColor" : "none"} />
+                          <Icons.defaultAgent aria-hidden fill={isDefault ? "currentColor" : "none"} />
                         </Button>
                         <div className="flex min-w-0 flex-1 flex-col">
                           <span className="truncate text-ui-base font-medium text-foreground">{p.Name}</span>
@@ -319,7 +319,7 @@ function ProfilesSection({ client, events }: SettingsSectionContext) {
                               data-testid={`profile-menu-${p.ID}`}
                               className="shrink-0"
                             >
-                              <MoreHorizontal aria-hidden />
+                              <Icons.more aria-hidden />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -622,6 +622,6 @@ registerSettingsSection({
   label: "Agents",
   groupLabel: "Agents & providers",
   order: 175,
-  icon: <Bot aria-hidden className="size-3.5" />,
+  icon: <Icons.agent aria-hidden className="size-3.5" />,
   render: (ctx) => <ProfilesSection {...ctx} />,
 });

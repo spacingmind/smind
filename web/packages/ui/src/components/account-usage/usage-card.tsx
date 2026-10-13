@@ -1,4 +1,3 @@
-import { Clock } from "lucide-react";
 
 import { UsageBalanceBar } from "@/components/account-usage/usage-balance-bar";
 import { UsageRefreshButton } from "@/components/account-usage/usage-refresh-button";
@@ -14,6 +13,7 @@ import type { UsageDisplayAs } from "@/lib/account-usage/format";
 import { formatUsageFreshness, type UsageRefresh } from "@/lib/account-usage/model";
 import type { AccountUsage, UsageBalance, UsageDetail, UsageWindow } from "@/lib/account-usage/types";
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 export interface UsageCardRefresh {
   state: UsageRefresh;
@@ -117,7 +117,7 @@ export function UsageCard({
         <div className="flex flex-col gap-0.5" data-testid="usage-cooldown">
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm">
             <StatusBadge status="danger" data-testid="usage-cooldown-badge">
-              <Clock aria-hidden className="size-3 shrink-0" />
+              <Icons.time aria-hidden className="size-3 shrink-0" />
               {cooldownCopy.label}
             </StatusBadge>
             {/* Flex drops this space from the layout; it keeps "Rate limited until …" one sentence for text readers. */}

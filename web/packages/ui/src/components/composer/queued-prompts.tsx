@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import type { ChatQueueItem } from "@/lib/types";
@@ -52,7 +52,7 @@ export function QueuedPrompts({
               aria-label={`Cancel queued prompt: ${item.Prompt.slice(0, 40)}`}
               onClick={() => onCancel(item.ID)}
             >
-              <X aria-hidden className="size-3" />
+              <Icons.close aria-hidden className="size-3" />
             </Button>
           </li>
         ),

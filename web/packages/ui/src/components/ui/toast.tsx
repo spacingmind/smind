@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { AlertVariant } from "@/components/ui/alert";
+import { Icons } from "@/lib/icons";
 
 export interface ToastOptions {
   id?: string;
@@ -21,12 +21,12 @@ interface ToastItem {
   durationMs: number;
 }
 
-const VARIANT_ICON: Record<AlertVariant, typeof Info> = {
-  default: Info,
-  info: Info,
-  success: CheckCircle2,
-  warning: AlertTriangle,
-  error: AlertCircle,
+const VARIANT_ICON: Record<AlertVariant, typeof Icons.info> = {
+  default: Icons.info,
+  info: Icons.info,
+  success: Icons.success,
+  warning: Icons.warning,
+  error: Icons.error,
 };
 
 const VARIANT_CLASSES: Record<AlertVariant, string> = {

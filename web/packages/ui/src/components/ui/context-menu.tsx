@@ -1,8 +1,8 @@
 import * as React from "react";
 import { ContextMenu as ContextMenuPrimitive } from "radix-ui";
-import { ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 /**
  * A shadcn-shaped wrapper over Radix's ContextMenu, added for the file
@@ -45,7 +45,7 @@ function ContextMenuItem({
     <ContextMenuPrimitive.Item
       data-slot="context-menu-item"
       className={cn(
-        "focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none [&_svg]:size-3.5 [&_svg]:shrink-0",
+        "focus:bg-menu-hover data-[disabled]:pointer-events-none data-[disabled]:opacity-50 relative flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none [&_svg]:size-4 [&_svg]:shrink-0",
         className,
       )}
       {...props}
@@ -80,13 +80,13 @@ function ContextMenuSubTrigger({
     <ContextMenuPrimitive.SubTrigger
       data-slot="context-menu-sub-trigger"
       className={cn(
-        "focus:bg-menu-hover data-[state=open]:bg-menu-hover flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none [&>svg]:size-3.5 [&>svg]:shrink-0",
+        "focus:bg-menu-hover data-[state=open]:bg-menu-hover flex cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-ui-base outline-hidden select-none [&>svg]:size-4 [&>svg]:shrink-0",
         className,
       )}
       {...props}
     >
       {children}
-      <ChevronRight className="ml-auto size-4" />
+      <Icons.chevronRight className="ml-auto size-4" />
     </ContextMenuPrimitive.SubTrigger>
   );
 }

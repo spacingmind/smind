@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquarePlus, X } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import type { DiffLineRef } from "@/lib/diff-lines";
@@ -65,7 +65,7 @@ export function ReviewComments({
               onClick={() => removeReviewDraft(taskId, draft.id)}
               className="shrink-0 rounded p-0.5 text-foreground-muted hover:bg-hover hover:text-foreground"
             >
-              <X className="size-3" />
+              <Icons.close className="size-3" />
             </button>
           </div>
           {draft.snippet.trim() && (
@@ -111,7 +111,7 @@ function CommentComposer({
   return (
     <div className="rounded-md border bg-card px-3 py-2" data-testid="review-composer" data-path={pending.path}>
       <div className="mb-1 flex items-center gap-1.5 text-ui-sm text-foreground-muted">
-        <MessageSquarePlus className="size-3" />
+        <Icons.addComment className="size-3" />
         {lineLabel(pending.line, pending.side)}
       </div>
       {pending.snippet.trim() && (

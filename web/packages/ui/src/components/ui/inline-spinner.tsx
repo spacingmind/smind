@@ -1,6 +1,6 @@
-import { Loader2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 /**
  * The shared inline loading indicator (ui-redesign-parity plan, Item 2):
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 export function InlineSpinner({ label, className }: { label?: string; className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-ui-base text-foreground-muted", className)} role="status">
-      <Loader2 className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
+      <Icons.spinner className="size-3.5 shrink-0 animate-spin" aria-hidden="true" />
       {label}
     </span>
   );

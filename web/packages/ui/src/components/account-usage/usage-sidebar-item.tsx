@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useMemo, useRef, useState } from "react";
-import { CircleGauge } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { UsageMeter } from "@/components/account-usage/usage-meter";
 import { UsageSourceIcon } from "@/components/account-usage/usage-source-icon";
@@ -192,7 +192,7 @@ function PinnedUsageTrigger({ sources }: { sources: readonly PinnedUsageSource[]
 function PlainUsageTrigger() {
   return (
     <button type="button" onClick={openUsageModal} aria-label="Usage" data-testid="sidebar-usage-summary" data-layout="plain" className={cn(ROW_CLASS, "gap-2")}>
-      <CircleGauge aria-hidden className="size-4 shrink-0 text-foreground-muted" />
+      <Icons.usage aria-hidden className="size-4 shrink-0 text-foreground-muted" />
       <span className="min-w-0 truncate text-ui-sm text-foreground-muted">Usage</span>
     </button>
   );

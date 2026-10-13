@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { Server } from "lucide-react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { desktop, isDesktop, type DaemonProgress, type DaemonStatus } from "@/lib/platform";
+import { Icons } from "@/lib/icons";
 
 /**
  * ADR-0013 part D2's Settings -> Daemon: status, version, managed/
@@ -169,7 +169,7 @@ if (isDesktop) {
     label: "Daemon",
     groupLabel: "Connection",
     order: 160,
-    icon: <Server aria-hidden className="size-3.5" />,
+    icon: <Icons.host aria-hidden className="size-3.5" />,
     render: () => <DaemonSection />,
   });
 }

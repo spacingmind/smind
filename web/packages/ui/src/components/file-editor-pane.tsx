@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, PenLine } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import type { EditorView } from "@codemirror/view";
 
 import { CodeMirrorEditor } from "@/components/code-mirror-editor";
@@ -290,7 +290,7 @@ export function FileEditorPane({
                   aria-pressed={mode === "edit"}
                   className="flex h-6 items-center gap-1 rounded-md px-2 text-ui-sm font-medium disabled:pointer-events-none disabled:bg-muted"
                 >
-                  <PenLine className="size-3" />
+                  <Icons.edit className="size-3" />
                   Edit
                 </button>
                 <button
@@ -300,7 +300,7 @@ export function FileEditorPane({
                   aria-pressed={mode === "preview"}
                   className="flex h-6 items-center gap-1 rounded-md px-2 text-ui-sm font-medium disabled:pointer-events-none disabled:bg-muted"
                 >
-                  <Eye className="size-3" />
+                  <Icons.preview className="size-3" />
                   Preview
                 </button>
               </div>

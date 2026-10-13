@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronRight, Layers } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { ToolCall } from "@/components/timeline/tool-call";
 import type { TimelineRowContext } from "@/components/timeline/timeline-row";
@@ -33,8 +33,8 @@ export function ToolGroupRow({ items, worktreePath, onOpenFile }: { items: Timel
           data-testid="tool-group-toggle"
           className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left hover:bg-hover text-ui-sm text-foreground-muted outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
         >
-          <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
-          <Layers className="size-3 shrink-0" />
+          <Icons.chevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
+          <Icons.toolGroup className="size-3 shrink-0" />
           <span className="shrink-0 font-medium text-foreground">{items.length} tool calls</span>
           {names.length > 0 && (
             <span className="min-w-0 flex-1 truncate">{names.join(", ")}</span>

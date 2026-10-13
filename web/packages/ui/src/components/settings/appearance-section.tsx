@@ -1,4 +1,3 @@
-import { Palette } from "lucide-react";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { StepGroup } from "@/components/ui/step-group";
@@ -6,6 +5,7 @@ import { useFontSizes } from "@/hooks/use-font-sizes";
 import { useTheme } from "@/hooks/use-theme";
 import type { FontSizes, FontSizeStep } from "@/lib/settings-preferences";
 import type { ThemePreference } from "@/lib/theme";
+import { Icons } from "@/lib/icons";
 
 const THEME_OPTIONS: { value: ThemePreference; label: string }[] = [
   { value: "light", label: "Light" },
@@ -68,6 +68,6 @@ registerSettingsSection({
   id: "appearance",
   label: "Appearance",
   order: 100,
-  icon: <Palette aria-hidden className="size-3.5" />,
+  icon: <Icons.appearance aria-hidden className="size-3.5" />,
   render: () => <AppearanceSection />,
 });

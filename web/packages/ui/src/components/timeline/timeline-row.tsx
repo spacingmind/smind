@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Brain, ChevronRight, CircleHelp, ShieldCheck } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { PERMISSION_REASON_LABEL } from "@/components/timeline/permission-reason";
 import { TimelineMarkdown } from "@/components/timeline/timeline-markdown";
@@ -59,8 +59,8 @@ export const TimelineRow = memo(function TimelineRow({
           {/* Collapsed by default (Item 8): reasoning is available, not in the way. */}
           <details className="group/details">
             <summary className="-mx-2 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
-              <ChevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
-              <Brain className="size-3 shrink-0" />
+              <Icons.chevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
+              <Icons.thinking className="size-3 shrink-0" />
               Thinking
             </summary>
             <div
@@ -103,8 +103,8 @@ export const TimelineRow = memo(function TimelineRow({
           {item.rawKind ? (
             <details className="group/details">
               <summary className="-mx-2 flex cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-ui-sm text-foreground-muted select-none hover:bg-hover [&::-webkit-details-marker]:hidden">
-                <ChevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
-                <CircleHelp className="size-3 shrink-0" />
+                <Icons.chevronRight className="size-3 shrink-0 transition-transform group-open/details:rotate-90" />
+                <Icons.question className="size-3 shrink-0" />
                 Unrecognised event: {item.rawKind}
               </summary>
               <pre className="mt-1 ml-7 overflow-x-auto rounded-lg bg-surface px-2.5 py-1.5 text-ui-sm whitespace-pre-wrap text-foreground-muted">
@@ -113,7 +113,7 @@ export const TimelineRow = memo(function TimelineRow({
             </details>
           ) : (
             <p className="flex items-center gap-2 py-1 text-ui-sm text-foreground-muted">
-              <CircleHelp className="size-3 shrink-0" />
+              <Icons.question className="size-3 shrink-0" />
               Unrecognised event: {item.eventType}
             </p>
           )}
@@ -135,7 +135,7 @@ function PermissionRow({ item }: { item: TimelinePermissionItem }) {
   const resolution = item.reason ? PERMISSION_REASON_LABEL[item.reason] : undefined;
   return (
     <p className="flex items-center gap-2 text-ui-sm text-foreground-muted">
-      <ShieldCheck className="size-3 shrink-0" />
+      <Icons.permission className="size-3 shrink-0" />
       Permission resolved
       {resolution && <StatusBadge status={resolution.status}>{resolution.label}</StatusBadge>}
     </p>

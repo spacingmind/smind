@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, ChevronDown, Code, FolderOpen } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +53,7 @@ export function OpenInEditorButton({ path, actions }: { path: string; actions: L
             className="h-full rounded-none px-2 text-foreground-muted hover:text-foreground"
             onClick={() => actions.open(active.id, path)}
           >
-            <Code aria-hidden />
+            <Icons.openInEditor aria-hidden />
             <span className="hidden @min-[56rem]/app-header:inline">{active.label}</span>
           </Button>
         </TooltipTrigger>
@@ -71,7 +71,7 @@ export function OpenInEditorButton({ path, actions }: { path: string; actions: L
                 aria-label="Choose editor"
                 className="h-full w-5 rounded-none border-l border-border text-foreground-muted hover:text-foreground dark:border-input-border"
               >
-                <ChevronDown aria-hidden />
+                <Icons.chevronDown aria-hidden />
               </Button>
             </DropdownMenuTrigger>
           </TooltipTrigger>
@@ -85,14 +85,14 @@ export function OpenInEditorButton({ path, actions }: { path: string; actions: L
               data-editor-id={editor.id}
               onSelect={() => choose(editor.id)}
             >
-              <Code aria-hidden />
+              <Icons.openInEditor aria-hidden />
               <span className="min-w-0 flex-1 truncate">{editor.label}</span>
-              {editor.id === active.id && <Check aria-hidden className="ml-2 size-3.5" />}
+              {editor.id === active.id && <Icons.check aria-hidden className="ml-2 size-4" />}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
           <DropdownMenuItem data-testid="open-in-editor-reveal" onSelect={() => actions.reveal(path)}>
-            <FolderOpen aria-hidden />
+            <Icons.folderOpen aria-hidden />
             {actions.revealLabel}
           </DropdownMenuItem>
         </DropdownMenuContent>

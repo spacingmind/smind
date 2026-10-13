@@ -16,28 +16,7 @@ import { useCommands } from "@/palette/palette-provider";
 import type { Command } from "@/palette/commands";
 
 import type { DaemonEvents } from "@/hooks/use-daemon-events";
-import {
-  AlertCircle,
-  Archive,
-  ChevronRight,
-  Circle,
-  FolderGit2,
-  SquareTerminal,
-  FolderOpen,
-  FolderTree,
-  GitBranch,
-  Layers,
-  ListChecks,
-  Loader2,
-  MoreHorizontal,
-  Pin,
-  PinOff,
-  Plus,
-  Search,
-  SquareArrowOutUpRight,
-  Trash2,
-} from "lucide-react";
-
+import { Icons } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 import { accountHealthTestKey } from "@/lib/provider-health";
 import type { WsClient } from "@/lib/ws-client";
@@ -844,7 +823,7 @@ export function AppSidebar({
                       data-testid="sidebar-group-mode-toggle"
                       onClick={() => setGroupMode(groupMode === "tree" ? "status" : "tree")}
                     >
-                      {groupMode === "tree" ? <FolderTree /> : <ListChecks />}
+                      {groupMode === "tree" ? <Icons.groupByWorkspace /> : <Icons.groupByStatus />}
                     </Button>
                   )}
                   <Button
@@ -854,7 +833,7 @@ export function AppSidebar({
                     data-testid="sidebar-search-toggle"
                     onClick={() => setSearchOpen(true)}
                   >
-                    <Search />
+                    <Icons.search />
                   </Button>
                   {!empty && (
                     <Button
@@ -865,7 +844,7 @@ export function AppSidebar({
                       onClick={() => setCrud({ kind: "workspace" })}
                       className="mr-1"
                     >
-                      <Plus />
+                      <Icons.add />
                     </Button>
                   )}
                 </span>
@@ -879,9 +858,9 @@ export function AppSidebar({
               <RowSignalContext.Provider value={rowSignal}>
                 <CollapsedNodesContext.Provider value={nodes}>
                 <SidebarMenu className="@container/sb">
-                  {error && <StatusRow icon={<AlertCircle className="size-3.5" />} className="text-destructive" text={error} />}
+                  {error && <StatusRow icon={<Icons.error className="size-3.5" />} className="text-destructive" text={error} />}
                   {!error && workspaces === null && (
-                    <StatusRow icon={<Loader2 className="size-3.5 animate-spin" />} text="Loading workspaces…" />
+                    <StatusRow icon={<Icons.spinner className="size-3.5 animate-spin" />} text="Loading workspaces…" />
                   )}
                   {empty && !searching && (
                     <SidebarMenuItem>
@@ -900,7 +879,7 @@ export function AppSidebar({
                           data-testid="sidebar-empty-new-workspace-button"
                           onClick={() => setCrud({ kind: "workspace" })}
                         >
-                          <Plus /> New workspace
+                          <Icons.add /> New workspace
                         </Button>
                       </div>
                     </SidebarMenuItem>
@@ -1142,7 +1121,7 @@ function PinnedSection({
           data-testid="sidebar-pinned-section-header"
           className="rounded-lg"
         >
-          <Pin className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+          <Icons.pin className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
           <FadeText
             data-testid="container-title"
             className={cn("flex-initial text-ui-sm", active ? "text-foreground" : "text-foreground-subtle")}
@@ -1303,7 +1282,7 @@ function ContainerContent({ kind, children }: { kind: string; children: ReactNod
  */
 function RowChevron({ open }: { open: boolean }) {
   return (
-    <ChevronRight
+    <Icons.chevronRight
       data-testid="row-chevron"
       aria-hidden="true"
       className={cn("size-3.5 shrink-0 text-foreground-subtlest transition-transform", open && "rotate-90")}
@@ -1330,7 +1309,7 @@ function RowMenu({
     <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" aria-label="Row actions" className="size-5 p-0" {...triggerProps}>
-          <MoreHorizontal />
+          <Icons.more />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="right">
@@ -1405,24 +1384,24 @@ function WorkspaceItem({
   const { attention, runStatus } = useRowSignal();
   const aggregate = aggregateStatus(workspaceTasks(workspace), attention, runStatus);
   const items = [
-    { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(null) },
-    { label: "Add space", icon: <Plus />, onSelect: onAddSpace },
+    { label: "Add task", icon: <Icons.add />, onSelect: () => onAddTask(null) },
+    { label: "Add space", icon: <Icons.add />, onSelect: onAddSpace },
     ...(localPathActions
       ? [
           {
             label: localPathActions.revealLabel,
-            icon: <FolderOpen />,
+            icon: <Icons.folderOpen />,
             onSelect: () => localPathActions.reveal(workspace.Path),
           },
           ...localPathActions.editors.map((editor) => ({
             label: `Open in ${editor.label}`,
-            icon: <SquareArrowOutUpRight />,
+            icon: <Icons.externalLink />,
             onSelect: () => localPathActions.open(editor.id, workspace.Path),
           })),
         ]
       : []),
-    { label: "Worktree scripts", icon: <SquareTerminal />, onSelect: onEditScripts },
-    { label: "Delete workspace", icon: <Trash2 />, onSelect: onDeleteWorkspace },
+    { label: "Worktree scripts", icon: <Icons.terminal />, onSelect: onEditScripts },
+    { label: "Delete workspace", icon: <Icons.delete />, onSelect: onDeleteWorkspace },
   ];
 
   const { active, rowProps, setMenuOpen } = useRowActive();
@@ -1463,7 +1442,7 @@ function WorkspaceItem({
               aria-expanded={expanded}
               className={cn("rounded-lg", active && "pr-7")}
             >
-              <FolderGit2 className="group-data-[collapsible=icon]:hidden" />
+              <Icons.workspace className="group-data-[collapsible=icon]:hidden" />
               <span
                 data-testid="rail-monogram"
                 data-selected={selectedHere || undefined}
@@ -1620,8 +1599,8 @@ function SpaceItem({
       spaceId={space.ID}
       nodeId={`space:${space.ID}`}
       menuItems={[
-        { label: "Add task", icon: <Plus />, onSelect: () => onAddTask(space.ID) },
-        { label: "Delete space", icon: <Trash2 />, onSelect: () => onDeleteSpace(space) },
+        { label: "Add task", icon: <Icons.add />, onSelect: () => onAddTask(space.ID) },
+        { label: "Delete space", icon: <Icons.delete />, onSelect: () => onDeleteSpace(space) },
       ]}
     />
   );
@@ -1693,7 +1672,7 @@ function SpaceLikeItem({
             data-testid={testId}
             data-space-id={spaceId}
           >
-            <Layers className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
+            <Icons.space className={cn("size-3.5", active ? "text-foreground" : "text-foreground-subtle")} />
             <FadeText
               data-testid="container-title"
               fade={active}
@@ -1799,7 +1778,7 @@ function TaskHoverCardBody({
       )}
       {(stat?.branch ?? task.Branch) && (
         <div className="flex items-center gap-1.5 text-ui-sm text-muted-foreground">
-          <GitBranch className="size-3 shrink-0" />
+          <Icons.branch className="size-3 shrink-0" />
           <span data-testid="sidebar-task-branch" className="min-w-0 truncate">
             {stat?.branch ?? task.Branch}
           </span>
@@ -1982,7 +1961,7 @@ const TaskRow = memo(function TaskRow({
               style={{ left: padLeft - ROW_GUTTER_PX }}
               className="absolute inset-y-0 flex w-3 items-center justify-center rounded-sm text-muted-foreground outline-hidden"
             >
-              <ChevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
+              <Icons.chevronRight className={cn("size-3 transition-transform", !isCollapsed && "rotate-90")} />
             </button>
           )}
           <HoverCard openDelay={400} closeDelay={100}>
@@ -2130,7 +2109,7 @@ const TaskRow = memo(function TaskRow({
                     data-task-id={task.ID}
                     className="size-5 p-0"
                   >
-                    <MoreHorizontal />
+                    <Icons.more />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -2312,21 +2291,21 @@ function taskMenuEntries(
       kind: "item",
       testId: "sidebar-task-pin-action",
       label: o.isPinned ? "Unpin" : "Pin",
-      icon: o.isPinned ? <PinOff /> : <Pin />,
+      icon: o.isPinned ? <Icons.unpin /> : <Icons.pin />,
       onSelect: () => o.onTogglePin(task.ID),
     },
     {
       kind: "item",
       testId: "sidebar-task-mark-unread-action",
       label: "Mark unread",
-      icon: <Circle />,
+      icon: <Icons.statusIdle />,
       onSelect: () => o.onMarkUnread(task.ID),
     },
     {
       kind: "item",
       testId: "sidebar-task-archive-action",
       label: "Archive task",
-      icon: <Archive />,
+      icon: <Icons.archive />,
       onSelect: () => o.onArchiveTask(task),
     },
   );
@@ -2363,7 +2342,7 @@ function TaskMenuItems({ entries, parts }: { entries: TaskMenuEntry[]; parts: Me
         entry.kind === "move" ? (
           <Sub key="move">
             <SubTrigger data-testid="sidebar-task-move-action">
-              <Layers /> Move to space
+              <Icons.space /> Move to space
             </SubTrigger>
             <SubContent>
               {entry.targets.map((target) => (

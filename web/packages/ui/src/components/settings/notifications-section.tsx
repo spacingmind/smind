@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 
-import { Bell } from "lucide-react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -9,6 +8,7 @@ import { useNotificationPermission, type NotificationPermissionState } from "@/h
 import { useNotificationSoundPreference } from "@/hooks/use-notification-sound-preference";
 import { playNotificationSound } from "@/lib/notification-sound";
 import { cn } from "@/lib/utils";
+import { Icons } from "@/lib/icons";
 
 /** Mirrors General's former copy for this toggle -- moved here per the web-sidebar-attention plan (AC3), not duplicated: general-section.tsx no longer renders it. */
 const PERMISSION_LABEL: Record<NotificationPermissionState, string> = {
@@ -141,6 +141,6 @@ registerSettingsSection({
   label: "Notifications",
   // Ungrouped, so it sorts with General/Appearance above every group heading.
   order: 110,
-  icon: <Bell aria-hidden className="size-3.5" />,
+  icon: <Icons.notifications aria-hidden className="size-3.5" />,
   render: (ctx) => <NotificationsSection {...ctx} />,
 });

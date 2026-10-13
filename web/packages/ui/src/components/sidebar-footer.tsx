@@ -1,5 +1,4 @@
-import { useState, type ComponentType, type ReactNode } from "react";
-import { Bot, CircleGauge, CircleHelp, FolderPlus, KeyRound, Server, Settings as SettingsIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -16,6 +15,7 @@ import { openUsageModal } from "@/hooks/use-usage-modal";
 import { useKeyboard } from "@/keyboard/keyboard-provider";
 import type { ConnectionStatus } from "@/lib/reconnect";
 import { desktop, isDesktop } from "@/lib/platform";
+import { Icons, type IconComponent } from "@/lib/icons";
 import { cn } from "@/lib/utils";
 
 const DOCS_URL = "https://github.com/spacingmind/smind#readme";
@@ -62,7 +62,7 @@ function FooterIconButton({
   onClick,
 }: {
   label: string;
-  icon: ComponentType;
+  icon: IconComponent;
   testId: string;
   onClick: () => void;
 }) {
@@ -89,7 +89,7 @@ function HostRow({
   testId,
   onSelect,
 }: {
-  icon?: ComponentType<{ className?: string }>;
+  icon?: IconComponent;
   label: string;
   value?: ReactNode;
   testId: string;
@@ -149,7 +149,7 @@ function HostButton({
             data-testid="sidebar-footer-host"
             className={cn("relative", ICON_BUTTON_CLASS)}
           >
-            <Server />
+            <Icons.host />
             {dot && (
               <StatusDot
                 status={dot}
@@ -170,7 +170,7 @@ function HostButton({
           <span className="text-foreground-subtlest">{connectionStatusText ?? connectionStatus}</span>
         </div>
         <HostRow
-          icon={KeyRound}
+          icon={Icons.credentials}
           label="Providers"
           testId="sidebar-footer-host-providers"
           onSelect={() => select("providers")}
@@ -185,7 +185,7 @@ function HostButton({
           }
         />
         <HostRow
-          icon={Bot}
+          icon={Icons.agent}
           label="Agents"
           testId="sidebar-footer-host-agents"
           onSelect={() => select("agents")}
@@ -220,7 +220,7 @@ function HelpButton({ onOpenSettings }: { onOpenSettings?: (sectionId?: string) 
             data-testid="sidebar-footer-help"
             className={ICON_BUTTON_CLASS}
           >
-            <CircleHelp />
+            <Icons.help />
           </Button>
         </DropdownMenuTrigger>
       </FooterTooltip>
@@ -283,13 +283,13 @@ export function SidebarFooterActions({
         >
           <FooterIconButton
             label="Add workspace"
-            icon={FolderPlus}
+            icon={Icons.folderAdd}
             testId="sidebar-footer-add-workspace"
             onClick={onAddWorkspace}
           />
           <FooterIconButton
             label="Usage"
-            icon={CircleGauge}
+            icon={Icons.usage}
             testId="sidebar-footer-usage"
             onClick={openUsageModal}
           />
@@ -305,7 +305,7 @@ export function SidebarFooterActions({
           <ThemeToggle withTooltip className={ICON_BUTTON_CLASS} />
           <FooterIconButton
             label="Settings"
-            icon={SettingsIcon}
+            icon={Icons.settings}
             testId="sidebar-settings-button"
             onClick={() => onOpenSettings?.()}
           />

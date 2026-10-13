@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Check, Copy, Pencil, RotateCcw } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { groupTimeline, type DetailLevel } from "@/components/timeline/detail-level";
 import { TimelineRow, type TimelineRowContext } from "@/components/timeline/timeline-row";
@@ -78,7 +78,7 @@ export const RunTimeline = memo(function RunTimeline({
           {onEditPrompt && (
             <MessageAction
               label="Edit & resend"
-              icon={<Pencil aria-hidden />}
+              icon={<Icons.edit aria-hidden />}
               data-testid="run-prompt-edit"
               onClick={() => onEditPrompt(run)}
             />
@@ -125,7 +125,7 @@ export const RunTimeline = memo(function RunTimeline({
             {onRerun && run.status !== "running" && (
               <MessageAction
                 label="Re-run this prompt"
-                icon={<RotateCcw aria-hidden />}
+                icon={<Icons.retry aria-hidden />}
                 data-testid="run-rerun"
                 onClick={() => onRerun(run)}
               />
@@ -159,7 +159,7 @@ function RunCopyMenu({ run }: { run: RunEntry }) {
               data-testid="run-copy-button"
               aria-label="Copy"
             >
-              {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+              {copied ? <Icons.check aria-hidden /> : <Icons.copy aria-hidden />}
             </Button>
           </DropdownMenuTrigger>
         </TooltipTrigger>

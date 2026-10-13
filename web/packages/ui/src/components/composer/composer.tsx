@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type Ref } from "react";
 
-import { ArrowUp, Square, Zap } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { ComposerStatusChips } from "@/components/composer/composer-status-chips";
 import { QueuedPrompts } from "@/components/composer/queued-prompts";
@@ -474,7 +474,7 @@ export function Composer({
                   title="Interrupt the running turn and send now (⌘/Ctrl+Enter)"
                   onClick={sendNow}
                 >
-                  <Zap aria-hidden />
+                  <Icons.sendNow aria-hidden />
                 </Button>
               )}
               {running && (
@@ -488,7 +488,7 @@ export function Composer({
                   data-testid="chat-stop-button"
                   onClick={handleStop}
                 >
-                  <Square aria-hidden className="fill-current" />
+                  <Icons.stop aria-hidden className="fill-current" />
                 </Button>
               )}
               <Button
@@ -500,7 +500,7 @@ export function Composer({
                 title={running ? "Queue this prompt — it sends when the run finishes (Enter)" : "Send (Enter)"}
                 data-testid="chat-send-button"
               >
-                <ArrowUp aria-hidden />
+                <Icons.send aria-hidden />
               </Button>
             </div>
           </div>

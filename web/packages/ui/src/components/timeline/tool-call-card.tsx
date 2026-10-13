@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { StatusDot, type StatusDotStatus } from "@/components/ui/status-dot";
 import type { TimelineToolCallItem } from "@/hooks/use-run-timeline";
@@ -78,7 +78,7 @@ export function ToolCallCard({
             onOpenPath ? "shrink-0" : "flex-1",
           )}
         >
-          <ChevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
+          <Icons.chevronRight className={cn("size-3 shrink-0 transition-transform", open && "rotate-90")} />
           <Icon className="size-3 shrink-0" />
           <span className="shrink-0 font-medium text-foreground" data-chat-find-text="true">
             {name}

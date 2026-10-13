@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Loader2 } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { RunUsagePill } from "@/components/run-usage-pill";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,7 @@ export function RunFooter<T extends RunFooterRun>({
       >
         {running ? (
           <span className={cn(SEGMENT, "gap-1.5")}>
-            <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+            <Icons.spinner aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
             {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
             <span role="status">Working…</span>
             {view.duration && (

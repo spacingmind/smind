@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { Brain, CheckCheck, RotateCcw, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { ModelPicker, type PickerProfileRow } from "@/components/composer/model-picker";
 import { PILL_TRIGGER_CLASS } from "@/components/composer/pill-class";
@@ -425,7 +425,7 @@ function RunConfigToolbarModelPicker() {
           disabled={meta.disabled}
           onClick={() => actions.resetToAgent()}
         >
-          <RotateCcw aria-hidden />
+          <Icons.reset aria-hidden />
         </Button>
       )}
     </div>
@@ -494,7 +494,7 @@ function RunConfigToolbarMode() {
           data-danger={dangerous ? "true" : undefined}
           className={cn(PILL_TRIGGER_CLASS, dangerous && "text-warning hover:text-warning")}
         >
-          {dangerous ? <ShieldAlert aria-hidden className="shrink-0" /> : <ShieldCheck aria-hidden className="shrink-0" />}
+          {dangerous ? <Icons.permissionDanger aria-hidden className="shrink-0" /> : <Icons.permission aria-hidden className="shrink-0" />}
           <SelectValue placeholder="Select mode" />
         </SelectTrigger>
         <SelectContent>
@@ -518,7 +518,7 @@ function RunConfigToolbarMode() {
           aria-label="Auto-accept"
           className={cn(PILL_TRIGGER_CLASS, autoAccept ? "text-warning hover:text-warning" : "text-foreground-muted")}
         >
-          <CheckCheck aria-hidden className="shrink-0" />
+          <Icons.checkAll aria-hidden className="shrink-0" />
           <span className="max-sm:hidden">{AUTO_ACCEPT_LABEL}</span>
         </Button>
       )}
@@ -552,7 +552,7 @@ function RunConfigToolbarThinking() {
         title={THINKING_LEVELS.find((t) => t.id === (state.thinkingLevel || "standard"))?.help}
         className={PILL_TRIGGER_CLASS}
       >
-        <Brain aria-hidden className="shrink-0" />
+        <Icons.thinking aria-hidden className="shrink-0" />
         <SelectValue placeholder="Select thinking level" />
       </SelectTrigger>
       <SelectContent>

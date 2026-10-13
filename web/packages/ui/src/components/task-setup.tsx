@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Check, ChevronRight, Loader2, RotateCw } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -24,11 +24,11 @@ export function SetupBadge({ status, compact = false, className }: { status: Set
   const label = LABELS[status];
   const icon =
     status === "running" ? (
-      <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />
+      <Icons.spinner className="size-3 shrink-0 animate-spin" aria-hidden="true" />
     ) : status === "ok" ? (
-      <Check className="size-3 shrink-0" aria-hidden="true" />
+      <Icons.check className="size-3 shrink-0" aria-hidden="true" />
     ) : (
-      <AlertTriangle className="size-3 shrink-0" aria-hidden="true" />
+      <Icons.warning className="size-3 shrink-0" aria-hidden="true" />
     );
   if (compact) {
     return (
@@ -154,13 +154,13 @@ export function SetupDetails({
             aria-controls={`task-${task.ID}-setup-log`}
             onClick={() => setOpen((v) => !v)}
           >
-            <ChevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
+            <Icons.chevronRight className={cn("size-3 transition-transform", open && "rotate-90")} />
             {open ? "Hide log" : "Show log"}
           </Button>
         )}
         {finished && hasScript && (
           <Button type="button" variant="outline" size="xs" data-testid="task-setup-retry" disabled={retrying} onClick={() => void retry()}>
-            <RotateCw className={cn("size-3", retrying && "animate-spin")} />
+            <Icons.retry className={cn("size-3", retrying && "animate-spin")} />
             Retry setup
           </Button>
         )}

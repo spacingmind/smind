@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { Icons } from "@/lib/icons";
 
 import { DiffRender, type DiffOutputFormat } from "@/components/diff-render";
 import { FileStatusMarker } from "@/components/file-status-marker";
@@ -614,7 +614,7 @@ function FileRow({
           onClick={onToggleCollapse}
           data-testid={`diff-file-header-${file.path}`}
         >
-          <ChevronRight
+          <Icons.chevronRight
             aria-hidden="true"
             className={cn("size-3.5 shrink-0 text-foreground-subtle transition-transform", !collapsed && "rotate-90")}
           />

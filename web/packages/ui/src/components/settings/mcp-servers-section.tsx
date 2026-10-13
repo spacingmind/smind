@@ -1,5 +1,4 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { MoreHorizontal, Plug, Plus } from "lucide-react";
 
 import { SettingsSectionTitle } from "@/components/settings/settings-title";
 import { registerSettingsSection, type SettingsSectionContext } from "@/components/settings/settings-registry";
@@ -9,6 +8,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { McpServer } from "@/lib/types";
+import { Icons } from "@/lib/icons";
 
 /**
  * The add/edit form's field state -- one instance shared by whichever card
@@ -214,7 +214,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
 
   const newServerButton = (
     <Button type="button" size="sm" data-testid="mcp-new-button" onClick={openNew}>
-      <Plus aria-hidden className="size-3.5" /> New server
+      <Icons.add aria-hidden className="size-3.5" /> New server
     </Button>
   );
 
@@ -314,7 +314,7 @@ function McpServersSection({ client, events }: SettingsSectionContext) {
                               data-testid={`mcp-menu-${m.id}`}
                               className="shrink-0"
                             >
-                              <MoreHorizontal aria-hidden />
+                              <Icons.more aria-hidden />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
@@ -594,7 +594,7 @@ function KVEditor({
         data-testid={`${idPrefix}-add`}
         onClick={() => onChange([...rows, { key: "", value: "" }])}
       >
-        <Plus aria-hidden className="size-3.5" /> Add
+        <Icons.add aria-hidden className="size-3.5" /> Add
       </Button>
     </div>
   );
@@ -657,6 +657,6 @@ registerSettingsSection({
   label: "MCP servers",
   groupLabel: "Agents & providers",
   order: 177,
-  icon: <Plug aria-hidden className="size-3.5" />,
+  icon: <Icons.mcp aria-hidden className="size-3.5" />,
   render: (ctx) => <McpServersSection {...ctx} />,
 });

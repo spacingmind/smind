@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Info, MoreHorizontal, Plus, KeyRound } from "lucide-react";
 
 import { ConnectAccountPanel, useProviderTest } from "@/components/accounts-dialog";
 import {
@@ -24,6 +23,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
+import { Icons } from "@/lib/icons";
 import {
   Tooltip,
   TooltipContent,
@@ -262,7 +262,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
             data-testid="providers-connect-toggle"
             onClick={() => setConnecting((v) => !v)}
           >
-            <Plus aria-hidden className="size-3.5" />
+            <Icons.add aria-hidden className="size-3.5" />
             Connect account
           </Button>
         }
@@ -376,7 +376,7 @@ function ProvidersSection({ client, events }: SettingsSectionContext) {
                         aria-label="About other accounts"
                         className="text-foreground-subtle"
                       >
-                        <Info aria-hidden className="size-3.5" />
+                        <Icons.info aria-hidden className="size-3.5" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>
@@ -523,7 +523,7 @@ function AccountRow({
                     aria-label={`Account actions for ${account.label}`}
                     data-testid={`provider-row-menu-${account.id}`}
                   >
-                    <MoreHorizontal />
+                    <Icons.more />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
@@ -842,6 +842,6 @@ registerSettingsSection({
   label: "Providers",
   groupLabel: "Agents & providers",
   order: 180,
-  icon: <KeyRound aria-hidden className="size-3.5" />,
+  icon: <Icons.credentials aria-hidden className="size-3.5" />,
   render: (ctx) => <ProvidersSection {...ctx} />,
 });

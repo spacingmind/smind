@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { FileCode, ImageIcon } from "lucide-react";
+import { Icons } from "@/lib/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -91,17 +91,17 @@ export function FilePreview({ kind, content, path }: { kind: PreviewKind; conten
     return content ? (
       <MarkdownPreview content={content} />
     ) : (
-      <EmptyPreview icon={<FileCode className="size-3.5" />} />
+      <EmptyPreview icon={<Icons.fileCode className="size-3.5" />} />
     );
   }
   if (kind === "svg") {
     return content ? (
       <SvgPreview content={content} path={path} />
     ) : (
-      <EmptyPreview icon={<ImageIcon className="size-3.5" />} />
+      <EmptyPreview icon={<Icons.image className="size-3.5" />} />
     );
   }
-  return content ? <HtmlPreview content={content} /> : <EmptyPreview icon={<FileCode className="size-3.5" />} />;
+  return content ? <HtmlPreview content={content} /> : <EmptyPreview icon={<Icons.fileCode className="size-3.5" />} />;
 }
 
 function EmptyPreview({ icon }: { icon: ReactNode }) {

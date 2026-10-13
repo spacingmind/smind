@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import { Network } from "lucide-react";
 
 import { registerSettingsSection } from "@/components/settings/settings-registry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { desktop, isDesktop, type Connection } from "@/lib/platform";
+import { Icons } from "@/lib/icons";
 
 /**
  * ADR-0013 AC6's host picker, as Settings -> Connections: list every
@@ -161,7 +161,7 @@ if (isDesktop) {
     label: "Daemon server",
     groupLabel: "Connection",
     order: 150,
-    icon: <Network aria-hidden className="size-3.5" />,
+    icon: <Icons.connections aria-hidden className="size-3.5" />,
     render: () => <ConnectionsSection />,
   });
 }
