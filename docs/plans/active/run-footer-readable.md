@@ -33,13 +33,13 @@ focused (as today). Left to right:
 | State | Line |
 |---|---|
 | running | `⟳ Working… 12s` (spinner, live 1 s tick) |
-| done, `end_turn` / no reason | `Worked for 9s · Sonnet 5.5 · $0.03 · 2h ago` |
-| `cancelled` | `Stopped by you · 4s · Sonnet 5.5` (neutral) |
+| done, `end_turn` / no reason | `Sonnet 5.5 · 9s · $0.03 · 2h ago` |
+| `cancelled` | `Stopped by you · Sonnet 5.5 · 4s` (neutral) |
 | `max_tokens` | `Stopped at the output limit · Sonnet 5.5 · 9s`  **[Continue]** (warning) |
 | `max_turn_requests` | `Hit the tool-turn limit · Sonnet 5.5 · 9s`  **[Continue]** (warning) |
 | `refusal` | `The agent declined to continue · Sonnet 5.5 · 9s` (warning) |
 | status `error` | `Failed after 9s · Sonnet 5.5`  **[Retry]** (destructive); the red error box above keeps the full message and "Retry with higher effort" |
-| status `stopped`, no reason | `Stopped · 4s` (neutral) |
+| status `stopped`, no reason | `Stopped · Sonnet 5.5 · 4s` (neutral) |
 | any other stop reason | `Ended: <reason> · …` (neutral, verbatim reason) |
 
 - **No "done" word, no provider id, no status dot on a normal finish.** The

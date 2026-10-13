@@ -61,7 +61,7 @@ export function RunFooter<T extends RunFooterRun>({
         role="group"
         aria-label={view.ariaLabel}
         className={cn(
-          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 transition-opacity",
+          "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 sm:gap-x-2 transition-opacity",
           view.kind === "done" &&
             "opacity-70 group-has-[:focus-visible]/answer:opacity-100 group-hover/answer:opacity-100 [@media(hover:none)]:opacity-100",
         )}
@@ -69,14 +69,16 @@ export function RunFooter<T extends RunFooterRun>({
         data-status={run.status}
       >
         {running ? (
-          <span className="flex items-center gap-1.5" role="status">
-            <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-            <span data-testid="run-status">{view.duration ? `Working… ${view.duration}` : "Working…"}</span>
+          <span className={SEGMENT} role="status">
+            <span className="flex items-center gap-1.5">
+              <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+              <span data-testid="run-status">{view.duration ? `Working… ${view.duration}` : "Working…"}</span>
+            </span>
           </span>
         ) : (
           view.sentence !== undefined && (
             <span
-              className={cn("flex items-center gap-1.5", view.tone === "warning" && "text-warning", view.tone === "danger" && "text-destructive")}
+              className={cn(SEGMENT, "gap-1.5", view.tone === "warning" && "text-warning", view.tone === "danger" && "text-destructive")}
             >
               {view.tone !== "neutral" && <StatusDot status={view.tone === "danger" ? "danger" : "warning"} />}
               <span data-testid="run-stop-reason" data-tone={view.tone}>
@@ -110,18 +112,24 @@ export function RunFooter<T extends RunFooterRun>({
           )
         )}
         {!running && view.model && (
-          <span data-testid="run-model" className="min-w-0 truncate">
+          <span data-testid="run-model" className={cn(SEGMENT, "min-w-0 truncate")}>
             {view.model}
           </span>
         )}
-        {view.duration && (
-          <span data-testid="run-elapsed" title={view.durationTitle ?? undefined}>
+        {/* While running the live "Working… 12s" label already carries the elapsed time. */}
+        {!running && view.duration && (
+          <span data-testid="run-elapsed" title={view.durationTitle ?? undefined} className={SEGMENT}>
             {view.duration}
           </span>
         )}
-        <RunUsagePill usage={run.usage} provider={run.provider} />
+        {run.usage !== undefined && (
+          // The pill carries its own px-2 (a hover target): trade the dot's margin and the trailing gap for it so the dots stay evenly spaced.
+          <span className={cn(SEGMENT, "sm:-mr-2 sm:before:mr-0")}>
+            <RunUsagePill usage={run.usage} provider={run.provider} />
+          </span>
+        )}
         {view.age && (
-          <time data-testid="run-age" dateTime={run.finishedAt} title={view.age.title} className="shrink-0">
+          <time data-testid="run-age" dateTime={run.finishedAt} title={view.age.title} className={cn(SEGMENT, "shrink-0")}>
             {view.age.label}
           </time>
         )}
@@ -130,6 +138,10 @@ export function RunFooter<T extends RunFooterRun>({
     </div>
   );
 }
+
+/** One footer segment: from `sm` up a middle dot before every segment but the first (a pseudo-element, so assistive tech skips it); below `sm` a wrapped line would start with a stray dot, so plain gaps do the separating. */
+const SEGMENT =
+  "flex items-center sm:before:mr-2 sm:before:text-foreground-subtle sm:before:content-['·'] sm:first:before:content-none";
 
 /** Re-renders every `intervalMs` while mounted (null = off), returning the tick's timestamp. */
 function useTicker(intervalMs: number | null): number | null {
