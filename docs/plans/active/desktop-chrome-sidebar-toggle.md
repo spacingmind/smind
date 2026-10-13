@@ -218,3 +218,11 @@ committed). `/tmp/smind-tl/shots/real/final/` (REAL macOS): `{dark,light}-{colla
 strip (y=40, x=120..1240) is a single colour, the lights zone (y=44, x=0..118) is a single colour, no vertical line
 or corner crosses y<49, sidebar content is hidden (never clipped), the toggle stays at x=84. Settled collapsed shows
 the rail badges at y=72 (same as a fresh load); settled expanded is the unchanged ZCode layout.
+
+Final real-macOS pass (fresh capture on the pushed code, `/tmp/smind-tl/shots/real/final2/`, REAL macOS): the 20
+transition frames (`{dark,light}-{collapse,expand}-{1-start,2-25,3-50,4-75,5-settled}`) re-checked by pixel row
+(strip y=40 x=120..1240 and lights zone y=44 x=0..118 are a single colour in all 16 non-settled frames), plus
+`*-6-settings` (lights on the Settings sidebar surface, unchanged) and `*-7-fullscreen-expanded`,
+`*-7b-fullscreen-collapse-mid`, `*-7c-fullscreen-collapsed` (no lights: toggle in the rail, strip/header reclaim
+the zone; the toggle caught mid-glide in 7/7b is the forced 6s `left` transition after entering fullscreen, not the
+real 200ms). The temporary capture hook was removed again (not committed).
