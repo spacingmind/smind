@@ -86,13 +86,18 @@ Components render `<Icons.settings />` (or `const Icon = Icons.x` when the glyph
 
 ## Progress
 
-- [x] Inventory + convention + registry module + drift test (this commit)
-- [ ] Peer A: sidebar / footer / usage items / account-usage
-- [ ] Peer B: header / tabs / App.tsx / file panes / terminal / find / folder picker / open-in-editor
-- [ ] Peer C: composer, model picker, run-config, timeline, tool rows, task-setup, run footer
-- [ ] Peer D: settings, `ui/*` primitives, theme toggle, misc
-- [ ] Screenshots after, review, PR
+- [x] Inventory + convention + registry module + drift test (`2e8f0946`)
+- [x] Area A sidebar / footer / usage (`d50e591f`, Peer GLM; Lead committed — the Peer hit its turn cap uncommitted)
+- [x] Area B header / tabs / panes (`dde4b169`; Lead fixed three visible-text strings the scripted rename corrupted, and moved `terminal` to `>_` after `TB-AC4` showed D8 of app-header-and-tabs)
+- [x] Area C composer / timeline (`28a5a527`, `5459b243`; Lead reverted a blanket muted→subtle colour change in `model-picker-rows.tsx`, `5cb7de78`)
+- [x] Area D settings / ui primitives (`19b9db76`; Lead fixed a mangled `aria-label="Server name"`, `3e9e464b`)
+- [x] Screenshots before/after, review, PR
 
 ## Validation
 
-(to fill in at the end: AC → evidence)
+- **AC1** `lib/icons.test.ts › is imported through, not around` green; `grep -rn lucide-react src | grep -v .test.` → only `lib/icons.ts`, `lib/file-icons.tsx`.
+- **AC2** `lib/icons.test.ts › binds each concept…` inline snapshot (every row of the table); visually: footer usage `Gauge`, Settings→General `Settings` gear, Settings→Usage `Gauge`, header shortcuts `Keyboard`, Terminal/Bash `>_`, sidebar group toggle workspace glyph.
+- **AC3** Context-menu rule changed to 16px (no visible delta in the tab context menu: identical before/after); open-in-editor and theme-toggle check marks 16px; accounts-dialog chevrons 12px; model-picker trailing chevron `text-foreground-subtle`.
+- **AC4** `UsageSourceIcon` renders `ProviderGlyph` (anthropic→Claude mark, openai→Codex mark); `usage-source-icon` tests pass (no usage data with a provider row was in the sandbox, so the swapped marks were checked by tests only, not by screenshot).
+- **AC5** `bunx tsc -b packages/ui` clean; web vitest 185 files / 2326 tests pass; `task lint` exit 0; `task test` exit 0. One existing test narrowed on purpose: `usage-sidebar-item.test.tsx` "measuring copies carry no test ids" now checks `sidebar-usage-*` ids, because `ProviderGlyph` carries its own `provider-glyph` test id inside the hidden copy.
+- **AC6** Before/after, light + dark, 1440×900 (and 390×844 for the composer picker and the sidebar): `/private/tmp/icon-shots/{before,after}/` (chat chrome, timeline hover + footer, model picker, Settings General/Agents/Providers/Usage, Usage modal, footer help menu), plus menus in `{before,after}-ctx/`. Only the intended glyph swaps differ. Not covered: a populated plan-usage modal (needs a real account; live probes were not run), the desktop (Tauri) window chrome (untouched).
