@@ -52,8 +52,18 @@ Evidence (tauri-plugin-updater 2.12.0 in the cargo registry, tauri-bundler `dev`
 
 ## Progress
 
-(see commits)
+Done in one PR: web strings (peer-glm), desktop/packaging (peer-sonnet), Go/CLI/docs prose (lead).
 
 ## Validation
 
-(filled in at the end)
+1. Web/CLI/desktop display strings: diffs reviewed; `task test`, `task lint`, web typecheck + 2350 vitest tests,
+   `cargo test` (src-tauri 58, daemon-client 179), desktop node tests (13) all pass.
+2. README/docs prose and CLI help prose changed; ADRs left as history; commands unchanged.
+3. `task desktop:mac` built `bundle/macos/sMind.app` and `bundle/dmg/sMind_0.11.1_aarch64.dmg`;
+   `Contents/MacOS` = `smind`, `smind-desktop`; Info.plist CFBundleName/DisplayName=sMind,
+   CFBundleExecutable=smind-desktop, URL scheme `smind`, identifier `dev.spacingmind.desktop`.
+   Workflow globs reviewed: `*.dmg`/`*-setup.exe`/`*.msi` are name-agnostic; the explicit `smind.app` paths were updated.
+4. Diff grep shows no identifier changed (only `smind.app`→`sMind.app` bundler-output paths and display prose).
+5. Screenshots (light+dark): sidebar strip, main, offline page. Not renderable headlessly: the update dialog and the
+   desktop rail/menus (need the Tauri shell); covered by unit tests and string diff only.
+   Wordmark stays `text-foreground` (cyan is reserved for primary/focus per docs/design.md; the mark already carries it).
