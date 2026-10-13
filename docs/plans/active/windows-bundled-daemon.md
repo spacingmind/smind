@@ -102,9 +102,9 @@ page copy (separate repo).
 ## Progress
 
 - [x] ADR-0030 amendment, ADR-0013 note, this plan.
-- [ ] Rust: sidecar path, shared copy install, placeholder, remove download.
-- [ ] Taskfile `desktop:win:daemon`, `desktop-windows.yml`, `release-please.yml`.
-- [ ] README.
+- [x] Rust: sidecar path, shared copy install, placeholder, remove download (peer-sonnet a8c3c1b4, 26517d2e, e583de74 — ACCEPTED by Lead after reading the full diff).
+- [x] Taskfile `desktop:win:daemon`, `desktop-windows.yml`, `release-please.yml` (Lead, 22cedfa5).
+- [x] README (peer-glm 0acf8066, ACCEPTED; installer file-name claim corrected by Lead).
 - [ ] Adversarial review of workflow + Rust.
 - [ ] PR + `desktop-windows` workflow green with the Verify bundle step.
 
