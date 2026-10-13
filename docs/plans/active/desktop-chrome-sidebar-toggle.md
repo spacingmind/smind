@@ -146,9 +146,35 @@ All within the existing model (collapsible="icon" rail, inset panel); no new arc
 
 - [x] Refs research.
 - [x] Baseline diagnosed (stubbed bridge render).
-- [ ] Implementation.
-- [ ] Real-macOS screenshots (blocked while the session is locked).
+- [x] Implementation (`window-sidebar-toggle.tsx`, `window-chrome.ts`, `app-sidebar.tsx`, `app-header.tsx`, `App.tsx`).
+- [x] Unit tests (T1-T3) + stubbed-bridge harness (T4).
+- [ ] Real-macOS screenshots of the new chrome: BLOCKED (see Validation).
 
 ## Validation
 
-(pending)
+Harness: desktop-flavoured build (`VITE_SMIND_DESKTOP=1`) served against an isolated sandbox daemon
+(`SMIND_HOME=/tmp/smind-tl/home`, port 4699, 4 workspaces) with a stubbed `__TAURI_INTERNALS__` and a drawn
+light cluster at x=16..76, y=17..31; Playwright drives the app's own Cmd+B shortcut, samples every frame of the
+200ms transition and probes interactive elements against the lights rect. Files: `/tmp/smind-tl/harness/`
+(local, not committed), shots in `/tmp/smind-tl/shots/{base,new}/`. Not real macOS: no vibrancy, lights drawn.
+
+- DC-AC1 (fixed toggle): toggle x = 84 in expanded, mid-toggle and collapsed (macOS); 10 on Windows/Linux and in
+  macOS fullscreen; baseline moved 220 -> 93. Same node (App test keeps focus).
+- DC-AC2 (no overlap): zero hits against the lights rect in expanded / collapsed / mid / Settings / compact /
+  compact sheet (baseline: lights straddled the rail seam, border and corner). Surface under the lights is the bar
+  colour across the whole bar (`mac-*-2-collapsed.png`).
+- DC-AC3: rail items start at y>=48 (AC badge top 59); bar and header bottom borders share one line.
+- DC-AC4: per-frame trace, collapse: title x 265 -> 226 -> 181 -> 153 -> 135 -> 125 -> 121 -> 120 (monotonic,
+  never below the toggle zone end 120); expand mirrors it; toggle x constant 84 in every frame.
+- DC-AC5: fullscreen: toggle x=10, strip pad 46, header inset 0, panel back to rounded + bordered (unit tests +
+  `*-4-fullscreen-*.png`).
+- DC-AC6: Windows/Linux at 1280/900/640: caption buttons flush with the right edge, no overlap with header actions.
+- DC-AC7/8: unit tests; full web suite 2338 passing; `task test`, `task lint`, `task build` green.
+- Real macOS: the Human's session was locked (`CGSSessionScreenIsLocked=1`) for the whole run, so the
+  WKWebView never painted and full-screen captures are black. A window capture of the real bundle
+  (`/tmp/smind-tl/shots/real-new-locked.png`, real macOS) does confirm the lights' real geometry: three circles
+  centred at x~23/46/69, y=24, i.e. the x=16..76 cluster the constants assume. Pixel-level screenshots of the
+  rendered new chrome on real macOS (vibrancy sidebar, mid-toggle) are still owed -- the bundle is built at
+  `desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/smind.app`; run with
+  `HOME=<tmp> SMIND_DAEMON_URL=http://127.0.0.1:<sandbox port>` and capture with `screencapture -x -o -l <id>` once
+  the screen is unlocked.
