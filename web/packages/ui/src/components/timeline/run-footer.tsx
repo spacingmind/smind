@@ -45,12 +45,14 @@ export function RunFooter<T extends RunFooterRun>({
   children?: ReactNode;
 }) {
   const running = run.status === "running";
-  // The live tickers: a running label re-renders every second, an age
-  // label every 30. Pinned to the least frequent rate the text changes at
-  // (Paseo's own rationale), and only while the run is mounted.
-  const tickSecond = useTicker(running ? 1000 : null);
-  const tickAge = useTicker(run.finishedAt ? 30_000 : null);
-  const now = running && tickSecond !== null ? new Date(tickSecond) : tickAge !== null ? new Date(tickAge) : new Date();
+  // The tickers only force a re-render; `now` is read fresh each render so an
+  // unrelated re-render never works from a stale tick. A running label ticks
+  // every second; an age label needs 30 s only in its first hour, then 5 min,
+  // and stops for good once it has become a plain date.
+  const ageMs = run.finishedAt ? Date.now() - Date.parse(run.finishedAt) : NaN;
+  useTicker(running ? 1000 : null);
+  useTicker(!running && ageMs >= 0 && ageMs < AGE_TICK_STOPS_MS ? (ageMs < HOUR_MS ? 30_000 : 300_000) : null);
+  const now = new Date();
 
   const modelLabel = running ? "" : resolveRunModelLabel(run, modelLabels, providerLabels?.[run.provider]);
   const view = describeRunFooter(run, { now, modelLabel });
@@ -69,11 +71,15 @@ export function RunFooter<T extends RunFooterRun>({
         data-status={run.status}
       >
         {running ? (
-          <span className={SEGMENT} role="status">
-            <span className="flex items-center gap-1.5">
-              <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
-              <span data-testid="run-status">{view.duration ? `Working… ${view.duration}` : "Working…"}</span>
-            </span>
+          <span className={cn(SEGMENT, "gap-1.5")}>
+            <Loader2 aria-hidden className="size-3.5 animate-spin motion-reduce:animate-none" />
+            {/* The static word is the polite live region; the ticking number is a timer (implicitly aria-live=off) so a screen reader is not read a new value every second. */}
+            <span role="status">Working…</span>
+            {view.duration && (
+              <span role="timer" data-testid="run-working-elapsed">
+                {view.duration}
+              </span>
+            )}
           </span>
         ) : (
           view.sentence !== undefined && (
@@ -112,8 +118,8 @@ export function RunFooter<T extends RunFooterRun>({
           )
         )}
         {!running && view.model && (
-          <span data-testid="run-model" className={cn(SEGMENT, "min-w-0 truncate")}>
-            {view.model}
+          <span data-testid="run-model" title={modelTitle(run)} className={cn(SEGMENT, "min-w-0")}>
+            <span className="truncate">{view.model}</span>
           </span>
         )}
         {/* While running the live "Working… 12s" label already carries the elapsed time. */}
@@ -140,17 +146,25 @@ export function RunFooter<T extends RunFooterRun>({
 }
 
 /** One footer segment: from `sm` up a middle dot before every segment but the first (a pseudo-element, so assistive tech skips it); below `sm` a wrapped line would start with a stray dot, so plain gaps do the separating. */
+const HOUR_MS = 3_600_000;
+const AGE_TICK_STOPS_MS = 7 * 24 * HOUR_MS;
+
+/** ADR-0025: the exact model id stays one hover away, now that the footer shows the catalog label. */
+function modelTitle(run: RunFooterRun): string | undefined {
+  if (run.model) return `Requested model: ${run.model}`;
+  if (run.usage?.model) return `Reported model: ${run.usage.model}`;
+  return undefined;
+}
+
 const SEGMENT =
   "flex items-center sm:before:mr-2 sm:before:text-foreground-subtle sm:before:content-['·'] sm:first:before:content-none";
 
-/** Re-renders every `intervalMs` while mounted (null = off), returning the tick's timestamp. */
-function useTicker(intervalMs: number | null): number | null {
-  const [tick, setTick] = useState<number | null>(null);
+/** Re-renders every `intervalMs` while mounted (null = off). */
+function useTicker(intervalMs: number | null): void {
+  const [, setTick] = useState(0);
   useEffect(() => {
     if (intervalMs === null) return;
-    setTick(Date.now());
-    const id = setInterval(() => setTick(Date.now()), intervalMs);
+    const id = setInterval(() => setTick((n) => n + 1), intervalMs);
     return () => clearInterval(id);
   }, [intervalMs]);
-  return tick;
 }

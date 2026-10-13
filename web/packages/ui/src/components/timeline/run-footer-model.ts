@@ -110,7 +110,9 @@ export function formatAbsoluteTime(date: Date): string {
  */
 export function humaniseModelId(modelId: string): string {
   if (!modelId.startsWith("claude-")) return modelId;
-  const parts = modelId.slice("claude-".length).split("-");
+  // A `[1m]`-style context suffix and a trailing 8-digit date are noise to a reader.
+  const bare = modelId.replace(/\[[^\]]*\]$/, "").replace(/-\d{8}$/, "");
+  const parts = bare.slice("claude-".length).split("-");
   const joined: string[] = [];
   for (const part of parts) {
     const last = joined[joined.length - 1];
@@ -170,7 +172,6 @@ export function describeRunFooter(
   const duration = ms === null ? null : formatDuration(ms);
 
   if (run.status === "running") {
-    const runningLabel = duration === null ? "Working…" : `Working… ${duration}`;
     return {
       kind: "running",
       tone: "neutral",
@@ -179,7 +180,8 @@ export function describeRunFooter(
       durationTitle: null,
       model: "",
       age: null,
-      ariaLabel: runningLabel,
+      // Static: the group's label must not change every second (the ticking time is its own timer element).
+      ariaLabel: "Working",
     };
   }
 

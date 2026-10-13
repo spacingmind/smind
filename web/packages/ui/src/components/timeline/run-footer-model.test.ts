@@ -73,6 +73,10 @@ describe("resolveRunModelLabel humanises an uncatalogued claude id and leaves un
     expect(resolveRunModelLabel(run({ model: "claude-opus-5-5" }))).toBe("Opus 5.5");
     expect(resolveRunModelLabel(run({ model: "claude-sonnet-4-5" }))).toBe("Sonnet 4.5");
   });
+  it("drops a dated suffix and a [1m] context suffix", () => {
+    expect(resolveRunModelLabel(run({ model: "claude-sonnet-4-5-20250929" }))).toBe("Sonnet 4.5");
+    expect(resolveRunModelLabel(run({ model: "claude-opus-5-5[1m]" }))).toBe("Opus 5.5");
+  });
   it("leaves non-claude ids raw", () => {
     expect(resolveRunModelLabel(run({ model: "glm-5.3" }))).toBe("glm-5.3");
     expect(resolveRunModelLabel(run({ model: "o4-mini" }))).toBe("o4-mini");

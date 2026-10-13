@@ -128,7 +128,8 @@ describe("TaskDetailPane", () => {
     client.emit("run.attach", 0, "chunk", { text: "partial " });
     await flush();
     expect(screen.getByTestId("timeline-assistant")).toHaveTextContent("partial");
-    expect(screen.getByTestId("run-status")).toHaveTextContent(/^Working…/);
+    expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
+    expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…/);
 
     client.emit("run.attach", 0, "chunk", { text: "and more" });
     await flush();

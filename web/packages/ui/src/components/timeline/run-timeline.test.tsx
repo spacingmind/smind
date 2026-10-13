@@ -128,14 +128,17 @@ describe("RunTimeline", () => {
           <RunTimeline run={run([], { status: "running", finishedAt: undefined })} />
         </ul>,
       );
-      const status = screen.getByTestId("run-status");
-      expect(status).toHaveTextContent("Working…");
+      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent("Working…");
       expect(screen.getByTestId("run-meta")).toHaveAttribute("data-status", "running");
       // After 12 fake seconds the label ticks up to 12s.
       act(() => {
         vi.advanceTimersByTime(12_000);
       });
-      expect(screen.getByTestId("run-status")).toHaveTextContent("Working… 12s");
+      expect(screen.getByTestId("run-working-elapsed")).toHaveTextContent("12s");
+      // The ticking number is a timer (aria-live off); only the static word is a live region.
+      expect(screen.getByTestId("run-working-elapsed")).toHaveAttribute("role", "timer");
+      expect(within(screen.getByTestId("run-meta")).getByRole("status")).toHaveTextContent(/^Working…$/);
+      expect(screen.getByTestId("run-meta")).toHaveAttribute("aria-label", "Working");
       // No model segment while running.
       expect(screen.queryByTestId("run-model")).not.toBeInTheDocument();
     } finally {
@@ -793,5 +796,29 @@ describe("useRunTimeline mcpServers", () => {
     });
     expect(result.current.runs?.[0]?.configRevision).toBe(2);
     expect(result.current.runs?.[0]?.items).toEqual([]);
+  });
+});
+
+describe("RunTimeline model segment title", () => {
+  it("keeps the exact requested model id one hover away (ADR-0025)", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { model: "claude-opus-5-5" })} modelLabels={{ "claude-native/claude-opus-5-5": "Opus 5.5" }} />
+      </ul>,
+    );
+    const model = screen.getByTestId("run-model");
+    expect(model).toHaveTextContent("Opus 5.5");
+    expect(model).toHaveAttribute("title", "Requested model: claude-opus-5-5");
+  });
+
+  it("falls back to the reported model id for a default run", () => {
+    render(
+      <ul>
+        <RunTimeline run={run([], { usage: { model: "claude-sonnet-4-5-20250929", source: "claude_result" } })} />
+      </ul>,
+    );
+    const model = screen.getByTestId("run-model");
+    expect(model).toHaveTextContent("Sonnet 4.5");
+    expect(model).toHaveAttribute("title", "Reported model: claude-sonnet-4-5-20250929");
   });
 });
